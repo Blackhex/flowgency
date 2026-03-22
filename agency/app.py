@@ -1084,6 +1084,8 @@ async def admin_settings_page(request: Request):
     return templates.TemplateResponse("admin_settings.html", {
         "request": request,
         **admin_context("settings"),
+        "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
+        "ai_backend": CONFIG.get("agency", {}).get("ai_backend", "claude-code"),
     })
 
 
@@ -1118,6 +1120,9 @@ async def admin_save_settings(request: Request):
     config["agency"]["title"] = title or "Agency"
     if default_group:
         config["agency"]["default_group"] = default_group
+
+    ai_backend = form.get("ai_backend", "claude-code")
+    config["agency"]["ai_backend"] = ai_backend
 
     # Handle dispatch interval update
     dispatch_interval_raw = form.get("dispatch_interval", "")
@@ -1298,6 +1303,8 @@ async def admin_org_edit(request: Request, org: str):
         "dispatch_agents": dispatch_cfg.get("agents", {}),
         "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
         "available_prompts": prompts,
+        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
+        "default_integration": g.get("default_integration", "claude-code"),
         "warning": "",
     })
 
@@ -1328,6 +1335,9 @@ async def admin_org_save(request: Request, org: str):
         config["groups"][org]["tmux_config"] = tmux_config
     elif "tmux_config" in config["groups"][org]:
         del config["groups"][org]["tmux_config"]
+
+    default_integration = form.get("default_integration", "claude-code")
+    config["groups"][org]["default_integration"] = default_integration
 
     save_config(config)
     reload_groups()
@@ -1632,6 +1642,24 @@ async def admin_agent_save(request: Request, org: str, agent: str):
             save_agent_definition(agent_dir, content)
     elif file_type == "memory_md":
         (agent_dir / "memory.md").write_text(content)
+
+    # Persist per-agent integration if submitted
+    integration = form.get("integration", "")
+    if integration:
+        config = load_config()
+        agents = config["groups"][org].get("agents", [])
+        for i, a in enumerate(agents):
+            name = a if isinstance(a, str) else a.get("name", "")
+            if name == agent:
+                default_int = config["groups"][org].get("default_integration", "claude-code")
+                if integration != default_int:
+                    agents[i] = {"name": agent, "integration": integration}
+                else:
+                    agents[i] = agent  # Use shorthand if matches default
+                break
+        config["groups"][org]["agents"] = agents
+        save_config(config)
+        reload_groups()
 
     return RedirectResponse(f"/admin/orgs/{org}/agents/{agent}", status_code=303)
 
