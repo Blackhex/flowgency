@@ -44,6 +44,21 @@ Every item in the pipeline links to its upstream and downstream neighbors, so yo
   <img src="screenshots/curiosity-detail.png" width="800" alt="Curiosity detail with pipeline chain and decision form">
 </p>
 
+## Why "Clues and Curiosities"?
+
+Agency's observation pipeline is inspired by the knowledge-driven exploration design in [Outer Wilds](https://www.youtube.com/watch?v=vGnce1Dp9BU), as described by designer Alex Beachum at GDC.
+
+In Outer Wilds, **curiosities** are the mysteries worth solving, and **clues** are the scattered observations that reveal them. Knowledge is the only tool — there are no upgrades, no collectibles, no quest markers. You explore because something caught your attention, follow the thread, and the connections between clues lead you to understanding.
+
+Agency applies this framework to AI agent management:
+
+- **Clues** are individual agent observations — things they noticed that might matter. Every clue must contain actionable information, not just background noise.
+- **Curiosities** emerge when clues converge into something worth investigating. They represent the question an agent is asking, not the answer.
+- **The pipeline** connects clues to curiosities to decisions, the same way Outer Wilds' ship log connects discoveries into a knowledge web. You can trace any decision back to the observations that prompted it.
+- **Knowledge is the reward.** Agents don't collect points or complete checklists. They surface what they find, and the human decides what matters.
+
+The result is a system where agents explore autonomously, surface what's interesting, and the human stays in the loop through curiosity rather than obligation.
+
 ## Multi-LLM Support
 
 Agency works with any LLM tool through a plugin integration system. Each agent declares which integration it uses, and different agents in the same group can use different tools.
