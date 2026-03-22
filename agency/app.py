@@ -86,7 +86,6 @@ def get_agency_config() -> dict:
 # ── Dispatch Helpers ──────────────────────────────────────────────────────────
 
 DISPATCH_CONF_DIR = Path.home() / ".config" / "agency"
-DISPATCH_CONF_FILE = DISPATCH_CONF_DIR / "dispatch.conf"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
 
@@ -334,23 +333,6 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
     finally:
         if prompt_file.exists():
             prompt_file.unlink()
-
-
-def write_dispatch_timer(interval: int) -> None:
-    """Write the agency-dispatch.timer systemd unit file."""
-    timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
-    timer_file.write_text(
-        "[Unit]\n"
-        "Description=Agency Agent Dispatch Timer\n"
-        "\n"
-        "[Timer]\n"
-        f"OnCalendar=*-*-* *:0/{interval}\n"
-        "Persistent=true\n"
-        "RandomizedDelaySec=60\n"
-        "\n"
-        "[Install]\n"
-        "WantedBy=timers.target\n"
-    )
 
 
 def parse_csv_to_rows(text: str) -> tuple[list[str], list[list[str]]]:
@@ -1134,9 +1116,8 @@ async def admin_save_settings(request: Request):
                     config["agency"]["dispatch"] = {}
                 old_interval = config["agency"]["dispatch"].get("interval", 15)
                 config["agency"]["dispatch"]["interval"] = new_interval
-                # If interval changed and dispatch is installed, rewrite timer
+                # If interval changed and dispatch is installed, reload timer
                 if new_interval != old_interval and config["agency"]["dispatch"].get("installed", False):
-                    write_dispatch_timer(new_interval)
                     subprocess.run(
                         ["systemctl", "--user", "daemon-reload"],
                         capture_output=True, text=True, timeout=10,
