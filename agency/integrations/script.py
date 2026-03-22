@@ -1,24 +1,91 @@
-"""Stub — replaced in Task 4."""
+"""Custom script integration."""
+
+import subprocess
+import time
 from pathlib import Path
-from agency.integrations import BaseIntegration, AgentIdentity, _register
+
+import yaml
+
+from agency.integrations import (
+    BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
+)
+from agency.integrations.claude_code import _parse_frontmatter
 
 
 class ScriptIntegration(BaseIntegration):
     name = "script"
-    display_name = "Script"
-    detect_priority = 1000
+    display_name = "Custom Script"
+    supports_execution = True
+    supports_ai_backend = False
+    detect_priority = 1000  # Never auto-detects
 
-    def detect(self, agent_dir: Path) -> bool:
-        return False
+    def __init__(self, integration_config: dict | None = None):
+        self._config = integration_config or {}
+
+    def with_config(self, integration_config: dict) -> "ScriptIntegration":
+        """Return a new instance with the given config. Used by dispatch/execution resolvers."""
+        return ScriptIntegration(integration_config)
 
     def identity_filename(self) -> str:
-        return ""
+        return "agent.md"
+
+    def detect(self, agent_dir: Path) -> bool:
+        return False  # Must be configured explicitly
 
     def parse_identity(self, agent_dir: Path) -> AgentIdentity | None:
-        return None
+        path = agent_dir / "agent.md"
+        if not path.is_file():
+            return None
+        meta, body = _parse_frontmatter(path.read_text())
+        return AgentIdentity(
+            display_name=meta.get("display_name"),
+            title=meta.get("title"),
+            emoji=meta.get("emoji"),
+            body=body,
+        )
 
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
-        pass
+        path = agent_dir / "agent.md"
+        meta = {}
+        if identity.display_name:
+            meta["display_name"] = identity.display_name
+        if identity.title:
+            meta["title"] = identity.title
+        if identity.emoji:
+            meta["emoji"] = identity.emoji
+        if meta:
+            front = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+            path.write_text(f"---\n{front}\n---\n\n{identity.body}")
+        else:
+            path.write_text(identity.body)
+
+    def validate_config(self, config: dict) -> list[str]:
+        errors = []
+        if not config.get("command"):
+            errors.append("'command' is required for the script integration")
+        return errors
+
+    def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
+        command = self._config.get("command", "")
+        if not command:
+            raise IntegrationError("No command configured for script integration")
+        # Expand placeholders
+        command = command.replace("{prompt_file}", str(prompt_file))
+        command = command.replace("{agent_dir}", str(agent_dir))
+        start = time.monotonic()
+        try:
+            result = subprocess.run(
+                command, shell=True,
+                capture_output=True, text=True, timeout=timeout,
+                cwd=str(agent_dir),
+            )
+            return RunResult(
+                exit_code=result.returncode, stdout=result.stdout,
+                stderr=result.stderr, duration_seconds=time.monotonic() - start,
+            )
+        except subprocess.TimeoutExpired:
+            return RunResult(exit_code=124, stdout="", stderr="Timed out",
+                           duration_seconds=time.monotonic() - start)
 
 
 _register(ScriptIntegration())
