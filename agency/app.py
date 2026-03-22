@@ -22,6 +22,7 @@ from markupsafe import Markup
 import uvicorn
 
 from agency.config import normalize_agents, agent_names
+from agency.integrations import get_integration, detect_integration, REGISTRY
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -207,6 +208,20 @@ def get_group(group: str) -> dict:
         "agents_full": g.get("_agents_normalized", []),
         "shared": Path(g["path"]) / "shared",
     }
+
+
+def get_agent_integration(g: dict, agent_name: str):
+    """Resolve the integration for an agent in a group."""
+    for agent_info in g.get("agents_full", []):
+        if agent_info["name"] == agent_name:
+            return get_integration(agent_info.get("integration", "claude-code"))
+    # Fallback: try auto-detection
+    agent_dir = g["path"] / agent_name
+    if agent_dir.is_dir():
+        detected = detect_integration(agent_dir)
+        if detected:
+            return detected
+    return get_integration("claude-code")
 
 
 def safe_redirect(url: str, fallback: str = "/") -> str:
@@ -475,6 +490,8 @@ def collect_documents(g: dict) -> list[dict]:
     skip_dirs = {"clues", "curiosities", "decisions", "prompts", "logs", "archive",
                  "ad-skills", "social-posts", "templates", "dashboard"}
 
+    identity_files = {i.identity_filename() for i in REGISTRY.values()}
+
     for agent in g["agents"]:
         agent_dir = g["path"] / agent
         if not agent_dir.exists():
@@ -482,7 +499,7 @@ def collect_documents(g: dict) -> list[dict]:
         for f in sorted(agent_dir.rglob("*")):
             if f.is_dir():
                 continue
-            if f.name.startswith(".") or f.name == "CLAUDE.md":
+            if f.name.startswith(".") or f.name in identity_files:
                 continue
             rel = f.relative_to(agent_dir)
             if any(part in skip_dirs for part in rel.parts[:-1]):
@@ -678,55 +695,50 @@ def resolve_agent_dir(g: dict, agent_name: str) -> Path:
     raise HTTPException(404, f"Agent not found: {agent_name}")
 
 
-def parse_agent_identity(agent_dir: Path) -> dict:
-    """Read CLAUDE.md and return identity fields + body."""
-    claude_md = agent_dir / "CLAUDE.md"
-    if not claude_md.exists():
+def parse_agent_identity(agent_dir: Path, integration=None) -> dict:
+    """Read agent identity via integration. Falls back to claude-code."""
+    if integration is None:
+        integration = get_integration("claude-code")
+    identity = integration.parse_identity(agent_dir)
+    if identity is None:
         return {"display_name": agent_dir.name, "title": "", "emoji": "", "body": "", "frontmatter": {}}
-    raw = claude_md.read_text()
-    meta, body = parse_frontmatter(raw)
     return {
-        "display_name": meta.get("display_name", agent_dir.name),
-        "title": meta.get("title", ""),
-        "emoji": meta.get("emoji", ""),
-        "body": body,
-        "frontmatter": meta,
+        "display_name": identity.display_name or agent_dir.name,
+        "title": identity.title or "",
+        "emoji": identity.emoji or "",
+        "body": identity.body,
+        "frontmatter": {},
     }
 
 
-def save_agent_identity(agent_dir: Path, fields: dict) -> None:
-    """Merge identity fields into CLAUDE.md frontmatter, preserving other fields."""
-    claude_md = agent_dir / "CLAUDE.md"
-    if claude_md.exists():
-        raw = claude_md.read_text()
-        meta, body = parse_frontmatter(raw)
-    else:
-        meta, body = {}, ""
-    for key in ("display_name", "title", "emoji"):
-        if key in fields and fields[key]:
-            meta[key] = fields[key]
-        elif key in fields and not fields[key] and key in meta:
-            del meta[key]
-    if meta:
-        front = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-        claude_md.write_text(f"---\n{front}\n---\n\n{body}")
-    else:
-        claude_md.write_text(body)
+def save_agent_identity(agent_dir: Path, fields: dict, integration=None) -> None:
+    """Save identity fields via integration."""
+    if integration is None:
+        integration = get_integration("claude-code")
+    from agency.integrations import AgentIdentity
+    existing = integration.parse_identity(agent_dir)
+    identity = AgentIdentity(
+        display_name=fields.get("display_name") or (existing.display_name if existing else None),
+        title=fields.get("title") or (existing.title if existing else None),
+        emoji=fields.get("emoji") or (existing.emoji if existing else None),
+        body=existing.body if existing else "",
+    )
+    integration.write_identity(agent_dir, identity)
 
 
-def save_agent_definition(agent_dir: Path, new_body: str) -> None:
-    """Write CLAUDE.md body preserving all existing frontmatter."""
-    claude_md = agent_dir / "CLAUDE.md"
-    if claude_md.exists():
-        raw = claude_md.read_text()
-        meta, _ = parse_frontmatter(raw)
-    else:
-        meta = {}
-    if meta:
-        front = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-        claude_md.write_text(f"---\n{front}\n---\n\n{new_body}")
-    else:
-        claude_md.write_text(new_body)
+def save_agent_definition(agent_dir: Path, new_body: str, integration=None) -> None:
+    """Save agent definition body via integration."""
+    if integration is None:
+        integration = get_integration("claude-code")
+    from agency.integrations import AgentIdentity
+    existing = integration.parse_identity(agent_dir)
+    identity = AgentIdentity(
+        display_name=existing.display_name if existing else None,
+        title=existing.title if existing else None,
+        emoji=existing.emoji if existing else None,
+        body=new_body,
+    )
+    integration.write_identity(agent_dir, identity)
 
 
 def find_headshot(agent_dir: Path) -> Path | None:
@@ -960,7 +972,7 @@ async def setup_process(request: Request):
     detected = []
     for d in sorted(path.iterdir()):
         if d.is_dir() and d.name not in ("shared", "_subagents") and not d.name.startswith("."):
-            if (d / "CLAUDE.md").exists():
+            if detect_integration(d):
                 detected.append(d.name)
 
     if not detected:
@@ -968,7 +980,7 @@ async def setup_process(request: Request):
             "request": request,
             "agency_title": agency_title,
             "suggestion": suggestion,
-            "error": 'No agents found at this path. Agency looks for subdirectories containing a CLAUDE.md file. <a href="/admin/" class="underline">Set up manually in Settings</a>.',
+            "error": 'No agents found at this path. Agency looks for subdirectories containing an agent definition file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). <a href="/admin/" class="underline">Set up manually in Settings</a>.',
             "path_value": path_str,
         })
 
@@ -1493,7 +1505,7 @@ async def admin_org_initialize(request: Request, org: str):
 
 @app.post("/admin/orgs/{org}/autodetect", response_class=HTMLResponse)
 async def admin_org_autodetect(request: Request, org: str):
-    """Auto-detect agents by scanning for directories containing CLAUDE.md."""
+    """Auto-detect agents by scanning for directories with recognized definition files."""
     config = load_config()
     if org not in config.get("groups", {}):
         raise HTTPException(404, f"Unknown org: {org}")
@@ -1506,7 +1518,7 @@ async def admin_org_autodetect(request: Request, org: str):
     if base.exists():
         for d in sorted(base.iterdir()):
             if d.is_dir() and d.name != "shared" and not d.name.startswith("."):
-                if (d / "CLAUDE.md").exists():
+                if detect_integration(d):
                     detected.append(d.name)
 
     # Update config with detected agents
@@ -1531,7 +1543,7 @@ async def admin_org_autodetect(request: Request, org: str):
         "org_path": g["path"],
         "org_agents": "\n".join(agent_names),
         "agent_infos": agent_infos,
-        "warning": f"Auto-detected {len(detected)} agents." if detected else "No agents with CLAUDE.md found in path.",
+        "warning": f"Auto-detected {len(detected)} agents." if detected else "No agents with recognized definition files found in path.",
     })
 
 
@@ -1544,7 +1556,14 @@ def get_agent_info(base: Path, agent_name: str) -> dict:
     info = {
         "name": agent_name,
         "dir_exists": agent_dir.is_dir(),
-        "has_claude_md": (agent_dir / "CLAUDE.md").exists(),
+        "has_definition": any(
+            (agent_dir / i.identity_filename()).exists()
+            for i in REGISTRY.values()
+        ) if agent_dir.is_dir() else False,
+        "has_claude_md": any(
+            (agent_dir / i.identity_filename()).exists()
+            for i in REGISTRY.values()
+        ) if agent_dir.is_dir() else False,
         "has_memory": (agent_dir / "memory.md").exists(),
         "has_mcp": (agent_dir / ".mcp.json").exists(),
         "files": [],
@@ -1573,13 +1592,22 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
     agent_dir = base / agent
 
     # Read editable files
-    claude_md = ""
+    definition_content = ""
     memory_md = ""
     if agent_dir.is_dir():
-        claude_path = agent_dir / "CLAUDE.md"
+        config_tmp = load_config()
+        g_cfg = config_tmp.get("groups", {}).get(org, {})
+        default_int = g_cfg.get("default_integration", "claude-code")
+        from agency.config import normalize_agents as _norm
+        agent_integration = get_integration(default_int)
+        for a in _norm(g_cfg.get("agents", []), default_int):
+            if a["name"] == agent:
+                agent_integration = get_integration(a.get("integration", default_int))
+                break
+        identity_path = agent_dir / agent_integration.identity_filename()
+        if identity_path.exists():
+            definition_content = identity_path.read_text()
         memory_path = agent_dir / "memory.md"
-        if claude_path.exists():
-            claude_md = claude_path.read_text()
         if memory_path.exists():
             memory_md = memory_path.read_text()
 
@@ -1593,7 +1621,8 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
         "org_key": org,
         "org_name": g["name"],
         "agent": agent_info,
-        "claude_md": claude_md,
+        "claude_md": definition_content,
+        "definition_content": definition_content,
         "memory_md": memory_md,
         "warning": "",
     })
@@ -1601,7 +1630,7 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
 
 @app.post("/admin/orgs/{org}/agents/{agent}/save", response_class=HTMLResponse)
 async def admin_agent_save(request: Request, org: str, agent: str):
-    """Save agent CLAUDE.md and/or memory.md."""
+    """Save agent definition file and/or memory.md."""
     config = load_config()
     groups = config.get("groups", {})
     if org not in groups:
@@ -1621,8 +1650,19 @@ async def admin_agent_save(request: Request, org: str, agent: str):
     # Create agent dir if it doesn't exist
     agent_dir.mkdir(parents=True, exist_ok=True)
 
-    if file_type == "claude_md":
-        (agent_dir / "CLAUDE.md").write_text(content)
+    if file_type == "claude_md" or file_type == "definition":
+        # Use integration to determine identity file
+        config = load_config()
+        g_cfg = config.get("groups", {}).get(org, {})
+        default_int = g_cfg.get("default_integration", "claude-code")
+        from agency.config import normalize_agents as _norm
+        for a in _norm(g_cfg.get("agents", []), default_int):
+            if a["name"] == agent:
+                integration = get_integration(a.get("integration", default_int))
+                save_agent_definition(agent_dir, content, integration)
+                break
+        else:
+            save_agent_definition(agent_dir, content)
     elif file_type == "memory_md":
         (agent_dir / "memory.md").write_text(content)
 
@@ -1656,9 +1696,12 @@ async def admin_agent_create(request: Request, org: str):
     base = Path(g["path"])
     agent_dir = base / agent_name
     agent_dir.mkdir(parents=True, exist_ok=True)
-    claude_path = agent_dir / "CLAUDE.md"
-    if not claude_path.exists():
-        claude_path.write_text(f"# {agent_name.replace('-', ' ').title()} Agent\n\nRole definition goes here.\n")
+    # Use group's default integration to determine identity file
+    default_int = g.get("default_integration", "claude-code")
+    integration = get_integration(default_int)
+    identity_file = agent_dir / integration.identity_filename()
+    if not identity_file.exists():
+        identity_file.write_text(f"# {agent_name.replace('-', ' ').title()} Agent\n\nRole definition goes here.\n")
     memory_path = agent_dir / "memory.md"
     if not memory_path.exists():
         memory_path.write_text(f"# {agent_name.replace('-', ' ').title()} Memory\n\n")
