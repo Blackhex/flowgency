@@ -26,6 +26,7 @@
         {% if is_subagent %}
         <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-600">subagent</span>
         {% endif %}
+        {% if agent_integration %}{{ agent_integration | integration_badge }}{% endif %}
       </div>
       {% if identity.title %}
       <div class="text-sm text-gray-500 mb-2">{{ identity.title }}</div>
@@ -96,7 +97,7 @@
 <!-- Agent Definition (collapsible, collapsed by default) -->
 <details class="bg-white rounded-xl border border-gray-200 mb-6">
   <summary class="px-6 py-4 cursor-pointer text-sm font-semibold text-gray-700 hover:text-gray-900">
-    Agent Definition (CLAUDE.md)
+    Agent Definition
   </summary>
   <div class="px-6 pb-6">
     <form method="POST" action="/{{ group }}/agents/{{ agent }}/definition">

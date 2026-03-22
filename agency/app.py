@@ -21,6 +21,10 @@ from markupsafe import Markup
 
 import uvicorn
 
+from agency.config import normalize_agents, agent_names
+from agency.integrations import get_integration, detect_integration, REGISTRY
+from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status as _get_timer_status, detect_platform
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path.cwd() / "config.yaml"
@@ -51,10 +55,22 @@ def reload_groups() -> None:
     global GROUPS, CONFIG
     CONFIG = load_config()
     GROUPS = CONFIG.get("groups", {})
+    # Normalize agent lists so all code paths see consistent data
+    for key, g in GROUPS.items():
+        default_int = g.get("default_integration", "claude-code")
+        raw_agents = g.get("agents", [])
+        g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
+        # Keep agents as a name list for backward compat
+        g["agents"] = agent_names(g["_agents_normalized"])
 
 
 CONFIG = load_config()
 GROUPS = CONFIG.get("groups", {})
+for key, g in GROUPS.items():
+    default_int = g.get("default_integration", "claude-code")
+    raw_agents = g.get("agents", [])
+    g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
+    g["agents"] = agent_names(g["_agents_normalized"])
 
 
 def get_agency_config() -> dict:
@@ -70,105 +86,34 @@ def get_agency_config() -> dict:
 # ── Dispatch Helpers ──────────────────────────────────────────────────────────
 
 DISPATCH_CONF_DIR = Path.home() / ".config" / "agency"
-DISPATCH_CONF_FILE = DISPATCH_CONF_DIR / "dispatch.conf"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
 
 def get_dispatch_status() -> dict:
     """Return dispatch installation status."""
-    installed = CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False)
-    interval = CONFIG.get("agency", {}).get("dispatch", {}).get("interval", 15)
-    timer_active = False
-    if installed:
-        try:
-            result = subprocess.run(
-                ["systemctl", "--user", "is-active", "agency-dispatch.timer"],
-                capture_output=True, text=True, timeout=5,
-            )
-            timer_active = result.stdout.strip() == "active"
-        except Exception:
-            timer_active = False
-    return {"installed": installed, "interval": interval, "timer_active": timer_active}
+    status = _get_timer_status()
+    config_dispatch = CONFIG.get("agency", {}).get("dispatch", {})
+    status["interval"] = config_dispatch.get("interval", 15)
+    status["installed"] = status["installed"] or config_dispatch.get("installed", False)
+    return status
 
 
 def install_dispatch(interval: int = 15) -> str | None:
-    """Install dispatch systemd timer. Returns error string or None on success."""
-    try:
-        # 1. Create config directory
-        DISPATCH_CONF_DIR.mkdir(parents=True, exist_ok=True)
-
-        # 2. Find venv python
-        venv_python = Path(__file__).parent.parent / ".venv" / "bin" / "python3"
-        if not venv_python.exists():
-            venv_python = Path(sys.executable)
-
-        # 2b. Find claude CLI (systemd services may not have it in PATH)
-        claude_path = shutil.which("claude") or ""
-
-        # 3. Write dispatch.conf (values quoted for paths with spaces)
-        DISPATCH_CONF_FILE.write_text(
-            f'config_path="{CONFIG_PATH}"\n'
-            f'venv_python="{venv_python}"\n'
-            f'claude_path="{claude_path}"\n'
-        )
-
-        # 4. Copy dispatch.sh
-        src_dispatch = Path(__file__).parent / "dispatch" / "dispatch.sh"
-        dst_dispatch = DISPATCH_CONF_DIR / "dispatch.sh"
-        shutil.copy2(src_dispatch, dst_dispatch)
-        dst_dispatch.chmod(dst_dispatch.stat().st_mode | stat.S_IEXEC)
-
-        # 4b. Fix SELinux context so systemd can execute it (Fedora Kinoite)
-        try:
-            subprocess.run(
-                ["chcon", "-t", "bin_t", str(dst_dispatch)],
-                capture_output=True, timeout=5,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass  # chcon not available on non-SELinux systems
-
-        # 5. Write systemd service
-        SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
-        service_file = SYSTEMD_USER_DIR / "agency-dispatch.service"
-        service_file.write_text(
-            "[Unit]\n"
-            "Description=Agency Agent Dispatch\n"
-            "\n"
-            "[Service]\n"
-            "Type=oneshot\n"
-            "ExecStart=%h/.config/agency/dispatch.sh\n"
-            "Environment=HOME=%h\n"
-        )
-
-        # 6. Write systemd timer
-        write_dispatch_timer(interval)
-
-        # 7. Enable and start timer
-        subprocess.run(
-            ["systemctl", "--user", "daemon-reload"],
-            capture_output=True, text=True, timeout=10, check=True,
-        )
-        subprocess.run(
-            ["systemctl", "--user", "enable", "--now", "agency-dispatch.timer"],
-            capture_output=True, text=True, timeout=10, check=True,
-        )
-
-        # 8. Update config
-        config = load_config()
-        if "agency" not in config:
-            config["agency"] = {}
-        if "dispatch" not in config["agency"]:
-            config["agency"]["dispatch"] = {}
-        config["agency"]["dispatch"]["installed"] = True
-        config["agency"]["dispatch"]["interval"] = interval
-        save_config(config)
-
-        # 9. Reload
-        reload_groups()
-
-        return None
-    except Exception as e:
-        return str(e)
+    """Install dispatch timer using platform-native scheduler."""
+    error = install_timer(str(CONFIG_PATH), interval)
+    if error:
+        return error
+    # Update config
+    config = load_config()
+    if "agency" not in config:
+        config["agency"] = {}
+    if "dispatch" not in config["agency"]:
+        config["agency"]["dispatch"] = {}
+    config["agency"]["dispatch"]["installed"] = True
+    config["agency"]["dispatch"]["interval"] = interval
+    save_config(config)
+    reload_groups()
+    return None
 
 
 app = FastAPI(title="Agency Dashboard")
@@ -190,8 +135,30 @@ def get_group(group: str) -> dict:
         "name": g["name"],
         "path": Path(g["path"]),
         "agents": g["agents"],
+        "agents_full": g.get("_agents_normalized", []),
         "shared": Path(g["path"]) / "shared",
     }
+
+
+def get_agent_integration(g: dict, agent_name: str):
+    """Resolve the integration for an agent in a group.
+
+    Priority: filesystem detection first (for existing agents with identity files),
+    then config, then group default. This ensures that an agent with CLAUDE.md is
+    always handled by the claude-code integration, even if the group default is different.
+    """
+    agent_dir = g["path"] / agent_name
+    # 1. Auto-detect from existing files on disk
+    if agent_dir.is_dir():
+        detected = detect_integration(agent_dir)
+        if detected:
+            return detected
+    # 2. Fall back to config (for new agents or dirs with no recognized files)
+    for agent_info in g.get("agents_full", []):
+        if agent_info["name"] == agent_name:
+            return get_integration(agent_info.get("integration", "claude-code"))
+    # 3. Group default
+    return get_integration("claude-code")
 
 
 def safe_redirect(url: str, fallback: str = "/") -> str:
@@ -284,7 +251,7 @@ def update_decision_execution(decision_path: Path, updates: dict) -> None:
 
 
 def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
-                              curiosity_slug: str) -> None:
+                              curiosity_slug: str, group_key: str = "") -> None:
     """Background task: spawn an agent to execute an approved decision."""
     now = datetime.now(timezone.utc).isoformat()
     update_decision_execution(decision_path, {"status": "executing", "started_at": now})
@@ -314,12 +281,32 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
     out_path = log_dir / f"{agent}-exec-{ts}.out"
     err_path = log_dir / f"{agent}-exec-{ts}.err"
 
+    # Write prompt to temp file for integration
+    prompt_file = log_dir / f"{agent}-exec-{ts}.prompt"
+    prompt_file.write_text(prompt)
+
     try:
-        result = subprocess.run(
-            ["claude", "--dangerously-skip-permissions", "-p", prompt],
-            capture_output=True, text=True, timeout=300,
-            cwd=str(agent_dir),
-        )
+        # Resolve integration (filesystem detection first, then config)
+        g = GROUPS.get(group_key, {})
+        grp = {"path": group_path, "agents_full": g.get("_agents_normalized", [])}
+        agent_integration = get_agent_integration(grp, agent)
+
+        if not agent_integration.supports_execution:
+            update_decision_execution(decision_path, {
+                "status": "failed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "summary": f"Integration '{agent_integration.name}' does not support execution.",
+            })
+            return
+
+        # For script integration, apply config from agent's config entry
+        if hasattr(agent_integration, 'with_config'):
+            for a in g.get("_agents_normalized", []):
+                if a["name"] == agent and "integration_config" in a:
+                    agent_integration = agent_integration.with_config(a["integration_config"])
+                    break
+
+        result = agent_integration.run(agent_dir, prompt_file, timeout=300)
         out_path.write_text(result.stdout)
         err_path.write_text(result.stderr)
 
@@ -327,9 +314,8 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
         updated_meta, _ = parse_frontmatter(decision_path.read_text())
         exec_status = updated_meta.get("execution", {}).get("status", "")
         if exec_status not in ("success", "success_with_exceptions", "failed"):
-            # Agent didn't update status — infer from exit code
             completed = datetime.now(timezone.utc).isoformat()
-            if result.returncode == 0:
+            if result.exit_code == 0:
                 update_decision_execution(decision_path, {
                     "status": "success",
                     "completed_at": completed,
@@ -339,43 +325,17 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
                 update_decision_execution(decision_path, {
                     "status": "failed",
                     "completed_at": completed,
-                    "summary": f"Agent exited with code {result.returncode}.",
+                    "summary": f"Agent exited with code {result.exit_code}.",
                 })
-    except subprocess.TimeoutExpired:
-        update_decision_execution(decision_path, {
-            "status": "failed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "summary": "Agent execution timed out after 300 seconds.",
-        })
-    except FileNotFoundError:
-        update_decision_execution(decision_path, {
-            "status": "failed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "summary": "Claude CLI not found. Is claude installed and in PATH?",
-        })
     except Exception as e:
         update_decision_execution(decision_path, {
             "status": "failed",
             "completed_at": datetime.now(timezone.utc).isoformat(),
-            "summary": f"Unexpected error: {e}",
+            "summary": f"Execution error: {e}",
         })
-
-
-def write_dispatch_timer(interval: int) -> None:
-    """Write the agency-dispatch.timer systemd unit file."""
-    timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
-    timer_file.write_text(
-        "[Unit]\n"
-        "Description=Agency Agent Dispatch Timer\n"
-        "\n"
-        "[Timer]\n"
-        f"OnCalendar=*-*-* *:0/{interval}\n"
-        "Persistent=true\n"
-        "RandomizedDelaySec=60\n"
-        "\n"
-        "[Install]\n"
-        "WantedBy=timers.target\n"
-    )
+    finally:
+        if prompt_file.exists():
+            prompt_file.unlink()
 
 
 def parse_csv_to_rows(text: str) -> tuple[list[str], list[list[str]]]:
@@ -460,6 +420,8 @@ def collect_documents(g: dict) -> list[dict]:
     skip_dirs = {"clues", "curiosities", "decisions", "prompts", "logs", "archive",
                  "ad-skills", "social-posts", "templates", "dashboard"}
 
+    identity_files = {i.identity_filename() for i in REGISTRY.values()}
+
     for agent in g["agents"]:
         agent_dir = g["path"] / agent
         if not agent_dir.exists():
@@ -467,7 +429,7 @@ def collect_documents(g: dict) -> list[dict]:
         for f in sorted(agent_dir.rglob("*")):
             if f.is_dir():
                 continue
-            if f.name.startswith(".") or f.name == "CLAUDE.md":
+            if f.name.startswith(".") or f.name in identity_files:
                 continue
             rel = f.relative_to(agent_dir)
             if any(part in skip_dirs for part in rel.parts[:-1]):
@@ -663,55 +625,50 @@ def resolve_agent_dir(g: dict, agent_name: str) -> Path:
     raise HTTPException(404, f"Agent not found: {agent_name}")
 
 
-def parse_agent_identity(agent_dir: Path) -> dict:
-    """Read CLAUDE.md and return identity fields + body."""
-    claude_md = agent_dir / "CLAUDE.md"
-    if not claude_md.exists():
+def parse_agent_identity(agent_dir: Path, integration=None) -> dict:
+    """Read agent identity via integration. Falls back to claude-code."""
+    if integration is None:
+        integration = get_integration("claude-code")
+    identity = integration.parse_identity(agent_dir)
+    if identity is None:
         return {"display_name": agent_dir.name, "title": "", "emoji": "", "body": "", "frontmatter": {}}
-    raw = claude_md.read_text()
-    meta, body = parse_frontmatter(raw)
     return {
-        "display_name": meta.get("display_name", agent_dir.name),
-        "title": meta.get("title", ""),
-        "emoji": meta.get("emoji", ""),
-        "body": body,
-        "frontmatter": meta,
+        "display_name": identity.display_name or agent_dir.name,
+        "title": identity.title or "",
+        "emoji": identity.emoji or "",
+        "body": identity.body,
+        "frontmatter": {},
     }
 
 
-def save_agent_identity(agent_dir: Path, fields: dict) -> None:
-    """Merge identity fields into CLAUDE.md frontmatter, preserving other fields."""
-    claude_md = agent_dir / "CLAUDE.md"
-    if claude_md.exists():
-        raw = claude_md.read_text()
-        meta, body = parse_frontmatter(raw)
-    else:
-        meta, body = {}, ""
-    for key in ("display_name", "title", "emoji"):
-        if key in fields and fields[key]:
-            meta[key] = fields[key]
-        elif key in fields and not fields[key] and key in meta:
-            del meta[key]
-    if meta:
-        front = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-        claude_md.write_text(f"---\n{front}\n---\n\n{body}")
-    else:
-        claude_md.write_text(body)
+def save_agent_identity(agent_dir: Path, fields: dict, integration=None) -> None:
+    """Save identity fields via integration."""
+    if integration is None:
+        integration = get_integration("claude-code")
+    from agency.integrations import AgentIdentity
+    existing = integration.parse_identity(agent_dir)
+    identity = AgentIdentity(
+        display_name=fields.get("display_name") or (existing.display_name if existing else None),
+        title=fields.get("title") or (existing.title if existing else None),
+        emoji=fields.get("emoji") or (existing.emoji if existing else None),
+        body=existing.body if existing else "",
+    )
+    integration.write_identity(agent_dir, identity)
 
 
-def save_agent_definition(agent_dir: Path, new_body: str) -> None:
-    """Write CLAUDE.md body preserving all existing frontmatter."""
-    claude_md = agent_dir / "CLAUDE.md"
-    if claude_md.exists():
-        raw = claude_md.read_text()
-        meta, _ = parse_frontmatter(raw)
-    else:
-        meta = {}
-    if meta:
-        front = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-        claude_md.write_text(f"---\n{front}\n---\n\n{new_body}")
-    else:
-        claude_md.write_text(new_body)
+def save_agent_definition(agent_dir: Path, new_body: str, integration=None) -> None:
+    """Save agent definition body via integration."""
+    if integration is None:
+        integration = get_integration("claude-code")
+    from agency.integrations import AgentIdentity
+    existing = integration.parse_identity(agent_dir)
+    identity = AgentIdentity(
+        display_name=existing.display_name if existing else None,
+        title=existing.title if existing else None,
+        emoji=existing.emoji if existing else None,
+        body=new_body,
+    )
+    integration.write_identity(agent_dir, identity)
 
 
 def find_headshot(agent_dir: Path) -> Path | None:
@@ -761,6 +718,28 @@ def relative_time(dt: datetime | None) -> str:
 templates.env.filters["relative_time"] = relative_time
 
 
+def integration_badge_filter(name: str) -> Markup:
+    """Render a colored badge for an integration name."""
+    colors = {
+        "claude-code": "bg-orange-100 text-orange-800",
+        "codex": "bg-green-100 text-green-800",
+        "gemini": "bg-blue-100 text-blue-800",
+        "aider": "bg-purple-100 text-purple-800",
+        "goose": "bg-yellow-100 text-yellow-800",
+        "script": "bg-gray-100 text-gray-800",
+        "sdk": "bg-indigo-100 text-indigo-800",
+    }
+    color = colors.get(name, "bg-gray-100 text-gray-800")
+    try:
+        display = get_integration(name).display_name
+    except KeyError:
+        display = name
+    return Markup(f'<span class="px-2 py-0.5 rounded-full text-xs font-medium {color}">{display}</span>')
+
+
+templates.env.filters["integration_badge"] = integration_badge_filter
+
+
 def agent_health_status(last_seen: datetime | None) -> str:
     """Return health status based on last seen time. green/amber/red."""
     if last_seen is None:
@@ -783,7 +762,8 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
         agent_dir = g["path"] / agent_name
         if not agent_dir.is_dir():
             continue
-        identity = parse_agent_identity(agent_dir)
+        agent_int = get_agent_integration(g, agent_name)
+        identity = parse_agent_identity(agent_dir, agent_int)
         open_count = sum(1 for c in clues if c.get("agent") == agent_name and c.get("status") == "open")
         last_seen = get_agent_last_seen(g, agent_name)
         info = {
@@ -793,6 +773,7 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             "open_clues": open_count,
             "is_subagent": identity["frontmatter"].get("subagent", False),
             "has_headshot": find_headshot(agent_dir) is not None,
+            "integration": agent_int.name,
         }
         if info["is_subagent"]:
             subagents.append(info)
@@ -806,7 +787,8 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
                 continue
             if any(s["name"] == d.name for s in subagents):
                 continue
-            identity = parse_agent_identity(d)
+            sub_int = get_agent_integration(g, d.name)
+            identity = parse_agent_identity(d, sub_int)
             open_count = sum(1 for c in clues if c.get("agent") == d.name and c.get("status") == "open")
             last_seen = get_agent_last_seen(g, d.name)
             subagents.append({
@@ -815,6 +797,7 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
                 "health": agent_health_status(last_seen),
                 "open_clues": open_count, "is_subagent": True,
                 "has_headshot": find_headshot(d) is not None,
+                "integration": sub_int.name,
             })
 
     return agents, subagents
@@ -909,7 +892,7 @@ async def setup_page(request: Request):
     """First-run wizard page."""
     if GROUPS:
         return RedirectResponse("/", status_code=303)
-    suggestion = str(Path.home() / ".claude" / "agents")
+    suggestion = str(Path.home() / "agents")
     return templates.TemplateResponse("setup.html", {
         "request": request,
         "agency_title": get_agency_config().get("title", "Agency"),
@@ -927,7 +910,7 @@ async def setup_process(request: Request):
 
     form = await request.form()
     path_str = form.get("path", "").strip()
-    suggestion = str(Path.home() / ".claude" / "agents")
+    suggestion = str(Path.home() / "agents")
     agency_title = get_agency_config().get("title", "Agency")
 
     # Expand ~ and validate
@@ -945,7 +928,7 @@ async def setup_process(request: Request):
     detected = []
     for d in sorted(path.iterdir()):
         if d.is_dir() and d.name not in ("shared", "_subagents") and not d.name.startswith("."):
-            if (d / "CLAUDE.md").exists():
+            if detect_integration(d):
                 detected.append(d.name)
 
     if not detected:
@@ -953,7 +936,7 @@ async def setup_process(request: Request):
             "request": request,
             "agency_title": agency_title,
             "suggestion": suggestion,
-            "error": 'No agents found at this path. Agency looks for subdirectories containing a CLAUDE.md file. <a href="/admin/" class="underline">Set up manually in Settings</a>.',
+            "error": 'No agents found at this path. Agency looks for subdirectories containing an agent definition file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). <a href="/admin/" class="underline">Set up manually in Settings</a>.',
             "path_value": path_str,
         })
 
@@ -1087,9 +1070,22 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
 @app.get("/admin/", response_class=HTMLResponse)
 async def admin_settings_page(request: Request):
     """Admin app settings page."""
+    # Build full integration info for the installed integrations table
+    all_integrations_info = []
+    for name, i in REGISTRY.items():
+        all_integrations_info.append({
+            "name": name,
+            "display_name": i.display_name,
+            "supports_execution": i.supports_execution,
+            "supports_ai_backend": i.supports_ai_backend,
+            "identity_file": i.identity_filename() if hasattr(i, 'identity_filename') and callable(i.identity_filename) else "—",
+        })
     return templates.TemplateResponse("admin_settings.html", {
         "request": request,
         **admin_context("settings"),
+        "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
+        "ai_backend": CONFIG.get("agency", {}).get("ai_backend", "claude-code"),
+        "all_integrations_info": all_integrations_info,
     })
 
 
@@ -1125,6 +1121,9 @@ async def admin_save_settings(request: Request):
     if default_group:
         config["agency"]["default_group"] = default_group
 
+    ai_backend = form.get("ai_backend", "claude-code")
+    config["agency"]["ai_backend"] = ai_backend
+
     # Handle dispatch interval update
     dispatch_interval_raw = form.get("dispatch_interval", "")
     if dispatch_interval_raw:
@@ -1135,9 +1134,8 @@ async def admin_save_settings(request: Request):
                     config["agency"]["dispatch"] = {}
                 old_interval = config["agency"]["dispatch"].get("interval", 15)
                 config["agency"]["dispatch"]["interval"] = new_interval
-                # If interval changed and dispatch is installed, rewrite timer
+                # If interval changed and dispatch is installed, reload timer
                 if new_interval != old_interval and config["agency"]["dispatch"].get("installed", False):
-                    write_dispatch_timer(new_interval)
                     subprocess.run(
                         ["systemctl", "--user", "daemon-reload"],
                         capture_output=True, text=True, timeout=10,
@@ -1304,6 +1302,8 @@ async def admin_org_edit(request: Request, org: str):
         "dispatch_agents": dispatch_cfg.get("agents", {}),
         "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
         "available_prompts": prompts,
+        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
+        "default_integration": g.get("default_integration", "claude-code"),
         "warning": "",
     })
 
@@ -1334,6 +1334,9 @@ async def admin_org_save(request: Request, org: str):
         config["groups"][org]["tmux_config"] = tmux_config
     elif "tmux_config" in config["groups"][org]:
         del config["groups"][org]["tmux_config"]
+
+    default_integration = form.get("default_integration", "claude-code")
+    config["groups"][org]["default_integration"] = default_integration
 
     save_config(config)
     reload_groups()
@@ -1478,7 +1481,7 @@ async def admin_org_initialize(request: Request, org: str):
 
 @app.post("/admin/orgs/{org}/autodetect", response_class=HTMLResponse)
 async def admin_org_autodetect(request: Request, org: str):
-    """Auto-detect agents by scanning for directories containing CLAUDE.md."""
+    """Auto-detect agents by scanning for directories with recognized definition files."""
     config = load_config()
     if org not in config.get("groups", {}):
         raise HTTPException(404, f"Unknown org: {org}")
@@ -1491,7 +1494,7 @@ async def admin_org_autodetect(request: Request, org: str):
     if base.exists():
         for d in sorted(base.iterdir()):
             if d.is_dir() and d.name != "shared" and not d.name.startswith("."):
-                if (d / "CLAUDE.md").exists():
+                if detect_integration(d):
                     detected.append(d.name)
 
     # Update config with detected agents
@@ -1502,6 +1505,13 @@ async def admin_org_autodetect(request: Request, org: str):
         reload_groups()
 
     agent_infos = [get_agent_info(base, a) for a in agent_names]
+
+    # Gather dispatch + prompt context (same as admin_org_edit)
+    dispatch_cfg = g.get("dispatch", {})
+    prompts = []
+    prompts_dir = Path(g["path"]) / "shared" / "prompts"
+    if prompts_dir.exists():
+        prompts = sorted(f.name for f in prompts_dir.glob("*.md"))
 
     return templates.TemplateResponse("admin_org_edit.html", {
         "request": request,
@@ -1514,9 +1524,18 @@ async def admin_org_autodetect(request: Request, org: str):
         "org_key": org,
         "org_name": g["name"],
         "org_path": g["path"],
+        "org_tmux_config": g.get("tmux_config", ""),
         "org_agents": "\n".join(agent_names),
         "agent_infos": agent_infos,
-        "warning": f"Auto-detected {len(detected)} agents." if detected else "No agents with CLAUDE.md found in path.",
+        "dispatch_enabled": dispatch_cfg.get("enabled", False),
+        "dispatch_timeout": dispatch_cfg.get("timeout", 300),
+        "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
+        "dispatch_agents": dispatch_cfg.get("agents", {}),
+        "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
+        "available_prompts": prompts,
+        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
+        "default_integration": g.get("default_integration", "claude-code"),
+        "warning": f"Auto-detected {len(detected)} agents." if detected else "No agents with recognized definition files found in path.",
     })
 
 
@@ -1529,7 +1548,14 @@ def get_agent_info(base: Path, agent_name: str) -> dict:
     info = {
         "name": agent_name,
         "dir_exists": agent_dir.is_dir(),
-        "has_claude_md": (agent_dir / "CLAUDE.md").exists(),
+        "has_definition": any(
+            (agent_dir / i.identity_filename()).exists()
+            for i in REGISTRY.values()
+        ) if agent_dir.is_dir() else False,
+        "has_claude_md": any(
+            (agent_dir / i.identity_filename()).exists()
+            for i in REGISTRY.values()
+        ) if agent_dir.is_dir() else False,
         "has_memory": (agent_dir / "memory.md").exists(),
         "has_mcp": (agent_dir / ".mcp.json").exists(),
         "files": [],
@@ -1558,13 +1584,15 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
     agent_dir = base / agent
 
     # Read editable files
-    claude_md = ""
+    definition_content = ""
     memory_md = ""
     if agent_dir.is_dir():
-        claude_path = agent_dir / "CLAUDE.md"
+        grp = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
+        agent_integration = get_agent_integration(grp, agent)
+        identity_path = agent_dir / agent_integration.identity_filename()
+        if identity_path.exists():
+            definition_content = identity_path.read_text()
         memory_path = agent_dir / "memory.md"
-        if claude_path.exists():
-            claude_md = claude_path.read_text()
         if memory_path.exists():
             memory_md = memory_path.read_text()
 
@@ -1578,7 +1606,8 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
         "org_key": org,
         "org_name": g["name"],
         "agent": agent_info,
-        "claude_md": claude_md,
+        "claude_md": definition_content,
+        "definition_content": definition_content,
         "memory_md": memory_md,
         "warning": "",
     })
@@ -1586,7 +1615,7 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
 
 @app.post("/admin/orgs/{org}/agents/{agent}/save", response_class=HTMLResponse)
 async def admin_agent_save(request: Request, org: str, agent: str):
-    """Save agent CLAUDE.md and/or memory.md."""
+    """Save agent definition file and/or memory.md."""
     config = load_config()
     groups = config.get("groups", {})
     if org not in groups:
@@ -1606,10 +1635,31 @@ async def admin_agent_save(request: Request, org: str, agent: str):
     # Create agent dir if it doesn't exist
     agent_dir.mkdir(parents=True, exist_ok=True)
 
-    if file_type == "claude_md":
-        (agent_dir / "CLAUDE.md").write_text(content)
+    if file_type == "claude_md" or file_type == "definition":
+        # Detect integration from existing files, fall back to config
+        grp = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
+        agent_int = get_agent_integration(grp, agent)
+        save_agent_definition(agent_dir, content, agent_int)
     elif file_type == "memory_md":
         (agent_dir / "memory.md").write_text(content)
+
+    # Persist per-agent integration if submitted
+    integration = form.get("integration", "")
+    if integration:
+        config = load_config()
+        agents = config["groups"][org].get("agents", [])
+        for i, a in enumerate(agents):
+            name = a if isinstance(a, str) else a.get("name", "")
+            if name == agent:
+                default_int = config["groups"][org].get("default_integration", "claude-code")
+                if integration != default_int:
+                    agents[i] = {"name": agent, "integration": integration}
+                else:
+                    agents[i] = agent  # Use shorthand if matches default
+                break
+        config["groups"][org]["agents"] = agents
+        save_config(config)
+        reload_groups()
 
     return RedirectResponse(f"/admin/orgs/{org}/agents/{agent}", status_code=303)
 
@@ -1641,9 +1691,12 @@ async def admin_agent_create(request: Request, org: str):
     base = Path(g["path"])
     agent_dir = base / agent_name
     agent_dir.mkdir(parents=True, exist_ok=True)
-    claude_path = agent_dir / "CLAUDE.md"
-    if not claude_path.exists():
-        claude_path.write_text(f"# {agent_name.replace('-', ' ').title()} Agent\n\nRole definition goes here.\n")
+    # Use group's default integration to determine identity file
+    default_int = g.get("default_integration", "claude-code")
+    integration = get_integration(default_int)
+    identity_file = agent_dir / integration.identity_filename()
+    if not identity_file.exists():
+        identity_file.write_text(f"# {agent_name.replace('-', ' ').title()} Agent\n\nRole definition goes here.\n")
     memory_path = agent_dir / "memory.md"
     if not memory_path.exists():
         memory_path.write_text(f"# {agent_name.replace('-', ' ').title()} Memory\n\n")
@@ -1737,7 +1790,8 @@ async def agent_profile(request: Request, group: str, agent: str):
     """View an agent's profile with identity, logs, clues, and memory."""
     g = get_group(group)
     agent_dir = resolve_agent_dir(g, agent)
-    identity = parse_agent_identity(agent_dir)
+    agent_int = get_agent_integration(g, agent)
+    identity = parse_agent_identity(agent_dir, agent_int)
     is_subagent = (g["path"] / "_subagents" / agent).is_dir() or identity["frontmatter"].get("subagent", False)
     last_seen = get_agent_last_seen(g, agent)
     logs = get_agent_logs(g, agent)
@@ -1770,6 +1824,8 @@ async def agent_profile(request: Request, group: str, agent: str):
         "memory_path": memory_path,
         "agent_schedule": agent_schedule,
         "dispatch_enabled": dispatch_enabled,
+        "agent_integration": agent_int.name,
+        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
     })
 
 
@@ -2089,6 +2145,7 @@ async def curiosity_decide(request: Request, group: str, slug: str,
         background_tasks.add_task(
             execute_approved_decision,
             decision_path, Path(g["path"]), origin_agent, slug,
+            group_key=group,
         )
 
     return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
@@ -2171,6 +2228,7 @@ async def decision_retry(request: Request, group: str, slug: str,
     background_tasks.add_task(
         execute_approved_decision,
         decision_path, Path(g["path"]), agent, curiosity_slug,
+        group_key=group,
     )
 
     return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)

@@ -29,11 +29,12 @@
         {% endif %}
       </div>
     </div>
-    <div class="flex items-center gap-3 text-xs text-gray-400">
+    <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
       <span class="flex items-center gap-1.5" title="{{ a.last_seen.strftime('%Y-%m-%d %H:%M') if a.last_seen else 'No activity' }}">
         <span class="inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
         {{ a.last_seen | relative_time }}
       </span>
+      {% if a.integration %}{{ a.integration | integration_badge }}{% endif %}
       {% if a.open_clues > 0 %}
       <span class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">{{ a.open_clues }} open</span>
       {% endif %}
