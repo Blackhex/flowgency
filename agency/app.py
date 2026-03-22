@@ -21,6 +21,8 @@ from markupsafe import Markup
 
 import uvicorn
 
+from agency.config import normalize_agents, agent_names
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path.cwd() / "config.yaml"
@@ -51,10 +53,22 @@ def reload_groups() -> None:
     global GROUPS, CONFIG
     CONFIG = load_config()
     GROUPS = CONFIG.get("groups", {})
+    # Normalize agent lists so all code paths see consistent data
+    for key, g in GROUPS.items():
+        default_int = g.get("default_integration", "claude-code")
+        raw_agents = g.get("agents", [])
+        g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
+        # Keep agents as a name list for backward compat
+        g["agents"] = agent_names(g["_agents_normalized"])
 
 
 CONFIG = load_config()
 GROUPS = CONFIG.get("groups", {})
+for key, g in GROUPS.items():
+    default_int = g.get("default_integration", "claude-code")
+    raw_agents = g.get("agents", [])
+    g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
+    g["agents"] = agent_names(g["_agents_normalized"])
 
 
 def get_agency_config() -> dict:
@@ -190,6 +204,7 @@ def get_group(group: str) -> dict:
         "name": g["name"],
         "path": Path(g["path"]),
         "agents": g["agents"],
+        "agents_full": g.get("_agents_normalized", []),
         "shared": Path(g["path"]) / "shared",
     }
 
