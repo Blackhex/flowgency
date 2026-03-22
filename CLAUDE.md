@@ -15,12 +15,12 @@
 ```
 ~/dev/agency/
 ├── agency/                    # Python package
-│   ├── app.py                 # Main FastAPI app (~2200 lines)
+│   ├── app.py                 # Main FastAPI app (~2500 lines)
 │   ├── __init__.py
 │   ├── dispatch/              # Dispatch system
 │   │   ├── dispatch.sh        # Global dispatcher script (installed to ~/.config/agency/)
 │   │   └── __init__.py
-│   └── templates/             # 23 Jinja2 templates
+│   └── templates/             # 26 Jinja2 templates
 │       ├── base.html          # Layout: sidebar + main content
 │       ├── home.html          # Inbox (open clues, decisions)
 │       ├── agents.html        # Agent list with health pulse dots
@@ -39,7 +39,10 @@
 │       ├── prompt_detail.html # View/edit prompt content
 │       ├── memory.html        # Agent memory list
 │       ├── memory_view.html   # View/edit memory
-│       ├── admin.html         # Admin: settings + dispatch + org management
+│       ├── admin.html         # Admin: redirects to settings
+│       ├── admin_settings.html # Admin: app settings (title, default group)
+│       ├── admin_dispatch.html # Admin: dispatch timer management
+│       ├── admin_groups.html  # Admin: agent group list + management
 │       ├── admin_org_edit.html # Create/edit org + dispatch schedule config
 │       ├── admin_agent_detail.html # Admin agent detail view
 │       ├── setup.html         # First-run wizard
@@ -142,6 +145,7 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | POST | `/{group}/curiosities/{slug}/decide` | Create decision for curiosity |
 | GET | `/{group}/decisions` | Decision list |
 | GET | `/{group}/decisions/{slug}` | Decision detail |
+| POST | `/{group}/decisions/{slug}/retry` | Retry execution of approved decision |
 | GET | `/{group}/documents` | Browse agent documents |
 | GET | `/{group}/documents/view?path=` | View/edit document |
 | POST | `/{group}/documents/save` | Save document edits |
@@ -154,6 +158,8 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | GET | `/{group}/memory` | Agent memory file list |
 | GET | `/{group}/memory/view?path=` | View/edit memory file |
 | POST | `/{group}/memory/save` | Save memory edits |
+| GET | `/{group}/tmux-config` | Tmux session config viewer |
+| POST | `/{group}/tmux-config/save` | Save tmux config edits |
 
 ### Agent Routes
 
@@ -171,7 +177,9 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/admin/` | Settings dashboard — Agency settings + dispatch + org list |
+| GET | `/admin/` | Admin settings page (redirects to settings) |
+| GET | `/admin/dispatch` | Dispatch timer management page |
+| GET | `/admin/groups` | Agent group list + management |
 | POST | `/admin/settings` | Update Agency title, default group, dispatch interval |
 | POST | `/admin/dispatch/install` | Install global dispatch timer/service |
 | GET | `/admin/orgs/new` | New org form |
@@ -182,6 +190,11 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | POST | `/admin/orgs/{org}/delete` | Remove org from config |
 | POST | `/admin/orgs/{org}/initialize` | Create shared/ folder structure |
 | POST | `/admin/orgs/{org}/autodetect` | Scan path for directories with CLAUDE.md |
+| GET | `/admin/orgs/{org}/agents/{agent}` | Admin agent detail view |
+| POST | `/admin/orgs/{org}/agents/{agent}/save` | Save admin agent settings |
+| POST | `/admin/orgs/{org}/agents/create` | Create new agent in org |
+| POST | `/admin/orgs/{org}/agents/{agent}/rename` | Rename agent directory |
+| POST | `/admin/orgs/{org}/agents/{agent}/delete` | Delete agent from org |
 
 ### Other Routes
 
@@ -190,6 +203,8 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | GET | `/` | Redirect to default group |
 | GET | `/setup` | First-run setup wizard |
 | POST | `/setup` | Process setup wizard |
+| POST | `/tips/dismiss` | Dismiss a single tip |
+| POST | `/tips/hide-all` | Hide all tips |
 
 ## Data Model
 

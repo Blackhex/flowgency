@@ -314,7 +314,7 @@ def update_decision_execution(decision_path: Path, updates: dict) -> None:
 
 
 def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
-                              curiosity_slug: str) -> None:
+                              curiosity_slug: str, group_key: str = "") -> None:
     """Background task: spawn an agent to execute an approved decision."""
     now = datetime.now(timezone.utc).isoformat()
     update_decision_execution(decision_path, {"status": "executing", "started_at": now})
@@ -344,12 +344,36 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
     out_path = log_dir / f"{agent}-exec-{ts}.out"
     err_path = log_dir / f"{agent}-exec-{ts}.err"
 
+    # Write prompt to temp file for integration
+    prompt_file = log_dir / f"{agent}-exec-{ts}.prompt"
+    prompt_file.write_text(prompt)
+
     try:
-        result = subprocess.run(
-            ["claude", "--dangerously-skip-permissions", "-p", prompt],
-            capture_output=True, text=True, timeout=300,
-            cwd=str(agent_dir),
-        )
+        # Resolve integration
+        g = GROUPS.get(group_key, {})
+        default_int = g.get("default_integration", "claude-code")
+        agent_integration = get_integration(default_int)
+        for a in normalize_agents(g.get("agents", []), default_int):
+            if a["name"] == agent:
+                agent_integration = get_integration(a.get("integration", default_int))
+                break
+
+        if not agent_integration.supports_execution:
+            update_decision_execution(decision_path, {
+                "status": "failed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "summary": f"Integration '{agent_integration.name}' does not support execution.",
+            })
+            return
+
+        # For script integration, apply config
+        if hasattr(agent_integration, 'with_config'):
+            for a in normalize_agents(g.get("agents", []), default_int):
+                if a["name"] == agent and "integration_config" in a:
+                    agent_integration = agent_integration.with_config(a["integration_config"])
+                    break
+
+        result = agent_integration.run(agent_dir, prompt_file, timeout=300)
         out_path.write_text(result.stdout)
         err_path.write_text(result.stderr)
 
@@ -357,9 +381,8 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
         updated_meta, _ = parse_frontmatter(decision_path.read_text())
         exec_status = updated_meta.get("execution", {}).get("status", "")
         if exec_status not in ("success", "success_with_exceptions", "failed"):
-            # Agent didn't update status — infer from exit code
             completed = datetime.now(timezone.utc).isoformat()
-            if result.returncode == 0:
+            if result.exit_code == 0:
                 update_decision_execution(decision_path, {
                     "status": "success",
                     "completed_at": completed,
@@ -369,26 +392,17 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
                 update_decision_execution(decision_path, {
                     "status": "failed",
                     "completed_at": completed,
-                    "summary": f"Agent exited with code {result.returncode}.",
+                    "summary": f"Agent exited with code {result.exit_code}.",
                 })
-    except subprocess.TimeoutExpired:
-        update_decision_execution(decision_path, {
-            "status": "failed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "summary": "Agent execution timed out after 300 seconds.",
-        })
-    except FileNotFoundError:
-        update_decision_execution(decision_path, {
-            "status": "failed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "summary": "Claude CLI not found. Is claude installed and in PATH?",
-        })
     except Exception as e:
         update_decision_execution(decision_path, {
             "status": "failed",
             "completed_at": datetime.now(timezone.utc).isoformat(),
-            "summary": f"Unexpected error: {e}",
+            "summary": f"Execution error: {e}",
         })
+    finally:
+        if prompt_file.exists():
+            prompt_file.unlink()
 
 
 def write_dispatch_timer(interval: int) -> None:
@@ -2147,6 +2161,7 @@ async def curiosity_decide(request: Request, group: str, slug: str,
         background_tasks.add_task(
             execute_approved_decision,
             decision_path, Path(g["path"]), origin_agent, slug,
+            group_key=group,
         )
 
     return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
@@ -2229,6 +2244,7 @@ async def decision_retry(request: Request, group: str, slug: str,
     background_tasks.add_task(
         execute_approved_decision,
         decision_path, Path(g["path"]), agent, curiosity_slug,
+        group_key=group,
     )
 
     return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
