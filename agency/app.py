@@ -890,7 +890,7 @@ async def setup_page(request: Request):
     """First-run wizard page."""
     if GROUPS:
         return RedirectResponse("/", status_code=303)
-    suggestion = str(Path.home() / ".claude" / "agents")
+    suggestion = str(Path.home() / "agents")
     return templates.TemplateResponse("setup.html", {
         "request": request,
         "agency_title": get_agency_config().get("title", "Agency"),
@@ -908,7 +908,7 @@ async def setup_process(request: Request):
 
     form = await request.form()
     path_str = form.get("path", "").strip()
-    suggestion = str(Path.home() / ".claude" / "agents")
+    suggestion = str(Path.home() / "agents")
     agency_title = get_agency_config().get("title", "Agency")
 
     # Expand ~ and validate
@@ -1493,6 +1493,13 @@ async def admin_org_autodetect(request: Request, org: str):
 
     agent_infos = [get_agent_info(base, a) for a in agent_names]
 
+    # Gather dispatch + prompt context (same as admin_org_edit)
+    dispatch_cfg = g.get("dispatch", {})
+    prompts = []
+    prompts_dir = Path(g["path"]) / "shared" / "prompts"
+    if prompts_dir.exists():
+        prompts = sorted(f.name for f in prompts_dir.glob("*.md"))
+
     return templates.TemplateResponse("admin_org_edit.html", {
         "request": request,
         "agency_title": agency.get("title", "Agency"),
@@ -1504,8 +1511,17 @@ async def admin_org_autodetect(request: Request, org: str):
         "org_key": org,
         "org_name": g["name"],
         "org_path": g["path"],
+        "org_tmux_config": g.get("tmux_config", ""),
         "org_agents": "\n".join(agent_names),
         "agent_infos": agent_infos,
+        "dispatch_enabled": dispatch_cfg.get("enabled", False),
+        "dispatch_timeout": dispatch_cfg.get("timeout", 300),
+        "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
+        "dispatch_agents": dispatch_cfg.get("agents", {}),
+        "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
+        "available_prompts": prompts,
+        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
+        "default_integration": g.get("default_integration", "claude-code"),
         "warning": f"Auto-detected {len(detected)} agents." if detected else "No agents with recognized definition files found in path.",
     })
 
