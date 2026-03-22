@@ -141,19 +141,7 @@ def install_dispatch(interval: int = 15) -> str | None:
         )
 
         # 6. Write systemd timer
-        timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
-        timer_file.write_text(
-            "[Unit]\n"
-            "Description=Agency Agent Dispatch Timer\n"
-            "\n"
-            "[Timer]\n"
-            f"OnCalendar=*-*-* *:0/{interval}\n"
-            "Persistent=true\n"
-            "RandomizedDelaySec=60\n"
-            "\n"
-            "[Install]\n"
-            "WantedBy=timers.target\n"
-        )
+        write_dispatch_timer(interval)
 
         # 7. Enable and start timer
         subprocess.run(
@@ -213,13 +201,14 @@ def safe_redirect(url: str, fallback: str = "/") -> str:
     return fallback
 
 
-def group_context(g: dict) -> dict:
-    """Return standard template context for a group."""
+def group_context(g: dict, clues: list[dict] | None = None, curiosities: list[dict] | None = None) -> dict:
+    """Return standard template context for a group. Accepts precomputed lists to avoid double-reads."""
     agency = get_agency_config()
     group_cfg = GROUPS.get(g["key"], {})
-    # Sidebar counts (lightweight — only reads clue/curiosity frontmatter)
-    clues = list_clues(g)
-    curiosities = list_curiosities(g)
+    if clues is None:
+        clues = list_clues(g)
+    if curiosities is None:
+        curiosities = list_curiosities(g)
     open_clue_count = sum(1 for c in clues if c.get("status") == "open")
     actionable_curiosity_count = sum(1 for c in curiosities if c.get("status") in ("proposed", "investigating"))
     return {
@@ -267,6 +256,38 @@ def read_file(path: Path) -> str:
         return ""
 
 
+def validate_file_access(fpath: Path, base_path: Path) -> None:
+    """Validate file is within base_path. Raises HTTPException(403) if not."""
+    try:
+        fpath.resolve().relative_to(base_path.resolve())
+    except ValueError:
+        raise HTTPException(403, "Access denied")
+
+
+def update_frontmatter_field(filepath: Path, field: str, value: str) -> None:
+    """Update a single YAML frontmatter field in a markdown file."""
+    raw = filepath.read_text()
+    raw = re.sub(rf'^({field}:\s*).*$', f'\\1{value}', raw, count=1, flags=re.MULTILINE)
+    filepath.write_text(raw)
+
+
+def write_dispatch_timer(interval: int) -> None:
+    """Write the agency-dispatch.timer systemd unit file."""
+    timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
+    timer_file.write_text(
+        "[Unit]\n"
+        "Description=Agency Agent Dispatch Timer\n"
+        "\n"
+        "[Timer]\n"
+        f"OnCalendar=*-*-* *:0/{interval}\n"
+        "Persistent=true\n"
+        "RandomizedDelaySec=60\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+
+
 def parse_csv_to_rows(text: str) -> tuple[list[str], list[list[str]]]:
     """Parse CSV text to header + rows, skipping comment lines."""
     lines = [l for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
@@ -309,62 +330,38 @@ def enforce_ttl(filepath: Path, meta: dict) -> bool:
     if status in ("archived", "dismissed", "approved", "rejected", "deferred"):
         return False
     if check_ttl_expired(meta):
-        raw = filepath.read_text()
-        raw = re.sub(r'^(status:\s*).*$', '\\1archived', raw, count=1, flags=re.MULTILINE)
-        filepath.write_text(raw)
+        update_frontmatter_field(filepath, "status", "archived")
         meta["status"] = "archived"
         return True
     return False
 
 
-def list_clues(g: dict) -> list[dict]:
-    """List all clue files with parsed frontmatter. Enforces TTL auto-archiving."""
-    clues_dir = g["shared"] / "clues"
-    if not clues_dir.exists():
+def list_markdown_items(g: dict, subdir: str, apply_ttl: bool = False) -> list[dict]:
+    """List markdown files from a shared subdirectory with parsed frontmatter."""
+    item_dir = g["shared"] / subdir
+    if not item_dir.exists():
         return []
-    clues = []
-    for f in sorted(clues_dir.glob("*.md"), reverse=True):
+    items = []
+    for f in sorted(item_dir.glob("*.md"), reverse=True):
         raw = f.read_text()
         meta, body = parse_frontmatter(raw)
-        meta["_filename"] = f.name
-        meta["_body"] = body
-        meta["_slug"] = f.stem
-        enforce_ttl(f, meta)
-        clues.append(meta)
-    return clues
+        meta.update({"_filename": f.name, "_body": body, "_slug": f.stem})
+        if apply_ttl:
+            enforce_ttl(f, meta)
+        items.append(meta)
+    return items
+
+
+def list_clues(g: dict) -> list[dict]:
+    return list_markdown_items(g, "clues", apply_ttl=True)
 
 
 def list_curiosities(g: dict) -> list[dict]:
-    """List all curiosity files with parsed frontmatter. Enforces TTL auto-archiving."""
-    curiosities_dir = g["shared"] / "curiosities"
-    if not curiosities_dir.exists():
-        return []
-    items = []
-    for f in sorted(curiosities_dir.glob("*.md"), reverse=True):
-        raw = f.read_text()
-        meta, body = parse_frontmatter(raw)
-        meta["_filename"] = f.name
-        meta["_body"] = body
-        meta["_slug"] = f.stem
-        enforce_ttl(f, meta)
-        items.append(meta)
-    return items
+    return list_markdown_items(g, "curiosities", apply_ttl=True)
 
 
 def list_decisions(g: dict) -> list[dict]:
-    """List all decision files with parsed frontmatter."""
-    decisions_dir = g["shared"] / "decisions"
-    if not decisions_dir.exists():
-        return []
-    items = []
-    for f in sorted(decisions_dir.glob("*.md"), reverse=True):
-        raw = f.read_text()
-        meta, body = parse_frontmatter(raw)
-        meta["_filename"] = f.name
-        meta["_body"] = body
-        meta["_slug"] = f.stem
-        items.append(meta)
-    return items
+    return list_markdown_items(g, "decisions")
 
 
 def collect_documents(g: dict) -> list[dict]:
@@ -699,8 +696,9 @@ def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:
     return results
 
 
-def build_agent_timeline(g: dict, agent_name: str, limit: int = 30) -> list[dict]:
-    """Build an interleaved timeline of logs and clues for an agent."""
+def build_agent_timeline(g: dict, agent_name: str, agent_clues: list[dict] | None = None, limit: int = 30) -> list[dict]:
+    """Build an interleaved timeline of logs and clues for an agent.
+    Accepts precomputed agent_clues to avoid re-reading files."""
     events = []
 
     # Add logs
@@ -722,30 +720,24 @@ def build_agent_timeline(g: dict, agent_name: str, limit: int = 30) -> list[dict
                         "suffix": f.suffix,
                     })
 
-    # Add clues
-    clues_dir = g["shared"] / "clues"
-    if clues_dir.exists():
-        for f in clues_dir.glob("*.md"):
-            raw = f.read_text()
-            meta, body = parse_frontmatter(raw)
-            if meta.get("agent") != agent_name:
-                continue
-            clue_date = meta.get("date")
-            if isinstance(clue_date, str):
-                try:
-                    clue_date = datetime.fromisoformat(clue_date)
-                except (ValueError, TypeError):
-                    clue_date = datetime.fromtimestamp(f.stat().st_mtime)
-            elif not isinstance(clue_date, datetime):
-                clue_date = datetime.fromtimestamp(f.stat().st_mtime)
-            events.append({
-                "type": "clue",
-                "timestamp": clue_date,
-                "slug": f.stem,
-                "status": meta.get("status", "open"),
-                "body_preview": body[:120],
-                "float": meta.get("float", False),
-            })
+    # Add clues from precomputed list
+    for c in (agent_clues or []):
+        clue_date = c.get("date")
+        if isinstance(clue_date, str):
+            try:
+                clue_date = datetime.fromisoformat(clue_date)
+            except (ValueError, TypeError):
+                clue_date = datetime.now()
+        elif not isinstance(clue_date, datetime):
+            clue_date = datetime.now()
+        events.append({
+            "type": "clue",
+            "timestamp": clue_date,
+            "slug": c.get("_slug", ""),
+            "status": c.get("status", "open"),
+            "body_preview": c.get("_body", "")[:120],
+            "float": c.get("float", False),
+        })
 
     events.sort(key=lambda e: e["timestamp"], reverse=True)
     return events[:limit]
@@ -1004,19 +996,7 @@ async def admin_save_settings(request: Request):
                 config["agency"]["dispatch"]["interval"] = new_interval
                 # If interval changed and dispatch is installed, rewrite timer
                 if new_interval != old_interval and config["agency"]["dispatch"].get("installed", False):
-                    timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
-                    timer_file.write_text(
-                        "[Unit]\n"
-                        "Description=Agency Agent Dispatch Timer\n"
-                        "\n"
-                        "[Timer]\n"
-                        f"OnCalendar=*-*-* *:0/{new_interval}\n"
-                        "Persistent=true\n"
-                        "RandomizedDelaySec=60\n"
-                        "\n"
-                        "[Install]\n"
-                        "WantedBy=timers.target\n"
-                    )
+                    write_dispatch_timer(new_interval)
                     subprocess.run(
                         ["systemctl", "--user", "daemon-reload"],
                         capture_output=True, text=True, timeout=10,
@@ -1620,8 +1600,10 @@ async def agent_profile(request: Request, group: str, agent: str):
     is_subagent = (g["path"] / "_subagents" / agent).is_dir() or identity["frontmatter"].get("subagent", False)
     last_seen = get_agent_last_seen(g, agent)
     logs = get_agent_logs(g, agent)
-    clues = [c for c in list_clues(g) if c.get("agent") == agent][:10]
-    timeline = build_agent_timeline(g, agent)
+    all_clues = list_clues(g)
+    agent_clues = [c for c in all_clues if c.get("agent") == agent]
+    clues = agent_clues[:10]
+    timeline = build_agent_timeline(g, agent, agent_clues=agent_clues)
     has_headshot = find_headshot(agent_dir) is not None
     has_memory = (agent_dir / "memory.md").exists()
     memory_path = str(agent_dir / "memory.md") if has_memory else ""
@@ -1759,7 +1741,7 @@ async def home(request: Request, group: str):
 
     return templates.TemplateResponse("home.html", {
         "request": request,
-        **group_context(g),
+        **group_context(g, clues=clues, curiosities=curiosities),
         "open_clues": open_clues,
         "floated_clues": floated_clues,
         "actionable_curiosities": actionable_curiosities,
@@ -1776,14 +1758,15 @@ async def clues_list(request: Request, group: str, agent: str = "", status: str 
     """List all clues with optional filtering."""
     g = get_group(group)
     clues = list_clues(g)
+    filtered = clues
     if agent:
-        clues = [c for c in clues if c.get("agent") == agent]
+        filtered = [c for c in filtered if c.get("agent") == agent]
     if status:
-        clues = [c for c in clues if c.get("status") == status]
+        filtered = [c for c in filtered if c.get("status") == status]
     return templates.TemplateResponse("clues.html", {
         "request": request,
-        **group_context(g),
-        "clues": clues,
+        **group_context(g, clues=clues),
+        "clues": filtered,
         "filter_agent": agent,
         "filter_status": status,
         "agents": g["agents"],
@@ -1841,9 +1824,7 @@ async def clue_update_status(request: Request, group: str, slug: str):
     if new_status not in ("open", "connected", "dismissed", "archived"):
         raise HTTPException(400, "Invalid status")
 
-    raw = path.read_text()
-    raw = re.sub(r'^(status:\s*).*$', f'\\1{new_status}', raw, count=1, flags=re.MULTILINE)
-    path.write_text(raw)
+    update_frontmatter_field(path, "status", new_status)
 
     return RedirectResponse(f"/{group}/clues/{slug}", status_code=303)
 
@@ -1895,9 +1876,7 @@ async def curiosity_detail(request: Request, group: str, slug: str):
     # (handles decisions created outside Agency, e.g., by agents directly)
     if decision and meta.get("status") not in ("approved", "deferred", "rejected"):
         new_status = decision["meta"].get("decision", "approved")
-        raw = path.read_text()
-        raw = re.sub(r'^(status:\s*).*$', f'\\1{new_status}', raw, count=1, flags=re.MULTILINE)
-        path.write_text(raw)
+        update_frontmatter_field(path, "status", new_status)
         meta["status"] = new_status
 
     return templates.TemplateResponse("curiosity_detail.html", {
@@ -1942,9 +1921,7 @@ decision: {decision_text}
     # Update curiosity status
     cpath = curiosities_dir / f"{slug}.md"
     if cpath.exists():
-        raw = cpath.read_text()
-        raw = re.sub(r'^(status:\s*).*$', f'\\1{decision_text}', raw, count=1, flags=re.MULTILINE)
-        cpath.write_text(raw)
+        update_frontmatter_field(cpath, "status", decision_text)
 
     return RedirectResponse(f"/{group}/curiosities/{slug}", status_code=303)
 
@@ -2020,10 +1997,7 @@ async def document_view(request: Request, group: str, path: str):
     g = get_group(group)
     fpath = Path(path)
     # Security: must be under this group's agents dir
-    try:
-        fpath.resolve().relative_to(g["path"].resolve())
-    except ValueError:
-        raise HTTPException(403, "Access denied")
+    validate_file_access(fpath, g["path"])
     if not fpath.exists():
         raise HTTPException(404, "File not found")
 
@@ -2070,10 +2044,7 @@ async def document_save(request: Request, group: str):
     content = form.get("content", "")
     fpath = Path(path)
 
-    try:
-        fpath.resolve().relative_to(g["path"].resolve())
-    except ValueError:
-        raise HTTPException(403, "Access denied")
+    validate_file_access(fpath, g["path"])
 
     fpath.write_text(content)
     return RedirectResponse(f"/{group}/documents/view?path={path}", status_code=303)
@@ -2097,10 +2068,7 @@ async def log_view(request: Request, group: str, path: str):
     g = get_group(group)
     fpath = Path(path)
     logs_dir = g["shared"] / "logs"
-    try:
-        fpath.resolve().relative_to(logs_dir.resolve())
-    except ValueError:
-        raise HTTPException(403, "Access denied")
+    validate_file_access(fpath, logs_dir)
     if not fpath.exists():
         raise HTTPException(404, "Log not found")
 
@@ -2174,10 +2142,7 @@ async def memory_view(request: Request, group: str, path: str):
     """View/edit a memory file."""
     g = get_group(group)
     fpath = Path(path)
-    try:
-        fpath.resolve().relative_to(g["path"].resolve())
-    except ValueError:
-        raise HTTPException(403, "Access denied")
+    validate_file_access(fpath, g["path"])
     if not fpath.exists():
         raise HTTPException(404, "Memory file not found")
 
@@ -2204,10 +2169,7 @@ async def memory_save(request: Request, group: str):
     content = form.get("content", "")
     fpath = Path(path)
 
-    try:
-        fpath.resolve().relative_to(g["path"].resolve())
-    except ValueError:
-        raise HTTPException(403, "Access denied")
+    validate_file_access(fpath, g["path"])
 
     fpath.write_text(content)
     return RedirectResponse(f"/{group}/memory/view?path={path}", status_code=303)

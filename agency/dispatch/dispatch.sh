@@ -258,10 +258,12 @@ run_agent() {
 # Main loop: iterate enabled groups
 # ---------------------------------------------------------------------------
 while IFS= read -r group_json; do
-    group_key=$(json_field "$group_json" "group")
-    group_path=$(json_field "$group_json" "path")
-    group_timeout=$(json_field_int "$group_json" "timeout")
-    daily_limit=$(json_field_int "$group_json" "daily_limit")
+    # Parse all group fields in one Python call
+    IFS=$'\t' read -r group_key group_path group_timeout daily_limit < <("$venv_python" -c "
+import json,sys
+g=json.loads(sys.argv[1])
+print(g['group'],g['path'],int(g['timeout']),int(g['daily_limit']),sep='\t')
+" "$group_json")
 
     log "Processing group: ${group_key}"
 
@@ -285,9 +287,12 @@ while IFS= read -r group_json; do
         while IFS= read -r sched_json; do
             [[ -z "$sched_json" ]] && continue
 
-            prompt=$("$venv_python" -c "import json,sys; print(json.loads(sys.argv[1]).get('prompt',''))" "$sched_json")
-            at_time=$("$venv_python" -c "import json,sys; print(json.loads(sys.argv[1]).get('at',''))" "$sched_json")
-            every_val=$("$venv_python" -c "import json,sys; print(json.loads(sys.argv[1]).get('every',''))" "$sched_json")
+            # Parse all fields in one Python call
+            IFS=$'\t' read -r prompt at_time every_val < <("$venv_python" -c "
+import json,sys
+d=json.loads(sys.argv[1])
+print(d.get('prompt',''),d.get('at',''),d.get('every',''),sep='\t')
+" "$sched_json")
 
             if [[ -z "$prompt" ]]; then
                 log "  WARNING: schedule entry for ${agent_name} missing 'prompt', skipping"
