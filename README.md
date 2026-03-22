@@ -1,35 +1,31 @@
 <p align="center">
-  <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="80" height="80" rx="12" fill="#1e2a5e"/>
-    <line x1="20" y1="60" x2="29" y2="42" stroke="white" stroke-width="2" opacity="0.3"/>
-    <line x1="29" y1="42" x2="40" y2="18" stroke="white" stroke-width="2" opacity="0.3"/>
-    <line x1="60" y1="60" x2="51" y2="42" stroke="white" stroke-width="2" opacity="0.3"/>
-    <line x1="51" y1="42" x2="40" y2="18" stroke="white" stroke-width="2" opacity="0.3"/>
-    <line x1="29" y1="42" x2="51" y2="42" stroke="white" stroke-width="2" opacity="0.3"/>
-    <line x1="20" y1="60" x2="60" y2="60" stroke="white" stroke-width="1.5" opacity="0.15"/>
-    <line x1="29" y1="42" x2="60" y2="60" stroke="white" stroke-width="1.5" opacity="0.12"/>
-    <circle cx="40" cy="18" r="4.5" fill="white"/>
-    <circle cx="29" cy="42" r="3.5" fill="white" opacity="0.8"/>
-    <circle cx="51" cy="42" r="3.5" fill="white" opacity="0.8"/>
-    <circle cx="20" cy="60" r="3.5" fill="white" opacity="0.6"/>
-    <circle cx="60" cy="60" r="3.5" fill="white" opacity="0.6"/>
-  </svg>
+  <img src="screenshots/logo.svg" width="80" height="80" alt="Agency logo">
 </p>
 
-# Agency
+<h1 align="center">Agency</h1>
 
-A dashboard for managing AI agents that communicate through markdown files on your local machine.
+<p align="center">
+  The control plane for your AI agents — any LLM, any framework, your filesystem.
+</p>
 
-**No database. No Docker. No build step.** Python + FastAPI + Tailwind CDN.
+<p align="center">
+  <strong>No database. No Docker. No build step.</strong> Python + FastAPI + Tailwind CDN.
+</p>
+
+---
+
+<p align="center">
+  <img src="screenshots/inbox.png" width="800" alt="Agency inbox showing clues, curiosities, and decisions">
+</p>
 
 ## Quick Start
 
 ```bash
 pip install -e .
-agency
+python -m agency.app
 ```
 
-On first run, a setup wizard walks you through pointing Agency at your agent directory. It auto-detects agents, creates the shared folder structure, and drops you into your Inbox.
+On first run, a setup wizard walks you through pointing Agency at your agent directory. It auto-detects agents by their identity files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.goosehints`, `agent.md`), creates the shared folder structure, and drops you into your Inbox.
 
 Visit `http://localhost:8500`.
 
@@ -40,21 +36,71 @@ Your agents write observations to the filesystem as markdown files with YAML fro
 1. **Clues** — agents observe something and write it down
 2. **Curiosities** — observations converge into proposals worth considering
 3. **Decisions** — you approve, defer, or reject through the UI
-4. **Execution** — approved decisions auto-dispatch the proposing agent to do the work, with status tracking (success, success with exceptions, failed) and retry
+4. **Execution** — approved decisions auto-dispatch the proposing agent to do the work, with status tracking and retry
 
 Every item in the pipeline links to its upstream and downstream neighbors, so you can trace how an observation became an action.
 
+<p align="center">
+  <img src="screenshots/curiosity-detail.png" width="800" alt="Curiosity detail with pipeline chain and decision form">
+</p>
+
+## Multi-LLM Support
+
+Agency works with any LLM tool through a plugin integration system. Each agent declares which integration it uses, and different agents in the same group can use different tools.
+
+| Integration | Identity File | What It Does |
+|-------------|-------------|-------------|
+| **Claude Code** | `CLAUDE.md` | `claude --dangerously-skip-permissions -p` |
+| **OpenAI Codex** | `AGENTS.md` | `codex --dangerously-skip-permissions -p` |
+| **Google Gemini** | `GEMINI.md` | `gemini -p` |
+| **Aider** | `CONVENTIONS.md` | `aider --message-file` |
+| **Goose** | `.goosehints` | `goose run` |
+| **Custom Script** | `agent.md` | Your command with `{prompt_file}` placeholder |
+| **SDK** | `agent.md` | No execution — Agency manages files, you run the agent |
+
+<p align="center">
+  <img src="screenshots/agents.png" width="800" alt="Agent list with integration badges showing Claude Code, Codex, Gemini, Aider, and Custom Script">
+</p>
+
+```yaml
+# config.yaml — mix integrations in the same group
+groups:
+  my-project:
+    default_integration: claude-code
+    agents:
+    - researcher              # uses group default (Claude Code)
+    - name: data-bot
+      integration: codex      # uses Codex
+    - name: runner
+      integration: script     # uses a custom script
+      integration_config:
+        command: "./run.sh {prompt_file}"
+```
+
 ## Features
 
-- **Dispatch scheduling** — one-click setup, then configure `at` (daily) and `every` (recurring) rules per agent
-- **Agent profiles** with identity, activity timeline, and health monitoring (green/amber/red pulse)
+- **Multi-LLM integrations** — Claude Code, Codex, Gemini, Aider, Goose, custom scripts, or SDK-only
+- **Dispatch scheduling** — cross-platform (Linux systemd, macOS launchd), `at` and `every` rules per agent
+- **Agent profiles** with identity, activity timeline, integration badge, and health monitoring
 - **Inbox** that surfaces what needs your attention across all agents
 - **Pipeline tracking** with clickable clue/curiosity/decision chains and auto-execution on approval
 - **TTL enforcement** that auto-archives stale items
 - **Document, memory, and prompt editing** in the browser
 - **Light/dark mode** with system preference detection and persistent toggle
-- **Multi-group support** for separate agent directories
-- **Admin panel** for managing groups, agents, and dispatch schedules
+- **Multi-group support** for separate agent teams with different tools
+- **Admin panel** for managing groups, agents, integrations, dispatch, and AI backend selection
+
+<p align="center">
+  <img src="screenshots/agent-profile.png" width="800" alt="Agent profile with identity, timeline, and dispatch schedule">
+</p>
+
+## Admin & Settings
+
+The admin panel lets you manage groups, configure default integrations, and see all installed integration plugins at a glance.
+
+<p align="center">
+  <img src="screenshots/admin-settings.png" width="800" alt="Admin settings with AI backend selector and installed integrations table">
+</p>
 
 ## Add-on: Agency Setup Skill
 
@@ -72,30 +118,27 @@ ln -s /path/to/agency/skills/agency-setup ~/.claude/skills/agency-setup
 1. **Analyzes** your codebase — language, framework, structure, purpose
 2. **Proposes** 3-5 agents tailored to the project (you approve or tweak)
 3. **Generates** everything Agency needs to manage them:
-   - Agent `CLAUDE.md` role definitions and `memory.md` files
+   - Agent role definitions and memory files
    - `shared/` folder with clues, curiosities, decisions, logs, prompts
    - Dispatch prompts with project-specific observation tasks
-   - `dispatch.sh` + systemd timer/service for automated runs
    - Tmux launch script with color-coded agent panes
 4. **Registers** the new group with Agency (if Agency is installed)
 5. **Enables** the dispatch timer so agents start running
 
-The whole process is interactive but Claude-led — you can fly through it by saying "ok" at each step.
-
 ## Tech Stack
 
-Python 3.11+ / FastAPI / Jinja2 / Tailwind CSS CDN / 6 dependencies / No JS framework
+Python 3.11+ / FastAPI / Jinja2 / Tailwind CSS CDN / No JS framework / No database
 
 ## Documentation
 
 See the [`kb/`](kb/) folder:
 
 - [Directory Structure](kb/directory-structure.md) — expected agent group layout
-- [Agent Identity](kb/agent-identity.md) — display names, titles, avatars
+- [Agent Identity](kb/agent-identity.md) — display names, titles, avatars, integration detection
 - [Data Formats](kb/data-formats.md) — clue, curiosity, and decision frontmatter
-- [Configuration](kb/configuration.md) — config.yaml reference
-- [Deployment](kb/deployment.md) — running as a systemd service
-- [Dispatch](kb/dispatch.md) — automatic agent scheduling
+- [Configuration](kb/configuration.md) — config.yaml reference with per-agent integrations
+- [Deployment](kb/deployment.md) — running as a service on Linux, macOS, or Windows
+- [Dispatch](kb/dispatch.md) — cross-platform agent scheduling
 
 ## License
 
