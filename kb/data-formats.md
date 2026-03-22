@@ -1,6 +1,6 @@
 # Data Formats
 
-Agency is a read/write dashboard — it doesn't run your agents. Your agents write clues, curiosities, and logs to the `shared/` directory as markdown files with YAML frontmatter. Agency reads those files and presents them in the UI.
+Agency is a read/write dashboard for managing AI agents. Agents write clues, curiosities, and logs to the `shared/` directory as markdown files with YAML frontmatter. Agency reads those files and presents them in the UI. When decisions are approved, Agency dispatches agents to execute them via their configured integration.
 
 ## Clue Format
 
@@ -95,7 +95,7 @@ Go ahead with the deduplication pass. Run it as a pre-processing step.
 
 ### Execution Block
 
-When a curiosity is approved, Agency automatically dispatches the origin agent to execute the proposed action. The `execution` block tracks progress:
+When a curiosity is approved, Agency dispatches the origin agent to execute the proposed action using the agent's configured integration. The `execution` block tracks progress:
 
 | Field | Description |
 |-------|-------------|
@@ -105,7 +105,7 @@ When a curiosity is approved, Agency automatically dispatches the origin agent t
 | `completed_at` | ISO 8601 timestamp when execution finished |
 | `summary` | Agent's report of what it did (or why it failed) |
 
-Failed executions can be retried from the decision detail page.
+Failed executions can be retried from the decision detail page. The integration used depends on the agent's configuration — Claude Code agents are run with `claude -p`, Codex with `codex -p`, etc.
 
 ## TTL Enforcement
 
@@ -118,6 +118,6 @@ Agency tracks the full chain across the pipeline:
 - A **clue** can link to a curiosity via `linked_curiosity`
 - A **curiosity** links back to its source clues via `clues`
 - A **decision** links to its curiosity via `curiosity`
-- An approved **decision** triggers **execution**, dispatching the origin agent to carry out the proposed action
+- An approved **decision** triggers **execution**, dispatching the origin agent via its integration to carry out the proposed action
 
 The UI renders these as clickable pipeline banners on each detail page, showing the full path from observation to action to execution.

@@ -1,14 +1,21 @@
 # Dispatch
 
-Dispatch is Agency's built-in agent scheduler. It runs as a systemd user timer that wakes up on a regular heartbeat, evaluates schedule rules for each group, and runs qualifying agents sequentially.
+Dispatch is Agency's built-in agent scheduler. It runs as a platform-native timer (systemd on Linux, launchd on macOS) that calls a Python dispatch script on a regular heartbeat. The script evaluates schedule rules for each group and runs qualifying agents via their configured integration.
 
 ## Setup
 
-Go to **Settings** (`/admin/`) and click **Install Dispatch**. This installs three things into your user session:
+Go to **Settings** (`/admin/`) and click **Install Dispatch**. Agency detects your platform and installs the appropriate timer:
 
-- `~/.config/agency/dispatch.sh` — the dispatcher script
-- `~/.config/agency/dispatch.conf` — points the script at your config.yaml and Python venv
-- `~/.config/systemd/user/agency-dispatch.service` + `agency-dispatch.timer` — systemd units
+**Linux (systemd):**
+- `~/.config/systemd/user/agency-dispatch.service` + `agency-dispatch.timer`
+- No root/sudo needed (user-level services)
+
+**macOS (launchd):**
+- `~/Library/LaunchAgents/com.agency.dispatch.plist`
+- No root/sudo needed (user-level agents)
+
+**Windows:**
+- Not yet automated. The admin page shows the command to run manually via Task Scheduler.
 
 The timer is enabled and started immediately. Default heartbeat is every 15 minutes. You can change the interval on the Settings page after installation.
 
@@ -46,16 +53,39 @@ Valid units are `m` (minutes) and `h` (hours). The dispatcher checks a marker fi
 
 An agent can have multiple rules with different prompts and schedules.
 
+### `condition` — code-triggered rules
+
+```yaml
+- prompt: quality-gate.md
+  at: "06:00"
+  condition: pre-send
+```
+
+Rules with a `condition` field are **skipped by the Python dispatcher** and displayed as read-only in the UI. These are for groups that have their own `shared/dispatch.sh` with custom logic (database checks, event conditions, etc.). The per-group dispatch script runs independently via its own timer.
+
 ## How It Works
 
-1. The systemd timer fires every N minutes (default 15, configurable in Settings).
-2. `dispatch.sh` reads `config.yaml` and finds groups with `dispatch.enabled: true`.
+1. The platform timer fires every N minutes (default 15, configurable in Settings).
+2. `agency/dispatch/run.py` reads `config.yaml` and finds groups with `dispatch.enabled: true`.
 3. For each enabled group, it iterates agents and their schedule rules.
 4. For `at` rules: checks if the current time is within the heartbeat window of the target. Skips if an event marker exists for today.
 5. For `every` rules: checks if enough time has elapsed since the last-run marker's mtime.
-6. Qualifying agents are run sequentially — `claude --dangerously-skip-permissions` with the prompt file's contents, executed from the agent's directory.
-7. Output goes to `shared/logs/YYYY-MM-DD/{agent}-{prompt}-{HHMMSS}.out` (and `.err`).
-8. After each run, the daily limit is re-checked. If reached, the group stops.
+6. Condition rules are skipped with an info log.
+7. Qualifying agents are run sequentially — the agent's integration is resolved and `integration.run()` is called with the prompt file, executed from the agent's directory.
+8. Output goes to `shared/logs/YYYY-MM-DD/{agent}-{prompt}-{HHMMSS}.out` (and `.err`).
+9. After each run, the daily limit is re-checked. If reached, the group stops.
+
+## Integration-Aware Execution
+
+The dispatcher resolves each agent's integration from config before running. This means:
+
+- Claude Code agents are run with `claude --dangerously-skip-permissions -p`
+- Codex agents are run with `codex --dangerously-skip-permissions -p`
+- Aider agents are run with `aider --message-file`
+- Script agents use their configured command template
+- SDK agents are skipped (externally managed)
+
+Different agents in the same group can use different integrations.
 
 ## Config Format
 
@@ -86,16 +116,22 @@ groups:
 
 ## Installed Files
 
+**Linux:**
+
 | File | Purpose |
 |------|---------|
-| `~/.config/agency/dispatch.sh` | Main dispatcher script |
-| `~/.config/agency/dispatch.conf` | Config path and venv Python path |
 | `~/.config/systemd/user/agency-dispatch.service` | Systemd service unit |
 | `~/.config/systemd/user/agency-dispatch.timer` | Systemd timer unit |
 
+**macOS:**
+
+| File | Purpose |
+|------|---------|
+| `~/Library/LaunchAgents/com.agency.dispatch.plist` | launchd agent plist |
+
 ## Monitoring
 
-- **Agent list** — a green pulse dot appears next to agents with active dispatch schedules. Gray dot if dispatch is disabled for the group.
+- **Agent list** — integration badges show which tool each agent uses. Health dots show recent activity.
 - **Agent profile** — schedule pills show each rule (`at 09:00`, `every 6h`) with the associated prompt.
 - **Logs** — dispatch output lands in the Logs section under the run date, one file per agent per run.
-- **Settings** — shows whether the timer is active and the current heartbeat interval.
+- **Settings** — shows whether the timer is active, the detected platform, and the current heartbeat interval.
