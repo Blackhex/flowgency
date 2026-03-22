@@ -9,16 +9,290 @@
   <span class="text-sm text-gray-500">{{ prompts|length }} prompts</span>
 </div>
 
-<p class="text-sm text-gray-500 mb-4">These prompts are executed by <code class="bg-gray-100 px-1 rounded">dispatch.sh</code> on schedule. Each defines what an agent does during a specific event window.</p>
+<p class="text-sm text-gray-500 mb-6">Dispatch prompts and their agent assignments. Edit schedules inline or click a prompt name to view/edit its content.</p>
 
-<div class="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+<form method="POST" action="/{{ group }}/prompts/dispatch" id="dispatch-form">
+
+<div class="space-y-3">
   {% for p in prompts %}
-  <a href="/{{ group }}/prompts/{{ p.slug }}" class="block px-4 py-3 hover:bg-gray-50 transition-colors">
-    <div class="flex items-center justify-between">
-      <span class="text-sm font-medium text-gray-900">{{ p.name }}</span>
-      <span class="text-xs text-gray-400">&rarr;</span>
+  {% set is_system = p.name.startswith('_') %}
+  {% set scheduled = p.assignments | selectattr('type') | list %}
+  {% set conditions = p.assignments | selectattr('condition') | list %}
+  {% set unscheduled = p.assignments | rejectattr('type') | rejectattr('condition') | list %}
+  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <!-- Prompt header -->
+    <div class="flex items-center justify-between px-4 py-3 {% if is_system %}bg-gray-50{% endif %}">
+      <div class="flex items-center gap-3 min-w-0">
+        <a href="/{{ group }}/prompts/{{ p.slug }}" class="text-sm font-medium text-gray-900 hover:text-indigo-600 transition-colors truncate">
+          {{ p.name }}
+        </a>
+        {% if is_system %}
+        <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">system</span>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        {% if not is_system %}
+          {% if scheduled | length > 0 %}
+          <span class="text-xs text-gray-400">{{ scheduled | length }} scheduled</span>
+          {% elif conditions | length > 0 %}
+          {# only condition-triggered, no editable schedule #}
+          {% elif p.inferred_agent %}
+          <span class="text-xs text-gray-400">unscheduled</span>
+          {% else %}
+          <span class="text-xs text-gray-400">unassigned</span>
+          {% endif %}
+        {% endif %}
+        <a href="/{{ group }}/prompts/{{ p.slug }}" class="text-xs text-gray-400 hover:text-indigo-600">&rarr;</a>
+      </div>
     </div>
-  </a>
+
+    {% if not is_system %}
+    <!-- Dispatch assignments -->
+    <div class="border-t border-gray-100 px-4 py-3">
+      <div id="assignments-{{ p.slug }}" class="space-y-2">
+        {% for a in p.assignments %}
+          {% if a.condition %}
+          {# Condition-triggered: read-only display #}
+          <div class="flex items-center gap-2 condition-row">
+            <span class="inline-flex items-center gap-1.5 px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
+              {{ a.agent }}
+            </span>
+            <span class="inline-flex items-center gap-1 px-2 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700" title="Triggered by code condition: {{ a.condition }}">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+              {{ a.condition }}
+            </span>
+            {% if a.value %}
+            <span class="text-xs text-gray-400">{{ a.type }} {{ a.value }}</span>
+            {% endif %}
+          </div>
+          {% elif a.type %}
+          {# Scheduled: editable #}
+          <div class="flex items-center gap-2 assignment-row">
+            <select name="assign_agent_{{ p.slug }}_{{ loop.index0 }}"
+                    class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+              {% for agent in agents %}
+              <option value="{{ agent }}" {% if agent == a.agent %}selected{% endif %}>{{ agent }}</option>
+              {% endfor %}
+            </select>
+
+            <select name="assign_type_{{ p.slug }}_{{ loop.index0 }}"
+                    class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-20">
+              <option value="at" {% if a.type == 'at' %}selected{% endif %}>at</option>
+              <option value="every" {% if a.type == 'every' %}selected{% endif %}>every</option>
+            </select>
+
+            {% if a.type == 'at' %}
+            <select name="assign_value_{{ p.slug }}_{{ loop.index0 }}"
+                    class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-28 time-select"
+                    data-current="{{ a.value }}">
+              {% for t in ['05:00','05:30','06:00','06:30','07:00','07:30','08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00','21:00','22:00','23:00'] %}
+              <option value="{{ t }}" {% if t == a.value %}selected{% endif %}>{{ t }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <select name="assign_value_{{ p.slug }}_{{ loop.index0 }}"
+                    class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-28 interval-select"
+                    data-current="{{ a.value }}">
+              {% for iv in ['1h','2h','3h','4h','6h','8h','12h'] %}
+              <option value="{{ iv }}" {% if iv == a.value %}selected{% endif %}>{{ iv }}</option>
+              {% endfor %}
+            </select>
+            {% endif %}
+
+            <button type="button" onclick="this.closest('.assignment-row').remove(); markDirty()"
+                    class="px-2 py-1.5 text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors" title="Remove assignment">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+          {% else %}
+          {# Inferred agent, no schedule yet #}
+          <div class="flex items-center gap-2 assignment-row">
+            <select name="assign_agent_{{ p.slug }}_{{ loop.index0 }}"
+                    class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+              {% for agent in agents %}
+              <option value="{{ agent }}" {% if agent == a.agent %}selected{% endif %}>{{ agent }}</option>
+              {% endfor %}
+            </select>
+
+            <select name="assign_type_{{ p.slug }}_{{ loop.index0 }}"
+                    class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-20 border-dashed">
+              <option value="" selected disabled>schedule</option>
+              <option value="at">at</option>
+              <option value="every">every</option>
+            </select>
+
+            <select name="assign_value_{{ p.slug }}_{{ loop.index0 }}" disabled
+                    class="px-2 py-1.5 border border-gray-200 border-dashed rounded-lg text-sm bg-gray-50 w-28 unscheduled-value">
+              <option value="">--:--</option>
+            </select>
+
+            <button type="button" onclick="this.closest('.assignment-row').remove(); markDirty()"
+                    class="px-2 py-1.5 text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors" title="Remove assignment">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      <button type="button" onclick="addAssignment('{{ p.slug }}')"
+              class="mt-2 px-2.5 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition-colors">
+        + Assign agent
+      </button>
+    </div>
+    {% endif %}
+  </div>
   {% endfor %}
 </div>
+
+<!-- Save bar (hidden until changes made) -->
+<div id="save-bar" class="hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50">
+  <div class="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
+    <span class="text-sm text-gray-600">Unsaved dispatch changes</span>
+    <div class="flex items-center gap-3">
+      <button type="button" onclick="location.reload()" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800">Discard</button>
+      <button type="submit" class="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Save Dispatch Config</button>
+    </div>
+  </div>
+</div>
+
+</form>
+
+<script>
+var agents = {{ agents | tojson }};
+var assignCounters = {};
+
+// Initialize counters from existing rows (both assignment-row and condition-row)
+document.querySelectorAll('[id^="assignments-"]').forEach(function(container) {
+  var slug = container.id.replace('assignments-', '');
+  assignCounters[slug] = container.querySelectorAll('.assignment-row, .condition-row').length;
+});
+
+var presetTimes = ['05:00','05:30','06:00','06:30','07:00','07:30','08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00','21:00','22:00','23:00'];
+var presetIntervals = ['1h','2h','3h','4h','6h','8h','12h'];
+
+function markDirty() {
+  document.getElementById('save-bar').classList.remove('hidden');
+}
+
+function createRemoveButton() {
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'px-2 py-1.5 text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors';
+  btn.title = 'Remove assignment';
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'w-4 h-4');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('d', 'M6 18L18 6M6 6l12 12');
+  svg.appendChild(path);
+  btn.appendChild(svg);
+  btn.addEventListener('click', function() { btn.closest('.assignment-row').remove(); markDirty(); });
+  return btn;
+}
+
+function populateSelect(sel, options, selected) {
+  while (sel.firstChild) sel.removeChild(sel.firstChild);
+  options.forEach(function(v) {
+    var opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    if (v === selected) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function addAssignment(slug) {
+  if (!(slug in assignCounters)) assignCounters[slug] = 0;
+  var idx = assignCounters[slug]++;
+
+  var container = document.getElementById('assignments-' + slug);
+  if (!container) return;
+
+  var row = document.createElement('div');
+  row.className = 'flex items-center gap-2 assignment-row';
+
+  var agentSel = document.createElement('select');
+  agentSel.name = 'assign_agent_' + slug + '_' + idx;
+  agentSel.className = 'px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
+  populateSelect(agentSel, agents, null);
+
+  var typeSel = document.createElement('select');
+  typeSel.name = 'assign_type_' + slug + '_' + idx;
+  typeSel.className = 'px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-20';
+  populateSelect(typeSel, ['at', 'every'], 'at');
+
+  var valSel = document.createElement('select');
+  valSel.name = 'assign_value_' + slug + '_' + idx;
+  valSel.className = 'px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 w-28';
+  populateSelect(valSel, presetTimes, null);
+
+  typeSel.addEventListener('change', function() {
+    populateSelect(valSel, this.value === 'at' ? presetTimes : presetIntervals, null);
+    markDirty();
+  });
+
+  row.appendChild(agentSel);
+  row.appendChild(typeSel);
+  row.appendChild(valSel);
+  row.appendChild(createRemoveButton());
+  container.appendChild(row);
+
+  [agentSel, typeSel, valSel].forEach(function(el) {
+    el.addEventListener('change', markDirty);
+  });
+
+  markDirty();
+}
+
+// When type changes on existing rows, swap value presets
+document.querySelectorAll('.assignment-row select[name*="assign_type_"]').forEach(function(typeSel) {
+  typeSel.addEventListener('change', function() {
+    var row = this.closest('.assignment-row');
+    var valSel = row.querySelector('select[name*="assign_value_"]');
+    if (!valSel) return;
+    populateSelect(valSel, this.value === 'at' ? presetTimes : presetIntervals, null);
+    markDirty();
+  });
+});
+
+// When unscheduled type dropdown changes, enable and populate the value dropdown
+document.querySelectorAll('.assignment-row select[name*="assign_type_"]').forEach(function(typeSel) {
+  if (!typeSel.value) {
+    typeSel.addEventListener('change', function() {
+      var row = this.closest('.assignment-row');
+      var valSel = row.querySelector('.unscheduled-value');
+      if (valSel) {
+        valSel.disabled = false;
+        valSel.classList.remove('bg-gray-50', 'border-dashed');
+        valSel.classList.add('bg-white');
+        populateSelect(valSel, this.value === 'at' ? presetTimes : presetIntervals, null);
+      }
+      // Remove the placeholder option and border-dashed from type
+      this.classList.remove('border-dashed');
+      markDirty();
+    });
+  }
+});
+
+// Ensure custom values not in presets still appear
+document.querySelectorAll('.time-select, .interval-select').forEach(function(sel) {
+  var current = sel.getAttribute('data-current');
+  if (current && !sel.querySelector('option[value="' + current + '"]')) {
+    var opt = document.createElement('option');
+    opt.value = current;
+    opt.textContent = current;
+    opt.selected = true;
+    sel.insertBefore(opt, sel.firstChild);
+  }
+});
+
+// Mark dirty on any change
+document.getElementById('dispatch-form').addEventListener('change', markDirty);
+</script>
 {% endblock %}

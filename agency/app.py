@@ -522,17 +522,68 @@ def collect_logs(g: dict) -> dict[str, list[dict]]:
     return result
 
 
+def infer_agent_from_prompt(filename: str, agents: list[str]) -> str | None:
+    """Infer agent name from prompt filename by matching agent name prefix.
+
+    E.g., 'product-routine.md' matches agent 'product',
+    'business-ops-daily-close.md' matches 'business-ops'.
+    Tries longest agent name first to handle hyphenated names correctly.
+    """
+    stem = filename.replace(".md", "")
+    # Sort agents by length descending so 'business-ops' matches before 'business'
+    for agent in sorted(agents, key=len, reverse=True):
+        if stem == agent or stem.startswith(agent + "-"):
+            return agent
+    return None
+
+
 def collect_prompts(g: dict) -> list[dict]:
-    """List prompt files."""
+    """List prompt files with dispatch assignment info."""
     prompts_dir = g["shared"] / "prompts"
     if not prompts_dir.exists():
         return []
+
+    agents = g["agents"]
+
+    # Build prompt-centric dispatch map from config
+    group_cfg = GROUPS.get(g["key"], {})
+    dispatch_agents = group_cfg.get("dispatch", {}).get("agents", {})
+    # Invert: {prompt_filename: [{agent, type, value}, ...]}
+    prompt_assignments: dict[str, list[dict]] = {}
+    for agent_name, rules in dispatch_agents.items():
+        for rule in rules:
+            prompt_file = rule.get("prompt", "")
+            if not prompt_file:
+                continue
+            if prompt_file not in prompt_assignments:
+                prompt_assignments[prompt_file] = []
+            entry = {"agent": agent_name, "condition": rule.get("condition", "")}
+            if rule.get("at"):
+                entry["type"] = "at"
+                entry["value"] = rule["at"]
+            elif rule.get("every"):
+                entry["type"] = "every"
+                entry["value"] = rule["every"]
+            else:
+                continue
+            prompt_assignments[prompt_file].append(entry)
+
     items = []
     for f in sorted(prompts_dir.glob("*.md")):
+        assignments = prompt_assignments.get(f.name, [])
+        inferred_agent = infer_agent_from_prompt(f.name, agents)
+
+        # If no explicit assignments but we can infer the agent, pre-populate
+        # with an unscheduled placeholder so the UI shows the agent association
+        if not assignments and inferred_agent:
+            assignments = [{"agent": inferred_agent, "type": "", "value": ""}]
+
         items.append({
             "name": f.name,
             "path": str(f),
             "slug": f.stem,
+            "assignments": assignments,
+            "inferred_agent": inferred_agent,
         })
     return items
 
@@ -2242,10 +2293,14 @@ async def prompts_list(request: Request, group: str):
     """Browse and edit agent prompts."""
     g = get_group(group)
     items = collect_prompts(g)
+    group_cfg = GROUPS.get(g["key"], {})
+    dispatch_cfg = group_cfg.get("dispatch", {})
     return templates.TemplateResponse("prompts.html", {
         "request": request,
         **group_context(g),
         "prompts": items,
+        "agents": g["agents"],
+        "dispatch_enabled": dispatch_cfg.get("enabled", False),
     })
 
 
@@ -2276,6 +2331,85 @@ async def prompt_save(request: Request, group: str, slug: str):
     content = form.get("content", "")
     path.write_text(content)
     return RedirectResponse(f"/{group}/prompts/{slug}", status_code=303)
+
+
+@app.post("/{group}/prompts/dispatch", response_class=HTMLResponse)
+async def prompts_dispatch_save(request: Request, group: str):
+    """Save dispatch assignments edited from the prompts page."""
+    g = get_group(group)
+    config = load_config()
+    if group not in config.get("groups", {}):
+        raise HTTPException(404, f"Unknown group: {group}")
+
+    form = await request.form()
+
+    # Rebuild agent-centric dispatch rules from prompt-centric form data.
+    # Form fields: assign_agent_{prompt}_{idx}, assign_type_{prompt}_{idx}, assign_value_{prompt}_{idx}
+    # Collect all prompt filenames from the form
+    prompt_rules: dict[str, list[dict]] = {}  # prompt_name -> [{agent, type, value}]
+    prompts_dir = g["shared"] / "prompts"
+    prompt_files = sorted(f.name for f in prompts_dir.glob("*.md")) if prompts_dir.exists() else []
+
+    for prompt_file in prompt_files:
+        prompt_key = prompt_file.replace(".md", "")
+        idx = 0
+        while True:
+            agent = form.get(f"assign_agent_{prompt_key}_{idx}")
+            if agent is None:
+                break
+            rule_type = form.get(f"assign_type_{prompt_key}_{idx}", "").strip()
+            rule_value = form.get(f"assign_value_{prompt_key}_{idx}", "").strip()
+            if agent and rule_type and rule_value:
+                if prompt_file not in prompt_rules:
+                    prompt_rules[prompt_file] = []
+                prompt_rules[prompt_file].append({
+                    "agent": agent,
+                    "type": rule_type,
+                    "value": rule_value,
+                })
+            idx += 1
+
+    # Invert back to agent-centric for config storage
+    agents_dispatch: dict[str, list[dict]] = {}
+    for prompt_file, assignments in prompt_rules.items():
+        for a in assignments:
+            agent_name = a["agent"]
+            if agent_name not in agents_dispatch:
+                agents_dispatch[agent_name] = []
+            rule = {"prompt": prompt_file}
+            if a["type"] == "at":
+                rule["at"] = a["value"]
+            else:
+                rule["every"] = a["value"]
+            # Preserve condition from hidden form field if present
+            condition = a.get("condition", "")
+            if condition:
+                rule["condition"] = condition
+            agents_dispatch[agent_name].append(rule)
+
+    # Re-add condition-tagged rules that weren't in the form (read-only rows)
+    existing_agents = config["groups"][group].get("dispatch", {}).get("agents", {})
+    for agent_name, rules in existing_agents.items():
+        for rule in rules:
+            if rule.get("condition"):
+                if agent_name not in agents_dispatch:
+                    agents_dispatch[agent_name] = []
+                # Check if this exact condition rule already exists (from hidden field)
+                existing = any(
+                    r.get("prompt") == rule["prompt"] and r.get("condition") == rule["condition"]
+                    for r in agents_dispatch[agent_name]
+                )
+                if not existing:
+                    agents_dispatch[agent_name].append(rule)
+
+    # Merge into existing dispatch config (preserve enabled/timeout/daily_limit)
+    existing_dispatch = config["groups"][group].get("dispatch", {})
+    existing_dispatch["agents"] = agents_dispatch
+    config["groups"][group]["dispatch"] = existing_dispatch
+
+    save_config(config)
+    reload_groups()
+    return RedirectResponse(f"/{group}/prompts", status_code=303)
 
 
 @app.get("/{group}/memory", response_class=HTMLResponse)

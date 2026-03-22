@@ -158,6 +158,25 @@ If yes:
 - Derive a group key from the project directory name (lowercase, hyphens)
 - Add to config.yaml under `groups:` with name, path, agents list, and tmux_config path
 - The `tmux_config` field should point to the absolute path of `tmux-agents.sh`
+- **Write dispatch config** derived from the generated `dispatch.sh` event handlers:
+  - Set `dispatch.enabled: true`, `dispatch.timeout: 300`, `dispatch.daily_limit: 15`
+  - For each agent→prompt mapping in `dispatch.sh`, add a rule under `dispatch.agents`:
+    ```yaml
+    dispatch:
+      enabled: true
+      timeout: 300
+      daily_limit: 15
+      agents:
+        agent-name:
+        - prompt: agent-name-routine.md
+          at: "07:00"        # From the morning event handler time
+        - prompt: agent-name-cleanup.md
+          at: "21:00"        # From the evening event handler time
+    ```
+  - The `at` time should match the midpoint of the dispatch.sh time window for that event
+  - If an assignment has a code condition (e.g., only runs when a DB check passes), add
+    `condition: condition-name` to the rule — these display as read-only in the UI
+  - This keeps config.yaml in sync with dispatch.sh so the Agency dashboard shows accurate schedules
 
 If not found, skip silently.
 

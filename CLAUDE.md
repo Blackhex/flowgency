@@ -35,8 +35,8 @@
 │       ├── document_view.html # View/edit markdown, CSV, HTML
 │       ├── logs.html          # Execution logs by date
 │       ├── log_view.html      # Single log file
-│       ├── prompts.html       # Dispatch prompt list
-│       ├── prompt_detail.html # View/edit prompt
+│       ├── prompts.html       # Dispatch prompts with agent assignments + schedule editing
+│       ├── prompt_detail.html # View/edit prompt content
 │       ├── memory.html        # Agent memory list
 │       ├── memory_view.html   # View/edit memory
 │       ├── admin.html         # Admin: settings + dispatch + org management
@@ -77,9 +77,31 @@ groups:
             at: "09:00"
           - prompt: routine.md
             every: 6h
+          - prompt: quality-gate.md
+            at: "06:00"
+            condition: pre-send    # Code-triggered (read-only in UI)
 ```
 
 The `agency` and `dispatch` sections are optional — missing keys fall back to defaults.
+
+### Dispatch Rule Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `prompt` | Yes | Filename in `shared/prompts/` |
+| `at` | One of at/every | Daily time (HH:MM) |
+| `every` | One of at/every | Recurring interval (e.g., `6h`, `30m`) |
+| `condition` | No | Code condition name — makes rule read-only in UI, displayed with code icon |
+
+Rules with `condition` indicate the prompt is triggered by logic in the group's `dispatch.sh` (e.g., DB checks, event conditions). The `at` time is approximate — the actual trigger depends on the condition. These rules are preserved through UI saves but cannot be edited from the prompts page.
+
+### Dispatch Architecture
+
+Each group has its own `dispatch.sh` in `shared/` that handles execution. The `config.yaml` dispatch section mirrors what's in dispatch.sh so the Agency UI can display and edit schedules. Both should stay in sync:
+
+- **Simple time-based rules** (`at`/`every` without `condition`): Editable from the prompts page and admin UI. Changes should be reflected in dispatch.sh.
+- **Condition-triggered rules** (`condition` field present): Defined in dispatch.sh code. Shown read-only in the UI. Managed by editing dispatch.sh directly.
+- **Prompt filename convention**: `{agent-name}-{purpose}.md` — the agent prefix is auto-detected to infer agent assignments for prompts not yet in the dispatch config.
 
 ## How Agent Groups Work
 
@@ -125,9 +147,10 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | POST | `/{group}/documents/save` | Save document edits |
 | GET | `/{group}/logs` | Execution logs by date |
 | GET | `/{group}/logs/view?path=` | View log file |
-| GET | `/{group}/prompts` | Dispatch prompt list |
-| GET | `/{group}/prompts/{slug}` | View/edit prompt |
-| POST | `/{group}/prompts/{slug}/save` | Save prompt edits |
+| GET | `/{group}/prompts` | Dispatch prompts with agent assignments |
+| GET | `/{group}/prompts/{slug}` | View/edit prompt content |
+| POST | `/{group}/prompts/{slug}/save` | Save prompt content edits |
+| POST | `/{group}/prompts/dispatch` | Save dispatch assignments from prompts page |
 | GET | `/{group}/memory` | Agent memory file list |
 | GET | `/{group}/memory/view?path=` | View/edit memory file |
 | POST | `/{group}/memory/save` | Save memory edits |
