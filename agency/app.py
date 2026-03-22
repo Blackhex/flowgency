@@ -23,6 +23,7 @@ import uvicorn
 
 from agency.config import normalize_agents, agent_names
 from agency.integrations import get_integration, detect_integration, REGISTRY
+from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status as _get_timer_status, detect_platform
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -91,99 +92,29 @@ SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
 def get_dispatch_status() -> dict:
     """Return dispatch installation status."""
-    installed = CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False)
-    interval = CONFIG.get("agency", {}).get("dispatch", {}).get("interval", 15)
-    timer_active = False
-    if installed:
-        try:
-            result = subprocess.run(
-                ["systemctl", "--user", "is-active", "agency-dispatch.timer"],
-                capture_output=True, text=True, timeout=5,
-            )
-            timer_active = result.stdout.strip() == "active"
-        except Exception:
-            timer_active = False
-    return {"installed": installed, "interval": interval, "timer_active": timer_active}
+    status = _get_timer_status()
+    config_dispatch = CONFIG.get("agency", {}).get("dispatch", {})
+    status["interval"] = config_dispatch.get("interval", 15)
+    status["installed"] = status["installed"] or config_dispatch.get("installed", False)
+    return status
 
 
 def install_dispatch(interval: int = 15) -> str | None:
-    """Install dispatch systemd timer. Returns error string or None on success."""
-    try:
-        # 1. Create config directory
-        DISPATCH_CONF_DIR.mkdir(parents=True, exist_ok=True)
-
-        # 2. Find venv python
-        venv_python = Path(__file__).parent.parent / ".venv" / "bin" / "python3"
-        if not venv_python.exists():
-            venv_python = Path(sys.executable)
-
-        # 2b. Find claude CLI (systemd services may not have it in PATH)
-        claude_path = shutil.which("claude") or ""
-
-        # 3. Write dispatch.conf (values quoted for paths with spaces)
-        DISPATCH_CONF_FILE.write_text(
-            f'config_path="{CONFIG_PATH}"\n'
-            f'venv_python="{venv_python}"\n'
-            f'claude_path="{claude_path}"\n'
-        )
-
-        # 4. Copy dispatch.sh
-        src_dispatch = Path(__file__).parent / "dispatch" / "dispatch.sh"
-        dst_dispatch = DISPATCH_CONF_DIR / "dispatch.sh"
-        shutil.copy2(src_dispatch, dst_dispatch)
-        dst_dispatch.chmod(dst_dispatch.stat().st_mode | stat.S_IEXEC)
-
-        # 4b. Fix SELinux context so systemd can execute it (Fedora Kinoite)
-        try:
-            subprocess.run(
-                ["chcon", "-t", "bin_t", str(dst_dispatch)],
-                capture_output=True, timeout=5,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass  # chcon not available on non-SELinux systems
-
-        # 5. Write systemd service
-        SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
-        service_file = SYSTEMD_USER_DIR / "agency-dispatch.service"
-        service_file.write_text(
-            "[Unit]\n"
-            "Description=Agency Agent Dispatch\n"
-            "\n"
-            "[Service]\n"
-            "Type=oneshot\n"
-            "ExecStart=%h/.config/agency/dispatch.sh\n"
-            "Environment=HOME=%h\n"
-        )
-
-        # 6. Write systemd timer
-        write_dispatch_timer(interval)
-
-        # 7. Enable and start timer
-        subprocess.run(
-            ["systemctl", "--user", "daemon-reload"],
-            capture_output=True, text=True, timeout=10, check=True,
-        )
-        subprocess.run(
-            ["systemctl", "--user", "enable", "--now", "agency-dispatch.timer"],
-            capture_output=True, text=True, timeout=10, check=True,
-        )
-
-        # 8. Update config
-        config = load_config()
-        if "agency" not in config:
-            config["agency"] = {}
-        if "dispatch" not in config["agency"]:
-            config["agency"]["dispatch"] = {}
-        config["agency"]["dispatch"]["installed"] = True
-        config["agency"]["dispatch"]["interval"] = interval
-        save_config(config)
-
-        # 9. Reload
-        reload_groups()
-
-        return None
-    except Exception as e:
-        return str(e)
+    """Install dispatch timer using platform-native scheduler."""
+    error = install_timer(str(CONFIG_PATH), interval)
+    if error:
+        return error
+    # Update config
+    config = load_config()
+    if "agency" not in config:
+        config["agency"] = {}
+    if "dispatch" not in config["agency"]:
+        config["agency"]["dispatch"] = {}
+    config["agency"]["dispatch"]["installed"] = True
+    config["agency"]["dispatch"]["interval"] = interval
+    save_config(config)
+    reload_groups()
+    return None
 
 
 app = FastAPI(title="Agency Dashboard")
