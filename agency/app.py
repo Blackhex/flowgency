@@ -773,6 +773,7 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             "open_clues": open_count,
             "is_subagent": identity["frontmatter"].get("subagent", False),
             "has_headshot": find_headshot(agent_dir) is not None,
+            "integration": agent_int.name,
         }
         if info["is_subagent"]:
             subagents.append(info)
@@ -796,6 +797,7 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
                 "health": agent_health_status(last_seen),
                 "open_clues": open_count, "is_subagent": True,
                 "has_headshot": find_headshot(d) is not None,
+                "integration": sub_int.name,
             })
 
     return agents, subagents
@@ -1068,11 +1070,22 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
 @app.get("/admin/", response_class=HTMLResponse)
 async def admin_settings_page(request: Request):
     """Admin app settings page."""
+    # Build full integration info for the installed integrations table
+    all_integrations_info = []
+    for name, i in REGISTRY.items():
+        all_integrations_info.append({
+            "name": name,
+            "display_name": i.display_name,
+            "supports_execution": i.supports_execution,
+            "supports_ai_backend": i.supports_ai_backend,
+            "identity_file": i.identity_filename() if hasattr(i, 'identity_filename') and callable(i.identity_filename) else "—",
+        })
     return templates.TemplateResponse("admin_settings.html", {
         "request": request,
         **admin_context("settings"),
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
         "ai_backend": CONFIG.get("agency", {}).get("ai_backend", "claude-code"),
+        "all_integrations_info": all_integrations_info,
     })
 
 
@@ -1811,6 +1824,8 @@ async def agent_profile(request: Request, group: str, agent: str):
         "memory_path": memory_path,
         "agent_schedule": agent_schedule,
         "dispatch_enabled": dispatch_enabled,
+        "agent_integration": agent_int.name,
+        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
     })
 
 

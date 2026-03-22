@@ -38,5 +38,45 @@
       </button>
     </div>
   </form>
+
+  {% if all_integrations_info %}
+  <div class="mt-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Installed Integrations</h2>
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th class="px-4 py-3">Integration</th>
+            <th class="px-4 py-3">Identity File</th>
+            <th class="px-4 py-3">Execution</th>
+            <th class="px-4 py-3">AI Backend</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for i in all_integrations_info %}
+          <tr>
+            <td class="px-4 py-3">{{ i.name | integration_badge }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ i.identity_file }}</td>
+            <td class="px-4 py-3">
+              {% if i.supports_execution %}
+              <span class="text-emerald-600">&#10003;</span>
+              {% else %}
+              <span class="text-gray-300">—</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3">
+              {% if i.supports_ai_backend %}
+              <span class="text-emerald-600">&#10003;</span>
+              {% else %}
+              <span class="text-gray-300">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
