@@ -141,16 +141,23 @@ def get_group(group: str) -> dict:
 
 
 def get_agent_integration(g: dict, agent_name: str):
-    """Resolve the integration for an agent in a group."""
-    for agent_info in g.get("agents_full", []):
-        if agent_info["name"] == agent_name:
-            return get_integration(agent_info.get("integration", "claude-code"))
-    # Fallback: try auto-detection
+    """Resolve the integration for an agent in a group.
+
+    Priority: filesystem detection first (for existing agents with identity files),
+    then config, then group default. This ensures that an agent with CLAUDE.md is
+    always handled by the claude-code integration, even if the group default is different.
+    """
     agent_dir = g["path"] / agent_name
+    # 1. Auto-detect from existing files on disk
     if agent_dir.is_dir():
         detected = detect_integration(agent_dir)
         if detected:
             return detected
+    # 2. Fall back to config (for new agents or dirs with no recognized files)
+    for agent_info in g.get("agents_full", []):
+        if agent_info["name"] == agent_name:
+            return get_integration(agent_info.get("integration", "claude-code"))
+    # 3. Group default
     return get_integration("claude-code")
 
 
@@ -279,14 +286,10 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
     prompt_file.write_text(prompt)
 
     try:
-        # Resolve integration
+        # Resolve integration (filesystem detection first, then config)
         g = GROUPS.get(group_key, {})
-        default_int = g.get("default_integration", "claude-code")
-        agent_integration = get_integration(default_int)
-        for a in normalize_agents(g.get("agents", []), default_int):
-            if a["name"] == agent:
-                agent_integration = get_integration(a.get("integration", default_int))
-                break
+        grp = {"path": group_path, "agents_full": g.get("_agents_normalized", [])}
+        agent_integration = get_agent_integration(grp, agent)
 
         if not agent_integration.supports_execution:
             update_decision_execution(decision_path, {
@@ -296,9 +299,9 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
             })
             return
 
-        # For script integration, apply config
+        # For script integration, apply config from agent's config entry
         if hasattr(agent_integration, 'with_config'):
-            for a in normalize_agents(g.get("agents", []), default_int):
+            for a in g.get("_agents_normalized", []):
                 if a["name"] == agent and "integration_config" in a:
                     agent_integration = agent_integration.with_config(a["integration_config"])
                     break
@@ -759,7 +762,8 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
         agent_dir = g["path"] / agent_name
         if not agent_dir.is_dir():
             continue
-        identity = parse_agent_identity(agent_dir)
+        agent_int = get_agent_integration(g, agent_name)
+        identity = parse_agent_identity(agent_dir, agent_int)
         open_count = sum(1 for c in clues if c.get("agent") == agent_name and c.get("status") == "open")
         last_seen = get_agent_last_seen(g, agent_name)
         info = {
@@ -782,7 +786,8 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
                 continue
             if any(s["name"] == d.name for s in subagents):
                 continue
-            identity = parse_agent_identity(d)
+            sub_int = get_agent_integration(g, d.name)
+            identity = parse_agent_identity(d, sub_int)
             open_count = sum(1 for c in clues if c.get("agent") == d.name and c.get("status") == "open")
             last_seen = get_agent_last_seen(g, d.name)
             subagents.append({
@@ -1553,15 +1558,8 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
     definition_content = ""
     memory_md = ""
     if agent_dir.is_dir():
-        config_tmp = load_config()
-        g_cfg = config_tmp.get("groups", {}).get(org, {})
-        default_int = g_cfg.get("default_integration", "claude-code")
-        from agency.config import normalize_agents as _norm
-        agent_integration = get_integration(default_int)
-        for a in _norm(g_cfg.get("agents", []), default_int):
-            if a["name"] == agent:
-                agent_integration = get_integration(a.get("integration", default_int))
-                break
+        grp = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
+        agent_integration = get_agent_integration(grp, agent)
         identity_path = agent_dir / agent_integration.identity_filename()
         if identity_path.exists():
             definition_content = identity_path.read_text()
@@ -1609,18 +1607,10 @@ async def admin_agent_save(request: Request, org: str, agent: str):
     agent_dir.mkdir(parents=True, exist_ok=True)
 
     if file_type == "claude_md" or file_type == "definition":
-        # Use integration to determine identity file
-        config = load_config()
-        g_cfg = config.get("groups", {}).get(org, {})
-        default_int = g_cfg.get("default_integration", "claude-code")
-        from agency.config import normalize_agents as _norm
-        for a in _norm(g_cfg.get("agents", []), default_int):
-            if a["name"] == agent:
-                integration = get_integration(a.get("integration", default_int))
-                save_agent_definition(agent_dir, content, integration)
-                break
-        else:
-            save_agent_definition(agent_dir, content)
+        # Detect integration from existing files, fall back to config
+        grp = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
+        agent_int = get_agent_integration(grp, agent)
+        save_agent_definition(agent_dir, content, agent_int)
     elif file_type == "memory_md":
         (agent_dir / "memory.md").write_text(content)
 
@@ -1771,7 +1761,8 @@ async def agent_profile(request: Request, group: str, agent: str):
     """View an agent's profile with identity, logs, clues, and memory."""
     g = get_group(group)
     agent_dir = resolve_agent_dir(g, agent)
-    identity = parse_agent_identity(agent_dir)
+    agent_int = get_agent_integration(g, agent)
+    identity = parse_agent_identity(agent_dir, agent_int)
     is_subagent = (g["path"] / "_subagents" / agent).is_dir() or identity["frontmatter"].get("subagent", False)
     last_seen = get_agent_last_seen(g, agent)
     logs = get_agent_logs(g, agent)
