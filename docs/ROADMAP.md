@@ -27,12 +27,12 @@ Agency currently assumes Claude agents (reads `CLAUDE.md` for identity). To supp
 
 ---
 
-## Priority 4: Skills CRUD + SkillsMCP Integration
-**Impact:** Medium-High | **Effort:** Medium | **Dependencies:** SkillsMCP server
+## Priority 4: Skills CRUD + Vercel Skills Integration
+**Impact:** Medium-High | **Effort:** Medium | **Dependencies:** [Vercel Skills](https://github.com/vercel-labs/skills) framework
 
-A skills management interface within Agency: browse installed skills per agent, create/edit/delete skills, and integrate with a SkillsMCP marketplace server for discovering and installing community skills. This turns Agency into a full agent development environment, not just a monitoring dashboard.
+A skills management interface within Agency: browse installed skills per agent, create/edit/delete skills, and integrate with the [Vercel Skills](https://github.com/vercel-labs/skills) open-source framework for discovering, installing, and managing community skills. This turns Agency into a full agent development environment, not just a monitoring dashboard.
 
-**Why fourth:** Powerful feature but depends on the SkillsMCP ecosystem existing and being stable. The CRUD portion (managing local skill files) can ship independently; the marketplace integration is additive.
+**Why fourth:** Powerful feature but depends on the Vercel Skills ecosystem maturing. The CRUD portion (managing local skill files) can ship independently; the browse/install integration with the Vercel Skills registry is additive.
 
 ---
 
@@ -61,6 +61,6 @@ Package Agency as a native macOS app (Tauri or Electron) with: menu bar icon sho
 | First Run Wizard | High | Low | None | 1 |
 | MCP Management | High | Medium | None | 2 |
 | Multi-LLM Support | Critical | Medium-High | None | 3 |
-| Skills CRUD + SkillsMCP | Medium-High | Medium | SkillsMCP | 4 |
+| Skills CRUD + Vercel Skills | Medium-High | Medium | Vercel Skills | 4 |
 | Home Assistant | Medium | Medium | HA instance | 5 |
 | Native macOS App | High | Very High | Stable UI | 6 |

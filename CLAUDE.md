@@ -14,29 +14,40 @@
 
 ```
 ~/dev/agency/
-├── app.py                    # Main FastAPI app (~1100 lines)
-├── config.yaml               # Group registry + Agency settings
+├── agency/                    # Python package
+│   ├── app.py                 # Main FastAPI app (~2200 lines)
+│   ├── __init__.py
+│   ├── dispatch/              # Dispatch system
+│   │   ├── dispatch.sh        # Global dispatcher script (installed to ~/.config/agency/)
+│   │   └── __init__.py
+│   └── templates/             # 23 Jinja2 templates
+│       ├── base.html          # Layout: sidebar + main content
+│       ├── home.html          # Inbox (open clues, decisions)
+│       ├── agents.html        # Agent list with health pulse dots
+│       ├── agent_profile.html # Agent profile: identity, timeline, schedule
+│       ├── clues.html         # Clue list with filters
+│       ├── clue_detail.html   # Single clue + pipeline chain + status change
+│       ├── curiosities.html   # Curiosity list
+│       ├── curiosity_detail.html # Curiosity + pipeline chain + decide form
+│       ├── decisions.html     # Decision list
+│       ├── decision_detail.html # Single decision + pipeline chain
+│       ├── documents.html     # Agent documents browser
+│       ├── document_view.html # View/edit markdown, CSV, HTML
+│       ├── logs.html          # Execution logs by date
+│       ├── log_view.html      # Single log file
+│       ├── prompts.html       # Dispatch prompt list
+│       ├── prompt_detail.html # View/edit prompt
+│       ├── memory.html        # Agent memory list
+│       ├── memory_view.html   # View/edit memory
+│       ├── admin.html         # Admin: settings + dispatch + org management
+│       ├── admin_org_edit.html # Create/edit org + dispatch schedule config
+│       ├── admin_agent_detail.html # Admin agent detail view
+│       ├── setup.html         # First-run wizard
+│       └── tmux_config.html   # Tmux session config viewer
+├── kb/                        # User-facing documentation
+├── docs/                      # Specs and plans
+├── config.yaml                # Group registry + Agency settings
 ├── pyproject.toml             # Dependencies
-├── agency.service             # Systemd service unit (user-level)
-├── templates/                 # 18 Jinja2 templates
-│   ├── base.html              # Layout: sidebar + main content
-│   ├── home.html              # Inbox (open clues, decisions)
-│   ├── clues.html             # Clue list with filters
-│   ├── clue_detail.html       # Single clue + status change
-│   ├── curiosities.html       # Curiosity list
-│   ├── curiosity_detail.html  # Curiosity + decide form
-│   ├── decisions.html         # Decision list
-│   ├── decision_detail.html   # Single decision
-│   ├── documents.html         # Agent documents browser
-│   ├── document_view.html     # View/edit markdown, CSV, HTML
-│   ├── logs.html              # Execution logs by date
-│   ├── log_view.html          # Single log file
-│   ├── prompts.html           # Dispatch prompt list
-│   ├── prompt_detail.html     # View/edit prompt
-│   ├── memory.html            # Agent memory list
-│   ├── memory_view.html       # View/edit memory
-│   ├── admin.html             # Admin: Agency settings + org management
-│   └── admin_org_edit.html    # Create/edit org form
 ├── .venv/                     # Python virtual environment
 └── CLAUDE.md                  # This file
 ```
@@ -47,19 +58,28 @@
 agency:
   title: Agency                    # App title shown in sidebar + page titles
   default_group: newsletter        # Group to redirect to from /
+  dispatch:
+    installed: true                # Set after first dispatch init
+    interval: 15                   # Heartbeat interval in minutes
 
 groups:
   newsletter:
     name: Newsletter Agents        # Display name
     path: /path/to/agents          # Filesystem path to agent directories
     agents: [agent1, agent2, ...]  # List of agent directory names
-  another-group:
-    name: Another Group
-    path: /path/to/agents
-    agents: [agent1, agent2, ...]
+    dispatch:                      # Per-group dispatch config (optional)
+      enabled: true
+      timeout: 300                 # Seconds per agent run
+      daily_limit: 20              # Max runs per day for this group
+      agents:                      # Per-agent schedule rules
+        agent1:
+          - prompt: morning.md
+            at: "09:00"
+          - prompt: routine.md
+            every: 6h
 ```
 
-The `agency` section is optional — missing keys fall back to defaults.
+The `agency` and `dispatch` sections are optional — missing keys fall back to defaults.
 
 ## How Agent Groups Work
 
@@ -112,16 +132,30 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | GET | `/{group}/memory/view?path=` | View/edit memory file |
 | POST | `/{group}/memory/save` | Save memory edits |
 
+### Agent Routes
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/{group}/agents` | Agent list with health pulse dots |
+| GET | `/{group}/agents/{agent}` | Agent profile: identity, timeline, schedule |
+| POST | `/{group}/agents/{agent}/identity` | Save identity fields (display name, title, emoji) |
+| POST | `/{group}/agents/{agent}/definition` | Save CLAUDE.md body |
+| POST | `/{group}/agents/{agent}/upload-headshot` | Upload agent avatar |
+| GET | `/{group}/agents/{agent}/headshot` | Serve headshot image |
+| POST | `/{group}/agents/{agent}/toggle-subagent` | Toggle regular/subagent status |
+
 ### Admin Routes
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/admin/` | Settings dashboard — Agency settings + org list |
-| POST | `/admin/settings` | Update Agency title, default group |
+| GET | `/admin/` | Settings dashboard — Agency settings + dispatch + org list |
+| POST | `/admin/settings` | Update Agency title, default group, dispatch interval |
+| POST | `/admin/dispatch/install` | Install global dispatch timer/service |
 | GET | `/admin/orgs/new` | New org form |
 | POST | `/admin/orgs/create` | Create org (writes config, optionally initializes) |
-| GET | `/admin/orgs/{org}/edit` | Edit org form |
+| GET | `/admin/orgs/{org}/edit` | Edit org form + dispatch schedule config |
 | POST | `/admin/orgs/{org}/save` | Save org changes |
+| POST | `/admin/orgs/{org}/dispatch` | Save dispatch config for group |
 | POST | `/admin/orgs/{org}/delete` | Remove org from config |
 | POST | `/admin/orgs/{org}/initialize` | Create shared/ folder structure |
 | POST | `/admin/orgs/{org}/autodetect` | Scan path for directories with CLAUDE.md |
@@ -131,6 +165,8 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/` | Redirect to default group |
+| GET | `/setup` | First-run setup wizard |
+| POST | `/setup` | Process setup wizard |
 
 ## Data Model
 
@@ -178,6 +214,31 @@ decision: approved             # approved, deferred, rejected
 - `reload_groups()` updates the global `GROUPS` dict after changes
 - `get_agency_config()` returns Agency settings with backward-compatible defaults
 
+### Dispatch System
+- Global dispatcher at `agency/dispatch/dispatch.sh` — installed to `~/.config/agency/` during init
+- Uses project's `.venv/bin/python3` to parse config.yaml (PyYAML → JSON)
+- `get_dispatch_status()` checks systemd timer state
+- `install_dispatch()` creates conf/script/service/timer and enables the timer
+- Schedule rules: `at` (daily at specific time) and `every` (recurring interval)
+- TTL-style marker files for dedup: `.event-*` for `at` rules, `.last-*` for `every` rules
+
+### Agent Profiles
+- `build_agent_timeline()` interleaves logs and clues chronologically
+- `agent_health_status()` returns green/amber/red based on last seen time
+- Schedule pills shown from `config.dispatch.agents.{name}` rules
+
+### Pipeline Relationships
+- Clue detail resolves `linked_curiosity` → curiosity → decision chain
+- Curiosity detail shows originating clues + resulting decision
+- Decision detail traces back through curiosity to source clues
+- All rendered as clickable pipeline banners with color-coded steps
+
+### TTL Enforcement
+- `check_ttl_expired()` and `enforce_ttl()` auto-archive stale items
+- Called from `list_clues()` and `list_curiosities()` on every page load
+- Rewrites status to "archived" in the markdown file frontmatter
+- Skips items already in terminal states
+
 ### Security
 - Path traversal protection: `fpath.resolve().relative_to(g["path"].resolve())` — validates file access is within the specific group's directory
 - No auth — assumes local network / trusted access
@@ -189,6 +250,7 @@ Every org-scoped template gets via `group_context(g)`:
 - `group_name` — display name
 - `groups` — dict of all group keys → names (for switcher)
 - `agency_title` — from config
+- `nav_open_clues`, `nav_actionable`, `nav_agent_count` — sidebar counts
 
 ### Initialize Workflow
 Creates the standard agent group folder structure. Idempotent — only creates missing dirs/files:
@@ -259,6 +321,7 @@ Available in all templates:
 - `{{ status | status_badge }}` — colored pill for clue/curiosity status
 - `{{ agent | agent_badge }}` — colored pill for agent name
 - `{{ text | render_md }}` — markdown → HTML
+- `{{ dt | relative_time }}` — datetime to "5m ago", "2h ago", etc.
 
 ## Coding Conventions
 
@@ -280,7 +343,9 @@ Available in all templates:
 
 - Real-time updates (WebSocket or SSE for live clue/decision notifications)
 - Unified inbox across all groups (`/all/` route)
-- Agent health monitoring (last dispatch time, error rate, memory size)
+- Event-based dispatch conditions (`if` rules — e.g., "run if unread email > 20")
 - Clue analytics (trends over time, agent activity heatmaps)
 - Dark mode toggle
 - Mobile-optimized decision workflow
+- MCP config viewing/editing on agent profile page
+- Skills CRUD + SkillsMCP marketplace integration
