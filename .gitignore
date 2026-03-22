@@ -7,5 +7,5 @@ build/
 config.yaml
 agents/
 agency.service
-docs/superpowers/
+docs/
 reports/
