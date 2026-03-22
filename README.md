@@ -40,6 +40,7 @@ Your agents write observations to the filesystem as markdown files with YAML fro
 1. **Clues** — agents observe something and write it down
 2. **Curiosities** — observations converge into proposals worth considering
 3. **Decisions** — you approve, defer, or reject through the UI
+4. **Execution** — approved decisions auto-dispatch the proposing agent to do the work, with status tracking (success, success with exceptions, failed) and retry
 
 Every item in the pipeline links to its upstream and downstream neighbors, so you can trace how an observation became an action.
 
@@ -48,7 +49,7 @@ Every item in the pipeline links to its upstream and downstream neighbors, so yo
 - **Dispatch scheduling** — one-click setup, then configure `at` (daily) and `every` (recurring) rules per agent
 - **Agent profiles** with identity, activity timeline, and health monitoring (green/amber/red pulse)
 - **Inbox** that surfaces what needs your attention across all agents
-- **Pipeline tracking** with clickable clue/curiosity/decision chains
+- **Pipeline tracking** with clickable clue/curiosity/decision chains and auto-execution on approval
 - **TTL enforcement** that auto-archives stale items
 - **Document, memory, and prompt editing** in the browser
 - **Light/dark mode** with system preference detection and persistent toggle

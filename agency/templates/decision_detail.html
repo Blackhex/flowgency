@@ -8,19 +8,19 @@
   <a href="/{{ group }}/decisions" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to decisions</a>
 </div>
 
-<div class="bg-white rounded-lg border border-gray-200 p-6">
+<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
   <div class="flex items-start justify-between mb-4">
-    <h1 class="text-xl font-bold text-gray-900">{{ slug | replace("-", " ") | title }}</h1>
-    <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">{{ meta.get("decision", "") }}</span>
+    <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100">{{ slug | replace("-", " ") | title }}</h1>
+    <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">{{ meta.get("decision", "") }}</span>
   </div>
 
-  <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500 mb-6 pb-4 border-b border-gray-100">
+  <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500 dark:text-gray-400 mb-6 pb-4 border-b border-gray-100 dark:border-gray-700">
     <span>Decided by: <strong>{{ meta.get("decided_by", "\u2014") }}</strong></span>
     <span>Date: <strong>{{ meta.get("date", "\u2014") }}</strong></span>
   </div>
 
   {% if curiosity_slug or pipeline_clues %}
-  <div class="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
+  <div class="mb-6 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
     <div class="text-xs font-semibold text-indigo-500 uppercase tracking-wide mb-2">Pipeline</div>
     <div class="flex flex-wrap items-center gap-2 text-sm">
       {% if pipeline_clues %}
@@ -49,8 +49,91 @@
   </div>
   {% endif %}
 
-  <div class="prose max-w-none">
+  {% if body_html and body_html != '' %}
+  <div class="prose dark:prose-invert max-w-none mb-6">
     {{ body_html | safe }}
   </div>
+  {% endif %}
+
+  {% if execution %}
+  <!-- Execution Status -->
+  <div class="mt-6 p-4 rounded-lg border
+    {% if execution.status == 'success' %}bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800
+    {% elif execution.status == 'success_with_exceptions' %}bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800
+    {% elif execution.status == 'failed' %}bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800
+    {% elif execution.status == 'executing' %}bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800
+    {% else %}bg-gray-50 border-gray-200 dark:bg-gray-700/50 dark:border-gray-600
+    {% endif %}">
+
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Execution</h3>
+
+        {% if execution.status == 'pending' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-300">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Pending
+        </span>
+        {% elif execution.status == 'executing' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-200">
+          <svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Executing
+        </span>
+        {% elif execution.status == 'success' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-200 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-200">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          Success
+        </span>
+        {% elif execution.status == 'success_with_exceptions' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-200 text-amber-800 dark:bg-amber-800 dark:text-amber-200">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+          Success with exceptions
+        </span>
+        {% elif execution.status == 'failed' %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          Failed
+        </span>
+        {% endif %}
+      </div>
+
+      {% if execution.status in ('failed', 'success_with_exceptions') %}
+      <form method="POST" action="/{{ group }}/decisions/{{ slug }}/retry" class="inline">
+        <button type="submit" class="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
+                onclick="return confirm('Re-execute this decision?')">
+          Retry
+        </button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+      {% if execution.agent %}
+      <div>Agent: <strong>{{ execution.agent }}</strong></div>
+      {% endif %}
+      {% if execution.started_at %}
+      <div>Started: <strong>{{ execution.started_at }}</strong></div>
+      {% endif %}
+      {% if execution.completed_at %}
+      <div>Completed: <strong>{{ execution.completed_at }}</strong></div>
+      {% endif %}
+    </div>
+
+    {% if execution.summary %}
+    <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+      <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Summary</div>
+      <div class="prose dark:prose-invert prose-sm max-w-none">
+        {{ execution.summary | render_md }}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if execution.status == 'executing' %}
+    <div class="mt-3 text-xs text-blue-600 dark:text-blue-400">
+      Agent is working on this now. Refresh the page to check progress.
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import markdown
 import yaml
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
@@ -269,6 +269,96 @@ def update_frontmatter_field(filepath: Path, field: str, value: str) -> None:
     raw = filepath.read_text()
     raw = re.sub(rf'^({field}:\s*).*$', f'\\1{value}', raw, count=1, flags=re.MULTILINE)
     filepath.write_text(raw)
+
+
+def update_decision_execution(decision_path: Path, updates: dict) -> None:
+    """Update execution fields in a decision file's frontmatter."""
+    raw = decision_path.read_text()
+    meta, body = parse_frontmatter(raw)
+    if "execution" not in meta:
+        meta["execution"] = {}
+    meta["execution"].update(updates)
+    # Rewrite the file with updated frontmatter
+    frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+    decision_path.write_text(f"---\n{frontmatter}\n---\n\n{body}\n")
+
+
+def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
+                              curiosity_slug: str) -> None:
+    """Background task: spawn an agent to execute an approved decision."""
+    now = datetime.now(timezone.utc).isoformat()
+    update_decision_execution(decision_path, {"status": "executing", "started_at": now})
+
+    # Build the execution prompt
+    prompt = (
+        f"An approved decision needs to be executed.\n\n"
+        f"Read the decision file at agents/shared/decisions/{decision_path.name}\n"
+        f"Read the linked curiosity at agents/shared/curiosities/{curiosity_slug}.md\n\n"
+        f"Execute the proposed action described in the curiosity. Do the work.\n\n"
+        f"When done, update the decision file's execution section:\n"
+        f"- Set status to: success, success_with_exceptions, or failed\n"
+        f"- Set completed_at to the current ISO timestamp\n"
+        f"- Write a summary of what you did (or why you couldn't)\n\n"
+        f"Use the update format: read the file, modify the execution fields in the "
+        f"YAML frontmatter, write it back. The execution fields are under the "
+        f"'execution' key in the frontmatter."
+    )
+
+    agent_dir = group_path / agent
+    if not agent_dir.exists():
+        agent_dir = group_path
+
+    log_dir = group_path / "shared" / "logs" / datetime.now().strftime("%Y-%m-%d")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%H%M%S")
+    out_path = log_dir / f"{agent}-exec-{ts}.out"
+    err_path = log_dir / f"{agent}-exec-{ts}.err"
+
+    try:
+        result = subprocess.run(
+            ["claude", "--dangerously-skip-permissions", "-p", prompt],
+            capture_output=True, text=True, timeout=300,
+            cwd=str(agent_dir),
+        )
+        out_path.write_text(result.stdout)
+        err_path.write_text(result.stderr)
+
+        # Check if the agent updated the status itself
+        updated_meta, _ = parse_frontmatter(decision_path.read_text())
+        exec_status = updated_meta.get("execution", {}).get("status", "")
+        if exec_status not in ("success", "success_with_exceptions", "failed"):
+            # Agent didn't update status — infer from exit code
+            completed = datetime.now(timezone.utc).isoformat()
+            if result.returncode == 0:
+                update_decision_execution(decision_path, {
+                    "status": "success",
+                    "completed_at": completed,
+                    "summary": "Agent completed execution (status inferred from exit code).",
+                })
+            else:
+                update_decision_execution(decision_path, {
+                    "status": "failed",
+                    "completed_at": completed,
+                    "summary": f"Agent exited with code {result.returncode}.",
+                })
+    except subprocess.TimeoutExpired:
+        update_decision_execution(decision_path, {
+            "status": "failed",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "summary": "Agent execution timed out after 300 seconds.",
+        })
+    except FileNotFoundError:
+        update_decision_execution(decision_path, {
+            "status": "failed",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "summary": "Claude CLI not found. Is claude installed and in PATH?",
+        })
+    except Exception as e:
+        update_decision_execution(decision_path, {
+            "status": "failed",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "summary": f"Unexpected error: {e}",
+        })
 
 
 def write_dispatch_timer(interval: int) -> None:
@@ -1892,7 +1982,8 @@ async def curiosity_detail(request: Request, group: str, slug: str):
 
 
 @app.post("/{group}/curiosities/{slug}/decide", response_class=HTMLResponse)
-async def curiosity_decide(request: Request, group: str, slug: str):
+async def curiosity_decide(request: Request, group: str, slug: str,
+                           background_tasks: BackgroundTasks):
     """Create a decision for a curiosity."""
     g = get_group(group)
     decisions_dir = g["shared"] / "decisions"
@@ -1902,28 +1993,54 @@ async def curiosity_decide(request: Request, group: str, slug: str):
     decision_text = form.get("decision", "approved")
     notes = form.get("notes", "")
 
+    # Read curiosity to get origin_agent for execution
+    origin_agent = ""
+    cpath = curiosities_dir / f"{slug}.md"
+    if cpath.exists():
+        cmeta, _ = parse_frontmatter(cpath.read_text())
+        origin_agent = cmeta.get("origin_agent", "")
+
     agency_cfg = get_agency_config()
     decided_by = agency_cfg.get("decided_by", "admin")
     today = datetime.now().strftime("%Y-%m-%d")
-    decision_content = f"""---
-curiosity: {slug}.md
-decided_by: {decided_by}
-date: {today}
-decision: {decision_text}
----
 
-{notes}
-"""
+    # Build decision frontmatter
+    meta = {
+        "curiosity": f"{slug}.md",
+        "decided_by": decided_by,
+        "date": today,
+        "decision": decision_text,
+    }
+
+    # Add execution block for approved decisions
+    if decision_text == "approved" and origin_agent:
+        meta["execution"] = {
+            "status": "pending",
+            "agent": origin_agent,
+            "started_at": None,
+            "completed_at": None,
+            "summary": None,
+        }
+
+    frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+    decision_content = f"---\n{frontmatter}\n---\n\n{notes}\n"
+
     decisions_dir.mkdir(exist_ok=True)
     decision_path = decisions_dir / f"{slug}.md"
     decision_path.write_text(decision_content)
 
     # Update curiosity status
-    cpath = curiosities_dir / f"{slug}.md"
     if cpath.exists():
         update_frontmatter_field(cpath, "status", decision_text)
 
-    return RedirectResponse(f"/{group}/curiosities/{slug}", status_code=303)
+    # Auto-dispatch agent for approved decisions
+    if decision_text == "approved" and origin_agent:
+        background_tasks.add_task(
+            execute_approved_decision,
+            decision_path, Path(g["path"]), origin_agent, slug,
+        )
+
+    return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
 
 
 @app.get("/{group}/decisions", response_class=HTMLResponse)
@@ -1961,6 +2078,8 @@ async def decision_detail(request: Request, group: str, slug: str):
                 if clue_path.exists():
                     pipeline_clues.append({"slug": clue_slug, "filename": clue_file})
 
+    execution = meta.get("execution", {})
+
     return templates.TemplateResponse("decision_detail.html", {
         "request": request,
         **group_context(g),
@@ -1969,7 +2088,41 @@ async def decision_detail(request: Request, group: str, slug: str):
         "slug": slug,
         "pipeline_clues": pipeline_clues,
         "curiosity_slug": curiosity_slug,
+        "execution": execution,
     })
+
+
+@app.post("/{group}/decisions/{slug}/retry", response_class=HTMLResponse)
+async def decision_retry(request: Request, group: str, slug: str,
+                         background_tasks: BackgroundTasks):
+    """Retry execution of a failed approved decision."""
+    g = get_group(group)
+    decision_path = g["shared"] / "decisions" / f"{slug}.md"
+    if not decision_path.exists():
+        raise HTTPException(404, "Decision not found")
+
+    meta, _ = parse_frontmatter(decision_path.read_text())
+    execution = meta.get("execution", {})
+    agent = execution.get("agent", "")
+    curiosity_slug = (meta.get("curiosity", "") or "").replace(".md", "")
+
+    if not agent or not curiosity_slug:
+        raise HTTPException(400, "Decision has no execution agent or linked curiosity")
+
+    # Reset execution status
+    update_decision_execution(decision_path, {
+        "status": "pending",
+        "started_at": None,
+        "completed_at": None,
+        "summary": None,
+    })
+
+    background_tasks.add_task(
+        execute_approved_decision,
+        decision_path, Path(g["path"]), agent, curiosity_slug,
+    )
+
+    return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
 
 
 @app.get("/{group}/documents", response_class=HTMLResponse)

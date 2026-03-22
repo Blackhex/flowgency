@@ -72,10 +72,40 @@ curiosity: deduplication-pass.md
 decided_by: admin
 date: 2025-01-16
 decision: approved
+execution:
+  status: success
+  agent: researcher
+  started_at: 2025-01-16T14:00:00+00:00
+  completed_at: 2025-01-16T14:03:22+00:00
+  summary: Added deduplication pass to the pre-processing pipeline. 3 duplicate entries resolved.
 ---
 
 Go ahead with the deduplication pass. Run it as a pre-processing step.
 ```
+
+### Decision Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `curiosity` | yes | Linked curiosity filename |
+| `decided_by` | yes | Who made the decision |
+| `date` | yes | ISO 8601 date |
+| `decision` | yes | `approved`, `deferred`, `rejected` |
+| `execution` | no | Auto-added for approved decisions (see below) |
+
+### Execution Block
+
+When a curiosity is approved, Agency automatically dispatches the origin agent to execute the proposed action. The `execution` block tracks progress:
+
+| Field | Description |
+|-------|-------------|
+| `status` | `pending` → `executing` → `success`, `success_with_exceptions`, or `failed` |
+| `agent` | Agent that was dispatched |
+| `started_at` | ISO 8601 timestamp when execution began |
+| `completed_at` | ISO 8601 timestamp when execution finished |
+| `summary` | Agent's report of what it did (or why it failed) |
+
+Failed executions can be retried from the decision detail page.
 
 ## TTL Enforcement
 
@@ -88,5 +118,6 @@ Agency tracks the full chain across the pipeline:
 - A **clue** can link to a curiosity via `linked_curiosity`
 - A **curiosity** links back to its source clues via `clues`
 - A **decision** links to its curiosity via `curiosity`
+- An approved **decision** triggers **execution**, dispatching the origin agent to carry out the proposed action
 
-The UI renders these as clickable pipeline banners on each detail page, showing the full path from observation to action.
+The UI renders these as clickable pipeline banners on each detail page, showing the full path from observation to action to execution.
