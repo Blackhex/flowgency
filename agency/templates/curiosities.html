@@ -13,7 +13,7 @@
   {% for c in curiosities %}
   <a href="/{{ group }}/curiosities/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-purple-300 transition-colors">
     <div class="flex flex-wrap items-center gap-2 mb-1.5">
-      <a href="/{{ group }}/agents/{{ c.get('origin_agent', '') }}">{{ c.get("origin_agent", "") | agent_badge }}</a>
+      {{ c.get("origin_agent", "") | agent_badge }}
       {{ c.get("status", "") | status_badge }}
     </div>
     <div class="font-medium text-gray-900">{{ c._slug | replace("-", " ") | title }}</div>

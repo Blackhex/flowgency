@@ -29,7 +29,7 @@
   {% for c in clues %}
   <a href="/{{ group }}/clues/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
     <div class="flex flex-wrap items-center gap-2 mb-1.5">
-      <a href="/{{ group }}/agents/{{ c.get('agent', '') }}">{{ c.get("agent", "") | agent_badge }}</a>
+      {{ c.get("agent", "") | agent_badge }}
       {{ c.get("status", "") | status_badge }}
       {% if c.get("float") %}<span class="text-xs text-amber-600 font-medium">floated</span>{% endif %}
     </div>
