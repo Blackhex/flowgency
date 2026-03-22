@@ -1891,6 +1891,15 @@ async def curiosity_detail(request: Request, group: str, slug: str):
                 decision = {"filename": d.name, "slug": d.stem, "meta": dmeta, "body": dbody}
                 break
 
+    # Sync curiosity status if a decision exists but status is stale
+    # (handles decisions created outside Agency, e.g., by agents directly)
+    if decision and meta.get("status") not in ("approved", "deferred", "rejected"):
+        new_status = decision["meta"].get("decision", "approved")
+        raw = path.read_text()
+        raw = re.sub(r'^(status:\s*).*$', f'\\1{new_status}', raw, count=1, flags=re.MULTILINE)
+        path.write_text(raw)
+        meta["status"] = new_status
+
     return templates.TemplateResponse("curiosity_detail.html", {
         "request": request,
         **group_context(g),
