@@ -733,6 +733,28 @@ def relative_time(dt: datetime | None) -> str:
 templates.env.filters["relative_time"] = relative_time
 
 
+def integration_badge_filter(name: str) -> Markup:
+    """Render a colored badge for an integration name."""
+    colors = {
+        "claude-code": "bg-orange-100 text-orange-800",
+        "codex": "bg-green-100 text-green-800",
+        "gemini": "bg-blue-100 text-blue-800",
+        "aider": "bg-purple-100 text-purple-800",
+        "goose": "bg-yellow-100 text-yellow-800",
+        "script": "bg-gray-100 text-gray-800",
+        "sdk": "bg-indigo-100 text-indigo-800",
+    }
+    color = colors.get(name, "bg-gray-100 text-gray-800")
+    try:
+        display = get_integration(name).display_name
+    except KeyError:
+        display = name
+    return Markup(f'<span class="px-2 py-0.5 rounded-full text-xs font-medium {color}">{display}</span>')
+
+
+templates.env.filters["integration_badge"] = integration_badge_filter
+
+
 def agent_health_status(last_seen: datetime | None) -> str:
     """Return health status based on last seen time. green/amber/red."""
     if last_seen is None:
