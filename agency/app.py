@@ -168,16 +168,16 @@ def safe_redirect(url: str, fallback: str = "/") -> str:
     return fallback
 
 
-def group_context(g: dict, clues: list[dict] | None = None, curiosities: list[dict] | None = None) -> dict:
+def group_context(g: dict, observations: list[dict] | None = None, proposals: list[dict] | None = None) -> dict:
     """Return standard template context for a group. Accepts precomputed lists to avoid double-reads."""
     agency = get_agency_config()
     group_cfg = GROUPS.get(g["key"], {})
-    if clues is None:
-        clues = list_clues(g)
-    if curiosities is None:
-        curiosities = list_curiosities(g)
-    open_clue_count = sum(1 for c in clues if c.get("status") == "open")
-    actionable_curiosity_count = sum(1 for c in curiosities if c.get("status") in ("proposed", "investigating"))
+    if observations is None:
+        observations = list_observations(g)
+    if proposals is None:
+        proposals = list_proposals(g)
+    open_observation_count = sum(1 for c in observations if c.get("status") == "open")
+    actionable_proposal_count = sum(1 for c in proposals if c.get("status") in ("proposed", "investigating"))
     return {
         "group": g["key"],
         "group_name": g["name"],
@@ -185,8 +185,8 @@ def group_context(g: dict, clues: list[dict] | None = None, curiosities: list[di
         "agency_title": agency.get("title", "Agency"),
         "admin_active": False,
         "tmux_config_available": bool(group_cfg.get("tmux_config")),
-        "nav_open_clues": open_clue_count,
-        "nav_actionable": actionable_curiosity_count,
+        "nav_open_observations": open_observation_count,
+        "nav_actionable": actionable_proposal_count,
         "nav_agent_count": len(g["agents"]),
         "show_tips": CONFIG.get("agency", {}).get("show_tips", True) is not False,
         "tips_dismissed": CONFIG.get("agency", {}).get("tips_dismissed", []),
@@ -251,7 +251,7 @@ def update_decision_execution(decision_path: Path, updates: dict) -> None:
 
 
 def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
-                              curiosity_slug: str, group_key: str = "") -> None:
+                              proposal_slug: str, group_key: str = "") -> None:
     """Background task: spawn an agent to execute an approved decision."""
     now = datetime.now(timezone.utc).isoformat()
     update_decision_execution(decision_path, {"status": "executing", "started_at": now})
@@ -260,8 +260,8 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
     prompt = (
         f"An approved decision needs to be executed.\n\n"
         f"Read the decision file at agents/shared/decisions/{decision_path.name}\n"
-        f"Read the linked curiosity at agents/shared/curiosities/{curiosity_slug}.md\n\n"
-        f"Execute the proposed action described in the curiosity. Do the work.\n\n"
+        f"Read the linked proposal at agents/shared/proposals/{proposal_slug}.md\n\n"
+        f"Execute the proposed action described in the proposal. Do the work.\n\n"
         f"When done, update the decision file's execution section:\n"
         f"- Set status to: success, success_with_exceptions, or failed\n"
         f"- Set completed_at to the current ISO timestamp\n"
@@ -402,12 +402,12 @@ def list_markdown_items(g: dict, subdir: str, apply_ttl: bool = False) -> list[d
     return items
 
 
-def list_clues(g: dict) -> list[dict]:
-    return list_markdown_items(g, "clues", apply_ttl=True)
+def list_observations(g: dict) -> list[dict]:
+    return list_markdown_items(g, "observations", apply_ttl=True)
 
 
-def list_curiosities(g: dict) -> list[dict]:
-    return list_markdown_items(g, "curiosities", apply_ttl=True)
+def list_proposals(g: dict) -> list[dict]:
+    return list_markdown_items(g, "proposals", apply_ttl=True)
 
 
 def list_decisions(g: dict) -> list[dict]:
@@ -417,7 +417,7 @@ def list_decisions(g: dict) -> list[dict]:
 def collect_documents(g: dict) -> list[dict]:
     """Collect standalone documents from agent directories."""
     docs = []
-    skip_dirs = {"clues", "curiosities", "decisions", "prompts", "logs", "archive",
+    skip_dirs = {"observations", "proposals", "decisions", "prompts", "logs", "archive",
                  "ad-skills", "social-posts", "templates", "dashboard"}
 
     identity_files = {i.identity_filename() for i in REGISTRY.values()}
@@ -566,7 +566,7 @@ def collect_memory_files(g: dict) -> list[dict]:
 
 
 def status_badge(status: str) -> Markup:
-    """Return a colored badge for clue/curiosity status."""
+    """Return a colored badge for observation/proposal status."""
     colors = {
         "open": "bg-amber-100 text-amber-800",
         "connected": "bg-blue-100 text-blue-800",
@@ -754,7 +754,7 @@ def agent_health_status(last_seen: datetime | None) -> str:
 
 def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
     """Build full agent info lists. Returns (agents, subagents)."""
-    clues = list_clues(g)
+    observations = list_observations(g)
     agents = []
     subagents = []
 
@@ -764,13 +764,13 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             continue
         agent_int = get_agent_integration(g, agent_name)
         identity = parse_agent_identity(agent_dir, agent_int)
-        open_count = sum(1 for c in clues if c.get("agent") == agent_name and c.get("status") == "open")
+        open_count = sum(1 for c in observations if c.get("agent") == agent_name and c.get("status") == "open")
         last_seen = get_agent_last_seen(g, agent_name)
         info = {
             "name": agent_name, "dir": agent_dir, **identity,
             "last_seen": last_seen,
             "health": agent_health_status(last_seen),
-            "open_clues": open_count,
+            "open_observations": open_count,
             "is_subagent": identity["frontmatter"].get("subagent", False),
             "has_headshot": find_headshot(agent_dir) is not None,
             "integration": agent_int.name,
@@ -789,13 +789,13 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
                 continue
             sub_int = get_agent_integration(g, d.name)
             identity = parse_agent_identity(d, sub_int)
-            open_count = sum(1 for c in clues if c.get("agent") == d.name and c.get("status") == "open")
+            open_count = sum(1 for c in observations if c.get("agent") == d.name and c.get("status") == "open")
             last_seen = get_agent_last_seen(g, d.name)
             subagents.append({
                 "name": d.name, "dir": d, **identity,
                 "last_seen": last_seen,
                 "health": agent_health_status(last_seen),
-                "open_clues": open_count, "is_subagent": True,
+                "open_observations": open_count, "is_subagent": True,
                 "has_headshot": find_headshot(d) is not None,
                 "integration": sub_int.name,
             })
@@ -820,9 +820,9 @@ def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:
     return results
 
 
-def build_agent_timeline(g: dict, agent_name: str, agent_clues: list[dict] | None = None, limit: int = 30) -> list[dict]:
-    """Build an interleaved timeline of logs and clues for an agent.
-    Accepts precomputed agent_clues to avoid re-reading files."""
+def build_agent_timeline(g: dict, agent_name: str, agent_observations: list[dict] | None = None, limit: int = 30) -> list[dict]:
+    """Build an interleaved timeline of logs and observations for an agent.
+    Accepts precomputed agent_observations to avoid re-reading files."""
     events = []
 
     # Add logs
@@ -844,19 +844,19 @@ def build_agent_timeline(g: dict, agent_name: str, agent_clues: list[dict] | Non
                         "suffix": f.suffix,
                     })
 
-    # Add clues from precomputed list
-    for c in (agent_clues or []):
-        clue_date = c.get("date")
-        if isinstance(clue_date, str):
+    # Add observations from precomputed list
+    for c in (agent_observations or []):
+        obs_date = c.get("date")
+        if isinstance(obs_date, str):
             try:
-                clue_date = datetime.fromisoformat(clue_date)
+                obs_date = datetime.fromisoformat(obs_date)
             except (ValueError, TypeError):
-                clue_date = datetime.now()
-        elif not isinstance(clue_date, datetime):
-            clue_date = datetime.now()
+                obs_date = datetime.now()
+        elif not isinstance(obs_date, datetime):
+            obs_date = datetime.now()
         events.append({
-            "type": "clue",
-            "timestamp": clue_date,
+            "type": "observation",
+            "timestamp": obs_date,
             "slug": c.get("_slug", ""),
             "status": c.get("status", "open"),
             "body_preview": c.get("_body", "")[:120],
@@ -967,21 +967,21 @@ async def setup_process(request: Request):
 
     # Initialize shared folder structure
     shared = path / "shared"
-    for subdir in ["clues", "curiosities", "decisions", "prompts", "logs"]:
+    for subdir in ["observations", "proposals", "decisions", "prompts", "logs"]:
         (shared / subdir).mkdir(parents=True, exist_ok=True)
     memory_path = shared / "memory.md"
     if not memory_path.exists():
         memory_path.write_text(f"# {name} — Shared Memory\n\nCollective knowledge and decisions.\n")
 
-    # Copy _clue-system-steps.md from an existing group if available
-    clue_steps_target = shared / "prompts" / "_clue-system-steps.md"
-    if not clue_steps_target.exists():
+    # Copy _observation-system-steps.md from an existing group if available
+    observation_steps_target = shared / "prompts" / "_observation-system-steps.md"
+    if not observation_steps_target.exists():
         for other_key, other_g in config.get("groups", {}).items():
             if other_key == key:
                 continue
-            source = Path(other_g["path"]) / "shared" / "prompts" / "_clue-system-steps.md"
+            source = Path(other_g["path"]) / "shared" / "prompts" / "_observation-system-steps.md"
             if source.exists():
-                shutil.copy2(source, clue_steps_target)
+                shutil.copy2(source, observation_steps_target)
                 break
 
     for agent in detected:
@@ -1452,7 +1452,7 @@ async def admin_org_initialize(request: Request, org: str):
 
     # Create shared structure
     shared = base / "shared"
-    for subdir in ["clues", "curiosities", "decisions", "prompts", "logs"]:
+    for subdir in ["observations", "proposals", "decisions", "prompts", "logs"]:
         (shared / subdir).mkdir(parents=True, exist_ok=True)
 
     # Create shared memory.md if it doesn't exist
@@ -1460,16 +1460,16 @@ async def admin_org_initialize(request: Request, org: str):
     if not memory_path.exists():
         memory_path.write_text(f"# {g['name']} — Shared Memory\n\nCollective knowledge and decisions.\n")
 
-    # Copy _clue-system-steps.md from an existing group if available
-    clue_steps_target = shared / "prompts" / "_clue-system-steps.md"
-    if not clue_steps_target.exists():
+    # Copy _observation-system-steps.md from an existing group if available
+    observation_steps_target = shared / "prompts" / "_observation-system-steps.md"
+    if not observation_steps_target.exists():
         # Try to find an existing one to copy
         for other_key, other_g in config.get("groups", {}).items():
             if other_key == org:
                 continue
-            source = Path(other_g["path"]) / "shared" / "prompts" / "_clue-system-steps.md"
+            source = Path(other_g["path"]) / "shared" / "prompts" / "_observation-system-steps.md"
             if source.exists():
-                shutil.copy2(source, clue_steps_target)
+                shutil.copy2(source, observation_steps_target)
                 break
 
     # Create agent directories
@@ -1787,7 +1787,7 @@ async def agents_list(request: Request, group: str):
 
 @app.get("/{group}/agents/{agent}", response_class=HTMLResponse)
 async def agent_profile(request: Request, group: str, agent: str):
-    """View an agent's profile with identity, logs, clues, and memory."""
+    """View an agent's profile with identity, logs, observations, and memory."""
     g = get_group(group)
     agent_dir = resolve_agent_dir(g, agent)
     agent_int = get_agent_integration(g, agent)
@@ -1795,10 +1795,10 @@ async def agent_profile(request: Request, group: str, agent: str):
     is_subagent = (g["path"] / "_subagents" / agent).is_dir() or identity["frontmatter"].get("subagent", False)
     last_seen = get_agent_last_seen(g, agent)
     logs = get_agent_logs(g, agent)
-    all_clues = list_clues(g)
-    agent_clues = [c for c in all_clues if c.get("agent") == agent]
-    clues = agent_clues[:10]
-    timeline = build_agent_timeline(g, agent, agent_clues=agent_clues)
+    all_observations = list_observations(g)
+    agent_observations = [c for c in all_observations if c.get("agent") == agent]
+    observations = agent_observations[:10]
+    timeline = build_agent_timeline(g, agent, agent_observations=agent_observations)
     has_headshot = find_headshot(agent_dir) is not None
     has_memory = (agent_dir / "memory.md").exists()
     memory_path = str(agent_dir / "memory.md") if has_memory else ""
@@ -1817,7 +1817,7 @@ async def agent_profile(request: Request, group: str, agent: str):
         "is_subagent": is_subagent,
         "last_seen": last_seen,
         "logs": logs,
-        "clues": clues,
+        "observations": observations,
         "timeline": timeline,
         "has_headshot": has_headshot,
         "has_memory": has_memory,
@@ -1928,75 +1928,75 @@ async def agent_toggle_subagent(request: Request, group: str, agent: str):
 async def home(request: Request, group: str):
     """Dashboard home — inbox of items needing attention."""
     g = get_group(group)
-    clues = list_clues(g)
-    curiosities = list_curiosities(g)
+    observations = list_observations(g)
+    proposals = list_proposals(g)
     decisions = list_decisions(g)
 
-    open_clues = [c for c in clues if c.get("status") in ("open",)]
-    floated_clues = [c for c in clues if c.get("float")]
-    actionable_curiosities = [c for c in curiosities if c.get("status") in ("proposed", "investigating")]
+    open_observations = [c for c in observations if c.get("status") in ("open",)]
+    floated_observations = [c for c in observations if c.get("float")]
+    actionable_proposals = [c for c in proposals if c.get("status") in ("proposed", "investigating")]
 
     return templates.TemplateResponse("home.html", {
         "request": request,
-        **group_context(g, clues=clues, curiosities=curiosities),
-        "open_clues": open_clues,
-        "floated_clues": floated_clues,
-        "actionable_curiosities": actionable_curiosities,
+        **group_context(g, observations=observations, proposals=proposals),
+        "open_observations": open_observations,
+        "floated_observations": floated_observations,
+        "actionable_proposals": actionable_proposals,
         "recent_decisions": decisions[:5],
-        "total_clues": len(clues),
-        "total_curiosities": len(curiosities),
+        "total_observations": len(observations),
+        "total_proposals": len(proposals),
         "total_decisions": len(decisions),
         "now": datetime.now().strftime("%B %d, %Y"),
     })
 
 
-@app.get("/{group}/clues", response_class=HTMLResponse)
-async def clues_list(request: Request, group: str, agent: str = "", status: str = ""):
-    """List all clues with optional filtering."""
+@app.get("/{group}/observations", response_class=HTMLResponse)
+async def observations_list(request: Request, group: str, agent: str = "", status: str = ""):
+    """List all observations with optional filtering."""
     g = get_group(group)
-    clues = list_clues(g)
-    filtered = clues
+    observations = list_observations(g)
+    filtered = observations
     if agent:
         filtered = [c for c in filtered if c.get("agent") == agent]
     if status:
         filtered = [c for c in filtered if c.get("status") == status]
-    return templates.TemplateResponse("clues.html", {
+    return templates.TemplateResponse("observations.html", {
         "request": request,
-        **group_context(g, clues=clues),
-        "clues": filtered,
+        **group_context(g, observations=observations),
+        "observations": filtered,
         "filter_agent": agent,
         "filter_status": status,
         "agents": g["agents"],
     })
 
 
-@app.get("/{group}/clues/{slug}", response_class=HTMLResponse)
-async def clue_detail(request: Request, group: str, slug: str):
-    """View a single clue."""
+@app.get("/{group}/observations/{slug}", response_class=HTMLResponse)
+async def observation_detail(request: Request, group: str, slug: str):
+    """View a single observation."""
     g = get_group(group)
-    path = g["shared"] / "clues" / f"{slug}.md"
+    path = g["shared"] / "observations" / f"{slug}.md"
     if not path.exists():
-        raise HTTPException(404, "Clue not found")
+        raise HTTPException(404, "Observation not found")
     raw = path.read_text()
     meta, body = parse_frontmatter(raw)
 
-    # Resolve pipeline chain: clue → curiosity → decision
+    # Resolve pipeline chain: observation → proposal → decision
     pipeline = None
-    linked_curiosity_slug = meta.get("linked_curiosity", "")
-    if linked_curiosity_slug:
-        curiosity_slug = linked_curiosity_slug.replace(".md", "")
-        curiosity_path = g["shared"] / "curiosities" / f"{curiosity_slug}.md"
-        pipeline = {"curiosity_slug": curiosity_slug, "curiosity_exists": curiosity_path.exists()}
-        # Check for a decision on that curiosity
-        decision_path = g["shared"] / "decisions" / f"{curiosity_slug}.md"
+    linked_proposal_slug = meta.get("linked_proposal", "")
+    if linked_proposal_slug:
+        proposal_slug = linked_proposal_slug.replace(".md", "")
+        proposal_path = g["shared"] / "proposals" / f"{proposal_slug}.md"
+        pipeline = {"proposal_slug": proposal_slug, "proposal_exists": proposal_path.exists()}
+        # Check for a decision on that proposal
+        decision_path = g["shared"] / "decisions" / f"{proposal_slug}.md"
         if decision_path.exists():
             dmeta, _ = parse_frontmatter(decision_path.read_text())
-            pipeline["decision_slug"] = curiosity_slug
+            pipeline["decision_slug"] = proposal_slug
             pipeline["decision_status"] = dmeta.get("decision", "")
         else:
             pipeline["decision_slug"] = None
 
-    return templates.TemplateResponse("clue_detail.html", {
+    return templates.TemplateResponse("observation_detail.html", {
         "request": request,
         **group_context(g),
         "meta": meta,
@@ -2008,13 +2008,13 @@ async def clue_detail(request: Request, group: str, slug: str):
     })
 
 
-@app.post("/{group}/clues/{slug}/status", response_class=HTMLResponse)
-async def clue_update_status(request: Request, group: str, slug: str):
-    """Update a clue's status via form submission."""
+@app.post("/{group}/observations/{slug}/status", response_class=HTMLResponse)
+async def observation_update_status(request: Request, group: str, slug: str):
+    """Update an observation's status via form submission."""
     g = get_group(group)
-    path = g["shared"] / "clues" / f"{slug}.md"
+    path = g["shared"] / "observations" / f"{slug}.md"
     if not path.exists():
-        raise HTTPException(404, "Clue not found")
+        raise HTTPException(404, "Observation not found")
 
     form = await request.form()
     new_status = form.get("status", "")
@@ -2023,39 +2023,39 @@ async def clue_update_status(request: Request, group: str, slug: str):
 
     update_frontmatter_field(path, "status", new_status)
 
-    return RedirectResponse(f"/{group}/clues/{slug}", status_code=303)
+    return RedirectResponse(f"/{group}/observations/{slug}", status_code=303)
 
 
-@app.get("/{group}/curiosities", response_class=HTMLResponse)
-async def curiosities_list(request: Request, group: str):
-    """List all curiosities."""
+@app.get("/{group}/proposals", response_class=HTMLResponse)
+async def proposals_list(request: Request, group: str):
+    """List all proposals."""
     g = get_group(group)
-    items = list_curiosities(g)
-    return templates.TemplateResponse("curiosities.html", {
+    items = list_proposals(g)
+    return templates.TemplateResponse("proposals.html", {
         "request": request,
         **group_context(g),
-        "curiosities": items,
+        "proposals": items,
     })
 
 
-@app.get("/{group}/curiosities/{slug}", response_class=HTMLResponse)
-async def curiosity_detail(request: Request, group: str, slug: str):
-    """View a single curiosity."""
+@app.get("/{group}/proposals/{slug}", response_class=HTMLResponse)
+async def proposal_detail(request: Request, group: str, slug: str):
+    """View a single proposal."""
     g = get_group(group)
-    curiosities_dir = g["shared"] / "curiosities"
-    clues_dir = g["shared"] / "clues"
+    proposals_dir = g["shared"] / "proposals"
+    observations_dir = g["shared"] / "observations"
     decisions_dir = g["shared"] / "decisions"
 
-    path = curiosities_dir / f"{slug}.md"
+    path = proposals_dir / f"{slug}.md"
     if not path.exists():
-        raise HTTPException(404, "Curiosity not found")
+        raise HTTPException(404, "Proposal not found")
     raw = path.read_text()
     meta, body = parse_frontmatter(raw)
 
-    # Find linked clues
+    # Find linked observations
     linked = []
-    for c in meta.get("clues", []):
-        cpath = clues_dir / c
+    for c in meta.get("observations", []):
+        cpath = observations_dir / c
         if cpath.exists():
             linked.append({"filename": c, "slug": cpath.stem})
 
@@ -2069,40 +2069,40 @@ async def curiosity_detail(request: Request, group: str, slug: str):
                 decision = {"filename": d.name, "slug": d.stem, "meta": dmeta, "body": dbody}
                 break
 
-    # Sync curiosity status if a decision exists but status is stale
+    # Sync proposal status if a decision exists but status is stale
     # (handles decisions created outside Agency, e.g., by agents directly)
     if decision and meta.get("status") not in ("approved", "deferred", "rejected"):
         new_status = decision["meta"].get("decision", "approved")
         update_frontmatter_field(path, "status", new_status)
         meta["status"] = new_status
 
-    return templates.TemplateResponse("curiosity_detail.html", {
+    return templates.TemplateResponse("proposal_detail.html", {
         "request": request,
         **group_context(g),
         "meta": meta,
         "body_html": render_md(body),
         "body_raw": body,
         "slug": slug,
-        "linked_clues": linked,
+        "linked_observations": linked,
         "decision": decision,
     })
 
 
-@app.post("/{group}/curiosities/{slug}/decide", response_class=HTMLResponse)
-async def curiosity_decide(request: Request, group: str, slug: str,
+@app.post("/{group}/proposals/{slug}/decide", response_class=HTMLResponse)
+async def proposal_decide(request: Request, group: str, slug: str,
                            background_tasks: BackgroundTasks):
-    """Create a decision for a curiosity."""
+    """Create a decision for a proposal."""
     g = get_group(group)
     decisions_dir = g["shared"] / "decisions"
-    curiosities_dir = g["shared"] / "curiosities"
+    proposals_dir = g["shared"] / "proposals"
 
     form = await request.form()
     decision_text = form.get("decision", "approved")
     notes = form.get("notes", "")
 
-    # Read curiosity to get origin_agent for execution
+    # Read proposal to get origin_agent for execution
     origin_agent = ""
-    cpath = curiosities_dir / f"{slug}.md"
+    cpath = proposals_dir / f"{slug}.md"
     if cpath.exists():
         cmeta, _ = parse_frontmatter(cpath.read_text())
         origin_agent = cmeta.get("origin_agent", "")
@@ -2113,7 +2113,7 @@ async def curiosity_decide(request: Request, group: str, slug: str,
 
     # Build decision frontmatter
     meta = {
-        "curiosity": f"{slug}.md",
+        "proposal": f"{slug}.md",
         "decided_by": decided_by,
         "date": today,
         "decision": decision_text,
@@ -2136,7 +2136,7 @@ async def curiosity_decide(request: Request, group: str, slug: str,
     decision_path = decisions_dir / f"{slug}.md"
     decision_path.write_text(decision_content)
 
-    # Update curiosity status
+    # Update proposal status
     if cpath.exists():
         update_frontmatter_field(cpath, "status", decision_text)
 
@@ -2173,18 +2173,18 @@ async def decision_detail(request: Request, group: str, slug: str):
     raw = path.read_text()
     meta, body = parse_frontmatter(raw)
 
-    # Resolve pipeline chain: clues → curiosity → this decision
-    pipeline_clues = []
-    curiosity_slug = (meta.get("curiosity", "") or "").replace(".md", "")
-    if curiosity_slug:
-        curiosity_path = g["shared"] / "curiosities" / f"{curiosity_slug}.md"
-        if curiosity_path.exists():
-            cmeta, _ = parse_frontmatter(curiosity_path.read_text())
-            for clue_file in cmeta.get("clues", []):
-                clue_slug = clue_file.replace(".md", "")
-                clue_path = g["shared"] / "clues" / clue_file
-                if clue_path.exists():
-                    pipeline_clues.append({"slug": clue_slug, "filename": clue_file})
+    # Resolve pipeline chain: observations → proposal → this decision
+    pipeline_observations = []
+    proposal_slug = (meta.get("proposal", "") or "").replace(".md", "")
+    if proposal_slug:
+        proposal_path = g["shared"] / "proposals" / f"{proposal_slug}.md"
+        if proposal_path.exists():
+            cmeta, _ = parse_frontmatter(proposal_path.read_text())
+            for obs_file in cmeta.get("observations", []):
+                obs_slug = obs_file.replace(".md", "")
+                obs_path = g["shared"] / "observations" / obs_file
+                if obs_path.exists():
+                    pipeline_observations.append({"slug": obs_slug, "filename": obs_file})
 
     execution = meta.get("execution", {})
 
@@ -2194,8 +2194,8 @@ async def decision_detail(request: Request, group: str, slug: str):
         "meta": meta,
         "body_html": render_md(body),
         "slug": slug,
-        "pipeline_clues": pipeline_clues,
-        "curiosity_slug": curiosity_slug,
+        "pipeline_observations": pipeline_observations,
+        "proposal_slug": proposal_slug,
         "execution": execution,
     })
 
@@ -2212,10 +2212,10 @@ async def decision_retry(request: Request, group: str, slug: str,
     meta, _ = parse_frontmatter(decision_path.read_text())
     execution = meta.get("execution", {})
     agent = execution.get("agent", "")
-    curiosity_slug = (meta.get("curiosity", "") or "").replace(".md", "")
+    proposal_slug = (meta.get("proposal", "") or "").replace(".md", "")
 
-    if not agent or not curiosity_slug:
-        raise HTTPException(400, "Decision has no execution agent or linked curiosity")
+    if not agent or not proposal_slug:
+        raise HTTPException(400, "Decision has no execution agent or linked proposal")
 
     # Reset execution status
     update_decision_execution(decision_path, {
@@ -2227,7 +2227,7 @@ async def decision_retry(request: Request, group: str, slug: str,
 
     background_tasks.add_task(
         execute_approved_decision,
-        decision_path, Path(g["path"]), agent, curiosity_slug,
+        decision_path, Path(g["path"]), agent, proposal_slug,
         group_key=group,
     )
 
