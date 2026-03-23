@@ -125,6 +125,17 @@ See the [`kb/`](kb/) folder for detailed guides:
 - [Dispatch](kb/dispatch.md) — agent scheduling system
 - [Deployment](kb/deployment.md) — running as a service on Linux, macOS, or Windows
 
+## Contributing
+
+Contributions are welcome! Fork the repo, create a branch, and open a PR.
+
+```bash
+git clone https://github.com/<your-username>/agency.git
+cd agency
+pip install -e .
+python -m pytest tests/ -v
+```
+
 ## License
 
 MIT
