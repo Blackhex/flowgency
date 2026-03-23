@@ -178,6 +178,8 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
         proposals = list_proposals(g)
     open_observation_count = sum(1 for c in observations if c.get("status") == "open")
     actionable_proposal_count = sum(1 for c in proposals if c.get("status") in ("proposed", "investigating"))
+    floated_observation_count = sum(1 for c in observations if c.get("float") and c.get("status") == "open")
+    needs_action_count = actionable_proposal_count + floated_observation_count
     return {
         "group": g["key"],
         "group_name": g["name"],
@@ -186,7 +188,7 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
         "admin_active": False,
         "tmux_config_available": bool(group_cfg.get("tmux_config")),
         "nav_open_observations": open_observation_count,
-        "nav_actionable": actionable_proposal_count,
+        "nav_actionable": needs_action_count,
         "nav_agent_count": len(g["agents"]),
         "show_tips": CONFIG.get("agency", {}).get("show_tips", True) is not False,
         "tips_dismissed": CONFIG.get("agency", {}).get("tips_dismissed", []),
@@ -1965,6 +1967,9 @@ async def home(request: Request, group: str):
     floated_observations = [c for c in observations if c.get("float")]
     actionable_proposals = [c for c in proposals if c.get("status") in ("proposed", "investigating")]
 
+    floated_open_observations = [c for c in observations if c.get("float") and c.get("status") == "open"]
+    needs_action_count = len(actionable_proposals) + len(floated_open_observations)
+
     return templates.TemplateResponse("home.html", {
         "request": request,
         **group_context(g, observations=observations, proposals=proposals),
@@ -1975,6 +1980,7 @@ async def home(request: Request, group: str):
         "total_observations": len(observations),
         "total_proposals": len(proposals),
         "total_decisions": len(decisions),
+        "needs_action_count": needs_action_count,
         "now": datetime.now().strftime("%B %d, %Y"),
     })
 
