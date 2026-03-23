@@ -14,6 +14,16 @@
   <img src="screenshots/inbox.png" width="800" alt="Agency mission control dashboard with fleet status, pipeline pulse, attention queue, and activity feed">
 </p>
 
+## Who This Is For
+
+Agency is for people who treat AI agents like team members on a project — not disposable tools you spin up and throw away.
+
+If you have a codebase where an agent handles docs, another watches for quality issues, and a third manages releases, those agents need persistent identities, accumulated knowledge, and a structured way to surface what they've found. Agency gives them that. Each agent has a name, a role, a memory, and a history. They live in your project long-term, like virtual employees with specific responsibilities.
+
+**This is not an agent runner.** Tools like [Superset](https://superset.sh) are great at spinning up parallel workspaces, streaming real-time output, and managing active coding sessions. Agency sits above that layer. It's the coordination brain — deciding *what* agents should work on, reviewing *what they found*, and keeping a record of *what was decided*. Agency dispatches intent. Your runner of choice executes it.
+
+If you have multiple projects, each with their own agent team, Agency manages all of them from one dashboard. Same pipeline, same governance, separate groups.
+
 ## The Problem
 
 You have AI agents. Maybe they use Claude Code. Maybe Codex, Gemini, Aider, or something custom. They run in different directories, produce output in different ways, and you're alt-tabbing between terminals to figure out what's happening.
