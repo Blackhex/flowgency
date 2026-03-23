@@ -195,8 +195,8 @@
     <nav id="sidebar" class="fixed md:static z-50 h-full w-[13.5rem] bg-agency-950 flex flex-col shrink-0 transition-transform duration-200 -translate-x-full md:translate-x-0">
 
       <!-- Logo + title -->
-      <div class="flex items-center justify-center px-4 pt-5 pb-1 relative">
-        <a href="{% if group %}/{{ group }}/{% else %}/{% endif %}" class="flex items-center gap-2.5 group">
+      <div class="flex items-center justify-start px-4 pt-5 pb-1 relative">
+        <a href="{% if group %}/{{ group }}/{% else %}/{% endif %}" class="flex items-end gap-2.5 group">
           <div class="w-8 h-8 rounded-lg bg-agency-600 flex items-center justify-center">
             <svg class="w-5 h-5" viewBox="0 0 80 80" fill="none">
               <line x1="20" y1="60" x2="29" y2="42" stroke="white" stroke-width="3" opacity="0.4"/>
@@ -211,7 +211,7 @@
               <circle cx="60" cy="60" r="5.5" fill="white" opacity="0.6"/>
             </svg>
           </div>
-          <span class="text-base font-bold text-white tracking-tight">{{ agency_title|default('Agency') }}</span>
+          <span class="text-lg font-bold text-white tracking-tight">{{ agency_title|default('Agency') }}</span>
         </a>
         <button class="md:hidden absolute right-4 p-1 rounded hover:bg-white/10" onclick="document.getElementById('sidebar').classList.add('-translate-x-full'); document.getElementById('overlay').classList.add('hidden')">
           <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
