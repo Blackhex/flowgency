@@ -445,6 +445,97 @@ def list_decisions(g: dict) -> list[dict]:
     return list_markdown_items(g, "decisions")
 
 
+def build_pipeline_stats(observations: list[dict], proposals: list[dict],
+                         decisions: list[dict]) -> dict:
+    """Compute pipeline stage counts and 7-day sparkline data for dashboard."""
+    today = datetime.now().date()
+
+    def sparkline_buckets(items: list[dict]) -> list[int]:
+        buckets = [0] * 7
+        for item in items:
+            date_val = item.get("date", "")
+            if isinstance(date_val, str):
+                try:
+                    date_val = datetime.fromisoformat(date_val).date()
+                except (ValueError, TypeError):
+                    continue
+            elif isinstance(date_val, datetime):
+                date_val = date_val.date()
+            elif hasattr(date_val, "year"):
+                pass
+            else:
+                continue
+            days_ago = (today - date_val).days
+            if 0 <= days_ago < 7:
+                buckets[6 - days_ago] += 1
+        return buckets
+
+    obs_total = len(observations)
+    prop_total = len(proposals)
+    dec_total = len(decisions)
+
+    if obs_total > 8 and prop_total <= 1:
+        flow = "bottleneck"
+    elif obs_total > 5 * max(prop_total, 1) and obs_total > 5:
+        flow = "bottleneck"
+    else:
+        flow = "healthy"
+
+    return {
+        "observations": {"total": obs_total, "sparkline": sparkline_buckets(observations)},
+        "proposals": {"total": prop_total, "sparkline": sparkline_buckets(proposals)},
+        "decisions": {"total": dec_total, "sparkline": sparkline_buckets(decisions)},
+        "flow_status": flow,
+    }
+
+
+def build_activity_feed(observations: list[dict], proposals: list[dict],
+                        limit: int = 15) -> list[dict]:
+    """Build a cross-agent chronological feed for the dashboard activity zone."""
+    events = []
+
+    for o in observations:
+        date_val = o.get("date", "")
+        if isinstance(date_val, str):
+            try:
+                dt = datetime.fromisoformat(date_val)
+            except (ValueError, TypeError):
+                dt = datetime.min
+        elif isinstance(date_val, datetime):
+            dt = date_val
+        else:
+            dt = datetime.min
+        events.append({
+            "type": "observation",
+            "slug": o.get("_slug", ""),
+            "agent": o.get("agent", ""),
+            "timestamp": dt,
+            "status": o.get("status", ""),
+        })
+
+    for p in proposals:
+        date_val = p.get("date", "")
+        if isinstance(date_val, str):
+            try:
+                dt = datetime.fromisoformat(date_val)
+            except (ValueError, TypeError):
+                dt = datetime.min
+        elif isinstance(date_val, datetime):
+            dt = date_val
+        else:
+            dt = datetime.min
+        events.append({
+            "type": "proposal",
+            "slug": p.get("_slug", ""),
+            "agent": p.get("origin_agent", ""),
+            "timestamp": dt,
+            "status": p.get("status", ""),
+        })
+
+    events.sort(key=lambda e: e["timestamp"], reverse=True)
+    return events[:limit]
+
+
 def collect_documents(g: dict) -> list[dict]:
     """Collect standalone documents from agent directories."""
     docs = []
@@ -1971,7 +2062,7 @@ async def agent_toggle_subagent(request: Request, group: str, agent: str):
 
 @app.get("/{group}/", response_class=HTMLResponse)
 async def home(request: Request, group: str):
-    """Dashboard home — inbox of items needing attention."""
+    """Dashboard home — mission control."""
     g = get_group(group)
     observations = list_observations(g)
     proposals = list_proposals(g)
@@ -1984,17 +2075,35 @@ async def home(request: Request, group: str):
     floated_open_observations = [c for c in observations if c.get("float") and c.get("status") == "open"]
     needs_action_count = len(actionable_proposals) + len(floated_open_observations)
 
+    # Zone 1: Fleet status
+    agents, subagents = collect_agents_with_identity(g)
+
+    # Zone 2: Pipeline pulse
+    pipeline = build_pipeline_stats(observations, proposals, decisions)
+
+    # Zone 4: Activity feed
+    activity = build_activity_feed(observations, proposals, limit=15)
+
     return templates.TemplateResponse("home.html", {
         "request": request,
         **group_context(g, observations=observations, proposals=proposals),
-        "open_observations": open_observations,
-        "floated_observations": floated_observations,
+        # Zone 1: Fleet
+        "fleet_agents": agents,
+        "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
+        # Zone 2: Pipeline
+        "pipeline": pipeline,
+        # Zone 3: Attention queue
         "actionable_proposals": actionable_proposals,
-        "recent_decisions": decisions[:5],
+        "open_observations": open_observations[:7],
+        "floated_observations": floated_observations,
+        "needs_action_count": needs_action_count,
+        # Zone 4: Activity
+        "activity_feed": activity,
+        # Kept for compatibility
         "total_observations": len(observations),
         "total_proposals": len(proposals),
         "total_decisions": len(decisions),
-        "needs_action_count": needs_action_count,
+        "recent_decisions": decisions[:5],
         "now": datetime.now().strftime("%B %d, %Y"),
     })
 
