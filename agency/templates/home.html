@@ -9,9 +9,9 @@
   <div class="pr-12">
     <div class="text-sm font-semibold text-gray-900 mb-1">How the pipeline works</div>
     <div class="text-sm text-gray-600 leading-relaxed">
-      Your agents observe things and write <strong>clues</strong>.
+      Your agents observe things and write <strong>observations</strong>.
       When observations converge into something worth acting on, they become
-      <strong>curiosities</strong> — proposals for your review. You make
+      <strong>proposals</strong> — proposals for your review. You make
       <strong>decisions</strong> to approve, defer, or reject them.
     </div>
     <form method="POST" action="/tips/hide-all" class="inline">
@@ -34,11 +34,11 @@
 <!-- Stats row -->
 <div class="grid grid-cols-3 gap-3 mb-8">
   <div class="bg-white rounded-lg border border-gray-200 p-3 md:p-4">
-    <div class="text-2xl font-bold text-amber-600">{{ open_clues|length }}</div>
-    <div class="text-xs md:text-sm text-gray-500">Open clues</div>
+    <div class="text-2xl font-bold text-amber-600">{{ open_observations|length }}</div>
+    <div class="text-xs md:text-sm text-gray-500">Open observations</div>
   </div>
   <div class="bg-white rounded-lg border border-gray-200 p-3 md:p-4">
-    <div class="text-2xl font-bold text-purple-600">{{ actionable_curiosities|length }}</div>
+    <div class="text-2xl font-bold text-purple-600">{{ actionable_proposals|length }}</div>
     <div class="text-xs md:text-sm text-gray-500">Needs action</div>
   </div>
   <div class="bg-white rounded-lg border border-gray-200 p-3 md:p-4">
@@ -47,13 +47,13 @@
   </div>
 </div>
 
-<!-- Actionable Curiosities -->
-{% if actionable_curiosities %}
+<!-- Actionable Proposals -->
+{% if actionable_proposals %}
 <div class="mb-8">
-  <h2 class="text-lg font-semibold text-gray-900 mb-3">Curiosities Needing Your Decision</h2>
+  <h2 class="text-lg font-semibold text-gray-900 mb-3">Proposals Needing Your Decision</h2>
   <div class="space-y-3">
-    {% for c in actionable_curiosities %}
-    <a href="/{{ group }}/curiosities/{{ c._slug }}" class="block bg-white rounded-lg border border-purple-200 p-4 hover:border-purple-400 transition-colors">
+    {% for c in actionable_proposals %}
+    <a href="/{{ group }}/proposals/{{ c._slug }}" class="block bg-white rounded-lg border border-purple-200 p-4 hover:border-purple-400 transition-colors">
       <div class="flex flex-wrap items-center gap-2 mb-1.5">
         {{ c.get("origin_agent", "") | agent_badge }}
         {{ c.get("status", "") | status_badge }}
@@ -71,13 +71,13 @@
 </div>
 {% endif %}
 
-<!-- Open Clues -->
-{% if open_clues %}
+<!-- Open Observations -->
+{% if open_observations %}
 <div class="mb-8">
-  <h2 class="text-lg font-semibold text-gray-900 mb-3">Open Clues</h2>
+  <h2 class="text-lg font-semibold text-gray-900 mb-3">Open Observations</h2>
   <div class="space-y-2">
-    {% for c in open_clues %}
-    <a href="/{{ group }}/clues/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-3 hover:border-amber-300 transition-colors">
+    {% for c in open_observations %}
+    <a href="/{{ group }}/observations/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-3 hover:border-amber-300 transition-colors">
       <div class="flex flex-wrap items-center gap-2 mb-1">
         {{ c.get("agent", "") | agent_badge }}
         {% if c.get("float") %}<span class="text-xs text-amber-600 font-medium">floated</span>{% endif %}
@@ -90,13 +90,13 @@
 </div>
 {% endif %}
 
-<!-- Floated Clues (important signals) -->
-{% if floated_clues %}
+<!-- Floated Observations (important signals) -->
+{% if floated_observations %}
 <div class="mb-8">
   <h2 class="text-lg font-semibold text-gray-900 mb-3">Floated Signals</h2>
   <div class="space-y-2">
-    {% for c in floated_clues %}
-    <a href="/{{ group }}/clues/{{ c._slug }}" class="block bg-amber-50 rounded-lg border border-amber-200 p-3 hover:border-amber-400 transition-colors">
+    {% for c in floated_observations %}
+    <a href="/{{ group }}/observations/{{ c._slug }}" class="block bg-amber-50 rounded-lg border border-amber-200 p-3 hover:border-amber-400 transition-colors">
       <div class="flex flex-wrap items-center gap-2 mb-1">
         {{ c.get("agent", "") | agent_badge }}
         {{ c.get("status", "") | status_badge }}
@@ -127,7 +127,7 @@
 </div>
 {% endif %}
 
-{% if not open_clues and not actionable_curiosities and not floated_clues %}
+{% if not open_observations and not actionable_proposals and not floated_observations %}
 <div class="bg-white rounded-lg border border-gray-200 p-8 text-center">
   <div class="text-gray-400 text-lg mb-2">All clear</div>
   <div class="text-sm text-gray-500">No items need your attention right now.</div>

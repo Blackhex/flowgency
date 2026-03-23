@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% set active = "curiosities" %}
+{% set active = "proposals" %}
 
-{% block title %}{{ slug }} - Curiosities{% endblock %}
+{% block title %}{{ slug }} - Proposals{% endblock %}
 
 {% block content %}
 <div class="mb-4">
-  <a href="/{{ group }}/curiosities" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to curiosities</a>
+  <a href="/{{ group }}/proposals" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to proposals</a>
 </div>
 
 <div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
@@ -27,14 +27,14 @@
   </div>
 
   <!-- Pipeline chain -->
-  {% if linked_clues or decision %}
+  {% if linked_observations or decision %}
   <div class="mb-4 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
     <div class="text-xs font-semibold text-indigo-500 uppercase tracking-wide mb-2">Pipeline</div>
     <div class="flex flex-wrap items-center gap-2 text-sm">
-      {% if linked_clues %}
+      {% if linked_observations %}
       <div class="flex flex-wrap items-center gap-1">
-        {% for lc in linked_clues %}
-        <a href="/{{ group }}/clues/{{ lc.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 font-medium hover:bg-amber-200 transition-colors text-xs">
+        {% for lc in linked_observations %}
+        <a href="/{{ group }}/observations/{{ lc.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 font-medium hover:bg-amber-200 transition-colors text-xs">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
           {{ lc.slug | replace("-", " ") }}
         </a>
@@ -44,7 +44,7 @@
       {% endif %}
       <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-purple-100 text-purple-800 font-medium">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-        This curiosity
+        This proposal
       </span>
       {% if decision %}
       <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -78,7 +78,7 @@
   {% if not decision %}
   <div class="mt-6 pt-4 border-t border-gray-100">
     <h3 class="text-sm font-semibold text-gray-700 mb-3">Make a Decision</h3>
-    <form method="POST" action="/{{ group }}/curiosities/{{ slug }}/decide">
+    <form method="POST" action="/{{ group }}/proposals/{{ slug }}/decide">
       <div class="flex flex-wrap gap-3 mb-3">
         <label class="flex items-center gap-1.5">
           <input type="radio" name="decision" value="approved" checked class="text-emerald-600">

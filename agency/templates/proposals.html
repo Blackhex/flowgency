@@ -1,17 +1,17 @@
 {% extends "base.html" %}
-{% set active = "curiosities" %}
+{% set active = "proposals" %}
 
-{% block title %}Curiosities - {{ group_name }}{% endblock %}
+{% block title %}Proposals - {{ group_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-6">
-  <h1 class="text-2xl font-bold text-gray-900">Curiosities</h1>
-  <span class="text-sm text-gray-500">{{ curiosities|length }} total</span>
+  <h1 class="text-2xl font-bold text-gray-900">Proposals</h1>
+  <span class="text-sm text-gray-500">{{ proposals|length }} total</span>
 </div>
 
 <div class="space-y-3">
-  {% for c in curiosities %}
-  <a href="/{{ group }}/curiosities/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-purple-300 transition-colors">
+  {% for c in proposals %}
+  <a href="/{{ group }}/proposals/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-purple-300 transition-colors">
     <div class="flex flex-wrap items-center gap-2 mb-1.5">
       {{ c.get("origin_agent", "") | agent_badge }}
       {{ c.get("status", "") | status_badge }}
@@ -20,7 +20,7 @@
     <div class="mt-1 text-sm text-gray-600 line-clamp-2">{{ c._body[:250] }}</div>
     <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-400">
       <span>{{ c.get("date", "") }}</span>
-      {% if c.get("clues") %}<span>{{ c.clues|length }} linked clues</span>{% endif %}
+      {% if c.get("observations") %}<span>{{ c.observations|length }} linked observations</span>{% endif %}
       {% if c.get("feedback_requested") %}
       <span>Feedback: {{ c.get("feedback_received", [])|length }}/{{ c.feedback_requested|length }}</span>
       {% endif %}
@@ -29,7 +29,7 @@
   {% endfor %}
 </div>
 
-{% if not curiosities %}
-<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No curiosities yet.</div>
+{% if not proposals %}
+<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No proposals yet.</div>
 {% endif %}
 {% endblock %}

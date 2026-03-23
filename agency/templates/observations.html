@@ -1,23 +1,23 @@
 {% extends "base.html" %}
-{% set active = "clues" %}
+{% set active = "observations" %}
 
-{% block title %}Clues - {{ group_name }}{% endblock %}
+{% block title %}Observations - {{ group_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-4">
-  <h1 class="text-2xl font-bold text-gray-900">Clues</h1>
-  <span class="text-sm text-gray-500">{{ clues|length }} total</span>
+  <h1 class="text-2xl font-bold text-gray-900">Observations</h1>
+  <span class="text-sm text-gray-500">{{ observations|length }} total</span>
 </div>
 
 <!-- Filters -->
 <div class="flex gap-3 mb-6">
-  <select onchange="location.href='/{{ group }}/clues?agent='+this.value+'&status={{ filter_status }}'" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
+  <select onchange="location.href='/{{ group }}/observations?agent='+this.value+'&status={{ filter_status }}'" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
     <option value="">All agents</option>
     {% for a in agents %}
     <option value="{{ a }}" {% if filter_agent == a %}selected{% endif %}>{{ a }}</option>
     {% endfor %}
   </select>
-  <select onchange="location.href='/{{ group }}/clues?agent={{ filter_agent }}&status='+this.value" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
+  <select onchange="location.href='/{{ group }}/observations?agent={{ filter_agent }}&status='+this.value" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
     <option value="">All statuses</option>
     {% for s in ["open", "connected", "dismissed", "archived"] %}
     <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ s }}</option>
@@ -26,8 +26,8 @@
 </div>
 
 <div class="space-y-2">
-  {% for c in clues %}
-  <a href="/{{ group }}/clues/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
+  {% for c in observations %}
+  <a href="/{{ group }}/observations/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
     <div class="flex flex-wrap items-center gap-2 mb-1.5">
       {{ c.get("agent", "") | agent_badge }}
       {{ c.get("status", "") | status_badge }}
@@ -38,13 +38,13 @@
     <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-400">
       <span>{{ c.get("category", "") }}</span>
       <span>{{ c.get("date", "")|string }}</span>
-      {% if c.get("linked_curiosity") %}<span class="text-blue-500">linked to curiosity</span>{% endif %}
+      {% if c.get("linked_proposal") %}<span class="text-blue-500">linked to proposal</span>{% endif %}
     </div>
   </a>
   {% endfor %}
 </div>
 
-{% if not clues %}
-<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No clues found.</div>
+{% if not observations %}
+<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">No observations found.</div>
 {% endif %}
 {% endblock %}

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% set active = "clues" %}
+{% set active = "observations" %}
 
-{% block title %}{{ slug }} - Clues{% endblock %}
+{% block title %}{{ slug }} - Observations{% endblock %}
 
 {% block content %}
 <div class="mb-4">
-  <a href="/{{ group }}/clues" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to clues</a>
+  <a href="/{{ group }}/observations" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to observations</a>
 </div>
 
 <div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
@@ -29,17 +29,17 @@
     <div class="flex flex-wrap items-center gap-2 text-sm">
       <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 font-medium">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-        This clue
+        This observation
       </span>
       <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-      {% if pipeline.curiosity_exists %}
-      <a href="/{{ group }}/curiosities/{{ pipeline.curiosity_slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-purple-100 text-purple-800 font-medium hover:bg-purple-200 transition-colors">
+      {% if pipeline.proposal_exists %}
+      <a href="/{{ group }}/proposals/{{ pipeline.proposal_slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-purple-100 text-purple-800 font-medium hover:bg-purple-200 transition-colors">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-        {{ pipeline.curiosity_slug | replace("-", " ") | title }}
+        {{ pipeline.proposal_slug | replace("-", " ") | title }}
       </a>
       {% else %}
       <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 text-gray-500">
-        {{ meta.linked_curiosity }}
+        {{ meta.linked_proposal }}
       </span>
       {% endif %}
       {% if pipeline.decision_slug %}
@@ -53,11 +53,11 @@
   </div>
   {% endif %}
 
-  {% if meta.get("linked_clues") %}
+  {% if meta.get("linked_observations") %}
   <div class="mb-4 p-3 bg-gray-50 rounded-lg text-sm">
-    <span class="text-gray-500">Related clues:</span>
-    {% for lc in meta.linked_clues %}
-    <a href="/{{ group }}/clues/{{ lc | replace('.md', '') }}" class="inline-block ml-1 text-indigo-600 underline text-xs">{{ lc }}</a>
+    <span class="text-gray-500">Related observations:</span>
+    {% for lc in meta.linked_observations %}
+    <a href="/{{ group }}/observations/{{ lc | replace('.md', '') }}" class="inline-block ml-1 text-indigo-600 underline text-xs">{{ lc }}</a>
     {% endfor %}
   </div>
   {% endif %}
@@ -69,7 +69,7 @@
 
   <!-- Status change -->
   <div class="mt-6 pt-4 border-t border-gray-100">
-    <form method="POST" action="/{{ group }}/clues/{{ slug }}/status" class="flex flex-wrap items-center gap-3">
+    <form method="POST" action="/{{ group }}/observations/{{ slug }}/status" class="flex flex-wrap items-center gap-3">
       <label class="text-sm text-gray-600">Change status:</label>
       <select name="status" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
         {% for s in ["open", "connected", "dismissed", "archived"] %}
