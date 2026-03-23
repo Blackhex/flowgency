@@ -494,41 +494,35 @@ def build_activity_feed(observations: list[dict], proposals: list[dict],
     """Build a cross-agent chronological feed for the dashboard activity zone."""
     events = []
 
-    for o in observations:
-        date_val = o.get("date", "")
+    def _parse_dt(date_val) -> datetime:
+        """Parse a date value into a naive datetime for safe comparison."""
         if isinstance(date_val, str):
             try:
                 dt = datetime.fromisoformat(date_val)
             except (ValueError, TypeError):
-                dt = datetime.min
+                return datetime.min
         elif isinstance(date_val, datetime):
             dt = date_val
         else:
-            dt = datetime.min
+            return datetime.min
+        # Strip tzinfo so naive and aware datetimes can be compared
+        return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+    for o in observations:
         events.append({
             "type": "observation",
             "slug": o.get("_slug", ""),
             "agent": o.get("agent", ""),
-            "timestamp": dt,
+            "timestamp": _parse_dt(o.get("date", "")),
             "status": o.get("status", ""),
         })
 
     for p in proposals:
-        date_val = p.get("date", "")
-        if isinstance(date_val, str):
-            try:
-                dt = datetime.fromisoformat(date_val)
-            except (ValueError, TypeError):
-                dt = datetime.min
-        elif isinstance(date_val, datetime):
-            dt = date_val
-        else:
-            dt = datetime.min
         events.append({
             "type": "proposal",
             "slug": p.get("_slug", ""),
             "agent": p.get("origin_agent", ""),
-            "timestamp": dt,
+            "timestamp": _parse_dt(p.get("date", "")),
             "status": p.get("status", ""),
         })
 
