@@ -419,7 +419,12 @@ def list_markdown_items(g: dict, subdir: str, apply_ttl: bool = False) -> list[d
     for f in sorted(item_dir.glob("*.md"), reverse=True):
         raw = f.read_text()
         meta, body = parse_frontmatter(raw)
-        meta.update({"_filename": f.name, "_body": body, "_slug": f.stem})
+        meta.update({
+            "_filename": f.name,
+            "_body": body,
+            "_slug": f.stem,
+            "_title": extract_display_title(body, f.stem),
+        })
         if apply_ttl:
             enforce_ttl(f, meta)
         items.append(meta)
@@ -2027,6 +2032,7 @@ async def observation_detail(request: Request, group: str, slug: str):
         "body_html": render_md(body),
         "body_raw": body,
         "slug": slug,
+        "title": extract_display_title(body, slug),
         "filename": path.name,
         "pipeline": pipeline,
     })
@@ -2107,6 +2113,7 @@ async def proposal_detail(request: Request, group: str, slug: str):
         "body_html": render_md(body),
         "body_raw": body,
         "slug": slug,
+        "title": extract_display_title(body, slug),
         "linked_observations": linked,
         "decision": decision,
     })
@@ -2218,6 +2225,7 @@ async def decision_detail(request: Request, group: str, slug: str):
         "meta": meta,
         "body_html": render_md(body),
         "slug": slug,
+        "title": extract_display_title(body, slug),
         "pipeline_observations": pipeline_observations,
         "proposal_slug": proposal_slug,
         "execution": execution,
