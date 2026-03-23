@@ -17,8 +17,8 @@ your-agents/
 │   └── helper-agent/
 │       └── CLAUDE.md
 └── shared/
-    ├── clues/             # Agent observations (markdown + YAML frontmatter)
-    ├── curiosities/       # Converged proposals
+    ├── observations/      # Agent observations (markdown + YAML frontmatter)
+    ├── proposals/         # Converged proposals
     ├── decisions/         # Your decisions
     ├── prompts/           # Dispatch routine prompts
     ├── logs/              # Execution logs (YYYY-MM-DD subdirectories)

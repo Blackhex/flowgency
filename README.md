@@ -15,7 +15,7 @@
 ---
 
 <p align="center">
-  <img src="screenshots/inbox.png" width="800" alt="Agency inbox showing clues, curiosities, and decisions">
+  <img src="screenshots/inbox.png" width="800" alt="Agency inbox showing observations, proposals, and decisions">
 </p>
 
 ## Quick Start
@@ -33,31 +33,18 @@ Visit `http://localhost:8500`.
 
 Your agents write observations to the filesystem as markdown files with YAML frontmatter. Agency reads those files and presents a pipeline:
 
-1. **Clues** — agents observe something and write it down
-2. **Curiosities** — observations converge into proposals worth considering
+1. **Observations** — agents observe something and write it down
+2. **Proposals** — observations converge into proposals worth considering
 3. **Decisions** — you approve, defer, or reject through the UI
 4. **Execution** — approved decisions auto-dispatch the proposing agent to do the work, with status tracking and retry
 
 Every item in the pipeline links to its upstream and downstream neighbors, so you can trace how an observation became an action.
 
 <p align="center">
-  <img src="screenshots/curiosity-detail.png" width="800" alt="Curiosity detail with pipeline chain and decision form">
+  <img src="screenshots/curiosity-detail.png" width="800" alt="Proposal detail with pipeline chain and decision form">
 </p>
 
-## Why "Clues and Curiosities"?
-
-Agency's observation pipeline is inspired by the knowledge-driven exploration design in [Outer Wilds](https://www.youtube.com/watch?v=vGnce1Dp9BU), as described by designer Alex Beachum at GDC.
-
-In Outer Wilds, **curiosities** are the mysteries worth solving, and **clues** are the scattered observations that reveal them. Knowledge is the only tool — there are no upgrades, no collectibles, no quest markers. You explore because something caught your attention, follow the thread, and the connections between clues lead you to understanding.
-
-Agency applies this framework to AI agent management:
-
-- **Clues** are individual agent observations — things they noticed that might matter. Every clue must contain actionable information, not just background noise.
-- **Curiosities** emerge when clues converge into something worth investigating. They represent the question an agent is asking, not the answer.
-- **The pipeline** connects clues to curiosities to decisions, the same way Outer Wilds' ship log connects discoveries into a knowledge web. You can trace any decision back to the observations that prompted it.
-- **Knowledge is the reward.** Agents don't collect points or complete checklists. They surface what they find, and the human decides what matters.
-
-The result is a system where agents explore autonomously, surface what's interesting, and the human stays in the loop through curiosity rather than obligation.
+> Agency's observation pipeline is inspired by the ship log in Outer Wilds. [Read the design story →](kb/design-inspiration.md)
 
 ## Multi-LLM Support
 
@@ -98,7 +85,7 @@ groups:
 - **Dispatch scheduling** — cross-platform (Linux systemd, macOS launchd), `at` and `every` rules per agent
 - **Agent profiles** with identity, activity timeline, integration badge, and health monitoring
 - **Inbox** that surfaces what needs your attention across all agents
-- **Pipeline tracking** with clickable clue/curiosity/decision chains and auto-execution on approval
+- **Pipeline tracking** with clickable observation/proposal/decision chains and auto-execution on approval
 - **TTL enforcement** that auto-archives stale items
 - **Document, memory, and prompt editing** in the browser
 - **Light/dark mode** with system preference detection and persistent toggle
@@ -134,7 +121,7 @@ ln -s /path/to/agency/skills/agency-setup ~/.claude/skills/agency-setup
 2. **Proposes** 3-5 agents tailored to the project (you approve or tweak)
 3. **Generates** everything Agency needs to manage them:
    - Agent role definitions and memory files
-   - `shared/` folder with clues, curiosities, decisions, logs, prompts
+   - `shared/` folder with observations, proposals, decisions, logs, prompts
    - Dispatch prompts with project-specific observation tasks
    - Tmux launch script with color-coded agent panes
 4. **Registers** the new group with Agency (if Agency is installed)
@@ -150,7 +137,7 @@ See the [`kb/`](kb/) folder:
 
 - [Directory Structure](kb/directory-structure.md) — expected agent group layout
 - [Agent Identity](kb/agent-identity.md) — display names, titles, avatars, integration detection
-- [Data Formats](kb/data-formats.md) — clue, curiosity, and decision frontmatter
+- [Data Formats](kb/data-formats.md) — observation, proposal, and decision frontmatter
 - [Configuration](kb/configuration.md) — config.yaml reference with per-agent integrations
 - [Deployment](kb/deployment.md) — running as a service on Linux, macOS, or Windows
 - [Dispatch](kb/dispatch.md) — cross-platform agent scheduling

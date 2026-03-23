@@ -34,13 +34,13 @@
 │   │   └── __init__.py
 │   └── templates/             # 26 Jinja2 templates
 │       ├── base.html          # Layout: sidebar + main content
-│       ├── home.html          # Inbox (open clues, decisions)
+│       ├── home.html          # Inbox (open observations, decisions)
 │       ├── agents.html        # Agent list with health dots + integration badges
 │       ├── agent_profile.html # Agent profile: identity, integration, timeline, schedule
-│       ├── clues.html         # Clue list with filters
-│       ├── clue_detail.html   # Single clue + pipeline chain + status change
-│       ├── curiosities.html   # Curiosity list
-│       ├── curiosity_detail.html # Curiosity + pipeline chain + decide form
+│       ├── observations.html   # Observation list with filters
+│       ├── observation_detail.html # Single observation + pipeline chain + status change
+│       ├── proposals.html     # Proposal list
+│       ├── proposal_detail.html # Proposal + pipeline chain + decide form
 │       ├── decisions.html     # Decision list
 │       ├── decision_detail.html # Single decision + pipeline chain
 │       ├── documents.html     # Agent documents browser
@@ -197,8 +197,8 @@ Each group points to a directory containing agent subdirectories and a `shared/`
 │   ├── memory.md          # Persistent agent knowledge
 │   └── .mcp.json          # MCP config (optional)
 ├── shared/
-│   ├── clues/             # Agent observations (markdown + frontmatter)
-│   ├── curiosities/       # Converged proposals
+│   ├── observations/      # Agent observations (markdown + frontmatter)
+│   ├── proposals/         # Converged proposals
 │   ├── decisions/         # User decisions
 │   ├── prompts/           # Dispatch routine prompts
 │   ├── logs/              # Execution logs (YYYY-MM-DD subdirs)
@@ -218,13 +218,13 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/{group}/` | Inbox — open clues, floated signals, recent decisions |
-| GET | `/{group}/clues` | Clue list with agent/status filters |
-| GET | `/{group}/clues/{slug}` | Clue detail + status change form |
-| POST | `/{group}/clues/{slug}/status` | Update clue status |
-| GET | `/{group}/curiosities` | Curiosity list |
-| GET | `/{group}/curiosities/{slug}` | Curiosity detail + decide form |
-| POST | `/{group}/curiosities/{slug}/decide` | Create decision for curiosity |
+| GET | `/{group}/` | Inbox — open observations, floated signals, recent decisions |
+| GET | `/{group}/observations` | Observation list with agent/status filters |
+| GET | `/{group}/observations/{slug}` | Observation detail + status change form |
+| POST | `/{group}/observations/{slug}/status` | Update observation status |
+| GET | `/{group}/proposals` | Proposal list |
+| GET | `/{group}/proposals/{slug}` | Proposal detail + decide form |
+| POST | `/{group}/proposals/{slug}/decide` | Create decision for proposal |
 | GET | `/{group}/decisions` | Decision list |
 | GET | `/{group}/decisions/{slug}` | Decision detail |
 | POST | `/{group}/decisions/{slug}/retry` | Retry execution of approved decision |
@@ -292,7 +292,7 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 
 All data is markdown with YAML frontmatter. No SQL, no migrations.
 
-### Clue Frontmatter
+### Observation Frontmatter
 
 ```yaml
 agent: infrastructure          # Source agent
@@ -300,18 +300,18 @@ date: 2026-03-20T06:00:00-04:00
 category: container-health     # Domain category
 status: open                   # open, connected, dismissed, archived
 float: false                   # true = promoted to "Floated Signals"
-linked_clues: []               # Related clue filenames
-linked_curiosity: ~            # Promoted curiosity filename
+linked_observations: []        # Related observation filenames
+linked_proposal: ~             # Promoted proposal filename
 ttl_days: 14                   # Days before auto-archive
 ```
 
-### Curiosity Frontmatter
+### Proposal Frontmatter
 
 ```yaml
 origin_agent: infrastructure
 date: 2026-03-20
 status: investigating          # investigating, feedback, proposed, approved, deferred, rejected
-clues: [clue1.md, clue2.md]
+observations: [obs1.md, obs2.md]
 feedback_requested: []         # Agents asked for input
 feedback_received: []          # Agents that responded
 ttl_days: 30
@@ -320,7 +320,7 @@ ttl_days: 30
 ### Decision Frontmatter
 
 ```yaml
-curiosity: slug.md             # Linked curiosity
+proposal: slug.md              # Linked proposal
 decided_by: admin
 date: 2026-03-20
 decision: approved             # approved, deferred, rejected
@@ -352,20 +352,20 @@ decision: approved             # approved, deferred, rejected
 - TTL-style marker files for dedup: `.event-*` for `at` rules, `.last-*` for `every` rules
 
 ### Agent Profiles
-- `build_agent_timeline()` interleaves logs and clues chronologically
+- `build_agent_timeline()` interleaves logs and observations chronologically
 - `agent_health_status()` returns green/amber/red based on last seen time
 - Schedule pills shown from `config.dispatch.agents.{name}` rules
 - Integration badge shown next to agent name
 
 ### Pipeline Relationships
-- Clue detail resolves `linked_curiosity` → curiosity → decision chain
-- Curiosity detail shows originating clues + resulting decision
-- Decision detail traces back through curiosity to source clues
+- Observation detail resolves `linked_proposal` → proposal → decision chain
+- Proposal detail shows originating observations + resulting decision
+- Decision detail traces back through proposal to source observations
 - All rendered as clickable pipeline banners with color-coded steps
 
 ### TTL Enforcement
 - `check_ttl_expired()` and `enforce_ttl()` auto-archive stale items
-- Called from `list_clues()` and `list_curiosities()` on every page load
+- Called from `list_observations()` and `list_proposals()` on every page load
 - Rewrites status to "archived" in the markdown file frontmatter
 - Skips items already in terminal states
 
@@ -380,13 +380,13 @@ Every org-scoped template gets via `group_context(g)`:
 - `group_name` — display name
 - `groups` — dict of all group keys → names (for switcher)
 - `agency_title` — from config
-- `nav_open_clues`, `nav_actionable`, `nav_agent_count` — sidebar counts
+- `nav_open_observations`, `nav_actionable`, `nav_agent_count` — sidebar counts
 
 ### Initialize Workflow
 Creates the standard agent group folder structure. Idempotent — only creates missing dirs/files:
-- `shared/clues/`, `shared/curiosities/`, `shared/decisions/`, `shared/prompts/`, `shared/logs/`
+- `shared/observations/`, `shared/proposals/`, `shared/decisions/`, `shared/prompts/`, `shared/logs/`
 - `shared/memory.md` with default header
-- `shared/prompts/_clue-system-steps.md` (copies from first existing group that has one)
+- `shared/prompts/_observation-system-steps.md` (copies from first existing group that has one)
 - Per-agent directories from the agents list
 
 ## Development
@@ -441,7 +441,7 @@ Templates use Tailwind CSS via CDN — no build step needed. Custom prose styles
 ### Template Filters
 
 Available in all templates:
-- `{{ status | status_badge }}` — colored pill for clue/curiosity status
+- `{{ status | status_badge }}` — colored pill for observation/proposal status
 - `{{ agent | agent_badge }}` — colored pill for agent name
 - `{{ name | integration_badge }}` — colored pill for integration name
 - `{{ text | render_md }}` — markdown → HTML
@@ -449,7 +449,7 @@ Available in all templates:
 
 ## Coding Conventions
 
-- **Routes:** Async FastAPI handlers, grouped by feature (clues, curiosities, decisions, documents, logs, prompts, memory, admin)
+- **Routes:** Async FastAPI handlers, grouped by feature (observations, proposals, decisions, documents, logs, prompts, memory, admin)
 - **Helpers:** Pure functions that take a group dict `g` and return data
 - **Integrations:** Each integration is a Python class in `agency/integrations/` implementing `BaseIntegration`
 - **Templates:** Jinja2 with Tailwind utility classes. All org-scoped links use `{{ group }}` prefix.
@@ -467,10 +467,10 @@ Available in all templates:
 
 ## Future Ideas
 
-- Real-time updates (WebSocket or SSE for live clue/decision notifications)
+- Real-time updates (WebSocket or SSE for live observation/decision notifications)
 - Unified inbox across all groups (`/all/` route)
 - Event-based dispatch conditions (`if` rules — e.g., "run if unread email > 20")
-- Clue analytics (trends over time, agent activity heatmaps)
+- Observation analytics (trends over time, agent activity heatmaps)
 - Dark mode toggle
 - Mobile-optimized decision workflow
 - MCP config viewing/editing on agent profile page
