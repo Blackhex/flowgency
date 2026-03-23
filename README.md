@@ -15,7 +15,7 @@
 ---
 
 <p align="center">
-  <img src="screenshots/inbox.png" width="800" alt="Agency inbox showing observations, proposals, and decisions">
+  <img src="screenshots/inbox.png" width="800" alt="Agency mission control dashboard with fleet status, pipeline pulse, attention queue, and activity feed">
 </p>
 
 ## Quick Start
@@ -41,7 +41,7 @@ Your agents write observations to the filesystem as markdown files with YAML fro
 Every item in the pipeline links to its upstream and downstream neighbors, so you can trace how an observation became an action.
 
 <p align="center">
-  <img src="screenshots/curiosity-detail.png" width="800" alt="Proposal detail with pipeline chain and decision form">
+  <img src="screenshots/proposal-detail.png" width="800" alt="Proposal detail with pipeline chain and decision form">
 </p>
 
 > Agency's observation pipeline is inspired by the ship log in Outer Wilds. [Read the design story →](kb/design-inspiration.md)
@@ -81,11 +81,13 @@ groups:
 
 ## Features
 
+- **Mission control dashboard** — fleet status bar, pipeline pulse with sparklines, attention queue with inline approve/defer/reject, activity feed
+- **CLI interface** — `agency inbox`, `agency status`, `agency approve <slug>` — manage agents from the terminal
 - **Multi-LLM integrations** — Claude Code, Codex, Gemini, Aider, Goose, custom scripts, or SDK-only
 - **Dispatch scheduling** — cross-platform (Linux systemd, macOS launchd), `at` and `every` rules per agent
 - **Agent profiles** with identity, activity timeline, integration badge, and health monitoring
-- **Inbox** that surfaces what needs your attention across all agents
 - **Pipeline tracking** with clickable observation/proposal/decision chains and auto-execution on approval
+- **Smart display titles** — extracts human-readable titles from observation/proposal body text
 - **TTL enforcement** that auto-archives stale items
 - **Document, memory, and prompt editing** in the browser
 - **Light/dark mode** with system preference detection and persistent toggle
