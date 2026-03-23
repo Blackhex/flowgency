@@ -14,7 +14,7 @@
   <a href="/{{ group }}/decisions/{{ d._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-emerald-300 transition-colors">
     <div class="flex items-start justify-between">
       <div>
-        <div class="font-medium text-gray-900">{{ d._slug | replace("-", " ") | title }}</div>
+        <div class="font-medium text-gray-900">{{ d._title }}</div>
         <div class="mt-1 text-sm text-gray-600">{{ d._body[:200] }}</div>
       </div>
       <div class="flex items-center gap-2 shrink-0 ml-4">

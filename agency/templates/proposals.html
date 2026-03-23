@@ -16,7 +16,7 @@
       {{ c.get("origin_agent", "") | agent_badge }}
       {{ c.get("status", "") | status_badge }}
     </div>
-    <div class="font-medium text-gray-900">{{ c._slug | replace("-", " ") | title }}</div>
+    <div class="font-medium text-gray-900">{{ c._title }}</div>
     <div class="mt-1 text-sm text-gray-600 line-clamp-2">{{ c._body[:250] }}</div>
     <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-400">
       <span>{{ c.get("date", "") }}</span>

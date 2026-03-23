@@ -14,7 +14,7 @@
     {{ meta.get("status", "") | status_badge }}
     {% if meta.get("float") %}<span class="text-xs text-amber-600 font-medium">Floated</span>{% endif %}
   </div>
-  <h1 class="text-lg md:text-xl font-bold text-gray-900 mb-4">{{ slug | replace("-", " ") }}</h1>
+  <h1 class="text-lg md:text-xl font-bold text-gray-900 mb-4">{{ title }}</h1>
 
   <!-- Metadata -->
   <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 mb-6 pb-4 border-b border-gray-100">

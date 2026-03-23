@@ -13,7 +13,7 @@
     <a href="/{{ group }}/agents/{{ meta.get('origin_agent', '') }}">{{ meta.get("origin_agent", "") | agent_badge }}</a>
     {{ meta.get("status", "") | status_badge }}
   </div>
-  <h1 class="text-lg md:text-xl font-bold text-gray-900 mb-4">{{ slug | replace("-", " ") | title }}</h1>
+  <h1 class="text-lg md:text-xl font-bold text-gray-900 mb-4">{{ title }}</h1>
 
   <!-- Metadata -->
   <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 mb-4 pb-4 border-b border-gray-100">
