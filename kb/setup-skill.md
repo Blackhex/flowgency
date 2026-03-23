@@ -5,7 +5,10 @@ Agency ships with a Claude Code skill that can bootstrap a fully functional agen
 ## Install
 
 ```bash
-# Symlink into your Claude Code skills directory
+# Create the skills directory if it doesn't exist
+mkdir -p ~/.claude/skills
+
+# Symlink the skill, replacing the path with wherever you cloned Agency
 ln -s /path/to/agency/skills/agency-setup ~/.claude/skills/agency-setup
 ```
 

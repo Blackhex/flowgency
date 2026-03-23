@@ -92,8 +92,9 @@ Agent definitions, memory files, dispatch prompts, shared knowledge — all edit
 ## Quick Start
 
 ```bash
-pip install -e .
-agency serve
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/agency serve
 ```
 
 On first run, a setup wizard walks you through pointing Agency at your agent directory. It auto-detects your agents, creates the shared folder structure, and drops you into your dashboard.
