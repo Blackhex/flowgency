@@ -1018,7 +1018,21 @@ async def setup_process(request: Request):
     for agent in detected:
         (path / agent).mkdir(exist_ok=True)
 
-    return RedirectResponse(f"/{key}/", status_code=303)
+    return RedirectResponse(f"/setup/complete/{key}", status_code=303)
+
+
+@app.get("/setup/complete/{group}", response_class=HTMLResponse)
+async def setup_complete(request: Request, group: str):
+    """Post-setup page — tells user to come back later."""
+    agency_title = get_agency_config().get("title", "Agency")
+    g = GROUPS.get(group)
+    group_name = g["name"] if g else group
+    return templates.TemplateResponse("setup_complete.html", {
+        "request": request,
+        "agency_title": agency_title,
+        "group": group,
+        "group_name": group_name,
+    })
 
 
 # ── Tip Routes ────────────────────────────────────────────────────────────────

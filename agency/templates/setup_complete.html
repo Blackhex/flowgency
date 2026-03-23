@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Setup Complete — {{ agency_title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            agency: {
+              50: '#f0f4ff', 100: '#dbe4ff', 200: '#bac8ff',
+              500: '#5c7cfa', 600: '#4263eb', 700: '#3b5bdb',
+              800: '#364fc7', 900: '#1e2a5e', 950: '#141b3d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="h-full bg-agency-950 font-sans flex items-center justify-center p-4">
+  <div class="w-full max-w-lg">
+    <!-- Logo -->
+    <div class="flex items-center justify-center gap-3 mb-8">
+      <div class="w-10 h-10 rounded-xl bg-agency-600 flex items-center justify-center">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
+      </div>
+      <span class="text-2xl font-bold text-white tracking-tight">{{ agency_title }}</span>
+    </div>
+
+    <!-- Heading -->
+    <h1 class="text-2xl font-bold text-white text-center mb-8">Now go outside and touch grass for a while</h1>
+
+    <!-- Nature illustration -->
+    <div class="flex justify-center mb-8">
+      <svg width="200" height="120" viewBox="0 0 200 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Sky gradient background -->
+        <rect width="200" height="120" rx="12" fill="#1a2744"/>
+
+        <!-- Sun -->
+        <circle cx="155" cy="32" r="16" fill="#fbbf24" opacity="0.9"/>
+        <circle cx="155" cy="32" r="22" fill="#fbbf24" opacity="0.15"/>
+
+        <!-- Distant hills -->
+        <ellipse cx="100" cy="105" rx="120" ry="35" fill="#2d4a3e" opacity="0.7"/>
+        <ellipse cx="45" cy="108" rx="80" ry="30" fill="#345e50" opacity="0.8"/>
+        <ellipse cx="160" cy="110" rx="70" ry="28" fill="#2a5445" opacity="0.75"/>
+
+        <!-- Foreground ground -->
+        <ellipse cx="100" cy="118" rx="110" ry="18" fill="#3d7a5a"/>
+
+        <!-- Tree trunk -->
+        <rect x="88" y="62" width="5" height="28" rx="2" fill="#6b4c3b"/>
+
+        <!-- Tree canopy -->
+        <circle cx="90" cy="55" r="15" fill="#4a9e6e" opacity="0.9"/>
+        <circle cx="82" cy="60" r="11" fill="#3d8b5e" opacity="0.85"/>
+        <circle cx="98" cy="58" r="12" fill="#56b07a" opacity="0.8"/>
+        <circle cx="90" cy="48" r="10" fill="#5cbf82" opacity="0.7"/>
+
+        <!-- Small bench -->
+        <rect x="118" y="88" width="22" height="2" rx="1" fill="#8b7355"/>
+        <rect x="120" y="90" width="2" height="6" rx="0.5" fill="#8b7355"/>
+        <rect x="136" y="90" width="2" height="6" rx="0.5" fill="#8b7355"/>
+
+        <!-- Small person sitting on bench -->
+        <circle cx="130" cy="82" r="3" fill="#ddd6c8"/>
+        <rect x="128.5" y="85" width="3" height="4" rx="1" fill="#7c8dbf"/>
+
+        <!-- Grass tufts -->
+        <path d="M25 96 Q27 88 29 96" stroke="#5cbf82" stroke-width="1.2" fill="none" opacity="0.7"/>
+        <path d="M60 94 Q62 86 64 94" stroke="#4a9e6e" stroke-width="1.2" fill="none" opacity="0.6"/>
+        <path d="M150 92 Q152 84 154 92" stroke="#5cbf82" stroke-width="1.2" fill="none" opacity="0.7"/>
+        <path d="M172 95 Q174 88 176 95" stroke="#4a9e6e" stroke-width="1.2" fill="none" opacity="0.6"/>
+
+        <!-- Stars -->
+        <circle cx="30" cy="20" r="1" fill="white" opacity="0.4"/>
+        <circle cx="70" cy="15" r="0.8" fill="white" opacity="0.3"/>
+        <circle cx="120" cy="22" r="1" fill="white" opacity="0.35"/>
+        <circle cx="50" cy="38" r="0.6" fill="white" opacity="0.25"/>
+      </svg>
+    </div>
+
+    <!-- Body text -->
+    <div class="text-center space-y-4 mb-10 px-4">
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Your agents are configured and ready to work. The real value of Agency emerges over time — your agents will observe things, file what they find, and surface proposals when patterns emerge.
+      </p>
+      <p class="text-sm text-gray-400 leading-relaxed">
+        There's nothing for you to do right now, and that's the point.
+      </p>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        Come back in about 24 hours. Your inbox will have something worth looking at.
+      </p>
+    </div>
+
+    <!-- Subtle link -->
+    <p class="text-center text-xs text-gray-500">
+      <a href="/admin/groups" class="hover:text-gray-400 transition-colors">Or, add another agent group &rarr;</a>
+    </p>
+  </div>
+</body>
+</html>
