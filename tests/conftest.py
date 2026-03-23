@@ -15,8 +15,8 @@ def tmp_group_path(tmp_path):
     """Create a temporary group directory with shared/ structure."""
     group = tmp_path / "group"
     group.mkdir()
-    (group / "shared" / "clues").mkdir(parents=True)
-    (group / "shared" / "curiosities").mkdir(parents=True)
+    (group / "shared" / "observations").mkdir(parents=True)
+    (group / "shared" / "proposals").mkdir(parents=True)
     (group / "shared" / "decisions").mkdir(parents=True)
     (group / "shared" / "prompts").mkdir(parents=True)
     (group / "shared" / "logs").mkdir(parents=True)
