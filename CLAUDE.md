@@ -17,6 +17,7 @@
 ~/dev/agency/
 ├── agency/                    # Python package
 │   ├── app.py                 # Main FastAPI app (~2500 lines)
+│   ├── cli.py                 # CLI interface (agency inbox, status, approve, etc.)
 │   ├── config.py              # Shared config utilities (normalize_agents, agent_names)
 │   ├── __init__.py
 │   ├── integrations/          # LLM integration plugin system
@@ -32,9 +33,9 @@
 │   │   ├── run.py             # Python dispatch runner (replaces dispatch.sh)
 │   │   ├── install.py         # Platform-native timer installer
 │   │   └── __init__.py
-│   └── templates/             # 26 Jinja2 templates
+│   └── templates/             # 27 Jinja2 templates
 │       ├── base.html          # Layout: sidebar + main content
-│       ├── home.html          # Inbox (open observations, decisions)
+│       ├── home.html          # Mission control dashboard (fleet, pipeline, attention queue, activity)
 │       ├── agents.html        # Agent list with health dots + integration badges
 │       ├── agent_profile.html # Agent profile: identity, integration, timeline, schedule
 │       ├── observations.html   # Observation list with filters
@@ -58,8 +59,9 @@
 │       ├── admin_org_edit.html # Create/edit org + dispatch schedule + default integration
 │       ├── admin_agent_detail.html # Admin agent detail view
 │       ├── setup.html         # First-run wizard
+│       ├── setup_complete.html # Post-setup "touch grass" finale page
 │       └── tmux_config.html   # Tmux session config viewer
-├── tests/                     # Test suite (78 tests)
+├── tests/                     # Test suite (98 tests)
 │   ├── conftest.py            # Shared fixtures
 │   ├── test_integrations.py   # Registry, detection, base classes
 │   ├── test_integration_claude_code.py
@@ -68,7 +70,11 @@
 │   ├── test_integration_sdk.py
 │   ├── test_config_normalization.py
 │   ├── test_dispatch_run.py
-│   └── test_dispatch_install.py
+│   ├── test_dispatch_install.py
+│   ├── test_display_titles.py       # Display title extraction
+│   ├── test_needs_action.py         # Needs action metric
+│   ├── test_dashboard.py            # Dashboard helpers (pipeline stats, activity feed)
+│   └── test_cli.py                  # CLI interface
 ├── kb/                        # User-facing documentation
 ├── docs/                      # Specs and plans
 ├── config.yaml                # Group registry + Agency settings
@@ -218,7 +224,7 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/{group}/` | Inbox — open observations, floated signals, recent decisions |
+| GET | `/{group}/` | Mission control — fleet status, pipeline pulse, attention queue, activity feed |
 | GET | `/{group}/observations` | Observation list with agent/status filters |
 | GET | `/{group}/observations/{slug}` | Observation detail + status change form |
 | POST | `/{group}/observations/{slug}/status` | Update observation status |
@@ -287,6 +293,7 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | POST | `/setup` | Process setup wizard |
 | POST | `/tips/dismiss` | Dismiss a single tip |
 | POST | `/tips/hide-all` | Hide all tips |
+| GET | `/setup/complete/{group}` | Post-setup "touch grass" page |
 
 ## Data Model
 
@@ -357,6 +364,21 @@ decision: approved             # approved, deferred, rejected
 - Schedule pills shown from `config.dispatch.agents.{name}` rules
 - Integration badge shown next to agent name
 
+### Mission Control Dashboard
+- `build_pipeline_stats()` computes per-stage counts, 7-day sparkline buckets, and flow health (healthy/bottleneck)
+- `build_activity_feed()` merges observations and proposals into a chronological cross-agent feed
+- `extract_display_title()` extracts first `**bold text**` from markdown body as display title, falls back to slug
+- Dashboard has four zones: fleet status bar, pipeline pulse, attention queue (with inline approve/defer/reject), activity feed
+- Inline proposal actions use the existing `proposal_decide()` route via form POST
+
+### CLI Interface
+- `agency/cli.py` — terminal interface using argparse, imports helpers from `app.py`
+- Entry point: `agency` (via pyproject.toml `[project.scripts]`)
+- Subcommands: `serve`, `inbox`, `status`, `observations`, `proposals`, `decisions`, `approve`, `defer`, `reject`, `agents`
+- `--group` flag defaults to `agency.default_group` from config.yaml
+- `--json` flag on list commands for scripting
+- ANSI color output (auto-detected)
+
 ### Pipeline Relationships
 - Observation detail resolves `linked_proposal` → proposal → decision chain
 - Proposal detail shows originating observations + resulting decision
@@ -394,9 +416,22 @@ Creates the standard agent group folder structure. Idempotent — only creates m
 ### Running Locally
 
 ```bash
+# Web dashboard
 cd ~/dev/agency
 .venv/bin/python3 -m agency.app
 # Serves at http://127.0.0.1:8500
+
+# CLI
+.venv/bin/python3 -m agency.cli status
+.venv/bin/python3 -m agency.cli inbox --group newsletter
+```
+
+Or via the installed entry point:
+```bash
+agency serve          # Web dashboard
+agency inbox          # What needs attention
+agency status         # Fleet overview
+agency approve <slug> # Approve a proposal
 ```
 
 ### Dependencies
@@ -471,9 +506,10 @@ Available in all templates:
 - Unified inbox across all groups (`/all/` route)
 - Event-based dispatch conditions (`if` rules — e.g., "run if unread email > 20")
 - Observation analytics (trends over time, agent activity heatmaps)
-- Dark mode toggle
-- Mobile-optimized decision workflow
 - MCP config viewing/editing on agent profile page
 - Skills CRUD + SkillsMCP marketplace integration
 - Per-agent integration change from profile page dropdown
 - Windows Task Scheduler support for dispatch
+- Dashboard Phase 2: Keyboard navigation (j/k movement, a/d/x hotkeys)
+- Dashboard Phase 3: Auto-refresh (poll JSON endpoint every 30-60s)
+- Dashboard Phase 4: Activity heatmap (48h agent activity grid)
