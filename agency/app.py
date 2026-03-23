@@ -965,10 +965,12 @@ def build_agent_timeline(g: dict, agent_name: str, agent_observations: list[dict
         obs_date = c.get("date")
         if isinstance(obs_date, str):
             try:
-                obs_date = datetime.fromisoformat(obs_date)
+                obs_date = datetime.fromisoformat(obs_date).replace(tzinfo=None)
             except (ValueError, TypeError):
                 obs_date = datetime.now()
-        elif not isinstance(obs_date, datetime):
+        elif isinstance(obs_date, datetime):
+            obs_date = obs_date.replace(tzinfo=None)
+        else:
             obs_date = datetime.now()
         events.append({
             "type": "observation",
