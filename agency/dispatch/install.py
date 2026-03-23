@@ -77,6 +77,21 @@ def _status_linux() -> dict:
     return {"installed": installed, "timer_active": timer_active}
 
 
+def _build_path_env() -> str:
+    """Build a PATH that includes the user's local bin dirs alongside system defaults."""
+    path_dirs = []
+    # Include dirs where user-installed CLIs live (e.g. claude, uv)
+    for candidate in [
+        Path.home() / ".local" / "bin",
+        Path.home() / ".cargo" / "bin",
+    ]:
+        if candidate.is_dir():
+            path_dirs.append(str(candidate))
+    # System defaults
+    path_dirs.extend(["/usr/local/bin", "/usr/bin", "/bin"])
+    return ":".join(path_dirs)
+
+
 def _install_linux(config_path: str, interval: int) -> str | None:
     """Write systemd service + timer and enable them."""
     try:
@@ -84,6 +99,8 @@ def _install_linux(config_path: str, interval: int) -> str | None:
         venv_python = Path(__file__).parent.parent.parent / ".venv" / "bin" / "python3"
         if not venv_python.exists():
             venv_python = Path(sys.executable)
+
+        path_env = _build_path_env()
 
         # Write systemd service
         SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
@@ -95,6 +112,7 @@ def _install_linux(config_path: str, interval: int) -> str | None:
             "[Service]\n"
             "Type=oneshot\n"
             f"ExecStart={venv_python} -m agency.dispatch.run --config {config_path}\n"
+            f"Environment=PATH={path_env}\n"
             "Environment=HOME=%h\n"
         )
 
