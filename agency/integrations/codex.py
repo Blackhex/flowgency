@@ -59,7 +59,7 @@ class CodexIntegration(BaseIntegration):
         start = time.monotonic()
         try:
             result = subprocess.run(
-                [cmd, "--dangerously-skip-permissions", "-p", prompt_text],
+                [cmd, "exec", "--yolo", prompt_text],
                 capture_output=True, text=True, timeout=timeout,
                 cwd=str(agent_dir),
             )
@@ -75,6 +75,21 @@ class CodexIntegration(BaseIntegration):
             return RunResult(exit_code=124, stdout="", stderr="Timed out", duration_seconds=duration)
         except FileNotFoundError:
             raise IntegrationError(f"Codex CLI not found. Looked for: {cmd}")
+
+    def prompt(self, text: str, timeout: int = 60) -> str:
+        cmd = self._find_cmd()
+        try:
+            result = subprocess.run(
+                [cmd, "exec", "--full-auto", text],
+                capture_output=True, text=True, timeout=timeout,
+            )
+            if result.returncode != 0:
+                raise IntegrationError(f"codex exited with code {result.returncode}: {result.stderr}")
+            return result.stdout
+        except FileNotFoundError:
+            raise IntegrationError(f"Codex CLI not found. Looked for: {cmd}")
+        except subprocess.TimeoutExpired:
+            raise IntegrationError(f"codex timed out after {timeout}s")
 
     def _find_cmd(self) -> str:
         return shutil.which("codex") or "codex"

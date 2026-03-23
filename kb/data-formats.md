@@ -105,7 +105,7 @@ When a curiosity is approved, Agency dispatches the origin agent to execute the 
 | `completed_at` | ISO 8601 timestamp when execution finished |
 | `summary` | Agent's report of what it did (or why it failed) |
 
-Failed executions can be retried from the decision detail page. The integration used depends on the agent's configuration — Claude Code agents are run with `claude -p`, Codex with `codex -p`, etc.
+Failed executions can be retried from the decision detail page. The integration used depends on the agent's configuration — Claude Code agents are run with `claude -p`, Codex with `codex exec`, etc.
 
 ## TTL Enforcement
 

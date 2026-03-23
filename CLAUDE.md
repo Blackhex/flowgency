@@ -91,7 +91,7 @@ Agency uses a plugin system to support multiple LLM tools. Each integration is a
 | Integration | Native File | Detect Signal | Execution | AI Backend |
 |-------------|------------|---------------|-----------|------------|
 | `claude-code` | `CLAUDE.md` | CLAUDE.md exists | `claude -p` | Yes |
-| `codex` | `AGENTS.md` | AGENTS.md exists | `codex -p` | Yes |
+| `codex` | `AGENTS.md` | AGENTS.md exists | `codex exec --yolo` | Yes |
 | `gemini` | `GEMINI.md` | GEMINI.md exists | `gemini -p` | Yes |
 | `aider` | `CONVENTIONS.md` | .aider.conf.yml exists | `aider --message-file` | No |
 | `goose` | `.goosehints` | .goosehints exists | `goose run` | Yes |

@@ -80,7 +80,7 @@ Rules with a `condition` field are **skipped by the Python dispatcher** and disp
 The dispatcher resolves each agent's integration from config before running. This means:
 
 - Claude Code agents are run with `claude --dangerously-skip-permissions -p`
-- Codex agents are run with `codex --dangerously-skip-permissions -p`
+- Codex agents are run with `codex exec --yolo`
 - Aider agents are run with `aider --message-file`
 - Script agents use their configured command template
 - SDK agents are skipped (externally managed)

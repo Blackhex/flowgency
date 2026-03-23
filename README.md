@@ -66,7 +66,7 @@ Agency works with any LLM tool through a plugin integration system. Each agent d
 | Integration | Identity File | What It Does |
 |-------------|-------------|-------------|
 | **Claude Code** | `CLAUDE.md` | `claude --dangerously-skip-permissions -p` |
-| **OpenAI Codex** | `AGENTS.md` | `codex --dangerously-skip-permissions -p` |
+| **OpenAI Codex** | `AGENTS.md` | `codex exec --yolo` |
 | **Google Gemini** | `GEMINI.md` | `gemini -p` |
 | **Aider** | `CONVENTIONS.md` | `aider --message-file` |
 | **Goose** | `.goosehints` | `goose run` |
