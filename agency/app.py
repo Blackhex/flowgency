@@ -386,6 +386,30 @@ def enforce_ttl(filepath: Path, meta: dict) -> bool:
     return False
 
 
+def extract_display_title(body: str | None, slug: str) -> str:
+    """Extract a human-readable title from markdown body text.
+
+    Looks for the first **bold text** in the body (not inside headings).
+    Falls back to slug with hyphens replaced by spaces.
+    Truncates to 120 chars if needed.
+    """
+    if not body:
+        return slug.replace("-", " ")
+
+    for line in body.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        m = re.search(r"\*\*(.+?)\*\*", stripped)
+        if m:
+            title = m.group(1).rstrip(".,;:!?")
+            if len(title) > 120:
+                return title[:117] + "..."
+            return title
+
+    return slug.replace("-", " ")
+
+
 def list_markdown_items(g: dict, subdir: str, apply_ttl: bool = False) -> list[dict]:
     """List markdown files from a shared subdirectory with parsed frontmatter."""
     item_dir = g["shared"] / subdir
