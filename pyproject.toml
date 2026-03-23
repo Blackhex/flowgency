@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agency = "agency.app:main"
+agency = "agency.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["agency*"]
