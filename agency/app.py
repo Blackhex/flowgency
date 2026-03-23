@@ -189,6 +189,7 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
         "tmux_config_available": bool(group_cfg.get("tmux_config")),
         "nav_open_observations": open_observation_count,
         "nav_actionable": needs_action_count,
+        "nav_actionable_proposals": actionable_proposal_count,
         "nav_agent_count": len(g["agents"]),
         "show_tips": CONFIG.get("agency", {}).get("show_tips", True) is not False,
         "tips_dismissed": CONFIG.get("agency", {}).get("tips_dismissed", []),
