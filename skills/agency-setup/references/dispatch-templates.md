@@ -29,7 +29,7 @@ Use project-appropriate commands — npm/pytest/go test/cargo, not generic place
 ## Pre-Approved Actions
 {Copy from agent's CLAUDE.md, scoped to what makes sense during dispatch.}
 - Read any file in the project
-- Write and update clue/curiosity files in `agents/shared/`
+- Write and update observation/proposal files in `agents/shared/`
 
 ## Boundaries
 {Copy from agent's CLAUDE.md boundaries, plus dispatch-specific restrictions like:}
@@ -38,10 +38,10 @@ Use project-appropriate commands — npm/pytest/go test/cargo, not generic place
 
 ### Update Memory
 If you discovered stable facts worth remembering across runs (not ephemeral
-observations — those go in clues), update `agents/{AGENT_NAME}/memory.md`.
+observations — those go in observations), update `agents/{AGENT_NAME}/memory.md`.
 
-## Clue System Steps
-Follow the standard clue-system steps in `agents/shared/prompts/_clue-system-steps.md`.
+## Observation System Steps
+Follow the standard observation-system steps in `agents/shared/prompts/_observation-system-steps.md`.
 Read that file now and follow each step after completing your observation tasks above.
 ```
 
@@ -56,22 +56,22 @@ You are the {AGENT_DISPLAY_NAME} running the nightly cleanup routine.
 
 ## Cleanup Tasks
 
-### 1. Archive Expired Clues
-Read all files in `agents/shared/clues/` (not archive/).
-For each clue:
+### 1. Archive Expired Observations
+Read all files in `agents/shared/observations/` (not archive/).
+For each observation:
 - Parse the `date` and `ttl_days` from frontmatter
 - If `date + ttl_days < today` AND `status` is `open`:
   - Set `status: abandoned` in the frontmatter
-  - Move the file to `agents/shared/clues/archive/`
+  - Move the file to `agents/shared/observations/archive/`
   - Create the archive directory if it doesn't exist
 
-### 2. Archive Expired Curiosities
-Read all files in `agents/shared/curiosities/` (not archive/).
-For each curiosity:
+### 2. Archive Expired Proposals
+Read all files in `agents/shared/proposals/` (not archive/).
+For each proposal:
 - Parse the `date` and `ttl_days` from frontmatter
 - If `date + ttl_days < today` AND `status` is `proposed` (no decision was made):
   - Set `status: expired` in the frontmatter
-  - Move the file to `agents/shared/curiosities/archive/`
+  - Move the file to `agents/shared/proposals/archive/`
 
 ### 3. Clean Old Logs
 ```bash
@@ -81,10 +81,10 @@ NOTE: This is an explicit exception to the "no destructive commands" rule — cl
 is specifically authorized to delete old log directories.
 
 ### 4. Summary
-"Cleanup: archived N clues, expired M curiosities, removed K log directories"
+"Cleanup: archived N observations, expired M proposals, removed K log directories"
 
 ## Boundaries
-- ONLY modify files in `agents/shared/clues/`, `agents/shared/curiosities/`, `agents/shared/logs/`
+- ONLY modify files in `agents/shared/observations/`, `agents/shared/proposals/`, `agents/shared/logs/`
 - You may NOT touch any other files
 ```
 
@@ -97,19 +97,19 @@ to their routine prompt:
 ## Cross-Agent Orchestration Tasks
 
 ### N. Route Feedback Requests
-Read all files in `agents/shared/curiosities/`.
-For any curiosity where `status: feedback`:
+Read all files in `agents/shared/proposals/`.
+For any proposal where `status: feedback`:
 - Check which agents are in `feedback_requested` but not in `feedback_received`
 - For each missing agent, spawn the agent headlessly:
   ```bash
   cd {PROJECT_ROOT}/agents/{agent} && \
-    claude --dangerously-skip-permissions -p "Read agents/shared/curiosities/{file}.
+    claude --dangerously-skip-permissions -p "Read agents/shared/proposals/{file}.
     Your feedback is requested. Add your feedback under ### Agent Feedback.
     Add your agent name to feedback_received in the frontmatter. Keep to 2-4 sentences."
   ```
 
-### N+1. Finalize Completed Curiosities
-For any curiosity where `feedback_received` matches `feedback_requested`:
+### N+1. Finalize Completed Proposals
+For any proposal where `feedback_received` matches `feedback_requested`:
 - Write the `### Recommendation` section synthesizing all feedback
 - Set `status: proposed`
 ```
@@ -240,22 +240,22 @@ run_agents_parallel() {
   return "$failed"
 }
 
-# --- Curiosity Router ---
+# --- Proposal Router ---
 
-maybe_route_curiosities() {
+maybe_route_proposals() {
   local files
-  files=$(find "$SHARED_DIR/curiosities/" -maxdepth 1 -name '*.md' 2>/dev/null | head -1)
+  files=$(find "$SHARED_DIR/proposals/" -maxdepth 1 -name '*.md' 2>/dev/null | head -1)
   if [[ -z "$files" ]]; then
-    log "No curiosities to check"
+    log "No proposals to check"
     return 0
   fi
   local pending
-  pending=$(grep -rl '^status: feedback' "$SHARED_DIR/curiosities/" 2>/dev/null | head -1)
+  pending=$(grep -rl '^status: feedback' "$SHARED_DIR/proposals/" 2>/dev/null | head -1)
   if [[ -z "$pending" ]]; then
-    log "No pending curiosity feedback requests"
+    log "No pending proposal feedback requests"
     return 0
   fi
-  log "Found pending curiosity feedback — running coordinator"
+  log "Found pending proposal feedback — running coordinator"
   run_agent "{COORDINATOR_AGENT}" "{COORDINATOR_AGENT}-routine.md" || true
 }
 
@@ -306,7 +306,7 @@ main() {
     log "No event matches current time window, exiting"
   fi
 
-  maybe_route_curiosities
+  maybe_route_proposals
 
   log "=== {PROJECT_NAME} Agent Dispatcher Complete ==="
 }

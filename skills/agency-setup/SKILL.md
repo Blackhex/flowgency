@@ -86,13 +86,13 @@ take seconds, not minutes.
 Read the templates from `references/` before generating:
 - `references/templates.md` — agent CLAUDE.md, memory.md, shared memory
 - `references/dispatch-templates.md` — dispatch.sh, timer, service, tmux script
-- `references/clue-system-steps.md` — universal clue pipeline steps
+- `references/observation-system-steps.md` — universal observation pipeline steps
 
 ### 4.1 Directory Structure
 
 ```bash
 mkdir -p agents/{agent1,agent2,...}
-mkdir -p agents/shared/{clues,curiosities,decisions,logs,prompts}
+mkdir -p agents/shared/{observations,proposals,decisions,logs,prompts}
 ```
 
 ### 4.2 Agent Files
@@ -103,7 +103,7 @@ For each agent, generate from the templates in `references/templates.md`:
 
 Plus shared files:
 - `agents/shared/memory.md` — Project context, preferences, learned facts
-- `agents/shared/prompts/_clue-system-steps.md` — Copy from `references/clue-system-steps.md`
+- `agents/shared/prompts/_observation-system-steps.md` — Copy from `references/observation-system-steps.md`
 
 ### 4.3 Dispatch Prompts
 
@@ -114,7 +114,7 @@ Follow the structure in `references/dispatch-templates.md`:
 - Pre-approved actions
 - Boundaries
 - Update memory
-- Clue system steps reference
+- Observation system steps reference
 
 If the maintainer/cleanup agent exists, also generate `{agent}-cleanup.md`.
 

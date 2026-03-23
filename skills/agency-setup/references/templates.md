@@ -50,7 +50,7 @@ to shared memory instead (or both).
 ## Pre-Approved Actions
 {List of what this agent CAN do. Examples:}
 - Read any file in the project
-- Write and update clue/curiosity files in `agents/shared/`
+- Write and update observation/proposal files in `agents/shared/`
 - Update `agents/{AGENT_NAME}/memory.md` and `agents/shared/memory.md`
 {For builder agents, add:}
 - Edit source code in `{SOURCE_DIRECTORIES}`
@@ -58,7 +58,7 @@ to shared memory instead (or both).
 - Restart the service: `{RESTART_COMMAND}` (if applicable)
 {For maintainer agents, add:}
 - Run health check commands (systemctl status, curl GET, journalctl)
-- Archive expired clues and curiosities
+- Archive expired observations and proposals
 - Delete old log directories (14+ days) under `agents/shared/logs/`
 {For read-only agents:}
 - Use curl for GET requests to evaluate the running app (if web app)
@@ -70,7 +70,7 @@ to shared memory instead (or both).
 {For non-builder agents, add:}
 - Do NOT edit source code or project configuration files
 {For all agents:}
-- If your work requires an action beyond your permissions, propose it via a clue or curiosity
+- If your work requires an action beyond your permissions, propose it via an observation or proposal
 
 ## Interfaces With
 {List other agents this one coordinates with:}
