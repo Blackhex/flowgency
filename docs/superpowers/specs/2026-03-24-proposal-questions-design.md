@@ -105,7 +105,7 @@ Same card layout as the form, but read-only. Input controls are replaced with th
 
 ### Dashboard Attention Queue
 
-Proposals show a **"N questions"** pill badge (purple). No inline answering — always click through to the proposal detail page. This applies uniformly regardless of question count or type.
+The current inline approve/defer/reject buttons are **removed**. Proposals instead show a clickable **"N questions"** pill badge (purple) that links to the proposal detail page. No inline answering — always click through. This applies uniformly regardless of question count or type.
 
 ### Proposals List Page
 
@@ -157,6 +157,17 @@ No major changes. The status badge shows `decided` (green) instead of `approved`
 - The agent is instructed to read the decision file and act on the answers.
 - This applies regardless of what the answers contain — including fully rejected proposals, where the agent should close the loop gracefully.
 - This replaces the old model where only `approved` decisions triggered execution.
+- The old `execution` block in decision frontmatter (with `status: pending/executing/success/failed`) is replaced by a simpler model: the decision file records `execution_status` (pending/running/complete/failed) as a single field, updated by the dispatch runner. The decision detail template shows this status. The retry mechanism (`POST /{group}/decisions/{slug}/retry`) continues to work — it re-dispatches the agent.
+
+### CLI Changes
+
+The CLI subcommands `approve`, `defer`, and `reject` are **removed**. They are replaced by a single `agency decide <slug>` command that:
+
+1. Reads the proposal's questions and prints them to the terminal.
+2. Prompts the user to answer each question interactively (selection for boolean/choice, text input for free-response).
+3. POSTs the answers to `proposal_decide()`.
+
+The `inbox` and `proposals` subcommands continue to work — they list proposals with question counts. The `decisions` subcommand shows answers.
 
 ## Agent Instructions
 
@@ -205,6 +216,11 @@ One-time migration of existing files (no backward compatibility layer):
 1. **Existing proposals** — Add `questions` field with a single boolean question (`id: approve`, prompt derived from the Recommendation section or generic "Approve this proposal?"). Change terminal statuses (`approved`/`deferred`/`rejected`) to `decided`.
 2. **Existing decisions** — Convert `decision: approved` to `answers: { approve: approved }`. Remove the old `decision` field and `execution` block.
 3. **`_observation-system-steps.md`** — Replace the proposal template and finalization instructions.
+
+## Notes
+
+- The old `notes` textarea on the decide form is removed. Decision context now lives in the structured answers themselves. If agents need free-text context from the human, they include a `free-response` question.
+- Tests referencing `approved`/`deferred`/`rejected` proposal statuses need updating to use `decided`.
 
 ## Out of Scope
 
