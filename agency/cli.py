@@ -231,16 +231,15 @@ def cmd_decisions(args):
     items = list_decisions(g)
 
     if getattr(args, "json", False):
-        print(json.dumps([{"slug": i["_slug"], "title": i.get("_title", i["_slug"]), "decision": i.get("decision", ""), "date": str(i.get("date", ""))} for i in items], indent=2))
+        print(json.dumps([{"slug": i["_slug"], "title": i.get("_title", i["_slug"]), "answers": i.get("answers", {}), "date": str(i.get("date", ""))} for i in items], indent=2))
         return
 
     print(f"\n{bold('Decisions')} — {g['name']} ({len(items)} total)\n")
     for i in items:
-        decision = i.get("decision", "")
-        color = green if decision == "approved" else (yellow if decision == "deferred" else red)
         title_text = i.get("_title", i["_slug"])
-        decision_str = decision[:10].rjust(10)
-        print(f"  {color(decision_str)}  {title_text[:60]}  {dim(str(i.get('date', '')))}")
+        answers = i.get("answers", {})
+        answer_count = len(answers)
+        print(f"  {green('decided')}  {title_text[:60]}  {dim(str(i.get('date', '')))}  {dim(f'{answer_count} answer(s)')}")
     print()
 
 def cmd_agents(args):
@@ -267,9 +266,8 @@ def cmd_agents(args):
             print(f"  {dot} {a.get('emoji', '')} {a['name']}  {dim(a['integration'])}")
     print()
 
-def _decide_proposal(args, decision: str):
-    """Approve, defer, or reject a proposal."""
-    from agency.app import save_config
+def cmd_decide(args):
+    """Interactively answer a proposal's questions."""
     import yaml
 
     g = _resolve_group(args)
@@ -282,36 +280,81 @@ def _decide_proposal(args, decision: str):
         print(f"Error: Proposal '{slug}' not found.", file=sys.stderr)
         sys.exit(1)
 
-    # Update proposal status
-    update_frontmatter_field(path, "status", decision)
+    meta, body = parse_frontmatter(path.read_text())
+    questions = meta.get("questions", [])
+    if not questions:
+        print("Error: Proposal has no questions.", file=sys.stderr)
+        sys.exit(1)
+
+    origin_agent = meta.get("origin_agent", "")
+    print(f"\n{bold(slug)}\n")
+
+    answers = {}
+    for i, q in enumerate(questions, 1):
+        print(f"  {cyan(str(i))}. {q['prompt']}")
+
+        if q["type"] == "boolean":
+            print(f"     {green('[a]')}pprove  {yellow('[d]')}efer  {red('[r]')}eject")
+            while True:
+                choice = input("     > ").strip().lower()
+                if choice in ("a", "approve"):
+                    answers[q["id"]] = "approved"
+                    break
+                elif choice in ("d", "defer"):
+                    answers[q["id"]] = "deferred"
+                    break
+                elif choice in ("r", "reject"):
+                    answers[q["id"]] = "rejected"
+                    break
+                print("     Invalid choice. Enter a/d/r.")
+
+        elif q["type"] == "choice":
+            options = q.get("options", [])
+            for j, opt in enumerate(options, 1):
+                print(f"     [{j}] {opt['label']}")
+            if q.get("multi"):
+                print("     (comma-separated numbers for multiple)")
+                raw = input("     > ").strip()
+                indices = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
+                answers[q["id"]] = [options[idx - 1]["label"] for idx in indices if 1 <= idx <= len(options)]
+            else:
+                while True:
+                    raw = input("     > ").strip()
+                    if raw.isdigit() and 1 <= int(raw) <= len(options):
+                        answers[q["id"]] = options[int(raw) - 1]["label"]
+                        break
+                    print(f"     Enter a number 1-{len(options)}.")
+
+        elif q["type"] == "free-response":
+            answers[q["id"]] = input("     > ").strip()
+
+        print()
 
     # Create decision file
     today = datetime.now().strftime("%Y-%m-%d")
-    meta = {
+    dec_meta = {
         "proposal": f"{slug}.md",
         "decided_by": "cli",
         "date": today,
-        "decision": decision,
+        "answers": answers,
+        "execution_status": "pending",
     }
-    frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-    content = f"---\n{frontmatter}\n---\n\nDecided via CLI.\n"
+    frontmatter = yaml.dump(dec_meta, default_flow_style=False, sort_keys=False).strip()
+    content = f"---\n{frontmatter}\n---\n"
 
     decisions_dir.mkdir(exist_ok=True)
     decision_path = decisions_dir / f"{slug}.md"
     decision_path.write_text(content)
 
-    symbol = {"approved": green("✓"), "deferred": yellow("⏸"), "rejected": red("✗")}
-    print(f"{symbol.get(decision, '?')} {decision.title()}: {slug}")
-    print(f"  Decision written to shared/decisions/{slug}.md")
+    # Update proposal status
+    update_frontmatter_field(path, "status", "decided")
 
-def cmd_approve(args):
-    _decide_proposal(args, "approved")
-
-def cmd_defer(args):
-    _decide_proposal(args, "deferred")
-
-def cmd_reject(args):
-    _decide_proposal(args, "rejected")
+    print(f"{green('✓')} Decision saved: shared/decisions/{slug}.md")
+    for qid, ans in answers.items():
+        if isinstance(ans, list):
+            print(f"  {qid}: {', '.join(ans)}")
+        else:
+            print(f"  {qid}: {ans}")
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -355,11 +398,10 @@ def main():
     p.add_argument("--group", "-g")
     p.add_argument("--json", action="store_true")
 
-    # approve / defer / reject
-    for cmd_name in ("approve", "defer", "reject"):
-        p = sub.add_parser(cmd_name, help=f"{cmd_name.title()} a proposal")
-        p.add_argument("slug", help="Proposal slug")
-        p.add_argument("--group", "-g")
+    # decide
+    p = sub.add_parser("decide", help="Answer a proposal's questions")
+    p.add_argument("slug", help="Proposal slug")
+    p.add_argument("--group", "-g")
 
     # agents
     p = sub.add_parser("agents", help="List agents with health status")
@@ -387,9 +429,7 @@ def main():
         "observations": cmd_observations,
         "proposals": cmd_proposals,
         "decisions": cmd_decisions,
-        "approve": cmd_approve,
-        "defer": cmd_defer,
-        "reject": cmd_reject,
+        "decide": cmd_decide,
         "agents": cmd_agents,
     }
     dispatch[args.command](args)
