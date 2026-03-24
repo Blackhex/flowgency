@@ -21,7 +21,7 @@ from markupsafe import Markup
 
 import uvicorn
 
-from agency.config import normalize_agents, agent_names
+from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status as _get_timer_status, detect_platform
 
@@ -147,7 +147,7 @@ def get_agent_integration(g: dict, agent_name: str):
     then config, then group default. This ensures that an agent with CLAUDE.md is
     always handled by the claude-code integration, even if the group default is different.
     """
-    agent_dir = g["path"] / agent_name
+    agent_dir = get_agent_dir(g, agent_name)
     # 1. Auto-detect from existing files on disk
     if agent_dir.is_dir():
         detected = detect_integration(agent_dir)
@@ -286,7 +286,11 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
         f"'execution' key in the frontmatter."
     )
 
-    agent_dir = group_path / agent
+    # Resolve integration (filesystem detection first, then config)
+    g = GROUPS.get(group_key, {})
+    grp = {"path": group_path, "agents_full": g.get("_agents_normalized", [])}
+
+    agent_dir = get_agent_dir(grp, agent)
     if not agent_dir.exists():
         agent_dir = group_path
 
@@ -301,9 +305,6 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
     prompt_file.write_text(prompt)
 
     try:
-        # Resolve integration (filesystem detection first, then config)
-        g = GROUPS.get(group_key, {})
-        grp = {"path": group_path, "agents_full": g.get("_agents_normalized", [])}
         agent_integration = get_agent_integration(grp, agent)
 
         if not agent_integration.supports_execution:
@@ -552,7 +553,7 @@ def collect_documents(g: dict) -> list[dict]:
     identity_files = {i.identity_filename() for i in REGISTRY.values()}
 
     for agent in g["agents"]:
-        agent_dir = g["path"] / agent
+        agent_dir = get_agent_dir(g, agent)
         if not agent_dir.exists():
             continue
         for f in sorted(agent_dir.rglob("*")):
@@ -688,7 +689,7 @@ def collect_memory_files(g: dict) -> list[dict]:
         items.append({"agent": "shared", "path": str(sm), "name": "memory.md"})
     # Per-agent
     for agent in g["agents"]:
-        mf = g["path"] / agent / "memory.md"
+        mf = get_agent_dir(g, agent) / "memory.md"
         if mf.exists():
             items.append({"agent": agent, "path": str(mf), "name": "memory.md"})
     return items
@@ -745,7 +746,7 @@ def resolve_agent_dir(g: dict, agent_name: str) -> Path:
     """Find an agent's directory, checking root and _subagents/. Raises 404 if not found."""
     if "/" in agent_name or ".." in agent_name:
         raise HTTPException(400, "Invalid agent name")
-    agent_dir = g["path"] / agent_name
+    agent_dir = get_agent_dir(g, agent_name)
     if agent_dir.is_dir():
         return agent_dir
     sub_dir = g["path"] / "_subagents" / agent_name
@@ -888,7 +889,7 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
     subagents = []
 
     for agent_name in g["agents"]:
-        agent_dir = g["path"] / agent_name
+        agent_dir = get_agent_dir(g, agent_name)
         if not agent_dir.is_dir():
             continue
         agent_int = get_agent_integration(g, agent_name)
@@ -2041,7 +2042,7 @@ async def agent_toggle_subagent(request: Request, group: str, agent: str):
     g = get_group(group)
     if "/" in agent or ".." in agent:
         raise HTTPException(400, "Invalid agent name")
-    root_dir = g["path"] / agent
+    root_dir = get_agent_dir(g, agent)
     sub_dir = g["path"] / "_subagents" / agent
     is_currently_subagent = sub_dir.is_dir()
 
@@ -2429,7 +2430,7 @@ async def document_view(request: Request, group: str, path: str):
     g = get_group(group)
     fpath = Path(path)
     # Security: must be under this group's agents dir
-    validate_file_access(fpath, g["path"])
+    validate_file_access(fpath, g["path"], allowed_roots=get_allowed_roots(g))
     if not fpath.exists():
         raise HTTPException(404, "File not found")
 
@@ -2476,7 +2477,7 @@ async def document_save(request: Request, group: str):
     content = form.get("content", "")
     fpath = Path(path)
 
-    validate_file_access(fpath, g["path"])
+    validate_file_access(fpath, g["path"], allowed_roots=get_allowed_roots(g))
 
     fpath.write_text(content)
     return RedirectResponse(f"/{group}/documents/view?path={path}", status_code=303)
@@ -2657,7 +2658,7 @@ async def memory_view(request: Request, group: str, path: str):
     """View/edit a memory file."""
     g = get_group(group)
     fpath = Path(path)
-    validate_file_access(fpath, g["path"])
+    validate_file_access(fpath, g["path"], allowed_roots=get_allowed_roots(g))
     if not fpath.exists():
         raise HTTPException(404, "Memory file not found")
 
@@ -2684,7 +2685,7 @@ async def memory_save(request: Request, group: str):
     content = form.get("content", "")
     fpath = Path(path)
 
-    validate_file_access(fpath, g["path"])
+    validate_file_access(fpath, g["path"], allowed_roots=get_allowed_roots(g))
 
     fpath.write_text(content)
     return RedirectResponse(f"/{group}/memory/view?path={path}", status_code=303)
