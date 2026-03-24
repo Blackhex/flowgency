@@ -21,7 +21,7 @@ from markupsafe import Markup
 
 import uvicorn
 
-from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots
+from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status as _get_timer_status, detect_platform
 
@@ -1419,7 +1419,9 @@ async def admin_org_edit(request: Request, org: str):
     base = Path(g["path"])
 
     # Build rich agent info
-    agent_infos = [get_agent_info(base, a) for a in g.get("agents", [])]
+    grp_full = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
+    _agent_names = [a if isinstance(a, str) else a.get("name", "") for a in g.get("agents", []) if a]
+    agent_infos = [get_agent_info(base, a, agent_dir=get_agent_dir(grp_full, a)) for a in _agent_names]
 
     # Dispatch config for this group
     dispatch_cfg = g.get("dispatch", {})
@@ -1439,7 +1441,7 @@ async def admin_org_edit(request: Request, org: str):
         "org_key": org,
         "org_name": g["name"],
         "org_path": g["path"],
-        "org_agents": "\n".join(g.get("agents", [])),
+        "org_agents": "\n".join(_agent_names),
         "org_tmux_config": g.get("tmux_config", ""),
         "agent_infos": agent_infos,
         "dispatch_enabled": dispatch_cfg.get("enabled", False),
@@ -1618,9 +1620,12 @@ async def admin_org_initialize(request: Request, org: str):
                 shutil.copy2(source, observation_steps_target)
                 break
 
-    # Create agent directories
-    for agent in g.get("agents", []):
-        (base / agent).mkdir(exist_ok=True)
+    # Create agent directories (skip shared agents with external paths)
+    raw_agents = g.get("agents", [])
+    for agent in raw_agents:
+        name = agent if isinstance(agent, str) else agent.get("name", "")
+        if name and not is_shared_agent(raw_agents, name):
+            (base / name).mkdir(exist_ok=True)
 
     return RedirectResponse("/admin/groups", status_code=303)
 
@@ -1644,13 +1649,15 @@ async def admin_org_autodetect(request: Request, org: str):
                     detected.append(d.name)
 
     # Update config with detected agents
-    agent_names = detected if detected else g.get("agents", [])
+    raw_agents = detected if detected else g.get("agents", [])
     if detected:
         config["groups"][org]["agents"] = detected
         save_config(config)
         reload_groups()
 
-    agent_infos = [get_agent_info(base, a) for a in agent_names]
+    grp_full = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
+    _agent_names = [a if isinstance(a, str) else a.get("name", "") for a in raw_agents if a]
+    agent_infos = [get_agent_info(base, a, agent_dir=get_agent_dir(grp_full, a)) for a in _agent_names]
 
     # Gather dispatch + prompt context (same as admin_org_edit)
     dispatch_cfg = g.get("dispatch", {})
@@ -1671,7 +1678,7 @@ async def admin_org_autodetect(request: Request, org: str):
         "org_name": g["name"],
         "org_path": g["path"],
         "org_tmux_config": g.get("tmux_config", ""),
-        "org_agents": "\n".join(agent_names),
+        "org_agents": "\n".join(_agent_names),
         "agent_infos": agent_infos,
         "dispatch_enabled": dispatch_cfg.get("enabled", False),
         "dispatch_timeout": dispatch_cfg.get("timeout", 300),
@@ -1688,9 +1695,10 @@ async def admin_org_autodetect(request: Request, org: str):
 # ── Agent CRUD Routes ────────────────────────────────────────────────────────
 
 
-def get_agent_info(base: Path, agent_name: str) -> dict:
+def get_agent_info(base: Path, agent_name: str, agent_dir: Path | None = None) -> dict:
     """Gather filesystem info about an individual agent."""
-    agent_dir = base / agent_name
+    if agent_dir is None:
+        agent_dir = base / agent_name
     info = {
         "name": agent_name,
         "dir_exists": agent_dir.is_dir(),
@@ -1723,18 +1731,19 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
     base = Path(g["path"])
     agency = get_agency_config()
 
-    if agent not in g.get("agents", []):
+    idx, _ = find_agent_in_config(g.get("agents", []), agent)
+    if idx < 0:
         raise HTTPException(404, f"Agent '{agent}' not in group '{org}'")
 
-    agent_info = get_agent_info(base, agent)
-    agent_dir = base / agent
+    grp_full = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
+    agent_dir = get_agent_dir(grp_full, agent)
+    agent_info = get_agent_info(base, agent, agent_dir=agent_dir)
 
     # Read editable files
     definition_content = ""
     memory_md = ""
     if agent_dir.is_dir():
-        grp = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
-        agent_integration = get_agent_integration(grp, agent)
+        agent_integration = get_agent_integration(grp_full, agent)
         identity_path = agent_dir / agent_integration.identity_filename()
         if identity_path.exists():
             definition_content = identity_path.read_text()
@@ -1769,10 +1778,14 @@ async def admin_agent_save(request: Request, org: str, agent: str):
 
     g = groups[org]
     base = Path(g["path"])
-    agent_dir = base / agent
+    grp_full = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
+    agent_dir = get_agent_dir(grp_full, agent)
 
-    # Security: validate path
-    agent_dir.resolve().relative_to(base.resolve())
+    # Security: validate path is within allowed roots
+    allowed_roots = get_allowed_roots(grp_full)
+    resolved = agent_dir.resolve()
+    if not any(resolved == r.resolve() or resolved.is_relative_to(r.resolve()) for r in allowed_roots):
+        raise HTTPException(400, "Path outside allowed directories")
 
     form = await request.form()
     file_type = form.get("file_type", "claude_md")
@@ -1783,8 +1796,7 @@ async def admin_agent_save(request: Request, org: str, agent: str):
 
     if file_type == "claude_md" or file_type == "definition":
         # Detect integration from existing files, fall back to config
-        grp = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
-        agent_int = get_agent_integration(grp, agent)
+        agent_int = get_agent_integration(grp_full, agent)
         save_agent_definition(agent_dir, content, agent_int)
     elif file_type == "memory_md":
         (agent_dir / "memory.md").write_text(content)
@@ -1869,18 +1881,22 @@ async def admin_agent_rename(request: Request, org: str, agent: str):
     base = Path(g["path"])
 
     # Update config
-    if agent in agents:
-        idx = agents.index(agent)
-        agents[idx] = new_name
+    idx, entry = find_agent_in_config(agents, agent)
+    if idx >= 0:
+        if isinstance(entry, dict):
+            agents[idx] = {**entry, "name": new_name}
+        else:
+            agents[idx] = new_name
         config["groups"][org]["agents"] = agents
         save_config(config)
         reload_groups()
 
-    # Rename directory if it exists
-    old_dir = base / agent
-    new_dir = base / new_name
-    if old_dir.is_dir() and not new_dir.exists():
-        old_dir.rename(new_dir)
+    # Skip directory rename for shared agents (external path)
+    if not is_shared_agent(agents, new_name):
+        old_dir = base / agent
+        new_dir = base / new_name
+        if old_dir.is_dir() and not new_dir.exists():
+            old_dir.rename(new_dir)
 
     return RedirectResponse(f"/admin/orgs/{org}/agents/{new_name}", status_code=303)
 
@@ -1899,14 +1915,16 @@ async def admin_agent_delete(request: Request, org: str, agent: str):
     agents = g.get("agents", [])
 
     # Remove from config
-    if agent in agents:
-        agents.remove(agent)
+    shared = is_shared_agent(agents, agent)
+    idx, _ = find_agent_in_config(agents, agent)
+    if idx >= 0:
+        agents.pop(idx)
         config["groups"][org]["agents"] = agents
         save_config(config)
         reload_groups()
 
-    # Optionally delete directory
-    if delete_files:
+    # Optionally delete directory (skip shared agents — external path)
+    if delete_files and not shared:
         agent_dir = Path(g["path"]) / agent
         agent_dir.resolve().relative_to(Path(g["path"]).resolve())
         if agent_dir.is_dir():
