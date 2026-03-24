@@ -8,13 +8,23 @@
   One dashboard for all your AI agents — no matter what tool they run on.
 </p>
 
+<p align="center">
+  <a href="https://github.com/christag/agency/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="AGPL-3.0 License"></a>
+  <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/tests-98%20passing-brightgreen.svg" alt="98 tests passing">
+  <img src="https://img.shields.io/badge/database-none-orange.svg" alt="No database">
+  <img src="https://img.shields.io/badge/docker-not%20required-orange.svg" alt="No Docker required">
+</p>
+
 ---
+
+Agency is an open-source management dashboard for AI agent teams. It connects to 7 LLM tools — Claude Code, Codex, Gemini, Aider, Goose, custom scripts, and SDK agents — and gives you a unified pipeline to see what your agents observe, review their proposals, and make decisions. Everything is stored as markdown files with YAML frontmatter. No database, no Docker, no build step.
 
 <p align="center">
   <img src="screenshots/inbox.png" width="800" alt="Agency mission control dashboard with fleet status, pipeline pulse, attention queue, and activity feed">
 </p>
 
-## Who This Is For
+## Who is this for?
 
 Agency is for people who treat AI agents like team members on a project — not disposable tools you spin up and throw away.
 
@@ -24,13 +34,13 @@ If you have a codebase where an agent handles docs, another watches for quality 
 
 If you have multiple projects, each with their own agent team, Agency manages all of them from one dashboard. Same pipeline, same governance, separate groups.
 
-## The Problem
+## What problem does Agency solve?
 
 You have AI agents. Maybe they use Claude Code. Maybe Codex, Gemini, Aider, or something custom. They run in different directories, produce output in different ways, and you're alt-tabbing between terminals to figure out what's happening.
 
 Agency gives you a single place to see what your agents are doing, what they've found, and what they need from you.
 
-## What You Get
+## What do you get?
 
 ### A pipeline that turns agent noise into action
 
@@ -55,7 +65,7 @@ The home screen gives you everything at a glance: which agents are healthy, what
 
 Approve, defer, or reject proposals inline — no clicking through to separate pages unless you want the details.
 
-### Works with whatever LLM tools you already use
+### Which LLM tools does it support?
 
 Agency supports **Claude Code, OpenAI Codex, Google Gemini, Aider, Goose, custom scripts**, and an SDK mode for agents you run yourself. Different agents in the same group can use different tools — Agency handles the differences.
 
@@ -71,7 +81,7 @@ Each agent gets a profile page with a name, title, emoji avatar, optional headsh
   <img src="screenshots/agent-profile.png" width="800" alt="Agent profile with identity, timeline, and schedule">
 </p>
 
-### Scheduled dispatch
+### How does scheduling work?
 
 Set agents to run on schedules — daily at a specific time, or every few hours. Agency installs a lightweight system timer (no Docker, no cron hacks) and handles the rest. Each run gets logged so you can see exactly what happened.
 
@@ -139,4 +149,4 @@ python -m pytest tests/ -v
 
 ## License
 
-MIT
+AGPL-3.0 — free to use, modify, and distribute. All derivative works must remain open source under the same license. See [LICENSE](LICENSE) for details.
