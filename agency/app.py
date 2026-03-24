@@ -253,40 +253,37 @@ def update_frontmatter_field(filepath: Path, field: str, value: str) -> None:
     filepath.write_text(raw)
 
 
-def update_decision_execution(decision_path: Path, updates: dict) -> None:
-    """Update execution fields in a decision file's frontmatter."""
+def update_decision_execution(decision_path: Path, field: str, value) -> None:
+    """Update execution_status (or other top-level field) in a decision file."""
     raw = decision_path.read_text()
     meta, body = parse_frontmatter(raw)
-    if "execution" not in meta:
-        meta["execution"] = {}
-    meta["execution"].update(updates)
-    # Rewrite the file with updated frontmatter
+    meta[field] = value
     frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
     decision_path.write_text(f"---\n{frontmatter}\n---\n\n{body}\n")
 
 
-def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
-                              proposal_slug: str, group_key: str = "") -> None:
-    """Background task: spawn an agent to execute an approved decision."""
+def execute_decision(decision_path: Path, group_path: Path, agent: str,
+                     proposal_slug: str, group_key: str = "") -> None:
+    """Background task: dispatch agent to act on a decision's answers."""
     now = datetime.now(timezone.utc).isoformat()
-    update_decision_execution(decision_path, {"status": "executing", "started_at": now})
+    update_decision_execution(decision_path, "execution_status", "running")
 
-    # Build the execution prompt
     prompt = (
-        f"An approved decision needs to be executed.\n\n"
+        f"A decision has been made on your proposal.\n\n"
         f"Read the decision file at agents/shared/decisions/{decision_path.name}\n"
         f"Read the linked proposal at agents/shared/proposals/{proposal_slug}.md\n\n"
-        f"Execute the proposed action described in the proposal. Do the work.\n\n"
-        f"When done, update the decision file's execution section:\n"
-        f"- Set status to: success, success_with_exceptions, or failed\n"
-        f"- Set completed_at to the current ISO timestamp\n"
-        f"- Write a summary of what you did (or why you couldn't)\n\n"
-        f"Use the update format: read the file, modify the execution fields in the "
-        f"YAML frontmatter, write it back. The execution fields are under the "
-        f"'execution' key in the frontmatter."
+        f"The decision file contains an 'answers' section in the frontmatter with "
+        f"the human's responses to each question you asked in the proposal.\n\n"
+        f"Act on these answers:\n"
+        f"- If approved/accepted: execute the proposed action\n"
+        f"- If deferred: acknowledge and schedule for later\n"
+        f"- If rejected: close the loop gracefully, do not proceed\n"
+        f"- For choice/free-response answers: use the human's input to guide your work\n\n"
+        f"When done, update the decision file's 'execution_status' field in the "
+        f"YAML frontmatter to one of: complete, failed\n"
+        f"Also set 'execution_summary' to a brief description of what you did."
     )
 
-    # Resolve integration (filesystem detection first, then config)
     g = GROUPS.get(group_key, {})
     grp = {"path": group_path, "agents_full": g.get("_agents_normalized", [])}
 
@@ -300,7 +297,6 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
     out_path = log_dir / f"{agent}-exec-{ts}.out"
     err_path = log_dir / f"{agent}-exec-{ts}.err"
 
-    # Write prompt to temp file for integration
     prompt_file = log_dir / f"{agent}-exec-{ts}.prompt"
     prompt_file.write_text(prompt)
 
@@ -308,14 +304,11 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
         agent_integration = get_agent_integration(grp, agent)
 
         if not agent_integration.supports_execution:
-            update_decision_execution(decision_path, {
-                "status": "failed",
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-                "summary": f"Integration '{agent_integration.name}' does not support execution.",
-            })
+            update_decision_execution(decision_path, "execution_status", "failed")
+            update_decision_execution(decision_path, "execution_summary",
+                                      f"Integration '{agent_integration.name}' does not support execution.")
             return
 
-        # For script integration, apply config from agent's config entry
         if hasattr(agent_integration, 'with_config'):
             for a in g.get("_agents_normalized", []):
                 if a["name"] == agent and "integration_config" in a:
@@ -326,29 +319,20 @@ def execute_approved_decision(decision_path: Path, group_path: Path, agent: str,
         out_path.write_text(result.stdout)
         err_path.write_text(result.stderr)
 
-        # Check if the agent updated the status itself
         updated_meta, _ = parse_frontmatter(decision_path.read_text())
-        exec_status = updated_meta.get("execution", {}).get("status", "")
-        if exec_status not in ("success", "success_with_exceptions", "failed"):
-            completed = datetime.now(timezone.utc).isoformat()
+        exec_status = updated_meta.get("execution_status", "")
+        if exec_status not in ("complete", "failed"):
             if result.exit_code == 0:
-                update_decision_execution(decision_path, {
-                    "status": "success",
-                    "completed_at": completed,
-                    "summary": "Agent completed execution (status inferred from exit code).",
-                })
+                update_decision_execution(decision_path, "execution_status", "complete")
+                update_decision_execution(decision_path, "execution_summary",
+                                          "Agent completed execution (inferred from exit code).")
             else:
-                update_decision_execution(decision_path, {
-                    "status": "failed",
-                    "completed_at": completed,
-                    "summary": f"Agent exited with code {result.exit_code}.",
-                })
+                update_decision_execution(decision_path, "execution_status", "failed")
+                update_decision_execution(decision_path, "execution_summary",
+                                          f"Agent exited with code {result.exit_code}.")
     except Exception as e:
-        update_decision_execution(decision_path, {
-            "status": "failed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "summary": f"Execution error: {e}",
-        })
+        update_decision_execution(decision_path, "execution_status", "failed")
+        update_decision_execution(decision_path, "execution_summary", f"Execution error: {e}")
     finally:
         if prompt_file.exists():
             prompt_file.unlink()
@@ -2279,21 +2263,29 @@ async def proposal_detail(request: Request, group: str, slug: str):
 @app.post("/{group}/proposals/{slug}/decide", response_class=HTMLResponse)
 async def proposal_decide(request: Request, group: str, slug: str,
                            background_tasks: BackgroundTasks):
-    """Create a decision for a proposal."""
+    """Create a decision by answering a proposal's questions."""
     g = get_group(group)
     decisions_dir = g["shared"] / "decisions"
     proposals_dir = g["shared"] / "proposals"
 
-    form = await request.form()
-    decision_text = form.get("decision", "approved")
-    notes = form.get("notes", "")
-
-    # Read proposal to get origin_agent for execution
-    origin_agent = ""
+    # Read proposal to get questions and origin_agent
     cpath = proposals_dir / f"{slug}.md"
-    if cpath.exists():
-        cmeta, _ = parse_frontmatter(cpath.read_text())
-        origin_agent = cmeta.get("origin_agent", "")
+    if not cpath.exists():
+        raise HTTPException(404, "Proposal not found")
+    cmeta, _ = parse_frontmatter(cpath.read_text())
+    origin_agent = cmeta.get("origin_agent", "")
+    questions = cmeta.get("questions", [])
+
+    form = await request.form()
+
+    # Build answers from form data
+    answers = {}
+    for q in questions:
+        key = f"answer_{q['id']}"
+        if q.get("type") == "choice" and q.get("multi"):
+            answers[q["id"]] = form.getlist(key)
+        else:
+            answers[q["id"]] = form.get(key, "")
 
     agency_cfg = get_agency_config()
     decided_by = agency_cfg.get("decided_by", "admin")
@@ -2304,34 +2296,24 @@ async def proposal_decide(request: Request, group: str, slug: str,
         "proposal": f"{slug}.md",
         "decided_by": decided_by,
         "date": today,
-        "decision": decision_text,
+        "answers": answers,
+        "execution_status": "pending",
     }
 
-    # Add execution block for approved decisions
-    if decision_text == "approved" and origin_agent:
-        meta["execution"] = {
-            "status": "pending",
-            "agent": origin_agent,
-            "started_at": None,
-            "completed_at": None,
-            "summary": None,
-        }
-
     frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-    decision_content = f"---\n{frontmatter}\n---\n\n{notes}\n"
+    decision_content = f"---\n{frontmatter}\n---\n"
 
     decisions_dir.mkdir(exist_ok=True)
     decision_path = decisions_dir / f"{slug}.md"
     decision_path.write_text(decision_content)
 
-    # Update proposal status
-    if cpath.exists():
-        update_frontmatter_field(cpath, "status", decision_text)
+    # Update proposal status to decided
+    update_frontmatter_field(cpath, "status", "decided")
 
-    # Auto-dispatch agent for approved decisions
-    if decision_text == "approved" and origin_agent:
+    # Always dispatch agent to act on the decision
+    if origin_agent:
         background_tasks.add_task(
-            execute_approved_decision,
+            execute_decision,
             decision_path, Path(g["path"]), origin_agent, slug,
             group_key=group,
         )
@@ -2399,23 +2381,25 @@ async def decision_retry(request: Request, group: str, slug: str,
         raise HTTPException(404, "Decision not found")
 
     meta, _ = parse_frontmatter(decision_path.read_text())
-    execution = meta.get("execution", {})
-    agent = execution.get("agent", "")
     proposal_slug = (meta.get("proposal", "") or "").replace(".md", "")
+
+    # Look up origin_agent from the linked proposal
+    agent = ""
+    if proposal_slug:
+        proposal_path = g["shared"] / "proposals" / f"{proposal_slug}.md"
+        if proposal_path.exists():
+            pmeta, _ = parse_frontmatter(proposal_path.read_text())
+            agent = pmeta.get("origin_agent", "")
 
     if not agent or not proposal_slug:
         raise HTTPException(400, "Decision has no execution agent or linked proposal")
 
     # Reset execution status
-    update_decision_execution(decision_path, {
-        "status": "pending",
-        "started_at": None,
-        "completed_at": None,
-        "summary": None,
-    })
+    update_decision_execution(decision_path, "execution_status", "pending")
+    update_decision_execution(decision_path, "execution_summary", None)
 
     background_tasks.add_task(
-        execute_approved_decision,
+        execute_decision,
         decision_path, Path(g["path"]), agent, proposal_slug,
         group_key=group,
     )
