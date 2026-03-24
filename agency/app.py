@@ -2360,7 +2360,16 @@ async def decision_detail(request: Request, group: str, slug: str):
                 if obs_path.exists():
                     pipeline_observations.append({"slug": obs_slug, "filename": obs_file})
 
-    execution = meta.get("execution", {})
+    execution_status = meta.get("execution_status", "")
+    execution_summary = meta.get("execution_summary", "")
+
+    # Load proposal questions for rendering answers
+    questions = []
+    if proposal_slug:
+        proposal_path = g["shared"] / "proposals" / f"{proposal_slug}.md"
+        if proposal_path.exists():
+            pmeta, _ = parse_frontmatter(proposal_path.read_text())
+            questions = pmeta.get("questions", [])
 
     return templates.TemplateResponse("decision_detail.html", {
         "request": request,
@@ -2371,7 +2380,10 @@ async def decision_detail(request: Request, group: str, slug: str):
         "title": extract_display_title(body, slug),
         "pipeline_observations": pipeline_observations,
         "proposal_slug": proposal_slug,
-        "execution": execution,
+        "execution_status": execution_status,
+        "execution_summary": execution_summary,
+        "questions": questions,
+        "answers": meta.get("answers", {}),
     })
 
 

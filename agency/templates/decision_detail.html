@@ -11,7 +11,7 @@
 <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
   <div class="flex items-start justify-between mb-4">
     <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100">{{ title }}</h1>
-    <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">{{ meta.get("decision", "") }}</span>
+    {{ "decided" | status_badge }}
   </div>
 
   <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500 dark:text-gray-400 mb-6 pb-4 border-b border-gray-100 dark:border-gray-700">
@@ -27,7 +27,6 @@
       <div class="flex flex-wrap items-center gap-1">
         {% for lc in pipeline_observations %}
         <a href="/{{ group }}/observations/{{ lc.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 font-medium hover:bg-amber-200 transition-colors text-xs">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
           {{ lc.slug | replace("-", " ") }}
         </a>
         {% endfor %}
@@ -36,16 +35,58 @@
       {% endif %}
       {% if proposal_slug %}
       <a href="/{{ group }}/proposals/{{ proposal_slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-purple-100 text-purple-800 font-medium hover:bg-purple-200 transition-colors">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
         {{ proposal_slug | replace("-", " ") | title }}
       </a>
       <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       {% endif %}
       <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-100 text-emerald-800 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         This decision
       </span>
     </div>
+  </div>
+  {% endif %}
+
+  <!-- Answers -->
+  {% if questions and answers %}
+  <div class="mb-6">
+    <h3 class="text-sm font-semibold text-purple-700 dark:text-purple-400 mb-3">Answers</h3>
+    {% for q in questions %}
+    <div class="border border-gray-200 dark:border-gray-600 rounded-lg p-4 mb-3 bg-gray-50 dark:bg-gray-700/50">
+      <div class="font-medium text-gray-500 dark:text-gray-400 mb-2">{{ loop.index }}. {{ q.prompt }}</div>
+
+      {% set answer = answers.get(q.id, "") %}
+
+      {% if q.type == "boolean" %}
+      <div class="inline-block px-3 py-1 rounded-md text-sm font-medium
+        {% if answer == 'approved' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300
+        {% elif answer == 'deferred' %}bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300
+        {% elif answer == 'rejected' %}bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300
+        {% else %}bg-gray-100 text-gray-600{% endif %}">
+        {{ answer | title }}
+      </div>
+
+      {% elif q.type == "choice" %}
+      {% if answer is string %}
+      <div class="inline-flex items-center px-3 py-2 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-md">
+        <span class="text-sm font-medium text-emerald-700 dark:text-emerald-300">{{ answer }}</span>
+      </div>
+      {% else %}
+      <div class="flex flex-col gap-1">
+        {% for a in answer %}
+        <div class="inline-flex items-center px-3 py-2 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-md">
+          <span class="text-sm font-medium text-emerald-700 dark:text-emerald-300">{{ a }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% elif q.type == "free-response" %}
+      <div class="px-3 py-2 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-md text-sm text-gray-700 dark:text-gray-300">
+        {{ answer }}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
   {% endif %}
 
@@ -55,49 +96,29 @@
   </div>
   {% endif %}
 
-  {% if execution %}
   <!-- Execution Status -->
+  {% if execution_status %}
   <div class="mt-6 p-4 rounded-lg border
-    {% if execution.status == 'success' %}bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800
-    {% elif execution.status == 'success_with_exceptions' %}bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800
-    {% elif execution.status == 'failed' %}bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800
-    {% elif execution.status == 'executing' %}bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800
-    {% else %}bg-gray-50 border-gray-200 dark:bg-gray-700/50 dark:border-gray-600
-    {% endif %}">
+    {% if execution_status == 'complete' %}bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800
+    {% elif execution_status == 'failed' %}bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800
+    {% elif execution_status == 'running' %}bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800
+    {% else %}bg-gray-50 border-gray-200 dark:bg-gray-700/50 dark:border-gray-600{% endif %}">
 
-    <div class="flex items-center justify-between mb-3">
+    <div class="flex items-center justify-between mb-2">
       <div class="flex items-center gap-2">
         <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Execution</h3>
-
-        {% if execution.status == 'pending' %}
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-300">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          Pending
-        </span>
-        {% elif execution.status == 'executing' %}
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-200">
-          <svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          Executing
-        </span>
-        {% elif execution.status == 'success' %}
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-200 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-200">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-          Success
-        </span>
-        {% elif execution.status == 'success_with_exceptions' %}
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-200 text-amber-800 dark:bg-amber-800 dark:text-amber-200">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
-          Success with exceptions
-        </span>
-        {% elif execution.status == 'failed' %}
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-          Failed
-        </span>
+        {% if execution_status == 'pending' %}
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-300">Pending</span>
+        {% elif execution_status == 'running' %}
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-200">Running</span>
+        {% elif execution_status == 'complete' %}
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-200 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-200">Complete</span>
+        {% elif execution_status == 'failed' %}
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-200 text-red-800 dark:bg-red-800 dark:text-red-200">Failed</span>
         {% endif %}
       </div>
 
-      {% if execution.status in ('failed', 'success_with_exceptions') %}
+      {% if execution_status in ('failed',) %}
       <form method="POST" action="/{{ group }}/decisions/{{ slug }}/retry" class="inline">
         <button type="submit" class="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
                 onclick="return confirm('Re-execute this decision?')">
@@ -107,30 +128,15 @@
       {% endif %}
     </div>
 
-    <div class="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-      {% if execution.agent %}
-      <div>Agent: <strong>{{ execution.agent }}</strong></div>
-      {% endif %}
-      {% if execution.started_at %}
-      <div>Started: <strong>{{ execution.started_at }}</strong></div>
-      {% endif %}
-      {% if execution.completed_at %}
-      <div>Completed: <strong>{{ execution.completed_at }}</strong></div>
-      {% endif %}
-    </div>
-
-    {% if execution.summary %}
-    <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
-      <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Summary</div>
-      <div class="prose dark:prose-invert prose-sm max-w-none">
-        {{ execution.summary | render_md }}
-      </div>
+    {% if execution_summary %}
+    <div class="prose dark:prose-invert prose-sm max-w-none">
+      {{ execution_summary | render_md }}
     </div>
     {% endif %}
 
-    {% if execution.status == 'executing' %}
-    <div class="mt-3 text-xs text-blue-600 dark:text-blue-400">
-      Agent is working on this now. Refresh the page to check progress.
+    {% if execution_status == 'running' %}
+    <div class="mt-2 text-xs text-blue-600 dark:text-blue-400">
+      Agent is working on this now. Refresh to check progress.
     </div>
     {% endif %}
   </div>
