@@ -178,8 +178,11 @@ Agents can be specified as bare strings (shorthand) or dicts (full form):
 
 - `"product"` → `{"name": "product", "integration": "<group default>"}`
 - `{"name": "bot", "integration": "script", "integration_config": {...}}` → explicit integration
+- `{"name": "pm", "path": "/shared/agents/pm"}` → shared agent with external path
 
 Config normalization happens at load time. The shorthand is never rewritten to disk.
+
+Agents with a `path` override resolve their directory from the configured path instead of `{group_path}/{name}`. This allows the same agent directory to be shared across multiple groups — useful for program-manager-style agents that span projects. All groups that reference the agent can read and edit its files.
 
 ### Dispatch Rule Fields
 
@@ -341,6 +344,8 @@ decision: approved             # approved, deferred, rejected
 - `reload_groups()` updates the global `GROUPS` dict after changes, normalizes agent lists
 - `get_agency_config()` returns Agency settings with backward-compatible defaults
 - `normalize_agents()` (in `agency/config.py`) converts bare string agent lists to dicts with integration info
+- `get_agent_dir(g, agent_name)` (in `agency/config.py`) resolves agent directory — checks for `path` override in config, falls back to `g["path"] / name`
+- `get_allowed_roots(g)` (in `agency/config.py`) returns allowed filesystem roots for path validation — group path + any external agent paths
 
 ### Integration System
 - `agency/integrations/__init__.py` — `BaseIntegration` base class, `REGISTRY`, `get_integration()`, `detect_integration()`
