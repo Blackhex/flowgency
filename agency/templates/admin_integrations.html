@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Integrations — {{ agency_title }}{% endblock %}
+{% block content %}
+<div class="max-w-3xl">
+  <h1 class="text-2xl font-bold text-gray-900 mb-6">Integrations</h1>
+
+  {% if restart_needed %}
+  <div class="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
+    <div class="text-sm text-amber-800">Integration changes require a service restart to take effect.</div>
+    <form method="POST" action="/admin/integrations/restart" class="inline">
+      <button type="submit" class="px-3 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
+              onclick="return confirm('Restart the Agency service?')">
+        Restart Service
+      </button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Installed</h2>
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th class="px-4 py-3">Integration</th>
+            <th class="px-4 py-3">Author</th>
+            <th class="px-4 py-3">Identity File</th>
+            <th class="px-4 py-3">Execution</th>
+            <th class="px-4 py-3">AI Backend</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for i in installed %}
+          <tr>
+            <td class="px-4 py-3">{{ i.name | integration_badge }}</td>
+            <td class="px-4 py-3 text-xs text-gray-500">{{ i.author }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ i.identity_file }}</td>
+            <td class="px-4 py-3">
+              {% if i.supports_execution %}<span class="text-emerald-600">&#10003;</span>{% else %}<span class="text-gray-300">—</span>{% endif %}
+            </td>
+            <td class="px-4 py-3">
+              {% if i.supports_ai_backend %}<span class="text-emerald-600">&#10003;</span>{% else %}<span class="text-gray-300">—</span>{% endif %}
+            </td>
+            <td class="px-4 py-3 text-right">
+              <form method="POST" action="/admin/integrations/unregister" class="inline">
+                <input type="hidden" name="module_path" value="{{ i.module_path }}">
+                <button type="submit" class="text-xs text-red-600 hover:text-red-800"
+                        onclick="return confirm('Unregister {{ i.name }}?')">Unregister</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if available %}
+  <div class="mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Available to Register</h2>
+    <p class="text-sm text-gray-500 mb-3">Integration files found in subdirectories that aren't registered yet.</p>
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th class="px-4 py-3">Module</th>
+            <th class="px-4 py-3">Author</th>
+            <th class="px-4 py-3">File</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for a in available %}
+          <tr>
+            <td class="px-4 py-3 font-mono text-xs">{{ a.module_path }}</td>
+            <td class="px-4 py-3 text-xs text-gray-500">{{ a.author }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ a.filename }}</td>
+            <td class="px-4 py-3 text-right">
+              <form method="POST" action="/admin/integrations/register" class="inline">
+                <input type="hidden" name="module_path" value="{{ a.module_path }}">
+                <button type="submit" class="px-3 py-1 text-xs font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 transition-colors">Register</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="mb-8">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Available to Register</h2>
+    <div class="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400 text-sm">
+      No unregistered integrations found. Drop a <code>.py</code> file in a subdirectory of <code>agency/integrations/</code> to add one.
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="text-sm text-gray-500">
+    <a href="#" class="text-indigo-600 hover:text-indigo-800">How to create an integration →</a>
+  </div>
+</div>
+{% endblock %}

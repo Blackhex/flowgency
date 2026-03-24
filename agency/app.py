@@ -1200,23 +1200,89 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
 @app.get("/admin/", response_class=HTMLResponse)
 async def admin_settings_page(request: Request):
     """Admin app settings page."""
-    # Build full integration info for the installed integrations table
-    all_integrations_info = []
-    for name, i in REGISTRY.items():
-        all_integrations_info.append({
-            "name": name,
-            "display_name": i.display_name,
-            "supports_execution": i.supports_execution,
-            "supports_ai_backend": i.supports_ai_backend,
-            "identity_file": i.identity_filename() if hasattr(i, 'identity_filename') and callable(i.identity_filename) else "—",
-        })
     return templates.TemplateResponse("admin_settings.html", {
         "request": request,
         **admin_context("settings"),
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
         "ai_backend": CONFIG.get("agency", {}).get("ai_backend", "claude-code"),
-        "all_integrations_info": all_integrations_info,
+        "installed_count": len(REGISTRY),
     })
+
+
+def _read_integration_config():
+    """Read integration module list from config."""
+    from agency.integrations import _read_config
+    return _read_config()
+
+
+@app.get("/admin/integrations", response_class=HTMLResponse)
+async def admin_integrations_page(request: Request):
+    """Admin integrations management page."""
+    from agency.integrations import scan_available
+
+    config_modules = _read_integration_config()
+    module_to_author = {}
+    for mod in config_modules:
+        parts = mod.split(".")
+        if len(parts) == 2:
+            module_to_author[parts[1]] = parts[0]
+
+    installed = []
+    for name, i in REGISTRY.items():
+        module_name = name.replace("-", "_")
+        author = module_to_author.get(module_name, "unknown")
+        installed.append({
+            "name": name,
+            "display_name": i.display_name,
+            "module_path": f"{author}.{module_name}",
+            "supports_execution": i.supports_execution,
+            "supports_ai_backend": i.supports_ai_backend,
+            "identity_file": i.identity_filename() if hasattr(i, 'identity_filename') and callable(i.identity_filename) else "—",
+            "author": author,
+        })
+
+    available = scan_available()
+
+    return templates.TemplateResponse("admin_integrations.html", {
+        "request": request,
+        **admin_context("integrations"),
+        "installed": installed,
+        "available": available,
+        "restart_needed": request.query_params.get("restart") == "1",
+    })
+
+
+@app.post("/admin/integrations/register", response_class=HTMLResponse)
+async def admin_integrations_register(request: Request):
+    """Register an available integration."""
+    from agency.integrations import register_integration
+    form = await request.form()
+    module_path = form.get("module_path", "")
+    if module_path:
+        register_integration(module_path)
+    return RedirectResponse("/admin/integrations?restart=1", status_code=303)
+
+
+@app.post("/admin/integrations/unregister", response_class=HTMLResponse)
+async def admin_integrations_unregister(request: Request):
+    """Unregister an installed integration."""
+    from agency.integrations import unregister_integration
+    form = await request.form()
+    module_path = form.get("module_path", "")
+    if module_path:
+        unregister_integration(module_path)
+    return RedirectResponse("/admin/integrations?restart=1", status_code=303)
+
+
+@app.post("/admin/integrations/restart", response_class=HTMLResponse)
+async def admin_integrations_restart(request: Request):
+    """Restart the agency service to apply integration changes."""
+    import subprocess
+    try:
+        subprocess.Popen(["systemctl", "--user", "restart", "agency.service"])
+    except Exception:
+        pass
+    return RedirectResponse("/admin/integrations", status_code=303)
 
 
 @app.get("/admin/dispatch", response_class=HTMLResponse)
