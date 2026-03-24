@@ -165,3 +165,22 @@ def test_validate_file_access_rejects_unallowed_path(tmp_path):
     with pytest.raises(HTTPException) as exc_info:
         validate_file_access(sneaky, tmp_path / "group", allowed_roots=[])
     assert exc_info.value.status_code == 403
+
+
+# Task 5: Round-trip integration test for shared agent path
+
+def test_normalize_agents_round_trip_with_path():
+    """Ensure path field survives normalization and is accessible via agents_full."""
+    from agency.config import normalize_agents, get_agent_dir
+    from pathlib import Path
+
+    raw = [
+        "product",
+        {"name": "pm", "path": "/shared/agents/pm", "integration": "codex"},
+    ]
+    normalized = normalize_agents(raw, "claude-code")
+
+    g = {"path": Path("/groups/newsletter"), "agents_full": normalized}
+
+    assert get_agent_dir(g, "product") == Path("/groups/newsletter/product")
+    assert get_agent_dir(g, "pm") == Path("/shared/agents/pm")
