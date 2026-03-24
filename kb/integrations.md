@@ -68,4 +68,4 @@ Agency's integration system is extensible. To add a new LLM tool:
 3. Call `_register(YourIntegration())` at module level
 4. Import in `agency/integrations/__init__.py`
 
-See existing integrations for examples.
+See the full guide: **[Adding Integrations](adding-integrations.md)** — includes a complete template, sidecar vs. frontmatter guidance, testing instructions, and a walkthrough of submitting your integration as a PR.

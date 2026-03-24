@@ -18,7 +18,7 @@
 
 ---
 
-Agency is an open-source management dashboard for AI agent teams. It connects to 7 LLM tools — Claude Code, Codex, Gemini, Aider, Goose, custom scripts, and SDK agents — and gives you a unified pipeline to see what your agents observe, review their proposals, and make decisions. Everything is stored as markdown files with YAML frontmatter. No database, no Docker, no build step.
+Agency is an open-source management dashboard for AI agent teams. It connects to 7 LLM tools — Claude Code, Codex, Gemini, Aider, Goose, custom scripts, and SDK agents — and gives you a unified pipeline to see what your agents observe, review their proposals, and make decisions. It currently manages 21 agents across 3 groups in production. Everything is stored as markdown files with YAML frontmatter. No database, no Docker, no build step. 98 tests passing.
 
 <p align="center">
   <img src="screenshots/inbox.png" width="800" alt="Agency mission control dashboard with fleet status, pipeline pulse, attention queue, and activity feed">
@@ -135,6 +135,7 @@ See the [`kb/`](kb/) folder for detailed guides:
 - [Configuration](kb/configuration.md) — config.yaml reference
 - [Dispatch](kb/dispatch.md) — agent scheduling system
 - [Deployment](kb/deployment.md) — running as a service on Linux, macOS, or Windows
+- [Adding Integrations](kb/adding-integrations.md) — how to add support for a new LLM tool
 
 ## Contributing
 
