@@ -7,7 +7,7 @@ class TestBuildPipelineStats:
     def test_counts_items_per_stage(self):
         observations = [{"status": "open"}, {"status": "open"}, {"status": "archived"}]
         proposals = [{"status": "proposed"}]
-        decisions = [{"decision": "approved"}, {"decision": "deferred"}]
+        decisions = [{"answers": {"approve": "approved"}}, {"answers": {"approach": "Option A"}}]
         result = build_pipeline_stats(observations, proposals, decisions)
         assert result["observations"]["total"] == 3
         assert result["proposals"]["total"] == 1
@@ -36,7 +36,7 @@ class TestBuildPipelineStats:
     def test_healthy_flow(self):
         observations = [{"status": "open"}] * 3
         proposals = [{"status": "proposed"}] * 2
-        decisions = [{"decision": "approved"}] * 2
+        decisions = [{"answers": {"approve": "approved"}}] * 2
         result = build_pipeline_stats(observations, proposals, decisions)
         assert result["flow_status"] == "healthy"
 
