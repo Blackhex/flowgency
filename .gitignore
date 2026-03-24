@@ -9,3 +9,5 @@ agents/
 agency.service
 docs/
 reports/
+.worktrees/
+.superpowers/
