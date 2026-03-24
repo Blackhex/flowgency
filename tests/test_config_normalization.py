@@ -139,3 +139,29 @@ def test_get_allowed_roots_includes_external_paths(tmp_path):
     roots = get_allowed_roots(g)
     assert tmp_path / "group" in roots
     assert external in roots
+
+
+# Task 4: Tests for validate_file_access() with multiple roots
+
+def test_validate_file_access_allows_external_root(tmp_path):
+    """validate_file_access should accept files under any allowed root."""
+    from agency.app import validate_file_access
+    external = tmp_path / "external" / "pm"
+    external.mkdir(parents=True)
+    test_file = external / "memory.md"
+    test_file.touch()
+    # Should not raise when external root is in allowed_roots
+    validate_file_access(test_file, tmp_path / "group", allowed_roots=[external])
+
+
+def test_validate_file_access_rejects_unallowed_path(tmp_path):
+    """validate_file_access should reject files not under any allowed root."""
+    from agency.app import validate_file_access
+    from fastapi import HTTPException
+    import pytest
+    sneaky = tmp_path / "sneaky" / "file.md"
+    sneaky.parent.mkdir(parents=True)
+    sneaky.touch()
+    with pytest.raises(HTTPException) as exc_info:
+        validate_file_access(sneaky, tmp_path / "group", allowed_roots=[])
+    assert exc_info.value.status_code == 403

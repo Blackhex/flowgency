@@ -226,12 +226,24 @@ def read_file(path: Path) -> str:
         return ""
 
 
-def validate_file_access(fpath: Path, base_path: Path) -> None:
-    """Validate file is within base_path. Raises HTTPException(403) if not."""
+def validate_file_access(fpath: Path, base_path: Path, allowed_roots: list[Path] | None = None) -> None:
+    """Validate file is within base_path or any allowed root. Raises HTTPException(403) if not."""
+    resolved = fpath.resolve()
+    # Check base path first
     try:
-        fpath.resolve().relative_to(base_path.resolve())
+        resolved.relative_to(base_path.resolve())
+        return
     except ValueError:
-        raise HTTPException(403, "Access denied")
+        pass
+    # Check additional allowed roots
+    if allowed_roots:
+        for root in allowed_roots:
+            try:
+                resolved.relative_to(root.resolve())
+                return
+            except ValueError:
+                continue
+    raise HTTPException(403, "Access denied")
 
 
 def update_frontmatter_field(filepath: Path, field: str, value: str) -> None:
