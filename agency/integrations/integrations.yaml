@@ -1,0 +1,8 @@
+integrations:
+  - agency.claude_code
+  - agency.codex
+  - agency.gemini
+  - agency.aider
+  - agency.goose
+  - agency.script
+  - agency.sdk

@@ -101,6 +101,7 @@ def write_sidecar(agent_dir: Path, meta: dict) -> None:
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 REGISTRY: dict[str, BaseIntegration] = {}
+INTEGRATIONS_DIR = Path(__file__).parent
 
 
 def _register(integration: BaseIntegration) -> None:
@@ -126,12 +127,101 @@ def detect_integration(agent_dir: Path) -> BaseIntegration | None:
     return None
 
 
-# Import all integrations to trigger registration.
-# Each module calls _register() at import time.
-from agency.integrations.agency.claude_code import ClaudeCodeIntegration  # noqa: E402, F401
-from agency.integrations.agency.codex import CodexIntegration  # noqa: E402, F401
-from agency.integrations.agency.gemini import GeminiIntegration  # noqa: E402, F401
-from agency.integrations.agency.aider import AiderIntegration  # noqa: E402, F401
-from agency.integrations.agency.goose import GooseIntegration  # noqa: E402, F401
-from agency.integrations.agency.script import ScriptIntegration  # noqa: E402, F401
-from agency.integrations.agency.sdk import SdkIntegration  # noqa: E402, F401
+def _get_config_path() -> Path:
+    """Path to integrations.yaml."""
+    return INTEGRATIONS_DIR / "integrations.yaml"
+
+
+def _read_config() -> list[str]:
+    """Read the list of integration module paths from config."""
+    config_path = _get_config_path()
+    if not config_path.exists():
+        return []
+    data = yaml.safe_load(config_path.read_text()) or {}
+    return data.get("integrations", [])
+
+
+def _write_config(modules: list[str]) -> None:
+    """Write the integration module list to config."""
+    config_path = _get_config_path()
+    data = {"integrations": modules}
+    content = yaml.dump(data, default_flow_style=False, sort_keys=False)
+    config_path.write_text(content)
+
+
+def load_integrations() -> None:
+    """Load integrations from integrations.yaml config."""
+    import importlib
+    import logging
+    logger = logging.getLogger("agency.integrations")
+
+    modules = _read_config()
+    if not modules:
+        # First run or missing config — create default
+        modules = [
+            "agency.claude_code", "agency.codex", "agency.gemini",
+            "agency.aider", "agency.goose", "agency.script", "agency.sdk",
+        ]
+        _write_config(modules)
+
+    for module_path in modules:
+        # module_path is like "agency.claude_code" → import "agency.integrations.agency.claude_code"
+        full_module = f"agency.integrations.{module_path}"
+        try:
+            importlib.import_module(full_module)
+        except Exception as e:
+            logger.warning(f"Failed to load integration '{module_path}': {e}")
+
+
+def scan_available() -> list[dict]:
+    """Scan subdirectories for integration files not yet in config.
+
+    Returns list of dicts: {"module_path": "author.name", "author": "author", "filename": "name.py"}
+    """
+    registered = set(_read_config())
+    available = []
+
+    for subdir in sorted(INTEGRATIONS_DIR.iterdir()):
+        if not subdir.is_dir() or subdir.name.startswith(("_", ".")):
+            continue
+        if subdir.name == "__pycache__":
+            continue
+        for py_file in sorted(subdir.glob("*.py")):
+            if py_file.name.startswith("_"):
+                continue
+            module_path = f"{subdir.name}.{py_file.stem}"
+            if module_path in registered:
+                continue
+            # Check if file likely contains a BaseIntegration subclass
+            try:
+                content = py_file.read_text()
+                if "BaseIntegration" in content and "_register" in content:
+                    available.append({
+                        "module_path": module_path,
+                        "author": subdir.name,
+                        "filename": py_file.name,
+                    })
+            except (OSError, UnicodeDecodeError):
+                continue
+
+    return available
+
+
+def register_integration(module_path: str) -> None:
+    """Add an integration to integrations.yaml."""
+    modules = _read_config()
+    if module_path not in modules:
+        modules.append(module_path)
+        _write_config(modules)
+
+
+def unregister_integration(module_path: str) -> None:
+    """Remove an integration from integrations.yaml."""
+    modules = _read_config()
+    if module_path in modules:
+        modules.remove(module_path)
+        _write_config(modules)
+
+
+# Load integrations on import
+load_integrations()

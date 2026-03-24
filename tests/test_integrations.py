@@ -88,3 +88,16 @@ def test_base_integration_defaults():
     assert ti.detect_priority == 100
     assert ti.default_config() == {}
     assert ti.validate_config({}) == []
+
+
+def test_load_integrations_from_config():
+    """Config-driven loading populates the registry."""
+    from agency.integrations import REGISTRY
+    assert len(REGISTRY) >= 7
+
+
+def test_integrations_yaml_exists():
+    """integrations.yaml config file exists."""
+    from agency.integrations import INTEGRATIONS_DIR
+    config_path = INTEGRATIONS_DIR / "integrations.yaml"
+    assert config_path.exists()
