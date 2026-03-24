@@ -2241,11 +2241,13 @@ async def proposal_detail(request: Request, group: str, slug: str):
                 break
 
     # Sync proposal status if a decision exists but status is stale
-    # (handles decisions created outside Agency, e.g., by agents directly)
-    if decision and meta.get("status") not in ("approved", "deferred", "rejected"):
-        new_status = decision["meta"].get("decision", "approved")
-        update_frontmatter_field(path, "status", new_status)
-        meta["status"] = new_status
+    if decision and meta.get("status") != "decided":
+        update_frontmatter_field(path, "status", "decided")
+        meta["status"] = "decided"
+
+    # Parse questions for template
+    questions = meta.get("questions", [])
+    decision_answers = decision["meta"].get("answers", {}) if decision else {}
 
     return templates.TemplateResponse("proposal_detail.html", {
         "request": request,
@@ -2257,6 +2259,8 @@ async def proposal_detail(request: Request, group: str, slug: str):
         "title": extract_display_title(body, slug),
         "linked_observations": linked,
         "decision": decision,
+        "questions": questions,
+        "answers": decision_answers,
     })
 
 
