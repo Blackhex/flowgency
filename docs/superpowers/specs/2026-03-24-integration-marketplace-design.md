@@ -57,6 +57,8 @@ integrations:
 
 Each entry is `{author}.{module_name}`, which maps to `agency/integrations/{author}/{module_name}.py`.
 
+The file lives at `agency/integrations/integrations.yaml` (alongside `__init__.py`).
+
 ### Startup Loading
 
 On app startup, `agency/integrations/__init__.py`:
@@ -144,53 +146,49 @@ TESTING:
   .venv/bin/python -m pytest tests/test_integration_contract.py -v -k "your_tool"
 """
 
-from agency.integrations import BaseIntegration, _register
+from pathlib import Path
+from agency.integrations import BaseIntegration, AgentIdentity, RunResult, _register
 
 
 class YourToolIntegration(BaseIntegration):
     """Integration for YourTool CLI."""
 
-    @property
-    def name(self) -> str:
-        """Short identifier used in config.yaml and UI badges.
-        Example: 'cursor', 'windsurf', 'continue'
-        """
-        return "your-tool"
+    # Short identifier used in config.yaml and UI badges.
+    # Example: 'cursor', 'windsurf', 'continue'
+    name = "your-tool"
 
-    @property
-    def native_file(self) -> str:
+    # Display name shown in the admin UI.
+    display_name = "Your Tool"
+
+    # Can Agency invoke this tool to execute prompts?
+    # True if the tool has a CLI that accepts a prompt/file.
+    supports_execution = False
+
+    # Can Agency use this tool as its own AI backbone?
+    # True if the tool has a non-interactive prompt mode.
+    supports_ai_backend = False
+
+    # Lower number = checked first during auto-detection.
+    # Use 100 (default) for most integrations.
+    detect_priority = 100
+
+    def identity_filename(self) -> str:
         """The identity/config file this tool uses natively.
         Agency reads/writes agent identity through this file.
         Example: 'CLAUDE.md', 'AGENTS.md', '.cursorrules'
         """
         return "YOUR_CONFIG_FILE"
 
-    @property
-    def supports_execution(self) -> bool:
-        """Can Agency invoke this tool to execute prompts?
-        True if the tool has a CLI that accepts a prompt/file.
-        False if the tool is IDE-only or has no scriptable interface.
-        """
-        return False
-
-    @property
-    def supports_ai_backend(self) -> bool:
-        """Can Agency use this tool as its own AI backbone?
-        True if the tool has a non-interactive prompt mode
-        that returns a text response.
-        """
-        return False
-
-    def detect(self, agent_dir) -> bool:
+    def detect(self, agent_dir: Path) -> bool:
         """Return True if agent_dir belongs to this tool.
-        Usually: check if native_file exists in the directory.
+        Usually: check if identity_filename exists in the directory.
 
         Example:
-            return (agent_dir / self.native_file).exists()
+            return (agent_dir / self.identity_filename()).exists()
         """
-        return (agent_dir / self.native_file).exists()
+        return (agent_dir / self.identity_filename()).exists()
 
-    def parse_identity(self, agent_dir):
+    def parse_identity(self, agent_dir: Path) -> AgentIdentity | None:
         """Read the agent's identity from its native file.
         Return an AgentIdentity(display_name, title, emoji, body).
 
@@ -199,27 +197,23 @@ class YourToolIntegration(BaseIntegration):
         read from .agency-meta.yaml sidecar file instead.
         See existing integrations for examples of both patterns.
         """
-        from agency.integrations import AgentIdentity
         # TODO: implement
         return AgentIdentity(display_name="", title="", emoji="", body="")
 
-    def save_identity(self, agent_dir, fields: dict) -> None:
-        """Write identity fields back to the native file or sidecar.
-        `fields` is a dict with keys like 'display_name', 'title', 'emoji'.
+    def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
+        """Write agent identity back to the native file or sidecar.
+        `identity` is an AgentIdentity dataclass with display_name,
+        title, emoji, and body fields.
         """
         pass  # TODO: implement
 
-    def save_definition(self, agent_dir, body: str) -> None:
-        """Write the agent definition body to the native file."""
-        pass  # TODO: implement
-
-    def run(self, agent_dir, prompt_file, timeout=300):
+    def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
         """Execute the tool with a prompt file. Return a RunResult.
         Only needed if supports_execution is True.
 
         Example:
-            from agency.integrations import RunResult
-            import subprocess
+            import subprocess, time
+            start = time.time()
             result = subprocess.run(
                 ["your-tool", "--prompt", str(prompt_file)],
                 cwd=str(agent_dir),
@@ -229,6 +223,7 @@ class YourToolIntegration(BaseIntegration):
                 exit_code=result.returncode,
                 stdout=result.stdout,
                 stderr=result.stderr,
+                duration_seconds=time.time() - start,
             )
         """
         raise NotImplementedError("This integration does not support execution")
@@ -254,11 +249,12 @@ Contents:
 ### Contract Test: `tests/test_integration_contract.py`
 
 A parametrized test that validates any registered integration:
-- Has all required properties (name, native_file, supports_execution, supports_ai_backend)
+- Has required class attributes (`name`, `supports_execution`, `supports_ai_backend`)
 - `name` is a non-empty string
-- `native_file` is a non-empty string
+- `identity_filename()` returns a non-empty string
 - `detect()` accepts a Path argument and returns bool
-- `parse_identity()` returns an AgentIdentity
+- `parse_identity()` accepts a Path and returns an `AgentIdentity` or None
+- `write_identity()` is callable
 - If `supports_execution` is True, `run()` is callable
 - Can be imported without side effects beyond registration
 
