@@ -21,14 +21,18 @@
 │   ├── config.py              # Shared config utilities (normalize_agents, agent_names)
 │   ├── __init__.py
 │   ├── integrations/          # LLM integration plugin system
-│   │   ├── __init__.py        # BaseIntegration, registry, sidecar helpers
-│   │   ├── claude_code.py     # Claude Code CLI (CLAUDE.md)
-│   │   ├── codex.py           # OpenAI Codex CLI (AGENTS.md)
-│   │   ├── gemini.py          # Google Gemini CLI (GEMINI.md)
-│   │   ├── aider.py           # Aider (.aider.conf.yml, CONVENTIONS.md)
-│   │   ├── goose.py           # Goose (.goosehints)
-│   │   ├── script.py          # Custom script (user command template)
-│   │   └── sdk.py             # File-contract-only (no execution)
+│   │   ├── __init__.py        # BaseIntegration, registry, config-driven loading
+│   │   ├── integrations.yaml  # Which integrations are loaded (managed by admin UI)
+│   │   ├── _template.py       # Scaffolding for new integrations
+│   │   ├── agency/            # Official integrations
+│   │   │   ├── claude_code.py
+│   │   │   ├── codex.py
+│   │   │   ├── gemini.py
+│   │   │   ├── aider.py
+│   │   │   ├── goose.py
+│   │   │   ├── script.py
+│   │   │   └── sdk.py
+│   │   └── {author}/          # Community integrations
 │   ├── dispatch/              # Dispatch system
 │   │   ├── run.py             # Python dispatch runner (replaces dispatch.sh)
 │   │   ├── install.py         # Platform-native timer installer
@@ -54,6 +58,7 @@
 │       ├── memory_view.html   # View/edit memory
 │       ├── admin.html         # Admin: redirects to settings
 │       ├── admin_settings.html # Admin: app settings + installed integrations table
+│       ├── admin_integrations.html # Admin: integration management + registration
 │       ├── admin_dispatch.html # Admin: dispatch timer management
 │       ├── admin_groups.html  # Admin: agent group list + management
 │       ├── admin_org_edit.html # Create/edit org + dispatch schedule + default integration
@@ -92,6 +97,8 @@ Agency uses a plugin system to support multiple LLM tools. Each integration is a
 3. **Detection** — identify whether an agent directory belongs to this tool
 4. **AI backbone** — optionally provide LLM access for Agency's own AI features
 
+Integrations are organized by author namespace: official integrations live in `agency/integrations/agency/`, and community integrations live in `agency/integrations/{author}/`. Which integrations are loaded is controlled by `agency/integrations/integrations.yaml`, managed through the admin UI at `/admin/integrations`.
+
 ### Shipped Integrations
 
 | Integration | Native File | Detect Signal | Execution | AI Backend |
@@ -115,6 +122,8 @@ When Agency needs to interact with an agent, it resolves the integration in this
 
 This ensures an agent with CLAUDE.md is always handled correctly, even if the group default is different.
 
+Only integrations listed in `integrations.yaml` are loaded at startup. The admin UI at `/admin/integrations` lets you register or unregister integrations without editing files directly.
+
 ### Sidecar Metadata
 
 Tools whose native files don't support YAML frontmatter (Codex, Gemini, Aider, Goose) store Agency metadata in `.agency-meta.yaml`:
@@ -127,10 +136,11 @@ emoji: "📦"
 
 ### Adding New Integrations
 
-1. Create `agency/integrations/your_tool.py`
-2. Subclass `BaseIntegration`, implement all methods
-3. Call `_register(YourIntegration())` at module level
-4. Import in `agency/integrations/__init__.py`
+1. Copy `agency/integrations/_template.py` to `agency/integrations/{author}/{your_tool}.py`
+2. Fill in all methods following the template's inline guidance
+3. Register the integration via the admin UI at `/admin/integrations`
+
+See `kb/contributing-integrations.md` for a complete walkthrough.
 
 ## Config Format
 
@@ -286,6 +296,10 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | POST | `/admin/orgs/{org}/agents/create` | Create new agent in org |
 | POST | `/admin/orgs/{org}/agents/{agent}/rename` | Rename agent directory |
 | POST | `/admin/orgs/{org}/agents/{agent}/delete` | Delete agent from org |
+| GET | `/admin/integrations` | Integration management page |
+| POST | `/admin/integrations/register` | Register an available integration |
+| POST | `/admin/integrations/unregister` | Unregister an installed integration |
+| POST | `/admin/integrations/restart` | Restart service to apply changes |
 
 ### Other Routes
 
