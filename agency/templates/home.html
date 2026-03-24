@@ -8,15 +8,15 @@
 {% if show_tips and 'pipeline' not in tips_dismissed %}
 <div class="mb-4 p-3 bg-agency-50 dark:bg-agency-950/40 border border-agency-200 dark:border-agency-800 rounded-lg relative">
   <div class="pr-10">
-    <div class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-0.5">How the pipeline works</div>
-    <div class="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+    <div class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-0.5">How the pipeline works</div>
+    <div class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
       Agents observe things and write <strong>observations</strong>.
       When observations converge, they become <strong>proposals</strong> for your review.
       You make <strong>decisions</strong> to approve, defer, or reject.
     </div>
     <form method="POST" action="/tips/hide-all" class="inline">
       <input type="hidden" name="redirect" value="/{{ group }}/">
-      <button type="submit" class="text-xs text-agency-500 hover:text-agency-700 dark:hover:text-agency-300 mt-1">Hide all tips</button>
+      <button type="submit" class="text-sm text-agency-500 hover:text-agency-700 dark:hover:text-agency-300 mt-1">Hide all tips</button>
     </form>
   </div>
   <form method="POST" action="/tips/dismiss" class="absolute top-2 right-2">
@@ -35,22 +35,22 @@
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
     {% for a in fleet_agents %}
     <a href="/{{ group }}/agents/{{ a.name }}"
-       class="inline-flex items-center gap-1 text-sm whitespace-nowrap rounded px-1.5 py-0.5 transition-colors
+       class="inline-flex items-center gap-1.5 text-base whitespace-nowrap rounded px-2 py-0.5 transition-colors
               {% if a.health == 'red' %}bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40
               {% elif a.health == 'amber' %}bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/40
               {% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
-      <span class="text-sm">{{ a.emoji or '~' }}</span>
-      <span class="{% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% else %}text-rose-500{% endif %} text-xs leading-none">&#9679;</span>
-      <span class="text-gray-700 dark:text-gray-300 text-sm">{{ a.display_name or a.name }}</span>
-      {% if a.open_observations %}<span class="font-mono text-xs text-amber-600 dark:text-amber-400">{{ a.open_observations }}</span>{% endif %}
+      <span class="text-base">{{ a.emoji or '~' }}</span>
+      <span class="{% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% else %}text-rose-500{% endif %} text-sm leading-none">&#9679;</span>
+      <span class="text-gray-700 dark:text-gray-300 text-base">{{ a.display_name or a.name }}</span>
+      {% if a.open_observations %}<span class="font-mono text-sm text-amber-600 dark:text-amber-400">{{ a.open_observations }}</span>{% endif %}
     </a>
     {% endfor %}
   </div>
-  <div class="mt-1.5 text-xs text-gray-500 dark:text-gray-400 font-mono">
+  <div class="mt-1.5 text-sm text-gray-500 dark:text-gray-400 font-mono">
     {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_agents|length - fleet_healthy > 0 %} · <span class="text-amber-600 dark:text-amber-400">{{ fleet_agents|length - fleet_healthy }} needs attention</span>{% endif %}
   </div>
   {% else %}
-  <div class="text-xs text-gray-400 dark:text-gray-500">No agents configured</div>
+  <div class="text-sm text-gray-400 dark:text-gray-500">No agents configured</div>
   {% endif %}
 </div>
 
@@ -60,18 +60,18 @@
 <div class="bg-gray-50 dark:bg-gray-800/50 border rounded-lg px-4 py-3 mb-3
             {% if pipeline.flow_status == 'bottleneck' %}border-amber-300 dark:border-amber-700{% else %}border-emerald-200 dark:border-emerald-800{% endif %}">
   <div class="flex items-center justify-between gap-2 mb-1">
-    <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Pipeline</span>
+    <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Pipeline</span>
     {% if pipeline.flow_status == 'bottleneck' %}
-    <span class="text-xs font-mono text-amber-600 dark:text-amber-400">bottleneck</span>
+    <span class="text-sm font-mono text-amber-600 dark:text-amber-400">bottleneck</span>
     {% else %}
-    <span class="text-xs font-mono text-emerald-600 dark:text-emerald-400">healthy</span>
+    <span class="text-sm font-mono text-emerald-600 dark:text-emerald-400">healthy</span>
     {% endif %}
   </div>
   <div class="flex items-center justify-between">
     {# Observations #}
     <div class="flex-1 text-center">
-      <div class="text-xs text-blue-600 dark:text-blue-400 font-medium mb-0.5">Observations</div>
-      <div class="font-mono font-bold text-xl text-blue-700 dark:text-blue-300">{{ pipeline.observations.total }}</div>
+      <div class="text-sm text-blue-600 dark:text-blue-400 font-medium mb-0.5">Observations</div>
+      <div class="font-mono font-bold text-2xl text-blue-700 dark:text-blue-300">{{ pipeline.observations.total }}</div>
       <svg class="w-20 h-6 mx-auto text-blue-500 dark:text-blue-400 mt-0.5" viewBox="0 0 70 24">
         {% set max_val = pipeline.observations.sparkline|max or 1 %}
         {% for val in pipeline.observations.sparkline %}
@@ -81,12 +81,12 @@
       </svg>
     </div>
 
-    <div class="text-gray-300 dark:text-gray-600 text-xl font-light px-2 self-center">&rarr;</div>
+    <div class="text-gray-300 dark:text-gray-600 text-2xl font-light px-2 self-center">&rarr;</div>
 
     {# Proposals #}
     <div class="flex-1 text-center">
-      <div class="text-xs text-purple-600 dark:text-purple-400 font-medium mb-0.5">Proposals</div>
-      <div class="font-mono font-bold text-xl text-purple-700 dark:text-purple-300">{{ pipeline.proposals.total }}</div>
+      <div class="text-sm text-purple-600 dark:text-purple-400 font-medium mb-0.5">Proposals</div>
+      <div class="font-mono font-bold text-2xl text-purple-700 dark:text-purple-300">{{ pipeline.proposals.total }}</div>
       <svg class="w-20 h-6 mx-auto text-purple-500 dark:text-purple-400 mt-0.5" viewBox="0 0 70 24">
         {% set max_val = pipeline.proposals.sparkline|max or 1 %}
         {% for val in pipeline.proposals.sparkline %}
@@ -96,12 +96,12 @@
       </svg>
     </div>
 
-    <div class="text-gray-300 dark:text-gray-600 text-xl font-light px-2 self-center">&rarr;</div>
+    <div class="text-gray-300 dark:text-gray-600 text-2xl font-light px-2 self-center">&rarr;</div>
 
     {# Decisions #}
     <div class="flex-1 text-center">
-      <div class="text-xs text-emerald-600 dark:text-emerald-400 font-medium mb-0.5">Decisions</div>
-      <div class="font-mono font-bold text-xl text-emerald-700 dark:text-emerald-300">{{ pipeline.decisions.total }}</div>
+      <div class="text-sm text-emerald-600 dark:text-emerald-400 font-medium mb-0.5">Decisions</div>
+      <div class="font-mono font-bold text-2xl text-emerald-700 dark:text-emerald-300">{{ pipeline.decisions.total }}</div>
       <svg class="w-20 h-6 mx-auto text-emerald-500 dark:text-emerald-400 mt-0.5" viewBox="0 0 70 24">
         {% set max_val = pipeline.decisions.sparkline|max or 1 %}
         {% for val in pipeline.decisions.sparkline %}
@@ -121,9 +121,9 @@
   {# ── ZONE 3: ATTENTION QUEUE (3/5 width) ── #}
   <div class="md:col-span-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3 mb-3 md:mb-0">
     <div class="flex items-center justify-between mb-2">
-      <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Attention Queue</span>
+      <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Attention Queue</span>
       {% if needs_action_count %}
-      <span class="font-mono text-xs text-amber-600 dark:text-amber-400">{{ needs_action_count }} items</span>
+      <span class="font-mono text-sm text-amber-600 dark:text-amber-400">{{ needs_action_count }} items</span>
       {% endif %}
     </div>
 
@@ -131,31 +131,31 @@
 
     {# ─ Proposals (high priority) ─ #}
     {% for c in actionable_proposals %}
-    <div class="border border-purple-200 dark:border-purple-800 rounded-md px-3 py-2 mb-2 bg-white dark:bg-gray-800 hover:border-purple-400 dark:hover:border-purple-600 transition-colors">
+    <div class="border border-purple-200 dark:border-purple-800 rounded-md px-3 py-2.5 mb-2 bg-white dark:bg-gray-800 hover:border-purple-400 dark:hover:border-purple-600 transition-colors">
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0 flex-1">
-          <a href="/{{ group }}/proposals/{{ c._slug }}" class="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-purple-700 dark:hover:text-purple-300 leading-tight">{{ c._title }}</a>
+          <a href="/{{ group }}/proposals/{{ c._slug }}" class="text-base font-medium text-gray-900 dark:text-gray-100 hover:text-purple-700 dark:hover:text-purple-300 leading-tight">{{ c._title }}</a>
           <div class="flex flex-wrap items-center gap-1.5 mt-1">
             {{ c.get("origin_agent", "") | agent_badge }}
             {{ c.get("status", "") | status_badge }}
             {% if c.get("feedback_requested") %}
-            <span class="text-xs text-gray-400 dark:text-gray-500 font-mono">{{ c.get("feedback_received", [])|length }}/{{ c.get("feedback_requested", [])|length }} feedback</span>
+            <span class="text-sm text-gray-400 dark:text-gray-500 font-mono">{{ c.get("feedback_received", [])|length }}/{{ c.get("feedback_requested", [])|length }} feedback</span>
             {% endif %}
           </div>
         </div>
       </div>
-      <div class="flex gap-1.5 mt-1.5">
+      <div class="flex gap-1.5 mt-2">
         <form method="POST" action="/{{ group }}/proposals/{{ c._slug }}/decide" class="inline">
           <input type="hidden" name="decision" value="approved">
-          <button type="submit" title="Approve" class="px-2 py-0.5 text-xs font-medium rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-800/60 transition-colors">&#10003;</button>
+          <button type="submit" title="Approve" class="px-2.5 py-1 text-sm font-medium rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-800/60 transition-colors">&#10003;</button>
         </form>
         <form method="POST" action="/{{ group }}/proposals/{{ c._slug }}/decide" class="inline">
           <input type="hidden" name="decision" value="deferred">
-          <button type="submit" title="Defer" class="px-2 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-800/60 transition-colors">&#9208;</button>
+          <button type="submit" title="Defer" class="px-2.5 py-1 text-sm font-medium rounded bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-800/60 transition-colors">&#9208;</button>
         </form>
         <form method="POST" action="/{{ group }}/proposals/{{ c._slug }}/decide" class="inline">
           <input type="hidden" name="decision" value="rejected">
-          <button type="submit" title="Reject" class="px-2 py-0.5 text-xs font-medium rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/50 dark:text-red-300 dark:hover:bg-red-800/60 transition-colors">&#10007;</button>
+          <button type="submit" title="Reject" class="px-2.5 py-1 text-sm font-medium rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/50 dark:text-red-300 dark:hover:bg-red-800/60 transition-colors">&#10007;</button>
         </form>
       </div>
     </div>
@@ -163,52 +163,52 @@
 
     {# ─ Floated signals ─ #}
     {% for c in floated_observations %}
-    <a href="/{{ group }}/observations/{{ c._slug }}" class="block border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2 mb-2 bg-amber-50/50 dark:bg-amber-950/30 hover:border-amber-400 dark:hover:border-amber-600 transition-colors">
+    <a href="/{{ group }}/observations/{{ c._slug }}" class="block border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2.5 mb-2 bg-amber-50/50 dark:bg-amber-950/30 hover:border-amber-400 dark:hover:border-amber-600 transition-colors">
       <div class="flex items-center gap-1.5">
-        <span class="text-xs text-amber-600 dark:text-amber-400 font-medium">floated</span>
+        <span class="text-sm text-amber-600 dark:text-amber-400 font-medium">floated</span>
         {{ c.get("agent", "") | agent_badge }}
       </div>
-      <div class="text-sm text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ c._title }}</div>
+      <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ c._title }}</div>
     </a>
     {% endfor %}
 
     {# ─ Open observations (lower priority) ─ #}
     {% for c in open_observations %}
-    <a href="/{{ group }}/observations/{{ c._slug }}" class="block border border-gray-150 dark:border-gray-700 rounded-md px-3 py-1.5 mb-1.5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
+    <a href="/{{ group }}/observations/{{ c._slug }}" class="block border border-gray-150 dark:border-gray-700 rounded-md px-3 py-2 mb-1.5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
       <div class="flex items-center gap-1.5">
         {{ c.get("agent", "") | agent_badge }}
-        {% if c.get("float") %}<span class="text-xs text-amber-500 dark:text-amber-400">floated</span>{% endif %}
+        {% if c.get("float") %}<span class="text-sm text-amber-500 dark:text-amber-400">floated</span>{% endif %}
       </div>
-      <div class="text-xs text-gray-700 dark:text-gray-300 mt-0.5 leading-tight">{{ c._title }}</div>
+      <div class="text-sm text-gray-700 dark:text-gray-300 mt-0.5 leading-tight">{{ c._title }}</div>
     </a>
     {% endfor %}
 
     {# ─ Footer links ─ #}
     <div class="flex gap-4 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-      <a href="/{{ group }}/observations" class="text-xs text-agency-600 dark:text-agency-400 hover:text-agency-800 dark:hover:text-agency-200">View all observations &rarr;</a>
-      <a href="/{{ group }}/proposals" class="text-xs text-agency-600 dark:text-agency-400 hover:text-agency-800 dark:hover:text-agency-200">View all proposals &rarr;</a>
+      <a href="/{{ group }}/observations" class="text-sm text-agency-600 dark:text-agency-400 hover:text-agency-800 dark:hover:text-agency-200">View all observations &rarr;</a>
+      <a href="/{{ group }}/proposals" class="text-sm text-agency-600 dark:text-agency-400 hover:text-agency-800 dark:hover:text-agency-200">View all proposals &rarr;</a>
     </div>
 
     {% else %}
-    <div class="text-xs text-gray-400 dark:text-gray-500 py-2">No items need attention right now.</div>
+    <div class="text-sm text-gray-400 dark:text-gray-500 py-2">No items need attention right now.</div>
     {% endif %}
   </div>
 
   {# ── ZONE 4: ACTIVITY FEED (2/5 width) ── #}
   <div class="md:col-span-2 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
-    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Activity</div>
+    <div class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Activity</div>
     {% if activity_feed %}
-    <div class="max-h-96 overflow-y-auto space-y-0.5 pr-1">
+    <div class="max-h-96 overflow-y-auto space-y-1 pr-1">
       {% for ev in activity_feed %}
       <a href="/{{ group }}/{% if ev.type == 'observation' %}observations{% else %}proposals{% endif %}/{{ ev.slug }}"
-         class="flex items-baseline gap-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors group">
-        <span class="font-mono text-xs text-gray-400 dark:text-gray-500 w-12 flex-shrink-0 text-right">{{ ev.timestamp | relative_time }}</span>
-        <span class="text-xs truncate"><span class="text-gray-600 dark:text-gray-300 group-hover:text-gray-800 dark:group-hover:text-gray-100">{{ ev.agent }}</span> <span class="text-gray-400 dark:text-gray-500">&rarr;</span> filed {{ ev.type }}</span>
+         class="flex items-baseline gap-2 py-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors group">
+        <span class="font-mono text-sm text-gray-400 dark:text-gray-500 w-14 flex-shrink-0 text-right">{{ ev.timestamp | relative_time }}</span>
+        <span class="text-sm truncate"><span class="text-gray-600 dark:text-gray-300 group-hover:text-gray-800 dark:group-hover:text-gray-100">{{ ev.agent }}</span> <span class="text-gray-400 dark:text-gray-500">&rarr;</span> filed {{ ev.type }}</span>
       </a>
       {% endfor %}
     </div>
     {% else %}
-    <div class="text-xs text-gray-400 dark:text-gray-500 py-2">No recent activity</div>
+    <div class="text-sm text-gray-400 dark:text-gray-500 py-2">No recent activity</div>
     {% endif %}
   </div>
 
