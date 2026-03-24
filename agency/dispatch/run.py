@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 from agency.integrations import get_integration, REGISTRY
-from agency.config import normalize_agents, agent_names
+from agency.config import normalize_agents, agent_names, get_agent_dir
 
 log = logging.getLogger("agency.dispatch")
 
@@ -130,9 +130,14 @@ def run_dispatch_cycle(config: dict) -> None:
                     continue
 
                 if should_run:
+                    agent_dir = get_agent_dir(
+                        {"path": group_path, "agents_full": agents_normalized},
+                        agent_name
+                    )
                     _run_agent(
                         group_path, agent_name, prompt, timeout, log_dir,
                         agents_by_name.get(agent_name, {}),
+                        agent_dir=agent_dir,
                     )
                     # Touch markers
                     if at_time:
@@ -142,10 +147,12 @@ def run_dispatch_cycle(config: dict) -> None:
 
 
 def _run_agent(group_path: Path, agent_name: str, prompt_filename: str,
-               timeout: int, log_dir: Path, agent_config: dict) -> None:
+               timeout: int, log_dir: Path, agent_config: dict,
+               agent_dir: Path | None = None) -> None:
     """Execute a single agent run."""
     prompt_path = group_path / "shared" / "prompts" / prompt_filename
-    agent_dir = group_path / agent_name
+    if agent_dir is None:
+        agent_dir = group_path / agent_name
 
     if not agent_dir.is_dir():
         log.warning("  WARNING: agent dir not found: %s", agent_dir)
