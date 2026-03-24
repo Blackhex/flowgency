@@ -64,22 +64,32 @@ from agency.integrations.agency.sdk import SdkIntegration  # noqa: E402, F401
 
 - [ ] **Step 4: Fix cross-references between integration files**
 
-The `sdk.py` file imports from `claude_code.py`:
+Both `sdk.py` and `script.py` import from `claude_code.py`:
 ```python
+# In both agency/integrations/agency/sdk.py and agency/integrations/agency/script.py:
 from agency.integrations.claude_code import _parse_frontmatter
 ```
 
-Update to:
+Update both to:
 ```python
 from agency.integrations.agency.claude_code import _parse_frontmatter
 ```
 
-Check all integration files for similar cross-references and update them.
+- [ ] **Step 5: Fix test imports**
 
-- [ ] **Step 5: Run tests**
+These test files import integration modules directly and need path updates:
+
+- `tests/test_integration_claude_code.py`: `from agency.integrations.claude_code import` → `from agency.integrations.agency.claude_code import`
+- `tests/test_integration_sidecar.py`: `from agency.integrations.codex import` → `from agency.integrations.agency.codex import` (and similarly for gemini, aider, goose)
+- `tests/test_integration_script.py`: `from agency.integrations.script import` → `from agency.integrations.agency.script import`
+- `tests/test_integration_sdk.py`: `from agency.integrations.sdk import` → `from agency.integrations.agency.sdk import`
+
+Search each file for `from agency.integrations.` imports and add `.agency` after `integrations`.
+
+- [ ] **Step 6: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/ -v`
-Expected: All 118 tests pass. If imports fail, fix the remaining cross-references.
+Expected: All tests pass.
 
 - [ ] **Step 6: Commit**
 
@@ -296,23 +306,33 @@ Create the `/admin/integrations` page with installed and available-to-register s
 Add these routes after the existing admin routes (after line 1219):
 
 ```python
+def _read_integration_config():
+    """Read integration module list from config."""
+    from agency.integrations import _read_config
+    return _read_config()
+
+
 @app.get("/admin/integrations", response_class=HTMLResponse)
 async def admin_integrations_page(request: Request):
     """Admin integrations management page."""
     from agency.integrations import scan_available
 
+    # Build reverse map: module_name → author from config
+    config_modules = _read_integration_config()
+    module_to_author = {}
+    for mod in config_modules:
+        parts = mod.split(".")
+        if len(parts) == 2:
+            module_to_author[parts[1]] = parts[0]  # e.g., claude_code → agency
+
     installed = []
     for name, i in REGISTRY.items():
-        # Find which config entry maps to this integration
-        config_modules = _read_integration_config()
-        author = "unknown"
-        for mod in config_modules:
-            parts = mod.split(".")
-            if len(parts) == 2:
-                author = parts[0]
+        module_name = name.replace("-", "_")
+        author = module_to_author.get(module_name, "unknown")
         installed.append({
             "name": name,
             "display_name": i.display_name,
+            "module_path": f"{author}.{module_name}",
             "supports_execution": i.supports_execution,
             "supports_ai_backend": i.supports_ai_backend,
             "identity_file": i.identity_filename() if hasattr(i, 'identity_filename') and callable(i.identity_filename) else "—",
@@ -350,43 +370,6 @@ async def admin_integrations_unregister(request: Request):
     if module_path:
         unregister_integration(module_path)
     return RedirectResponse("/admin/integrations?restart=1", status_code=303)
-```
-
-Also add a helper at the top of the admin section to read integration config:
-
-```python
-def _read_integration_config():
-    """Read integration module list from config."""
-    from agency.integrations import _read_config
-    return _read_config()
-```
-
-Note: The `installed` list needs a better approach to find the author for each integration. Revise the installed loop to:
-
-```python
-    installed = []
-    config_modules = _read_integration_config()
-    # Build a reverse map: integration name → config module path
-    # We need to import each to check, but they're already loaded
-    module_to_author = {}
-    for mod in config_modules:
-        parts = mod.split(".")
-        if len(parts) == 2:
-            module_to_author[parts[1]] = parts[0]  # e.g., claude_code → agency
-
-    for name, i in REGISTRY.items():
-        # Integration name uses hyphens, module uses underscores
-        module_name = name.replace("-", "_")
-        author = module_to_author.get(module_name, "unknown")
-        installed.append({
-            "name": name,
-            "display_name": i.display_name,
-            "module_path": f"{author}.{module_name}",
-            "supports_execution": i.supports_execution,
-            "supports_ai_backend": i.supports_ai_backend,
-            "identity_file": i.identity_filename() if hasattr(i, 'identity_filename') and callable(i.identity_filename) else "—",
-            "author": author,
-        })
 ```
 
 - [ ] **Step 2: Create admin_integrations.html template**
@@ -541,30 +524,9 @@ In `agency/templates/base.html`, add an "Integrations" nav link after the "Agent
         </a>
 ```
 
-- [ ] **Step 5: Run tests**
+- [ ] **Step 5: Add restart route**
 
-Run: `.venv/bin/python -m pytest tests/ -v`
-Expected: All tests pass.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add agency/app.py agency/templates/admin_integrations.html agency/templates/admin_settings.html agency/templates/base.html
-git commit -m "feat: add admin integrations page with register/unregister"
-```
-
----
-
-### Task 4: Add restart route
-
-Add a POST route that restarts the systemd service when triggered from the admin integrations page.
-
-**Files:**
-- Modify: `agency/app.py` (add restart route)
-
-- [ ] **Step 1: Add restart route**
-
-Add after the unregister route:
+Add after the unregister route in `app.py`:
 
 ```python
 @app.post("/admin/integrations/restart", response_class=HTMLResponse)
@@ -578,16 +540,21 @@ async def admin_integrations_restart(request: Request):
     return RedirectResponse("/admin/integrations", status_code=303)
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 6: Run tests**
+
+Run: `.venv/bin/python -m pytest tests/ -v`
+Expected: All tests pass.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add agency/app.py
-git commit -m "feat: add service restart route for integration changes"
+git add agency/app.py agency/templates/admin_integrations.html agency/templates/admin_settings.html agency/templates/base.html
+git commit -m "feat: add admin integrations page with register/unregister/restart"
 ```
 
 ---
 
-### Task 5: Create template file and contract test
+### Task 4: Create template file and contract test (was Task 5)
 
 Add the `_template.py` scaffolding file and a contract test that validates integrations against the `BaseIntegration` API.
 
@@ -782,7 +749,7 @@ git commit -m "feat: add integration template and contract test harness"
 
 ---
 
-### Task 6: Create developer guide and GitHub issue template
+### Task 5: Create developer guide and GitHub issue template
 
 Write the contribution guide and issue template.
 
@@ -898,7 +865,7 @@ git commit -m "docs: add integration contribution guide and issue template"
 
 ---
 
-### Task 7: Update CLAUDE.md documentation
+### Task 6: Update CLAUDE.md documentation
 
 Update the root CLAUDE.md to document the new integration directory structure, config-driven loading, and admin integrations page.
 
