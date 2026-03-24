@@ -1,5 +1,5 @@
 import pytest
-from agency.integrations.sdk import SdkIntegration
+from agency.integrations.agency.sdk import SdkIntegration
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ import yaml
 from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
 )
-from agency.integrations.claude_code import _parse_frontmatter
+from agency.integrations.agency.claude_code import _parse_frontmatter
 
 
 class ScriptIntegration(BaseIntegration):

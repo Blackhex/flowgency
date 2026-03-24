@@ -1,5 +1,5 @@
 import pytest
-from agency.integrations.script import ScriptIntegration
+from agency.integrations.agency.script import ScriptIntegration
 from agency.integrations import AgentIdentity
 
 

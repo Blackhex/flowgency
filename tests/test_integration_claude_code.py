@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from agency.integrations.claude_code import ClaudeCodeIntegration
+from agency.integrations.agency.claude_code import ClaudeCodeIntegration
 from agency.integrations import AgentIdentity
 
 

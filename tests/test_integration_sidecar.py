@@ -1,9 +1,9 @@
 import pytest
 from agency.integrations import AgentIdentity
-from agency.integrations.codex import CodexIntegration
-from agency.integrations.gemini import GeminiIntegration
-from agency.integrations.aider import AiderIntegration
-from agency.integrations.goose import GooseIntegration
+from agency.integrations.agency.codex import CodexIntegration
+from agency.integrations.agency.gemini import GeminiIntegration
+from agency.integrations.agency.aider import AiderIntegration
+from agency.integrations.agency.goose import GooseIntegration
 
 
 class TestCodex:

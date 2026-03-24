@@ -128,10 +128,10 @@ def detect_integration(agent_dir: Path) -> BaseIntegration | None:
 
 # Import all integrations to trigger registration.
 # Each module calls _register() at import time.
-from agency.integrations.claude_code import ClaudeCodeIntegration  # noqa: E402, F401
-from agency.integrations.codex import CodexIntegration  # noqa: E402, F401
-from agency.integrations.gemini import GeminiIntegration  # noqa: E402, F401
-from agency.integrations.aider import AiderIntegration  # noqa: E402, F401
-from agency.integrations.goose import GooseIntegration  # noqa: E402, F401
-from agency.integrations.script import ScriptIntegration  # noqa: E402, F401
-from agency.integrations.sdk import SdkIntegration  # noqa: E402, F401
+from agency.integrations.agency.claude_code import ClaudeCodeIntegration  # noqa: E402, F401
+from agency.integrations.agency.codex import CodexIntegration  # noqa: E402, F401
+from agency.integrations.agency.gemini import GeminiIntegration  # noqa: E402, F401
+from agency.integrations.agency.aider import AiderIntegration  # noqa: E402, F401
+from agency.integrations.agency.goose import GooseIntegration  # noqa: E402, F401
+from agency.integrations.agency.script import ScriptIntegration  # noqa: E402, F401
+from agency.integrations.agency.sdk import SdkIntegration  # noqa: E402, F401
