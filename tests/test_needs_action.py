@@ -11,8 +11,8 @@ def test_needs_action_counts_actionable_proposals_and_floated_observations():
     proposals = [
         {"status": "proposed"},
         {"status": "investigating"},
-        {"status": "approved"},
-        {"status": "deferred"},
+        {"status": "decided"},
+        {"status": "decided"},
     ]
 
     actionable_proposals = [c for c in proposals if c.get("status") in ("proposed", "investigating")]
@@ -20,3 +20,13 @@ def test_needs_action_counts_actionable_proposals_and_floated_observations():
     needs_action = len(actionable_proposals) + len(floated_open)
 
     assert needs_action == 3  # 2 proposals + 1 floated observation
+
+
+def test_decided_is_not_actionable():
+    proposals = [
+        {"status": "proposed"},
+        {"status": "decided"},
+    ]
+    actionable = [c for c in proposals if c.get("status") in ("proposed", "investigating")]
+    assert len(actionable) == 1
+    assert actionable[0]["status"] == "proposed"

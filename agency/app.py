@@ -393,7 +393,7 @@ def check_ttl_expired(meta: dict) -> bool:
 def enforce_ttl(filepath: Path, meta: dict) -> bool:
     """Auto-archive an item if its TTL has expired. Returns True if archived."""
     status = meta.get("status", "")
-    if status in ("archived", "dismissed", "approved", "rejected", "deferred"):
+    if status in ("archived", "dismissed", "decided"):
         return False
     if check_ttl_expired(meta):
         update_frontmatter_field(filepath, "status", "archived")
@@ -702,7 +702,7 @@ def status_badge(status: str) -> Markup:
         "connected": "bg-blue-100 text-blue-800",
         "investigating": "bg-purple-100 text-purple-800",
         "proposed": "bg-green-100 text-green-800",
-        "approved": "bg-emerald-100 text-emerald-800",
+        "decided": "bg-emerald-100 text-emerald-800",
         "dismissed": "bg-gray-100 text-gray-500",
         "archived": "bg-gray-100 text-gray-400",
     }
