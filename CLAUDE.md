@@ -17,7 +17,7 @@
 ~/dev/agency/
 ├── agency/                    # Python package
 │   ├── app.py                 # Main FastAPI app (~2500 lines)
-│   ├── cli.py                 # CLI interface (agency inbox, status, approve, etc.)
+│   ├── cli.py                 # CLI interface (agency inbox, status, decide, etc.)
 │   ├── config.py              # Shared config utilities (normalize_agents, agent_names)
 │   ├── __init__.py
 │   ├── integrations/          # LLM integration plugin system
@@ -320,11 +320,15 @@ ttl_days: 14                   # Days before auto-archive
 ```yaml
 origin_agent: infrastructure
 date: 2026-03-20
-status: investigating          # investigating, feedback, proposed, approved, deferred, rejected
+status: proposed              # investigating, feedback, proposed, decided, archived
 observations: [obs1.md, obs2.md]
 feedback_requested: []         # Agents asked for input
 feedback_received: []          # Agents that responded
 ttl_days: 30
+questions:
+  - id: approve
+    type: boolean
+    prompt: "Approve this proposal?"
 ```
 
 ### Decision Frontmatter
@@ -333,7 +337,11 @@ ttl_days: 30
 proposal: slug.md              # Linked proposal
 decided_by: admin
 date: 2026-03-20
-decision: approved             # approved, deferred, rejected
+answers:
+  approve: approved
+  color: "Blue"
+execution_status: pending      # pending, running, complete, failed
+execution_summary: ~
 ```
 
 ## Key Implementation Details
@@ -373,13 +381,13 @@ decision: approved             # approved, deferred, rejected
 - `build_pipeline_stats()` computes per-stage counts, 7-day sparkline buckets, and flow health (healthy/bottleneck)
 - `build_activity_feed()` merges observations and proposals into a chronological cross-agent feed
 - `extract_display_title()` extracts first `**bold text**` from markdown body as display title, falls back to slug
-- Dashboard has four zones: fleet status bar, pipeline pulse, attention queue (with inline approve/defer/reject), activity feed
+- Dashboard has four zones: fleet status bar, pipeline pulse, attention queue (with inline decide actions), activity feed
 - Inline proposal actions use the existing `proposal_decide()` route via form POST
 
 ### CLI Interface
 - `agency/cli.py` — terminal interface using argparse, imports helpers from `app.py`
 - Entry point: `agency` (via pyproject.toml `[project.scripts]`)
-- Subcommands: `serve`, `inbox`, `status`, `observations`, `proposals`, `decisions`, `approve`, `defer`, `reject`, `agents`
+- Subcommands: `serve`, `inbox`, `status`, `observations`, `proposals`, `decisions`, `decide`, `agents`
 - `--group` flag defaults to `agency.default_group` from config.yaml
 - `--json` flag on list commands for scripting
 - ANSI color output (auto-detected)
@@ -436,7 +444,7 @@ Or via the installed entry point:
 agency serve          # Web dashboard
 agency inbox          # What needs attention
 agency status         # Fleet overview
-agency approve <slug> # Approve a proposal
+agency decide <slug>  # Submit answers for a proposal
 ```
 
 ### Dependencies
