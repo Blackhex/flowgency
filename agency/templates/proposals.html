@@ -21,8 +21,10 @@
     <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-gray-400">
       <span>{{ c.get("date", "") }}</span>
       {% if c.get("observations") %}<span>{{ c.observations|length }} linked observations</span>{% endif %}
-      {% if c.get("feedback_requested") %}
-      <span>Feedback: {{ c.get("feedback_received", [])|length }}/{{ c.feedback_requested|length }}</span>
+      {% if c.get("feedback_received") %}
+      <span>Feedback from: {{ c.get("feedback_received", []) | join(", ") }}</span>
+      {% elif c.get("feedback_requested") %}
+      <span>Feedback pending: {{ c.get("feedback_requested", []) | join(", ") }}</span>
       {% endif %}
     </div>
   </a>

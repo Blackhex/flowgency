@@ -1,11 +1,3 @@
-# Observation System Steps — Universal Template
-
-Copy this file verbatim to `agents/shared/prompts/_observation-system-steps.md` in every project.
-The only part that changes is the **Universal Boundaries** section at the bottom, which
-should be customized per-project to list the specific actions agents cannot take.
-
----
-
 ## Observation System — Standard Steps
 
 After completing your observation tasks, perform these steps in order:
@@ -134,16 +126,15 @@ The proposal is now ready for the user's inbox.
 
 ## Universal Boundaries
 
-**Customize this section per project.** Default boundaries:
-
 You may NOT:
 - Push git commits or create PRs
 - Restart or modify systemd services or containers
 - Run destructive bash commands (`rm -rf`, `git reset --hard`, etc.)
-- Edit files outside the project directory
+- Modify `config.yaml` (that's user configuration data)
+- Edit files outside the Agency project directory
 
 **Agent-specific permissions override these defaults** — check your CLAUDE.md for what
-you ARE allowed to do. For example, the builder agent can edit source code, while
-read-only agents cannot.
+you ARE allowed to do. For example, the product agent can edit source code in `agency/`,
+while the maintainer and strategist cannot.
 
 If your proposal requires an action beyond your permissions, propose it — do not do it yourself.

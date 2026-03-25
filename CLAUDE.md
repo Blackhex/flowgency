@@ -375,7 +375,7 @@ ttl_days: 14                   # Days before auto-archive
 ```yaml
 origin_agent: infrastructure
 date: 2026-03-20
-status: proposed              # investigating, feedback, proposed, decided, archived
+status: proposed              # investigating, proposed, decided, archived
 observations: [obs1.md, obs2.md]
 feedback_requested: []         # Agents asked for input
 feedback_received: []          # Agents that responded
