@@ -103,7 +103,7 @@
           {% endfor %}
         </div>
 
-        {% elif q.type == "free-response" %}
+        {% elif q.type in ["free-response", "text"] %}
         <textarea name="answer_{{ q.id }}" rows="3" required
                   class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-purple-400 focus:ring-1 focus:ring-purple-400"
                   placeholder="Type your answer..."></textarea>
@@ -154,7 +154,7 @@
       </div>
       {% endif %}
 
-      {% elif q.type == "free-response" %}
+      {% elif q.type in ["free-response", "text"] %}
       <div class="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-md text-sm text-gray-700">
         {{ answer }}
       </div>
