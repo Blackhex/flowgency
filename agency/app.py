@@ -427,9 +427,8 @@ def execute_decision(decision_path: Path, group_path: Path, agent: str,
         f"- If deferred: acknowledge and schedule for later\n"
         f"- If rejected: close the loop gracefully, do not proceed\n"
         f"- For choice/free-response answers: use the human's input to guide your work\n\n"
-        f"When done, update the decision file's 'execution_status' field in the "
-        f"YAML frontmatter to one of: complete, failed\n"
-        f"Also set 'execution_summary' to a brief description of what you did."
+        f"Do NOT modify the decision file — Agency handles status updates automatically.\n"
+        f"Just do the work described in the proposal and answers."
     )
 
     g = GROUPS.get(group_key, {})
