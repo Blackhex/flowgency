@@ -2779,36 +2779,94 @@ async def memory_save(request: Request, group: str):
     return RedirectResponse(f"/{group}/memory/view?path={path}", status_code=303)
 
 
-@app.get("/{group}/tmux-config", response_class=HTMLResponse)
-async def tmux_config_view(request: Request, group: str):
-    """View/edit the tmux config file for a group."""
+@app.get("/{group}/workspaces", response_class=HTMLResponse)
+async def workspaces_list(request: Request, group: str):
+    """List all workspaces for a group."""
     g = get_group(group)
-    tmux_path = GROUPS.get(group, {}).get("tmux_config", "")
-    if not tmux_path:
-        raise HTTPException(404, "No tmux config set for this group")
-    fpath = Path(tmux_path)
-    if not fpath.exists():
-        raise HTTPException(404, f"Tmux config file not found: {tmux_path}")
-    raw = fpath.read_text()
-    return templates.TemplateResponse("tmux_config.html", {
+    group_cfg = GROUPS.get(group, {})
+    workspace_list = group_cfg.get("workspaces", [])
+    from agency.workspaces import REGISTRY
+    enriched = []
+    for ws in workspace_list:
+        plugin = REGISTRY.get(ws.get("type", "custom"))
+        enriched.append({
+            **ws,
+            "plugin": plugin,
+            "summary": plugin.render_summary(ws.get("config", {})) if plugin else "",
+            "config_files": plugin.get_config_files(ws.get("config", {})) if plugin else [],
+            "can_launch": plugin.supports_launch() if plugin else False,
+        })
+    return templates.TemplateResponse("workspaces.html", {
         "request": request,
         **group_context(g),
-        "raw": raw,
-        "filepath": tmux_path,
+        "enriched_workspaces": enriched,
+        "active": "workspaces",
     })
 
 
-@app.post("/{group}/tmux-config/save", response_class=HTMLResponse)
-async def tmux_config_save(request: Request, group: str):
-    """Save edits to the tmux config file."""
+@app.get("/{group}/workspaces/{idx}/file", response_class=HTMLResponse)
+async def workspace_file_view(request: Request, group: str, idx: int):
+    """View/edit a config file within a workspace."""
     g = get_group(group)
-    tmux_path = GROUPS.get(group, {}).get("tmux_config", "")
-    if not tmux_path:
-        raise HTTPException(404, "No tmux config set for this group")
+    group_cfg = GROUPS.get(group, {})
+    workspace_list = group_cfg.get("workspaces", [])
+    if idx < 0 or idx >= len(workspace_list):
+        raise HTTPException(404, "Workspace not found")
+    ws = workspace_list[idx]
+    from agency.workspaces import REGISTRY
+    plugin = REGISTRY.get(ws.get("type", "custom"))
+    config_files = plugin.get_config_files(ws.get("config", {})) if plugin else []
+    file_path = request.query_params.get("path", "")
+    if not file_path and config_files:
+        file_path = config_files[0]["path"]
+    # Validate file is in the plugin's allowlist
+    allowed_paths = [cf["path"] for cf in config_files]
+    if file_path and file_path not in allowed_paths:
+        raise HTTPException(403, "File not in workspace config files")
+    raw = ""
+    language = "text"
+    if file_path:
+        fpath = Path(file_path)
+        if fpath.exists():
+            raw = fpath.read_text()
+        for cf in config_files:
+            if cf["path"] == file_path:
+                language = cf.get("language", "text")
+                break
+    return templates.TemplateResponse("workspace_detail.html", {
+        "request": request,
+        **group_context(g),
+        "ws": ws,
+        "ws_idx": idx,
+        "plugin": plugin,
+        "config_files": config_files,
+        "current_file": file_path,
+        "raw": raw,
+        "language": language,
+        "active": "workspaces",
+    })
+
+
+@app.post("/{group}/workspaces/{idx}/file/save", response_class=HTMLResponse)
+async def workspace_file_save(request: Request, group: str, idx: int):
+    """Save edits to a workspace config file."""
+    g = get_group(group)
+    group_cfg = GROUPS.get(group, {})
+    workspace_list = group_cfg.get("workspaces", [])
+    if idx < 0 or idx >= len(workspace_list):
+        raise HTTPException(404, "Workspace not found")
     form = await request.form()
+    file_path = form.get("file_path", "")
     content = form.get("content", "")
-    Path(tmux_path).write_text(content)
-    return RedirectResponse(f"/{group}/tmux-config", status_code=303)
+    if file_path:
+        ws = workspace_list[idx]
+        from agency.workspaces import REGISTRY
+        plugin = REGISTRY.get(ws.get("type", "custom"))
+        allowed = [cf["path"] for cf in plugin.get_config_files(ws.get("config", {}))] if plugin else []
+        if file_path not in allowed:
+            raise HTTPException(403, "File not in workspace config files")
+        Path(file_path).write_text(content)
+    return RedirectResponse(f"/{group}/workspaces/{idx}/file?path={file_path}", status_code=303)
 
 
 def main():

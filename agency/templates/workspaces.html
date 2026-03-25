@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% set active = "workspaces" %}
+
+{% block title %}Workspaces - {{ group_name }}{% endblock %}
+
+{% block content %}
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="text-2xl font-bold text-gray-900">Workspaces</h1>
+  <span class="text-sm text-gray-500">How you interact with these agents at runtime</span>
+</div>
+
+{% if enriched_workspaces %}
+<div class="space-y-4">
+  {% for ws in enriched_workspaces %}
+  <div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-3">
+        {% if ws.plugin %}
+          <span class="text-gray-400">{{ ws.plugin.icon_svg | safe }}</span>
+        {% endif %}
+        <h2 class="text-lg font-semibold text-gray-900">{{ ws.name }}</h2>
+        <span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{{ ws.type }}</span>
+      </div>
+      <div class="flex items-center gap-2">
+        {% if ws.config_files %}
+          <a href="/{{ group }}/workspaces/{{ loop.index0 }}/file"
+             class="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
+            View Files
+          </a>
+        {% endif %}
+        {% if ws.can_launch %}
+          <span class="px-3 py-1 text-xs text-gray-400 border border-gray-200 rounded-lg" title="Launch command available">
+            Launchable
+          </span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="text-sm text-gray-600">{{ ws.summary | safe }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="bg-white rounded-lg border border-gray-200 p-8 text-center">
+  <p class="text-gray-500 mb-2">No workspaces configured for this group.</p>
+  <p class="text-sm text-gray-400">Add workspaces in <a href="/admin/orgs/{{ group }}/edit" class="text-indigo-600 hover:underline">group settings</a> to define how you visualize and interact with these agents.</p>
+</div>
+{% endif %}
+{% endblock %}

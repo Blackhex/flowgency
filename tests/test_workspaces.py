@@ -2,6 +2,7 @@
 
 import pytest
 from pathlib import Path
+from starlette.testclient import TestClient
 
 
 def test_registry_is_populated():
@@ -244,6 +245,62 @@ class TestConfigMigration:
         group_cfg = {"name": "test"}
         result = migrate_tmux_config(group_cfg)
         assert "workspaces" not in result or result.get("workspaces") == []
+
+class TestWorkspaceRoutes:
+    """Smoke tests for workspace routes."""
+
+    def _make_app(self, tmp_path):
+        """Create a test app with a group that has workspaces configured."""
+        from agency.app import app, CONFIG, GROUPS
+
+        group_cfg = {
+            "name": "Test Group",
+            "path": str(tmp_path),
+            "agents": [],
+            "_agents_normalized": [],
+            "workspaces": [
+                {
+                    "name": "Terminal Grid",
+                    "type": "tmux",
+                    "config": {"script_path": str(tmp_path / "tmux.sh")},
+                },
+            ],
+        }
+        (tmp_path / "tmux.sh").write_text("#!/bin/bash\ntmux new-session")
+        (tmp_path / "shared" / "observations").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "shared" / "proposals").mkdir(parents=True, exist_ok=True)
+
+        CONFIG.clear()
+        CONFIG.update({"agency": {"title": "Test", "default_group": "test"}, "groups": {"test": group_cfg}})
+        GROUPS.clear()
+        GROUPS["test"] = group_cfg
+        return TestClient(app)
+
+    def test_workspaces_list(self, tmp_path):
+        client = self._make_app(tmp_path)
+        resp = client.get("/test/workspaces")
+        assert resp.status_code == 200
+        assert "Terminal Grid" in resp.text
+
+    def test_workspace_file_view(self, tmp_path):
+        client = self._make_app(tmp_path)
+        resp = client.get("/test/workspaces/0/file")
+        assert resp.status_code == 200
+        assert "tmux new-session" in resp.text
+
+    def test_workspace_file_view_invalid_index(self, tmp_path):
+        client = self._make_app(tmp_path)
+        resp = client.get("/test/workspaces/99/file")
+        assert resp.status_code == 404
+
+    def test_workspace_file_save_disallowed_path(self, tmp_path):
+        client = self._make_app(tmp_path)
+        resp = client.post("/test/workspaces/0/file/save", data={
+            "file_path": "/etc/passwd",
+            "content": "hacked",
+        })
+        assert resp.status_code == 403
+
 
     def test_migrate_noop_when_workspaces_already_exist(self):
         """Don't double-migrate if workspaces list already present."""
