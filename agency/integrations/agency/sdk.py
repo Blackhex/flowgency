@@ -6,8 +6,8 @@ import yaml
 
 from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, _register,
+    parse_identity_frontmatter as _parse_frontmatter,
 )
-from agency.integrations.agency.claude_code import _parse_frontmatter
 
 
 class SdkIntegration(BaseIntegration):
