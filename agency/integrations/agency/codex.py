@@ -92,7 +92,7 @@ class CodexIntegration(BaseIntegration):
             raise IntegrationError(f"codex timed out after {timeout}s")
 
     def _find_cmd(self) -> str:
-        return shutil.which("codex") or "codex"
+        return self._resolve_cmd("codex")
 
 
 _register(CodexIntegration())

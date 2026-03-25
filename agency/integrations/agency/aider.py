@@ -75,7 +75,7 @@ class AiderIntegration(BaseIntegration):
             raise IntegrationError(f"Aider CLI not found. Looked for: {cmd}")
 
     def _find_cmd(self) -> str:
-        return shutil.which("aider") or "aider"
+        return self._resolve_cmd("aider")
 
 
 _register(AiderIntegration())

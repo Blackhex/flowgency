@@ -76,7 +76,7 @@ class GooseIntegration(BaseIntegration):
             raise IntegrationError(f"Goose CLI not found. Looked for: {cmd}")
 
     def _find_cmd(self) -> str:
-        return shutil.which("goose") or "goose"
+        return self._resolve_cmd("goose")
 
 
 _register(GooseIntegration())

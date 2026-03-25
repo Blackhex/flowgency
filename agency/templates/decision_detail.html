@@ -80,7 +80,7 @@
       </div>
       {% endif %}
 
-      {% elif q.type == "free-response" %}
+      {% elif q.type in ["free-response", "text"] %}
       <div class="px-3 py-2 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-md text-sm text-gray-700 dark:text-gray-300">
         {{ answer }}
       </div>

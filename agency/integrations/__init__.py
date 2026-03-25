@@ -1,5 +1,6 @@
 """Integration plugin system for Agency."""
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +59,26 @@ class BaseIntegration:
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
         """Write agent identity back in the tool's native format."""
         raise NotImplementedError
+
+    @staticmethod
+    def _resolve_cmd(name: str) -> str:
+        """Find a CLI command by name, checking user-local paths as fallback.
+
+        Systemd services have minimal PATH and won't find tools installed to
+        ~/.local/bin or similar. This checks common locations after which().
+        """
+        found = shutil.which(name)
+        if found:
+            return found
+        home = Path.home()
+        for candidate in [
+            home / ".local" / "bin" / name,
+            home / ".npm-global" / "bin" / name,
+            Path(f"/usr/local/bin/{name}"),
+        ]:
+            if candidate.exists():
+                return str(candidate)
+        return name
 
     def detect(self, agent_dir: Path) -> bool:
         """Does this directory look like an agent managed by this tool?"""

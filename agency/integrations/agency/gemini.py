@@ -76,7 +76,7 @@ class GeminiIntegration(BaseIntegration):
             raise IntegrationError(f"Gemini CLI not found. Looked for: {cmd}")
 
     def _find_cmd(self) -> str:
-        return shutil.which("gemini") or "gemini"
+        return self._resolve_cmd("gemini")
 
 
 _register(GeminiIntegration())

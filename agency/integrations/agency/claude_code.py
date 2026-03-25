@@ -116,7 +116,7 @@ class ClaudeCodeIntegration(BaseIntegration):
             raise IntegrationError(f"claude timed out after {timeout}s")
 
     def _find_cmd(self) -> str:
-        return shutil.which("claude") or "claude"
+        return self._resolve_cmd("claude")
 
 
 _register(ClaudeCodeIntegration())
