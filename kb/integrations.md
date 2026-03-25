@@ -61,11 +61,11 @@ Agency itself can use an LLM for its own features (e.g., summarization). The AI 
 
 ## Adding New Integrations
 
-Agency's integration system is extensible. To add a new LLM tool:
+Agency's integration system is extensible. Integrations are organized by author namespace:
 
-1. Create `agency/integrations/your_tool.py`
-2. Subclass `BaseIntegration` and implement all required methods
-3. Call `_register(YourIntegration())` at module level
-4. Import in `agency/integrations/__init__.py`
+1. Copy `agency/integrations/_template.py` to `agency/integrations/{your-name}/your_tool.py`
+2. Fill in the methods (detection, identity parsing, execution)
+3. Register via the admin UI at Admin → Integrations
+4. Restart the service
 
-See the full guide: **[Adding Integrations](adding-integrations.md)** — includes a complete template, sidecar vs. frontmatter guidance, testing instructions, and a walkthrough of submitting your integration as a PR.
+See the full guide: **[Contributing Integrations](contributing-integrations.md)** — includes the template walkthrough, sidecar vs. frontmatter guidance, contract tests, and submission instructions.

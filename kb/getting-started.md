@@ -39,8 +39,8 @@ Agency organizes agent work into a four-stage pipeline:
 
 - **Observations** — things an agent noticed (written as markdown files)
 - **Proposals** — actionable suggestions that emerge from observations
-- **Decisions** — your response: approve, defer, or reject
-- **Execution** — for approved decisions, Agency dispatches the agent to do the work
+- **Decisions** — your answers to the proposal's questions (approve/defer/reject, choose from options, or free-text input)
+- **Execution** — Agency dispatches the agent to act on your answers
 
 Every item in the pipeline links to its neighbors, so you can always trace the full chain.
 

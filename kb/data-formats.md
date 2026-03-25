@@ -1,6 +1,6 @@
 # Data Formats
 
-Agency is a read/write dashboard for managing AI agents. Agents write observations, proposals, and logs to the `shared/` directory as markdown files with YAML frontmatter. Agency reads those files and presents them in the UI. When decisions are approved, Agency dispatches agents to execute them via their configured integration.
+Agency is a read/write dashboard for managing AI agents. Agents write observations, proposals, and logs to the `shared/` directory as markdown files with YAML frontmatter. Agency reads those files and presents them in the UI. When decisions are made, Agency dispatches agents to act on the answers via their configured integration.
 
 ## Observation Format
 
@@ -44,6 +44,17 @@ observations: [duplicate-ids-found.md, data-drift-detected.md]
 feedback_requested: []
 feedback_received: []
 ttl_days: 30
+questions:
+  - id: approach
+    type: choice
+    prompt: "Which deduplication strategy?"
+    options:
+      - label: "Pre-processing pass"
+      - label: "Real-time dedup at ingest"
+    multi: false
+  - id: approve
+    type: boolean
+    prompt: "Proceed with implementing this?"
 ---
 
 Recommend implementing a deduplication pass before the analysis pipeline runs.
@@ -56,31 +67,38 @@ Two related observations suggest this is a systemic issue, not a one-off.
 |-------|----------|-------------|
 | `origin_agent` | yes | Agent that proposed this |
 | `date` | yes | ISO 8601 date |
-| `status` | yes | `investigating`, `feedback`, `proposed`, `approved`, `deferred`, `rejected` |
+| `status` | yes | `investigating`, `feedback`, `proposed`, `decided`, `archived` |
 | `observations` | no | List of source observation filenames |
 | `feedback_requested` | no | Agents asked for input |
 | `feedback_received` | no | Agents that responded |
 | `ttl_days` | no | Days before auto-archive |
+| `questions` | yes | List of typed questions (see below) |
+
+### Question Types
+
+Each question has an `id`, `type`, and `prompt`. The three types:
+
+| Type | Extra Fields | Answer Format |
+|------|-------------|---------------|
+| `boolean` | — | `approved`, `deferred`, or `rejected` |
+| `choice` | `options` (list of `{label}`), `multi` (bool) | Selected label string, or list if multi |
+| `free-response` | — | Free text string |
 
 ## Decision Format
 
-Decisions are created through the UI when you approve, defer, or reject a proposal:
+Decisions are created when you answer a proposal's questions:
 
 ```yaml
 ---
 proposal: deduplication-pass.md
 decided_by: admin
 date: 2025-01-16
-decision: approved
-execution:
-  status: success
-  agent: researcher
-  started_at: 2025-01-16T14:00:00+00:00
-  completed_at: 2025-01-16T14:03:22+00:00
-  summary: Added deduplication pass to the pre-processing pipeline. 3 duplicate entries resolved.
+answers:
+  approach: "Pre-processing pass"
+  approve: approved
+execution_status: complete
+execution_summary: Added deduplication pass to the pre-processing pipeline. 3 duplicate entries resolved.
 ---
-
-Go ahead with the deduplication pass. Run it as a pre-processing step.
 ```
 
 ### Decision Fields
@@ -90,26 +108,17 @@ Go ahead with the deduplication pass. Run it as a pre-processing step.
 | `proposal` | yes | Linked proposal filename |
 | `decided_by` | yes | Who made the decision |
 | `date` | yes | ISO 8601 date |
-| `decision` | yes | `approved`, `deferred`, `rejected` |
-| `execution` | no | Auto-added for approved decisions (see below) |
+| `answers` | yes | Dict of question id → answer value |
+| `execution_status` | no | `pending`, `running`, `complete`, `failed` |
+| `execution_summary` | no | Agent's report of what it did |
 
-### Execution Block
+### Execution
 
-When a proposal is approved, Agency dispatches the origin agent to execute the proposed action using the agent's configured integration. The `execution` block tracks progress:
-
-| Field | Description |
-|-------|-------------|
-| `status` | `pending` → `executing` → `success`, `success_with_exceptions`, or `failed` |
-| `agent` | Agent that was dispatched |
-| `started_at` | ISO 8601 timestamp when execution began |
-| `completed_at` | ISO 8601 timestamp when execution finished |
-| `summary` | Agent's report of what it did (or why it failed) |
-
-Failed executions can be retried from the decision detail page. The integration used depends on the agent's configuration — Claude Code agents are run with `claude -p`, Codex with `codex exec`, etc.
+Every decision triggers a dispatch to the origin agent, regardless of the answers. The agent reads the decision file and acts on the answers — implementing approved actions, closing out rejected ones, or using choice/free-response answers to guide its work. Failed executions can be retried from the decision detail page.
 
 ## TTL Enforcement
 
-Observations and proposals with a `ttl_days` field are automatically archived when `date + ttl_days` passes. Items already in terminal states (`archived`, `dismissed`, `approved`, `rejected`, `deferred`) are not affected. TTL is checked on each page load.
+Observations and proposals with a `ttl_days` field are automatically archived when `date + ttl_days` passes. Items already in terminal states (`archived`, `dismissed`, `decided`) are not affected. TTL is checked on each page load.
 
 ## Pipeline Relationships
 
@@ -118,6 +127,6 @@ Agency tracks the full chain across the pipeline:
 - An **observation** can link to a proposal via `linked_proposal`
 - A **proposal** links back to its source observations via `observations`
 - A **decision** links to its proposal via `proposal`
-- An approved **decision** triggers **execution**, dispatching the origin agent via its integration to carry out the proposed action
+- Every **decision** triggers **execution**, dispatching the origin agent via its integration to act on the answers
 
 The UI renders these as clickable pipeline banners on each detail page, showing the full path from observation to action to execution.

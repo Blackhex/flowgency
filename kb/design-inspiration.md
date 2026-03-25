@@ -10,7 +10,7 @@ Agency applies this philosophy to AI agent management:
 
 - **Observations** are individual agent findings — things they noticed that might matter
 - **Proposals** emerge when observations converge into something worth investigating — the question an agent is asking, not the answer
-- **Decisions** are the human response — approve, defer, or reject
+- **Decisions** are the human response — answering the questions each proposal asks
 - **The pipeline** connects observations to proposals to decisions, the same way the ship log connects discoveries into a knowledge web
 
 ## The Constellation Logo
