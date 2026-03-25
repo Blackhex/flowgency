@@ -190,10 +190,11 @@
       .prose table { display: block; overflow-x: auto; }
     }
   </style>
+  {% if theme_css is defined and theme_css %}{{ theme_css | safe }}{% endif %}
 </head>
 <body class="h-full bg-gray-50 dark:bg-gray-900 font-sans text-gray-900 dark:text-gray-100 transition-colors duration-200">
   <!-- Mobile top bar -->
-  <div class="md:hidden fixed top-0 left-0 right-0 z-30 bg-agency-950 border-b border-agency-900 flex items-center h-12 px-3">
+  <div class="mobile-topbar md:hidden fixed top-0 left-0 right-0 z-30 bg-agency-950 border-b border-agency-900 flex items-center h-12 px-3">
     <button onclick="document.getElementById('sidebar').classList.remove('-translate-x-full'); document.getElementById('overlay').classList.remove('hidden')" class="p-1.5 rounded-lg hover:bg-white/10">
       <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
@@ -210,7 +211,7 @@
       <!-- Logo + title -->
       <div class="flex items-center justify-start px-4 pt-5 pb-1 relative">
         <a href="{% if group %}/{{ group }}/{% else %}/{% endif %}" class="flex items-end gap-2.5 group">
-          <div class="w-8 h-8 rounded-lg bg-agency-600 flex items-center justify-center">
+          <div class="logo-square w-8 h-8 rounded-lg bg-agency-600 flex items-center justify-center">
             <svg class="w-5 h-5" viewBox="0 0 80 80" fill="none">
               <line x1="20" y1="60" x2="29" y2="42" stroke="white" stroke-width="3" opacity="0.4"/>
               <line x1="29" y1="42" x2="40" y2="18" stroke="white" stroke-width="3" opacity="0.4"/>

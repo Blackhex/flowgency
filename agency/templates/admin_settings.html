@@ -32,6 +32,18 @@
       <p class="mt-1 text-xs text-gray-400">The LLM integration Agency uses for its own AI features.</p>
     </div>
     {% endif %}
+    {% if themes %}
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Theme</label>
+      <select name="theme" class="w-full max-w-sm px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+        <option value="" {% if not current_theme %}selected{% endif %}>Default (Indigo)</option>
+        {% for key, t in themes.items() %}
+        <option value="{{ key }}" {% if key == current_theme %}selected{% endif %}>{{ t.name }} — {{ t.description }}</option>
+        {% endfor %}
+      </select>
+      <p class="mt-1 text-xs text-gray-400">Color palette for the entire app. Themes are YAML files in <code class="text-xs">agency/themes/</code>.</p>
+    </div>
+    {% endif %}
     <div>
       <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
         Save Settings

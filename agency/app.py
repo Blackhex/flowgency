@@ -84,7 +84,150 @@ def get_agency_config() -> dict:
         "default_group": agency.get("default_group", "") or (list(GROUPS.keys())[0] if GROUPS else ""),
         "decided_by": agency.get("decided_by", "admin"),
         "ai_backend": agency.get("ai_backend", "claude-code"),
+        "theme": agency.get("theme", ""),
     }
+
+
+# ── Themes ─────────────────────────────────────────────────────────────────
+
+THEMES_DIR = Path(__file__).parent / "themes"
+
+
+def load_themes() -> dict[str, dict]:
+    """Read all theme YAML files from the themes directory."""
+    themes = {}
+    if not THEMES_DIR.is_dir():
+        return themes
+    for f in sorted(THEMES_DIR.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(f.read_text()) or {}
+            themes[f.stem] = data
+        except (yaml.YAMLError, OSError):
+            continue
+    return themes
+
+
+def generate_theme_css(theme: dict) -> str:
+    """Generate CSS custom properties and structural overrides from a theme dict."""
+    lines = ["<style>/* Theme: {} */".format(theme.get("name", "Custom"))]
+
+    light = theme.get("light", {})
+    dark = theme.get("dark", {})
+    logo = theme.get("logo", {})
+    scale = theme.get("scale", {})
+
+    # CSS custom properties
+    props_light = []
+    props_dark = []
+    for key, val in light.items():
+        props_light.append(f"  --t-{key.replace('_', '-')}: {val};")
+    for key, val in dark.items():
+        props_dark.append(f"  --t-{key.replace('_', '-')}: {val};")
+
+    # Logo properties
+    logo_light = logo.get("light", {})
+    logo_dark = logo.get("dark", {})
+    for key, val in logo_light.items():
+        props_light.append(f"  --t-logo-{key.replace('_', '-')}: {val};")
+    for key, val in logo_dark.items():
+        props_dark.append(f"  --t-logo-{key.replace('_', '-')}: {val};")
+
+    # Scale properties
+    for key, val in scale.items():
+        props_light.append(f"  --t-scale-{key}: {val};")
+        props_dark.append(f"  --t-scale-{key}: {val};")
+
+    lines.append(":root {")
+    lines.extend(props_light)
+    lines.append("}")
+    lines.append(".dark {")
+    lines.extend(props_dark)
+    lines.append("}")
+
+    # Structural overrides using the custom properties
+    lines.append("""
+/* Body */
+body { background-color: var(--t-bg) !important; color: var(--t-text) !important; }
+
+/* Sidebar */
+nav#sidebar { background-color: var(--t-sidebar-bg) !important; }
+.nav-item { color: var(--t-sidebar-text) !important; }
+.nav-item:hover { color: var(--t-sidebar-active-text) !important; }
+.nav-item.active { color: #fff !important; background: var(--t-sidebar-active-bg) !important; }
+.nav-section { color: var(--t-sidebar-section) !important; }
+.theme-toggle { color: var(--t-sidebar-text) !important; }
+.theme-toggle:hover { color: var(--t-sidebar-active-text) !important; }
+
+/* Logo */
+nav#sidebar .logo-square { background-color: var(--t-logo-bg, var(--t-sidebar-bg)) !important; }
+nav#sidebar .logo-square svg line { stroke: var(--t-logo-line, white) !important; }
+nav#sidebar .logo-square svg circle { fill: var(--t-logo-node, white) !important; }
+
+/* Mobile top bar */
+.mobile-topbar { background-color: var(--t-sidebar-bg) !important; border-color: var(--t-border-subtle) !important; }
+
+/* Cards and surfaces */
+.bg-white, .dark .bg-white { background-color: var(--t-bg-card) !important; }
+.bg-gray-50, .dark .bg-gray-50 { background-color: var(--t-bg) !important; }
+.dark .bg-gray-100 { background-color: var(--t-bg-surface, var(--t-bg-card)) !important; }
+
+/* Borders */
+.border-gray-200, .dark .border-gray-200 { border-color: var(--t-border) !important; }
+.border-gray-100, .dark .border-gray-100 { border-color: var(--t-border-subtle) !important; }
+
+/* Text */
+.text-gray-900, .dark .text-gray-900 { color: var(--t-text-heading) !important; }
+.text-gray-800, .dark .text-gray-800 { color: var(--t-text-heading) !important; }
+.text-gray-700, .dark .text-gray-700 { color: var(--t-text) !important; }
+.text-gray-600, .dark .text-gray-600 { color: var(--t-text-muted) !important; }
+.text-gray-500, .dark .text-gray-500 { color: var(--t-text-faint) !important; }
+
+/* Primary action buttons */
+.bg-indigo-600, .bg-purple-600 { background-color: var(--t-primary) !important; color: var(--t-primary-text) !important; }
+.hover\\:bg-indigo-700:hover, .hover\\:bg-purple-700:hover { background-color: var(--t-primary-hover) !important; }
+.text-indigo-600 { color: var(--t-primary) !important; }
+.hover\\:text-indigo-800:hover { color: var(--t-primary-hover) !important; }
+.focus\\:ring-indigo-500:focus { --tw-ring-color: var(--t-primary) !important; }
+.focus\\:border-indigo-500:focus { border-color: var(--t-primary) !important; }
+
+/* Form inputs */
+.dark input, .dark textarea, .dark select {
+  background-color: var(--t-code-bg) !important;
+  border-color: var(--t-border) !important;
+  color: var(--t-text) !important;
+}
+.dark input:focus, .dark textarea:focus, .dark select:focus {
+  border-color: var(--t-primary) !important;
+}
+
+/* Code */
+.prose code { background: var(--t-code-bg) !important; }
+.prose pre { background: var(--t-code-bg) !important; }
+
+/* Prose links */
+.prose a { color: var(--t-link) !important; }
+""")
+
+    lines.append("</style>")
+    return "\n".join(lines)
+
+
+_THEME_CSS_CACHE: dict[str, str] = {}
+
+
+def get_theme_css() -> str:
+    """Return theme CSS for the currently selected theme, or empty string."""
+    theme_key = CONFIG.get("agency", {}).get("theme", "")
+    if not theme_key:
+        return ""
+    if theme_key in _THEME_CSS_CACHE:
+        return _THEME_CSS_CACHE[theme_key]
+    themes = load_themes()
+    if theme_key not in themes:
+        return ""
+    css = generate_theme_css(themes[theme_key])
+    _THEME_CSS_CACHE[theme_key] = css
+    return css
 
 
 # ── Dispatch Helpers ──────────────────────────────────────────────────────────
@@ -202,6 +345,7 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
         "nav_agent_count": len(g["agents"]),
         "show_tips": CONFIG.get("agency", {}).get("show_tips", True) is not False,
         "tips_dismissed": CONFIG.get("agency", {}).get("tips_dismissed", []),
+        "theme_css": get_theme_css(),
     }
 
 
@@ -1203,6 +1347,7 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
         "admin_page": admin_page,
         "dispatch": get_dispatch_status(),
         "dispatch_error": dispatch_error,
+        "theme_css": get_theme_css(),
     }
 
 
@@ -1215,6 +1360,8 @@ async def admin_settings_page(request: Request):
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
         "ai_backend": get_agency_config()["ai_backend"],
         "installed_count": len(REGISTRY),
+        "themes": load_themes(),
+        "current_theme": get_agency_config()["theme"],
     })
 
 
@@ -1286,7 +1433,6 @@ async def admin_integrations_unregister(request: Request):
 @app.post("/admin/integrations/restart", response_class=HTMLResponse)
 async def admin_integrations_restart(request: Request):
     """Restart the agency service to apply integration changes."""
-    import subprocess
     try:
         subprocess.Popen(["systemctl", "--user", "restart", "agency.service"])
     except Exception:
@@ -1328,6 +1474,10 @@ async def admin_save_settings(request: Request):
 
     ai_backend = form.get("ai_backend", "claude-code")
     config["agency"]["ai_backend"] = ai_backend
+
+    theme = form.get("theme", "").strip()
+    config["agency"]["theme"] = theme
+    _THEME_CSS_CACHE.clear()  # Invalidate cached CSS
 
     # Handle dispatch interval update
     dispatch_interval_raw = form.get("dispatch_interval", "")
@@ -1426,10 +1576,7 @@ async def admin_org_create(request: Request):
             "org_path": path,
             "org_agents": agents_raw,
             "org_workspaces_json": json_module.dumps(ws_list),
-            "workspace_types_json": json_module.dumps([
-                {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
-                for ws in WORKSPACE_REGISTRY.values()
-            ]),
+            "workspace_types_json": _workspace_types_json(),
             "agent_infos": [],
             "warning": "Key, name, and path are required.",
         })
@@ -1468,10 +1615,7 @@ async def admin_org_create(request: Request):
             "org_path": path,
             "org_agents": "\n".join(agents),
             "org_workspaces_json": json_module.dumps(ws_list),
-            "workspace_types_json": json_module.dumps([
-                {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
-                for ws in WORKSPACE_REGISTRY.values()
-            ]),
+            "workspace_types_json": _workspace_types_json(),
             "agent_infos": [get_agent_info(Path(path), a) for a in agents] if Path(path).exists() else [],
             "warning": warning + " Org saved successfully.",
         })
@@ -1582,10 +1726,7 @@ async def admin_org_save(request: Request, org: str):
             "org_path": config["groups"][org]["path"],
             "org_agents": "\n".join(agents),
             "org_workspaces_json": json_module.dumps(ws_list),
-            "workspace_types_json": json_module.dumps([
-                {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
-                for ws in WORKSPACE_REGISTRY.values()
-            ]),
+            "workspace_types_json": _workspace_types_json(),
             "agent_infos": [get_agent_info(Path(config["groups"][org]["path"]), a) for a in agents],
             "dispatch_enabled": config["groups"][org].get("dispatch", {}).get("enabled", False),
             "dispatch_timeout": config["groups"][org].get("dispatch", {}).get("timeout", 1800),
@@ -1862,10 +2003,7 @@ async def admin_agent_save(request: Request, org: str, agent: str):
     agent_dir = get_agent_dir(grp_full, agent)
 
     # Security: validate path is within allowed roots
-    allowed_roots = get_allowed_roots(grp_full)
-    resolved = agent_dir.resolve()
-    if not any(resolved == r.resolve() or resolved.is_relative_to(r.resolve()) for r in allowed_roots):
-        raise HTTPException(400, "Path outside allowed directories")
+    validate_file_access(agent_dir, base, allowed_roots=get_allowed_roots(grp_full))
 
     form = await request.form()
     file_type = form.get("file_type", "claude_md")
@@ -2071,27 +2209,29 @@ async def agent_profile(request: Request, group: str, agent: str):
 
 @app.post("/{group}/agents/{agent}/identity", response_class=HTMLResponse)
 async def agent_save_identity(request: Request, group: str, agent: str):
-    """Save identity fields to CLAUDE.md frontmatter."""
+    """Save identity fields via detected integration."""
     g = get_group(group)
     agent_dir = resolve_agent_dir(g, agent)
+    agent_int = get_agent_integration(g, agent)
     form = await request.form()
     fields = {
         "display_name": form.get("display_name", "").strip(),
         "title": form.get("title", "").strip(),
         "emoji": form.get("emoji", "").strip(),
     }
-    save_agent_identity(agent_dir, fields)
+    save_agent_identity(agent_dir, fields, integration=agent_int)
     return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
 
 
 @app.post("/{group}/agents/{agent}/definition", response_class=HTMLResponse)
 async def agent_save_definition(request: Request, group: str, agent: str):
-    """Save CLAUDE.md body preserving frontmatter."""
+    """Save agent definition body preserving frontmatter."""
     g = get_group(group)
     agent_dir = resolve_agent_dir(g, agent)
+    agent_int = get_agent_integration(g, agent)
     form = await request.form()
     body = form.get("body", "")
-    save_agent_definition(agent_dir, body)
+    save_agent_definition(agent_dir, body, integration=agent_int)
     return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
 
 
