@@ -52,12 +52,98 @@
     <input type="hidden" name="agents" id="agents-hidden" value="{{ org_agents }}">
 
     <div>
-      <label for="tmux_config" class="block text-sm font-medium text-gray-700 mb-1">Tmux Config Path</label>
-      <input type="text" name="tmux_config" id="tmux_config" value="{{ org_tmux_config|default('') }}"
-             placeholder="/path/to/scripts/tmux-agents.sh"
-             class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-      <p class="mt-1 text-xs text-gray-400">Optional. Absolute path to a tmux session script for this group.</p>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Workspaces</label>
+      <p class="text-xs text-gray-400 mb-3">Define how you interact with this agent group at runtime.</p>
+      <input type="hidden" name="workspaces_json" id="workspaces-hidden"
+             value="{{ org_workspaces_json|default('[]') }}">
+
+      <div id="workspaces-list" class="space-y-3 mb-3">
+      </div>
+
+      <button type="button" onclick="addWorkspace()"
+              class="px-3 py-1 text-sm border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 text-gray-500">
+        + Add Workspace
+      </button>
     </div>
+
+    <script>
+    const WORKSPACE_TYPES = {{ workspace_types_json | safe }};
+
+    function addWorkspace(data) {
+      data = data || {name: '', type: 'tmux', config: {}};
+      const list = document.getElementById('workspaces-list');
+      const div = document.createElement('div');
+      div.className = 'bg-gray-50 rounded-lg border border-gray-200 p-3';
+
+      const typeOpts = WORKSPACE_TYPES.map(function(t) {
+        const selected = t.name === data.type ? ' selected' : '';
+        return '<option value="' + t.name + '"' + selected + '>' + t.display_name + '</option>';
+      }).join('');
+
+      const row = document.createElement('div');
+      row.className = 'flex gap-3 mb-2';
+
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.placeholder = 'Workspace name';
+      nameInput.value = data.name || '';
+      nameInput.setAttribute('onchange', 'syncWorkspaces()');
+      nameInput.setAttribute('data-field', 'name');
+      nameInput.className = 'flex-1 px-2 py-1 text-sm border border-gray-300 rounded';
+
+      const typeSelect = document.createElement('select');
+      typeSelect.setAttribute('onchange', 'syncWorkspaces()');
+      typeSelect.setAttribute('data-field', 'type');
+      typeSelect.className = 'px-2 py-1 text-sm border border-gray-300 rounded';
+      WORKSPACE_TYPES.forEach(function(t) {
+        const opt = document.createElement('option');
+        opt.value = t.name;
+        opt.textContent = t.display_name;
+        if (t.name === data.type) opt.selected = true;
+        typeSelect.appendChild(opt);
+      });
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'px-2 py-1 text-sm text-red-600 hover:bg-red-50 rounded';
+      removeBtn.textContent = '\u00d7';
+      removeBtn.onclick = function() { div.remove(); syncWorkspaces(); };
+
+      row.appendChild(nameInput);
+      row.appendChild(typeSelect);
+      row.appendChild(removeBtn);
+
+      const textarea = document.createElement('textarea');
+      textarea.placeholder = 'Config (JSON)';
+      textarea.rows = 2;
+      textarea.setAttribute('onchange', 'syncWorkspaces()');
+      textarea.setAttribute('data-field', 'config');
+      textarea.className = 'w-full px-2 py-1 text-xs font-mono border border-gray-300 rounded';
+      textarea.textContent = JSON.stringify(data.config || {}, null, 2);
+
+      div.appendChild(row);
+      div.appendChild(textarea);
+      list.appendChild(div);
+    }
+
+    function syncWorkspaces() {
+      const list = document.getElementById('workspaces-list');
+      const workspaces = [];
+      for (const div of list.children) {
+        const name = div.querySelector('[data-field="name"]').value;
+        const type = div.querySelector('[data-field="type"]').value;
+        let config = {};
+        try { config = JSON.parse(div.querySelector('[data-field="config"]').value); } catch(e) {}
+        workspaces.push({name: name, type: type, config: config});
+      }
+      document.getElementById('workspaces-hidden').value = JSON.stringify(workspaces);
+    }
+
+    try {
+      var initial = JSON.parse(document.getElementById('workspaces-hidden').value || '[]');
+      initial.forEach(function(ws) { addWorkspace(ws); });
+    } catch(e) {}
+    </script>
 
     {% if all_integrations %}
     <div>
@@ -276,7 +362,7 @@
       <div class="mt-4 pt-4 border-t border-gray-100">
         <p class="text-xs text-gray-400">
           Or use the <code class="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">/agency-setup</code> Claude Code skill
-          to auto-generate a full agent team with roles, dispatch prompts, and tmux config.
+          to auto-generate a full agent team with roles, dispatch prompts, and workspaces.
           <a href="https://github.com/your-repo/agency#add-on-agency-setup-skill" class="text-indigo-500 hover:text-indigo-700">Learn more</a>
         </p>
       </div>

@@ -24,6 +24,8 @@ import uvicorn
 from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status as _get_timer_status, detect_platform
+import json as json_module
+from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +64,7 @@ def reload_groups() -> None:
         g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
         # Keep agents as a name list for backward compat
         g["agents"] = agent_names(g["_agents_normalized"])
+        GROUPS[key] = migrate_tmux_config(GROUPS[key])
 
 
 CONFIG = load_config()
@@ -71,6 +74,7 @@ for key, g in GROUPS.items():
     raw_agents = g.get("agents", [])
     g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
     g["agents"] = agent_names(g["_agents_normalized"])
+    g.update(migrate_tmux_config(g))
 
 
 def get_agency_config() -> dict:
@@ -186,7 +190,8 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
         "groups": {k: v["name"] for k, v in GROUPS.items()},
         "agency_title": agency.get("title", "Agency"),
         "admin_active": False,
-        "tmux_config_available": bool(group_cfg.get("tmux_config")),
+        "workspaces": group_cfg.get("workspaces", []),
+        "workspaces_available": bool(group_cfg.get("workspaces")),
         "nav_open_observations": open_observation_count,
         "nav_actionable": needs_action_count,
         "nav_actionable_proposals": actionable_proposal_count,
@@ -1379,7 +1384,11 @@ async def admin_org_new(request: Request):
         "org_name": "",
         "org_path": "",
         "org_agents": "",
-        "org_tmux_config": "",
+        "org_workspaces_json": json_module.dumps([]),
+        "workspace_types_json": json_module.dumps([
+            {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
+            for ws in WORKSPACE_REGISTRY.values()
+        ]),
         "agent_infos": [],
         "warning": "",
     })
@@ -1394,7 +1403,11 @@ async def admin_org_create(request: Request):
     path = form.get("path", "").strip()
     agents_raw = form.get("agents", "").strip()
     agents = [a.strip() for a in agents_raw.splitlines() if a.strip()]
-    tmux_config = form.get("tmux_config", "").strip()
+    workspaces_json = form.get("workspaces_json", "[]")
+    try:
+        ws_list = json_module.loads(workspaces_json)
+    except (json_module.JSONDecodeError, TypeError):
+        ws_list = []
 
     if not key or not name or not path:
         agency = get_agency_config()
@@ -1410,7 +1423,11 @@ async def admin_org_create(request: Request):
             "org_name": name,
             "org_path": path,
             "org_agents": agents_raw,
-            "org_tmux_config": tmux_config,
+            "org_workspaces_json": json_module.dumps(ws_list),
+            "workspace_types_json": json_module.dumps([
+                {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
+                for ws in WORKSPACE_REGISTRY.values()
+            ]),
             "agent_infos": [],
             "warning": "Key, name, and path are required.",
         })
@@ -1428,8 +1445,8 @@ async def admin_org_create(request: Request):
         "path": path,
         "agents": agents,
     }
-    if tmux_config:
-        group_cfg["tmux_config"] = tmux_config
+    if ws_list:
+        group_cfg["workspaces"] = ws_list
     config["groups"][key] = group_cfg
 
     save_config(config)
@@ -1448,7 +1465,11 @@ async def admin_org_create(request: Request):
             "org_name": name,
             "org_path": path,
             "org_agents": "\n".join(agents),
-            "org_tmux_config": tmux_config,
+            "org_workspaces_json": json_module.dumps(ws_list),
+            "workspace_types_json": json_module.dumps([
+                {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
+                for ws in WORKSPACE_REGISTRY.values()
+            ]),
             "agent_infos": [get_agent_info(Path(path), a) for a in agents] if Path(path).exists() else [],
             "warning": warning + " Org saved successfully.",
         })
@@ -1492,7 +1513,11 @@ async def admin_org_edit(request: Request, org: str):
         "org_name": g["name"],
         "org_path": g["path"],
         "org_agents": "\n".join(_agent_names),
-        "org_tmux_config": g.get("tmux_config", ""),
+        "org_workspaces_json": json_module.dumps(g.get("workspaces", [])),
+        "workspace_types_json": json_module.dumps([
+            {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
+            for ws in WORKSPACE_REGISTRY.values()
+        ]),
         "agent_infos": agent_infos,
         "dispatch_enabled": dispatch_cfg.get("enabled", False),
         "dispatch_timeout": dispatch_cfg.get("timeout", 300),
@@ -1514,7 +1539,11 @@ async def admin_org_save(request: Request, org: str):
     path = form.get("path", "").strip()
     agents_raw = form.get("agents", "").strip()
     agents = [a.strip() for a in agents_raw.splitlines() if a.strip()]
-    tmux_config = form.get("tmux_config", "").strip()
+    workspaces_json = form.get("workspaces_json", "[]")
+    try:
+        ws_list = json_module.loads(workspaces_json)
+    except (json_module.JSONDecodeError, TypeError):
+        ws_list = []
 
     config = load_config()
     if org not in config.get("groups", {}):
@@ -1528,10 +1557,11 @@ async def admin_org_save(request: Request, org: str):
     if path:
         config["groups"][org]["path"] = path
     config["groups"][org]["agents"] = agents
-    if tmux_config:
-        config["groups"][org]["tmux_config"] = tmux_config
-    elif "tmux_config" in config["groups"][org]:
-        del config["groups"][org]["tmux_config"]
+    if ws_list:
+        config["groups"][org]["workspaces"] = ws_list
+    elif "workspaces" in config["groups"].get(org, {}):
+        del config["groups"][org]["workspaces"]
+    config["groups"][org].pop("tmux_config", None)
 
     default_integration = form.get("default_integration", "claude-code")
     config["groups"][org]["default_integration"] = default_integration
@@ -1552,7 +1582,11 @@ async def admin_org_save(request: Request, org: str):
             "org_name": config["groups"][org]["name"],
             "org_path": config["groups"][org]["path"],
             "org_agents": "\n".join(agents),
-            "org_tmux_config": tmux_config,
+            "org_workspaces_json": json_module.dumps(ws_list),
+            "workspace_types_json": json_module.dumps([
+                {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
+                for ws in WORKSPACE_REGISTRY.values()
+            ]),
             "agent_infos": [get_agent_info(Path(config["groups"][org]["path"]), a) for a in agents],
             "dispatch_enabled": config["groups"][org].get("dispatch", {}).get("enabled", False),
             "dispatch_timeout": config["groups"][org].get("dispatch", {}).get("timeout", 300),
@@ -1727,7 +1761,11 @@ async def admin_org_autodetect(request: Request, org: str):
         "org_key": org,
         "org_name": g["name"],
         "org_path": g["path"],
-        "org_tmux_config": g.get("tmux_config", ""),
+        "org_workspaces_json": json_module.dumps(g.get("workspaces", [])),
+        "workspace_types_json": json_module.dumps([
+            {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
+            for ws in WORKSPACE_REGISTRY.values()
+        ]),
         "org_agents": "\n".join(_agent_names),
         "agent_infos": agent_infos,
         "dispatch_enabled": dispatch_cfg.get("enabled", False),
@@ -2775,36 +2813,94 @@ async def memory_save(request: Request, group: str):
     return RedirectResponse(f"/{group}/memory/view?path={path}", status_code=303)
 
 
-@app.get("/{group}/tmux-config", response_class=HTMLResponse)
-async def tmux_config_view(request: Request, group: str):
-    """View/edit the tmux config file for a group."""
+@app.get("/{group}/workspaces", response_class=HTMLResponse)
+async def workspaces_list(request: Request, group: str):
+    """List all workspaces for a group."""
     g = get_group(group)
-    tmux_path = GROUPS.get(group, {}).get("tmux_config", "")
-    if not tmux_path:
-        raise HTTPException(404, "No tmux config set for this group")
-    fpath = Path(tmux_path)
-    if not fpath.exists():
-        raise HTTPException(404, f"Tmux config file not found: {tmux_path}")
-    raw = fpath.read_text()
-    return templates.TemplateResponse("tmux_config.html", {
+    group_cfg = GROUPS.get(group, {})
+    workspace_list = group_cfg.get("workspaces", [])
+    from agency.workspaces import REGISTRY
+    enriched = []
+    for ws in workspace_list:
+        plugin = REGISTRY.get(ws.get("type", "custom"))
+        enriched.append({
+            **ws,
+            "plugin": plugin,
+            "summary": plugin.render_summary(ws.get("config", {})) if plugin else "",
+            "config_files": plugin.get_config_files(ws.get("config", {})) if plugin else [],
+            "can_launch": plugin.supports_launch() if plugin else False,
+        })
+    return templates.TemplateResponse("workspaces.html", {
         "request": request,
         **group_context(g),
-        "raw": raw,
-        "filepath": tmux_path,
+        "enriched_workspaces": enriched,
+        "active": "workspaces",
     })
 
 
-@app.post("/{group}/tmux-config/save", response_class=HTMLResponse)
-async def tmux_config_save(request: Request, group: str):
-    """Save edits to the tmux config file."""
+@app.get("/{group}/workspaces/{idx}/file", response_class=HTMLResponse)
+async def workspace_file_view(request: Request, group: str, idx: int):
+    """View/edit a config file within a workspace."""
     g = get_group(group)
-    tmux_path = GROUPS.get(group, {}).get("tmux_config", "")
-    if not tmux_path:
-        raise HTTPException(404, "No tmux config set for this group")
+    group_cfg = GROUPS.get(group, {})
+    workspace_list = group_cfg.get("workspaces", [])
+    if idx < 0 or idx >= len(workspace_list):
+        raise HTTPException(404, "Workspace not found")
+    ws = workspace_list[idx]
+    from agency.workspaces import REGISTRY
+    plugin = REGISTRY.get(ws.get("type", "custom"))
+    config_files = plugin.get_config_files(ws.get("config", {})) if plugin else []
+    file_path = request.query_params.get("path", "")
+    if not file_path and config_files:
+        file_path = config_files[0]["path"]
+    # Validate file is in the plugin's allowlist
+    allowed_paths = [cf["path"] for cf in config_files]
+    if file_path and file_path not in allowed_paths:
+        raise HTTPException(403, "File not in workspace config files")
+    raw = ""
+    language = "text"
+    if file_path:
+        fpath = Path(file_path)
+        if fpath.exists():
+            raw = fpath.read_text()
+        for cf in config_files:
+            if cf["path"] == file_path:
+                language = cf.get("language", "text")
+                break
+    return templates.TemplateResponse("workspace_detail.html", {
+        "request": request,
+        **group_context(g),
+        "ws": ws,
+        "ws_idx": idx,
+        "plugin": plugin,
+        "config_files": config_files,
+        "current_file": file_path,
+        "raw": raw,
+        "language": language,
+        "active": "workspaces",
+    })
+
+
+@app.post("/{group}/workspaces/{idx}/file/save", response_class=HTMLResponse)
+async def workspace_file_save(request: Request, group: str, idx: int):
+    """Save edits to a workspace config file."""
+    g = get_group(group)
+    group_cfg = GROUPS.get(group, {})
+    workspace_list = group_cfg.get("workspaces", [])
+    if idx < 0 or idx >= len(workspace_list):
+        raise HTTPException(404, "Workspace not found")
     form = await request.form()
+    file_path = form.get("file_path", "")
     content = form.get("content", "")
-    Path(tmux_path).write_text(content)
-    return RedirectResponse(f"/{group}/tmux-config", status_code=303)
+    if file_path:
+        ws = workspace_list[idx]
+        from agency.workspaces import REGISTRY
+        plugin = REGISTRY.get(ws.get("type", "custom"))
+        allowed = [cf["path"] for cf in plugin.get_config_files(ws.get("config", {}))] if plugin else []
+        if file_path not in allowed:
+            raise HTTPException(403, "File not in workspace config files")
+        Path(file_path).write_text(content)
+    return RedirectResponse(f"/{group}/workspaces/{idx}/file?path={file_path}", status_code=303)
 
 
 def main():
