@@ -24,6 +24,7 @@ import uvicorn
 from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status as _get_timer_status, detect_platform
+from agency.workspaces import migrate_tmux_config
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ def reload_groups() -> None:
         g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
         # Keep agents as a name list for backward compat
         g["agents"] = agent_names(g["_agents_normalized"])
+        GROUPS[key] = migrate_tmux_config(GROUPS[key])
 
 
 CONFIG = load_config()
@@ -71,6 +73,7 @@ for key, g in GROUPS.items():
     raw_agents = g.get("agents", [])
     g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
     g["agents"] = agent_names(g["_agents_normalized"])
+    g.update(migrate_tmux_config(g))
 
 
 def get_agency_config() -> dict:
@@ -186,7 +189,8 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
         "groups": {k: v["name"] for k, v in GROUPS.items()},
         "agency_title": agency.get("title", "Agency"),
         "admin_active": False,
-        "tmux_config_available": bool(group_cfg.get("tmux_config")),
+        "workspaces": group_cfg.get("workspaces", []),
+        "workspaces_available": bool(group_cfg.get("workspaces")),
         "nav_open_observations": open_observation_count,
         "nav_actionable": needs_action_count,
         "nav_actionable_proposals": actionable_proposal_count,
