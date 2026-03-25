@@ -4,6 +4,7 @@ from agency.integrations.agency.codex import CodexIntegration
 from agency.integrations.agency.gemini import GeminiIntegration
 from agency.integrations.agency.aider import AiderIntegration
 from agency.integrations.agency.goose import GooseIntegration
+from agency.integrations.agency.opencode import OpenCodeIntegration
 
 
 class TestCodex:
@@ -174,6 +175,58 @@ class TestGoose:
         identity = AgentIdentity(display_name="New", title="T", emoji="🪿", body="New hints")
         integration.write_identity(tmp_agent_dir, identity)
         assert "New hints" in (tmp_agent_dir / ".goosehints").read_text()
+        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        assert "display_name: New" in sidecar
+
+    def test_missing_file(self, integration, tmp_agent_dir):
+        assert integration.parse_identity(tmp_agent_dir) is None
+
+
+class TestOpenCode:
+    @pytest.fixture
+    def integration(self):
+        return OpenCodeIntegration()
+
+    def test_metadata(self, integration):
+        assert integration.name == "opencode"
+        assert integration.identity_filename() == "AGENTS.md"
+        assert integration.detect_priority == 8
+
+    def test_detect_with_opencode_dir(self, integration, tmp_agent_dir):
+        (tmp_agent_dir / ".opencode").mkdir()
+        assert integration.detect(tmp_agent_dir) is True
+
+    def test_detect_negative(self, integration, tmp_agent_dir):
+        assert integration.detect(tmp_agent_dir) is False
+
+    def test_detect_negative_agents_md_only(self, integration, tmp_agent_dir):
+        """AGENTS.md alone should NOT trigger OpenCode — that's Codex."""
+        (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
+        assert integration.detect(tmp_agent_dir) is False
+
+    def test_parse_identity_body_from_native(self, integration, tmp_agent_dir):
+        (tmp_agent_dir / ".opencode").mkdir()
+        (tmp_agent_dir / "AGENTS.md").write_text("# OpenCode Agent\nBuild things.\n")
+        identity = integration.parse_identity(tmp_agent_dir)
+        assert identity is not None
+        assert "# OpenCode Agent" in identity.body
+
+    def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
+        (tmp_agent_dir / ".opencode").mkdir()
+        (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
+        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+            "display_name: OpenCode Bot\ntitle: OC\nemoji: \"⚡\"\n"
+        )
+        identity = integration.parse_identity(tmp_agent_dir)
+        assert identity.display_name == "OpenCode Bot"
+        assert identity.title == "OC"
+
+    def test_write_identity_creates_sidecar(self, integration, tmp_agent_dir):
+        (tmp_agent_dir / ".opencode").mkdir()
+        (tmp_agent_dir / "AGENTS.md").write_text("# Old body\n")
+        identity = AgentIdentity(display_name="New", title="T", emoji="⚡", body="# New body")
+        integration.write_identity(tmp_agent_dir, identity)
+        assert "# New body" in (tmp_agent_dir / "AGENTS.md").read_text()
         sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
