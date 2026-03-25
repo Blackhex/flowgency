@@ -352,11 +352,14 @@
           </span>
         </a>
 
-        {% if tmux_config_available %}
-        <a href="/{{ group }}/tmux-config" class="nav-item {% if active == 'tmux_config' %}active{% endif %}">
+        {% if workspaces_available %}
+        <a href="/{{ group }}/workspaces" class="nav-item {% if active == 'workspaces' %}active{% endif %}">
           <span class="flex items-center gap-2">
-            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-            Tmux Config
+            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/></svg>
+            Workspaces
+            {% if workspaces | length > 0 %}
+            <span class="ml-auto text-xs text-gray-400">{{ workspaces | length }}</span>
+            {% endif %}
           </span>
         </a>
         {% endif %}
