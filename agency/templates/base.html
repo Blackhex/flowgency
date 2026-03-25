@@ -143,6 +143,16 @@
     .dark .border-red-200 { border-color: rgba(239, 68, 68, 0.3) !important; }
     .dark .border-blue-200 { border-color: rgba(59, 130, 246, 0.3) !important; }
 
+    /* Decide form radio pills — custom classes bypass dark mode !important overrides on Tailwind utilities */
+    .decide-pill { background-color: #f3f4f6; color: #4b5563; }
+    .dark .decide-pill { background-color: #334155; color: #94a3b8; }
+    .peer:checked ~ .decide-pill-approve { background-color: #d1fae5; color: #047857; }
+    .dark .peer:checked ~ .decide-pill-approve { background-color: rgba(16, 185, 129, 0.3); color: rgb(16, 185, 129); }
+    .peer:checked ~ .decide-pill-defer { background-color: #fef3c7; color: #b45309; }
+    .dark .peer:checked ~ .decide-pill-defer { background-color: rgba(245, 158, 11, 0.3); color: rgb(245, 158, 11); }
+    .peer:checked ~ .decide-pill-reject { background-color: #fee2e2; color: #b91c1c; }
+    .dark .peer:checked ~ .decide-pill-reject { background-color: rgba(239, 68, 68, 0.3); color: rgb(239, 68, 68); }
+
     /* Status badges (keep readable in dark) */
     .dark .bg-amber-100 { background-color: rgba(245, 158, 11, 0.2) !important; }
     .dark .bg-emerald-100 { background-color: rgba(16, 185, 129, 0.2) !important; }

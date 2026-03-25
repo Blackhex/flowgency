@@ -77,15 +77,15 @@
         <div class="flex gap-2">
           <label class="cursor-pointer">
             <input type="radio" name="answer_{{ q.id }}" value="approved" class="hidden peer" required>
-            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-600 peer-checked:bg-emerald-100 peer-checked:text-emerald-700 transition-colors">Approve</span>
+            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium decide-pill decide-pill-approve transition-colors">Approve</span>
           </label>
           <label class="cursor-pointer">
             <input type="radio" name="answer_{{ q.id }}" value="deferred" class="hidden peer">
-            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-600 peer-checked:bg-amber-100 peer-checked:text-amber-700 transition-colors">Defer</span>
+            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium decide-pill decide-pill-defer transition-colors">Defer</span>
           </label>
           <label class="cursor-pointer">
             <input type="radio" name="answer_{{ q.id }}" value="rejected" class="hidden peer">
-            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium bg-gray-100 text-gray-600 peer-checked:bg-red-100 peer-checked:text-red-700 transition-colors">Reject</span>
+            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium decide-pill decide-pill-reject transition-colors">Reject</span>
           </label>
         </div>
 
