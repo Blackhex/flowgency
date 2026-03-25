@@ -2,8 +2,25 @@
 <html lang="en" class="h-full">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}{{ agency_title|default('Agency') }}{% endblock %}</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1e2a5e" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141b3d" media="(prefers-color-scheme: dark)">
+
+  <!-- iOS/Safari PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="{{ agency_title|default('Agency') }}">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+
+  <!-- Favicon -->
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="/static/favicon-16.png" sizes="16x16" type="image/png">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -73,6 +90,14 @@
     .dark .prose th { background: #1e293b; color: #e2e8f0; }
     .dark .prose blockquote { border-color: #475569; color: #94a3b8; }
     .dark .prose a { color: #818cf8; }
+
+    /* PWA safe areas — iOS notch/dynamic island */
+    @supports (padding: env(safe-area-inset-top)) {
+      body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+      #sidebar { padding-top: env(safe-area-inset-top); padding-left: env(safe-area-inset-left); }
+      main { padding-right: env(safe-area-inset-right); }
+      .mobile-header { padding-top: env(safe-area-inset-top); }
+    }
 
     /* Nav styling */
     .nav-item { display: flex; align-items: center; justify-content: space-between; padding: 0.45rem 0.75rem; border-radius: 0.5rem; font-size: 0.9375rem; font-weight: 500; color: #94a3b8; transition: all 150ms; }
@@ -435,6 +460,13 @@
 
     // Set initial UI state
     updateThemeUI(document.documentElement.classList.contains('dark'));
+  </script>
+
+  <!-- Service Worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
   </script>
 </body>
 </html>

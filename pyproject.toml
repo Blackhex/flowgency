@@ -20,4 +20,4 @@ agency = "agency.cli:main"
 include = ["agency*"]
 
 [tool.setuptools.package-data]
-agency = ["templates/*.html"]
+agency = ["templates/*.html", "static/*", "themes/*.yaml"]

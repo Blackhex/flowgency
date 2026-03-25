@@ -1,0 +1,17 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Maskable: no rounded corners, content in safe zone (center 80%) -->
+  <rect width="512" height="512" fill="#1e2a5e"/>
+  <!-- Safe zone offset: 51.2px inset on each side, scale content to fit 409.6x409.6 centered -->
+  <g transform="translate(51.2, 51.2) scale(0.8)">
+    <line x1="128" y1="384" x2="185.6" y2="268.8" stroke="white" stroke-width="14" opacity="0.4"/>
+    <line x1="185.6" y1="268.8" x2="256" y2="115.2" stroke="white" stroke-width="14" opacity="0.4"/>
+    <line x1="384" y1="384" x2="326.4" y2="268.8" stroke="white" stroke-width="14" opacity="0.4"/>
+    <line x1="326.4" y1="268.8" x2="256" y2="115.2" stroke="white" stroke-width="14" opacity="0.4"/>
+    <line x1="185.6" y1="268.8" x2="326.4" y2="268.8" stroke="white" stroke-width="14" opacity="0.4"/>
+    <circle cx="256" cy="115.2" r="48" fill="white"/>
+    <circle cx="185.6" cy="268.8" r="38" fill="white" opacity="0.8"/>
+    <circle cx="326.4" cy="268.8" r="38" fill="white" opacity="0.8"/>
+    <circle cx="128" cy="384" r="38" fill="white" opacity="0.6"/>
+    <circle cx="384" cy="384" r="38" fill="white" opacity="0.6"/>
+  </g>
+</svg>

@@ -15,6 +15,7 @@ import markdown
 import yaml
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
@@ -268,9 +269,32 @@ def install_dispatch(interval: int = 15) -> str | None:
 
 
 app = FastAPI(title="Agency Dashboard")
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 md = markdown.Markdown(extensions=["tables", "fenced_code", "meta", "nl2br"])
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+# ── PWA ──────────────────────────────────────────────────────────────────────
+
+
+@app.get("/sw.js")
+async def service_worker():
+    """Serve service worker from root for full scope."""
+    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript",
+                        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
+
+
+@app.get("/manifest.json")
+async def manifest():
+    """Serve PWA manifest with dynamic app title."""
+    cfg = get_agency_config()
+    data = json_module.loads((STATIC_DIR / "manifest.json").read_text())
+    data["name"] = cfg.get("title", "Agency")
+    data["short_name"] = cfg.get("title", "Agency")
+    return data
 
 
 # ── Group Resolution ──────────────────────────────────────────────────────────
