@@ -9,23 +9,11 @@ import yaml
 
 from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
+    parse_identity_frontmatter,
 )
 
-
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Parse YAML frontmatter from markdown text."""
-    if not text.startswith("---"):
-        return {}, text
-    end = text.find("---", 3)
-    if end == -1:
-        return {}, text
-    front = text[3:end].strip()
-    body = text[end + 3:].strip()
-    try:
-        meta = yaml.safe_load(front) or {}
-    except yaml.YAMLError:
-        meta = {}
-    return meta, body
+# Keep backward-compat alias for any external importers
+_parse_frontmatter = parse_identity_frontmatter
 
 
 class ClaudeCodeIntegration(BaseIntegration):

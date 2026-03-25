@@ -32,6 +32,22 @@ class IntegrationError(Exception):
     pass
 
 
+def parse_identity_frontmatter(text: str) -> tuple[dict, str]:
+    """Parse YAML frontmatter from markdown text. Shared by integrations that use frontmatter identity files."""
+    if not text.startswith("---"):
+        return {}, text
+    end = text.find("---", 3)
+    if end == -1:
+        return {}, text
+    front = text[3:end].strip()
+    body = text[end + 3:].strip()
+    try:
+        meta = yaml.safe_load(front) or {}
+    except yaml.YAMLError:
+        meta = {}
+    return meta, body
+
+
 class BaseIntegration:
     """Base class for all integrations. Subclass and register to add a new one."""
     name: str = ""
@@ -91,6 +107,34 @@ class BaseIntegration:
     def validate_config(self, config: dict) -> list[str]:
         """Validate integration_config. Return list of error messages."""
         return []
+
+    def _write_sidecar_identity(self, agent_dir: Path, identity_file: Path, identity: AgentIdentity) -> None:
+        """Write identity for sidecar-based integrations (body to identity file, meta to sidecar)."""
+        identity_file.write_text(identity.body)
+        meta = read_sidecar(agent_dir)
+        for key, value in [
+            ("display_name", identity.display_name),
+            ("title", identity.title),
+            ("emoji", identity.emoji),
+        ]:
+            if value:
+                meta[key] = value
+            elif key in meta and not value:
+                del meta[key]
+        write_sidecar(agent_dir, meta)
+
+    def _parse_sidecar_identity(self, agent_dir: Path, identity_file: Path) -> AgentIdentity | None:
+        """Parse identity for sidecar-based integrations (body from file, meta from sidecar)."""
+        if not identity_file.is_file():
+            return None
+        body = identity_file.read_text()
+        meta = read_sidecar(agent_dir)
+        return AgentIdentity(
+            display_name=meta.get("display_name"),
+            title=meta.get("title"),
+            emoji=meta.get("emoji"),
+            body=body,
+        )
 
     def prompt(self, text: str, timeout: int = 60) -> str:
         """Simple prompt -> response for Agency's own AI features.

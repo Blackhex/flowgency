@@ -5,10 +5,9 @@ import io
 import os
 import re
 import shutil
-import stat
 import subprocess
-import sys
 import tempfile
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,7 +22,7 @@ import uvicorn
 
 from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
-from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status as _get_timer_status, detect_platform
+from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
 
@@ -84,13 +83,18 @@ def get_agency_config() -> dict:
         "title": agency.get("title", "Agency"),
         "default_group": agency.get("default_group", "") or (list(GROUPS.keys())[0] if GROUPS else ""),
         "decided_by": agency.get("decided_by", "admin"),
+        "ai_backend": agency.get("ai_backend", "claude-code"),
     }
 
 
 # ── Dispatch Helpers ──────────────────────────────────────────────────────────
 
-DISPATCH_CONF_DIR = Path.home() / ".config" / "agency"
-SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
+def _workspace_types_json() -> str:
+    """Serialize workspace registry for admin templates."""
+    return json_module.dumps([
+        {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
+        for ws in WORKSPACE_REGISTRY.values()
+    ])
 
 
 def get_dispatch_status() -> dict:
@@ -223,14 +227,6 @@ def render_md(text: str) -> Markup:
     return Markup(md.convert(text))
 
 
-def read_file(path: Path) -> str:
-    """Read a file, return empty string if missing."""
-    try:
-        return path.read_text()
-    except FileNotFoundError:
-        return ""
-
-
 def validate_file_access(fpath: Path, base_path: Path, allowed_roots: list[Path] | None = None) -> None:
     """Validate file is within base_path or any allowed root. Raises HTTPException(403) if not."""
     resolved = fpath.resolve()
@@ -320,7 +316,15 @@ def execute_decision(decision_path: Path, group_path: Path, agent: str,
                     agent_integration = agent_integration.with_config(a["integration_config"])
                     break
 
-        result = agent_integration.run(agent_dir, prompt_file, timeout=300)
+        # Resolve timeout: per-agent → group dispatch → default 30 min
+        dispatch_cfg = g.get("dispatch", {})
+        agent_timeout = dispatch_cfg.get("agents", {}).get(agent, {})
+        if isinstance(agent_timeout, dict):
+            timeout = agent_timeout.get("timeout", dispatch_cfg.get("timeout", 1800))
+        else:
+            timeout = dispatch_cfg.get("timeout", 1800)
+
+        result = agent_integration.run(agent_dir, prompt_file, timeout=timeout)
         out_path.write_text(result.stdout)
         err_path.write_text(result.stderr)
 
@@ -1209,7 +1213,7 @@ async def admin_settings_page(request: Request):
         "request": request,
         **admin_context("settings"),
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
-        "ai_backend": CONFIG.get("agency", {}).get("ai_backend", "claude-code"),
+        "ai_backend": get_agency_config()["ai_backend"],
         "installed_count": len(REGISTRY),
     })
 
@@ -1385,10 +1389,7 @@ async def admin_org_new(request: Request):
         "org_path": "",
         "org_agents": "",
         "org_workspaces_json": json_module.dumps([]),
-        "workspace_types_json": json_module.dumps([
-            {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
-            for ws in WORKSPACE_REGISTRY.values()
-        ]),
+        "workspace_types_json": _workspace_types_json(),
         "agent_infos": [],
         "warning": "",
     })
@@ -1417,6 +1418,7 @@ async def admin_org_create(request: Request):
             "agency_title": agency.get("title", "Agency"),
             "admin_active": True,
             "active": "admin",
+            "admin_page": "groups",
             "groups": {k: v["name"] for k, v in config.get("groups", {}).items()},
             "mode": "create",
             "org_key": key,
@@ -1514,13 +1516,10 @@ async def admin_org_edit(request: Request, org: str):
         "org_path": g["path"],
         "org_agents": "\n".join(_agent_names),
         "org_workspaces_json": json_module.dumps(g.get("workspaces", [])),
-        "workspace_types_json": json_module.dumps([
-            {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
-            for ws in WORKSPACE_REGISTRY.values()
-        ]),
+        "workspace_types_json": _workspace_types_json(),
         "agent_infos": agent_infos,
         "dispatch_enabled": dispatch_cfg.get("enabled", False),
-        "dispatch_timeout": dispatch_cfg.get("timeout", 300),
+        "dispatch_timeout": dispatch_cfg.get("timeout", 1800),
         "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
         "dispatch_agents": dispatch_cfg.get("agents", {}),
         "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
@@ -1589,7 +1588,7 @@ async def admin_org_save(request: Request, org: str):
             ]),
             "agent_infos": [get_agent_info(Path(config["groups"][org]["path"]), a) for a in agents],
             "dispatch_enabled": config["groups"][org].get("dispatch", {}).get("enabled", False),
-            "dispatch_timeout": config["groups"][org].get("dispatch", {}).get("timeout", 300),
+            "dispatch_timeout": config["groups"][org].get("dispatch", {}).get("timeout", 1800),
             "dispatch_daily_limit": config["groups"][org].get("dispatch", {}).get("daily_limit", 20),
             "dispatch_agents": config["groups"][org].get("dispatch", {}).get("agents", {}),
             "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
@@ -1609,7 +1608,7 @@ async def admin_org_dispatch_save(request: Request, org: str):
 
     form = await request.form()
     enabled = form.get("enabled") == "on"
-    timeout = int(form.get("timeout", 300))
+    timeout = int(form.get("timeout", 1800))
     daily_limit = int(form.get("daily_limit", 20))
 
     g = config["groups"][org]
@@ -1762,14 +1761,11 @@ async def admin_org_autodetect(request: Request, org: str):
         "org_name": g["name"],
         "org_path": g["path"],
         "org_workspaces_json": json_module.dumps(g.get("workspaces", [])),
-        "workspace_types_json": json_module.dumps([
-            {"name": ws.name, "display_name": ws.display_name, "description": ws.description}
-            for ws in WORKSPACE_REGISTRY.values()
-        ]),
+        "workspace_types_json": _workspace_types_json(),
         "org_agents": "\n".join(_agent_names),
         "agent_infos": agent_infos,
         "dispatch_enabled": dispatch_cfg.get("enabled", False),
-        "dispatch_timeout": dispatch_cfg.get("timeout", 300),
+        "dispatch_timeout": dispatch_cfg.get("timeout", 1800),
         "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
         "dispatch_agents": dispatch_cfg.get("agents", {}),
         "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
@@ -1791,10 +1787,6 @@ def get_agent_info(base: Path, agent_name: str, agent_dir: Path | None = None) -
         "name": agent_name,
         "dir_exists": agent_dir.is_dir(),
         "has_definition": any(
-            (agent_dir / i.identity_filename()).exists()
-            for i in REGISTRY.values()
-        ) if agent_dir.is_dir() else False,
-        "has_claude_md": any(
             (agent_dir / i.identity_filename()).exists()
             for i in REGISTRY.values()
         ) if agent_dir.is_dir() else False,
@@ -1927,7 +1919,8 @@ async def admin_agent_create(request: Request, org: str):
     g = config["groups"][org]
     agents = g.get("agents", [])
 
-    if agent_name not in agents:
+    idx, _ = find_agent_in_config(agents, agent_name)
+    if idx < 0:
         agents.append(agent_name)
         config["groups"][org]["agents"] = agents
         save_config(config)
@@ -2014,7 +2007,7 @@ async def admin_agent_delete(request: Request, org: str, agent: str):
     # Optionally delete directory (skip shared agents — external path)
     if delete_files and not shared:
         agent_dir = Path(g["path"]) / agent
-        agent_dir.resolve().relative_to(Path(g["path"]).resolve())
+        validate_file_access(agent_dir, Path(g["path"]))
         if agent_dir.is_dir():
             shutil.rmtree(agent_dir)
 
@@ -2046,10 +2039,8 @@ async def agent_profile(request: Request, group: str, agent: str):
     identity = parse_agent_identity(agent_dir, agent_int)
     is_subagent = (g["path"] / "_subagents" / agent).is_dir() or identity["frontmatter"].get("subagent", False)
     last_seen = get_agent_last_seen(g, agent)
-    logs = get_agent_logs(g, agent)
     all_observations = list_observations(g)
     agent_observations = [c for c in all_observations if c.get("agent") == agent]
-    observations = agent_observations[:10]
     timeline = build_agent_timeline(g, agent, agent_observations=agent_observations)
     has_headshot = find_headshot(agent_dir) is not None
     has_memory = (agent_dir / "memory.md").exists()
@@ -2068,8 +2059,6 @@ async def agent_profile(request: Request, group: str, agent: str):
         "identity": identity,
         "is_subagent": is_subagent,
         "last_seen": last_seen,
-        "logs": logs,
-        "observations": observations,
         "timeline": timeline,
         "has_headshot": has_headshot,
         "has_memory": has_memory,
@@ -2077,7 +2066,6 @@ async def agent_profile(request: Request, group: str, agent: str):
         "agent_schedule": agent_schedule,
         "dispatch_enabled": dispatch_enabled,
         "agent_integration": agent_int.name,
-        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
     })
 
 
@@ -2159,7 +2147,9 @@ async def agent_toggle_subagent(request: Request, group: str, agent: str):
         if root_dir.exists():
             raise HTTPException(409, f"Cannot move: {root_dir} already exists")
         shutil.move(str(sub_dir), str(root_dir))
-        if agent not in group_config.get("agents", []):
+        agents = group_config.get("agents", [])
+        idx, _ = find_agent_in_config(agents, agent)
+        if idx < 0:
             group_config.setdefault("agents", []).append(agent)
     else:
         if not root_dir.is_dir():
@@ -2168,8 +2158,11 @@ async def agent_toggle_subagent(request: Request, group: str, agent: str):
             raise HTTPException(409, f"Cannot move: {sub_dir} already exists")
         (g["path"] / "_subagents").mkdir(exist_ok=True)
         shutil.move(str(root_dir), str(sub_dir))
-        if agent in group_config.get("agents", []):
-            group_config["agents"].remove(agent)
+        agents = group_config.get("agents", [])
+        idx, _ = find_agent_in_config(agents, agent)
+        if idx >= 0:
+            agents.pop(idx)
+            group_config["agents"] = agents
 
     save_config(config)
     reload_groups()
@@ -2215,12 +2208,6 @@ async def home(request: Request, group: str):
         "needs_action_count": needs_action_count,
         # Zone 4: Activity
         "activity_feed": activity,
-        # Kept for compatibility
-        "total_observations": len(observations),
-        "total_proposals": len(proposals),
-        "total_decisions": len(decisions),
-        "recent_decisions": decisions[:5],
-        "now": datetime.now().strftime("%B %d, %Y"),
     })
 
 
@@ -2266,7 +2253,7 @@ async def observation_detail(request: Request, group: str, slug: str):
         if decision_path.exists():
             dmeta, _ = parse_frontmatter(decision_path.read_text())
             pipeline["decision_slug"] = proposal_slug
-            pipeline["decision_status"] = dmeta.get("decision", "")
+            pipeline["decision_status"] = dmeta.get("execution_status", "decided")
         else:
             pipeline["decision_slug"] = None
 
@@ -2602,7 +2589,7 @@ async def document_save(request: Request, group: str):
     validate_file_access(fpath, g["path"], allowed_roots=get_allowed_roots(g))
 
     fpath.write_text(content)
-    return RedirectResponse(f"/{group}/documents/view?path={path}", status_code=303)
+    return RedirectResponse(f"/{group}/documents/view?path={urllib.parse.quote(path, safe='')}", status_code=303)
 
 
 @app.get("/{group}/logs", response_class=HTMLResponse)
@@ -2810,7 +2797,7 @@ async def memory_save(request: Request, group: str):
     validate_file_access(fpath, g["path"], allowed_roots=get_allowed_roots(g))
 
     fpath.write_text(content)
-    return RedirectResponse(f"/{group}/memory/view?path={path}", status_code=303)
+    return RedirectResponse(f"/{group}/memory/view?path={urllib.parse.quote(path, safe='')}", status_code=303)
 
 
 @app.get("/{group}/workspaces", response_class=HTMLResponse)
@@ -2900,7 +2887,7 @@ async def workspace_file_save(request: Request, group: str, idx: int):
         if file_path not in allowed:
             raise HTTPException(403, "File not in workspace config files")
         Path(file_path).write_text(content)
-    return RedirectResponse(f"/{group}/workspaces/{idx}/file?path={file_path}", status_code=303)
+    return RedirectResponse(f"/{group}/workspaces/{idx}/file?path={urllib.parse.quote(file_path, safe='')}", status_code=303)
 
 
 def main():

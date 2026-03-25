@@ -207,10 +207,11 @@ groups:
           script_path: /path/to/tmux-agents.sh
     dispatch:                      # Per-group dispatch config (optional)
       enabled: true
-      timeout: 300                 # Seconds per agent run
+      timeout: 1800                # Seconds per agent run (default: 30 min)
       daily_limit: 20              # Max runs per day for this group
       agents:                      # Per-agent schedule rules
         product:
+          timeout: 3600            # Per-agent timeout override (optional)
           - prompt: morning.md
             at: "09:00"
           - prompt: routine.md

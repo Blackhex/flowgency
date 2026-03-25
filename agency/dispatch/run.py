@@ -19,15 +19,16 @@ log = logging.getLogger("agency.dispatch")
 
 def check_at_rule(target_time: str, now_epoch: float | None = None, interval: int = 15) -> bool:
     """Check if current time is within (interval+2) minutes of an 'at' target."""
-    if now_epoch is None:
-        now_epoch = time.time()
-    today = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    if now_epoch is not None:
+        now = datetime.fromtimestamp(now_epoch)
+    today = now.strftime("%Y-%m-%d")
     try:
-        target_epoch = datetime.strptime(f"{today} {target_time}", "%Y-%m-%d %H:%M").timestamp()
+        target = datetime.strptime(f"{today} {target_time}", "%Y-%m-%d %H:%M")
     except ValueError:
         log.warning("Invalid at time: %s", target_time)
         return False
-    diff = now_epoch - target_epoch
+    diff = (now - target).total_seconds()
     window = (interval + 2) * 60
     return 0 <= diff < window
 
@@ -67,7 +68,7 @@ def run_dispatch_cycle(config: dict) -> None:
 
         log.info("Processing group: %s", group_key)
         group_path = Path(g["path"])
-        timeout = d.get("timeout", 300)
+        timeout = d.get("timeout", 1800)
         daily_limit = d.get("daily_limit", 20)
 
         logs_root = group_path / "shared" / "logs"
@@ -134,8 +135,13 @@ def run_dispatch_cycle(config: dict) -> None:
                         {"path": group_path, "agents_full": agents_normalized},
                         agent_name
                     )
+                    # Per-agent timeout overrides group default
+                    agent_rules = dispatch_agents.get(agent_name, [])
+                    agent_timeout = timeout
+                    if isinstance(agent_rules, dict):
+                        agent_timeout = agent_rules.get("timeout", timeout)
                     _run_agent(
-                        group_path, agent_name, prompt, timeout, log_dir,
+                        group_path, agent_name, prompt, agent_timeout, log_dir,
                         agents_by_name.get(agent_name, {}),
                         agent_dir=agent_dir,
                     )
