@@ -59,3 +59,166 @@ def test_render_summary_base():
     ws = BaseWorkspace()
     result = ws.render_summary({})
     assert isinstance(result, str)
+
+
+class TestTmuxWorkspace:
+    def test_config_schema(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        schema = ws.config_schema()
+        keys = [f["key"] for f in schema]
+        assert "script_path" in keys
+
+    def test_validate_config_requires_script_path(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        errors = ws.validate_config({})
+        assert any("script_path" in e for e in errors)
+
+    def test_validate_config_valid(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        errors = ws.validate_config({"script_path": "/tmp/test.sh"})
+        assert errors == []
+
+    def test_get_config_files(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        files = ws.get_config_files({"script_path": "/tmp/test.sh"})
+        assert len(files) == 1
+        assert files[0]["path"] == "/tmp/test.sh"
+        assert files[0]["language"] == "bash"
+
+    def test_supports_launch(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        assert ws.supports_launch() is True
+
+    def test_launch_command(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        cmd = ws.launch_command({"script_path": "/tmp/test.sh"}, "/tmp/group")
+        assert cmd == "bash /tmp/test.sh"
+
+    def test_render_summary(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        summary = ws.render_summary({"script_path": "/tmp/agents.sh"})
+        assert "/tmp/agents.sh" in summary
+
+    def test_detect_finds_tmux_script(self, tmp_path):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        script = tmp_path / "tmux-agents.sh"
+        script.write_text("#!/bin/bash\ntmux new-session")
+        result = ws.detect(str(tmp_path))
+        assert result is not None
+        assert result["script_path"] == str(script)
+
+    def test_detect_returns_none_when_absent(self, tmp_path):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("tmux")
+        result = ws.detect(str(tmp_path))
+        assert result is None
+
+
+class TestCursorWorkspace:
+    def test_config_schema_has_project_path(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("cursor")
+        keys = [f["key"] for f in ws.config_schema()]
+        assert "project_path" in keys
+
+    def test_validate_config_requires_project_path(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("cursor")
+        errors = ws.validate_config({})
+        assert any("project_path" in e for e in errors)
+
+    def test_get_config_files_finds_rules(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("cursor")
+        files = ws.get_config_files({"project_path": "/tmp/project"})
+        assert isinstance(files, list)
+
+    def test_detect_finds_cursor_dir(self, tmp_path):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("cursor")
+        cursor_dir = tmp_path / ".cursor" / "rules"
+        cursor_dir.mkdir(parents=True)
+        (cursor_dir / "agents.mdc").write_text("---\n---\nrules")
+        result = ws.detect(str(tmp_path))
+        assert result is not None
+        assert result["project_path"] == str(tmp_path)
+
+
+class TestSupersetWorkspace:
+    def test_config_schema(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("superset")
+        keys = [f["key"] for f in ws.config_schema()]
+        assert "project_path" in keys
+
+    def test_detect_finds_superset_dir(self, tmp_path):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("superset")
+        ss_dir = tmp_path / ".superset"
+        ss_dir.mkdir()
+        (ss_dir / "config.json").write_text("{}")
+        result = ws.detect(str(tmp_path))
+        assert result is not None
+
+
+class TestIdeWorkspace:
+    def test_config_schema(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("ide")
+        keys = [f["key"] for f in ws.config_schema()]
+        assert "ide_name" in keys
+        assert "project_path" in keys
+
+    def test_validate_config(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("ide")
+        errors = ws.validate_config({})
+        assert len(errors) > 0
+        errors = ws.validate_config({"ide_name": "VS Code", "project_path": "/tmp"})
+        assert errors == []
+
+
+class TestChatWorkspace:
+    def test_config_schema(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("chat")
+        keys = [f["key"] for f in ws.config_schema()]
+        assert "platform" in keys
+
+    def test_validate_config(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("chat")
+        errors = ws.validate_config({})
+        assert len(errors) > 0
+        errors = ws.validate_config({"platform": "Mattermost", "channel_url": "https://mm.example.com/team/channel"})
+        assert errors == []
+
+    def test_render_summary(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("chat")
+        summary = ws.render_summary({"platform": "Slack", "channel_url": "#agents"})
+        assert "Slack" in summary
+
+
+class TestCustomWorkspace:
+    def test_config_schema(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("custom")
+        keys = [f["key"] for f in ws.config_schema()]
+        assert "config_path" in keys
+        assert "language" in keys
+
+    def test_get_config_files(self):
+        from agency.workspaces import get_workspace
+        ws = get_workspace("custom")
+        files = ws.get_config_files({"config_path": "/tmp/config.yaml", "language": "yaml"})
+        assert len(files) == 1
+        assert files[0]["language"] == "yaml"
