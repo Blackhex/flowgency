@@ -330,6 +330,9 @@
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             Decisions
           </span>
+          {% if nav_running_decisions is defined and nav_running_decisions > 0 %}
+          <span class="nav-badge bg-blue-500/20 text-blue-400" title="{{ nav_running_decisions }} executing">{{ nav_running_decisions }}</span>
+          {% endif %}
         </a>
 
         <!-- Workspace: Reference + config -->

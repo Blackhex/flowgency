@@ -54,6 +54,23 @@
   {% endif %}
 </div>
 
+{% if running_decisions %}
+<div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mb-3">
+  <div class="flex items-center gap-2 mb-1.5">
+    <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+    <span class="text-sm font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wider">Executing</span>
+  </div>
+  {% for d in running_decisions %}
+  <a href="/{{ group }}/decisions/{{ d._slug }}" class="flex items-center justify-between py-1.5 text-sm group">
+    <span class="text-blue-800 dark:text-blue-200 font-medium group-hover:underline">{{ d._slug | replace("-", " ") | title }}</span>
+    {% if d.get("proposal") %}
+    <span class="text-blue-500 dark:text-blue-400 text-xs font-mono">{{ d.get("proposal", "").replace(".md", "") }}</span>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
 {# ════════════════════════════════════════════════════════════
    ZONE 2: PIPELINE PULSE
    ════════════════════════════════════════════════════════════ #}

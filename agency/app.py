@@ -331,6 +331,8 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
     actionable_proposal_count = sum(1 for c in proposals if c.get("status") in ("proposed", "investigating"))
     floated_observation_count = sum(1 for c in observations if c.get("float") and c.get("status") == "open")
     needs_action_count = actionable_proposal_count + floated_observation_count
+    decisions = list_decisions(g)
+    running_decisions = sum(1 for d in decisions if d.get("execution_status") == "running")
     return {
         "group": g["key"],
         "group_name": g["name"],
@@ -343,6 +345,7 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
         "nav_actionable": needs_action_count,
         "nav_actionable_proposals": actionable_proposal_count,
         "nav_agent_count": len(g["agents"]),
+        "nav_running_decisions": running_decisions,
         "show_tips": CONFIG.get("agency", {}).get("show_tips", True) is not False,
         "tips_dismissed": CONFIG.get("agency", {}).get("tips_dismissed", []),
         "theme_css": get_theme_css(),
@@ -2348,6 +2351,8 @@ async def home(request: Request, group: str):
         "needs_action_count": needs_action_count,
         # Zone 4: Activity
         "activity_feed": activity,
+        # Executing decisions
+        "running_decisions": [d for d in decisions if d.get("execution_status") == "running"],
     })
 
 
