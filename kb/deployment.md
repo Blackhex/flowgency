@@ -4,8 +4,8 @@
 
 ```bash
 pip install -e .
-python -m agency.app
-# or: agency --port 8500 --host 0.0.0.0
+agency serve
+# or: python -m agency.app
 ```
 
 Agency serves on `http://localhost:8500` by default.

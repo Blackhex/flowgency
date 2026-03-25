@@ -1,0 +1,115 @@
+name: Dispatch
+description: Navy + Amber — the operations center
+author: agency
+
+dark:
+  # Surfaces
+  bg: "#0f1629"
+  bg_surface: "#131d3a"
+  bg_card: "#1b2444"
+  bg_card_hover: "#223055"
+  border: "#2a3660"
+  border_subtle: "#1f2b50"
+
+  # Sidebar
+  sidebar_bg: "#1b2444"
+  sidebar_text: "#8896b3"
+  sidebar_active_bg: "rgba(245,158,11,0.15)"
+  sidebar_active_text: "#f59e0b"
+  sidebar_section: "#4a5578"
+
+  # Typography
+  text: "#c5d0e8"
+  text_heading: "#e2eaf8"
+  text_muted: "#8896b3"
+  text_faint: "#5c6a8a"
+
+  # Primary action
+  primary: "#f59e0b"
+  primary_text: "#0f1629"
+  primary_hover: "#d97706"
+
+  # Secondary action
+  secondary: "#2d4a8a"
+  secondary_text: "#c5d0e8"
+  secondary_hover: "#365599"
+
+  # Outline action
+  outline: "#f59e0b"
+
+  # Code
+  code_bg: "#0a0f1e"
+
+  # Prose
+  link: "#f59e0b"
+
+light:
+  # Surfaces
+  bg: "#f0eee6"
+  bg_surface: "#f0eee6"
+  bg_card: "#ffffff"
+  bg_card_hover: "#faf8f3"
+  border: "#ddd9ce"
+  border_subtle: "#e8e4da"
+
+  # Sidebar — stays dark
+  sidebar_bg: "#1b2444"
+  sidebar_text: "#8896b3"
+  sidebar_active_bg: "rgba(245,158,11,0.15)"
+  sidebar_active_text: "#f59e0b"
+  sidebar_section: "#4a5578"
+
+  # Typography
+  text: "#1b2444"
+  text_heading: "#0f1629"
+  text_muted: "#4a5578"
+  text_faint: "#8a8678"
+
+  # Primary action
+  primary: "#d97706"
+  primary_text: "#ffffff"
+  primary_hover: "#b45309"
+
+  # Secondary action
+  secondary: "#2d4a8a"
+  secondary_text: "#ffffff"
+  secondary_hover: "#1b2444"
+
+  # Outline action
+  outline: "#d97706"
+
+  # Code
+  code_bg: "#e8e4da"
+
+  # Prose
+  link: "#2d4a8a"
+
+# Logo — node constellation
+logo:
+  dark:
+    bg: "#2d4a8a"
+    node: "#ffffff"
+    line: "#ffffff"
+  light:
+    bg: "#f0eee6"
+    bg_border: "#ddd9ce"
+    node: "#2d4a8a"
+    line: "#2d4a8a"
+
+# Semantic colors (shared across modes or per-mode overrides)
+status:
+  healthy: { bg_dark: "rgba(34,197,94,0.15)", text_dark: "#4ade80", bg_light: "#dcfce7", text_light: "#166534" }
+  pending: { bg_dark: "rgba(245,158,11,0.15)", text_dark: "#f59e0b", bg_light: "#fef3c7", text_light: "#92400e" }
+  error: { bg_dark: "rgba(239,68,68,0.15)", text_dark: "#f87171", bg_light: "#fee2e2", text_light: "#991b1b" }
+
+# Tailwind color scale (for agency-* utilities)
+scale:
+  50: "#f0eee6"
+  100: "#e0ddd1"
+  200: "#c5bfad"
+  500: "#f59e0b"
+  600: "#d97706"
+  700: "#b45309"
+  800: "#1b2444"
+  900: "#0f1629"
+  950: "#0a0f1e"

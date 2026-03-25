@@ -1,0 +1,115 @@
+name: Workshop
+description: Teal + Terracotta — skilled craft with human warmth
+author: agency
+
+dark:
+  # Surfaces
+  bg: "#0c1f22"
+  bg_surface: "#0e2a2d"
+  bg_card: "#134e4a"
+  bg_card_hover: "#16605a"
+  border: "#1a6560"
+  border_subtle: "#134e4a"
+
+  # Sidebar
+  sidebar_bg: "#134e4a"
+  sidebar_text: "#6b9ea3"
+  sidebar_active_bg: "rgba(20,184,166,0.15)"
+  sidebar_active_text: "#34d399"
+  sidebar_section: "#3d7a77"
+
+  # Typography
+  text: "#81c5bf"
+  text_heading: "#b8e4df"
+  text_muted: "#6b9ea3"
+  text_faint: "#3d7a77"
+
+  # Primary action
+  primary: "#14b8a6"
+  primary_text: "#052e29"
+  primary_hover: "#0d9488"
+
+  # Secondary action
+  secondary: "#1a6560"
+  secondary_text: "#81c5bf"
+  secondary_hover: "#1f7a73"
+
+  # Outline action
+  outline: "#14b8a6"
+
+  # Code
+  code_bg: "#081517"
+
+  # Prose
+  link: "#34d399"
+
+light:
+  # Surfaces
+  bg: "#f5f0eb"
+  bg_surface: "#f5f0eb"
+  bg_card: "#ffffff"
+  bg_card_hover: "#faf7f3"
+  border: "#e0d9d0"
+  border_subtle: "#ebe5dc"
+
+  # Sidebar — stays dark
+  sidebar_bg: "#134e4a"
+  sidebar_text: "#6b9ea3"
+  sidebar_active_bg: "rgba(20,184,166,0.15)"
+  sidebar_active_text: "#34d399"
+  sidebar_section: "#3d7a77"
+
+  # Typography
+  text: "#0c1f22"
+  text_heading: "#081517"
+  text_muted: "#3d6a6d"
+  text_faint: "#8a7f72"
+
+  # Primary action
+  primary: "#14b8a6"
+  primary_text: "#ffffff"
+  primary_hover: "#0d9488"
+
+  # Secondary action
+  secondary: "#e0d9d0"
+  secondary_text: "#0c1f22"
+  secondary_hover: "#d4cbc0"
+
+  # Outline action
+  outline: "#0d9488"
+
+  # Code
+  code_bg: "#e0d9d0"
+
+  # Prose
+  link: "#0d9488"
+
+# Logo — node constellation
+logo:
+  dark:
+    bg: "#1f7a73"
+    node: "#ffffff"
+    line: "#ffffff"
+  light:
+    bg: "#f5f0eb"
+    bg_border: "#e0d9d0"
+    node: "#14b8a6"
+    line: "#14b8a6"
+
+# Semantic colors
+status:
+  healthy: { bg_dark: "rgba(52,211,153,0.15)", text_dark: "#34d399", bg_light: "#dcfce7", text_light: "#166534" }
+  pending: { bg_dark: "rgba(194,112,78,0.2)", text_dark: "#e8926a", bg_light: "#fde8d8", text_light: "#9a3412" }
+  error: { bg_dark: "rgba(239,68,68,0.15)", text_dark: "#f87171", bg_light: "#fee2e2", text_light: "#991b1b" }
+
+# Tailwind color scale
+scale:
+  50: "#f5f0eb"
+  100: "#e0d9d0"
+  200: "#b8e4df"
+  500: "#14b8a6"
+  600: "#0d9488"
+  700: "#0f766e"
+  800: "#134e4a"
+  900: "#0c1f22"
+  950: "#081517"

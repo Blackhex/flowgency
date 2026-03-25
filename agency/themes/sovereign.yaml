@@ -1,0 +1,115 @@
+name: Sovereign
+description: Violet + Gold — autonomy and self-governance
+author: agency
+
+dark:
+  # Surfaces
+  bg: "#1a1033"
+  bg_surface: "#221745"
+  bg_card: "#2d1f5e"
+  bg_card_hover: "#362870"
+  border: "#3d2d75"
+  border_subtle: "#2d1f5e"
+
+  # Sidebar
+  sidebar_bg: "#2d1f5e"
+  sidebar_text: "#9b8cbf"
+  sidebar_active_bg: "rgba(167,139,250,0.15)"
+  sidebar_active_text: "#a78bfa"
+  sidebar_section: "#6b5a99"
+
+  # Typography
+  text: "#d4c6f5"
+  text_heading: "#ede6ff"
+  text_muted: "#9b8cbf"
+  text_faint: "#6b5a99"
+
+  # Primary action
+  primary: "#7c3aed"
+  primary_text: "#ffffff"
+  primary_hover: "#6d28d9"
+
+  # Secondary action
+  secondary: "#3d2d75"
+  secondary_text: "#d4c6f5"
+  secondary_hover: "#4a3688"
+
+  # Outline action
+  outline: "#a78bfa"
+
+  # Code
+  code_bg: "#130d26"
+
+  # Prose
+  link: "#a78bfa"
+
+light:
+  # Surfaces
+  bg: "#f5f0ff"
+  bg_surface: "#f5f0ff"
+  bg_card: "#ffffff"
+  bg_card_hover: "#faf7ff"
+  border: "#e4ddf5"
+  border_subtle: "#ede6ff"
+
+  # Sidebar — stays dark
+  sidebar_bg: "#2d1f5e"
+  sidebar_text: "#9b8cbf"
+  sidebar_active_bg: "rgba(167,139,250,0.15)"
+  sidebar_active_text: "#a78bfa"
+  sidebar_section: "#6b5a99"
+
+  # Typography
+  text: "#1a1033"
+  text_heading: "#130d26"
+  text_muted: "#5b4a80"
+  text_faint: "#9b8cbf"
+
+  # Primary action
+  primary: "#7c3aed"
+  primary_text: "#ffffff"
+  primary_hover: "#6d28d9"
+
+  # Secondary action
+  secondary: "#e4ddf5"
+  secondary_text: "#2d1f5e"
+  secondary_hover: "#d4c6f5"
+
+  # Outline action
+  outline: "#7c3aed"
+
+  # Code
+  code_bg: "#ede6ff"
+
+  # Prose
+  link: "#7c3aed"
+
+# Logo — node constellation
+logo:
+  dark:
+    bg: "#4a3688"
+    node: "#ffffff"
+    line: "#ffffff"
+  light:
+    bg: "#f5f0ff"
+    bg_border: "#e4ddf5"
+    node: "#7c3aed"
+    line: "#7c3aed"
+
+# Semantic colors
+status:
+  healthy: { bg_dark: "rgba(34,197,94,0.15)", text_dark: "#4ade80", bg_light: "#dcfce7", text_light: "#166534" }
+  pending: { bg_dark: "rgba(234,179,8,0.15)", text_dark: "#eab308", bg_light: "#fef9c3", text_light: "#854d0e" }
+  error: { bg_dark: "rgba(239,68,68,0.15)", text_dark: "#f87171", bg_light: "#fee2e2", text_light: "#991b1b" }
+
+# Tailwind color scale
+scale:
+  50: "#f5f0ff"
+  100: "#ede6ff"
+  200: "#d4c6f5"
+  500: "#7c3aed"
+  600: "#6d28d9"
+  700: "#5b21b6"
+  800: "#2d1f5e"
+  900: "#1a1033"
+  950: "#130d26"

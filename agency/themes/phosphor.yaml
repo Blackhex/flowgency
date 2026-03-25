@@ -1,0 +1,115 @@
+name: Phosphor
+description: Carbon + Neon Green — AI-native computation
+author: agency
+
+dark:
+  # Surfaces
+  bg: "#0a0f1a"
+  bg_surface: "#0d1320"
+  bg_card: "#111827"
+  bg_card_hover: "#172033"
+  border: "#1e293b"
+  border_subtle: "#151d2e"
+
+  # Sidebar
+  sidebar_bg: "#111827"
+  sidebar_text: "#4b5563"
+  sidebar_active_bg: "rgba(34,197,94,0.1)"
+  sidebar_active_text: "#22c55e"
+  sidebar_section: "#374151"
+
+  # Typography
+  text: "#94a3b8"
+  text_heading: "#e2e8f0"
+  text_muted: "#64748b"
+  text_faint: "#4b5563"
+
+  # Primary action
+  primary: "#22c55e"
+  primary_text: "#0a0f1a"
+  primary_hover: "#16a34a"
+
+  # Secondary action
+  secondary: "#1e293b"
+  secondary_text: "#94a3b8"
+  secondary_hover: "#283548"
+
+  # Outline action
+  outline: "#22c55e"
+
+  # Code
+  code_bg: "#060a12"
+
+  # Prose
+  link: "#22c55e"
+
+light:
+  # Surfaces
+  bg: "#f0fdf4"
+  bg_surface: "#f0fdf4"
+  bg_card: "#ffffff"
+  bg_card_hover: "#f7fef9"
+  border: "#bbf7d0"
+  border_subtle: "#dcfce7"
+
+  # Sidebar — stays dark
+  sidebar_bg: "#111827"
+  sidebar_text: "#4b5563"
+  sidebar_active_bg: "rgba(34,197,94,0.1)"
+  sidebar_active_text: "#22c55e"
+  sidebar_section: "#374151"
+
+  # Typography
+  text: "#111827"
+  text_heading: "#0a0f1a"
+  text_muted: "#374151"
+  text_faint: "#6b8a72"
+
+  # Primary action
+  primary: "#16a34a"
+  primary_text: "#ffffff"
+  primary_hover: "#15803d"
+
+  # Secondary action
+  secondary: "#dcfce7"
+  secondary_text: "#166534"
+  secondary_hover: "#bbf7d0"
+
+  # Outline action
+  outline: "#16a34a"
+
+  # Code
+  code_bg: "#dcfce7"
+
+  # Prose
+  link: "#16a34a"
+
+# Logo — node constellation (uses green nodes, not white)
+logo:
+  dark:
+    bg: "#1e293b"
+    node: "#22c55e"
+    line: "#22c55e"
+  light:
+    bg: "#f0fdf4"
+    bg_border: "#bbf7d0"
+    node: "#16a34a"
+    line: "#16a34a"
+
+# Semantic colors
+status:
+  healthy: { bg_dark: "rgba(34,197,94,0.15)", text_dark: "#22c55e", bg_light: "#dcfce7", text_light: "#166534" }
+  pending: { bg_dark: "rgba(6,182,212,0.15)", text_dark: "#06b6d4", bg_light: "#cffafe", text_light: "#155e75" }
+  error: { bg_dark: "rgba(239,68,68,0.15)", text_dark: "#f87171", bg_light: "#fee2e2", text_light: "#991b1b" }
+
+# Tailwind color scale
+scale:
+  50: "#f0fdf4"
+  100: "#dcfce7"
+  200: "#bbf7d0"
+  500: "#22c55e"
+  600: "#16a34a"
+  700: "#15803d"
+  800: "#111827"
+  900: "#0a0f1a"
+  950: "#060a12"

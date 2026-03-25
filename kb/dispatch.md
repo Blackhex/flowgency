@@ -4,7 +4,7 @@ Dispatch is Agency's built-in agent scheduler. It runs as a platform-native time
 
 ## Setup
 
-Go to **Settings** (`/admin/`) and click **Install Dispatch**. Agency detects your platform and installs the appropriate timer:
+Go to **Dispatch** (`/admin/dispatch`) and click **Install Dispatch**. Agency detects your platform and installs the appropriate timer:
 
 **Linux (systemd):**
 - `~/.config/systemd/user/agency-dispatch.service` + `agency-dispatch.timer`
@@ -17,7 +17,7 @@ Go to **Settings** (`/admin/`) and click **Install Dispatch**. Agency detects yo
 **Windows:**
 - Not yet automated. The admin page shows the command to run manually via Task Scheduler.
 
-The timer is enabled and started immediately. Default heartbeat is every 15 minutes. You can change the interval on the Settings page after installation.
+The timer is enabled and started immediately. Default heartbeat is every 15 minutes. You can change the interval on the Settings page (`/admin/`) after installation.
 
 ## Enabling per Group
 

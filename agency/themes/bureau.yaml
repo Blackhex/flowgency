@@ -1,0 +1,115 @@
+name: Bureau
+description: Slate + Copper — quiet authority and timeless competence
+author: agency
+
+dark:
+  # Surfaces
+  bg: "#1c1917"
+  bg_surface: "#211f1d"
+  bg_card: "#292524"
+  bg_card_hover: "#322e2b"
+  border: "#3d3936"
+  border_subtle: "#292524"
+
+  # Sidebar
+  sidebar_bg: "#292524"
+  sidebar_text: "#78716c"
+  sidebar_active_bg: "rgba(217,119,6,0.12)"
+  sidebar_active_text: "#d97706"
+  sidebar_section: "#57534e"
+
+  # Typography
+  text: "#a8a29e"
+  text_heading: "#d6d3d1"
+  text_muted: "#78716c"
+  text_faint: "#57534e"
+
+  # Primary action
+  primary: "#b45309"
+  primary_text: "#fef3c7"
+  primary_hover: "#92400e"
+
+  # Secondary action
+  secondary: "#3d3936"
+  secondary_text: "#a8a29e"
+  secondary_hover: "#4a4644"
+
+  # Outline action
+  outline: "#d97706"
+
+  # Code
+  code_bg: "#141210"
+
+  # Prose
+  link: "#d97706"
+
+light:
+  # Surfaces
+  bg: "#fafaf9"
+  bg_surface: "#fafaf9"
+  bg_card: "#ffffff"
+  bg_card_hover: "#fdfcfb"
+  border: "#e7e5e4"
+  border_subtle: "#f0eeec"
+
+  # Sidebar — stays dark
+  sidebar_bg: "#292524"
+  sidebar_text: "#78716c"
+  sidebar_active_bg: "rgba(217,119,6,0.12)"
+  sidebar_active_text: "#d97706"
+  sidebar_section: "#57534e"
+
+  # Typography
+  text: "#1c1917"
+  text_heading: "#0c0a09"
+  text_muted: "#44403c"
+  text_faint: "#a8a29e"
+
+  # Primary action
+  primary: "#b45309"
+  primary_text: "#ffffff"
+  primary_hover: "#92400e"
+
+  # Secondary action
+  secondary: "#e7e5e4"
+  secondary_text: "#1c1917"
+  secondary_hover: "#d6d3d1"
+
+  # Outline action
+  outline: "#b45309"
+
+  # Code
+  code_bg: "#e7e5e4"
+
+  # Prose
+  link: "#b45309"
+
+# Logo — node constellation (warm stone nodes)
+logo:
+  dark:
+    bg: "#44403c"
+    node: "#d6d3d1"
+    line: "#a8a29e"
+  light:
+    bg: "#fafaf9"
+    bg_border: "#e7e5e4"
+    node: "#78716c"
+    line: "#78716c"
+
+# Semantic colors
+status:
+  healthy: { bg_dark: "rgba(34,197,94,0.12)", text_dark: "#4ade80", bg_light: "#dcfce7", text_light: "#166534" }
+  pending: { bg_dark: "rgba(217,119,6,0.15)", text_dark: "#d97706", bg_light: "#fef3c7", text_light: "#92400e" }
+  error: { bg_dark: "rgba(239,68,68,0.15)", text_dark: "#f87171", bg_light: "#fee2e2", text_light: "#991b1b" }
+
+# Tailwind color scale
+scale:
+  50: "#fafaf9"
+  100: "#f5f5f4"
+  200: "#e7e5e4"
+  500: "#b45309"
+  600: "#92400e"
+  700: "#78350f"
+  800: "#292524"
+  900: "#1c1917"
+  950: "#0c0a09"

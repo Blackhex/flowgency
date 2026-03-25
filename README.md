@@ -135,14 +135,14 @@ See the [`kb/`](kb/) folder for detailed guides:
 - [Configuration](kb/configuration.md) — config.yaml reference
 - [Dispatch](kb/dispatch.md) — agent scheduling system
 - [Deployment](kb/deployment.md) — running as a service on Linux, macOS, or Windows
-- [Adding Integrations](kb/adding-integrations.md) — how to add support for a new LLM tool
+- [Contributing Integrations](kb/contributing-integrations.md) — how to add support for a new LLM tool
 
 ## Contributing
 
 Contributions are welcome! Fork the repo, create a branch, and open a PR.
 
 ```bash
-git clone https://github.com/<your-username>/agency.git
+git clone https://github.com/christag/agency.git
 cd agency
 pip install -e .
 python -m pytest tests/ -v

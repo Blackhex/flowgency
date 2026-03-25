@@ -24,7 +24,11 @@ groups:
       integration: script
       integration_config:
         command: "./run.sh {prompt_file}"
-    tmux_config: /path/to/tmux-session.sh  # Optional
+    workspaces:                    # Optional — runtime frontend configs
+      - name: Terminal Grid
+        type: tmux
+        config:
+          script_path: /path/to/tmux-session.sh
     dispatch:                      # Optional — see kb/dispatch.md
       enabled: true
       timeout: 300
@@ -54,7 +58,7 @@ groups:
 | `path` | yes | Filesystem path to the agent directory |
 | `agents` | yes | List of agents (strings or dicts — see below) |
 | `default_integration` | no | Default integration for agents (default: `claude-code`) |
-| `tmux_config` | no | Path to a tmux session script for this group |
+| `workspaces` | no | List of workspace configs (see below) |
 | `dispatch.enabled` | no | Enable dispatch scheduling for this group |
 | `dispatch.timeout` | no | Seconds per agent run (default 300) |
 | `dispatch.daily_limit` | no | Max agent runs per day (default 20) |
@@ -95,3 +99,23 @@ Groups can be added, edited, and removed from the admin panel at `/admin/`. The 
 - **AI Backend** — choose which integration Agency uses for its own AI features (in app settings)
 
 Config writes are atomic (temp file + rename) and the group registry is reloaded after every change.
+
+## Workspaces
+
+Workspaces define how you interact with an agent group at runtime — tmux grids, IDE windows, chat channels, etc. Each group can have multiple workspaces:
+
+```yaml
+workspaces:
+  - name: Terminal Grid
+    type: tmux
+    config:
+      script_path: /path/to/tmux-session.sh
+  - name: Cursor IDE
+    type: cursor
+    config:
+      project_path: /path/to/project
+```
+
+Available workspace types: `tmux`, `cursor`, `superset`, `ide`, `chat`, `custom`. Workspaces are configured per group in the admin panel or directly in config.yaml.
+
+Legacy `tmux_config` (a single path string) is auto-migrated to the `workspaces` list at config load time.

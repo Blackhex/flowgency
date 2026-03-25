@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-git clone https://github.com/your-org/agency.git
+git clone https://github.com/christag/agency.git
 cd agency
 pip install -e .
 ```
@@ -14,14 +14,9 @@ pip install -e .
 agency serve
 ```
 
-Open `http://localhost:8500`. On first run, the setup wizard will guide you through:
+Open `http://localhost:8500`. On first run, the setup wizard asks you to point to the directory where your agent subdirectories live. Agency creates the group, sets up the `shared/` folder structure (observations, proposals, decisions, logs, prompts), and drops you into your dashboard.
 
-1. **Name your group** — give your agent team a display name
-2. **Point to a directory** — the folder where your agent subdirectories live
-3. **Choose a default integration** — which LLM tool most of your agents use (Claude Code, Codex, Gemini, etc.)
-4. **Auto-detect agents** — Agency scans the directory for recognized identity files and finds your agents automatically
-
-The wizard creates the `shared/` folder structure (observations, proposals, decisions, logs, prompts) and drops you into your dashboard.
+From there, you can configure the group further in the admin panel — set a display name, choose a default integration, auto-detect agents, and add dispatch schedules.
 
 ## Basic Concepts
 
