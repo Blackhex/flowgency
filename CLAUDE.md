@@ -37,6 +37,14 @@
 │   │   ├── run.py             # Python dispatch runner (replaces dispatch.sh)
 │   │   ├── install.py         # Platform-native timer installer
 │   │   └── __init__.py
+│   ├── workspaces/            # Workspace plugin system
+│   │   ├── __init__.py        # BaseWorkspace, REGISTRY, migration
+│   │   ├── tmux.py            # tmux session layout
+│   │   ├── cursor.py          # Cursor IDE
+│   │   ├── superset.py        # Superset.sh orchestrator
+│   │   ├── ide.py             # Generic IDE (VS Code, Windsurf, JetBrains)
+│   │   ├── chat.py            # Chat platforms (Slack, Mattermost, Discord)
+│   │   └── custom.py          # Custom config file
 │   └── templates/             # 27 Jinja2 templates
 │       ├── base.html          # Layout: sidebar + main content
 │       ├── home.html          # Mission control dashboard (fleet, pipeline, attention queue, activity)
@@ -65,7 +73,8 @@
 │       ├── admin_agent_detail.html # Admin agent detail view
 │       ├── setup.html         # First-run wizard
 │       ├── setup_complete.html # Post-setup "touch grass" finale page
-│       └── tmux_config.html   # Tmux session config viewer
+│       ├── workspaces.html        # Workspace list — runtime frontend configs
+│       └── workspace_detail.html  # Workspace config file viewer/editor
 ├── tests/                     # Test suite (98 tests)
 │   ├── conftest.py            # Shared fixtures
 │   ├── test_integrations.py   # Registry, detection, base classes
@@ -142,6 +151,32 @@ emoji: "📦"
 
 See `kb/contributing-integrations.md` for a complete walkthrough.
 
+## Workspace System
+
+Workspaces represent how users visualize and interact with their agent groups at runtime — tmux grids, IDE windows, chat channels, dedicated UIs, etc. The system is extensible via plugins, modeled after the integration system.
+
+### Shipped Workspace Plugins
+
+| Plugin | Description | Key Config | Launch | Detect |
+|--------|------------|------------|--------|--------|
+| `tmux` | Terminal multiplexer session | `script_path` | Yes | `tmux-*.sh` |
+| `cursor` | Cursor IDE with rules | `project_path` | Yes | `.cursor/rules/` |
+| `superset` | Superset.sh orchestrator | `project_path` | Yes | `.superset/config.json` |
+| `ide` | Generic IDE (VS Code, etc.) | `ide_name`, `project_path` | Yes | No |
+| `chat` | Chat platform (Slack, etc.) | `platform`, `channel_url` | No | No |
+| `custom` | Any config file | `config_path`, `language` | Yes | No |
+
+### Adding New Workspace Plugins
+
+1. Create `agency/workspaces/your_plugin.py`
+2. Subclass `BaseWorkspace`, implement methods
+3. Call `_register(YourPlugin())` at module level
+4. Import in `agency/workspaces/__init__.py`
+
+### Config Migration
+
+Legacy `tmux_config` (single path string) is auto-migrated to the `workspaces` list at config load time. The migration is in-memory only — config.yaml is not rewritten until the user saves from admin.
+
 ## Config Format
 
 ```yaml
@@ -165,6 +200,11 @@ groups:
       integration: script
       integration_config:
         command: "./run.sh {prompt_file}"
+    workspaces:                        # How users interact with this group at runtime
+      - name: Terminal Grid
+        type: tmux
+        config:
+          script_path: /path/to/tmux-agents.sh
     dispatch:                      # Per-group dispatch config (optional)
       enabled: true
       timeout: 300                 # Seconds per agent run
@@ -259,8 +299,9 @@ All org-scoped routes use `/{group}/` prefix. Admin routes are at `/admin/`.
 | GET | `/{group}/memory` | Agent memory file list |
 | GET | `/{group}/memory/view?path=` | View/edit memory file |
 | POST | `/{group}/memory/save` | Save memory edits |
-| GET | `/{group}/tmux-config` | Tmux session config viewer |
-| POST | `/{group}/tmux-config/save` | Save tmux config edits |
+| GET | `/{group}/workspaces` | Workspace list — runtime frontend configs |
+| GET | `/{group}/workspaces/{idx}/file` | View/edit workspace config file |
+| POST | `/{group}/workspaces/{idx}/file/save` | Save workspace file edits |
 
 ### Agent Routes
 
@@ -430,6 +471,8 @@ Every org-scoped template gets via `group_context(g)`:
 - `groups` — dict of all group keys → names (for switcher)
 - `agency_title` — from config
 - `nav_open_observations`, `nav_actionable`, `nav_agent_count` — sidebar counts
+- `workspaces` — list of workspace dicts for the group
+- `workspaces_available` — bool, whether any workspaces are configured
 
 ### Initialize Workflow
 Creates the standard agent group folder structure. Idempotent — only creates missing dirs/files:
