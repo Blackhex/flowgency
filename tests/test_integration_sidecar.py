@@ -1,5 +1,5 @@
 import pytest
-from agency.integrations import AgentIdentity
+from agency.integrations import AgentIdentity, detect_integration
 from agency.integrations.agency.codex import CodexIntegration
 from agency.integrations.agency.gemini import GeminiIntegration
 from agency.integrations.agency.aider import AiderIntegration
@@ -285,3 +285,30 @@ class TestPi:
 
     def test_missing_file(self, integration, tmp_agent_dir):
         assert integration.parse_identity(tmp_agent_dir) is None
+
+
+class TestDetectionPriority:
+    """Ensure OpenCode and Pi are detected before Codex when their config dirs exist."""
+
+    def test_opencode_over_codex(self, tmp_agent_dir):
+        """AGENTS.md + .opencode/ → OpenCode, not Codex."""
+        (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
+        (tmp_agent_dir / ".opencode").mkdir()
+        result = detect_integration(tmp_agent_dir)
+        assert result is not None
+        assert result.name == "opencode"
+
+    def test_pi_over_codex(self, tmp_agent_dir):
+        """AGENTS.md + .pi/ → Pi, not Codex."""
+        (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
+        (tmp_agent_dir / ".pi").mkdir()
+        result = detect_integration(tmp_agent_dir)
+        assert result is not None
+        assert result.name == "pi"
+
+    def test_agents_md_only_is_codex(self, tmp_agent_dir):
+        """AGENTS.md alone → Codex."""
+        (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
+        result = detect_integration(tmp_agent_dir)
+        assert result is not None
+        assert result.name == "codex"

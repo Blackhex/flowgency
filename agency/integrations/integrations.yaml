@@ -4,5 +4,7 @@ integrations:
   - agency.gemini
   - agency.aider
   - agency.goose
+  - agency.opencode
+  - agency.pi
   - agency.script
   - agency.sdk

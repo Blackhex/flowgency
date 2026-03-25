@@ -225,7 +225,8 @@ def load_integrations() -> None:
         # First run or missing config — create default
         modules = [
             "agency.claude_code", "agency.codex", "agency.gemini",
-            "agency.aider", "agency.goose", "agency.script", "agency.sdk",
+            "agency.aider", "agency.goose", "agency.opencode", "agency.pi",
+            "agency.script", "agency.sdk",
         ]
         _write_config(modules)
 

@@ -117,6 +117,8 @@ Integrations are organized by author namespace: official integrations live in `a
 | `gemini` | `GEMINI.md` | GEMINI.md exists | `gemini -p` | Yes |
 | `aider` | `CONVENTIONS.md` | .aider.conf.yml exists | `aider --message-file` | No |
 | `goose` | `.goosehints` | .goosehints exists | `goose run` | Yes |
+| `opencode` | `AGENTS.md` | `.opencode/` dir exists | `opencode run` | No |
+| `pi` | `AGENTS.md` | `.pi/` dir exists | `pi -p` | No |
 | `script` | `agent.md` | Never (explicit config) | User command template | No |
 | `sdk` | `agent.md` | agent.md exists (fallback) | None (external) | No |
 
