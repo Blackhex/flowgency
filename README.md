@@ -18,7 +18,7 @@
 
 ---
 
-Agency is an open-source management dashboard for AI agent teams. It connects to 7 LLM tools — Claude Code, Codex, Gemini, Aider, Goose, custom scripts, and SDK agents — and gives you a unified pipeline to see what your agents observe, review their proposals, and make decisions. It currently manages 21 agents across 3 groups in production. Everything is stored as markdown files with YAML frontmatter. No database, no Docker, no build step. 98 tests passing.
+Agency is an open-source management dashboard for AI agent teams. It connects to 9 LLM tools — Claude Code, Codex, Gemini, Aider, Goose, OpenCode, Pi, custom scripts, and SDK agents — and gives you a unified pipeline to see what your agents observe, review their proposals, and make decisions. It currently manages 21 agents across 3 groups in production. Everything is stored as markdown files with YAML frontmatter. No database, no Docker, no build step. 229 tests passing.
 
 <p align="center">
   <img src="screenshots/inbox.png" width="800" alt="Agency mission control dashboard with fleet status, pipeline pulse, attention queue, and activity feed">
@@ -36,7 +36,7 @@ If you have multiple projects, each with their own agent team, Agency manages al
 
 ## What problem does Agency solve?
 
-You have AI agents. Maybe they use Claude Code. Maybe Codex, Gemini, Aider, or something custom. They run in different directories, produce output in different ways, and you're alt-tabbing between terminals to figure out what's happening.
+You have AI agents. Maybe they use Claude Code. Maybe Codex, Gemini, Aider, OpenCode, Pi, or something custom. They run in different directories, produce output in different ways, and you're alt-tabbing between terminals to figure out what's happening.
 
 Agency gives you a single place to see what your agents are doing, what they've found, and what they need from you.
 
@@ -67,7 +67,7 @@ Approve, defer, or reject proposals inline — no clicking through to separate p
 
 ### Which LLM tools does it support?
 
-Agency supports **Claude Code, OpenAI Codex, Google Gemini, Aider, Goose, custom scripts**, and an SDK mode for agents you run yourself. Different agents in the same group can use different tools — Agency handles the differences.
+Agency supports **Claude Code, OpenAI Codex, Google Gemini, Aider, Goose, OpenCode, Pi, custom scripts**, and an SDK mode for agents you run yourself. Different agents in the same group can use different tools — Agency handles the differences.
 
 <p align="center">
   <img src="screenshots/agents.png" width="800" alt="Agent list showing different integration badges">
