@@ -69,6 +69,24 @@ def get_workspace(name: str) -> BaseWorkspace:
     return REGISTRY[name]
 
 
+def migrate_tmux_config(group_cfg: dict) -> dict:
+    """Migrate legacy tmux_config to workspaces list. Returns modified dict."""
+    if group_cfg.get("workspaces"):
+        return group_cfg
+    tmux_path = group_cfg.get("tmux_config")
+    if not tmux_path:
+        return group_cfg
+    group_cfg["workspaces"] = [
+        {
+            "name": "tmux",
+            "type": "tmux",
+            "config": {"script_path": tmux_path},
+        }
+    ]
+    del group_cfg["tmux_config"]
+    return group_cfg
+
+
 # Import all workspace plugins to trigger registration.
 from agency.workspaces.tmux import TmuxWorkspace  # noqa: E402, F401
 from agency.workspaces.cursor import CursorWorkspace  # noqa: E402, F401
