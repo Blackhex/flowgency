@@ -92,13 +92,14 @@
         {% elif q.type == "choice" %}
         <div class="flex flex-col gap-1.5">
           {% for opt in q.options %}
+          {% set opt_label = opt.label if opt is mapping else opt %}
           <label class="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-md cursor-pointer hover:border-purple-300 has-[:checked]:border-purple-500 has-[:checked]:bg-purple-50 transition-colors">
             {% if q.multi %}
-            <input type="checkbox" name="answer_{{ q.id }}" value="{{ opt.label }}" class="text-purple-600 rounded">
+            <input type="checkbox" name="answer_{{ q.id }}" value="{{ opt_label }}" class="text-purple-600 rounded">
             {% else %}
-            <input type="radio" name="answer_{{ q.id }}" value="{{ opt.label }}" class="text-purple-600" {% if loop.first %}required{% endif %}>
+            <input type="radio" name="answer_{{ q.id }}" value="{{ opt_label }}" class="text-purple-600" {% if loop.first %}required{% endif %}>
             {% endif %}
-            <span class="text-sm">{{ opt.label }}</span>
+            <span class="text-sm">{{ opt_label }}</span>
           </label>
           {% endfor %}
         </div>
