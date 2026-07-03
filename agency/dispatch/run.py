@@ -191,7 +191,13 @@ def _run_agent(group_path: Path, agent_name: str, prompt_filename: str,
     log.info("  RUNNING: %s with %s (timeout %ds, integration %s)",
              agent_name, prompt_filename, timeout, integration_name)
 
-    result = integration.run(agent_dir, prompt_path, timeout)
+    running_marker = log_dir.parent / f".running-{agent_name}"
+    running_marker.touch()
+    try:
+        result = integration.run(agent_dir, prompt_path, timeout)
+    finally:
+        running_marker.unlink(missing_ok=True)
+
     out_file.write_text(result.stdout)
     err_file.write_text(result.stderr)
 
