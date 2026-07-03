@@ -1081,6 +1081,28 @@ def relative_time(dt: datetime | None) -> str:
 templates.env.filters["relative_time"] = relative_time
 
 
+def relative_future(dt: datetime | None) -> str:
+    """Format an upcoming datetime as 'in 5m', 'in 2h', 'tomorrow HH:MM', etc."""
+    if dt is None:
+        return ""
+    now = datetime.now()
+    seconds = int((dt - now).total_seconds())
+    if seconds <= 0:
+        return "due now"
+    minutes = round(seconds / 60)
+    if minutes < 60:
+        return f"in {minutes}m"
+    hours = minutes // 60
+    if hours < 24 and dt.date() == now.date():
+        return f"in {hours}h"
+    if dt.date() == (now + timedelta(days=1)).date():
+        return f"tomorrow {dt.strftime('%H:%M')}"
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+templates.env.filters["relative_future"] = relative_future
+
+
 def integration_badge_filter(name: str) -> Markup:
     """Render a colored badge for an integration name."""
     colors = {

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.app import is_agent_running, compute_next_run
+from agency.app import is_agent_running, compute_next_run, relative_future
 
 
 def _group(tmp_path):
@@ -112,4 +112,25 @@ def test_next_run_returns_soonest(tmp_path):
     ]}}
     result = compute_next_run(g, "product", cfg)
     assert result.strftime("%H:%M") == soon
+
+
+def test_relative_future_none():
+    assert relative_future(None) == ""
+
+
+def test_relative_future_due_now():
+    assert relative_future(datetime.now() - timedelta(minutes=1)) == "due now"
+
+
+def test_relative_future_minutes():
+    assert relative_future(datetime.now() + timedelta(minutes=5)) == "in 5m"
+
+
+def test_relative_future_hours():
+    assert relative_future(datetime.now() + timedelta(hours=2, minutes=1)) == "in 2h"
+
+
+def test_relative_future_tomorrow():
+    dt = datetime.now() + timedelta(days=1)
+    assert relative_future(dt) == f"tomorrow {dt.strftime('%H:%M')}"
 
