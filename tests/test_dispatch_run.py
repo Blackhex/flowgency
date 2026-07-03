@@ -88,7 +88,7 @@ def test_run_agent_marker_present_during_run(tmp_path):
 
     fake_integration = MagicMock(supports_execution=True)
 
-    def _run(agent_dir_arg, prompt_path, timeout):
+    def _run(agent_dir_arg, prompt_path, timeout, *, sandbox_root=None):
         seen["exists"] = running_marker.exists()
         return MagicMock(stdout="ok", stderr="", exit_code=0, duration_seconds=1.0)
 
@@ -114,3 +114,27 @@ def test_run_agent_removes_marker_on_exception(tmp_path):
                        {"integration": "claude-code"}, agent_dir=agent_dir)
 
     assert not running_marker.exists()
+
+
+def test_run_agent_forwards_sandbox_root(tmp_path):
+    """Verify sandbox_root parameter is forwarded to integration.run."""
+    group_path, agent_dir, log_dir = _make_group(tmp_path)
+    sandbox_path = Path("/repo/root")
+    captured = {}
+
+    fake_integration = MagicMock(supports_execution=True)
+
+    def _run(agent_dir_arg, prompt_path, timeout, *, sandbox_root=None):
+        captured["sandbox_root"] = sandbox_root
+        return MagicMock(stdout="ok", stderr="", exit_code=0, duration_seconds=1.0)
+
+    fake_integration.run.side_effect = _run
+
+    with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
+        _run_agent(
+            group_path, "product", "routine.md", 1800, log_dir,
+            {"integration": "claude-code"}, agent_dir=agent_dir,
+            sandbox_root=sandbox_path,
+        )
+
+    assert captured["sandbox_root"] == sandbox_path

@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 from agency.integrations import get_integration, REGISTRY
-from agency.config import normalize_agents, agent_names, get_agent_dir
+from agency.config import normalize_agents, agent_names, get_agent_dir, get_sandbox_root
 
 log = logging.getLogger("agency.dispatch")
 
@@ -68,6 +68,7 @@ def run_dispatch_cycle(config: dict) -> None:
 
         log.info("Processing group: %s", group_key)
         group_path = Path(g["path"])
+        sandbox_root = get_sandbox_root(g)
         timeout = d.get("timeout", 1800)
         daily_limit = d.get("daily_limit", 20)
 
@@ -144,6 +145,7 @@ def run_dispatch_cycle(config: dict) -> None:
                         group_path, agent_name, prompt, agent_timeout, log_dir,
                         agents_by_name.get(agent_name, {}),
                         agent_dir=agent_dir,
+                        sandbox_root=sandbox_root,
                     )
                     # Touch markers
                     if at_time:
@@ -154,7 +156,8 @@ def run_dispatch_cycle(config: dict) -> None:
 
 def _run_agent(group_path: Path, agent_name: str, prompt_filename: str,
                timeout: int, log_dir: Path, agent_config: dict,
-               agent_dir: Path | None = None) -> None:
+               agent_dir: Path | None = None, *,
+               sandbox_root: Path | None = None) -> None:
     """Execute a single agent run."""
     prompt_path = group_path / "shared" / "prompts" / prompt_filename
     if agent_dir is None:
@@ -194,7 +197,7 @@ def _run_agent(group_path: Path, agent_name: str, prompt_filename: str,
     running_marker = log_dir.parent / f".running-{agent_name}"
     running_marker.touch()
     try:
-        result = integration.run(agent_dir, prompt_path, timeout)
+        result = integration.run(agent_dir, prompt_path, timeout, sandbox_root=sandbox_root)
     finally:
         running_marker.unlink(missing_ok=True)
 
