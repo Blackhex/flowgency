@@ -22,7 +22,7 @@ from markupsafe import Markup
 
 import uvicorn
 
-from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
+from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, get_sandbox_root, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 import json as json_module
@@ -495,7 +495,8 @@ def execute_decision(decision_path: Path, group_path: Path, agent: str,
         else:
             timeout = dispatch_cfg.get("timeout", 1800)
 
-        result = agent_integration.run(agent_dir, prompt_file, timeout=timeout)
+        sandbox_root = get_sandbox_root(g)
+        result = agent_integration.run(agent_dir, prompt_file, timeout=timeout, sandbox_root=sandbox_root)
         out_path.write_text(result.stdout)
         err_path.write_text(result.stderr)
 
