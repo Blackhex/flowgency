@@ -5,12 +5,14 @@ import shutil
 import stat
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 DISPATCH_CONF_DIR = Path.home() / ".config" / "agency"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 LAUNCHD_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 LAUNCHD_PLIST = "com.agency.dispatch"
+WINDOWS_TASK_NAME = "AgencyDispatch"
 
 
 def detect_platform() -> str:
@@ -55,6 +57,18 @@ def uninstall_timer() -> str | None:
         return _uninstall_macos()
     else:
         return "Windows timer uninstallation is not yet implemented."
+
+
+# ── Windows (Task Scheduler) ─────────────────────────────────────────────────
+
+
+def _windows_python_launcher() -> str:
+    """Return pythonw.exe (no console window) if present, else sys.executable."""
+    exe = Path(sys.executable)
+    pythonw = exe.with_name("pythonw.exe")
+    if pythonw.exists():
+        return str(pythonw)
+    return str(exe)
 
 
 # ── Linux (systemd) ──────────────────────────────────────────────────────────
