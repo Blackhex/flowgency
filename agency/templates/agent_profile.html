@@ -34,6 +34,16 @@
       <div class="text-xs text-gray-400" title="{{ last_seen.strftime('%Y-%m-%d %H:%M:%S') if last_seen else '' }}">
         Last seen: {{ last_seen | relative_time }}
       </div>
+      {% if agent_running %}
+      <div class="flex items-center gap-1.5 text-xs text-emerald-600 mb-1">
+        <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        Running now
+      </div>
+      {% elif agent_next_run %}
+      <div class="text-xs text-gray-500 mb-1" title="{{ agent_next_run.strftime('%Y-%m-%d %H:%M') }}">
+        Next run: {{ agent_next_run | relative_future }} ({{ agent_next_run.strftime('%H:%M') }})
+      </div>
+      {% endif %}
       {% if agent_schedule %}
       <div class="flex flex-wrap items-center gap-1.5 mt-2">
         <span class="inline-block w-1.5 h-1.5 rounded-full {% if dispatch_enabled %}bg-emerald-400{% else %}bg-gray-300{% endif %}" title="Dispatch {{ 'enabled' if dispatch_enabled else 'disabled' }}"></span>

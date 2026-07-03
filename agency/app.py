@@ -2314,6 +2314,8 @@ async def agent_profile(request: Request, group: str, agent: str):
     dispatch_cfg = group_cfg.get("dispatch", {})
     agent_schedule = dispatch_cfg.get("agents", {}).get(agent, [])
     dispatch_enabled = dispatch_cfg.get("enabled", False)
+    agent_running = is_agent_running(g, agent, dispatch_cfg.get("timeout", 1800))
+    agent_next_run = compute_next_run(g, agent, dispatch_cfg)
 
     return templates.TemplateResponse(request, "agent_profile.html", {
         "request": request,
@@ -2328,6 +2330,8 @@ async def agent_profile(request: Request, group: str, agent: str):
         "memory_path": memory_path,
         "agent_schedule": agent_schedule,
         "dispatch_enabled": dispatch_enabled,
+        "agent_running": agent_running,
+        "agent_next_run": agent_next_run,
         "agent_integration": agent_int.name,
     })
 
