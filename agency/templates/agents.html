@@ -37,7 +37,7 @@
         {% else %}
         <span class="inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
         {{ a.last_seen | relative_time }}
-        {% if a.next_run %}<span class="text-gray-300">·</span> next {{ a.next_run | relative_future }}{% endif %}
+        {% if a.next_run %}<span class="text-gray-300">·</span> {{ a.next_run | relative_future }}{% endif %}
         {% endif %}
       </span>
       {% if a.integration %}{{ a.integration | integration_badge }}{% endif %}
@@ -87,7 +87,7 @@
           {% else %}
           <span class="inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
           {{ a.last_seen | relative_time }}
-          {% if a.next_run %}<span class="text-gray-300">·</span> next {{ a.next_run | relative_future }}{% endif %}
+          {% if a.next_run %}<span class="text-gray-300">·</span> {{ a.next_run | relative_future }}{% endif %}
           {% endif %}
         </span>
       </div>

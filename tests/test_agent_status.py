@@ -125,11 +125,11 @@ def test_relative_future_due_now():
 
 
 def test_relative_future_minutes():
-    assert relative_future(datetime.now() + timedelta(minutes=5)) == "in 5m"
+    assert relative_future(datetime.now() + timedelta(minutes=5)) == "5m away"
 
 
 def test_relative_future_hours():
-    assert relative_future(datetime.now() + timedelta(hours=2, minutes=1)) == "in 2h"
+    assert relative_future(datetime.now() + timedelta(hours=2, minutes=1)) == "2h away"
 
 
 def test_relative_future_tomorrow():
@@ -138,7 +138,7 @@ def test_relative_future_tomorrow():
 
 
 def test_relative_future_under_a_minute():
-    assert relative_future(datetime.now() + timedelta(seconds=30)) == "in 1m"
+    assert relative_future(datetime.now() + timedelta(seconds=30)) == "1m away"
 
 
 def test_collect_agents_includes_running_and_next_run(tmp_path):
