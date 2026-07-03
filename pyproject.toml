@@ -3,7 +3,7 @@ name = "christag-agency"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi<0.116",
+    "fastapi>=0.116",
     "starlette<1.0",
     "uvicorn[standard]",
     "jinja2",
