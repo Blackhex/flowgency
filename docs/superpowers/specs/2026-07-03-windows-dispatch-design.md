@@ -18,6 +18,11 @@ Add a Windows backend so that `install_timer`, `uninstall_timer`, and
 `get_timer_status` register, remove, and report on a real Windows Task Scheduler
 task that runs the existing dispatch runner every N minutes.
 
+No PowerShell or CMD console windows may pop up when the scheduled dispatch task
+runs in the background. Each fire must be silent — no visible console flash,
+every N minutes. (This is why the action uses `pythonw.exe`, and the task is
+configured to run whether or not a window would otherwise appear.)
+
 ## Non-Goals
 
 - No change to the dispatch runner (`agency/dispatch/run.py`) — it is already
