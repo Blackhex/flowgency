@@ -56,21 +56,37 @@ def test_next_run_no_rules(tmp_path):
 
 def test_next_run_at_future(tmp_path):
     g = _group_with_logs(tmp_path)
-    future = (datetime.now() + timedelta(hours=2)).strftime("%H:%M")
+    fixed_now = datetime(2026, 1, 15, 12, 0, 0)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    future = (fixed_now + timedelta(hours=2)).strftime("%H:%M")
     cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "at": future}]}}
-    result = compute_next_run(g, "product", cfg)
+    with patch.object(app_module, "datetime", _Frozen):
+        result = compute_next_run(g, "product", cfg)
     assert result is not None
-    assert result.date() == datetime.now().date()
+    assert result.date() == fixed_now.date()
     assert result.strftime("%H:%M") == future
 
 
 def test_next_run_at_past_rolls_to_tomorrow(tmp_path):
     g = _group_with_logs(tmp_path)
-    past = (datetime.now() - timedelta(hours=2)).strftime("%H:%M")
+    fixed_now = datetime(2026, 1, 15, 12, 0, 0)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
     cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "at": past}]}}
-    result = compute_next_run(g, "product", cfg)
+    with patch.object(app_module, "datetime", _Frozen):
+        result = compute_next_run(g, "product", cfg)
     assert result is not None
-    assert result.date() == (datetime.now() + timedelta(days=1)).date()
+    assert result.date() == (fixed_now + timedelta(days=1)).date()
 
 
 def test_next_run_every_no_marker_due_now(tmp_path):
