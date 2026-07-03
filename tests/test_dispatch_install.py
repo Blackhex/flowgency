@@ -97,3 +97,31 @@ def test_status_windows_not_installed():
         status = get_timer_status()
 
     assert status == {"installed": False, "timer_active": False}
+
+
+def test_uninstall_windows_deletes_task():
+    fake_client = MagicMock()
+    scheduler = fake_client.Dispatch.return_value
+    folder = scheduler.GetFolder.return_value
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
+        from agency.dispatch.install import uninstall_timer
+        err = uninstall_timer()
+
+    assert err is None
+    folder.DeleteTask.assert_called_once_with("AgencyDispatch", 0)
+
+
+def test_uninstall_windows_missing_task_is_success():
+    fake_client = MagicMock()
+    scheduler = fake_client.Dispatch.return_value
+    folder = scheduler.GetFolder.return_value
+    folder.DeleteTask.side_effect = Exception("The system cannot find the file specified")
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
+        from agency.dispatch.install import uninstall_timer
+        err = uninstall_timer()
+
+    assert err is None

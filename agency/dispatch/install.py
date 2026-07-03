@@ -56,7 +56,7 @@ def uninstall_timer() -> str | None:
     elif plat == "macos":
         return _uninstall_macos()
     else:
-        return "Windows timer uninstallation is not yet implemented."
+        return _uninstall_windows()
 
 
 # ── Windows (Task Scheduler) ─────────────────────────────────────────────────
@@ -134,6 +134,23 @@ def _status_windows() -> dict:
     # TASK_STATE_READY = 3, TASK_STATE_RUNNING = 4
     timer_active = bool(task.Enabled) and task.State in (3, 4)
     return {"installed": True, "timer_active": timer_active}
+
+
+def _uninstall_windows() -> str | None:
+    """Delete the AgencyDispatch task. Missing task is treated as success."""
+    try:
+        from win32com.client import Dispatch
+    except ImportError:
+        return None
+    try:
+        scheduler = Dispatch("Schedule.Service")
+        scheduler.Connect()
+        folder = scheduler.GetFolder("\\")
+        folder.DeleteTask(WINDOWS_TASK_NAME, 0)
+        return None
+    except Exception:
+        # Task not found (or already removed) — treat as success.
+        return None
 
 
 # ── Linux (systemd) ──────────────────────────────────────────────────────────
