@@ -1802,6 +1802,11 @@ async def admin_org_edit(request: Request, org: str):
         "available_prompts": prompts,
         "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
         "default_integration": g.get("default_integration", "claude-code"),
+        "sandbox_root": g.get("sandbox_root", ""),
+        "default_integration_supports_sandbox": (
+            REGISTRY.get(g.get("default_integration", "claude-code")).supports_sandbox
+            if REGISTRY.get(g.get("default_integration", "claude-code")) else False
+        ),
         "warning": "",
     })
 
