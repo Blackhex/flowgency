@@ -7,7 +7,8 @@ build/
 config.yaml
 agents/
 agency.service
-docs/
+docs/*
+!docs/superpowers/
 reports/
 .worktrees/
 .superpowers/
