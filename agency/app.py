@@ -4,6 +4,7 @@ import csv
 import io
 import os
 import re
+import time
 import shutil
 import subprocess
 import tempfile
@@ -985,6 +986,19 @@ def get_agent_last_seen(g: dict, agent_name: str) -> datetime | None:
             if f.name.startswith(f"{agent_name}-") and f.suffix in (".out", ".err"):
                 return datetime.fromtimestamp(f.stat().st_mtime)
     return None
+
+
+def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
+    """True if a fresh .running-<agent> marker exists in shared/logs.
+
+    A marker older than `timeout` seconds is treated as stale (orphaned by a
+    hard-killed process) and reported as not running, so the UI self-heals.
+    """
+    marker = g["shared"] / "logs" / f".running-{agent_name}"
+    if not marker.exists():
+        return False
+    age = time.time() - marker.stat().st_mtime
+    return age < timeout
 
 
 def relative_time(dt: datetime | None) -> str:
