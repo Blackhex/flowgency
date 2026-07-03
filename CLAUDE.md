@@ -196,6 +196,7 @@ groups:
     name: Newsletter Agents        # Display name
     path: /path/to/agents          # Filesystem path to agent directories
     default_integration: claude-code  # Default integration for agents in this group
+    sandbox_root: /path/to/repo/root  # Optional: runtime FS scope for sandbox-capable tools
     agents:                        # List of agents (string shorthand or dict form)
     - product                      # Shorthand: inherits group default_integration
     - editorial

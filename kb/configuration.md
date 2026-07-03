@@ -64,6 +64,26 @@ groups:
 | `dispatch.daily_limit` | no | Max agent runs per day (default 20) |
 | `dispatch.agents` | no | Per-agent schedule rules (see [Dispatch](dispatch.md)) |
 
+### Sandbox root (`sandbox_root`)
+
+Optional per-group filesystem scope for the agent **runtime** (not the dashboard).
+
+- **Unset (default):** sandbox-capable runtimes launch in full-access mode — the
+  agent can read/write anywhere the OS user can. For GitHub Copilot this means
+  `--autopilot --allow-all-paths`.
+- **Set:** the runtime is confined to the agent's own directory **plus** the
+  `sandbox_root`. For Copilot this maps to `--autopilot --add-dir <sandbox_root>`.
+  Use this to grant an agent nested in a larger repository access to the repo
+  root (for shared memory, output folders, etc.) while still confining it.
+
+Absolute paths are used as-is; relative paths resolve against the group `path`.
+
+Only runtimes that support sandboxing honor this setting. Runtimes that do not
+(shown with a warning in the admin UI) always run with their default access.
+
+This setting does **not** change the Agency dashboard's file browsers, which
+remain scoped to the group path.
+
 ## Agent List Format
 
 Agents can be specified in two forms:
