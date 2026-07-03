@@ -31,8 +31,14 @@
     </div>
     <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
       <span class="flex items-center gap-1.5" title="{{ a.last_seen.strftime('%Y-%m-%d %H:%M') if a.last_seen else 'No activity' }}">
+        {% if a.running %}
+        <span class="inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse"></span>
+        Running
+        {% else %}
         <span class="inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
         {{ a.last_seen | relative_time }}
+        {% if a.next_run %}<span class="text-gray-300">·</span> next {{ a.next_run | relative_future }}{% endif %}
+        {% endif %}
       </span>
       {% if a.integration %}{{ a.integration | integration_badge }}{% endif %}
       {% if a.open_observations > 0 %}
@@ -75,8 +81,14 @@
       <div class="flex items-center gap-2 text-xs text-gray-400">
         <span class="inline-block px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500 text-xs font-medium">subagent</span>
         <span class="flex items-center gap-1.5" title="{{ a.last_seen.strftime('%Y-%m-%d %H:%M') if a.last_seen else 'No activity' }}">
+          {% if a.running %}
+          <span class="inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse"></span>
+          Running
+          {% else %}
           <span class="inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
           {{ a.last_seen | relative_time }}
+          {% if a.next_run %}<span class="text-gray-300">·</span> next {{ a.next_run | relative_future }}{% endif %}
+          {% endif %}
         </span>
       </div>
     </a>
