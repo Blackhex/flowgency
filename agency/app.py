@@ -1140,6 +1140,9 @@ def agent_health_status(last_seen: datetime | None) -> str:
 def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
     """Build full agent info lists. Returns (agents, subagents)."""
     observations = list_observations(g)
+    group_cfg = GROUPS.get(g["key"], {})
+    dispatch_cfg = group_cfg.get("dispatch", {})
+    run_timeout = dispatch_cfg.get("timeout", 1800)
     agents = []
     subagents = []
 
@@ -1159,6 +1162,8 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             "is_subagent": identity["frontmatter"].get("subagent", False),
             "has_headshot": find_headshot(agent_dir) is not None,
             "integration": agent_int.name,
+            "running": is_agent_running(g, agent_name, run_timeout),
+            "next_run": compute_next_run(g, agent_name, dispatch_cfg),
         }
         if info["is_subagent"]:
             subagents.append(info)
@@ -1183,6 +1188,8 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
                 "open_observations": open_count, "is_subagent": True,
                 "has_headshot": find_headshot(d) is not None,
                 "integration": sub_int.name,
+                "running": is_agent_running(g, d.name, run_timeout),
+                "next_run": compute_next_run(g, d.name, dispatch_cfg),
             })
 
     return agents, subagents

@@ -2,9 +2,11 @@ import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from agency import app as app_module
 from agency.app import is_agent_running, compute_next_run, relative_future
 
 
@@ -137,4 +139,34 @@ def test_relative_future_tomorrow():
 
 def test_relative_future_under_a_minute():
     assert relative_future(datetime.now() + timedelta(seconds=30)) == "in 1m"
+
+
+def test_collect_agents_includes_running_and_next_run(tmp_path):
+    # Minimal group on disk
+    group_path = tmp_path / "grp"
+    agent_dir = group_path / "product"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "CLAUDE.md").write_text("# Product\n")
+    shared = group_path / "shared"
+    for sub in ("observations", "proposals", "decisions", "prompts", "logs"):
+        (shared / sub).mkdir(parents=True)
+
+    g = {
+        "key": "grp", "name": "Grp", "path": group_path,
+        "agents": ["product"], "agents_full": [{"name": "product", "integration": "claude-code"}],
+        "shared": shared,
+    }
+
+    # Mark product as running
+    (shared / "logs" / ".running-product").touch()
+
+    groups_cfg = {"grp": {"dispatch": {"enabled": True, "agents": {
+        "product": [{"prompt": "r.md", "every": "6h"}]}}}}
+
+    with patch.object(app_module, "GROUPS", groups_cfg):
+        agents, _subagents = app_module.collect_agents_with_identity(g)
+
+    product = next(a for a in agents if a["name"] == "product")
+    assert product["running"] is True
+    assert "next_run" in product
 
