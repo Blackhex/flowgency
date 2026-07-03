@@ -2464,6 +2464,7 @@ async def home(request: Request, group: str):
         # Zone 1: Fleet
         "fleet_agents": agents,
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
+        "fleet_running": sum(1 for a in agents if a.get("running")),
         # Zone 2: Pipeline
         "pipeline": pipeline,
         # Zone 3: Attention queue

@@ -40,14 +40,18 @@
               {% elif a.health == 'amber' %}bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/40
               {% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
       <span class="text-base">{{ a.emoji or '~' }}</span>
+      {% if a.running %}
+      <span class="text-emerald-500 text-sm leading-none animate-pulse" title="Running">&#9679;</span>
+      {% else %}
       <span class="{% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% else %}text-rose-500{% endif %} text-sm leading-none">&#9679;</span>
+      {% endif %}
       <span class="text-gray-700 dark:text-gray-300 text-base">{{ a.display_name or a.name }}</span>
       {% if a.open_observations %}<span class="font-mono text-sm text-amber-600 dark:text-amber-400">{{ a.open_observations }}</span>{% endif %}
     </a>
     {% endfor %}
   </div>
   <div class="mt-1.5 text-sm text-gray-500 dark:text-gray-400 font-mono">
-    {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_agents|length - fleet_healthy > 0 %} · <span class="text-amber-600 dark:text-amber-400">{{ fleet_agents|length - fleet_healthy }} needs attention</span>{% endif %}
+    {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_running %} · <span class="text-emerald-600 dark:text-emerald-400">{{ fleet_running }} running</span>{% endif %}{% if fleet_agents|length - fleet_healthy > 0 %} · <span class="text-amber-600 dark:text-amber-400">{{ fleet_agents|length - fleet_healthy }} needs attention</span>{% endif %}
   </div>
   {% else %}
   <div class="text-sm text-gray-400 dark:text-gray-500">No agents configured</div>
