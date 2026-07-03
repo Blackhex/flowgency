@@ -1,6 +1,16 @@
 """Shared config utilities for Agency."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+
+
+def _is_absolute_path(path_str: str) -> bool:
+    """Check if a path string is absolute on any platform (POSIX or Windows).
+
+    Config files authored on Linux use POSIX-style absolute paths (/shared/...),
+    which are not recognized as absolute by WindowsPath. Accept either form so
+    shared-agent paths resolve consistently across operating systems.
+    """
+    return PurePosixPath(path_str).is_absolute() or PureWindowsPath(path_str).is_absolute()
 
 
 def normalize_agents(agents_list: list, default_integration: str = "claude-code") -> list[dict]:
@@ -29,9 +39,8 @@ def get_agent_dir(g: dict, agent_name: str) -> Path:
     """
     for agent_info in g.get("agents_full", []):
         if agent_info["name"] == agent_name and "path" in agent_info:
-            p = Path(agent_info["path"])
-            if p.is_absolute():
-                return p
+            if _is_absolute_path(agent_info["path"]):
+                return Path(agent_info["path"])
     return Path(g["path"]) / agent_name
 
 
