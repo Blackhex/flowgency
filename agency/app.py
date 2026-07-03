@@ -4,10 +4,10 @@ import csv
 import io
 import os
 import re
-import time
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
