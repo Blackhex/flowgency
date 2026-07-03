@@ -409,3 +409,62 @@ class TestCopilot:
         assert "--autopilot" in fake_run.cmd
         assert "--experimental" in fake_run.cmd
         assert "hi there" in fake_run.cmd
+
+    def test_copilot_supports_sandbox_true(self, integration):
+        assert integration.supports_sandbox is True
+
+    def test_copilot_run_unset_sandbox_uses_allow_all_paths(self, tmp_agent_dir, monkeypatch):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        prompt = tmp_agent_dir / "p.prompt"
+        prompt.write_text("do the thing")
+
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(args, **kwargs):
+            captured["args"] = args
+            return FakeCompleted()
+
+        monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
+
+        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60)
+
+        assert "--allow-all-paths" in captured["args"]
+        assert "--add-dir" not in captured["args"]
+        assert "--autopilot" in captured["args"]
+
+    def test_copilot_run_set_sandbox_uses_add_dir(self, tmp_agent_dir, monkeypatch):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        prompt = tmp_agent_dir / "p.prompt"
+        prompt.write_text("do the thing")
+        root = tmp_agent_dir / "repo"
+        root.mkdir()
+
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(args, **kwargs):
+            captured["args"] = args
+            return FakeCompleted()
+
+        monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
+
+        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=root)
+
+        args = captured["args"]
+        assert "--add-dir" in args
+        assert args[args.index("--add-dir") + 1] == str(root)
+        assert "--allow-all-paths" not in args
+        assert "--autopilot" in args

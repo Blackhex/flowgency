@@ -14,6 +14,7 @@ class CopilotIntegration(BaseIntegration):
     display_name = "GitHub Copilot"
     supports_execution = True
     supports_ai_backend = True
+    supports_sandbox = True
     detect_priority = 7
 
     def identity_filename(self) -> str:
@@ -31,13 +32,18 @@ class CopilotIntegration(BaseIntegration):
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
         self._write_sidecar_identity(agent_dir, self._identity_file(agent_dir), identity)
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
+    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
+            *, sandbox_root: Path | None = None) -> RunResult:
         prompt_text = prompt_file.read_text()
         cmd = self._find_cmd()
+        if sandbox_root is not None:
+            path_args = ["--add-dir", str(sandbox_root)]
+        else:
+            path_args = ["--allow-all-paths"]
         start = time.monotonic()
         try:
             result = subprocess.run(
-                [cmd, "-p", prompt_text, "--autopilot", "--experimental"],
+                [cmd, "-p", prompt_text, "--autopilot", *path_args, "--experimental"],
                 capture_output=True, text=True, timeout=timeout,
                 cwd=str(agent_dir),
             )
