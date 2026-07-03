@@ -361,7 +361,7 @@ def cmd_decide(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="agency",
+        prog="christag-agency",
         description="Agency — AI Agent Management",
     )
     sub = parser.add_subparsers(dest="command")
