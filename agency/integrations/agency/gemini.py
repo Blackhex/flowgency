@@ -30,7 +30,8 @@ class GeminiIntegration(BaseIntegration):
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
         self._write_sidecar_identity(agent_dir, agent_dir / "GEMINI.md", identity)
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
+    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
+            *, sandbox_root: Path | None = None) -> RunResult:
         prompt_text = prompt_file.read_text()
         cmd = self._find_cmd()
         start = time.monotonic()

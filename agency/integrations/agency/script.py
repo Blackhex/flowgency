@@ -65,7 +65,8 @@ class ScriptIntegration(BaseIntegration):
             errors.append("'command' is required for the script integration")
         return errors
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
+    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
+            *, sandbox_root: Path | None = None) -> RunResult:
         errors = self.validate_config(self._config)
         if errors:
             raise IntegrationError("; ".join(errors))

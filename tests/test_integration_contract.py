@@ -1,4 +1,5 @@
 """Contract tests: validate all registered integrations meet the BaseIntegration API."""
+import inspect
 import pytest
 from pathlib import Path
 from agency.integrations import REGISTRY, BaseIntegration, AgentIdentity
@@ -49,3 +50,24 @@ class TestIntegrationContract:
 
     def test_is_base_integration_subclass(self, integration):
         assert isinstance(integration, BaseIntegration)
+
+
+def test_all_execution_integrations_run_accepts_sandbox_root():
+    """Every execution-capable integration.run must accept the sandbox_root kwarg.
+
+    Both call sites (dispatch, decision execution) pass sandbox_root
+    unconditionally, so an override missing it raises TypeError at runtime.
+    """
+    offenders = []
+    for name, integration in REGISTRY.items():
+        if not getattr(integration, "supports_execution", False):
+            continue
+        sig = inspect.signature(integration.run)
+        param = sig.parameters.get("sandbox_root")
+        accepts_var_kw = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        if param is None and not accepts_var_kw:
+            offenders.append(name)
+    assert offenders == [], f"integrations missing sandbox_root kwarg: {offenders}"
+

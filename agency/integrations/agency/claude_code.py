@@ -65,7 +65,8 @@ class ClaudeCodeIntegration(BaseIntegration):
         else:
             path.write_text(identity.body)
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
+    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
+            *, sandbox_root: Path | None = None) -> RunResult:
         prompt_text = prompt_file.read_text()
         cmd = self._find_cmd()
         start = time.monotonic()

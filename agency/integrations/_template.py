@@ -54,9 +54,14 @@ class YourToolIntegration(BaseIntegration):
         """Write agent identity back to the native file or sidecar."""
         pass
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
+    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
+            *, sandbox_root: Path | None = None) -> RunResult:
         """Execute the tool with a prompt file. Return a RunResult.
         Only needed if supports_execution is True.
+        
+        The sandbox_root parameter is passed by dispatch and decision execution
+        for integrations that support filesystem sandboxing. Most integrations
+        should accept and ignore it unless they implement sandbox support.
 
         Example:
             import subprocess, time
