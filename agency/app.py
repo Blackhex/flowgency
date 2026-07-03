@@ -1188,7 +1188,7 @@ async def setup_page(request: Request):
     if GROUPS:
         return RedirectResponse("/", status_code=303)
     suggestion = str(Path.home() / "agents")
-    return templates.TemplateResponse("setup.html", {
+    return templates.TemplateResponse(request, "setup.html", {
         "request": request,
         "agency_title": get_agency_config().get("title", "Agency"),
         "suggestion": suggestion,
@@ -1211,7 +1211,7 @@ async def setup_process(request: Request):
     # Expand ~ and validate
     path = Path(path_str).expanduser()
     if not path.is_dir():
-        return templates.TemplateResponse("setup.html", {
+        return templates.TemplateResponse(request, "setup.html", {
             "request": request,
             "agency_title": agency_title,
             "suggestion": suggestion,
@@ -1227,7 +1227,7 @@ async def setup_process(request: Request):
                 detected.append(d.name)
 
     if not detected:
-        return templates.TemplateResponse("setup.html", {
+        return templates.TemplateResponse(request, "setup.html", {
             "request": request,
             "agency_title": agency_title,
             "suggestion": suggestion,
@@ -1291,7 +1291,7 @@ async def setup_complete(request: Request, group: str):
     agency_title = get_agency_config().get("title", "Agency")
     g = GROUPS.get(group)
     group_name = g["name"] if g else group
-    return templates.TemplateResponse("setup_complete.html", {
+    return templates.TemplateResponse(request, "setup_complete.html", {
         "request": request,
         "agency_title": agency_title,
         "group": group,
@@ -1380,7 +1380,7 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
 @app.get("/admin/", response_class=HTMLResponse)
 async def admin_settings_page(request: Request):
     """Admin app settings page."""
-    return templates.TemplateResponse("admin_settings.html", {
+    return templates.TemplateResponse(request, "admin_settings.html", {
         "request": request,
         **admin_context("settings"),
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
@@ -1425,7 +1425,7 @@ async def admin_integrations_page(request: Request):
 
     available = scan_available()
 
-    return templates.TemplateResponse("admin_integrations.html", {
+    return templates.TemplateResponse(request, "admin_integrations.html", {
         "request": request,
         **admin_context("integrations"),
         "installed": installed,
@@ -1469,7 +1469,7 @@ async def admin_integrations_restart(request: Request):
 @app.get("/admin/dispatch", response_class=HTMLResponse)
 async def admin_dispatch_page(request: Request):
     """Admin dispatch configuration page."""
-    return templates.TemplateResponse("admin_dispatch.html", {
+    return templates.TemplateResponse(request, "admin_dispatch.html", {
         "request": request,
         **admin_context("dispatch"),
     })
@@ -1478,7 +1478,7 @@ async def admin_dispatch_page(request: Request):
 @app.get("/admin/groups", response_class=HTMLResponse)
 async def admin_groups_page(request: Request):
     """Admin agent groups page."""
-    return templates.TemplateResponse("admin_groups.html", {
+    return templates.TemplateResponse(request, "admin_groups.html", {
         "request": request,
         **admin_context("groups"),
     })
@@ -1540,7 +1540,7 @@ async def admin_dispatch_install(request: Request):
     """Install the dispatch systemd timer."""
     error = install_dispatch()
     if error:
-        return templates.TemplateResponse("admin_dispatch.html", {
+        return templates.TemplateResponse(request, "admin_dispatch.html", {
             "request": request,
             **admin_context("dispatch", dispatch_error=error),
         })
@@ -1552,7 +1552,7 @@ async def admin_org_new(request: Request):
     """Create new org form."""
     agency = get_agency_config()
     config = load_config()
-    return templates.TemplateResponse("admin_org_edit.html", {
+    return templates.TemplateResponse(request, "admin_org_edit.html", {
         "request": request,
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
@@ -1589,7 +1589,7 @@ async def admin_org_create(request: Request):
     if not key or not name or not path:
         agency = get_agency_config()
         config = load_config()
-        return templates.TemplateResponse("admin_org_edit.html", {
+        return templates.TemplateResponse(request, "admin_org_edit.html", {
             "request": request,
             "agency_title": agency.get("title", "Agency"),
             "admin_active": True,
@@ -1629,7 +1629,7 @@ async def admin_org_create(request: Request):
 
     if warning:
         agency = get_agency_config()
-        return templates.TemplateResponse("admin_org_edit.html", {
+        return templates.TemplateResponse(request, "admin_org_edit.html", {
             "request": request,
             "agency_title": agency.get("title", "Agency"),
             "admin_active": True,
@@ -1673,7 +1673,7 @@ async def admin_org_edit(request: Request, org: str):
     if prompts_dir.exists():
         prompts = sorted(f.name for f in prompts_dir.glob("*.md"))
 
-    return templates.TemplateResponse("admin_org_edit.html", {
+    return templates.TemplateResponse(request, "admin_org_edit.html", {
         "request": request,
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
@@ -1740,7 +1740,7 @@ async def admin_org_save(request: Request, org: str):
 
     if warning:
         agency = get_agency_config()
-        return templates.TemplateResponse("admin_org_edit.html", {
+        return templates.TemplateResponse(request, "admin_org_edit.html", {
             "request": request,
             "agency_title": agency.get("title", "Agency"),
             "admin_active": True,
@@ -1916,7 +1916,7 @@ async def admin_org_autodetect(request: Request, org: str):
     if prompts_dir.exists():
         prompts = sorted(f.name for f in prompts_dir.glob("*.md"))
 
-    return templates.TemplateResponse("admin_org_edit.html", {
+    return templates.TemplateResponse(request, "admin_org_edit.html", {
         "request": request,
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
@@ -1998,7 +1998,7 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
         if memory_path.exists():
             memory_md = memory_path.read_text()
 
-    return templates.TemplateResponse("admin_agent_detail.html", {
+    return templates.TemplateResponse(request, "admin_agent_detail.html", {
         "request": request,
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
@@ -2186,7 +2186,7 @@ async def agents_list(request: Request, group: str):
     """List all agents with identity and health info."""
     g = get_group(group)
     agents, subagents = collect_agents_with_identity(g)
-    return templates.TemplateResponse("agents.html", {
+    return templates.TemplateResponse(request, "agents.html", {
         "request": request,
         **group_context(g),
         "agents": agents,
@@ -2216,7 +2216,7 @@ async def agent_profile(request: Request, group: str, agent: str):
     agent_schedule = dispatch_cfg.get("agents", {}).get(agent, [])
     dispatch_enabled = dispatch_cfg.get("enabled", False)
 
-    return templates.TemplateResponse("agent_profile.html", {
+    return templates.TemplateResponse(request, "agent_profile.html", {
         "request": request,
         **group_context(g),
         "agent": agent,
@@ -2359,7 +2359,7 @@ async def home(request: Request, group: str):
     # Zone 4: Activity feed
     activity = build_activity_feed(observations, proposals, limit=15)
 
-    return templates.TemplateResponse("home.html", {
+    return templates.TemplateResponse(request, "home.html", {
         "request": request,
         **group_context(g, observations=observations, proposals=proposals),
         # Zone 1: Fleet
@@ -2389,7 +2389,7 @@ async def observations_list(request: Request, group: str, agent: str = "", statu
         filtered = [c for c in filtered if c.get("agent") == agent]
     if status:
         filtered = [c for c in filtered if c.get("status") == status]
-    return templates.TemplateResponse("observations.html", {
+    return templates.TemplateResponse(request, "observations.html", {
         "request": request,
         **group_context(g, observations=observations),
         "observations": filtered,
@@ -2425,7 +2425,7 @@ async def observation_detail(request: Request, group: str, slug: str):
         else:
             pipeline["decision_slug"] = None
 
-    return templates.TemplateResponse("observation_detail.html", {
+    return templates.TemplateResponse(request, "observation_detail.html", {
         "request": request,
         **group_context(g),
         "meta": meta,
@@ -2461,7 +2461,7 @@ async def proposals_list(request: Request, group: str):
     """List all proposals."""
     g = get_group(group)
     items = list_proposals(g)
-    return templates.TemplateResponse("proposals.html", {
+    return templates.TemplateResponse(request, "proposals.html", {
         "request": request,
         **group_context(g),
         "proposals": items,
@@ -2508,7 +2508,7 @@ async def proposal_detail(request: Request, group: str, slug: str):
     questions = meta.get("questions", [])
     decision_answers = decision["meta"].get("answers", {}) if decision else {}
 
-    return templates.TemplateResponse("proposal_detail.html", {
+    return templates.TemplateResponse(request, "proposal_detail.html", {
         "request": request,
         **group_context(g),
         "meta": meta,
@@ -2589,7 +2589,7 @@ async def decisions_list(request: Request, group: str):
     """List all decisions."""
     g = get_group(group)
     items = list_decisions(g)
-    return templates.TemplateResponse("decisions.html", {
+    return templates.TemplateResponse(request, "decisions.html", {
         "request": request,
         **group_context(g),
         "decisions": items,
@@ -2630,7 +2630,7 @@ async def decision_detail(request: Request, group: str, slug: str):
             pmeta, _ = parse_frontmatter(proposal_path.read_text())
             questions = pmeta.get("questions", [])
 
-    return templates.TemplateResponse("decision_detail.html", {
+    return templates.TemplateResponse(request, "decision_detail.html", {
         "request": request,
         **group_context(g),
         "meta": meta,
@@ -2692,7 +2692,7 @@ async def documents_list(request: Request, group: str, agent: str = ""):
     by_agent = {}
     for d in docs:
         by_agent.setdefault(d["agent"], []).append(d)
-    return templates.TemplateResponse("documents.html", {
+    return templates.TemplateResponse(request, "documents.html", {
         "request": request,
         **group_context(g),
         "by_agent": by_agent,
@@ -2730,7 +2730,7 @@ async def document_view(request: Request, group: str, path: str):
     else:
         content_html = f"<pre class='whitespace-pre-wrap text-sm'>{raw}</pre>"
 
-    return templates.TemplateResponse("document_view.html", {
+    return templates.TemplateResponse(request, "document_view.html", {
         "request": request,
         **group_context(g),
         "filename": fpath.name,
@@ -2765,7 +2765,7 @@ async def logs_list(request: Request, group: str):
     """Browse execution logs by date."""
     g = get_group(group)
     logs = collect_logs(g)
-    return templates.TemplateResponse("logs.html", {
+    return templates.TemplateResponse(request, "logs.html", {
         "request": request,
         **group_context(g),
         "logs": logs,
@@ -2785,7 +2785,7 @@ async def log_view(request: Request, group: str, path: str):
     raw = fpath.read_text()
     content_html = render_md(raw) if fpath.suffix == ".out" else f"<pre class='whitespace-pre-wrap text-sm text-red-700'>{raw}</pre>"
 
-    return templates.TemplateResponse("log_view.html", {
+    return templates.TemplateResponse(request, "log_view.html", {
         "request": request,
         **group_context(g),
         "filename": fpath.name,
@@ -2801,7 +2801,7 @@ async def prompts_list(request: Request, group: str):
     items = collect_prompts(g)
     group_cfg = GROUPS.get(g["key"], {})
     dispatch_cfg = group_cfg.get("dispatch", {})
-    return templates.TemplateResponse("prompts.html", {
+    return templates.TemplateResponse(request, "prompts.html", {
         "request": request,
         **group_context(g),
         "prompts": items,
@@ -2819,7 +2819,7 @@ async def prompt_detail(request: Request, group: str, slug: str):
         raise HTTPException(404, "Prompt not found")
     raw = path.read_text()
     content_html = render_md(raw)
-    return templates.TemplateResponse("prompt_detail.html", {
+    return templates.TemplateResponse(request, "prompt_detail.html", {
         "request": request,
         **group_context(g),
         "slug": slug,
@@ -2923,7 +2923,7 @@ async def memory_list(request: Request, group: str):
     """Browse and edit agent memory files."""
     g = get_group(group)
     items = collect_memory_files(g)
-    return templates.TemplateResponse("memory.html", {
+    return templates.TemplateResponse(request, "memory.html", {
         "request": request,
         **group_context(g),
         "memory_files": items,
@@ -2943,7 +2943,7 @@ async def memory_view(request: Request, group: str, path: str):
     content_html = render_md(raw)
     agent = fpath.parent.name
 
-    return templates.TemplateResponse("memory_view.html", {
+    return templates.TemplateResponse(request, "memory_view.html", {
         "request": request,
         **group_context(g),
         "agent": agent,
@@ -2985,7 +2985,7 @@ async def workspaces_list(request: Request, group: str):
             "config_files": plugin.get_config_files(ws.get("config", {})) if plugin else [],
             "can_launch": plugin.supports_launch() if plugin else False,
         })
-    return templates.TemplateResponse("workspaces.html", {
+    return templates.TemplateResponse(request, "workspaces.html", {
         "request": request,
         **group_context(g),
         "enriched_workspaces": enriched,
@@ -3022,7 +3022,7 @@ async def workspace_file_view(request: Request, group: str, idx: int):
             if cf["path"] == file_path:
                 language = cf.get("language", "text")
                 break
-    return templates.TemplateResponse("workspace_detail.html", {
+    return templates.TemplateResponse(request, "workspace_detail.html", {
         "request": request,
         **group_context(g),
         "ws": ws,
