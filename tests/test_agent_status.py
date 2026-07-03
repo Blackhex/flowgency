@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.app import is_agent_running
+from agency.app import is_agent_running, compute_next_run
 
 
 def _group(tmp_path):
@@ -32,3 +32,84 @@ def test_running_marker_stale(tmp_path):
 def test_running_marker_absent(tmp_path):
     g = _group(tmp_path)
     assert is_agent_running(g, "product", timeout=1800) is False
+
+
+def _group_with_logs(tmp_path):
+    shared = tmp_path / "shared"
+    (shared / "logs").mkdir(parents=True)
+    return {"key": "grp", "path": tmp_path, "shared": shared}
+
+
+def test_next_run_disabled(tmp_path):
+    g = _group_with_logs(tmp_path)
+    cfg = {"enabled": False, "agents": {"product": [{"prompt": "r.md", "every": "6h"}]}}
+    assert compute_next_run(g, "product", cfg) is None
+
+
+def test_next_run_no_rules(tmp_path):
+    g = _group_with_logs(tmp_path)
+    cfg = {"enabled": True, "agents": {}}
+    assert compute_next_run(g, "product", cfg) is None
+
+
+def test_next_run_at_future(tmp_path):
+    g = _group_with_logs(tmp_path)
+    future = (datetime.now() + timedelta(hours=2)).strftime("%H:%M")
+    cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "at": future}]}}
+    result = compute_next_run(g, "product", cfg)
+    assert result is not None
+    assert result.date() == datetime.now().date()
+    assert result.strftime("%H:%M") == future
+
+
+def test_next_run_at_past_rolls_to_tomorrow(tmp_path):
+    g = _group_with_logs(tmp_path)
+    past = (datetime.now() - timedelta(hours=2)).strftime("%H:%M")
+    cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "at": past}]}}
+    result = compute_next_run(g, "product", cfg)
+    assert result is not None
+    assert result.date() == (datetime.now() + timedelta(days=1)).date()
+
+
+def test_next_run_every_no_marker_due_now(tmp_path):
+    g = _group_with_logs(tmp_path)
+    cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "every": "6h"}]}}
+    before = datetime.now()
+    result = compute_next_run(g, "product", cfg)
+    assert result is not None
+    assert result <= datetime.now() and result >= before - timedelta(seconds=5)
+
+
+def test_next_run_every_with_marker(tmp_path):
+    g = _group_with_logs(tmp_path)
+    marker = g["shared"] / "logs" / ".last-product-r"
+    marker.touch()
+    two_hours_ago = time.time() - 2 * 3600
+    os.utime(marker, (two_hours_ago, two_hours_ago))
+    cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "every": "6h"}]}}
+    result = compute_next_run(g, "product", cfg)
+    # marker + 6h => ~4h from now
+    assert result is not None
+    delta = (result - datetime.now()).total_seconds()
+    assert 3.9 * 3600 < delta < 4.1 * 3600
+
+
+def test_next_run_skips_condition_rule(tmp_path):
+    g = _group_with_logs(tmp_path)
+    cfg = {"enabled": True, "agents": {"product": [
+        {"prompt": "gate.md", "at": "06:00", "condition": "pre-send"},
+    ]}}
+    assert compute_next_run(g, "product", cfg) is None
+
+
+def test_next_run_returns_soonest(tmp_path):
+    g = _group_with_logs(tmp_path)
+    soon = (datetime.now() + timedelta(minutes=30)).strftime("%H:%M")
+    later = (datetime.now() + timedelta(hours=5)).strftime("%H:%M")
+    cfg = {"enabled": True, "agents": {"product": [
+        {"prompt": "a.md", "at": later},
+        {"prompt": "b.md", "at": soon},
+    ]}}
+    result = compute_next_run(g, "product", cfg)
+    assert result.strftime("%H:%M") == soon
+

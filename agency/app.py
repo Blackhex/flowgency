@@ -1001,6 +1001,62 @@ def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
     return age < timeout
 
 
+def compute_next_run(g: dict, agent_name: str, dispatch_cfg: dict) -> datetime | None:
+    """Soonest upcoming dispatch datetime for an agent, or None.
+
+    Mirrors the dispatcher's rule semantics: skips condition rules and rules
+    without a prompt. 'at HH:MM' -> next occurrence (today or tomorrow).
+    'every Nm/Nh' -> .last-<agent>-<stem> mtime + interval (due now if absent).
+    """
+    if not dispatch_cfg.get("enabled", False):
+        return None
+    rules = dispatch_cfg.get("agents", {}).get(agent_name, [])
+    if not isinstance(rules, list):
+        return None
+
+    now = datetime.now()
+    logs_root = g["shared"] / "logs"
+    candidates: list[datetime] = []
+
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        prompt = rule.get("prompt", "")
+        if not prompt or rule.get("condition"):
+            continue
+
+        at_time = rule.get("at", "")
+        every_val = rule.get("every", "")
+
+        if at_time:
+            try:
+                target = datetime.strptime(
+                    f"{now.strftime('%Y-%m-%d')} {at_time}", "%Y-%m-%d %H:%M"
+                )
+            except ValueError:
+                continue
+            if target <= now:
+                target += timedelta(days=1)
+            candidates.append(target)
+        elif every_val:
+            match = re.fullmatch(r"(\d+)(m|h)", every_val)
+            if not match:
+                continue
+            val = int(match.group(1))
+            seconds = val * 60 if match.group(2) == "m" else val * 3600
+            stem = prompt.removesuffix(".md")
+            marker = logs_root / f".last-{agent_name}-{stem}"
+            if not marker.exists():
+                candidates.append(now)
+            else:
+                candidates.append(
+                    datetime.fromtimestamp(marker.stat().st_mtime)
+                    + timedelta(seconds=seconds)
+                )
+
+    return min(candidates) if candidates else None
+
+
 def relative_time(dt: datetime | None) -> str:
     """Format datetime as relative string."""
     if dt is None:
