@@ -1089,7 +1089,7 @@ def relative_future(dt: datetime | None) -> str:
     seconds = int((dt - now).total_seconds())
     if seconds <= 0:
         return "due now"
-    minutes = round(seconds / 60)
+    minutes = max(1, round(seconds / 60))
     if minutes < 60:
         return f"in {minutes}m"
     hours = minutes // 60

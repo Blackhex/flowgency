@@ -134,3 +134,7 @@ def test_relative_future_tomorrow():
     dt = datetime.now() + timedelta(days=1)
     assert relative_future(dt) == f"tomorrow {dt.strftime('%H:%M')}"
 
+
+def test_relative_future_under_a_minute():
+    assert relative_future(datetime.now() + timedelta(seconds=30)) == "in 1m"
+
