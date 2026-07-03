@@ -1,6 +1,6 @@
 import sys
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from agency.dispatch.install import detect_platform, get_timer_status
 
 
@@ -32,3 +32,38 @@ def test_windows_python_launcher_falls_back_to_executable(tmp_path):
     with patch("agency.dispatch.install.sys.executable", str(tmp_path / "python.exe")):
         from agency.dispatch.install import _windows_python_launcher
         assert _windows_python_launcher() == str(tmp_path / "python.exe")
+
+
+def test_install_windows_registers_task():
+    fake_client = MagicMock()
+    scheduler = fake_client.Dispatch.return_value
+    task_def = scheduler.NewTask.return_value
+    folder = scheduler.GetFolder.return_value
+    trigger = task_def.Triggers.Create.return_value
+    action = task_def.Actions.Create.return_value
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
+        from agency.dispatch.install import install_timer
+        err = install_timer(r"C:\cfg\config.yaml", 15)
+
+    assert err is None
+    scheduler.Connect.assert_called_once()
+    task_def.Triggers.Create.assert_called_once_with(1)   # TASK_TRIGGER_TIME
+    assert trigger.Repetition.Interval == "PT15M"
+    task_def.Actions.Create.assert_called_once_with(0)    # TASK_ACTION_EXEC
+    assert action.Arguments == '-m agency.dispatch.run --config "C:\\cfg\\config.yaml"'
+    folder.RegisterTaskDefinition.assert_called_once()
+    reg_args = folder.RegisterTaskDefinition.call_args.args
+    assert reg_args[0] == "AgencyDispatch"
+    assert reg_args[2] == 6   # TASK_CREATE_OR_UPDATE
+    assert reg_args[5] == 3   # TASK_LOGON_INTERACTIVE_TOKEN
+
+
+def test_install_windows_without_pywin32_returns_error():
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": None, "win32com.client": None}):
+        from agency.dispatch.install import install_timer
+        err = install_timer("cfg", 15)
+    assert err is not None
+    assert "pywin32" in err

@@ -45,7 +45,7 @@ def install_timer(config_path: str, interval: int = 15) -> str | None:
     elif plat == "macos":
         return _install_macos(config_path, interval)
     else:
-        return "Windows timer installation is not yet implemented. Please set up a Task Scheduler entry manually."
+        return _install_windows(config_path, interval)
 
 
 def uninstall_timer() -> str | None:
@@ -69,6 +69,53 @@ def _windows_python_launcher() -> str:
     if pythonw.exists():
         return str(pythonw)
     return str(exe)
+
+
+def _install_windows(config_path: str, interval: int) -> str | None:
+    """Register the AgencyDispatch Task Scheduler task."""
+    try:
+        from win32com.client import Dispatch
+    except ImportError:
+        return (
+            "pywin32 is required for Windows dispatch. "
+            "Install it with: pip install pywin32"
+        )
+    try:
+        launcher = _windows_python_launcher()
+        working_dir = str(Path(__file__).parent.parent.parent)
+
+        scheduler = Dispatch("Schedule.Service")
+        scheduler.Connect()
+        folder = scheduler.GetFolder("\\")
+        task_def = scheduler.NewTask(0)
+
+        task_def.RegistrationInfo.Description = "Agency Agent Dispatch"
+        task_def.RegistrationInfo.Author = "Agency"
+
+        settings = task_def.Settings
+        settings.Enabled = True
+        settings.StartWhenAvailable = True
+
+        trigger = task_def.Triggers.Create(1)  # TASK_TRIGGER_TIME
+        trigger.StartBoundary = datetime.now().replace(microsecond=0).isoformat()
+        trigger.Repetition.Interval = f"PT{interval}M"
+
+        action = task_def.Actions.Create(0)  # TASK_ACTION_EXEC
+        action.Path = launcher
+        action.Arguments = f'-m agency.dispatch.run --config "{config_path}"'
+        action.WorkingDirectory = working_dir
+
+        folder.RegisterTaskDefinition(
+            WINDOWS_TASK_NAME,
+            task_def,
+            6,      # TASK_CREATE_OR_UPDATE
+            None,   # user (current)
+            None,   # password
+            3,      # TASK_LOGON_INTERACTIVE_TOKEN
+        )
+        return None
+    except Exception as e:
+        return str(e)
 
 
 # ── Linux (systemd) ──────────────────────────────────────────────────────────
