@@ -11,6 +11,7 @@ Agency works with multiple LLM tools through a plugin system. Each agent uses on
 | **Google Gemini** | `GEMINI.md` | `gemini -p` |
 | **Aider** | `CONVENTIONS.md` | `aider --message-file` |
 | **Goose** | `.goosehints` | `goose run` |
+| **GitHub Copilot** | `AGENTS.md` | `copilot -p --autopilot --experimental` |
 | **Custom Script** | `agent.md` | Your command with `{prompt_file}` placeholder |
 | **SDK** | `agent.md` | None — you run the agent externally, Agency manages the files |
 

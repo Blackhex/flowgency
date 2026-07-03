@@ -327,27 +327,28 @@ class TestCopilot:
         assert integration.supports_ai_backend is True
 
     def test_identity_filename(self, integration):
-        assert integration.identity_filename() == ".github/copilot-instructions.md"
+        assert integration.identity_filename() == "AGENTS.md"
 
-    def test_detect(self, integration, tmp_agent_dir):
+    def test_detect_copilot_marker(self, integration, tmp_agent_dir):
+        (tmp_agent_dir / ".copilot").mkdir()
+        assert integration.detect(tmp_agent_dir) is True
+
+    def test_detect_github_marker(self, integration, tmp_agent_dir):
         (tmp_agent_dir / ".github").mkdir()
         assert integration.detect(tmp_agent_dir) is True
 
     def test_detect_negative(self, integration, tmp_agent_dir):
+        (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
         assert integration.detect(tmp_agent_dir) is False
 
     def test_parse_identity_body_from_native(self, integration, tmp_agent_dir):
-        gh = tmp_agent_dir / ".github"
-        gh.mkdir()
-        (gh / "copilot-instructions.md").write_text("# Copilot Agent\nDo things.\n")
+        (tmp_agent_dir / "AGENTS.md").write_text("# Copilot Agent\nDo things.\n")
         identity = integration.parse_identity(tmp_agent_dir)
         assert identity is not None
         assert "# Copilot Agent" in identity.body
 
     def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
-        gh = tmp_agent_dir / ".github"
-        gh.mkdir()
-        (gh / "copilot-instructions.md").write_text("# Agent\n")
+        (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
         (tmp_agent_dir / ".agency-meta.yaml").write_text(
             "display_name: Copilot Bot\ntitle: CB\nemoji: \"🐙\"\n"
         )
@@ -355,10 +356,10 @@ class TestCopilot:
         assert identity.display_name == "Copilot Bot"
         assert identity.title == "CB"
 
-    def test_write_identity_creates_nested_file_and_sidecar(self, integration, tmp_agent_dir):
+    def test_write_identity_creates_file_and_sidecar(self, integration, tmp_agent_dir):
         identity = AgentIdentity(display_name="New", title="T", emoji="🐙", body="# New body")
         integration.write_identity(tmp_agent_dir, identity)
-        assert "# New body" in (tmp_agent_dir / ".github" / "copilot-instructions.md").read_text()
+        assert "# New body" in (tmp_agent_dir / "AGENTS.md").read_text()
         sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 

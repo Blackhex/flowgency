@@ -226,7 +226,7 @@ def load_integrations() -> None:
         modules = [
             "agency.claude_code", "agency.codex", "agency.gemini",
             "agency.aider", "agency.goose", "agency.opencode", "agency.pi",
-            "agency.script", "agency.sdk",
+            "agency.copilot", "agency.script", "agency.sdk",
         ]
         _write_config(modules)
 

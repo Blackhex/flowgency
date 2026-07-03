@@ -119,6 +119,7 @@ Integrations are organized by author namespace: official integrations live in `a
 | `goose` | `.goosehints` | .goosehints exists | `goose run` | Yes |
 | `opencode` | `AGENTS.md` | `.opencode/` dir exists | `opencode run` | No |
 | `pi` | `AGENTS.md` | `.pi/` dir exists | `pi -p` | No |
+| `copilot` | `AGENTS.md` | `.copilot/` or `.github/` dir exists | `copilot -p --autopilot --experimental` | Yes |
 | `script` | `agent.md` | Never (explicit config) | User command template | No |
 | `sdk` | `agent.md` | agent.md exists (fallback) | None (external) | No |
 

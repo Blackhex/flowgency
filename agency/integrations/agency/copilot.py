@@ -17,19 +17,18 @@ class CopilotIntegration(BaseIntegration):
     detect_priority = 7
 
     def identity_filename(self) -> str:
-        return ".github/copilot-instructions.md"
+        return "AGENTS.md"
 
     def _identity_file(self, agent_dir: Path) -> Path:
-        return agent_dir / ".github" / "copilot-instructions.md"
+        return agent_dir / "AGENTS.md"
 
     def detect(self, agent_dir: Path) -> bool:
-        return (agent_dir / ".github").is_dir()
+        return (agent_dir / ".copilot").is_dir() or (agent_dir / ".github").is_dir()
 
     def parse_identity(self, agent_dir: Path) -> AgentIdentity | None:
         return self._parse_sidecar_identity(agent_dir, self._identity_file(agent_dir))
 
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
-        (agent_dir / ".github").mkdir(parents=True, exist_ok=True)
         self._write_sidecar_identity(agent_dir, self._identity_file(agent_dir), identity)
 
     def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
