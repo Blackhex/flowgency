@@ -1723,6 +1723,11 @@ async def admin_org_create(request: Request):
     }
     if ws_list:
         group_cfg["workspaces"] = ws_list
+    
+    sandbox_root = form.get("sandbox_root", "").strip()
+    if sandbox_root:
+        group_cfg["sandbox_root"] = sandbox_root
+    
     config["groups"][key] = group_cfg
 
     save_config(config)
@@ -1835,6 +1840,12 @@ async def admin_org_save(request: Request, org: str):
 
     default_integration = form.get("default_integration", "claude-code")
     config["groups"][org]["default_integration"] = default_integration
+
+    sandbox_root = form.get("sandbox_root", "").strip()
+    if sandbox_root:
+        config["groups"][org]["sandbox_root"] = sandbox_root
+    else:
+        config["groups"][org].pop("sandbox_root", None)
 
     save_config(config)
     reload_groups()
