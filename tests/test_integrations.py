@@ -1,3 +1,4 @@
+import inspect
 import pytest
 from pathlib import Path
 from agency.integrations import (
@@ -101,3 +102,15 @@ def test_integrations_yaml_exists():
     from agency.integrations import INTEGRATIONS_DIR
     config_path = INTEGRATIONS_DIR / "integrations.yaml"
     assert config_path.exists()
+
+
+def test_base_integration_supports_sandbox_defaults_false():
+    assert BaseIntegration.supports_sandbox is False
+
+
+def test_base_run_accepts_sandbox_root_kwarg():
+    sig = inspect.signature(BaseIntegration.run)
+    param = sig.parameters.get("sandbox_root")
+    assert param is not None
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
+    assert param.default is None

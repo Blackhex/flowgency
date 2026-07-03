@@ -54,13 +54,19 @@ class BaseIntegration:
     display_name: str = ""
     supports_execution: bool = True
     supports_ai_backend: bool = False
+    supports_sandbox: bool = False
     detect_priority: int = 100
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int) -> RunResult:
+    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
+            *, sandbox_root: Path | None = None) -> RunResult:
         """Execute an agent with a prompt.
 
         prompt_file is always a Path to the prompt file on disk. The integration
         is responsible for deciding how to pass it to the tool.
+
+        sandbox_root, when provided, is a directory the agent is allowed to
+        read/write in addition to its working directory. Integrations that do
+        not support sandboxing ignore it.
         """
         raise NotImplementedError
 
