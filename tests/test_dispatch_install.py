@@ -53,6 +53,9 @@ def test_install_windows_registers_task():
     assert trigger.Repetition.Interval == "PT15M"
     task_def.Actions.Create.assert_called_once_with(0)    # TASK_ACTION_EXEC
     assert action.Arguments == '-m agency.dispatch.run --config "C:\\cfg\\config.yaml"'
+    import agency.dispatch.install as _install_mod
+    from pathlib import Path as _Path
+    assert action.WorkingDirectory == str(_Path(_install_mod.__file__).parent.parent.parent)
     folder.RegisterTaskDefinition.assert_called_once()
     reg_args = folder.RegisterTaskDefinition.call_args.args
     assert reg_args[0] == "AgencyDispatch"
@@ -99,6 +102,22 @@ def test_status_windows_not_installed():
     assert status == {"installed": False, "timer_active": False}
 
 
+def test_status_windows_installed_but_disabled():
+    fake_client = MagicMock()
+    scheduler = fake_client.Dispatch.return_value
+    folder = scheduler.GetFolder.return_value
+    task = folder.GetTask.return_value
+    task.Enabled = False
+    task.State = 3  # TASK_STATE_READY
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
+        from agency.dispatch.install import get_timer_status
+        status = get_timer_status()
+
+    assert status == {"installed": True, "timer_active": False}
+
+
 def test_uninstall_windows_deletes_task():
     fake_client = MagicMock()
     scheduler = fake_client.Dispatch.return_value
@@ -125,3 +144,17 @@ def test_uninstall_windows_missing_task_is_success():
         err = uninstall_timer()
 
     assert err is None
+
+
+def test_uninstall_windows_connect_failure_returns_error():
+    fake_client = MagicMock()
+    scheduler = fake_client.Dispatch.return_value
+    scheduler.Connect.side_effect = Exception("The RPC server is unavailable")
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
+        from agency.dispatch.install import uninstall_timer
+        err = uninstall_timer()
+
+    assert err is not None
+    assert "RPC server" in err

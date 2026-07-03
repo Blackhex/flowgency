@@ -146,11 +146,15 @@ def _uninstall_windows() -> str | None:
         scheduler = Dispatch("Schedule.Service")
         scheduler.Connect()
         folder = scheduler.GetFolder("\\")
+    except Exception as e:
+        # Could not reach the Task Scheduler service — a real failure.
+        return str(e)
+    try:
         folder.DeleteTask(WINDOWS_TASK_NAME, 0)
-        return None
     except Exception:
         # Task not found (or already removed) — treat as success.
         return None
+    return None
 
 
 # ── Linux (systemd) ──────────────────────────────────────────────────────────
