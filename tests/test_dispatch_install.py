@@ -67,3 +67,33 @@ def test_install_windows_without_pywin32_returns_error():
         err = install_timer("cfg", 15)
     assert err is not None
     assert "pywin32" in err
+
+
+def test_status_windows_installed_and_active():
+    fake_client = MagicMock()
+    scheduler = fake_client.Dispatch.return_value
+    folder = scheduler.GetFolder.return_value
+    task = folder.GetTask.return_value
+    task.Enabled = True
+    task.State = 3  # TASK_STATE_READY
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
+        from agency.dispatch.install import get_timer_status
+        status = get_timer_status()
+
+    assert status == {"installed": True, "timer_active": True}
+
+
+def test_status_windows_not_installed():
+    fake_client = MagicMock()
+    scheduler = fake_client.Dispatch.return_value
+    folder = scheduler.GetFolder.return_value
+    folder.GetTask.side_effect = Exception("The system cannot find the file specified")
+
+    with patch("platform.system", return_value="Windows"), \
+         patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
+        from agency.dispatch.install import get_timer_status
+        status = get_timer_status()
+
+    assert status == {"installed": False, "timer_active": False}

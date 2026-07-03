@@ -34,7 +34,7 @@ def get_timer_status() -> dict:
     elif plat == "macos":
         return _status_macos()
     else:
-        return {"installed": False, "timer_active": False}
+        return _status_windows()
 
 
 def install_timer(config_path: str, interval: int = 15) -> str | None:
@@ -116,6 +116,24 @@ def _install_windows(config_path: str, interval: int) -> str | None:
         return None
     except Exception as e:
         return str(e)
+
+
+def _status_windows() -> dict:
+    """Report whether the AgencyDispatch task exists and is active."""
+    try:
+        from win32com.client import Dispatch
+    except ImportError:
+        return {"installed": False, "timer_active": False}
+    try:
+        scheduler = Dispatch("Schedule.Service")
+        scheduler.Connect()
+        folder = scheduler.GetFolder("\\")
+        task = folder.GetTask(WINDOWS_TASK_NAME)
+    except Exception:
+        return {"installed": False, "timer_active": False}
+    # TASK_STATE_READY = 3, TASK_STATE_RUNNING = 4
+    timer_active = bool(task.Enabled) and task.State in (3, 4)
+    return {"installed": True, "timer_active": timer_active}
 
 
 # ── Linux (systemd) ──────────────────────────────────────────────────────────
