@@ -1,6 +1,7 @@
 integrations:
   - agency.claude_code
   - agency.codex
+  - agency.copilot
   - agency.gemini
   - agency.aider
   - agency.goose

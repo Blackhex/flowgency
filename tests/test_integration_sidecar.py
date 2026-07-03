@@ -6,6 +6,7 @@ from agency.integrations.agency.aider import AiderIntegration
 from agency.integrations.agency.goose import GooseIntegration
 from agency.integrations.agency.opencode import OpenCodeIntegration
 from agency.integrations.agency.pi import PiIntegration
+from agency.integrations.agency.copilot import CopilotIntegration
 
 
 class TestCodex:
@@ -312,3 +313,98 @@ class TestDetectionPriority:
         result = detect_integration(tmp_agent_dir)
         assert result is not None
         assert result.name == "codex"
+
+
+class TestCopilot:
+    @pytest.fixture
+    def integration(self):
+        return CopilotIntegration()
+
+    def test_metadata(self, integration):
+        assert integration.name == "copilot"
+        assert integration.display_name == "GitHub Copilot"
+        assert integration.supports_execution is True
+        assert integration.supports_ai_backend is True
+
+    def test_identity_filename(self, integration):
+        assert integration.identity_filename() == ".github/copilot-instructions.md"
+
+    def test_detect(self, integration, tmp_agent_dir):
+        (tmp_agent_dir / ".github").mkdir()
+        assert integration.detect(tmp_agent_dir) is True
+
+    def test_detect_negative(self, integration, tmp_agent_dir):
+        assert integration.detect(tmp_agent_dir) is False
+
+    def test_parse_identity_body_from_native(self, integration, tmp_agent_dir):
+        gh = tmp_agent_dir / ".github"
+        gh.mkdir()
+        (gh / "copilot-instructions.md").write_text("# Copilot Agent\nDo things.\n")
+        identity = integration.parse_identity(tmp_agent_dir)
+        assert identity is not None
+        assert "# Copilot Agent" in identity.body
+
+    def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
+        gh = tmp_agent_dir / ".github"
+        gh.mkdir()
+        (gh / "copilot-instructions.md").write_text("# Agent\n")
+        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+            "display_name: Copilot Bot\ntitle: CB\nemoji: \"🐙\"\n"
+        )
+        identity = integration.parse_identity(tmp_agent_dir)
+        assert identity.display_name == "Copilot Bot"
+        assert identity.title == "CB"
+
+    def test_write_identity_creates_nested_file_and_sidecar(self, integration, tmp_agent_dir):
+        identity = AgentIdentity(display_name="New", title="T", emoji="🐙", body="# New body")
+        integration.write_identity(tmp_agent_dir, identity)
+        assert "# New body" in (tmp_agent_dir / ".github" / "copilot-instructions.md").read_text()
+        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        assert "display_name: New" in sidecar
+
+    def test_missing_file(self, integration, tmp_agent_dir):
+        assert integration.parse_identity(tmp_agent_dir) is None
+
+    def test_run_builds_command(self, integration, tmp_agent_dir, monkeypatch):
+        import agency.integrations.agency.copilot as mod
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["cwd"] = kwargs.get("cwd")
+            return FakeCompleted()
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+        prompt_file = tmp_agent_dir / "prompt.md"
+        prompt_file.write_text("Do the thing")
+        result = integration.run(tmp_agent_dir, prompt_file, timeout=30)
+        assert result.exit_code == 0
+        assert captured["cmd"][1] == "-p"
+        assert "Do the thing" in captured["cmd"]
+        assert "--autopilot" in captured["cmd"]
+        assert "--experimental" in captured["cmd"]
+        assert captured["cwd"] == str(tmp_agent_dir)
+
+    def test_prompt_returns_stdout(self, integration, monkeypatch):
+        import agency.integrations.agency.copilot as mod
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "hello"
+            stderr = ""
+
+        def fake_run(cmd, **kwargs):
+            fake_run.cmd = cmd
+            return FakeCompleted()
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+        out = integration.prompt("hi there", timeout=10)
+        assert out == "hello"
+        assert "--autopilot" in fake_run.cmd
+        assert "--experimental" in fake_run.cmd
+        assert "hi there" in fake_run.cmd

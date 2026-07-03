@@ -1111,6 +1111,7 @@ def integration_badge_filter(name: str) -> Markup:
         "gemini": "bg-blue-100 text-blue-800",
         "aider": "bg-purple-100 text-purple-800",
         "goose": "bg-yellow-100 text-yellow-800",
+        "copilot": "bg-slate-100 text-slate-800",
         "script": "bg-gray-100 text-gray-800",
         "sdk": "bg-indigo-100 text-indigo-800",
     }
@@ -1119,7 +1120,7 @@ def integration_badge_filter(name: str) -> Markup:
         display = get_integration(name).display_name
     except KeyError:
         display = name
-    return Markup(f'<span class="px-2 py-0.5 rounded-full text-xs font-medium {color}">{display}</span>')
+    return Markup(f'<span class="inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium {color}">{display}</span>')
 
 
 templates.env.filters["integration_badge"] = integration_badge_filter
