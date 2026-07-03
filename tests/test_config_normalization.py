@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 
 def test_normalize_bare_string():
@@ -184,3 +185,32 @@ def test_normalize_agents_round_trip_with_path():
 
     assert get_agent_dir(g, "product") == Path("/groups/newsletter/product")
     assert get_agent_dir(g, "pm") == Path("/shared/agents/pm")
+
+
+# Task 1 (Agent Sandbox Root): Tests for get_sandbox_root()
+
+def test_get_sandbox_root_absolute_passthrough():
+    from agency.config import get_sandbox_root
+    g = {"path": "/groups/agents", "sandbox_root": "/repo/root"}
+    assert get_sandbox_root(g) == Path("/repo/root")
+
+
+def test_get_sandbox_root_relative_resolved_against_group_path():
+    from agency.config import get_sandbox_root
+    g = {"path": "/groups/agents", "sandbox_root": ".."}
+    assert get_sandbox_root(g) == (Path("/groups/agents") / "..").resolve()
+
+
+def test_get_sandbox_root_missing_returns_none():
+    from agency.config import get_sandbox_root
+    assert get_sandbox_root({"path": "/groups/agents"}) is None
+
+
+def test_get_sandbox_root_empty_returns_none():
+    from agency.config import get_sandbox_root
+    assert get_sandbox_root({"path": "/groups/agents", "sandbox_root": "   "}) is None
+
+
+def test_get_sandbox_root_no_path_returns_none():
+    from agency.config import get_sandbox_root
+    assert get_sandbox_root({"sandbox_root": "relative/only"}) is None

@@ -53,6 +53,25 @@ def get_allowed_roots(g: dict) -> list[Path]:
     return roots
 
 
+def get_sandbox_root(g: dict) -> Path | None:
+    """Resolve a group's optional sandbox_root to an absolute Path.
+
+    Absolute paths are used as-is. Relative paths are resolved against the
+    group path. Returns None if unset/blank or if no group path is available
+    to resolve a relative value.
+    """
+    raw = g.get("sandbox_root")
+    if not raw or not str(raw).strip():
+        return None
+    p = Path(str(raw).strip())
+    if _is_absolute_path(str(raw).strip()):
+        return p
+    base = g.get("path")
+    if not base:
+        return None
+    return (Path(base) / p).resolve()
+
+
 def find_agent_in_config(agents: list, agent_name: str) -> tuple[int, dict | str | None]:
     """Find an agent in a raw (non-normalized) config list. Returns (index, entry) or (-1, None)."""
     for i, entry in enumerate(agents):
