@@ -37,15 +37,36 @@ class CopilotIntegration(BaseIntegration):
         prompt_text = prompt_file.read_text()
         cmd = self._find_cmd()
         if sandbox_root is not None:
-            path_args = ["--add-dir", str(sandbox_root)]
+            # Confined mode: run FROM the sandbox root. Copilot reliably grants
+            # native file access to paths under the working directory, so
+            # launching with cwd=sandbox_root puts the whole tree in scope
+            # (this mirrors the proven task-scheduler launch). With cwd at the
+            # root, --autopilot has nothing outside-scope to approve, so it runs
+            # non-interactively AND enables shell commands across the tree. The
+            # read/write/shell grants keep the -p run from stalling; the timeout
+            # guards against a tool invoked outside the allow-list.
+            work_dir = str(sandbox_root)
+            cmd_args = [
+                cmd, "-p", prompt_text, "--autopilot",
+                "--allow-tool=read",
+                "--allow-tool=write",
+                "--allow-tool=shell",
+                "--experimental",
+            ]
         else:
-            path_args = ["--allow-all-paths"]
+            # Unrestricted mode: run from the agent dir with full filesystem
+            # access and all tools pre-authorized, so --autopilot cannot stall.
+            work_dir = str(agent_dir)
+            cmd_args = [
+                cmd, "-p", prompt_text, "--autopilot",
+                "--allow-all-paths", "--allow-all-tools", "--experimental",
+            ]
         start = time.monotonic()
         try:
             result = subprocess.run(
-                [cmd, "-p", prompt_text, "--autopilot", *path_args, "--experimental"],
+                cmd_args,
                 capture_output=True, text=True, timeout=timeout,
-                cwd=str(agent_dir),
+                cwd=work_dir,
             )
             duration = time.monotonic() - start
             return RunResult(

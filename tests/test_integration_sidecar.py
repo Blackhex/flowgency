@@ -428,6 +428,7 @@ class TestCopilot:
 
         def fake_run(args, **kwargs):
             captured["args"] = args
+            captured["cwd"] = kwargs.get("cwd")
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
@@ -438,8 +439,12 @@ class TestCopilot:
         assert "--allow-all-paths" in captured["args"]
         assert "--add-dir" not in captured["args"]
         assert "--autopilot" in captured["args"]
+        assert "--allow-all-tools" in captured["args"]
+        assert "--allow-tool=shell" not in captured["args"]
+        # Unrestricted mode runs from the agent dir
+        assert captured["cwd"] == str(tmp_agent_dir)
 
-    def test_copilot_run_set_sandbox_uses_add_dir(self, tmp_agent_dir, monkeypatch):
+    def test_copilot_run_set_sandbox_runs_from_sandbox_root(self, tmp_agent_dir, monkeypatch):
         import agency.integrations.agency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
@@ -456,6 +461,7 @@ class TestCopilot:
 
         def fake_run(args, **kwargs):
             captured["args"] = args
+            captured["cwd"] = kwargs.get("cwd")
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
@@ -464,7 +470,12 @@ class TestCopilot:
         CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=root)
 
         args = captured["args"]
-        assert "--add-dir" in args
-        assert args[args.index("--add-dir") + 1] == str(root)
+        # Confined mode runs FROM the sandbox root so all paths are under cwd
+        assert captured["cwd"] == str(root)
+        assert "--add-dir" not in args
         assert "--allow-all-paths" not in args
         assert "--autopilot" in args
+        assert "--allow-tool=read" in args
+        assert "--allow-tool=write" in args
+        assert "--allow-tool=shell" in args
+        assert "--allow-all-tools" not in args
