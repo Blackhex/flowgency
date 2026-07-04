@@ -70,11 +70,16 @@ Optional per-group filesystem scope for the agent **runtime** (not the dashboard
 
 - **Unset (default):** sandbox-capable runtimes launch in full-access mode — the
   agent can read/write anywhere the OS user can. For GitHub Copilot this means
-  `--autopilot --allow-all-paths`.
-- **Set:** the runtime is confined to the agent's own directory **plus** the
-  `sandbox_root`. For Copilot this maps to `--autopilot --add-dir <sandbox_root>`.
+  the agent runs from its own directory with `--autopilot --allow-all-paths
+  --allow-all-tools`.
+- **Set:** the runtime runs **from the sandbox root as its working directory**,
+  which scopes native file access to that tree. For Copilot this means launching
+  with `cwd = <sandbox_root>` plus `--autopilot --allow-tool=read/write/shell`.
   Use this to grant an agent nested in a larger repository access to the repo
-  root (for shared memory, output folders, etc.) while still confining it.
+  root (for shared memory, output folders, etc.). Copilot grants native file
+  access to paths under the working directory, so running from the root puts the
+  whole tree in scope — the agent still loads its own identity file because the
+  dispatch prompt reads it by path.
 
 Absolute paths are used as-is; relative paths resolve against the group `path`.
 

@@ -1,7 +1,22 @@
 # Agent Sandbox Root — Design
 
 **Date:** 2026-07-03
-**Status:** Approved (pending implementation plan)
+**Status:** Implemented — Copilot mechanism revised during testing (see below)
+
+> **Revision (2026-07-04) — Copilot uses cwd, not `--add-dir`.** Live testing
+> against a real repo-nested agent disproved this spec's Option A (keep
+> `cwd = agent_dir`, add `--add-dir <root>`). Under non-interactive `--autopilot`,
+> Copilot did **not** reliably grant access to paths added via `--add-dir`; the
+> denials ("could not request permission from user") persisted regardless of
+> `--add-dir` / `--allow-tool` / `permissions-config.json` edits. Root cause:
+> **Copilot scopes native file access to the working directory.** The proven
+> mechanism (matching the repo's own task-scheduler launch, which always worked)
+> is to run confined mode with **`cwd = sandbox_root`** plus
+> `--autopilot --allow-tool=read/write/shell`. Unrestricted mode still runs from
+> `cwd = agent_dir` with `--allow-all-paths --allow-all-tools`. The config,
+> resolution, plumbing, admin UI, and security model in this spec are unchanged
+> and correct; only the Copilot invocation row of the matrix is superseded. See
+> `agency/integrations/agency/copilot.py` for the shipped behavior.
 
 ## Problem
 
