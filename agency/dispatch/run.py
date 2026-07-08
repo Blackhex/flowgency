@@ -141,7 +141,7 @@ def run_dispatch_cycle(config: dict) -> None:
                     agent_timeout = timeout
                     if isinstance(agent_rules, dict):
                         agent_timeout = agent_rules.get("timeout", timeout)
-                    _run_agent(
+                    run_agent_prompt(
                         group_path, agent_name, prompt, agent_timeout, log_dir,
                         agents_by_name.get(agent_name, {}),
                         agent_dir=agent_dir,
@@ -154,7 +154,7 @@ def run_dispatch_cycle(config: dict) -> None:
                         (logs_root / f".last-{agent_name}-{stem}").touch()
 
 
-def _run_agent(group_path: Path, agent_name: str, prompt_filename: str,
+def run_agent_prompt(group_path: Path, agent_name: str, prompt_filename: str,
                timeout: int, log_dir: Path, agent_config: dict,
                agent_dir: Path | None = None, *,
                sandbox_root: Path | None = None) -> None:

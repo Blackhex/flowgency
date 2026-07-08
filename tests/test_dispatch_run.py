@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch, MagicMock
-from agency.dispatch.run import check_at_rule, check_every_rule, _run_agent
+from agency.dispatch.run import check_at_rule, check_every_rule, run_agent_prompt
 
 
 def _epoch(time_str: str) -> float:
@@ -75,7 +75,7 @@ def test_run_agent_removes_running_marker_on_success(tmp_path):
     fake_integration.run.return_value = fake_result
 
     with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
-        _run_agent(group_path, "product", "routine.md", 1800, log_dir,
+        run_agent_prompt(group_path, "product", "routine.md", 1800, log_dir,
                    {"integration": "claude-code"}, agent_dir=agent_dir)
 
     assert not running_marker.exists()
@@ -95,7 +95,7 @@ def test_run_agent_marker_present_during_run(tmp_path):
     fake_integration.run.side_effect = _run
 
     with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
-        _run_agent(group_path, "product", "routine.md", 1800, log_dir,
+        run_agent_prompt(group_path, "product", "routine.md", 1800, log_dir,
                    {"integration": "claude-code"}, agent_dir=agent_dir)
 
     assert seen["exists"] is True
@@ -110,7 +110,7 @@ def test_run_agent_removes_marker_on_exception(tmp_path):
 
     with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
         with pytest.raises(RuntimeError):
-            _run_agent(group_path, "product", "routine.md", 1800, log_dir,
+            run_agent_prompt(group_path, "product", "routine.md", 1800, log_dir,
                        {"integration": "claude-code"}, agent_dir=agent_dir)
 
     assert not running_marker.exists()
@@ -131,7 +131,7 @@ def test_run_agent_forwards_sandbox_root(tmp_path):
     fake_integration.run.side_effect = _run
 
     with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
-        _run_agent(
+        run_agent_prompt(
             group_path, "product", "routine.md", 1800, log_dir,
             {"integration": "claude-code"}, agent_dir=agent_dir,
             sandbox_root=sandbox_path,
