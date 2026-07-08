@@ -12,6 +12,9 @@ def _setup_group(tmp_path: Path) -> Path:
     prompts = group_path / "shared" / "prompts"
     prompts.mkdir(parents=True)
     (prompts / "routine.md").write_text("# Routine\n")
+    (prompts / "product-routine.md").write_text("# Product routine\n")
+    (prompts / "other-routine.md").write_text("# Other routine\n")
+    (prompts / "_observation-system-steps.md").write_text("# System\n")
     (group_path / "shared" / "logs").mkdir(parents=True)
     app_mod.CONFIG = {"groups": {"test": {"name": "Test", "path": str(group_path)}}}
     app_mod.GROUPS = {
@@ -88,6 +91,19 @@ def test_agents_page_lists_prompts_with_run(tmp_path):
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    assert "routine.md" in resp.text
-    assert 'data-prompt="routine.md"' in resp.text
+    # Prompt inferred to this agent by filename prefix is shown, with a Run button.
+    assert 'data-prompt="product-routine.md"' in resp.text
     assert "/test/prompts/" in resp.text
+
+
+def test_agents_page_excludes_unrelated_and_system_prompts(tmp_path):
+    _setup_group(tmp_path)
+    client = TestClient(app)
+
+    resp = client.get("/test/agents")
+
+    assert resp.status_code == 200
+    # System prompts and prompts belonging to other agents are not listed.
+    assert 'data-prompt="_observation-system-steps.md"' not in resp.text
+    assert 'data-prompt="other-routine.md"' not in resp.text
+    assert 'data-prompt="routine.md"' not in resp.text

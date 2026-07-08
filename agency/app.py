@@ -846,6 +846,21 @@ def collect_prompts(g: dict) -> list[dict]:
     return items
 
 
+def prompts_for_agent(prompts: list[dict], agent_name: str) -> list[dict]:
+    """Filter prompts to those associated with the given agent.
+
+    A prompt belongs to an agent when that agent appears in its dispatch
+    assignments or was inferred from the prompt filename (the inferred agent
+    is already folded into ``assignments`` by ``collect_prompts``). System
+    prompts (e.g. underscore-prefixed) and prompts for other agents have no
+    such association and are excluded.
+    """
+    return [
+        p for p in prompts
+        if agent_name in {a.get("agent") for a in p.get("assignments", [])}
+    ]
+
+
 def collect_memory_files(g: dict) -> list[dict]:
     """Collect all memory.md files."""
     items = []
@@ -2305,6 +2320,8 @@ async def agents_list(request: Request, group: str):
     g = get_group(group)
     agents, subagents = collect_agents_with_identity(g)
     prompts = collect_prompts(g)
+    for a in agents:
+        a["prompts"] = prompts_for_agent(prompts, a["name"])
     return templates.TemplateResponse(request, "agents.html", {
         "request": request,
         **group_context(g),

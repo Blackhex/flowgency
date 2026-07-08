@@ -48,7 +48,7 @@
       {% endif %}
     </div>
     <div class="mt-3 max-h-40 overflow-y-auto border-t border-gray-100 pt-2 space-y-1">
-      {% for p in prompts %}
+      {% for p in a.prompts %}
       <div class="flex items-center justify-between gap-2 text-xs js-prompt-row">
         <a href="/{{ group }}/prompts/{{ p.slug }}"
            class="truncate text-gray-600 hover:text-indigo-600">{{ p.name }}</a>
@@ -57,7 +57,7 @@
                 data-agent="{{ a.name }}" data-prompt="{{ p.name }}">Run</button>
       </div>
       {% endfor %}
-      {% if not prompts %}
+      {% if not a.prompts %}
       <div class="text-xs text-gray-400">No prompts</div>
       {% endif %}
     </div>
