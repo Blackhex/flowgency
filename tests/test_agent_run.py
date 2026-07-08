@@ -30,7 +30,7 @@ def _setup_group(tmp_path: Path) -> Path:
 
 
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    group_path = _setup_group(tmp_path)
     calls = []
     monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: False)
     monkeypatch.setattr("agency.app.run_agent_prompt", lambda *a, **k: calls.append((a, k)))
@@ -42,8 +42,13 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     assert resp.json() == {"status": "started"}
     assert len(calls) == 1
     args, kwargs = calls[0]
+    assert args[0] == group_path
     assert args[1] == "product"
     assert args[2] == "routine.md"
+    assert args[3] == 1800
+    assert args[5] == {"name": "product", "integration": "script"}
+    assert kwargs["agent_dir"] is not None
+    assert "sandbox_root" in kwargs
 
 
 def test_run_unknown_prompt_404(tmp_path, monkeypatch):
