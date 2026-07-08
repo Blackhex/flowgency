@@ -15,7 +15,7 @@ from pathlib import Path
 import markdown
 import yaml
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
@@ -25,6 +25,7 @@ import uvicorn
 from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, get_sandbox_root, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
+from agency.dispatch.run import run_agent_prompt
 import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
 
@@ -2454,6 +2455,54 @@ async def agent_toggle_subagent(request: Request, group: str, agent: str):
     save_config(config)
     reload_groups()
     return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
+
+
+@app.post("/{group}/agents/{agent}/run")
+async def agent_run(request: Request, group: str, agent: str,
+                    background_tasks: BackgroundTasks):
+    g = get_group(group)
+    agent_dir = resolve_agent_dir(g, agent)
+
+    form = await request.form()
+    prompt = (form.get("prompt") or "").strip()
+    if not prompt or "/" in prompt or ".." in prompt:
+        raise HTTPException(status_code=400, detail="Invalid prompt")
+    prompt_path = g["shared"] / "prompts" / prompt
+    if not prompt_path.is_file():
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    raw_cfg = GROUPS.get(g["key"], {})
+    dispatch_cfg = raw_cfg.get("dispatch", {})
+    run_timeout = dispatch_cfg.get("timeout", 1800)
+    if is_agent_running(g, agent, run_timeout):
+        raise HTTPException(status_code=409, detail="Agent already running")
+
+    integration = get_agent_integration(g, agent)
+    if not integration.supports_execution:
+        raise HTTPException(status_code=400,
+                            detail="Integration does not support execution")
+
+    agent_dispatch = dispatch_cfg.get("agents", {}).get(agent, {})
+    if isinstance(agent_dispatch, dict):
+        run_timeout = agent_dispatch.get("timeout", run_timeout)
+
+    agent_config = {}
+    for info in g.get("agents_full", []):
+        if info.get("name") == agent:
+            agent_config = info
+            break
+
+    sandbox_root = get_sandbox_root(
+        {"sandbox_root": raw_cfg.get("sandbox_root"), "path": g["path"]}
+    )
+    log_dir = g["shared"] / "logs" / datetime.now().strftime("%Y-%m-%d")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    background_tasks.add_task(
+        run_agent_prompt, g["path"], agent, prompt, run_timeout,
+        log_dir, agent_config, agent_dir=agent_dir, sandbox_root=sandbox_root,
+    )
+    return JSONResponse({"status": "started"}, status_code=202)
 
 
 @app.get("/{group}/", response_class=HTMLResponse)
