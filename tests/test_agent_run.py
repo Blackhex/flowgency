@@ -2,7 +2,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from agency.app import app, CONFIG, GROUPS
+import agency.app as app_mod
+from agency.app import app
 
 
 def _setup_group(tmp_path: Path) -> Path:
@@ -12,18 +13,18 @@ def _setup_group(tmp_path: Path) -> Path:
     prompts.mkdir(parents=True)
     (prompts / "routine.md").write_text("# Routine\n")
     (group_path / "shared" / "logs").mkdir(parents=True)
-    CONFIG.clear()
-    CONFIG.update({"groups": {"test": {"name": "Test", "path": str(group_path)}}})
-    GROUPS.clear()
-    GROUPS["test"] = {
-        "key": "test",
-        "name": "Test",
-        "path": group_path,
-        "shared": group_path / "shared",
-        "agents": ["product"],
-        "agents_full": [{"name": "product", "integration": "script"}],
-        "_agents_normalized": [{"name": "product", "integration": "script"}],
-        "dispatch": {"timeout": 1800},
+    app_mod.CONFIG = {"groups": {"test": {"name": "Test", "path": str(group_path)}}}
+    app_mod.GROUPS = {
+        "test": {
+            "key": "test",
+            "name": "Test",
+            "path": group_path,
+            "shared": group_path / "shared",
+            "agents": ["product"],
+            "agents_full": [{"name": "product", "integration": "script"}],
+            "_agents_normalized": [{"name": "product", "integration": "script"}],
+            "dispatch": {"timeout": 1800},
+        }
     }
     return group_path
 
