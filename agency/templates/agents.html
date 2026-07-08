@@ -11,32 +11,34 @@
 
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
   {% for a in agents %}
-  <a href="/{{ group }}/agents/{{ a.name }}" class="block bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all">
-    <div class="flex items-center gap-3 mb-3">
-      <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
-        {% if a.has_headshot %}
-        <img src="/{{ group }}/agents/{{ a.name }}/headshot" class="w-full h-full object-cover" alt="">
-        {% elif a.emoji %}
-        <span class="text-lg">{{ a.emoji }}</span>
-        {% else %}
-        <span class="text-sm font-bold text-gray-400">{{ a.display_name[0]|upper }}</span>
-        {% endif %}
+  <div class="block bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all" data-agent-card="{{ a.name }}">
+    <a href="/{{ group }}/agents/{{ a.name }}" class="block">
+      <div class="flex items-center gap-3 mb-3">
+        <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
+          {% if a.has_headshot %}
+          <img src="/{{ group }}/agents/{{ a.name }}/headshot" class="w-full h-full object-cover" alt="">
+          {% elif a.emoji %}
+          <span class="text-lg">{{ a.emoji }}</span>
+          {% else %}
+          <span class="text-sm font-bold text-gray-400">{{ a.display_name[0]|upper }}</span>
+          {% endif %}
+        </div>
+        <div class="min-w-0">
+          <div class="font-semibold text-gray-900 truncate">{{ a.display_name }}</div>
+          {% if a.title %}
+          <div class="text-xs text-gray-500 truncate">{{ a.title }}</div>
+          {% endif %}
+        </div>
       </div>
-      <div class="min-w-0">
-        <div class="font-semibold text-gray-900 truncate">{{ a.display_name }}</div>
-        {% if a.title %}
-        <div class="text-xs text-gray-500 truncate">{{ a.title }}</div>
-        {% endif %}
-      </div>
-    </div>
+    </a>
     <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
       <span class="flex items-center gap-1.5" title="{{ a.last_seen.strftime('%Y-%m-%d %H:%M') if a.last_seen else 'No activity' }}">
         {% if a.running %}
-        <span class="inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse"></span>
-        Running
+        <span class="js-status-dot inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse"></span>
+        <span class="js-status-label">Running</span>
         {% else %}
-        <span class="inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
-        {{ a.last_seen | relative_time }}
+        <span class="js-status-dot inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
+        <span class="js-status-label">{{ a.last_seen | relative_time }}</span>
         {% if a.next_run %}<span class="text-gray-300">·</span> {{ a.next_run | relative_future }}{% endif %}
         {% endif %}
       </span>
@@ -45,7 +47,21 @@
       <span class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">{{ a.open_observations }} open</span>
       {% endif %}
     </div>
-  </a>
+    <div class="mt-3 max-h-40 overflow-y-auto border-t border-gray-100 pt-2 space-y-1">
+      {% for p in prompts %}
+      <div class="flex items-center justify-between gap-2 text-xs js-prompt-row">
+        <a href="/{{ group }}/prompts/{{ p.slug }}"
+           class="truncate text-gray-600 hover:text-indigo-600">{{ p.name }}</a>
+        <button type="button"
+                class="js-run-btn shrink-0 px-2 py-0.5 rounded-md border border-gray-200 text-gray-700 hover:border-indigo-300 hover:text-indigo-600"
+                data-agent="{{ a.name }}" data-prompt="{{ p.name }}">Run</button>
+      </div>
+      {% endfor %}
+      {% if not prompts %}
+      <div class="text-xs text-gray-400">No prompts</div>
+      {% endif %}
+    </div>
+  </div>
   {% endfor %}
 </div>
 
@@ -96,4 +112,36 @@
   </div>
 </details>
 {% endif %}
+
+<script>
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".js-run-btn");
+  if (!btn) return;
+  const agent = btn.dataset.agent;
+  const prompt = btn.dataset.prompt;
+  const card = document.querySelector(`[data-agent-card="${agent}"]`);
+  const body = new FormData();
+  body.append("prompt", prompt);
+  const showErr = (msg) => {
+    const row = btn.closest(".js-prompt-row");
+    let err = row.querySelector(".js-run-err");
+    if (!err) { err = document.createElement("span"); err.className = "js-run-err text-red-500"; row.appendChild(err); }
+    err.textContent = msg;
+  };
+  try {
+    const resp = await fetch(`/{{ group }}/agents/${agent}/run`, {method: "POST", body});
+    if (resp.status === 202) {
+      const dot = card.querySelector(".js-status-dot");
+      const label = card.querySelector(".js-status-label");
+      if (dot) dot.className = "js-status-dot inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse";
+      if (label) label.textContent = "Running";
+      card.querySelectorAll(".js-run-btn").forEach((b) => { b.disabled = true; b.classList.add("opacity-40"); });
+    } else {
+      showErr(resp.status === 409 ? "Busy" : "Error");
+    }
+  } catch (_) {
+    showErr("Error");
+  }
+});
+</script>
 {% endblock %}

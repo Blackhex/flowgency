@@ -73,3 +73,15 @@ def test_run_already_running_409(tmp_path, monkeypatch):
     resp = client.post("/test/agents/product/run", data={"prompt": "routine.md"})
 
     assert resp.status_code == 409
+
+
+def test_agents_page_lists_prompts_with_run(tmp_path):
+    _setup_group(tmp_path)
+    client = TestClient(app)
+
+    resp = client.get("/test/agents")
+
+    assert resp.status_code == 200
+    assert "routine.md" in resp.text
+    assert 'data-prompt="routine.md"' in resp.text
+    assert "/test/prompts/" in resp.text

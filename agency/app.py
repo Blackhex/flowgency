@@ -2304,11 +2304,13 @@ async def agents_list(request: Request, group: str):
     """List all agents with identity and health info."""
     g = get_group(group)
     agents, subagents = collect_agents_with_identity(g)
+    prompts = collect_prompts(g)
     return templates.TemplateResponse(request, "agents.html", {
         "request": request,
         **group_context(g),
         "agents": agents,
         "subagents": subagents,
+        "prompts": prompts,
     })
 
 
