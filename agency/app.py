@@ -54,6 +54,29 @@ def save_config(config: dict) -> None:
         raise
 
 
+def _parse_sandbox_roots(text: str):
+    """Parse a sandbox_root textarea (one path per line) into config form.
+
+    Returns None when empty, a single string for one path (back-compat), or a
+    list of strings for multiple paths.
+    """
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    if len(lines) == 1:
+        return lines[0]
+    return lines
+
+
+def _sandbox_root_text(val) -> str:
+    """Render a config sandbox_root value (str or list) as textarea text."""
+    if not val:
+        return ""
+    if isinstance(val, list):
+        return "\n".join(str(v) for v in val)
+    return str(val)
+
+
 def reload_groups() -> None:
     """Reload the global GROUPS dict from config."""
     global GROUPS, CONFIG
@@ -1740,9 +1763,12 @@ async def admin_org_create(request: Request):
     if ws_list:
         group_cfg["workspaces"] = ws_list
     
-    sandbox_root = form.get("sandbox_root", "").strip()
+    sandbox_root = _parse_sandbox_roots(form.get("sandbox_root", ""))
     if sandbox_root:
         group_cfg["sandbox_root"] = sandbox_root
+    allowed_tools = [t.strip() for t in form.getlist("allowed_tools") if t.strip()]
+    if allowed_tools:
+        group_cfg["allowed_tools"] = allowed_tools
     
     config["groups"][key] = group_cfg
 
@@ -1818,7 +1844,9 @@ async def admin_org_edit(request: Request, org: str):
         "available_prompts": prompts,
         "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
         "default_integration": g.get("default_integration", "claude-code"),
-        "sandbox_root": g.get("sandbox_root", ""),
+        "sandbox_root_text": _sandbox_root_text(g.get("sandbox_root")),
+        "allowed_tools": g.get("allowed_tools", []),
+        "known_tools": ["shell", "write"],
         "default_integration_supports_sandbox": (
             REGISTRY.get(g.get("default_integration", "claude-code")).supports_sandbox
             if REGISTRY.get(g.get("default_integration", "claude-code")) else False
@@ -1862,11 +1890,17 @@ async def admin_org_save(request: Request, org: str):
     default_integration = form.get("default_integration", "claude-code")
     config["groups"][org]["default_integration"] = default_integration
 
-    sandbox_root = form.get("sandbox_root", "").strip()
+    sandbox_root = _parse_sandbox_roots(form.get("sandbox_root", ""))
     if sandbox_root:
         config["groups"][org]["sandbox_root"] = sandbox_root
     else:
         config["groups"][org].pop("sandbox_root", None)
+
+    allowed_tools = [t.strip() for t in form.getlist("allowed_tools") if t.strip()]
+    if allowed_tools:
+        config["groups"][org]["allowed_tools"] = allowed_tools
+    else:
+        config["groups"][org].pop("allowed_tools", None)
 
     save_config(config)
     reload_groups()
@@ -2512,7 +2546,11 @@ async def agent_run(request: Request, group: str, agent: str,
             break
 
     sandbox_root = get_sandbox_root(
-        {"sandbox_root": raw_cfg.get("sandbox_root"), "path": g["path"]}
+        {
+            "sandbox_root": raw_cfg.get("sandbox_root"),
+            "allowed_tools": raw_cfg.get("allowed_tools"),
+            "path": g["path"],
+        }
     )
     log_dir = g["shared"] / "logs" / datetime.now().strftime("%Y-%m-%d")
     log_dir.mkdir(parents=True, exist_ok=True)

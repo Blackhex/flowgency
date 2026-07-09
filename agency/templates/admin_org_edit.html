@@ -49,14 +49,29 @@
     </div>
 
     <div>
-      <label for="sandbox_root" class="block text-sm font-medium text-gray-700 mb-1">Sandbox root <span class="text-gray-400 font-normal">(optional)</span></label>
-      <input type="text" name="sandbox_root" id="sandbox_root" value="{{ sandbox_root|default('') }}"
-             placeholder="/path/to/repository/root"
-             class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-      <p class="mt-1 text-xs text-gray-400">Directory the agent may read and write at runtime — e.g. the repository root. Leave empty to give agents full filesystem access. Does not affect the dashboard's file browsers.</p>
-      {% if sandbox_root and default_integration_supports_sandbox is defined and not default_integration_supports_sandbox %}
+      <label for="sandbox_root" class="block text-sm font-medium text-gray-700 mb-1">Sandbox roots <span class="text-gray-400 font-normal">(optional)</span></label>
+      <textarea name="sandbox_root" id="sandbox_root" rows="3"
+                placeholder="/path/to/repository/root&#10;/another/allowed/root"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">{{ sandbox_root_text|default('') }}</textarea>
+      <p class="mt-1 text-xs text-gray-400">Directories the agent may read and write at runtime — one path per line. The first line is the working directory (relative writes land there). Leave empty to give agents full filesystem access. Does not affect the dashboard's file browsers.</p>
+      {% if sandbox_root_text and default_integration_supports_sandbox is defined and not default_integration_supports_sandbox %}
       <p class="mt-1 text-xs text-amber-600">The selected default runtime does not support sandboxing — this setting will have no effect for it.</p>
       {% endif %}
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Allowed tools <span class="text-gray-400 font-normal">(optional)</span></label>
+      <div class="flex flex-wrap gap-x-4 gap-y-2">
+        {% for t in known_tools|default(['shell', 'write']) %}
+        <label class="inline-flex items-center gap-2 text-sm font-mono">
+          <input type="checkbox" name="allowed_tools" value="{{ t }}"
+                 {% if t in allowed_tools|default([]) %}checked{% endif %}
+                 class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+          {{ t }}
+        </label>
+        {% endfor %}
+      </div>
+      <p class="mt-1 text-xs text-gray-400">Tools the agent may use at runtime. Leave all unchecked to grant every tool. Read and search are always available.</p>
     </div>
 
     <!-- Hidden agents field — kept in sync by JS from the agent roster below -->
