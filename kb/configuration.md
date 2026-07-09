@@ -64,24 +64,50 @@ groups:
 | `dispatch.daily_limit` | no | Max agent runs per day (default 20) |
 | `dispatch.agents` | no | Per-agent schedule rules (see [Dispatch](dispatch.md)) |
 
-### Sandbox root (`sandbox_root`)
+### Sandbox root (`sandbox_root`) and allowed tools (`allowed_tools`)
 
-Optional per-group filesystem scope for the agent **runtime** (not the dashboard).
+Two optional, independent per-group keys that scope the agent **runtime** (not
+the dashboard) to a least-privilege posture. Both default to blanket access, so
+unconfigured groups are unchanged.
 
-- **Unset (default):** sandbox-capable runtimes launch in full-access mode — the
-  agent can read/write anywhere the OS user can. For GitHub Copilot this means
-  the agent runs from its own directory with `--autopilot --allow-all-paths
-  --allow-all-tools`.
-- **Set:** the runtime runs **from the sandbox root as its working directory**,
-  which scopes native file access to that tree. For Copilot this means launching
-  with `cwd = <sandbox_root>` plus `--autopilot --allow-tool=read/write/shell`.
-  Use this to grant an agent nested in a larger repository access to the repo
-  root (for shared memory, output folders, etc.). Copilot grants native file
-  access to paths under the working directory, so running from the root puts the
-  whole tree in scope — the agent still loads its own identity file because the
-  dispatch prompt reads it by path.
+`sandbox_root` accepts a **single string or a list of strings**:
 
-Absolute paths are used as-is; relative paths resolve against the group `path`.
+- **Unset/empty (default):** sandbox-capable runtimes get full filesystem access.
+  For GitHub Copilot this emits `--allow-all-paths` and the agent runs from its
+  own directory.
+- **Set:** each entry is added as an allowed root (`--add-dir` per entry for
+  Copilot), and the runtime's working directory is anchored at the **first**
+  root so relative writes land there. Use this to grant an agent nested in a
+  larger repository access to the repo root plus any additional trees (shared
+  memory, output folders, etc.).
+
+`allowed_tools` is an optional list of tool names (e.g. `shell`, `write`):
+
+- **Unset/empty (default):** tools are blanket-approved. For Copilot this emits
+  `--allow-all-tools --autopilot`.
+- **Set:** only the listed tools are granted (`--allow-tool <name>` per entry for
+  Copilot). Reads/search are always available and never prompt.
+
+> **Copilot note:** `--autopilot` is emitted **only** in the blanket-tools case.
+> It is incompatible with explicit `--allow-tool` grants — under autopilot the
+> shell/write tools perform a permission round-trip that fails closed mid-session
+> (github/copilot-cli#2971), so explicit grants omit it.
+
+Example:
+
+```yaml
+groups:
+  sentinel:
+    sandbox_root:
+      - C:/Projects/msvc-digest   # first entry => cwd / relative-write anchor
+      - ~/.agency-cowork          # additional allowed root
+    allowed_tools:
+      - shell
+      - write
+```
+
+For each `sandbox_root` entry, absolute paths are used as-is; relative paths
+resolve against the group `path`.
 
 Only runtimes that support sandboxing honor this setting. Runtimes that do not
 (shown with a warning in the admin UI) always run with their default access.
