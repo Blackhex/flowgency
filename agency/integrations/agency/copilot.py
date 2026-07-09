@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+from agency.config import SandboxSpec
 from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
 )
@@ -36,49 +37,41 @@ class CopilotIntegration(BaseIntegration):
         self._write_sidecar_identity(agent_dir, self._identity_file(agent_dir), identity)
 
     def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: Path | None = None) -> RunResult:
+            *, sandbox_root: "SandboxSpec | None" = None) -> RunResult:
         prompt_text = prompt_file.read_text()
         cmd = self._resolve_real_cmd(self._find_cmd())
-        if sandbox_root is not None:
-            # Confined mode: run FROM the sandbox root so relative writes land
-            # in the sandbox tree (this mirrors the proven task-scheduler
-            # launch).
-            #
-            # Tools are pre-authorized with a single --allow-all-tools rather
-            # than enumerated --allow-tool grants (github/copilot-cli#3699:
-            # --allow-tool is not honored in non-interactive -p mode). This is
-            # the canonical non-interactive form from `copilot --help`.
-            #
-            # --allow-all-paths is required: Copilot's shell AND native file
-            # tools deny operations that touch paths outside the working
-            # directory ("Permission denied and could not request permission
-            # from user") without it. Real routines legitimately read agency
-            # data outside the sandbox (e.g. ~/.agency-cowork/), and the proven
-            # production task-scheduler launch sets this flag. cwd still anchors
-            # relative writes to the sandbox tree.
-            #
-            # --autopilot is deliberately omitted: under --autopilot the shell
-            # and write tools still perform a permission round-trip that fails
-            # closed once the permission channel degrades mid-session
-            # (github/copilot-cli#2971), even with --allow-all-tools set. Plain
-            # -p --allow-all-tools pre-approves without that round-trip.
-            work_dir = str(sandbox_root)
-            cmd_args = [
-                cmd, "-p", prompt_text,
-                "--no-custom-instructions",
-                "--no-ask-user",
-                "--allow-all-tools",
-                "--allow-all-paths",
-                "--no-color",
-            ]
+
+        # Least-privilege builder. `roots` empty => --allow-all-paths; `tools`
+        # empty => blanket --allow-all-tools. --autopilot is emitted ONLY with
+        # blanket tools: it is incompatible with explicit --allow-tool grants,
+        # which under autopilot perform a permission round-trip that fails
+        # closed mid-session (github/copilot-cli#2971). Explicit grants were
+        # validated denial-free by a real-session probe on 2026-07-09.
+        spec = sandbox_root or SandboxSpec()
+        roots, tools = spec.roots, spec.allowed_tools
+
+        cmd_args = [
+            cmd, "-p", prompt_text,
+            "--no-custom-instructions",
+            "--no-ask-user",
+            "--no-color",
+            "--experimental",
+        ]
+
+        if roots:
+            for p in roots:
+                cmd_args += ["--add-dir", str(p)]
+            work_dir = str(roots[0])
         else:
-            # Unrestricted mode: run from the agent dir with full filesystem
-            # access and all tools pre-authorized, so --autopilot cannot stall.
+            cmd_args += ["--allow-all-paths"]
             work_dir = str(agent_dir)
-            cmd_args = [
-                cmd, "-p", prompt_text, "--autopilot",
-                "--allow-all-paths", "--allow-all-tools", "--experimental",
-            ]
+
+        if tools:
+            for t in tools:
+                cmd_args += ["--allow-tool", t]
+        else:
+            cmd_args += ["--allow-all-tools", "--autopilot"]
+
         start = time.monotonic()
         # On Windows `copilot` resolves to a .bat wrapper that spawns
         # powershell -> copilot.ps1 -> the real copilot.exe. That chain

@@ -1,6 +1,19 @@
 """Shared config utilities for Agency."""
 
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
+
+
+@dataclass(frozen=True)
+class SandboxSpec:
+    """Least-privilege spec for a confined agent run.
+
+    ``roots`` is the list of allowed filesystem roots (empty => --allow-all-paths).
+    ``allowed_tools`` is the list of granted tool names (empty => --allow-all-tools).
+    """
+
+    roots: tuple[Path, ...] = ()
+    allowed_tools: tuple[str, ...] = ()
 
 
 def _is_absolute_path(path_str: str) -> bool:
@@ -53,23 +66,41 @@ def get_allowed_roots(g: dict) -> list[Path]:
     return roots
 
 
-def get_sandbox_root(g: dict) -> Path | None:
-    """Resolve a group's optional sandbox_root to an absolute Path.
+def get_sandbox_root(g: dict) -> SandboxSpec | None:
+    """Resolve a group's optional sandbox_root / allowed_tools into a SandboxSpec.
 
-    Absolute paths are used as-is. Relative paths are resolved against the
-    group path. Returns None if unset/blank or if no group path is available
-    to resolve a relative value.
+    ``sandbox_root`` accepts a single string or a list of strings. Absolute
+    entries are used as-is; relative entries are resolved against the group path
+    (and dropped if no group path is available). ``allowed_tools`` is an optional
+    list of tool names. Returns None only when both roots and tools are empty,
+    preserving the historical "fully unrestricted" None-equivalence.
     """
     raw = g.get("sandbox_root")
-    if not raw or not str(raw).strip():
-        return None
-    p = Path(str(raw).strip())
-    if _is_absolute_path(str(raw).strip()):
-        return p
+    if isinstance(raw, list):
+        entries = raw
+    elif raw is None:
+        entries = []
+    else:
+        entries = [raw]
+
     base = g.get("path")
-    if not base:
+    roots: list[Path] = []
+    for entry in entries:
+        text = str(entry).strip()
+        if not text:
+            continue
+        if _is_absolute_path(text):
+            roots.append(Path(text))
+        elif base:
+            roots.append((Path(base) / Path(text)).resolve())
+
+    tools = tuple(
+        str(t).strip() for t in (g.get("allowed_tools") or []) if str(t).strip()
+    )
+
+    if not roots and not tools:
         return None
-    return (Path(base) / p).resolve()
+    return SandboxSpec(roots=tuple(roots), allowed_tools=tools)
 
 
 def find_agent_in_config(agents: list, agent_name: str) -> tuple[int, dict | str | None]:

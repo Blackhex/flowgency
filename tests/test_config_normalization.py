@@ -189,24 +189,34 @@ def test_normalize_agents_round_trip_with_path():
 
 # Task 1 (Agent Sandbox Root): Tests for get_sandbox_root()
 
-def test_get_sandbox_root_absolute_passthrough():
-    from agency.config import get_sandbox_root
+def test_get_sandbox_root_absolute_string():
+    from agency.config import get_sandbox_root, SandboxSpec
     g = {"path": "/groups/agents", "sandbox_root": "/repo/root"}
-    assert get_sandbox_root(g) == Path("/repo/root")
+    assert get_sandbox_root(g) == SandboxSpec(roots=(Path("/repo/root"),), allowed_tools=())
 
 
-def test_get_sandbox_root_relative_resolved_against_group_path():
-    from agency.config import get_sandbox_root
+def test_get_sandbox_root_relative_string_resolved_against_group_path():
+    from agency.config import get_sandbox_root, SandboxSpec
     g = {"path": "/groups/agents", "sandbox_root": ".."}
-    assert get_sandbox_root(g) == (Path("/groups/agents") / "..").resolve()
+    expected = (Path("/groups/agents") / "..").resolve()
+    assert get_sandbox_root(g) == SandboxSpec(roots=(expected,), allowed_tools=())
 
 
-def test_get_sandbox_root_missing_returns_none():
+def test_get_sandbox_root_list_preserves_order():
+    from agency.config import get_sandbox_root, SandboxSpec
+    g = {"path": "/groups/agents", "sandbox_root": ["/a", "rel"]}
+    expected_rel = (Path("/groups/agents") / "rel").resolve()
+    assert get_sandbox_root(g) == SandboxSpec(
+        roots=(Path("/a"), expected_rel), allowed_tools=()
+    )
+
+
+def test_get_sandbox_root_missing_and_no_tools_returns_none():
     from agency.config import get_sandbox_root
     assert get_sandbox_root({"path": "/groups/agents"}) is None
 
 
-def test_get_sandbox_root_empty_returns_none():
+def test_get_sandbox_root_blank_no_tools_returns_none():
     from agency.config import get_sandbox_root
     assert get_sandbox_root({"path": "/groups/agents", "sandbox_root": "   "}) is None
 
@@ -214,3 +224,27 @@ def test_get_sandbox_root_empty_returns_none():
 def test_get_sandbox_root_no_path_returns_none():
     from agency.config import get_sandbox_root
     assert get_sandbox_root({"sandbox_root": "relative/only"}) is None
+
+
+def test_get_sandbox_root_tools_only():
+    from agency.config import get_sandbox_root, SandboxSpec
+    g = {"path": "/groups/agents", "allowed_tools": ["shell", "write"]}
+    assert get_sandbox_root(g) == SandboxSpec(roots=(), allowed_tools=("shell", "write"))
+
+
+def test_get_sandbox_root_roots_and_tools():
+    from agency.config import get_sandbox_root, SandboxSpec
+    g = {
+        "path": "/groups/agents",
+        "sandbox_root": "/repo/root",
+        "allowed_tools": ["shell", "write"],
+    }
+    assert get_sandbox_root(g) == SandboxSpec(
+        roots=(Path("/repo/root"),), allowed_tools=("shell", "write")
+    )
+
+
+def test_get_sandbox_root_list_drops_blank_entries():
+    from agency.config import get_sandbox_root, SandboxSpec
+    g = {"path": "/groups/agents", "sandbox_root": ["/a", "  "]}
+    assert get_sandbox_root(g) == SandboxSpec(roots=(Path("/a"),), allowed_tools=())

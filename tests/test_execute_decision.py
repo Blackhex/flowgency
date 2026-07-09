@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import agency.app as app_mod
+from agency.config import SandboxSpec
 
 
 def test_execute_decision_passes_sandbox_root(tmp_path, monkeypatch):
@@ -40,4 +41,6 @@ def test_execute_decision_passes_sandbox_root(tmp_path, monkeypatch):
 
     app_mod.execute_decision(decision, group_path, "advisor", "prop", group_key="grp")
 
-    assert captured["sandbox_root"] == Path(str(tmp_path / "repo"))
+    assert captured["sandbox_root"] == SandboxSpec(
+        roots=(Path(str(tmp_path / "repo")),), allowed_tools=()
+    )

@@ -1,4 +1,5 @@
 import pytest
+from agency.config import SandboxSpec
 from agency.integrations import AgentIdentity, detect_integration
 from agency.integrations.agency.codex import CodexIntegration
 from agency.integrations.agency.gemini import GeminiIntegration
@@ -436,15 +437,48 @@ class TestCopilot:
 
         CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60)
 
-        assert "--allow-all-paths" in captured["args"]
-        assert "--add-dir" not in captured["args"]
-        assert "--autopilot" in captured["args"]
-        assert "--allow-all-tools" in captured["args"]
-        assert "--allow-tool=shell" not in captured["args"]
+        args = captured["args"]
+        # Unrestricted mode: both axes blanket-approved, --autopilot present.
+        assert "--allow-all-paths" in args
+        assert "--allow-all-tools" in args
+        assert "--autopilot" in args
+        assert "--add-dir" not in args
+        assert "--allow-tool" not in args
         # Unrestricted mode runs from the agent dir
         assert captured["cwd"] == str(tmp_agent_dir)
 
-    def test_copilot_run_set_sandbox_runs_from_sandbox_root(self, tmp_agent_dir, monkeypatch):
+    def test_copilot_run_none_and_empty_spec_equivalent(self, tmp_agent_dir, monkeypatch):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        prompt = tmp_agent_dir / "p.prompt"
+        prompt.write_text("do the thing")
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        results = []
+
+        def fake_run(args, **kwargs):
+            results.append((list(args), kwargs.get("cwd")))
+            return FakeCompleted()
+
+        monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
+
+        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=None)
+        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=SandboxSpec())
+
+        # None and an empty SandboxSpec produce identical unrestricted argv/cwd.
+        assert results[0] == results[1]
+        args, cwd = results[0]
+        assert "--allow-all-paths" in args
+        assert "--allow-all-tools" in args
+        assert "--autopilot" in args
+        assert cwd == str(tmp_agent_dir)
+
+    def test_copilot_run_roots_only_blanket_tools(self, tmp_agent_dir, monkeypatch):
         import agency.integrations.agency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
@@ -462,35 +496,69 @@ class TestCopilot:
         def fake_run(args, **kwargs):
             captured["args"] = args
             captured["cwd"] = kwargs.get("cwd")
+            return FakeCompleted()
+
+        monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
+
+        spec = SandboxSpec(roots=(root,), allowed_tools=())
+        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=spec)
+
+        args = captured["args"]
+        # roots set => --add-dir per root, cwd anchored at first root.
+        assert "--add-dir" in args
+        assert str(root) in args
+        assert captured["cwd"] == str(root)
+        assert "--allow-all-paths" not in args
+        # tools empty => blanket tools + --autopilot.
+        assert "--allow-all-tools" in args
+        assert "--autopilot" in args
+        assert "--allow-tool" not in args
+
+    def test_copilot_run_roots_and_tools_least_privilege(self, tmp_agent_dir, monkeypatch):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        prompt = tmp_agent_dir / "p.prompt"
+        prompt.write_text("do the thing")
+        r1 = tmp_agent_dir / "repo"
+        r2 = tmp_agent_dir / "cowork"
+        r1.mkdir()
+        r2.mkdir()
+
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(args, **kwargs):
+            captured["args"] = args
+            captured["cwd"] = kwargs.get("cwd")
             captured["kwargs"] = kwargs
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
-        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=root)
+        spec = SandboxSpec(roots=(r1, r2), allowed_tools=("shell", "write"))
+        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=spec)
 
         args = captured["args"]
-        # Confined mode runs FROM the sandbox root so relative writes land in
-        # the sandbox tree.
-        assert captured["cwd"] == str(root)
-        assert "--add-dir" not in args
-        # --allow-all-paths is required: Copilot's shell and native file tools
-        # deny out-of-cwd paths without it, and real routines legitimately read
-        # agency data outside the sandbox (github/copilot-cli#2971).
-        assert "--allow-all-paths" in args
-        # --autopilot is omitted in confined mode: under autopilot the shell/
-        # write tools still do a permission round-trip that fails closed
-        # mid-session (github/copilot-cli#2971). Plain -p --allow-all-tools
-        # pre-approves without that round-trip.
+        # Every root added explicitly; cwd anchored at the first root.
+        assert "--add-dir" in args
+        assert str(r1) in args
+        assert str(r2) in args
+        assert captured["cwd"] == str(r1)
+        # Every tool granted explicitly.
+        assert "--allow-tool" in args
+        assert "shell" in args
+        assert "write" in args
+        # Least-privilege: no blanket flags, no --autopilot.
         assert "--autopilot" not in args
-        assert "--allow-all-tools" in args
-        assert "--allow-tool=read" not in args
-        assert "--allow-tool=write" not in args
-        assert "--allow-tool=shell" not in args
-        # The subprocess is launched headless: stdin detached and (on Windows)
-        # no console window, so the CLI stays non-interactive and does not try
-        # to prompt for tool permission.
+        assert "--allow-all-paths" not in args
+        assert "--allow-all-tools" not in args
+        # Headless launch preserved.
         assert captured["kwargs"].get("stdin") is copilot_mod.subprocess.DEVNULL
         assert "creationflags" in captured["kwargs"]
 
