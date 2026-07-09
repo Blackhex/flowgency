@@ -3,8 +3,12 @@
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from agency.config import SandboxSpec
 
 SIDECAR_FILENAME = ".agency-meta.yaml"
 
@@ -58,15 +62,16 @@ class BaseIntegration:
     detect_priority: int = 100
 
     def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: Path | None = None) -> RunResult:
+            *, sandbox_root: "SandboxSpec | None" = None) -> RunResult:
         """Execute an agent with a prompt.
 
         prompt_file is always a Path to the prompt file on disk. The integration
         is responsible for deciding how to pass it to the tool.
 
-        sandbox_root, when provided, is a directory the agent is allowed to
-        read/write in addition to its working directory. Integrations that do
-        not support sandboxing ignore it.
+        sandbox_root, when provided, is a SandboxSpec declaring the allowed
+        filesystem roots and tools for the run. Only sandbox-aware integrations
+        (currently copilot) consume it; the rest bind and ignore this opaque
+        value.
         """
         raise NotImplementedError
 
