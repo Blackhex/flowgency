@@ -8,12 +8,33 @@
 
 **Tech Stack:** Python 3.11+, pytest, GitHub Copilot CLI (`copilot -p --autopilot --experimental`), FastAPI (unaffected).
 
+> **ACTUAL OUTCOME (2026-07-09, supersedes the flag-only plan below).** The
+> real-session gate (Task 2) disproved the flag-only hypothesis. Root cause was
+> **structural**, in two stacked parts (see the updated spec “Root cause”):
+> 1. On Windows `copilot` resolves to a `.bat` wrapper → `powershell` →
+>    `copilot.ps1` → `copilot.EXE`; under `subprocess.run` the real `.exe` gets
+>    a console and behaves interactively, failing closed headless.
+> 2. `--allow-all-paths` was missing, so shell/read tools denied the routine's
+>    legitimate out-of-sandbox reads (`~/.agency-cowork/...`).
+>
+> **Shipped fix:** new `_resolve_real_cmd()` bypasses the wrapper to invoke
+> `copilot.EXE` directly; the shared `subprocess.run` adds
+> `stdin=DEVNULL` + `creationflags=CREATE_NO_WINDOW`; the confined branch adds
+> `--allow-all-paths` (production parity, user-approved). Confined flags shipped:
+> `--no-custom-instructions --no-ask-user --allow-all-tools --allow-all-paths
+> --no-color`, `cwd=sandbox_root`. Validated: **2/2 full runs clean, 0 denials,
+> shell evidence present** (was 24–62 denials before). The “never add
+> --allow-all-paths” constraint below is **retracted**.
+
 ## Global Constraints
 
-- Path confinement is achieved ONLY via `cwd=sandbox_root`. NEVER add `--allow-all-paths` to the confined branch.
-- `--allow-all-tools` is approval-only; it must NOT change path scope.
-- Tests assert argv + cwd via monkeypatched `subprocess.run` — they cannot validate CLI runtime permission behavior. Runtime behavior is validated only by the real-session task.
-- No new files beyond the plan/spec. No refactoring beyond the flag swap, its comment update, and the test assertion swap.
+- ~~Path confinement is achieved ONLY via `cwd=sandbox_root`. NEVER add
+  `--allow-all-paths`.~~ **RETRACTED** — real routines need out-of-sandbox reads;
+  `--allow-all-paths` is shipped (production parity). `cwd=sandbox_root` still
+  anchors relative writes.
+- Tests assert argv + cwd + kwargs via monkeypatched `subprocess.run` — they
+  cannot validate CLI runtime permission behavior. Runtime behavior is validated
+  only by the real-session task.
 - Reference spec: `docs/superpowers/specs/2026-07-09-copilot-confined-permission-fix-design.md`.
 
 ---

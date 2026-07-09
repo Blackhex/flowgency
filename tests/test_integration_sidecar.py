@@ -462,6 +462,7 @@ class TestCopilot:
         def fake_run(args, **kwargs):
             captured["args"] = args
             captured["cwd"] = kwargs.get("cwd")
+            captured["kwargs"] = kwargs
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
@@ -470,12 +471,45 @@ class TestCopilot:
         CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=root)
 
         args = captured["args"]
-        # Confined mode runs FROM the sandbox root so all paths are under cwd
+        # Confined mode runs FROM the sandbox root so relative writes land in
+        # the sandbox tree.
         assert captured["cwd"] == str(root)
         assert "--add-dir" not in args
-        assert "--allow-all-paths" not in args
-        assert "--autopilot" in args
-        assert "--allow-tool=read" in args
-        assert "--allow-tool=write" in args
-        assert "--allow-tool=shell" in args
-        assert "--allow-all-tools" not in args
+        # --allow-all-paths is required: Copilot's shell and native file tools
+        # deny out-of-cwd paths without it, and real routines legitimately read
+        # agency data outside the sandbox (github/copilot-cli#2971).
+        assert "--allow-all-paths" in args
+        # --autopilot is omitted in confined mode: under autopilot the shell/
+        # write tools still do a permission round-trip that fails closed
+        # mid-session (github/copilot-cli#2971). Plain -p --allow-all-tools
+        # pre-approves without that round-trip.
+        assert "--autopilot" not in args
+        assert "--allow-all-tools" in args
+        assert "--allow-tool=read" not in args
+        assert "--allow-tool=write" not in args
+        assert "--allow-tool=shell" not in args
+        # The subprocess is launched headless: stdin detached and (on Windows)
+        # no console window, so the CLI stays non-interactive and does not try
+        # to prompt for tool permission.
+        assert captured["kwargs"].get("stdin") is copilot_mod.subprocess.DEVNULL
+        assert "creationflags" in captured["kwargs"]
+
+    def test_copilot_resolve_real_cmd_bypasses_windows_wrapper(self, monkeypatch):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        # On Windows the .bat/.cmd/.ps1 wrapper is resolved to the real .exe so
+        # CREATE_NO_WINDOW actually suppresses the CLI's console. On other
+        # platforms (or when no wrapper is detected) the command is unchanged.
+        wrapper = r"C:\wrap\copilot.BAT"
+        real = r"C:\real\copilot.EXE"
+
+        monkeypatch.setattr(copilot_mod.sys, "platform", "win32")
+        monkeypatch.setattr(copilot_mod.shutil, "which", lambda name, path=None: real)
+
+        assert CopilotIntegration._resolve_real_cmd(wrapper) == real
+
+    def test_copilot_resolve_real_cmd_noop_off_windows(self, monkeypatch):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        monkeypatch.setattr(copilot_mod.sys, "platform", "linux")
+        assert CopilotIntegration._resolve_real_cmd("copilot") == "copilot"
