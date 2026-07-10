@@ -64,3 +64,68 @@ class TestBuildActivityFeed:
     def test_handles_empty_input(self):
         feed = build_activity_feed([], [])
         assert feed == []
+
+
+def test_decision_detail_shows_agent_log_and_changes(tmp_path, monkeypatch):
+    """Verify decision_detail route passes executed_by, execution_log, and changed_files to template."""
+    from pathlib import Path
+    from fastapi.testclient import TestClient
+    import agency.app as app_mod
+    from agency.app import app
+
+    # Set up group with decision directory
+    group_path = tmp_path / "grp"
+    decisions_path = group_path / "shared" / "decisions"
+    logs_path = group_path / "shared" / "logs" / "2026-07-10"
+    decisions_path.mkdir(parents=True)
+    logs_path.mkdir(parents=True)
+
+    # Create decision with execution metadata
+    log_file = logs_path / "worker-exec-12345.out"
+    log_file.write_text("execution output")
+    
+    decision = decisions_path / "test-decision.md"
+    decision.write_text(f"""---
+decided_by: admin
+date: 2026-07-10
+execution_status: complete
+execution_summary: "Task completed successfully."
+executed_by: worker
+execution_log: {str(log_file)}
+changed_files:
+  - path: a.txt
+    status: modified
+    lines_added: 2
+    lines_removed: 1
+---
+Decision body
+""")
+
+    # Configure app
+    app_mod.CONFIG = {"groups": {"test": {"name": "Test Group", "path": str(group_path)}}}
+    app_mod.GROUPS = {
+        "test": {
+            "key": "test",
+            "name": "Test Group",
+            "path": group_path,
+            "shared": group_path / "shared",
+            "agents": ["worker"],
+            "_agents_normalized": [{"name": "worker", "integration": "script"}],
+        }
+    }
+
+    client = TestClient(app)
+    resp = client.get("/test/decisions/test-decision")
+
+    assert resp.status_code == 200
+    html = resp.text
+    # Assert agent badge is rendered (via agent_badge filter)
+    assert "worker" in html
+    # Assert log link is rendered
+    assert "/test/logs/view" in html
+    assert "worker-exec-12345.out" in html
+    # Assert changed file is rendered
+    assert "a.txt" in html
+    # Assert change stats are rendered
+    assert "+2" in html
+    assert "−1" in html or "&minus;1" in html

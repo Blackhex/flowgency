@@ -2863,6 +2863,9 @@ async def decision_detail(request: Request, group: str, slug: str):
 
     execution_status = meta.get("execution_status", "")
     execution_summary = meta.get("execution_summary", "")
+    executed_by = meta.get("executed_by", "")
+    execution_log = meta.get("execution_log", "")
+    changed_files = meta.get("changed_files", []) or []
 
     # Load proposal questions for rendering answers
     questions = []
@@ -2883,6 +2886,9 @@ async def decision_detail(request: Request, group: str, slug: str):
         "proposal_slug": proposal_slug,
         "execution_status": execution_status,
         "execution_summary": execution_summary,
+        "executed_by": executed_by,
+        "execution_log": execution_log,
+        "changed_files": changed_files,
         "questions": questions,
         "answers": meta.get("answers", {}),
     })
