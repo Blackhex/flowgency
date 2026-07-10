@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.store import (
@@ -73,6 +74,26 @@ def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):
         running_spec.job_id,
     }
     assert {record.status for record in records} == {"queued", "running"}
+
+
+def test_active_jobs_ignores_malformed_field_types(tmp_path):
+    group_path = tmp_path / "group"
+    valid_spec = make_spec(tmp_path)
+    valid_record = JobRecord.from_spec(valid_spec)
+    write_job(job_path(group_path, valid_spec.job_id), valid_record)
+
+    malformed = valid_record.to_dict()
+    malformed["spec"]["job_id"] = "malformed"
+    malformed["spec"]["prompt_content"] = {"unexpected": "mapping"}
+    malformed_path = job_path(group_path, "malformed")
+    malformed_path.write_text(
+        yaml.safe_dump(malformed, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    records = active_jobs(group_path)
+
+    assert [record.spec.job_id for record in records] == [valid_spec.job_id]
 
 
 def test_load_config_path_is_independent_of_current_working_directory(

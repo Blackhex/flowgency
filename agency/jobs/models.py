@@ -63,6 +63,16 @@ class JobSpec:
     def validate(self) -> None:
         if self.schema_version != SCHEMA_VERSION:
             raise ValueError(f"Unsupported job schema version: {self.schema_version}")
+        string_fields = {
+            "job_id": self.job_id,
+            "group_key": self.group_key,
+            "agent_name": self.agent_name,
+            "trigger": self.trigger,
+            "prompt_content": self.prompt_content,
+        }
+        for field_name, value in string_fields.items():
+            if not isinstance(value, str):
+                raise TypeError(f"{field_name} must be a string")
         if self.trigger not in VALID_TRIGGERS:
             raise ValueError(f"Invalid job trigger: {self.trigger}")
         if not self.job_id.strip():
