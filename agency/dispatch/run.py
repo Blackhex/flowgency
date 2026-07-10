@@ -11,8 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from agency.integrations import get_integration, REGISTRY
-from agency.config import normalize_agents, agent_names, get_agent_dir, get_sandbox_root
+from agency.jobs import JobSpec, JobSubmissionError, JobValidationError, submit_job
 
 log = logging.getLogger("agency.dispatch")
 
@@ -54,7 +53,7 @@ def load_dispatch_config(config_path: str) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def run_dispatch_cycle(config: dict) -> None:
+def run_dispatch_cycle(config: dict, config_path: Path | str, launcher=None) -> None:
     """Run one full dispatch cycle across all enabled groups."""
     agency_cfg = config.get("agency", {})
     dispatch_cfg = agency_cfg.get("dispatch", {})
@@ -68,7 +67,6 @@ def run_dispatch_cycle(config: dict) -> None:
 
         log.info("Processing group: %s", group_key)
         group_path = Path(g["path"])
-        sandbox_root = get_sandbox_root(g)
         timeout = d.get("timeout", 1800)
         daily_limit = d.get("daily_limit", 20)
 
@@ -82,11 +80,6 @@ def run_dispatch_cycle(config: dict) -> None:
         if out_count >= daily_limit:
             log.info("  SKIP: daily limit reached (%d/%d)", out_count, daily_limit)
             continue
-
-        # Normalize agents
-        default_int = g.get("default_integration", "claude-code")
-        agents_normalized = normalize_agents(g.get("agents", []), default_int)
-        agents_by_name = {a["name"]: a for a in agents_normalized}
 
         dispatch_agents = d.get("agents", {})
         for agent_name, rules in dispatch_agents.items():
@@ -132,84 +125,28 @@ def run_dispatch_cycle(config: dict) -> None:
                     continue
 
                 if should_run:
-                    agent_dir = get_agent_dir(
-                        {"path": group_path, "agents_full": agents_normalized},
-                        agent_name
-                    )
-                    # Per-agent timeout overrides group default
-                    agent_rules = dispatch_agents.get(agent_name, [])
                     agent_timeout = timeout
-                    if isinstance(agent_rules, dict):
-                        agent_timeout = agent_rules.get("timeout", timeout)
-                    run_agent_prompt(
-                        group_path, agent_name, prompt, agent_timeout, log_dir,
-                        agents_by_name.get(agent_name, {}),
-                        agent_dir=agent_dir,
-                        sandbox_root=sandbox_root,
-                    )
+                    prompt_path = group_path / "shared" / "prompts" / prompt
+                    try:
+                        prompt_content = prompt_path.read_text()
+                        spec = JobSpec.create(
+                            config_path=Path(config_path),
+                            group_key=group_key,
+                            agent_name=agent_name,
+                            trigger="scheduled_prompt",
+                            prompt_source={"type": "saved_prompt", "path": str(prompt_path)},
+                            prompt_content=prompt_content,
+                            timeout_override=agent_timeout,
+                        )
+                        submit_job(spec, launcher)
+                    except (JobValidationError, JobSubmissionError, OSError) as error:
+                        log.error("  ERROR: could not submit %s/%s: %s", agent_name, prompt, error)
+                        continue
                     # Touch markers
                     if at_time:
                         (log_dir / f".event-{agent_name}-{stem}").touch()
                     elif every_val:
                         (logs_root / f".last-{agent_name}-{stem}").touch()
-
-
-def run_agent_prompt(group_path: Path, agent_name: str, prompt_filename: str,
-               timeout: int, log_dir: Path, agent_config: dict,
-               agent_dir: Path | None = None, *,
-               sandbox_root: Path | None = None) -> None:
-    """Execute a single agent run."""
-    prompt_path = group_path / "shared" / "prompts" / prompt_filename
-    if agent_dir is None:
-        agent_dir = group_path / agent_name
-
-    if not agent_dir.is_dir():
-        log.warning("  WARNING: agent dir not found: %s", agent_dir)
-        return
-    if not prompt_path.is_file():
-        log.warning("  WARNING: prompt file not found: %s", prompt_path)
-        return
-
-    # Resolve integration
-    integration_name = agent_config.get("integration", "claude-code")
-    try:
-        integration = get_integration(integration_name)
-    except KeyError:
-        log.error("  ERROR: unknown integration '%s' for agent %s", integration_name, agent_name)
-        return
-
-    if not integration.supports_execution:
-        log.info("  SKIP: %s uses '%s' (no execution)", agent_name, integration_name)
-        return
-
-    # For script integration, create instance with agent's config
-    if integration_name == "script" and hasattr(integration, "with_config"):
-        integration = integration.with_config(agent_config.get("integration_config", {}))
-
-    ts = datetime.now().strftime("%H%M%S")
-    stem = prompt_filename.removesuffix(".md")
-    out_file = log_dir / f"{agent_name}-{stem}-{ts}.out"
-    err_file = log_dir / f"{agent_name}-{stem}-{ts}.err"
-
-    log.info("  RUNNING: %s with %s (timeout %ds, integration %s)",
-             agent_name, prompt_filename, timeout, integration_name)
-
-    running_marker = log_dir.parent / f".running-{agent_name}"
-    running_marker.touch()
-    try:
-        result = integration.run(agent_dir, prompt_path, timeout, sandbox_root=sandbox_root)
-    finally:
-        running_marker.unlink(missing_ok=True)
-
-    out_file.write_text(result.stdout)
-    err_file.write_text(result.stderr)
-
-    if result.exit_code == 124:
-        log.warning("  TIMEOUT: %s exceeded %ds", agent_name, timeout)
-    elif result.exit_code != 0:
-        log.error("  ERROR: %s exited with code %d", agent_name, result.exit_code)
-    else:
-        log.info("  DONE: %s (%.1fs)", agent_name, result.duration_seconds)
 
 
 def main():
@@ -225,7 +162,7 @@ def main():
 
     config = load_dispatch_config(args.config)
     log.info("Dispatch started")
-    run_dispatch_cycle(config)
+    run_dispatch_cycle(config, Path(args.config).resolve())
     log.info("Dispatch complete")
 
 

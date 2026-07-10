@@ -1,10 +1,9 @@
 import pytest
 import os
 import time
-from pathlib import Path
 from datetime import datetime
-from unittest.mock import patch, MagicMock
-from agency.dispatch.run import check_at_rule, check_every_rule, run_agent_prompt
+from agency.dispatch.run import check_at_rule, check_every_rule, run_dispatch_cycle
+from agency.jobs import JobSubmissionError
 
 
 def _epoch(time_str: str) -> float:
@@ -66,75 +65,51 @@ def _make_group(tmp_path):
     return group_path, agent_dir, log_dir
 
 
-def test_run_agent_removes_running_marker_on_success(tmp_path):
-    group_path, agent_dir, log_dir = _make_group(tmp_path)
-    running_marker = log_dir.parent / ".running-product"
-
-    fake_result = MagicMock(stdout="ok", stderr="", exit_code=0, duration_seconds=1.0)
-    fake_integration = MagicMock(supports_execution=True)
-    fake_integration.run.return_value = fake_result
-
-    with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
-        run_agent_prompt(group_path, "product", "routine.md", 1800, log_dir,
-                   {"integration": "claude-code"}, agent_dir=agent_dir)
-
-    assert not running_marker.exists()
-
-
-def test_run_agent_marker_present_during_run(tmp_path):
-    group_path, agent_dir, log_dir = _make_group(tmp_path)
-    running_marker = log_dir.parent / ".running-product"
-    seen = {}
-
-    fake_integration = MagicMock(supports_execution=True)
-
-    def _run(agent_dir_arg, prompt_path, timeout, *, sandbox_root=None):
-        seen["exists"] = running_marker.exists()
-        return MagicMock(stdout="ok", stderr="", exit_code=0, duration_seconds=1.0)
-
-    fake_integration.run.side_effect = _run
-
-    with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
-        run_agent_prompt(group_path, "product", "routine.md", 1800, log_dir,
-                   {"integration": "claude-code"}, agent_dir=agent_dir)
-
-    assert seen["exists"] is True
+def _enabled_config(group_path):
+    return {
+        "agency": {"dispatch": {"interval": 15}},
+        "groups": {
+            "test": {
+                "path": str(group_path),
+                "agents": ["product"],
+                "dispatch": {
+                    "enabled": True,
+                    "agents": {"product": [{"prompt": "routine.md", "every": "1h"}]},
+                },
+            }
+        },
+    }
 
 
-def test_run_agent_removes_marker_on_exception(tmp_path):
-    group_path, agent_dir, log_dir = _make_group(tmp_path)
-    running_marker = log_dir.parent / ".running-product"
+def test_due_schedule_submits_snapshot_then_touches_marker(tmp_path, monkeypatch):
+    group_path, _, _ = _make_group(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config = _enabled_config(group_path)
+    captured = []
 
-    fake_integration = MagicMock(supports_execution=True)
-    fake_integration.run.side_effect = RuntimeError("boom")
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job",
+        lambda spec, launcher=None: captured.append(spec) or object(),
+    )
 
-    with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
-        with pytest.raises(RuntimeError):
-            run_agent_prompt(group_path, "product", "routine.md", 1800, log_dir,
-                       {"integration": "claude-code"}, agent_dir=agent_dir)
+    run_dispatch_cycle(config, config_path)
 
-    assert not running_marker.exists()
+    assert captured[0].trigger == "scheduled_prompt"
+    assert captured[0].prompt_content == "do the thing"
+    assert (group_path / "shared" / "logs" / ".last-product-routine").exists()
 
 
-def test_run_agent_forwards_sandbox_root(tmp_path):
-    """Verify sandbox_root parameter is forwarded to integration.run."""
-    group_path, agent_dir, log_dir = _make_group(tmp_path)
-    sandbox_path = Path("/repo/root")
-    captured = {}
+def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypatch):
+    group_path, _, _ = _make_group(tmp_path)
+    config = _enabled_config(group_path)
 
-    fake_integration = MagicMock(supports_execution=True)
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            JobSubmissionError("no", tmp_path / "job")
+        ),
+    )
 
-    def _run(agent_dir_arg, prompt_path, timeout, *, sandbox_root=None):
-        captured["sandbox_root"] = sandbox_root
-        return MagicMock(stdout="ok", stderr="", exit_code=0, duration_seconds=1.0)
+    run_dispatch_cycle(config, tmp_path / "config.yaml")
 
-    fake_integration.run.side_effect = _run
-
-    with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
-        run_agent_prompt(
-            group_path, "product", "routine.md", 1800, log_dir,
-            {"integration": "claude-code"}, agent_dir=agent_dir,
-            sandbox_root=sandbox_path,
-        )
-
-    assert captured["sandbox_root"] == sandbox_path
+    assert not (group_path / "shared" / "logs" / ".last-product-routine").exists()

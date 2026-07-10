@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -33,30 +34,26 @@ def _setup_group(tmp_path: Path) -> Path:
 
 
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
-    group_path = _setup_group(tmp_path)
+    _setup_group(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: False)
-    monkeypatch.setattr("agency.app.run_agent_prompt", lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: calls.append(spec) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post("/test/agents/product/run", data={"prompt": "routine.md"})
 
     assert resp.status_code == 202
-    assert resp.json() == {"status": "started"}
+    assert resp.json() == {"status": "started", "job_id": "job-1"}
     assert len(calls) == 1
-    args, kwargs = calls[0]
-    assert args[0] == group_path
-    assert args[1] == "product"
-    assert args[2] == "routine.md"
-    assert args[3] == 1800
-    assert args[5] == {"name": "product", "integration": "script"}
-    assert kwargs["agent_dir"] is not None
-    assert "sandbox_root" in kwargs
+    spec = calls[0]
+    assert spec.trigger == "manual_prompt"
+    assert spec.group_key == "test"
+    assert spec.agent_name == "product"
+    assert spec.prompt_content == "# Routine\n"
 
 
 def test_run_unknown_prompt_404(tmp_path, monkeypatch):
     _setup_group(tmp_path)
-    monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: False)
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post("/test/agents/product/run", data={"prompt": "nope.md"})
@@ -66,7 +63,7 @@ def test_run_unknown_prompt_404(tmp_path, monkeypatch):
 
 def test_run_path_traversal_400(tmp_path, monkeypatch):
     _setup_group(tmp_path)
-    monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: False)
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post("/test/agents/product/run", data={"prompt": "../secret.md"})
@@ -74,14 +71,15 @@ def test_run_path_traversal_400(tmp_path, monkeypatch):
     assert resp.status_code == 400
 
 
-def test_run_already_running_409(tmp_path, monkeypatch):
+def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
     _setup_group(tmp_path)
-    monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: True)
+    calls = []
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: calls.append(spec) or SimpleNamespace(job_id=f"job-{len(calls)}"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"prompt": "routine.md"})
-
-    assert resp.status_code == 409
+    assert client.post("/test/agents/product/run", data={"prompt": "routine.md"}).status_code == 202
+    assert client.post("/test/agents/product/run", data={"prompt": "routine.md"}).status_code == 202
+    assert len(calls) == 2
 
 
 def test_agents_page_lists_prompts_with_run(tmp_path):
