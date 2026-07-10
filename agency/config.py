@@ -3,6 +3,16 @@
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+import yaml
+
+
+def load_config_path(path: Path) -> dict:
+    """Load configuration from an explicit filesystem path."""
+    if not path.exists():
+        return {"agency": {"title": "Agency", "default_group": ""}, "groups": {}}
+    with path.open(encoding="utf-8") as config_file:
+        return yaml.safe_load(config_file) or {}
+
 
 @dataclass(frozen=True)
 class SandboxSpec:

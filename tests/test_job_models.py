@@ -1,0 +1,98 @@
+from pathlib import Path
+
+import pytest
+
+from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.store import (
+    InvalidJobTransition,
+    active_jobs,
+    job_path,
+    read_job,
+    transition_job,
+    write_job,
+)
+from agency.config import load_config_path
+
+
+def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+    return JobSpec.create(
+        config_path=config_path,
+        group_key="newsletter",
+        agent_name=agent,
+        trigger="manual_prompt",
+        prompt_source={
+            "type": "saved_prompt",
+            "path": "shared/prompts/routine.md",
+        },
+        prompt_content="# Routine\n",
+    )
+
+
+def test_job_record_round_trips_through_atomic_store(tmp_path):
+    spec = make_spec(tmp_path)
+    record = JobRecord.from_spec(spec)
+    path = job_path(tmp_path / "group", spec.job_id)
+
+    write_job(path, record)
+
+    assert read_job(path) == record
+    assert spec.config_path == str((tmp_path / "config.yaml").resolve())
+
+
+def test_transition_job_requires_expected_status(tmp_path):
+    spec = make_spec(tmp_path)
+    path = job_path(tmp_path / "group", spec.job_id)
+    write_job(path, JobRecord.from_spec(spec))
+
+    running = transition_job(path, "queued", "running", worker_pid=123)
+
+    assert running.status == "running"
+    assert running.worker_pid == 123
+    with pytest.raises(InvalidJobTransition):
+        transition_job(path, "queued", "failed")
+
+
+def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):
+    group_path = tmp_path / "group"
+    queued_spec = make_spec(tmp_path, agent="product")
+    running_spec = make_spec(tmp_path, agent="product")
+    other_spec = make_spec(tmp_path, agent="editorial")
+
+    write_job(job_path(group_path, queued_spec.job_id), JobRecord.from_spec(queued_spec))
+    running_path = job_path(group_path, running_spec.job_id)
+    write_job(running_path, JobRecord.from_spec(running_spec))
+    transition_job(running_path, "queued", "running")
+    write_job(job_path(group_path, other_spec.job_id), JobRecord.from_spec(other_spec))
+
+    records = active_jobs(group_path, "product")
+
+    assert {record.spec.job_id for record in records} == {
+        queued_spec.job_id,
+        running_spec.job_id,
+    }
+    assert {record.status for record in records} == {"queued", "running"}
+
+
+def test_load_config_path_is_independent_of_current_working_directory(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "explicit" / "config.yaml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        "agency:\n  title: Explicit Agency\ngroups:\n  explicit: {}\n",
+        encoding="utf-8",
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "config.yaml").write_text(
+        "agency:\n  title: Wrong Agency\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(elsewhere)
+
+    config = load_config_path(config_path)
+
+    assert config["agency"]["title"] == "Explicit Agency"
+    assert "explicit" in config["groups"]
