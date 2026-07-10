@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import os
+
 import yaml
 
 import agency.app as app_mod
@@ -258,4 +260,140 @@ def test_retry_launch_failure_restores_original_decision_text(tmp_path, monkeypa
     )
     assert response.status_code == 400
     assert "spawn denied" in response.text
+    assert decision_path.read_text() == original_text
+
+
+def _spy_os_replace(monkeypatch):
+    """Patch os.replace (used by the app module) to record (tmp_dir, dst) pairs
+    while still performing the real rename, so tests can prove the atomic
+    same-directory-temp-file + os.replace pattern is actually used."""
+    calls = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        calls.append((Path(src).parent, Path(dst)))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", spy)
+    return calls
+
+
+def test_decide_creates_decision_via_atomic_replace(tmp_path, monkeypatch):
+    """Decision creation must write via a same-directory temp file + os.replace,
+    not a plain write_text, so a crash mid-write never leaves a truncated file."""
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id=spec.job_id))
+    calls = _spy_os_replace(monkeypatch)
+
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "approved", "execution_agent": "engineer"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    matching = [c for c in calls if c[1] == decision_path]
+    assert matching, f"expected os.replace(..., {decision_path}); calls={calls}"
+    assert matching[0][0] == decision_path.parent
+
+
+def test_retry_updates_decision_via_atomic_replace(tmp_path, monkeypatch):
+    """Retry's decision update (new job id, history append) must go through
+    the atomic temp-file + os.replace helper, not plain write_text."""
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    decision_path.write_text(
+        "---\nproposal: change.md\nexecution_status: failed\n"
+        "execution_agent: engineer\nexecution_job_id: old-job\n"
+        "execution_job_history: []\n---\n"
+    )
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id=spec.job_id))
+    calls = _spy_os_replace(monkeypatch)
+
+    response = client.post(
+        "/test/decisions/change/retry",
+        data={"execution_agent": "engineer"}, follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    matching = [c for c in calls if c[1] == decision_path]
+    assert matching, f"expected os.replace(..., {decision_path}); calls={calls}"
+    assert matching[0][0] == decision_path.parent
+
+
+def test_retry_launch_failure_restores_decision_via_atomic_replace(tmp_path, monkeypatch):
+    """Retry rollback (restoring the pre-retry decision text after a failed
+    submission) must also use the atomic temp-file + os.replace helper."""
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    original_text = (
+        "---\nproposal: change.md\nexecution_status: failed\n"
+        "execution_agent: engineer\nexecution_job_id: old-job\n"
+        "execution_job_history: []\n---\n"
+    )
+    decision_path.write_text(original_text)
+    monkeypatch.setattr(
+        "agency.app.submit_job",
+        lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
+    )
+    calls = _spy_os_replace(monkeypatch)
+
+    response = client.post(
+        "/test/decisions/change/retry",
+        data={"execution_agent": "engineer"},
+    )
+
+    assert response.status_code == 400
+    assert decision_path.read_text() == original_text
+    matching = [c for c in calls if c[1] == decision_path]
+    # Two atomic writes hit this decision path during retry+rollback: the
+    # pending-update write, then the rollback-to-original write.
+    assert len(matching) == 2, f"expected 2 os.replace(..., {decision_path}) calls; calls={calls}"
+    assert all(parent == decision_path.parent for parent, _ in matching)
+
+
+def test_retry_invalid_executor_rerenders_decision_detail_with_error(tmp_path, monkeypatch):
+    """An invalid executor on retry must re-render decision_detail.html with a
+    visible inline error and HTTP 400, not a bare HTTPException JSON body, and
+    must leave the decision file untouched."""
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    original_text = (
+        "---\nproposal: change.md\nexecution_status: failed\n"
+        "execution_agent: engineer\nexecution_job_id: old-job\n"
+        "execution_job_history: []\n---\n"
+    )
+    decision_path.write_text(original_text)
+
+    response = client.post(
+        "/test/decisions/change/retry",
+        data={"execution_agent": "sdk-agent"},
+    )
+
+    assert response.status_code == 400
+    assert "does not support execution" in response.text
+    assert "text/html" in response.headers["content-type"]
+    assert decision_path.read_text() == original_text
+
+
+def test_retry_launch_failure_rerenders_decision_detail_with_error(tmp_path, monkeypatch):
+    """A submission failure on retry must re-render decision_detail.html with a
+    visible inline error and HTTP 400, not a bare HTTPException JSON body."""
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    original_text = (
+        "---\nproposal: change.md\nexecution_status: failed\n"
+        "execution_agent: engineer\nexecution_job_id: old-job\n"
+        "execution_job_history: []\n---\n"
+    )
+    decision_path.write_text(original_text)
+    monkeypatch.setattr(
+        "agency.app.submit_job",
+        lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
+    )
+
+    response = client.post(
+        "/test/decisions/change/retry",
+        data={"execution_agent": "engineer"},
+    )
+
+    assert response.status_code == 400
+    assert "spawn denied" in response.text
+    assert "text/html" in response.headers["content-type"]
     assert decision_path.read_text() == original_text

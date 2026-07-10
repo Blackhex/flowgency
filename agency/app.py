@@ -27,6 +27,7 @@ from agency.config import normalize_agents, agent_names, get_agent_dir, get_allo
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 from agency.jobs import JobSpec, JobSubmissionError, JobValidationError, submit_job
+from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
 import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
@@ -467,18 +468,18 @@ def update_decision_execution(decision_path: Path, field: str, value) -> None:
     meta, body = parse_frontmatter(raw)
     meta[field] = value
     frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-    decision_path.write_text(f"---\n{frontmatter}\n---\n\n{body}\n")
+    atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n\n{body}\n")
 
 
 def recover_orphaned_executions() -> int:
     """Reset decisions stuck in 'running' to 'failed'.
 
-    Decision execution runs as an in-process background task, which does not
-    survive a server restart or crash. Any decision still at
-    execution_status == 'running' when the process exited is orphaned: its
-    agent is no longer running. Called on startup, this resets such decisions
-    to 'failed' with an explanatory summary so they surface a retry action
-    instead of hanging forever. Decisions in any other state are left untouched.
+    A decision's job may still be mid-run in a worker process when the
+    server restarts or crashes. Any decision still at execution_status ==
+    'running' at startup is orphaned: nothing is tracking that job anymore.
+    Called on startup, this resets such decisions to 'failed' with an
+    explanatory summary so they surface a retry action instead of hanging
+    forever. Decisions in any other state are left untouched.
     """
     recovered = 0
     for g in GROUPS.values():
@@ -2796,7 +2797,7 @@ async def proposal_decide(request: Request, group: str, slug: str):
     }
 
     frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-    decision_path.write_text(f"---\n{frontmatter}\n---\n")
+    atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
 
     try:
         submit_job(spec)
@@ -2831,6 +2832,14 @@ async def decisions_list(request: Request, group: str):
 async def decision_detail(request: Request, group: str, slug: str):
     """View a single decision."""
     g = get_group(group)
+    return render_decision_detail(request, g, group, slug)
+
+
+def render_decision_detail(request: Request, g: dict, group: str, slug: str,
+                            *, decision_error: str = "", status_code: int = 200):
+    """Build the decision_detail template response. Shared by the GET route and
+    the POST /retry route so validation/submission errors can re-render the
+    same page instead of returning a bare JSON error."""
     path = g["shared"] / "decisions" / f"{slug}.md"
     if not path.exists():
         raise HTTPException(404, "Decision not found")
@@ -2883,7 +2892,8 @@ async def decision_detail(request: Request, group: str, slug: str):
         "answers": meta.get("answers", {}),
         "execution_agents": execution_agent_options(g),
         "selected_execution_agent": selected_execution_agent,
-    })
+        "decision_error": decision_error,
+    }, status_code=status_code)
 
 
 @app.post("/{group}/decisions/{slug}/retry", response_class=HTMLResponse)
@@ -2912,9 +2922,10 @@ async def decision_retry(request: Request, group: str, slug: str):
     execution_agent = form.get("execution_agent") or default_agent
 
     if execution_agent not in execution_agent_options(g):
-        raise HTTPException(
-            400,
-            f"Agent '{execution_agent}' does not support execution or is unavailable.",
+        return render_decision_detail(
+            request, g, group, slug,
+            decision_error=f"Agent '{execution_agent}' does not support execution or is unavailable.",
+            status_code=400,
         )
 
     spec = JobSpec.create(
@@ -2946,13 +2957,17 @@ async def decision_retry(request: Request, group: str, slug: str):
     })
 
     frontmatter = yaml.dump(updated_meta, default_flow_style=False, sort_keys=False).strip()
-    decision_path.write_text(f"---\n{frontmatter}\n---\n\n{body}\n")
+    atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n\n{body}\n")
 
     try:
         submit_job(spec)
     except JobSubmissionError as error:
-        decision_path.write_text(original_text)
-        raise HTTPException(400, str(error)) from error
+        atomic_write_text(decision_path, original_text)
+        return render_decision_detail(
+            request, g, group, slug,
+            decision_error=str(error),
+            status_code=400,
+        )
 
     return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
 

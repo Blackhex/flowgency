@@ -1,12 +1,12 @@
 """Worker-side execution flow for durable agent jobs."""
 
 import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
+from .atomic import atomic_write_text
 from .context import resolve_job_context
 from .models import JobRecord
 from .store import read_job, transition_job
@@ -29,21 +29,9 @@ def _read_frontmatter(path: Path) -> tuple[dict, str]:
 
 
 def _write_frontmatter_atomic(path: Path, metadata: dict, body: str) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    file_descriptor, temp_name = tempfile.mkstemp(dir=path.parent)
     frontmatter = yaml.safe_dump(metadata, sort_keys=False).strip()
     payload = f"---\n{frontmatter}\n---\n\n{body}"
-    try:
-        with os.fdopen(file_descriptor, "w", encoding="utf-8") as temp_file:
-            temp_file.write(payload)
-        os.replace(temp_name, path)
-    except Exception:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
-        raise
+    atomic_write_text(path, payload)
 
 
 def project_decision(record: JobRecord) -> None:

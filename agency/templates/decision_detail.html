@@ -104,6 +104,10 @@
     {% elif execution_status == 'running' %}bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800
     {% else %}bg-gray-50 border-gray-200 dark:bg-gray-700/50 dark:border-gray-600{% endif %}">
 
+    {% if decision_error %}
+    <div class="mb-3 p-3 border border-red-300 bg-red-50 text-red-700 rounded-md" role="alert">{{ decision_error }}</div>
+    {% endif %}
+
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center gap-2">
         <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Execution</h3>
