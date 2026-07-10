@@ -464,6 +464,7 @@ def execute_decision(decision_path: Path, group_path: Path, agent: str,
     """Background task: dispatch agent to act on a decision's answers."""
     now = datetime.now(timezone.utc).isoformat()
     update_decision_execution(decision_path, "execution_status", "running")
+    update_decision_execution(decision_path, "executed_by", agent)
 
     prompt = (
         f"A decision has been made on your proposal.\n\n"
@@ -524,7 +525,6 @@ def execute_decision(decision_path: Path, group_path: Path, agent: str,
         out_path.write_text(result.stdout)
         err_path.write_text(result.stderr)
 
-        update_decision_execution(decision_path, "executed_by", agent)
         update_decision_execution(decision_path, "execution_log", str(out_path))
         changed = [
             {

@@ -129,3 +129,45 @@ def test_execute_decision_persists_empty_changed_files(tmp_path, monkeypatch):
     assert meta["executed_by"] == "worker"
     assert meta["execution_log"].endswith(".out")
     assert meta["changed_files"] == []  # Empty list persisted
+
+
+def test_execute_decision_sets_executed_by_before_run_completes(tmp_path, monkeypatch):
+    """executed_by must be persisted while the run is in progress, so the UI can
+    show which agent is working before execution finishes."""
+    group_path = tmp_path / "agents"
+    (group_path / "shared" / "decisions").mkdir(parents=True)
+    (group_path / "shared" / "logs").mkdir(parents=True)
+    agent_dir = group_path / "worker"
+    agent_dir.mkdir()
+
+    decision = group_path / "shared" / "decisions" / "inflight.md"
+    decision.write_text("---\nexecution_status: pending\n---\n")
+
+    seen = {}
+
+    class FakeIntegration:
+        name = "copilot"
+        supports_execution = True
+
+        def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
+            # Inspect the decision file mid-run: executed_by should already be set.
+            meta, _ = app_mod.parse_frontmatter(decision.read_text())
+            seen["executed_by"] = meta.get("executed_by")
+            seen["execution_status"] = meta.get("execution_status")
+            return RunResult(
+                exit_code=0, stdout="ok", stderr="", duration_seconds=0.1,
+                changed_files=[],
+            )
+
+    monkeypatch.setitem(
+        app_mod.GROUPS,
+        "test-grp",
+        {"path": str(group_path),
+         "_agents_normalized": [{"name": "worker", "integration": "copilot"}]},
+    )
+    monkeypatch.setattr(app_mod, "get_agent_integration", lambda g, a: FakeIntegration())
+
+    app_mod.execute_decision(decision, group_path, "worker", "inflight-proposal", group_key="test-grp")
+
+    assert seen["executed_by"] == "worker"
+    assert seen["execution_status"] == "running"
