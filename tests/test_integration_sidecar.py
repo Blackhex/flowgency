@@ -581,3 +581,60 @@ class TestCopilot:
 
         monkeypatch.setattr(copilot_mod.sys, "platform", "linux")
         assert CopilotIntegration._resolve_real_cmd("copilot") == "copilot"
+
+    def test_parse_jsonl_extracts_native_edits(self):
+        import json
+        from pathlib import Path
+        from agency.integrations.agency.copilot import CopilotIntegration
+        root = Path("C:/repo") if False else Path("/repo")
+        lines = [
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "t1", "toolName": "create",
+                      "arguments": {"path": str(root / "greeting.txt")}}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1", "success": True,
+                      "toolTelemetry": {"properties": {"command": "create"},
+                                        "metrics": {"linesAdded": 1, "linesRemoved": 0}}}},
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "t2", "toolName": "edit",
+                      "arguments": {"path": str(root / "existing.txt")}}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t2", "success": True,
+                      "toolTelemetry": {"properties": {"command": "edit"},
+                                        "metrics": {"linesAdded": 1, "linesRemoved": 1}}}},
+            {"type": "assistant.message", "data": {"content": "Done."}},
+        ]
+        raw = "\n".join(json.dumps(l) for l in lines)
+        text, changes = CopilotIntegration._parse_jsonl_output(raw, root)
+        assert "Done." in text
+        by_path = {c.path: c for c in changes}
+        assert by_path["greeting.txt"].status == "added"
+        assert by_path["greeting.txt"].lines_added == 1
+        assert by_path["existing.txt"].status == "modified"
+        assert by_path["existing.txt"].lines_added == 1
+        assert by_path["existing.txt"].lines_removed == 1
+
+    def test_parse_jsonl_skips_readonly_view(self):
+        import json
+        from pathlib import Path
+        from agency.integrations.agency.copilot import CopilotIntegration
+        lines = [
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "v1", "toolName": "view",
+                      "arguments": {"path": "/repo/a.txt"}}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "v1", "success": True,
+                      "toolTelemetry": {"properties": {"command": "view"},
+                                        "metrics": {}}}},
+        ]
+        raw = "\n".join(json.dumps(l) for l in lines)
+        _text, changes = CopilotIntegration._parse_jsonl_output(raw, Path("/repo"))
+        assert changes == []
+
+    def test_parse_jsonl_malformed_falls_back(self):
+        from pathlib import Path
+        from agency.integrations.agency.copilot import CopilotIntegration
+        raw = "this is not json\nok"
+        text, changes = CopilotIntegration._parse_jsonl_output(raw, Path("/repo"))
+        assert text == raw
+        assert changes == []

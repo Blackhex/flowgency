@@ -1,5 +1,6 @@
 """GitHub Copilot CLI integration."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from agency.config import SandboxSpec
 from agency.integrations import (
-    BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
+    BaseIntegration, RunResult, FileChange, AgentIdentity, IntegrationError, _register,
 )
 
 
@@ -35,6 +36,116 @@ class CopilotIntegration(BaseIntegration):
 
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
         self._write_sidecar_identity(agent_dir, self._identity_file(agent_dir), identity)
+
+    # Copilot native file-edit tools that mutate the filesystem. Read-only
+    # tools like "view" are intentionally excluded. Shell edits are not
+    # tracked by the CLI and cannot be recovered here.
+    _WRITE_TOOLS = {"create", "edit", "str_replace", "delete"}
+    _STATUS_BY_COMMAND = {
+        "create": "added",
+        "edit": "modified",
+        "str_replace": "modified",
+        "delete": "deleted",
+    }
+
+    @staticmethod
+    def _parse_jsonl_output(raw: str, root: "Path | None") -> "tuple[str, list[FileChange]]":
+        """Parse Copilot --output-format json (JSONL) into (text, changes).
+
+        Reconstructs human-readable text from assistant messages and extracts
+        per-file changes from native file-edit tool calls. Any structural
+        problem falls back to (raw, []); a run must never break on parsing.
+        """
+        try:
+            tool_names: dict[str, str] = {}
+            tool_paths: dict[str, str] = {}
+            # path -> {"status": str, "added": int, "removed": int}
+            files: dict[str, dict] = {}
+            texts: list[str] = []
+            saw_json = False
+
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                saw_json = True
+                etype = obj.get("type")
+                data = obj.get("data") or {}
+
+                if etype == "tool.execution_start":
+                    tcid = data.get("toolCallId")
+                    if tcid:
+                        tool_names[tcid] = data.get("toolName", "")
+                        path = (data.get("arguments") or {}).get("path")
+                        if path:
+                            tool_paths[tcid] = path
+                elif etype == "tool.execution_complete":
+                    tcid = data.get("toolCallId")
+                    telemetry = data.get("toolTelemetry") or {}
+                    props = telemetry.get("properties") or {}
+                    metrics = telemetry.get("metrics") or {}
+                    command = props.get("command") or tool_names.get(tcid, "")
+                    if command not in CopilotIntegration._WRITE_TOOLS:
+                        continue
+                    path = tool_paths.get(tcid)
+                    if not path:
+                        continue
+                    rel = CopilotIntegration._relativize(path, root)
+                    entry = files.setdefault(rel, {"status": None, "added": 0, "removed": 0})
+                    entry["added"] += int(metrics.get("linesAdded") or 0)
+                    entry["removed"] += int(metrics.get("linesRemoved") or 0)
+                    new_status = CopilotIntegration._STATUS_BY_COMMAND.get(command, "modified")
+                    # "added" wins (a file created this run stays added); then
+                    # "deleted"; otherwise "modified".
+                    if entry["status"] is None:
+                        entry["status"] = new_status
+                    elif entry["status"] != "added" and new_status == "added":
+                        entry["status"] = "added"
+                    elif entry["status"] == "modified" and new_status == "deleted":
+                        entry["status"] = "deleted"
+                elif etype == "assistant.message":
+                    content = data.get("content")
+                    if content:
+                        texts.append(content)
+                elif etype == "result":
+                    # Fallback source for file list if no per-tool edits parsed.
+                    usage = data.get("usage") or {}
+                    code_changes = usage.get("codeChanges") or {}
+                    for p in code_changes.get("filesModified") or []:
+                        rel = CopilotIntegration._relativize(p, root)
+                        if rel not in files:
+                            files[rel] = {"status": "modified", "added": 0, "removed": 0}
+
+            if not saw_json:
+                return raw, []
+
+            changes = [
+                FileChange(
+                    path=path,
+                    status=info["status"] or "modified",
+                    lines_added=info["added"],
+                    lines_removed=info["removed"],
+                )
+                for path, info in files.items()
+            ]
+            text = "\n".join(texts) if texts else raw
+            return text, changes
+        except Exception:
+            return raw, []
+
+    @staticmethod
+    def _relativize(path: str, root: "Path | None") -> str:
+        """Return path relative to root when possible, else the original."""
+        if not root:
+            return path
+        try:
+            return str(Path(path).resolve().relative_to(Path(root).resolve()))
+        except (ValueError, OSError):
+            return path
 
     def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
             *, sandbox_root: "SandboxSpec | None" = None) -> RunResult:
