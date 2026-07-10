@@ -77,7 +77,14 @@ def execute_job(job_path: Path) -> JobRecord:
         worker_pid=os.getpid(),
         started_at=started.isoformat(),
     )
-    project_decision(record)
+
+    # Decision projection is best-effort metadata sync and must not block
+    # durable job terminalization when decision files are missing/corrupt.
+    try:
+        project_decision(record)
+    except Exception:
+        pass
+
     prompt_path = Path(job_path).with_suffix(".prompt")
     try:
         context = resolve_job_context(record.spec)
@@ -132,5 +139,11 @@ def execute_job(job_path: Path) -> JobRecord:
         )
     finally:
         prompt_path.unlink(missing_ok=True)
-    project_decision(final)
+
+    # Keep terminalization authoritative even if projection fails.
+    try:
+        project_decision(final)
+    except Exception:
+        pass
+
     return final

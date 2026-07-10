@@ -184,6 +184,66 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
     assert result.changed_files == []
 
 
+def test_execute_job_projection_failure_before_run_still_completes(tmp_path, monkeypatch):
+    path, _ = queued_job(tmp_path)
+    calls = {"count": 0}
+
+    def flaky_project(record):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError("projection write failed")
+
+    monkeypatch.setattr("agency.jobs.execution.project_decision", flaky_project)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            agent_dir=tmp_path,
+            timeout=30,
+            sandbox_root=None,
+            group_path=tmp_path / "group",
+            integration=SimpleNamespace(
+                run=lambda *args, **kwargs: RunResult(0, "done", "", 0.1)
+            ),
+        ),
+    )
+
+    result = execute_job(path)
+
+    assert calls["count"] == 2
+    assert result.status == "complete"
+    assert read_job(path).status == "complete"
+
+
+def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeypatch):
+    path, _ = queued_job(tmp_path)
+    calls = {"count": 0}
+
+    def flaky_project(record):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError("projection read failed")
+
+    monkeypatch.setattr("agency.jobs.execution.project_decision", flaky_project)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            agent_dir=tmp_path,
+            timeout=30,
+            sandbox_root=None,
+            group_path=tmp_path / "group",
+            integration=SimpleNamespace(
+                run=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+            ),
+        ),
+    )
+
+    result = execute_job(path)
+
+    assert calls["count"] == 2
+    assert result.status == "failed"
+    assert read_job(path).status == "failed"
+
+
 def test_worker_returns_status_as_exit_code(tmp_path, monkeypatch):
     job_path = tmp_path / "job.yaml"
     seen = []
