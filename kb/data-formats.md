@@ -73,6 +73,7 @@ Two related observations suggest this is a systemic issue, not a one-off.
 | `feedback_received` | no | Agents that responded |
 | `ttl_days` | no | Days before auto-archive |
 | `questions` | yes | List of typed questions (see below) |
+| `execution_agent` | no | Agent that should implement decisions on this proposal. Defaults to `origin_agent` when unset (superseded proposals). |
 
 ### Question Types
 
@@ -111,10 +112,13 @@ execution_summary: Added deduplication pass to the pre-processing pipeline. 3 du
 | `answers` | yes | Dict of question id → answer value |
 | `execution_status` | no | `pending`, `running`, `complete`, `failed` |
 | `execution_summary` | no | Agent's report of what it did |
+| `execution_agent` | no | Agent selected to implement this decision. Chosen when the decision is created (or retried); falls back to the proposal's `execution_agent`, then `origin_agent`, for superseded decisions with no explicit selection. |
+| `execution_job_id` | no | ID of the current (or most recent) durable job submitted for this decision |
+| `execution_job_history` | no | IDs of prior jobs superseded by retries, oldest first. A retry appends the previous `execution_job_id` here before replacing it. |
 
 ### Execution
 
-Every decision triggers a dispatch to the origin agent, regardless of the answers. The agent reads the decision file and acts on the answers — implementing approved actions, closing out rejected ones, or using choice/free-response answers to guide its work. Failed executions can be retried from the decision detail page.
+When you answer a proposal's questions, you select which agent implements the decision (defaulting to the proposal's `execution_agent`, or `origin_agent` for superseded proposals). Agency submits a durable job for that agent with an immutable snapshot of the proposal body and your answers embedded in the prompt — the agent never needs to re-read the proposal or decision files. Failed executions can be retried from the decision detail page; retrying keeps the prior `execution_job_id` in `execution_job_history` and lets you change the executing agent.
 
 ## TTL Enforcement
 

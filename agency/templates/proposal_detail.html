@@ -69,6 +69,15 @@
     {% if not decision %}
     {# -- Unanswered: render form -- #}
     <form method="POST" action="/{{ group }}/proposals/{{ slug }}/decide">
+      {% if decision_error %}
+      <div class="mb-4 p-3 border border-red-300 bg-red-50 text-red-700 rounded-md" role="alert">{{ decision_error }}</div>
+      {% endif %}
+      <label for="execution-agent" class="block text-sm font-medium text-gray-700 mb-1">Implement with</label>
+      <select id="execution-agent" name="execution_agent" required class="w-full border border-gray-300 rounded-md px-3 py-2 mb-4">
+        {% for agent_name in execution_agents %}
+        <option value="{{ agent_name }}" {% if agent_name == selected_execution_agent %}selected{% endif %}>{{ agent_name }}</option>
+        {% endfor %}
+      </select>
       {% for q in questions %}
       <div class="border border-gray-200 rounded-lg p-4 mb-3">
         <div class="font-medium text-gray-800 mb-2">{{ loop.index }}. {{ q.prompt }}</div>

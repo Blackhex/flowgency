@@ -6,9 +6,11 @@ import yaml
 import agency.app as app_mod
 from agency.config import SandboxSpec
 from agency.integrations import FileChange, RunResult
+from agency.jobs import JobSubmissionError
 from agency.jobs.execution import execute_job
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.store import write_job
+from test_proposal_questions import _setup_decision_group
 
 
 def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tuple[Path, Path, JobSpec]:
@@ -187,3 +189,73 @@ def test_recover_orphaned_executions_handles_missing_dir(tmp_path, monkeypatch):
     )
     assert app_mod.recover_orphaned_executions() == 0
 
+
+def test_decide_submits_embedded_snapshot_and_persists_job_id(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    captured = []
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec) or SimpleNamespace(job_id=spec.job_id))
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "approved", "execution_agent": "engineer"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "approved" in captured[0].prompt_content
+    assert "Proposal body" in captured[0].prompt_content
+    metadata, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert metadata["execution_agent"] == "engineer"
+    assert metadata["execution_job_id"] == captured[0].job_id
+    assert metadata["execution_job_history"] == []
+
+
+def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    decision_path.write_text(
+        "---\nproposal: change.md\nexecution_status: failed\n"
+        "execution_agent: engineer\nexecution_job_id: old-job\n"
+        "execution_job_history: []\n---\n"
+    )
+    captured = []
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec) or SimpleNamespace(job_id=spec.job_id))
+    response = client.post(
+        "/test/decisions/change/retry",
+        data={"execution_agent": "engineer"}, follow_redirects=False,
+    )
+    metadata, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert response.status_code == 303
+    assert metadata["execution_job_history"] == ["old-job"]
+    assert metadata["execution_job_id"] == captured[0].job_id
+
+
+def test_launch_failure_rolls_back_new_decision(tmp_path, monkeypatch):
+    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)))
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "approved", "execution_agent": "engineer"},
+    )
+    assert response.status_code == 400
+    assert "spawn denied" in response.text
+    assert "status: proposed" in proposal_path.read_text()
+    assert not decision_path.exists()
+
+
+def test_retry_launch_failure_restores_original_decision_text(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    original_text = (
+        "---\nproposal: change.md\nexecution_status: failed\n"
+        "execution_agent: engineer\nexecution_job_id: old-job\n"
+        "execution_job_history: []\n---\n"
+    )
+    decision_path.write_text(original_text)
+    monkeypatch.setattr(
+        "agency.app.submit_job",
+        lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
+    )
+    response = client.post(
+        "/test/decisions/change/retry",
+        data={"execution_agent": "engineer"},
+    )
+    assert response.status_code == 400
+    assert "spawn denied" in response.text
+    assert decision_path.read_text() == original_text
