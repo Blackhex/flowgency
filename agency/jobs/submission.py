@@ -2,7 +2,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .context import JobValidationError, resolve_job_context
-from .launcher import DetachedProcessLauncher, JobLauncher
+from .launcher import JobLauncher, default_launcher
 from .models import JobHandle, JobRecord, JobSpec
 from .store import job_path, write_job
 
@@ -18,7 +18,7 @@ def submit_job(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
     path = job_path(context.group_path, spec.job_id)
     record = JobRecord.from_spec(spec)
     write_job(path, record)
-    selected_launcher = launcher or DetachedProcessLauncher()
+    selected_launcher = launcher or default_launcher()
     try:
         result = selected_launcher.launch(path)
     except Exception as error:

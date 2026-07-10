@@ -326,3 +326,31 @@ The initial transport is a detached child process. Moving to a dedicated daemon
 later requires implementing `DaemonLauncher`, deploying its consumer, and selecting
 that launcher in configuration. Job producers, serialized `JobSpec`, worker
 execution, integrations, and trigger routes remain unchanged.
+
+---
+
+## Addendum: Launcher Architecture Correction (2026-07-10)
+
+**Review finding:** On Linux/systemd deployments, POSIX `start_new_session=True`
+does not escape the submitting service's cgroup. When the Agency systemd service
+is stopped or restarted, systemd kills all processes in that cgroup — including
+"detached" workers created with `start_new_session=True`.
+
+**Approved correction:** On Linux with a usable user systemd manager, launch each
+job as its own transient user systemd service via:
+
+```
+systemd-run --user --collect --unit=agency-job-{safe_id} -- python -m agency.jobs.worker <path>
+```
+
+This places the worker in an independent cgroup owned by systemd, not the Agency
+service. The worker survives Agency service stop/restart.
+
+**Fallback:** `DetachedProcessLauncher` (POSIX `start_new_session` / Windows
+creation flags) remains the fallback when systemd is unavailable and on non-Linux
+platforms (macOS, Windows).
+
+**Selection:** `default_launcher()` factory auto-detects at call time: checks
+`sys.platform == "linux"`, `systemd-run` on PATH, and `systemctl --user
+is-system-running` returns "running" or "degraded". Tests inject detection via a
+`_detect` parameter. No call-site changes needed in dispatch or dashboard code.

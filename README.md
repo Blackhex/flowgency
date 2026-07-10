@@ -87,7 +87,7 @@ Set agents to run on schedules — daily at a specific time, or every few hours.
 
 ### Agent jobs
 
-Scheduled prompts, manual prompt runs, approved decisions, and decision retries all create durable records under `<group>/shared/jobs/`. Each job runs in a detached worker process, so stopping or restarting the dashboard does not stop the agent. Concurrent jobs for one agent are allowed, and proposal authors can set optional `execution_agent` frontmatter. Job records contain prompt snapshots and may contain operational paths; treat the group's `shared/` directory as private application data.
+Scheduled prompts, manual prompt runs, approved decisions, and decision retries all create durable records under `<group>/shared/jobs/`. On Linux with a user systemd manager, each job runs as a transient user systemd service (`systemd-run --user`), which ensures the worker continues even if the Agency service itself is restarted. On other platforms (macOS, Windows) or when systemd is unavailable, jobs run as detached subprocesses. In both cases, stopping or restarting the dashboard does not stop running agents. Concurrent jobs for one agent are allowed, and proposal authors can set optional `execution_agent` frontmatter. Job records contain prompt snapshots and may contain operational paths; treat the group's `shared/` directory as private application data.
 
 ### A CLI for terminal people
 
