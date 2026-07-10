@@ -1,13 +1,16 @@
-import os
-import time
+from dataclasses import replace
 from datetime import datetime, timedelta
+import os
 from pathlib import Path
+import time
 from unittest.mock import patch
 
 import pytest
 
 from agency import app as app_module
 from agency.app import is_agent_running, compute_next_run, relative_future
+from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.store import job_path, write_job
 
 
 def _group(tmp_path):
@@ -16,22 +19,36 @@ def _group(tmp_path):
     return {"key": "grp", "path": tmp_path, "shared": shared}
 
 
-def test_running_marker_fresh(tmp_path):
+def _write_job(tmp_path, status):
+    spec = JobSpec.create(
+        config_path=tmp_path / "config.yaml",
+        group_key="grp",
+        agent_name="product",
+        trigger="manual_prompt",
+        prompt_source={"type": "prompt", "path": "routine.md"},
+        prompt_content="# Routine\n",
+    )
+    write_job(
+        job_path(tmp_path, spec.job_id),
+        replace(JobRecord.from_spec(spec), status=status),
+    )
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_active_job_reports_agent_running(tmp_path, status):
     g = _group(tmp_path)
-    (g["shared"] / "logs" / ".running-product").touch()
+    _write_job(tmp_path, status)
     assert is_agent_running(g, "product", timeout=1800) is True
 
 
-def test_running_marker_stale(tmp_path):
+@pytest.mark.parametrize("status", ["complete", "failed"])
+def test_terminal_job_does_not_report_agent_running(tmp_path, status):
     g = _group(tmp_path)
-    marker = g["shared"] / "logs" / ".running-product"
-    marker.touch()
-    old = time.time() - 3600  # 1h ago, older than 1800s timeout
-    os.utime(marker, (old, old))
+    _write_job(tmp_path, status)
     assert is_agent_running(g, "product", timeout=1800) is False
 
 
-def test_running_marker_absent(tmp_path):
+def test_no_active_job_reports_agent_not_running(tmp_path):
     g = _group(tmp_path)
     assert is_agent_running(g, "product", timeout=1800) is False
 
@@ -173,8 +190,7 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
         "shared": shared,
     }
 
-    # Mark product as running
-    (shared / "logs" / ".running-product").touch()
+    _write_job(group_path, "running")
 
     groups_cfg = {"grp": {"dispatch": {"enabled": True, "agents": {
         "product": [{"prompt": "r.md", "every": "6h"}]}}}}

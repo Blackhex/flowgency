@@ -1,10 +1,13 @@
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 import agency.app as app_mod
-from agency.app import app
+from agency.app import app, is_agent_running
+from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.store import job_path, write_job
 
 
 def _setup_group(tmp_path: Path) -> Path:
@@ -80,6 +83,24 @@ def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
     assert client.post("/test/agents/product/run", data={"prompt": "routine.md"}).status_code == 202
     assert client.post("/test/agents/product/run", data={"prompt": "routine.md"}).status_code == 202
     assert len(calls) == 2
+
+
+def test_agent_running_state_comes_from_active_job_records(tmp_path):
+    group_path = _setup_group(tmp_path)
+    for status in ("queued", "running"):
+        spec = JobSpec.create(
+            config_path=tmp_path / "config.yaml",
+            group_key="test",
+            agent_name="product",
+            trigger="manual_prompt",
+            prompt_source={"type": "prompt", "path": "routine.md"},
+            prompt_content="# Routine\n",
+        )
+        record = replace(JobRecord.from_spec(spec), status=status)
+        write_job(job_path(group_path, spec.job_id), record)
+
+    assert not (group_path / "shared" / "logs" / ".running-product").exists()
+    assert is_agent_running(app_mod.GROUPS["test"], "product") is True
 
 
 def test_run_returns_400_when_prompt_snapshot_fails_spec_validation(tmp_path, monkeypatch):

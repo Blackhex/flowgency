@@ -57,6 +57,7 @@ def transition_job(
 
 
 def active_jobs(group_path: Path, agent_name: str | None = None) -> list[JobRecord]:
+    """Return persisted queued and running jobs, optionally for one agent."""
     jobs_dir = Path(group_path) / "shared" / "jobs"
     records = []
     for path in jobs_dir.glob("*.yaml"):

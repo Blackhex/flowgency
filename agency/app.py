@@ -7,7 +7,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -26,7 +25,14 @@ import uvicorn
 from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
-from agency.jobs import JobSpec, JobSubmissionError, JobValidationError, submit_job
+from agency.jobs import (
+    JobSpec,
+    JobSubmissionError,
+    JobValidationError,
+    active_jobs,
+    reconcile_jobs,
+    submit_job,
+)
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
 import json as json_module
@@ -298,10 +304,7 @@ def install_dispatch(interval: int = 15) -> str | None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Reset decisions orphaned by a prior restart/crash. Runs on every worker
-    # start, including uvicorn --reload restarts, so a restart never leaves a
-    # decision permanently stuck in 'running'.
-    recover_orphaned_executions()
+    reconcile_jobs(GROUPS)
     yield
 
 
@@ -469,43 +472,6 @@ def update_decision_execution(decision_path: Path, field: str, value) -> None:
     meta[field] = value
     frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
     atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n\n{body}\n")
-
-
-def recover_orphaned_executions() -> int:
-    """Reset decisions stuck in 'running' to 'failed'.
-
-    A decision's job may still be mid-run in a worker process when the
-    server restarts or crashes. Any decision still at execution_status ==
-    'running' at startup is orphaned: nothing is tracking that job anymore.
-    Called on startup, this resets such decisions to 'failed' with an
-    explanatory summary so they surface a retry action instead of hanging
-    forever. Decisions in any other state are left untouched.
-    """
-    recovered = 0
-    for g in GROUPS.values():
-        path = g.get("path")
-        if not path:
-            continue
-        decisions_dir = Path(path) / "shared" / "decisions"
-        if not decisions_dir.is_dir():
-            continue
-        for decision_path in decisions_dir.glob("*.md"):
-            try:
-                meta, _ = parse_frontmatter(decision_path.read_text())
-            except OSError:
-                continue
-            if meta.get("execution_status") == "running":
-                update_decision_execution(decision_path, "execution_status", "failed")
-                update_decision_execution(
-                    decision_path, "execution_summary",
-                    "Execution was interrupted before completion (the server "
-                    "restarted or crashed while the agent was running). Reset to "
-                    "failed so it can be retried.",
-                )
-                recovered += 1
-    if recovered:
-        print(f"Recovered {recovered} orphaned decision(s) stuck in 'running'.")
-    return recovered
 
 
 def parse_csv_to_rows(text: str) -> tuple[list[str], list[list[str]]]:
@@ -1008,16 +974,12 @@ def get_agent_last_seen(g: dict, agent_name: str) -> datetime | None:
 
 
 def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
-    """True if a fresh .running-<agent> marker exists in shared/logs.
+    """Return whether persisted jobs show queued or running work for an agent.
 
-    A marker older than `timeout` seconds is treated as stale (orphaned by a
-    hard-killed process) and reported as not running, so the UI self-heals.
+    ``timeout`` is retained temporarily for call-site compatibility; durable
+    job records are authoritative.
     """
-    marker = g["shared"] / "logs" / f".running-{agent_name}"
-    if not marker.exists():
-        return False
-    age = time.time() - marker.stat().st_mtime
-    return age < timeout
+    return bool(active_jobs(g["path"], agent_name))
 
 
 def compute_next_run(g: dict, agent_name: str, dispatch_cfg: dict) -> datetime | None:
