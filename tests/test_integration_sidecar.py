@@ -677,3 +677,69 @@ class TestCopilot:
         assert result.changed_files[0].path == "new.txt"
         assert result.changed_files[0].status == "added"
         assert result.changed_files[0].lines_added == 3
+
+    def test_parse_jsonl_result_event_fallback(self):
+        """M2: result event with filesModified falls back when no per-tool edits parsed."""
+        import json
+        from pathlib import Path
+        from agency.integrations.agency.copilot import CopilotIntegration
+        root = Path("/repo")
+        lines = [
+            {"type": "result",
+             "data": {"usage": {"codeChanges": {"filesModified": [str(root / "changed.py")]}}}},
+        ]
+        raw = "\n".join(json.dumps(l) for l in lines)
+        text, changes = CopilotIntegration._parse_jsonl_output(raw, root)
+        assert len(changes) == 1
+        assert changes[0].path == "changed.py"
+        assert changes[0].status == "modified"
+        assert changes[0].lines_added == 0
+        assert changes[0].lines_removed == 0
+
+    def test_parse_jsonl_same_path_aggregation(self):
+        """M3: create then edit on same path yields single FileChange with status=added and summed lines."""
+        import json
+        from pathlib import Path
+        from agency.integrations.agency.copilot import CopilotIntegration
+        root = Path("/repo")
+        lines = [
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "t1", "toolName": "create",
+                      "arguments": {"path": str(root / "file.txt")}}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1", "success": True,
+                      "toolTelemetry": {"properties": {"command": "create"},
+                                        "metrics": {"linesAdded": 5, "linesRemoved": 0}}}},
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "t2", "toolName": "edit",
+                      "arguments": {"path": str(root / "file.txt")}}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t2", "success": True,
+                      "toolTelemetry": {"properties": {"command": "edit"},
+                                        "metrics": {"linesAdded": 2, "linesRemoved": 1}}}},
+        ]
+        raw = "\n".join(json.dumps(l) for l in lines)
+        text, changes = CopilotIntegration._parse_jsonl_output(raw, root)
+        assert len(changes) == 1
+        assert changes[0].path == "file.txt"
+        assert changes[0].status == "added"  # created-stays-added precedence
+        assert changes[0].lines_added == 7   # 5 + 2
+        assert changes[0].lines_removed == 1
+
+    def test_parse_jsonl_shell_only_yields_no_changes(self):
+        """M4: shell tool mutations are not tracked (limitation)."""
+        import json
+        from pathlib import Path
+        from agency.integrations.agency.copilot import CopilotIntegration
+        lines = [
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "s1", "toolName": "shell",
+                      "arguments": {"command": "echo hello > out.txt"}}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "s1", "success": True,
+                      "toolTelemetry": {"properties": {"command": "shell"},
+                                        "metrics": {}}}},
+        ]
+        raw = "\n".join(json.dumps(l) for l in lines)
+        text, changes = CopilotIntegration._parse_jsonl_output(raw, Path("/repo"))
+        assert changes == []

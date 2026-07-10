@@ -535,8 +535,9 @@ def execute_decision(decision_path: Path, group_path: Path, agent: str,
             }
             for fc in result.changed_files
         ]
-        if changed:
-            update_decision_execution(decision_path, "changed_files", changed)
+        # M1: Always write changed_files (including empty list) to prevent stale
+        # data from remaining after a retry that produces no changes.
+        update_decision_execution(decision_path, "changed_files", changed)
 
         updated_meta, _ = parse_frontmatter(decision_path.read_text())
         exec_status = updated_meta.get("execution_status", "")

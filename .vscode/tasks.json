@@ -1,0 +1,204 @@
+{
+  "inputs": [
+    {
+      "description": "pytest -k keyword expression (e.g. 'copilot or dispatch')",
+      "id": "testKeyword",
+      "type": "promptString"
+    }
+  ],
+  "options": {
+    "cwd": "${workspaceFolder}"
+  },
+  "tasks": [
+    {
+      "args": [
+        "-m",
+        "pip",
+        "install",
+        "-e",
+        "."
+      ],
+      "command": "python",
+      "detail": "pip install -e . — install the package and dependencies in editable mode",
+      "group": "build",
+      "label": "Install (editable)",
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "pytest",
+        "tests/",
+        "-q"
+      ],
+      "command": "python",
+      "detail": "Run the full pytest suite",
+      "group": {
+        "isDefault": true,
+        "kind": "test"
+      },
+      "label": "Run tests",
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "pytest",
+        "tests/",
+        "-v"
+      ],
+      "command": "python",
+      "detail": "Run the full pytest suite with verbose output",
+      "group": "test",
+      "label": "Run tests (verbose)",
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "pytest",
+        "${file}",
+        "-v"
+      ],
+      "command": "python",
+      "detail": "Run pytest against the currently open test file",
+      "group": "test",
+      "label": "Run tests (current file)",
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "pytest",
+        "tests/",
+        "-v",
+        "-k",
+        "${input:testKeyword}"
+      ],
+      "command": "python",
+      "detail": "Run pytest filtered by a -k keyword expression",
+      "group": "test",
+      "label": "Run tests (filter by keyword)",
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "agency.app"
+      ],
+      "command": "python",
+      "detail": "Start the FastAPI web dashboard on http://127.0.0.1:8500",
+      "group": "none",
+      "isBackground": true,
+      "label": "Serve dashboard",
+      "problemMatcher": {
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*Started server process.*",
+          "endsPattern": ".*Application startup complete.*"
+        },
+        "pattern": {
+          "file": 1,
+          "location": 1,
+          "message": 1,
+          "regexp": "^(.*)$"
+        }
+      },
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "uvicorn",
+        "agency.app:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8500",
+        "--reload",
+        "--reload-dir",
+        "agency"
+      ],
+      "command": "python",
+      "detail": "Start the FastAPI dashboard with hot-reload on http://127.0.0.1:8500 (restarts on source changes)",
+      "group": "none",
+      "isBackground": true,
+      "label": "Serve dashboard (hot-reload)",
+      "problemMatcher": {
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*Started server process.*",
+          "endsPattern": ".*Application startup complete.*"
+        },
+        "pattern": {
+          "file": 1,
+          "location": 1,
+          "message": 1,
+          "regexp": "^(.*)$"
+        }
+      },
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "agency.cli",
+        "status"
+      ],
+      "command": "python",
+      "detail": "Fleet overview across all groups",
+      "group": "none",
+      "label": "CLI: status",
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "agency.cli",
+        "inbox"
+      ],
+      "command": "python",
+      "detail": "Show what needs attention",
+      "group": "none",
+      "label": "CLI: inbox",
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "agency.cli",
+        "agents"
+      ],
+      "command": "python",
+      "detail": "List agents with health status",
+      "group": "none",
+      "label": "CLI: agents",
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "args": [
+        "-m",
+        "agency.dispatch.run",
+        "--config",
+        "${workspaceFolder}/config.yaml"
+      ],
+      "command": "python",
+      "detail": "Run the dispatch runner a single time against config.yaml",
+      "group": "none",
+      "label": "Dispatch: run once",
+      "problemMatcher": [],
+      "type": "shell"
+    }
+  ],
+  // Development tasks for the Agency project.
+  // Run via: Terminal > Run Task... (Ctrl+Shift+P > "Tasks: Run Task")
+  "version": "2.0.0"
+}
