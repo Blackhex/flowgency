@@ -1,68 +1,62 @@
 from pathlib import Path
+from types import SimpleNamespace
+
+import yaml
 
 import agency.app as app_mod
 from agency.config import SandboxSpec
-from agency.integrations import RunResult, FileChange
+from agency.integrations import FileChange, RunResult
+from agency.jobs.execution import execute_job
+from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.store import write_job
 
 
-def test_execute_decision_passes_sandbox_root(tmp_path, monkeypatch):
-    """Verify execute_decision resolves sandbox_root from group config and passes it to integration.run"""
+def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tuple[Path, Path, JobSpec]:
     group_path = tmp_path / "agents"
-    (group_path / "shared" / "decisions").mkdir(parents=True)
-    (group_path / "shared" / "logs").mkdir(parents=True)
-    agent_dir = group_path / "advisor"
-    agent_dir.mkdir()
+    decision_path = group_path / "shared" / "decisions" / decision_name
+    decision_path.parent.mkdir(parents=True, exist_ok=True)
+    spec = JobSpec.create(
+        config_path=tmp_path / "config.yaml",
+        group_key="grp",
+        agent_name="worker",
+        trigger="decision",
+        prompt_source={"type": "decision"},
+        prompt_content="Immutable instructions",
+        decision_context={
+            "decision_path": str(decision_path),
+            "proposal_path": "proposal.md",
+        },
+    )
+    decision_path.write_text(
+        f"---\nexecution_job_id: {spec.job_id}\nexecution_status: pending\n---\n",
+        encoding="utf-8",
+    )
+    job_path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    write_job(job_path, JobRecord.from_spec(spec))
+    return group_path, decision_path, spec
 
-    decision = group_path / "shared" / "decisions" / "prop.md"
-    decision.write_text("---\nexecution_status: pending\n---\n")
 
-    captured = {}
+def _read_meta(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8")
+    _, frontmatter, _ = text.split("---", 2)
+    return yaml.safe_load(frontmatter) or {}
+
+
+def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeypatch):
+    group_path, decision, spec = queued_decision_job(tmp_path)
+    seen = {}
+    repo = tmp_path / "repo"
 
     class FakeIntegration:
-        name = "copilot"
         supports_execution = True
-        supports_sandbox = True
+        name = "copilot"
 
         def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
-            captured["sandbox_root"] = sandbox_root
-            class R:
-                exit_code = 0
-                stdout = "ok"
-                stderr = ""
-                duration_seconds = 0.1
-            return R()
-
-    monkeypatch.setitem(
-        app_mod.GROUPS,
-        "grp",
-        {"path": str(group_path), "sandbox_root": str(tmp_path / "repo"),
-         "_agents_normalized": [{"name": "advisor", "integration": "copilot"}]},
-    )
-    monkeypatch.setattr(app_mod, "get_agent_integration", lambda g, a: FakeIntegration())
-
-    app_mod.execute_decision(decision, group_path, "advisor", "prop", group_key="grp")
-
-    assert captured["sandbox_root"] == SandboxSpec(
-        roots=(Path(str(tmp_path / "repo")),), allowed_tools=()
-    )
-
-
-def test_execute_decision_persists_agent_log_and_changes(tmp_path, monkeypatch):
-    """Verify execute_decision persists executed_by, execution_log, and changed_files to decision frontmatter."""
-    group_path = tmp_path / "agents"
-    (group_path / "shared" / "decisions").mkdir(parents=True)
-    (group_path / "shared" / "logs").mkdir(parents=True)
-    agent_dir = group_path / "worker"
-    agent_dir.mkdir()
-
-    decision = group_path / "shared" / "decisions" / "test-decision.md"
-    decision.write_text("---\nexecution_status: pending\n---\n")
-
-    class FakeIntegration:
-        name = "copilot"
-        supports_execution = True
-
-        def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
+            seen["sandbox_root"] = sandbox_root
+            seen["prompt"] = prompt_file.read_text(encoding="utf-8")
+            meta = _read_meta(decision)
+            seen["executed_by"] = meta.get("executed_by")
+            seen["execution_status"] = meta.get("execution_status")
             return RunResult(
                 exit_code=0,
                 stdout="did work",
@@ -71,19 +65,26 @@ def test_execute_decision_persists_agent_log_and_changes(tmp_path, monkeypatch):
                 changed_files=[FileChange("a.txt", "modified", 2, 1)],
             )
 
-    monkeypatch.setitem(
-        app_mod.GROUPS,
-        "test-grp",
-        {"path": str(group_path),
-         "_agents_normalized": [{"name": "worker", "integration": "copilot"}]},
+    context = SimpleNamespace(
+        group_path=group_path,
+        agent_dir=group_path / "worker",
+        timeout=30,
+        sandbox_root=SandboxSpec(roots=(repo,), allowed_tools=()),
+        integration=FakeIntegration(),
     )
-    monkeypatch.setattr(app_mod, "get_agent_integration", lambda g, a: FakeIntegration())
+    context.agent_dir.mkdir(parents=True)
+    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
 
-    app_mod.execute_decision(decision, group_path, "worker", "test-proposal", group_key="test-grp")
+    execute_job(group_path / "shared" / "jobs" / f"{spec.job_id}.yaml")
 
-    meta, _ = app_mod.parse_frontmatter(decision.read_text())
+    meta = _read_meta(decision)
+    assert seen["sandbox_root"] == SandboxSpec(roots=(repo,), allowed_tools=())
+    assert seen["prompt"] == "Immutable instructions"
+    assert seen["executed_by"] == "worker"
+    assert seen["execution_status"] == "running"
+    assert meta["execution_status"] == "complete"
+    assert meta["execution_agent"] == "worker"
     assert meta["executed_by"] == "worker"
-    # (c): Strengthen to verify absolute path
     assert Path(meta["execution_log"]).is_absolute()
     assert meta["execution_log"].endswith(".out")
     assert meta["changed_files"] == [
@@ -91,86 +92,60 @@ def test_execute_decision_persists_agent_log_and_changes(tmp_path, monkeypatch):
     ]
 
 
-def test_execute_decision_persists_empty_changed_files(tmp_path, monkeypatch):
-    """M1: Verify execute_decision always writes changed_files, including empty list on retry."""
-    group_path = tmp_path / "agents"
-    (group_path / "shared" / "decisions").mkdir(parents=True)
-    (group_path / "shared" / "logs").mkdir(parents=True)
-    agent_dir = group_path / "worker"
-    agent_dir.mkdir()
+def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch):
+    group_path, decision, spec = queued_decision_job(tmp_path, decision_name="retry.md")
 
-    decision = group_path / "shared" / "decisions" / "retry.md"
-    decision.write_text("---\nexecution_status: pending\n---\n")
-
-    class FakeIntegration:
-        name = "copilot"
-        supports_execution = True
-
-        def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
-            return RunResult(
+    context = SimpleNamespace(
+        group_path=group_path,
+        agent_dir=group_path / "worker",
+        timeout=30,
+        sandbox_root=None,
+        integration=SimpleNamespace(
+            run=lambda *args, **kwargs: RunResult(
                 exit_code=0,
                 stdout="no changes made",
                 stderr="",
                 duration_seconds=0.5,
-                changed_files=[],  # Empty list — no changes
-            )
-
-    monkeypatch.setitem(
-        app_mod.GROUPS,
-        "test-grp",
-        {"path": str(group_path),
-         "_agents_normalized": [{"name": "worker", "integration": "copilot"}]},
-    )
-    monkeypatch.setattr(app_mod, "get_agent_integration", lambda g, a: FakeIntegration())
-
-    app_mod.execute_decision(decision, group_path, "worker", "retry-proposal", group_key="test-grp")
-
-    meta, _ = app_mod.parse_frontmatter(decision.read_text())
-    assert meta["executed_by"] == "worker"
-    assert meta["execution_log"].endswith(".out")
-    assert meta["changed_files"] == []  # Empty list persisted
-
-
-def test_execute_decision_sets_executed_by_before_run_completes(tmp_path, monkeypatch):
-    """executed_by must be persisted while the run is in progress, so the UI can
-    show which agent is working before execution finishes."""
-    group_path = tmp_path / "agents"
-    (group_path / "shared" / "decisions").mkdir(parents=True)
-    (group_path / "shared" / "logs").mkdir(parents=True)
-    agent_dir = group_path / "worker"
-    agent_dir.mkdir()
-
-    decision = group_path / "shared" / "decisions" / "inflight.md"
-    decision.write_text("---\nexecution_status: pending\n---\n")
-
-    seen = {}
-
-    class FakeIntegration:
-        name = "copilot"
-        supports_execution = True
-
-        def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
-            # Inspect the decision file mid-run: executed_by should already be set.
-            meta, _ = app_mod.parse_frontmatter(decision.read_text())
-            seen["executed_by"] = meta.get("executed_by")
-            seen["execution_status"] = meta.get("execution_status")
-            return RunResult(
-                exit_code=0, stdout="ok", stderr="", duration_seconds=0.1,
                 changed_files=[],
             )
-
-    monkeypatch.setitem(
-        app_mod.GROUPS,
-        "test-grp",
-        {"path": str(group_path),
-         "_agents_normalized": [{"name": "worker", "integration": "copilot"}]},
+        ),
     )
-    monkeypatch.setattr(app_mod, "get_agent_integration", lambda g, a: FakeIntegration())
+    context.agent_dir.mkdir(parents=True)
+    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
 
-    app_mod.execute_decision(decision, group_path, "worker", "inflight-proposal", group_key="test-grp")
+    execute_job(group_path / "shared" / "jobs" / f"{spec.job_id}.yaml")
 
-    assert seen["executed_by"] == "worker"
-    assert seen["execution_status"] == "running"
+    meta = _read_meta(decision)
+    assert meta["execution_status"] == "complete"
+    assert meta["changed_files"] == []
+
+
+def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
+    group_path, decision, spec = queued_decision_job(tmp_path, decision_name="failed.md")
+
+    context = SimpleNamespace(
+        group_path=group_path,
+        agent_dir=group_path / "worker",
+        timeout=30,
+        sandbox_root=None,
+        integration=SimpleNamespace(
+            run=lambda *args, **kwargs: RunResult(
+                exit_code=3,
+                stdout="",
+                stderr="error",
+                duration_seconds=0.2,
+                changed_files=[],
+            )
+        ),
+    )
+    context.agent_dir.mkdir(parents=True)
+    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
+
+    execute_job(group_path / "shared" / "jobs" / f"{spec.job_id}.yaml")
+
+    meta = _read_meta(decision)
+    assert meta["execution_status"] == "failed"
+    assert meta["execution_summary"] == "Agent exited with code 3."
 
 
 def test_recover_orphaned_executions_resets_running_to_failed(tmp_path, monkeypatch):
