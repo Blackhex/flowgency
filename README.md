@@ -85,6 +85,10 @@ Each agent gets a profile page with a name, title, emoji avatar, optional headsh
 
 Set agents to run on schedules — daily at a specific time, or every few hours. Agency installs a lightweight system timer (no Docker, no cron hacks) and handles the rest. Each run gets logged so you can see exactly what happened.
 
+### Agent jobs
+
+Scheduled prompts, manual prompt runs, approved decisions, and decision retries all create durable records under `<group>/shared/jobs/`. Each job runs in a detached worker process, so stopping or restarting the dashboard does not stop the agent. Concurrent jobs for one agent are allowed, and proposal authors can set optional `execution_agent` frontmatter. Job records contain prompt snapshots and may contain operational paths; treat the group's `shared/` directory as private application data.
+
 ### A CLI for terminal people
 
 Everything you can do in the browser, you can do from the terminal:
