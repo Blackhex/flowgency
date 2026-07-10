@@ -524,6 +524,20 @@ def execute_decision(decision_path: Path, group_path: Path, agent: str,
         out_path.write_text(result.stdout)
         err_path.write_text(result.stderr)
 
+        update_decision_execution(decision_path, "executed_by", agent)
+        update_decision_execution(decision_path, "execution_log", str(out_path))
+        changed = [
+            {
+                "path": fc.path,
+                "status": fc.status,
+                "lines_added": fc.lines_added,
+                "lines_removed": fc.lines_removed,
+            }
+            for fc in result.changed_files
+        ]
+        if changed:
+            update_decision_execution(decision_path, "changed_files", changed)
+
         updated_meta, _ = parse_frontmatter(decision_path.read_text())
         exec_status = updated_meta.get("execution_status", "")
         if exec_status not in ("complete", "failed"):
