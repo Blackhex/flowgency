@@ -1,7 +1,7 @@
 """Integration plugin system for Agency."""
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,12 +14,22 @@ SIDECAR_FILENAME = ".agency-meta.yaml"
 
 
 @dataclass
+class FileChange:
+    """A single file change reported by an integration after a run."""
+    path: str            # relative to sandbox root when possible; absolute fallback
+    status: str          # "added" | "modified" | "deleted"
+    lines_added: int
+    lines_removed: int
+
+
+@dataclass
 class RunResult:
     """Result of running an agent via an integration."""
     exit_code: int
     stdout: str
     stderr: str
     duration_seconds: float
+    changed_files: list["FileChange"] = field(default_factory=list)
 
 
 @dataclass

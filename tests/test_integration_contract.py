@@ -2,7 +2,7 @@
 import inspect
 import pytest
 from pathlib import Path
-from agency.integrations import REGISTRY, BaseIntegration, AgentIdentity
+from agency.integrations import REGISTRY, BaseIntegration, AgentIdentity, RunResult, FileChange
 
 
 def all_integration_names():
@@ -70,4 +70,17 @@ def test_all_execution_integrations_run_accepts_sandbox_root():
         if param is None and not accepts_var_kw:
             offenders.append(name)
     assert offenders == [], f"integrations missing sandbox_root kwarg: {offenders}"
+
+
+def test_runresult_changed_files_defaults_empty():
+    r = RunResult(exit_code=0, stdout="", stderr="", duration_seconds=1.0)
+    assert r.changed_files == []
+
+
+def test_filechange_fields():
+    fc = FileChange(path="a.txt", status="modified", lines_added=2, lines_removed=1)
+    assert fc.path == "a.txt"
+    assert fc.status == "modified"
+    assert fc.lines_added == 2
+    assert fc.lines_removed == 1
 
