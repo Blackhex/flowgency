@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -293,7 +294,16 @@ def install_dispatch(interval: int = 15) -> str | None:
     return None
 
 
-app = FastAPI(title="Agency Dashboard")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Reset decisions orphaned by a prior restart/crash. Runs on every worker
+    # start, including uvicorn --reload restarts, so a restart never leaves a
+    # decision permanently stuck in 'running'.
+    recover_orphaned_executions()
+    yield
+
+
+app = FastAPI(title="Agency Dashboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -457,6 +467,43 @@ def update_decision_execution(decision_path: Path, field: str, value) -> None:
     meta[field] = value
     frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
     decision_path.write_text(f"---\n{frontmatter}\n---\n\n{body}\n")
+
+
+def recover_orphaned_executions() -> int:
+    """Reset decisions stuck in 'running' to 'failed'.
+
+    Decision execution runs as an in-process background task, which does not
+    survive a server restart or crash. Any decision still at
+    execution_status == 'running' when the process exited is orphaned: its
+    agent is no longer running. Called on startup, this resets such decisions
+    to 'failed' with an explanatory summary so they surface a retry action
+    instead of hanging forever. Decisions in any other state are left untouched.
+    """
+    recovered = 0
+    for g in GROUPS.values():
+        path = g.get("path")
+        if not path:
+            continue
+        decisions_dir = Path(path) / "shared" / "decisions"
+        if not decisions_dir.is_dir():
+            continue
+        for decision_path in decisions_dir.glob("*.md"):
+            try:
+                meta, _ = parse_frontmatter(decision_path.read_text())
+            except OSError:
+                continue
+            if meta.get("execution_status") == "running":
+                update_decision_execution(decision_path, "execution_status", "failed")
+                update_decision_execution(
+                    decision_path, "execution_summary",
+                    "Execution was interrupted before completion (the server "
+                    "restarted or crashed while the agent was running). Reset to "
+                    "failed so it can be retried.",
+                )
+                recovered += 1
+    if recovered:
+        print(f"Recovered {recovered} orphaned decision(s) stuck in 'running'.")
+    return recovered
 
 
 def execute_decision(decision_path: Path, group_path: Path, agent: str,

@@ -171,3 +171,44 @@ def test_execute_decision_sets_executed_by_before_run_completes(tmp_path, monkey
 
     assert seen["executed_by"] == "worker"
     assert seen["execution_status"] == "running"
+
+
+def test_recover_orphaned_executions_resets_running_to_failed(tmp_path, monkeypatch):
+    """A decision left at execution_status 'running' after a restart/crash is
+    orphaned (its in-process background task is gone). Startup recovery must
+    reset it to 'failed' so it surfaces a retry action, while leaving decisions
+    in any other state untouched."""
+    group_path = tmp_path / "agents"
+    decisions = group_path / "shared" / "decisions"
+    decisions.mkdir(parents=True)
+
+    stuck = decisions / "stuck.md"
+    stuck.write_text("---\nexecution_status: running\n---\n")
+    done = decisions / "done.md"
+    done.write_text("---\nexecution_status: complete\n---\n")
+    fresh = decisions / "fresh.md"
+    fresh.write_text("---\ndecided_by: admin\n---\n")
+
+    monkeypatch.setattr(app_mod, "GROUPS", {"g": {"path": str(group_path)}})
+
+    recovered = app_mod.recover_orphaned_executions()
+
+    assert recovered == 1
+    meta_stuck, _ = app_mod.parse_frontmatter(stuck.read_text())
+    assert meta_stuck["execution_status"] == "failed"
+    assert "interrupted" in meta_stuck["execution_summary"].lower()
+
+    meta_done, _ = app_mod.parse_frontmatter(done.read_text())
+    assert meta_done["execution_status"] == "complete"
+    meta_fresh, _ = app_mod.parse_frontmatter(fresh.read_text())
+    assert "execution_status" not in meta_fresh
+
+
+def test_recover_orphaned_executions_handles_missing_dir(tmp_path, monkeypatch):
+    """Groups without a decisions directory must not raise during recovery."""
+    monkeypatch.setattr(
+        app_mod, "GROUPS",
+        {"g": {"path": str(tmp_path / "nonexistent")}, "h": {}},
+    )
+    assert app_mod.recover_orphaned_executions() == 0
+
