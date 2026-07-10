@@ -5,7 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Protocol
+from typing import Callable, Protocol
 
 
 DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
@@ -107,7 +107,7 @@ class SystemdRunLauncher:
 
 
 def default_launcher(
-    *, _detect: "type[object] | None" = None
+    *, _detect: "Callable[[], bool] | None" = None
 ) -> JobLauncher:
     """Select the best launcher for the current platform.
 

@@ -89,6 +89,12 @@ Set agents to run on schedules — daily at a specific time, or every few hours.
 
 Scheduled prompts, manual prompt runs, approved decisions, and decision retries all create durable records under `<group>/shared/jobs/`. On Linux with a user systemd manager, each job runs as a transient user systemd service (`systemd-run --user`), which ensures the worker continues even if the Agency service itself is restarted. On other platforms (macOS, Windows) or when systemd is unavailable, jobs run as detached subprocesses. In both cases, stopping or restarting the dashboard does not stop running agents. Concurrent jobs for one agent are allowed, and proposal authors can set optional `execution_agent` frontmatter. Job records contain prompt snapshots and may contain operational paths; treat the group's `shared/` directory as private application data.
 
+The systemd launch path has its own opt-in integration test, skipped by default since it requires a real Linux user systemd manager:
+
+```
+AGENCY_TEST_SYSTEMD=1 .venv/bin/python -m pytest tests/test_job_systemd_integration.py -v
+```
+
 ### A CLI for terminal people
 
 Everything you can do in the browser, you can do from the terminal:

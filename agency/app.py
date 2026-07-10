@@ -2464,10 +2464,6 @@ async def agent_run(request: Request, group: str, agent: str):
     if not prompt_path.is_file():
         raise HTTPException(status_code=404, detail="Prompt not found")
 
-    raw_cfg = GROUPS.get(g["key"], {})
-    dispatch_cfg = raw_cfg.get("dispatch", {})
-    run_timeout = dispatch_cfg.get("timeout", 1800)
-
     try:
         spec = JobSpec.create(
             config_path=CONFIG_PATH,
@@ -2476,7 +2472,6 @@ async def agent_run(request: Request, group: str, agent: str):
             trigger="manual_prompt",
             prompt_source={"type": "saved_prompt", "path": str(prompt_path)},
             prompt_content=prompt_path.read_text(),
-            timeout_override=run_timeout,
         )
         handle = submit_job(spec)
     except (TypeError, ValueError, JobValidationError, JobSubmissionError) as error:

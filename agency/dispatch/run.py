@@ -67,7 +67,6 @@ def run_dispatch_cycle(config: dict, config_path: Path | str, launcher=None) -> 
 
         log.info("Processing group: %s", group_key)
         group_path = Path(g["path"])
-        timeout = d.get("timeout", 1800)
         daily_limit = d.get("daily_limit", 20)
 
         logs_root = group_path / "shared" / "logs"
@@ -125,7 +124,6 @@ def run_dispatch_cycle(config: dict, config_path: Path | str, launcher=None) -> 
                     continue
 
                 if should_run:
-                    agent_timeout = timeout
                     prompt_path = group_path / "shared" / "prompts" / prompt
                     try:
                         prompt_content = prompt_path.read_text()
@@ -136,7 +134,6 @@ def run_dispatch_cycle(config: dict, config_path: Path | str, launcher=None) -> 
                             trigger="scheduled_prompt",
                             prompt_source={"type": "saved_prompt", "path": str(prompt_path)},
                             prompt_content=prompt_content,
-                            timeout_override=agent_timeout,
                         )
                         submit_job(spec, launcher)
                     except (TypeError, ValueError, JobValidationError, JobSubmissionError, OSError) as error:

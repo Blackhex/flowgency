@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from agency.jobs import JobSpec, JobSubmissionError, JobValidationError, submit_job
+from agency.jobs.context import resolve_job_context
 from agency.jobs.launcher import (
     CREATE_NEW_PROCESS_GROUP,
     DETACHED_PROCESS,
@@ -64,6 +65,35 @@ def test_submit_marks_record_failed_when_launch_fails(tmp_path):
     record = read_job(error.value.job_path)
     assert record.status == "failed"
     assert "spawn denied" in record.execution_summary
+
+
+def test_resolve_job_context_prefers_per_agent_timeout_over_group_default(tmp_path):
+    """Worker context resolution must be the sole timeout authority: a
+    configured per-agent timeout wins over the group default when the spec
+    itself carries no override (trigger routes no longer pass one)."""
+    group = tmp_path / "group"
+    (group / "product").mkdir(parents=True)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "groups:\n  test:\n    name: Test\n    path: "
+        + str(group).replace("\\", "/")
+        + "\n    agents:\n      - name: product\n        integration: script\n"
+        "        integration_config:\n          command: echo ok\n"
+        "    dispatch:\n      timeout: 1800\n      agents:\n        product:\n          timeout: 45\n"
+    )
+    spec = JobSpec.create(
+        config_path=config,
+        group_key="test",
+        agent_name="product",
+        trigger="manual_prompt",
+        prompt_source={"type": "saved_prompt", "path": "routine.md"},
+        prompt_content="Run it",
+    )
+    assert spec.timeout_override is None
+
+    context = resolve_job_context(spec)
+
+    assert context.timeout == 45
 
 
 def test_submit_rejects_missing_or_non_executable_agent(tmp_path):

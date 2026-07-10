@@ -1,5 +1,6 @@
 """Worker-side execution flow for durable agent jobs."""
 
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ from .atomic import atomic_write_text
 from .context import resolve_job_context
 from .models import JobRecord
 from .store import read_job, transition_job
+
+logger = logging.getLogger(__name__)
 
 
 def _read_frontmatter(path: Path) -> tuple[dict, str]:
@@ -70,8 +73,12 @@ def execute_job(job_path: Path) -> JobRecord:
     # durable job terminalization when decision files are missing/corrupt.
     try:
         project_decision(record)
-    except Exception:
-        pass
+    except Exception as error:
+        logger.warning(
+            "Failed to project running status for job %s to its decision: %s",
+            record.spec.job_id,
+            error,
+        )
 
     prompt_path = Path(job_path).with_suffix(".prompt")
     try:
@@ -131,7 +138,11 @@ def execute_job(job_path: Path) -> JobRecord:
     # Keep terminalization authoritative even if projection fails.
     try:
         project_decision(final)
-    except Exception:
-        pass
+    except Exception as error:
+        logger.warning(
+            "Failed to project final status for job %s to its decision: %s",
+            final.spec.job_id,
+            error,
+        )
 
     return final

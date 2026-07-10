@@ -96,6 +96,7 @@ def test_due_schedule_submits_snapshot_then_touches_marker(tmp_path, monkeypatch
 
     assert captured[0].trigger == "scheduled_prompt"
     assert captured[0].prompt_content == "do the thing"
+    assert captured[0].timeout_override is None
     assert (group_path / "shared" / "logs" / ".last-product-routine").exists()
 
 

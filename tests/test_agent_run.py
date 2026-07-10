@@ -52,6 +52,7 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     assert spec.group_key == "test"
     assert spec.agent_name == "product"
     assert spec.prompt_content == "# Routine\n"
+    assert spec.timeout_override is None
 
 
 def test_run_unknown_prompt_404(tmp_path, monkeypatch):

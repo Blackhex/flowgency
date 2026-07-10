@@ -1,11 +1,14 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import os
+
 import yaml
 
 from agency.integrations import FileChange, RunResult
 from agency.jobs.execution import execute_job
 from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.reconciliation import worker_alive
 from agency.jobs.store import read_job, write_job
 from agency.jobs.worker import main as worker_main
 
@@ -184,7 +187,7 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
     assert result.changed_files == []
 
 
-def test_execute_job_projection_failure_before_run_still_completes(tmp_path, monkeypatch):
+def test_execute_job_projection_failure_before_run_still_completes(tmp_path, monkeypatch, caplog):
     path, _ = queued_job(tmp_path)
     calls = {"count": 0}
 
@@ -212,9 +215,10 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
     assert calls["count"] == 2
     assert result.status == "complete"
     assert read_job(path).status == "complete"
+    assert "projection write failed" in caplog.text
 
 
-def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeypatch):
+def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeypatch, caplog):
     path, _ = queued_job(tmp_path)
     calls = {"count": 0}
 
@@ -242,6 +246,48 @@ def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeyp
     assert calls["count"] == 2
     assert result.status == "failed"
     assert read_job(path).status == "failed"
+    assert "projection read failed" in caplog.text
+
+
+def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkeypatch):
+    """SystemdRunLauncher reports no PID to the submitter (LaunchResult.worker_pid
+    is None). This proves execute_job's own queued->running transition records
+    the worker's real, confirmable PID regardless of what the launcher reported,
+    so reconciliation always has a usable PID for a running job."""
+    path, _ = queued_job(tmp_path)
+    assert read_job(path).worker_pid is None
+
+    captured = {}
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
+            running = read_job(path)
+            captured["status"] = running.status
+            captured["pid"] = running.worker_pid
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        agent_dir=tmp_path / "group" / "product",
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        group_path=tmp_path / "group",
+    )
+    context.agent_dir.mkdir(parents=True)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    result = execute_job(path)
+
+    assert captured["status"] == "running"
+    assert captured["pid"] == os.getpid()
+    assert worker_alive(captured["pid"]) is True
+    assert result.status == "complete"
+    assert result.worker_pid == os.getpid()
 
 
 def test_worker_returns_status_as_exit_code(tmp_path, monkeypatch):

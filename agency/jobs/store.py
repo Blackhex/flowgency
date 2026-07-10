@@ -1,13 +1,12 @@
 """Atomic YAML persistence for durable agent jobs."""
 
-import os
-import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from agency.jobs.atomic import atomic_write_text
 from agency.jobs.models import JobRecord
 
 
@@ -20,19 +19,8 @@ def job_path(group_path: Path, job_id: str) -> Path:
 
 
 def write_job(path: Path, record: JobRecord) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    file_descriptor, temp_name = tempfile.mkstemp(dir=path.parent)
-    try:
-        with os.fdopen(file_descriptor, "w", encoding="utf-8") as temp_file:
-            yaml.safe_dump(record.to_dict(), temp_file, sort_keys=False)
-        os.replace(temp_name, path)
-    except Exception:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
-        raise
+    content = yaml.safe_dump(record.to_dict(), sort_keys=False)
+    atomic_write_text(Path(path), content)
 
 
 def read_job(path: Path) -> JobRecord:
