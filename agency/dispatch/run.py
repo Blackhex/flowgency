@@ -139,7 +139,7 @@ def run_dispatch_cycle(config: dict, config_path: Path | str, launcher=None) -> 
                             timeout_override=agent_timeout,
                         )
                         submit_job(spec, launcher)
-                    except (JobValidationError, JobSubmissionError, OSError) as error:
+                    except (TypeError, ValueError, JobValidationError, JobSubmissionError, OSError) as error:
                         log.error("  ERROR: could not submit %s/%s: %s", agent_name, prompt, error)
                         continue
                     # Touch markers

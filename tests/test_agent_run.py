@@ -82,6 +82,18 @@ def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
     assert len(calls) == 2
 
 
+def test_run_returns_400_when_prompt_snapshot_fails_spec_validation(tmp_path, monkeypatch):
+    group_path = _setup_group(tmp_path)
+    (group_path / "shared" / "prompts" / "routine.md").write_text("\n")
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id="job-1"))
+    client = TestClient(app)
+
+    resp = client.post("/test/agents/product/run", data={"prompt": "routine.md"})
+
+    assert resp.status_code == 400
+    assert "Prompt content must not be blank" in resp.json()["detail"]
+
+
 def test_agents_page_lists_prompts_with_run(tmp_path):
     _setup_group(tmp_path)
     client = TestClient(app)

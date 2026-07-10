@@ -2589,18 +2589,18 @@ async def agent_run(request: Request, group: str, agent: str):
     dispatch_cfg = raw_cfg.get("dispatch", {})
     run_timeout = dispatch_cfg.get("timeout", 1800)
 
-    spec = JobSpec.create(
-        config_path=CONFIG_PATH,
-        group_key=group,
-        agent_name=agent,
-        trigger="manual_prompt",
-        prompt_source={"type": "saved_prompt", "path": str(prompt_path)},
-        prompt_content=prompt_path.read_text(),
-        timeout_override=run_timeout,
-    )
     try:
+        spec = JobSpec.create(
+            config_path=CONFIG_PATH,
+            group_key=group,
+            agent_name=agent,
+            trigger="manual_prompt",
+            prompt_source={"type": "saved_prompt", "path": str(prompt_path)},
+            prompt_content=prompt_path.read_text(),
+            timeout_override=run_timeout,
+        )
         handle = submit_job(spec)
-    except (JobValidationError, JobSubmissionError) as error:
+    except (TypeError, ValueError, JobValidationError, JobSubmissionError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return JSONResponse({"status": "started", "job_id": handle.job_id}, status_code=202)
 

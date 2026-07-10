@@ -113,3 +113,20 @@ def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypa
     run_dispatch_cycle(config, tmp_path / "config.yaml")
 
     assert not (group_path / "shared" / "logs" / ".last-product-routine").exists()
+
+
+def test_schedule_does_not_touch_marker_when_spec_validation_fails(tmp_path, monkeypatch):
+    group_path, _, _ = _make_group(tmp_path)
+    (group_path / "shared" / "prompts" / "routine.md").write_text("\n")
+    config = _enabled_config(group_path)
+    submit_calls = []
+
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job",
+        lambda spec, launcher=None: submit_calls.append(spec) or object(),
+    )
+
+    run_dispatch_cycle(config, tmp_path / "config.yaml")
+
+    assert submit_calls == []
+    assert not (group_path / "shared" / "logs" / ".last-product-routine").exists()
