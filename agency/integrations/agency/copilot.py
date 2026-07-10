@@ -167,6 +167,7 @@ class CopilotIntegration(BaseIntegration):
             "--no-ask-user",
             "--no-color",
             "--experimental",
+            "--output-format", "json",
         ]
 
         if roots:
@@ -205,11 +206,14 @@ class CopilotIntegration(BaseIntegration):
                 creationflags=creationflags,
             )
             duration = time.monotonic() - start
+            parse_root = roots[0] if roots else agent_dir
+            parsed_text, changed_files = self._parse_jsonl_output(result.stdout, parse_root)
             return RunResult(
                 exit_code=result.returncode,
-                stdout=result.stdout,
+                stdout=parsed_text,
                 stderr=result.stderr,
                 duration_seconds=duration,
+                changed_files=changed_files,
             )
         except subprocess.TimeoutExpired:
             duration = time.monotonic() - start

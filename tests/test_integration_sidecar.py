@@ -638,3 +638,42 @@ class TestCopilot:
         text, changes = CopilotIntegration._parse_jsonl_output(raw, Path("/repo"))
         assert text == raw
         assert changes == []
+
+    def test_run_emits_json_and_populates_changed_files(self, integration, tmp_agent_dir, monkeypatch):
+        import json
+        import agency.integrations.agency.copilot as mod
+
+        jsonl = "\n".join(json.dumps(l) for l in [
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "t1", "toolName": "create",
+                      "arguments": {"path": str(tmp_agent_dir / "new.txt")}}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1", "success": True,
+                      "toolTelemetry": {"properties": {"command": "create"},
+                                        "metrics": {"linesAdded": 3, "linesRemoved": 0}}}},
+            {"type": "assistant.message", "data": {"content": "Created new.txt"}},
+        ])
+
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = jsonl
+            stderr = ""
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return FakeCompleted()
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+        prompt_file = tmp_agent_dir / "prompt.md"
+        prompt_file.write_text("Do the thing")
+        result = integration.run(tmp_agent_dir, prompt_file, timeout=30)
+
+        assert "--output-format" in captured["cmd"]
+        assert "json" in captured["cmd"]
+        assert result.stdout == "Created new.txt"
+        assert len(result.changed_files) == 1
+        assert result.changed_files[0].path == "new.txt"
+        assert result.changed_files[0].status == "added"
+        assert result.changed_files[0].lines_added == 3
