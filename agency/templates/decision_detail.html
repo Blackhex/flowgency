@@ -191,5 +191,62 @@
     {% endif %}
   </div>
   {% endif %}
+
+  <!-- Verify (outcome governance) -->
+  {% if execution_status in ('complete', 'failed') %}
+  <div class="mt-6 p-4 rounded-lg border
+    {% if verification_status == 'verified' %}bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800
+    {% elif verification_status == 'needs_follow_up' %}bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800
+    {% else %}bg-gray-50 border-gray-200 dark:bg-gray-700/50 dark:border-gray-600{% endif %}">
+
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-2">
+        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Verify</h3>
+        {% if verification_status == 'verified' %}
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-200 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-200">Verified</span>
+        {% elif verification_status == 'needs_follow_up' %}
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-200 text-amber-800 dark:bg-amber-800 dark:text-amber-200">Needs follow-up</span>
+        {% else %}
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-300">Unverified</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">
+      Did this outcome satisfy the proposal?
+    </p>
+
+    {% if verification_status %}
+    <div class="text-xs text-gray-400 dark:text-gray-500 mb-3">
+      {% if verified_by %}By <strong>{{ verified_by }}</strong>{% endif %}
+      {% if verified_at %}<span class="ml-1">· {{ verified_at }}</span>{% endif %}
+      {% if verification_status == 'needs_follow_up' and follow_up_observation %}
+      <span class="ml-1">·
+        <a href="/{{ group }}/observations/{{ follow_up_observation }}"
+           class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">View follow-up observation</a>
+      </span>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="flex flex-wrap items-center gap-2">
+      <form method="POST" action="/{{ group }}/decisions/{{ slug }}/verify" class="inline">
+        <input type="hidden" name="verification_status" value="verified">
+        <button type="submit"
+                class="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors">
+          Mark verified
+        </button>
+      </form>
+      <form method="POST" action="/{{ group }}/decisions/{{ slug }}/verify" class="inline">
+        <input type="hidden" name="verification_status" value="needs_follow_up">
+        <button type="submit"
+                class="px-3 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
+                onclick="return confirm('Open a follow-up observation for this decision?')">
+          Needs follow-up
+        </button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

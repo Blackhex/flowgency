@@ -429,6 +429,125 @@ def cmd_dispatch(args: Namespace) -> int:
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+def _job_records(g: dict):
+    """Read all durable job records for a group, newest first. Returns list of
+    (path, record-or-None) tuples; record is None when a file can't be parsed."""
+    from agency.jobs.store import read_job
+
+    jobs_dir = g["shared"] / "jobs"
+    if not jobs_dir.is_dir():
+        return []
+    records = []
+    for path in jobs_dir.glob("*.yaml"):
+        try:
+            records.append((path, read_job(path)))
+        except Exception:
+            records.append((path, None))
+    def _key(item):
+        _, rec = item
+        if rec is None:
+            return ""
+        return rec.started_at or rec.spec.created_at or ""
+    records.sort(key=_key, reverse=True)
+    return records
+
+
+def _job_status_color(status: str) -> str:
+    if status == "complete":
+        return green(status)
+    if status == "failed":
+        return red(status)
+    if status == "running":
+        return cyan(status)
+    return yellow(status)
+
+
+def cmd_jobs(args):
+    """List durable agent jobs (read-only): status, agent, changed files."""
+    g = _resolve_group(args)
+    records = _job_records(g)
+    if getattr(args, "status", None):
+        records = [(p, r) for p, r in records if r and r.status == args.status]
+    if getattr(args, "agent", None):
+        records = [(p, r) for p, r in records if r and r.spec.agent_name == args.agent]
+
+    if getattr(args, "json", False):
+        out = []
+        for _, r in records:
+            if r is None:
+                continue
+            out.append({
+                "job_id": r.spec.job_id,
+                "agent": r.spec.agent_name,
+                "trigger": r.spec.trigger,
+                "status": r.status,
+                "changed_files": len(r.changed_files or []),
+                "exit_code": r.exit_code,
+                "started_at": r.started_at,
+                "completed_at": r.completed_at,
+                "log": r.stdout_path,
+            })
+        print(json.dumps(out, indent=2))
+        return
+
+    print(f"\n{bold('Jobs')} — {g['name']} ({len(records)} total)\n")
+    if not records:
+        print(f"  {dim('No jobs recorded yet.')}\n")
+        return
+    for _, r in records:
+        if r is None:
+            print(f"  {red('unreadable')}  {dim('(could not parse job file)')}")
+            continue
+        changed = r.changed_files or []
+        changed_str = f"{len(changed)} file(s)" if changed else "no changes"
+        when = _relative_time(r.started_at or r.spec.created_at)
+        print(f"  {_job_status_color(r.status.ljust(8))}  {r.spec.agent_name[:16].ljust(16)}  "
+              f"{dim(r.spec.trigger[:16].ljust(16))}  {dim(changed_str.ljust(12))}  {dim(when)}")
+        print(f"    {dim(r.spec.job_id)}")
+    print()
+
+
+def cmd_logs(args):
+    """Tail an execution log by job id, or list recent jobs with logs."""
+    g = _resolve_group(args)
+    records = _job_records(g)
+
+    if not getattr(args, "job_id", None):
+        with_logs = [(p, r) for p, r in records if r and r.stdout_path]
+        print(f"\n{bold('Execution logs')} — {g['name']}\n")
+        if not with_logs:
+            print(f"  {dim('No execution logs yet.')}\n")
+            return
+        for _, r in with_logs[:20]:
+            when = _relative_time(r.completed_at or r.started_at)
+            print(f"  {_job_status_color(r.status.ljust(8))}  {dim(r.spec.job_id)}  "
+                  f"{r.spec.agent_name[:16]}  {dim(when)}")
+        print(f"\n  {dim('Run: agency logs <job_id> [--lines N] [--stderr]')}\n")
+        return
+
+    match = next((r for _, r in records if r and r.spec.job_id.startswith(args.job_id)), None)
+    if match is None:
+        print(f"Error: No job matching '{args.job_id}'.", file=sys.stderr)
+        sys.exit(1)
+
+    log_path = match.stderr_path if getattr(args, "stderr", False) else match.stdout_path
+    if not log_path or not Path(log_path).is_file():
+        print(f"Error: No {'stderr' if getattr(args, 'stderr', False) else 'stdout'} log for job {match.spec.job_id}.", file=sys.stderr)
+        sys.exit(1)
+
+    lines = Path(log_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    n = getattr(args, "lines", 0) or 0
+    shown = lines[-n:] if n > 0 else lines
+    print(f"\n{bold(match.spec.job_id)} — {log_path}  ({_job_status_color(match.status)})\n")
+    for line in shown:
+        print(f"  {line}")
+    if n > 0 and len(lines) > n:
+        print(f"\n  {dim(f'... {len(lines) - n} earlier line(s) hidden (use --lines 0 for all)')}")
+    print()
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser(
         prog="christag-agency",
@@ -495,6 +614,20 @@ def main():
     uninstall_parser.add_argument("--force", action="store_true")
     uninstall_parser.set_defaults(interval=None, replace=False)
 
+    # jobs
+    p = sub.add_parser("jobs", help="List durable agent jobs (status, agent, changed files)")
+    p.add_argument("--group", "-g")
+    p.add_argument("--status", "-s", help="Filter by status (queued/running/complete/failed)")
+    p.add_argument("--agent", "-a", help="Filter by agent name")
+    p.add_argument("--json", action="store_true")
+
+    # logs
+    p = sub.add_parser("logs", help="Tail a job's execution log, or list recent logs")
+    p.add_argument("job_id", nargs="?", help="Job id (or unique prefix) to tail")
+    p.add_argument("--group", "-g")
+    p.add_argument("--lines", "-n", type=int, default=40, help="Show last N lines (0 = all)")
+    p.add_argument("--stderr", action="store_true", help="Show the stderr log instead of stdout")
+
     args = parser.parse_args()
 
     # No command → show help
@@ -519,6 +652,8 @@ def main():
         "decide": cmd_decide,
         "agents": cmd_agents,
         "dispatch": cmd_dispatch,
+        "jobs": cmd_jobs,
+        "logs": cmd_logs,
     }
     result = dispatch[args.command](args)
     if isinstance(result, int) and result:

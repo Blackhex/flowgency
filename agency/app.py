@@ -2898,6 +2898,10 @@ def render_decision_detail(request: Request, g: dict, group: str, slug: str,
     execution_log = meta.get("execution_log", "")
     execution_job_id = meta.get("execution_job_id", "")
     changed_files = meta.get("changed_files", []) or []
+    verification_status = meta.get("verification_status", "")
+    verified_by = meta.get("verified_by", "")
+    verified_at = meta.get("verified_at", "")
+    follow_up_observation = meta.get("follow_up_observation", "")
 
     selected_execution_agent = (
         meta.get("execution_agent")
@@ -2920,6 +2924,10 @@ def render_decision_detail(request: Request, g: dict, group: str, slug: str,
         "execution_log": execution_log,
         "execution_job_id": execution_job_id,
         "changed_files": changed_files,
+        "verification_status": verification_status,
+        "verified_by": verified_by,
+        "verified_at": verified_at,
+        "follow_up_observation": (follow_up_observation or "").replace(".md", ""),
         "questions": pmeta.get("questions", []),
         "answers": meta.get("answers", {}),
         "execution_agents": execution_agent_options(g),
@@ -3002,6 +3010,96 @@ async def decision_retry(request: Request, group: str, slug: str):
         )
 
     return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
+
+
+@app.post("/{group}/decisions/{slug}/verify", response_class=HTMLResponse)
+async def decision_verify(request: Request, group: str, slug: str):
+    """Record whether an executed decision satisfied its originating proposal.
+
+    This is a thin, governance-only outcome state on the existing decision
+    record — Agency observes and governs the result, it does not execute. When
+    the outcome did not satisfy the intent, this opens a follow-up observation
+    (floated, linked back to the decision) so the loop stays connected.
+    """
+    g = get_group(group)
+    decision_path = g["shared"] / "decisions" / f"{slug}.md"
+    if not decision_path.exists():
+        raise HTTPException(404, "Decision not found")
+
+    meta, body = parse_frontmatter(decision_path.read_text())
+
+    form = await request.form()
+    outcome = form.get("verification_status", "")
+    if outcome not in ("verified", "needs_follow_up"):
+        return render_decision_detail(
+            request, g, group, slug,
+            decision_error="Choose 'Verified' or 'Needs follow-up'.",
+            status_code=400,
+        )
+
+    agency_cfg = get_agency_config()
+    verifier = agency_cfg.get("decided_by", "admin")
+    now = datetime.now().isoformat(timespec="seconds")
+
+    meta["verification_status"] = outcome
+    meta["verified_by"] = verifier
+    meta["verified_at"] = now
+
+    if outcome == "needs_follow_up":
+        follow_up_slug = _create_follow_up_observation(g, slug, meta, body)
+        meta["follow_up_observation"] = f"{follow_up_slug}.md"
+    else:
+        meta.pop("follow_up_observation", None)
+
+    frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+    atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n\n{body}\n")
+
+    if outcome == "needs_follow_up":
+        return RedirectResponse(
+            f"/{group}/observations/{meta['follow_up_observation'].replace('.md', '')}",
+            status_code=303,
+        )
+    return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
+
+
+def _create_follow_up_observation(g: dict, decision_slug: str, meta: dict, body: str) -> str:
+    """Create a floated follow-up observation linked back to a decision whose
+    outcome did not satisfy its proposal. Returns the new observation slug."""
+    observations_dir = g["shared"] / "observations"
+    observations_dir.mkdir(parents=True, exist_ok=True)
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    follow_up_slug = f"{decision_slug}-follow-up-{stamp}"
+
+    agent = (
+        meta.get("executed_by")
+        or meta.get("execution_agent")
+        or get_agency_config().get("decided_by", "admin")
+    )
+    proposal = meta.get("proposal", "")
+    obs_meta = {
+        "agent": agent,
+        "date": datetime.now().isoformat(timespec="seconds"),
+        "category": "verification",
+        "status": "open",
+        "float": True,
+        "linked_observations": [],
+        "linked_proposal": proposal or None,
+        "follow_up_of_decision": f"{decision_slug}.md",
+    }
+    frontmatter = yaml.dump(obs_meta, default_flow_style=False, sort_keys=False).strip()
+    proposal_ref = f" (proposal `{proposal}`)" if proposal else ""
+    obs_body = (
+        f"# Follow-up needed: {decision_slug}\n\n"
+        f"The executed decision `{decision_slug}.md`{proposal_ref} did not satisfy "
+        "its originating proposal. Verification marked this outcome as needing "
+        "follow-up.\n\n"
+        "Describe what is still wrong or incomplete so it can be re-proposed and "
+        "re-dispatched.\n"
+    )
+    obs_path = observations_dir / f"{follow_up_slug}.md"
+    atomic_write_text(obs_path, f"---\n{frontmatter}\n---\n\n{obs_body}")
+    return follow_up_slug
 
 
 @app.get("/{group}/documents", response_class=HTMLResponse)

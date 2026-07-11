@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from .atomic import atomic_write_text
+from .changes import capture_git_changes
 from .context import resolve_job_context
 from .models import JobRecord
 from .store import read_job, transition_job
@@ -97,6 +98,17 @@ def execute_job(job_path: Path) -> JobRecord:
         )
         stdout_path.write_text(result.stdout, encoding="utf-8")
         stderr_path.write_text(result.stderr, encoding="utf-8")
+        native_changes = list(getattr(result, "changed_files", []))
+        # Native per-file edits (currently only Copilot) win when present. For
+        # every other integration, fall back to a git-status diff of the sandbox
+        # root so outcome visibility is integration-agnostic, not Copilot-only.
+        if not native_changes:
+            git_root = None
+            if context.sandbox_root and context.sandbox_root.roots:
+                git_root = Path(context.sandbox_root.roots[0])
+            elif context.agent_dir:
+                git_root = Path(context.agent_dir)
+            native_changes = capture_git_changes(git_root)
         changes = [
             {
                 "path": item.path,
@@ -104,7 +116,7 @@ def execute_job(job_path: Path) -> JobRecord:
                 "lines_added": item.lines_added,
                 "lines_removed": item.lines_removed,
             }
-            for item in getattr(result, "changed_files", [])
+            for item in native_changes
         ]
         status = "complete" if result.exit_code == 0 else "failed"
         summary = (
