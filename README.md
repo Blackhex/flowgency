@@ -114,12 +114,20 @@ Agent definitions, memory files, dispatch prompts, shared knowledge — all edit
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e .
-.venv/bin/agency serve
+.venv/bin/christag-agency serve
 ```
 
 On first run, a setup wizard walks you through pointing Agency at your agent directory. It auto-detects your agents, creates the shared folder structure, and drops you into your dashboard.
 
 Visit `http://localhost:8500`.
+
+For development, start the same server with reload enabled:
+
+```bash
+.venv/bin/christag-agency serve --reload
+```
+
+Reload mode watches project code, templates, static assets, themes, and `config.yaml`. Saving Agency runtime records under a group's `shared/` directory does not restart the server.
 
 ## Add-on: Agency Setup Skill
 

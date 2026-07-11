@@ -11,12 +11,20 @@ pip install -e .
 ## First Run
 
 ```bash
-agency serve
+christag-agency serve
 ```
 
 Open `http://localhost:8500`. On first run, the setup wizard asks you to point to the directory where your agent subdirectories live. Agency creates the group, sets up the `shared/` folder structure (observations, proposals, decisions, logs, prompts), and drops you into your dashboard.
 
 From there, you can configure the group further in the admin panel — set a display name, choose a default integration, auto-detect agents, and add dispatch schedules.
+
+## Development Reload
+
+```bash
+christag-agency serve --reload
+```
+
+Reload mode watches the current working directory for Python code, templates, static assets, themes, and YAML/JSON configuration. Changes to `config.yaml`, including saves from the admin UI, restart the development server. Runtime records under group `shared/` directories are excluded.
 
 ## Basic Concepts
 
