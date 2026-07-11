@@ -32,14 +32,34 @@
       </div>
     </a>
     <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
-      <span class="flex items-center gap-1.5" title="{{ a.last_seen.strftime('%Y-%m-%d %H:%M') if a.last_seen else 'No activity' }}">
+      <span class="flex items-center gap-1.5">
         {% if a.running %}
         <span class="js-status-dot inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse"></span>
         <span class="js-status-label">Running</span>
         {% else %}
         <span class="js-status-dot inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
-        <span class="js-status-label">{{ a.last_seen | relative_time }}</span>
-        {% if a.next_run %}<span class="text-gray-300">·</span> {{ a.next_run | relative_future }}{% endif %}
+        <span class="js-status-label flex items-center gap-1.5">
+          {% if a.last_run %}
+          <a href="/{{ group }}/logs/view?path={{ a.last_run.path | urlencode }}"
+             class="rounded-sm hover:text-indigo-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+             title="Open stdout from {{ a.last_run.at.strftime('%Y-%m-%d %H:%M') }}"
+             aria-label="Open {{ a.display_name }} last run stdout log">{{ a.last_run.at | relative_time }}</a>
+          {% else %}
+          <span title="{{ a.last_seen.strftime('%Y-%m-%d %H:%M') if a.last_seen else 'No activity' }}">{{ a.last_seen | relative_time }}</span>
+          {% endif %}
+          {% if a.next_run and a.next_run_detail %}
+          <span class="text-gray-300">·</span>
+          {% set prompt_names = a.prompts | map(attribute='name') | list %}
+          {% if a.next_run_detail.prompt in prompt_names and not a.next_run_detail.prompt.startswith('_') %}
+          <a href="/{{ group }}/prompts#schedule-{{ a.name | urlencode }}-{{ a.next_run_detail.rule_index }}"
+          {% else %}
+          <a href="/admin/orgs/{{ group }}/edit#rules-{{ a.name | urlencode }}"
+          {% endif %}
+             class="rounded-sm hover:text-indigo-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+             title="Edit {{ a.next_run_detail.prompt }} schedule - {{ a.next_run.strftime('%Y-%m-%d %H:%M') }}"
+             aria-label="Edit schedule for {{ a.next_run_detail.prompt }}">{{ a.next_run | relative_future }}</a>
+          {% endif %}
+        </span>
         {% endif %}
       </span>
       {% if a.integration %}{{ a.integration | integration_badge }}{% endif %}

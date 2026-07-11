@@ -1179,9 +1179,16 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
         agent_int = get_agent_integration(g, agent_name)
         identity = parse_agent_identity(agent_dir, agent_int)
         open_count = sum(1 for c in observations if c.get("agent") == agent_name and c.get("status") == "open")
-        last_seen = get_agent_last_seen(g, agent_name)
+        last_run = get_agent_last_run(g, agent_name)
+        last_seen = (
+            last_run["at"]
+            if last_run
+            else get_agent_last_seen(g, agent_name)
+        )
+        next_run_detail = compute_next_run_detail(g, agent_name, dispatch_cfg)
         info = {
             "name": agent_name, "dir": agent_dir, **identity,
+            "last_run": last_run,
             "last_seen": last_seen,
             "health": agent_health_status(last_seen),
             "open_observations": open_count,
@@ -1189,7 +1196,10 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             "has_headshot": find_headshot(agent_dir) is not None,
             "integration": agent_int.name,
             "running": is_agent_running(g, agent_name, run_timeout),
-            "next_run": compute_next_run(g, agent_name, dispatch_cfg),
+            "next_run": (
+                next_run_detail["when"] if next_run_detail else None
+            ),
+            "next_run_detail": next_run_detail,
         }
         if info["is_subagent"]:
             subagents.append(info)
@@ -1206,16 +1216,26 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             sub_int = get_agent_integration(g, d.name)
             identity = parse_agent_identity(d, sub_int)
             open_count = sum(1 for c in observations if c.get("agent") == d.name and c.get("status") == "open")
-            last_seen = get_agent_last_seen(g, d.name)
+            last_run = get_agent_last_run(g, d.name)
+            last_seen = (
+                last_run["at"]
+                if last_run
+                else get_agent_last_seen(g, d.name)
+            )
+            next_run_detail = compute_next_run_detail(g, d.name, dispatch_cfg)
             subagents.append({
                 "name": d.name, "dir": d, **identity,
+                "last_run": last_run,
                 "last_seen": last_seen,
                 "health": agent_health_status(last_seen),
                 "open_observations": open_count, "is_subagent": True,
                 "has_headshot": find_headshot(d) is not None,
                 "integration": sub_int.name,
                 "running": is_agent_running(g, d.name, run_timeout),
-                "next_run": compute_next_run(g, d.name, dispatch_cfg),
+                "next_run": (
+                    next_run_detail["when"] if next_run_detail else None
+                ),
+                "next_run_detail": next_run_detail,
             })
 
     return agents, subagents

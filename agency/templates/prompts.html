@@ -67,7 +67,8 @@
           </div>
           {% elif a.type %}
           {# Scheduled: editable #}
-          <div class="flex items-center gap-2 assignment-row">
+          <div id="schedule-{{ a.agent }}-{{ a.rule_index }}"
+            class="flex items-center gap-2 assignment-row scroll-mt-20 rounded-lg transition-colors target:bg-indigo-50 target:ring-2 target:ring-indigo-200">
             <select name="assign_agent_{{ p.slug }}_{{ loop.index0 }}"
                     class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
               {% for agent in agents %}

@@ -330,7 +330,6 @@ def test_relative_future_under_a_minute():
 
 
 def test_collect_agents_includes_running_and_next_run(tmp_path):
-    # Minimal group on disk
     group_path = tmp_path / "grp"
     agent_dir = group_path / "product"
     agent_dir.mkdir(parents=True)
@@ -339,9 +338,15 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
     for sub in ("observations", "proposals", "decisions", "prompts", "logs"):
         (shared / sub).mkdir(parents=True)
 
+    stdout_dir = shared / "logs" / "2026-07-11"
+    stdout_dir.mkdir()
+    stdout_path = stdout_dir / "product-manual_prompt-job-1.out"
+    stdout_path.write_text("")
+
     g = {
         "key": "grp", "name": "Grp", "path": group_path,
-        "agents": ["product"], "agents_full": [{"name": "product", "integration": "claude-code"}],
+        "agents": ["product"],
+        "agents_full": [{"name": "product", "integration": "claude-code"}],
         "shared": shared,
     }
 
@@ -353,7 +358,11 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
     with patch.object(app_module, "GROUPS", groups_cfg):
         agents, _subagents = app_module.collect_agents_with_identity(g)
 
-    product = next(a for a in agents if a["name"] == "product")
+    product = next(agent for agent in agents if agent["name"] == "product")
     assert product["running"] is True
-    assert "next_run" in product
+    assert product["last_run"]["path"] == str(stdout_path.resolve())
+    assert product["last_seen"] == product["last_run"]["at"]
+    assert product["next_run"] == product["next_run_detail"]["when"]
+    assert product["next_run_detail"]["prompt"] == "r.md"
+    assert product["next_run_detail"]["rule_index"] == 0
 
