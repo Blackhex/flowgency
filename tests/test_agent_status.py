@@ -8,7 +8,12 @@ from unittest.mock import patch
 import pytest
 
 from agency import app as app_module
-from agency.app import is_agent_running, compute_next_run, relative_future
+from agency.app import (
+    compute_next_run,
+    get_agent_last_run,
+    is_agent_running,
+    relative_future,
+)
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.store import job_path, write_job
 
@@ -57,6 +62,40 @@ def _group_with_logs(tmp_path):
     shared = tmp_path / "shared"
     (shared / "logs").mkdir(parents=True)
     return {"key": "grp", "path": tmp_path, "shared": shared}
+
+
+def test_agent_last_run_uses_newest_stdout_mtime(tmp_path):
+    g = _group_with_logs(tmp_path)
+    day = g["shared"] / "logs" / "2026-07-11"
+    day.mkdir()
+    older = day / "product-z-manual_prompt.out"
+    newer = day / "product-a-manual_prompt.out"
+    newest_stderr = day / "product-newest.err"
+    older.write_text("older")
+    newer.write_text("")
+    newest_stderr.write_text("newer stderr")
+
+    now = time.time()
+    os.utime(older, (now - 120, now - 120))
+    os.utime(newer, (now - 60, now - 60))
+    os.utime(newest_stderr, (now, now))
+
+    result = get_agent_last_run(g, "product")
+
+    assert result == {
+        "at": datetime.fromtimestamp(newer.stat().st_mtime),
+        "path": str(newer.resolve()),
+    }
+
+
+def test_agent_last_run_ignores_stderr_and_other_agents(tmp_path):
+    g = _group_with_logs(tmp_path)
+    day = g["shared"] / "logs" / "2026-07-11"
+    day.mkdir()
+    (day / "product-failed.err").write_text("failed")
+    (day / "editor-manual_prompt.out").write_text("other agent")
+
+    assert get_agent_last_run(g, "product") is None
 
 
 def test_next_run_disabled(tmp_path):

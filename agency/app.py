@@ -959,6 +959,28 @@ def find_headshot(agent_dir: Path) -> Path | None:
     return None
 
 
+def get_agent_last_run(g: dict, agent_name: str) -> dict | None:
+    """Return the newest stdout log path and timestamp for an agent."""
+    logs_dir = g["shared"] / "logs"
+    if not logs_dir.exists():
+        return None
+
+    stdout_files = (
+        path
+        for path in logs_dir.glob("*/*.out")
+        if path.is_file() and path.name.startswith(f"{agent_name}-")
+    )
+    latest = max(stdout_files, key=lambda path: path.stat().st_mtime, default=None)
+    if latest is None:
+        return None
+
+    modified_at = latest.stat().st_mtime
+    return {
+        "at": datetime.fromtimestamp(modified_at),
+        "path": str(latest.resolve()),
+    }
+
+
 def get_agent_last_seen(g: dict, agent_name: str) -> datetime | None:
     """Scan log date directories newest-first, return mtime of first matching file."""
     logs_dir = g["shared"] / "logs"
