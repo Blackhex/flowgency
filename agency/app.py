@@ -6,6 +6,7 @@ import io
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import urllib.parse
@@ -965,19 +966,25 @@ def get_agent_last_run(g: dict, agent_name: str) -> dict | None:
     if not logs_dir.exists():
         return None
 
-    stdout_files = (
-        path
-        for path in logs_dir.glob("*/*.out")
-        if path.is_file() and path.name.startswith(f"{agent_name}-")
-    )
-    latest = max(stdout_files, key=lambda path: path.stat().st_mtime, default=None)
+    candidates = []
+    for path in logs_dir.glob("*/*.out"):
+        if not path.name.startswith(f"{agent_name}-"):
+            continue
+        try:
+            path_stat = path.stat()
+        except OSError:
+            continue
+        if stat.S_ISREG(path_stat.st_mode):
+            candidates.append((path_stat.st_mtime, path))
+
+    latest = max(candidates, key=lambda candidate: candidate[0], default=None)
     if latest is None:
         return None
 
-    modified_at = latest.stat().st_mtime
+    modified_at, latest_path = latest
     return {
         "at": datetime.fromtimestamp(modified_at),
-        "path": str(latest.resolve()),
+        "path": str(latest_path.resolve()),
     }
 
 

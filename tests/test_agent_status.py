@@ -98,6 +98,32 @@ def test_agent_last_run_ignores_stderr_and_other_agents(tmp_path):
     assert get_agent_last_run(g, "product") is None
 
 
+def test_agent_last_run_stats_each_candidate_once(tmp_path, monkeypatch):
+    g = _group_with_logs(tmp_path)
+    day = g["shared"] / "logs" / "2026-07-11"
+    day.mkdir()
+    candidates = {
+        day / "product-older.out",
+        day / "product-newer.out",
+    }
+    for candidate in candidates:
+        candidate.write_text(candidate.name)
+
+    stat_calls = {candidate: 0 for candidate in candidates}
+    original_stat = Path.stat
+
+    def counting_stat(path, *args, **kwargs):
+        if path in stat_calls:
+            stat_calls[path] += 1
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", counting_stat)
+
+    get_agent_last_run(g, "product")
+
+    assert stat_calls == {candidate: 1 for candidate in candidates}
+
+
 def test_next_run_disabled(tmp_path):
     g = _group_with_logs(tmp_path)
     cfg = {"enabled": False, "agents": {"product": [{"prompt": "r.md", "every": "6h"}]}}
