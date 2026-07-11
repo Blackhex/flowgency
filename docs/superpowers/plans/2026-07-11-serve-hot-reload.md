@@ -4,7 +4,7 @@
 
 **Goal:** Add an opt-in `christag-agency serve --reload` mode that restarts for project code, UI assets, themes, and `config.yaml` while ignoring Agency runtime records.
 
-**Architecture:** `agency.app` will own one `run_server(host, port, reload=False)` entry point shared by both command-line parsers. Normal mode will continue to pass the in-memory FastAPI application to Uvicorn; reload mode will pass `agency.app:app` plus an explicit WatchFiles policy rooted at the current working directory. The console CLI will delegate directly to this function instead of rewriting `sys.argv`.
+**Architecture:** `agency.app` will own one `run_server(host, port, reload=False)` entry point shared by both command-line parsers. Normal mode will continue to pass the in-memory FastAPI application to `uvicorn.run()`. Reload mode will build Uvicorn's `Config`, `Server`, and `WatchFilesReload` directly, rooted at the current working directory, and replace only the supervisor's `watch_filter` with Agency's component-based policy. The console CLI will delegate directly to this function instead of rewriting `sys.argv`.
 
 **Tech Stack:** Python 3.11+, FastAPI, Uvicorn, WatchFiles, argparse, pytest, VS Code JSONC tasks.
 
@@ -42,7 +42,7 @@
 
 **Interfaces:**
 - Consumes: existing `agency.app.app`, `CONFIG_PATH`, `save_config(config: dict) -> None`, and `reload_groups() -> None`.
-- Produces: `run_server(host: str, port: int, reload: bool = False) -> None`, `_reload_excludes(root: Path) -> list[str]`, and immutable reload-policy tuples used to configure and test Uvicorn.
+- Produces: `run_server(host: str, port: int, reload: bool = False) -> None`, `_AgencyReloadFilter`, `_create_reload_supervisor()`, `_run_reload_server()`, and immutable reload-policy tuples used to configure and test Uvicorn.
 
 - [ ] **Step 1: Write failing server-launcher tests**
 
@@ -53,9 +53,9 @@ Create `tests/test_server.py` with this complete content:
 
 from pathlib import Path
 
+import pytest
 import uvicorn
 import yaml
-from uvicorn.supervisors.watchfilesreload import FileFilter
 
 from agency import app as app_mod
 
@@ -90,80 +90,107 @@ def test_run_server_reload_mode_uses_import_string_and_project_policy(
 ):
     _configure_existing_config(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
-    calls = []
-    monkeypatch.setattr(
-        app_mod.uvicorn,
-        "run",
-        lambda application, **options: calls.append((application, options)),
-    )
+    events = []
+
+    class FakeConfig:
+        def __init__(self, application, **options):
+            self.reload_dirs = [Path(path) for path in options["reload_dirs"]]
+            events.append(("config", application, options))
+
+        def load_app(self):
+            events.append("load_app")
+
+        def bind_socket(self):
+            events.append("bind_socket")
+            return "socket"
+
+    class FakeServer:
+        def __init__(self, config):
+            events.append(("server", config))
+
+        def run(self, sockets=None):
+            raise AssertionError("worker target must not run in the launcher process")
+
+    class FakeSupervisor:
+        def __init__(self, config, target, sockets):
+            self.watch_filter = None
+            events.append(("supervisor", config, target, sockets))
+
+        def run(self):
+            events.append(("run", self.watch_filter))
+
+    monkeypatch.setattr(app_mod.uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(app_mod.uvicorn, "Server", FakeServer)
+    monkeypatch.setattr(app_mod, "WatchFilesReload", FakeSupervisor)
 
     app_mod.run_server(host="127.0.0.1", port=8601, reload=True)
 
-    assert calls == [
-        (
-            "agency.app:app",
-            {
-                "host": "127.0.0.1",
-                "port": 8601,
-                "reload": True,
-                "reload_dirs": [str(tmp_path.resolve())],
-                "reload_includes": list(app_mod.RELOAD_INCLUDES),
-                "reload_excludes": app_mod._reload_excludes(tmp_path.resolve()),
-            },
-        )
-    ]
+    assert events[0] == (
+        "config",
+        "agency.app:app",
+        {
+            "host": "127.0.0.1",
+            "port": 8601,
+            "reload": True,
+            "reload_dirs": [str(tmp_path.resolve())],
+            "reload_includes": list(app_mod.RELOAD_INCLUDES),
+        },
+    )
+    assert events[1] == "load_app"
+    assert events[2][0] == "server"
+    assert events[3] == "bind_socket"
+    assert events[4][0] == "supervisor"
+    assert events[4][3] == ["socket"]
+    assert events[5][0] == "run"
+    assert isinstance(events[5][1], app_mod._AgencyReloadFilter)
+    assert events[5][1].root == tmp_path.resolve()
 
 
-def test_reload_policy_watches_project_files_and_ignores_runtime_data(
-    tmp_path, monkeypatch
-):
-    monkeypatch.chdir(tmp_path)
-    watched_paths = [
-        tmp_path / "agency" / "app.py",
-        tmp_path / "agency" / "templates" / "base.html",
-        tmp_path / "agency" / "static" / "app.css",
-        tmp_path / "agency" / "static" / "sw.js",
-        tmp_path / "agency" / "static" / "manifest.json",
-        tmp_path / "agency" / "themes" / "workshop.yaml",
-        tmp_path / "agency" / "themes" / "local.yml",
-        tmp_path / "config.yaml",
-    ]
-    for path in watched_paths:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("probe", encoding="utf-8")
-
-    existing_job = tmp_path / "existing" / "shared" / "jobs" / "job.yaml"
-    existing_job.parent.mkdir(parents=True)
-    existing_job.write_text("status: running\n", encoding="utf-8")
-    artifact_paths = [
-        tmp_path / ".git" / "state.json",
-        tmp_path / ".venv" / "Lib" / "site-packages" / "tool.py",
-        tmp_path / ".pytest_cache" / "state.json",
-        tmp_path / "christag_agency.egg-info" / "metadata.json",
-    ]
-    for path in artifact_paths:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("probe", encoding="utf-8")
-
+def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
     config = uvicorn.Config(
         "agency.app:app",
         reload=True,
-        reload_dirs=[str(tmp_path.resolve())],
+        reload_dirs=[str(root.resolve())],
         reload_includes=list(app_mod.RELOAD_INCLUDES),
-        reload_excludes=app_mod._reload_excludes(tmp_path.resolve()),
     )
-    file_filter = FileFilter(config)
+    server = uvicorn.Server(config)
+    supervisor = app_mod._create_reload_supervisor(config, server, [])
+    assert supervisor.reloader_name == "WatchFiles"
 
-    future_job = tmp_path / "future" / "shared" / "jobs" / "job.yaml"
-    future_job.parent.mkdir(parents=True)
-    future_job.write_text("status: queued\n", encoding="utf-8")
+    watched_paths = [
+        root / "agency" / "app.py",
+        root / "agency" / "templates" / "base.html",
+        root / "agency" / "static" / "app.css",
+        root / "agency" / "static" / "sw.js",
+        root / "agency" / "static" / "manifest.json",
+        root / "agency" / "themes" / "workshop.yaml",
+        root / "agency" / "themes" / "local.yml",
+        root / "config.yaml",
+    ]
+    excluded_paths = [
+        root / "deep" / ".git" / "state.json",
+        root / "deep" / ".venv" / "Lib" / "site-packages" / "tool.py",
+        root / "deep" / "venv" / "Lib" / "tool.py",
+        root / "deep" / "__pycache__" / "module.py",
+        root / "deep" / ".pytest_cache" / "state.json",
+        root / "deep" / ".mypy_cache" / "state.json",
+        root / "deep" / ".ruff_cache" / "state.json",
+        root / "deep" / "shared" / "jobs" / "job.yaml",
+        root / "deep" / "package.egg-info" / "metadata.json",
+    ]
+    for path in [*watched_paths, *excluded_paths]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("probe", encoding="utf-8")
 
     for path in watched_paths:
-        assert file_filter(path.resolve()), path
-    assert not file_filter(existing_job.resolve())
-    assert not file_filter(future_job.resolve())
-    for path in artifact_paths:
-        assert not file_filter(path.resolve()), path
+        assert supervisor.watch_filter(path.resolve()), path
+    for path in excluded_paths:
+        assert not supervisor.watch_filter(path.resolve()), path
+
+    assert not supervisor.watch_filter((tmp_path / "outside.py").resolve())
+    assert not supervisor.watch_filter((root / "README.md").resolve())
 
 
 def test_run_server_creates_config_before_starting_uvicorn(
@@ -206,7 +233,7 @@ Run:
 python -m pytest tests/test_server.py -v
 ```
 
-Expected: four failures reporting that `agency.app` has no `run_server`, `_reload_excludes`, or `RELOAD_INCLUDES` attributes. If collection instead reports that `watchfiles` is missing, that is also the expected pre-dependency failure on a clean Windows install.
+Expected: normal and first-run tests pass while reload tests fail because `WatchFilesReload`, `_AgencyReloadFilter`, or `_create_reload_supervisor` are not yet exposed by `agency.app`. If collection instead reports that `watchfiles` is missing, that is also the expected pre-dependency failure on a clean Windows install.
 
 - [ ] **Step 3: Guarantee WatchFiles on Windows**
 
@@ -241,6 +268,12 @@ Expected: editable installation succeeds and the second command prints a WatchFi
 
 - [ ] **Step 5: Implement the shared launcher and module flag**
 
+Import `WatchFilesReload` next to the existing Uvicorn import:
+
+```python
+from uvicorn.supervisors.watchfilesreload import WatchFilesReload
+```
+
 Replace the existing server-only `main()` block at the end of `agency/app.py` with:
 
 ```python
@@ -262,22 +295,57 @@ RELOAD_EXCLUDE_DIRS = (
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
-    "christag_agency.egg-info",
-)
-
-RELOAD_EXCLUDES = (
-    "**/shared/*",
-    "**/shared/**/*",
+    "shared",
 )
 
 
-def _reload_excludes(root: Path) -> list[str]:
-    """Build Uvicorn exclusions with absolute artifact directory paths."""
-    artifact_paths = (root / directory for directory in RELOAD_EXCLUDE_DIRS)
-    return [
-        *(str(path.resolve()) for path in artifact_paths if path.is_dir()),
-        *RELOAD_EXCLUDES,
-    ]
+class _AgencyReloadFilter:
+    """Select watched source files without depending on directory existence."""
+
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+
+    def __call__(self, path: Path) -> bool:
+        try:
+            relative_path = path.resolve().relative_to(self.root)
+        except ValueError:
+            return False
+
+        directory_parts = relative_path.parts[:-1]
+        if any(
+            part in RELOAD_EXCLUDE_DIRS or part.endswith(".egg-info")
+            for part in directory_parts
+        ):
+            return False
+        return any(relative_path.match(pattern) for pattern in RELOAD_INCLUDES)
+
+
+def _create_reload_supervisor(config, server, sockets):
+    """Create Uvicorn's WatchFiles supervisor with Agency's path filter."""
+    supervisor = WatchFilesReload(config, target=server.run, sockets=sockets)
+    supervisor.watch_filter = _AgencyReloadFilter(config.reload_dirs[0])
+    return supervisor
+
+
+def _run_reload_server(host: str, port: int) -> None:
+    """Run Uvicorn's reload lifecycle with Agency's WatchFiles filter."""
+    reload_root = Path.cwd().resolve()
+    config = uvicorn.Config(
+        "agency.app:app",
+        host=host,
+        port=port,
+        reload=True,
+        reload_dirs=[str(reload_root)],
+        reload_includes=list(RELOAD_INCLUDES),
+    )
+    config.load_app()
+    server = uvicorn.Server(config=config)
+
+    try:
+        socket = config.bind_socket()
+        _create_reload_supervisor(config, server, [socket]).run()
+    except KeyboardInterrupt:
+        pass
 
 
 def run_server(host: str, port: int, reload: bool = False) -> None:
@@ -289,16 +357,7 @@ def run_server(host: str, port: int, reload: bool = False) -> None:
 
     reload_groups()
     if reload:
-        reload_root = Path.cwd().resolve()
-        uvicorn.run(
-            "agency.app:app",
-            host=host,
-            port=port,
-            reload=True,
-            reload_dirs=[str(reload_root)],
-            reload_includes=list(RELOAD_INCLUDES),
-            reload_excludes=_reload_excludes(reload_root),
-        )
+        _run_reload_server(host, port)
         return
 
     uvicorn.run(app, host=host, port=port)
@@ -326,7 +385,7 @@ Run:
 python -m pytest tests/test_server.py -v
 ```
 
-Expected: `4 passed`, with no warning that reload include/exclude options have no effect.
+Expected: all focused server tests pass, including future deep artifact rejection, WatchFiles supervisor identity, normal mode, first-run setup, and error propagation.
 
 - [ ] **Step 7: Commit the independently working server launcher**
 

@@ -21,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
 import uvicorn
+from uvicorn.supervisors.watchfilesreload import WatchFilesReload
 
 from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
@@ -3324,22 +3325,57 @@ RELOAD_EXCLUDE_DIRS = (
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
-    "christag_agency.egg-info",
-)
-
-RELOAD_EXCLUDES = (
-    "**/shared/*",
-    "**/shared/**/*",
+    "shared",
 )
 
 
-def _reload_excludes(root: Path) -> list[str]:
-    """Build Uvicorn exclusions with absolute artifact directory paths."""
-    artifact_paths = (root / directory for directory in RELOAD_EXCLUDE_DIRS)
-    return [
-        *(str(path.resolve()) for path in artifact_paths if path.is_dir()),
-        *RELOAD_EXCLUDES,
-    ]
+class _AgencyReloadFilter:
+    """Select watched source files without depending on directory existence."""
+
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+
+    def __call__(self, path: Path) -> bool:
+        try:
+            relative_path = path.resolve().relative_to(self.root)
+        except ValueError:
+            return False
+
+        directory_parts = relative_path.parts[:-1]
+        if any(
+            part in RELOAD_EXCLUDE_DIRS or part.endswith(".egg-info")
+            for part in directory_parts
+        ):
+            return False
+        return any(relative_path.match(pattern) for pattern in RELOAD_INCLUDES)
+
+
+def _create_reload_supervisor(config, server, sockets):
+    """Create Uvicorn's WatchFiles supervisor with Agency's path filter."""
+    supervisor = WatchFilesReload(config, target=server.run, sockets=sockets)
+    supervisor.watch_filter = _AgencyReloadFilter(config.reload_dirs[0])
+    return supervisor
+
+
+def _run_reload_server(host: str, port: int) -> None:
+    """Run Uvicorn's reload lifecycle with Agency's WatchFiles filter."""
+    reload_root = Path.cwd().resolve()
+    config = uvicorn.Config(
+        "agency.app:app",
+        host=host,
+        port=port,
+        reload=True,
+        reload_dirs=[str(reload_root)],
+        reload_includes=list(RELOAD_INCLUDES),
+    )
+    config.load_app()
+    server = uvicorn.Server(config=config)
+
+    try:
+        socket = config.bind_socket()
+        _create_reload_supervisor(config, server, [socket]).run()
+    except KeyboardInterrupt:
+        pass
 
 
 def run_server(host: str, port: int, reload: bool = False) -> None:
@@ -3351,16 +3387,7 @@ def run_server(host: str, port: int, reload: bool = False) -> None:
 
     reload_groups()
     if reload:
-        reload_root = Path.cwd().resolve()
-        uvicorn.run(
-            "agency.app:app",
-            host=host,
-            port=port,
-            reload=True,
-            reload_dirs=[str(reload_root)],
-            reload_includes=list(RELOAD_INCLUDES),
-            reload_excludes=_reload_excludes(reload_root),
-        )
+        _run_reload_server(host, port)
         return
 
     uvicorn.run(app, host=host, port=port)

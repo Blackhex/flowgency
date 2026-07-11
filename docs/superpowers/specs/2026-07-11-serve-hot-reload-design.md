@@ -34,9 +34,11 @@ service startup behavior does not change.
 Add an opt-in `--reload` flag and introduce a shared server launcher in
 `agency.app`. Both the console CLI and the module entry point call this launcher.
 
-The launcher owns first-run config creation, group initialization, watch policy, and
-the final `uvicorn.run()` call. This removes the console CLI's current `sys.argv`
-rewrite and prevents the two entry points from drifting.
+The launcher owns first-run config creation, group initialization, and watch policy.
+Normal mode delegates to `uvicorn.run()`. Reload mode owns Uvicorn's narrow lower-level
+`Config`/`Server`/`WatchFilesReload` branch so Agency can replace the supervisor's
+assignable `watch_filter`. This removes the console CLI's current `sys.argv` rewrite
+and prevents the two entry points from drifting.
 
 ## Components
 
@@ -51,9 +53,11 @@ The launcher performs the existing startup sequence:
 2. Call `reload_groups()` so the parent process has current configuration.
 3. Start Uvicorn using the selected launch mode.
 
-Normal mode passes the in-memory `app` object to Uvicorn and does not supply reload
-settings. Reload mode passes the import string `agency.app:app`, because Uvicorn must
-re-import the application in each replacement worker.
+Normal mode passes the in-memory `app` object to `uvicorn.run()` and does not supply
+reload settings. Reload mode builds `uvicorn.Config` with the import string
+`agency.app:app`, because Uvicorn must re-import the application in each replacement
+worker. It then loads the app, creates `uvicorn.Server`, binds the configured socket,
+and runs `WatchFilesReload` with the server's `run` method as its worker target.
 
 `agency.app.main()` remains the parser for `python -m agency.app`, adds `--reload`,
 and delegates to `run_server()`.
@@ -69,26 +73,28 @@ added. Reload is a development convenience with one predictable project-level po
 
 ### Watch Policy
 
-Reload mode passes the following policy to Uvicorn:
+Reload mode applies the following policy to Uvicorn's WatchFiles supervisor:
 
 - Reload root: the resolved current working directory.
 - Included file patterns: `*.py`, `*.html`, `*.css`, `*.js`, `*.json`, `*.yaml`,
   and `*.yml`.
 - Excluded development artifacts: VCS metadata, virtual environments, Python caches,
   test/tool caches, and package metadata directories within the reload root.
-- Excluded runtime data: every `shared/` subtree beneath the reload root, using
-  recursive patterns for each included file type.
+- Excluded runtime data: every `shared/` subtree beneath the reload root.
 
 The root `config.yaml` is deliberately included. A manual edit or an admin UI save
 therefore restarts the development server. This is an accepted trade-off of reload
 mode; normal mode continues to apply admin changes through the existing
 `reload_groups()` calls without restarting.
 
-Agency reserves `shared/` beneath a group root for durable runtime data, so the static
-pattern covers existing groups, groups added after the supervisor starts, and groups
-configured at the project root. It does not exclude the group or reload root itself.
-Group directories outside the reload root require no exclusion because Uvicorn is not
-watching them. Markdown records are also outside the include patterns.
+Agency replaces only `WatchFilesReload.watch_filter` with a callable that resolves each
+changed path relative to the reload root. It rejects paths outside that root and paths
+whose relative directory components contain `.git`, `.venv`, `venv`, `__pycache__`,
+`.pytest_cache`, `.mypy_cache`, `.ruff_cache`, or `shared`, or any component ending in
+`.egg-info`. Component checks work at arbitrary depth and do not depend on a directory
+existing when the supervisor starts. Group directories outside the reload root require
+no exclusion because Uvicorn is not watching them. Markdown records are also outside
+the include patterns.
 
 ### VS Code And Documentation
 
@@ -112,8 +118,9 @@ guide. Production deployment and service examples continue to use `serve` withou
 2. `agency.cli` parses the command and calls the shared launcher directly.
 3. The launcher creates first-run config if needed and refreshes global group state.
 4. In normal mode, Uvicorn serves the existing in-memory application.
-5. In reload mode, Uvicorn supervises the current working directory and imports
-   `agency.app:app` in a child worker.
+5. In reload mode, Agency constructs Uvicorn's WatchFiles supervisor for the current
+  working directory, assigns the Agency path filter, and imports `agency.app:app` in
+  each child worker.
 6. A matching, non-excluded file event stops the current worker and imports a new one.
 7. The new worker reads `config.yaml` during module initialization, so config edits are
    reflected after restart.
@@ -128,8 +135,10 @@ guide. Production deployment and service examples continue to use `serve` withou
   supervisor remains available so a later valid save can recover the server.
 - Malformed `config.yaml` is not ignored or replaced. The worker reports the YAML
   failure and can recover after the file is corrected and saved again.
-- Reload exclusions are static patterns, so missing optional artifact or group data
-  directories do not affect startup.
+- Reload exclusions inspect relative path components for each event, so future artifact
+  or group data directories are ignored without startup-time discovery.
+- Reload mode catches `KeyboardInterrupt` at the same boundary as Uvicorn's run helper;
+  configuration, binding, watcher, and worker errors otherwise propagate unchanged.
 - A config save from the admin UI may complete immediately before the development
   worker restarts. That brief interruption is expected only when `--reload` is active.
 
@@ -140,12 +149,16 @@ guide. Production deployment and service examples continue to use `serve` withou
    `sys.argv`.
 2. Unit-test normal launcher mode by mocking `uvicorn.run()` and asserting it receives
    the in-memory ASGI app with no reload configuration.
-3. Unit-test reload launcher mode by asserting it receives `agency.app:app`,
-   `reload=True`, the resolved current working directory, and the approved include and
-   exclude policy.
-4. Prove `config.yaml` matches the reload policy while YAML job records under both an
-  existing and a not-yet-created configured `shared/` directory do not.
-5. Preserve first-run coverage by proving the default config is created before either
+3. Unit-test reload launcher mode by intercepting `Config`, `Server`, and
+  `WatchFilesReload`, then asserting the import string, host, port, reload root,
+  include policy, lifecycle order, and assigned Agency filter without starting a
+  real watcher.
+4. Construct the actual Agency supervisor before creating deep `.venv` and `shared`
+  paths, then prove those future paths and every excluded directory component are
+  rejected at arbitrary depth. Prove all seven source types plus root `config.yaml`
+  are accepted and paths outside the root are rejected.
+5. Prove non-`KeyboardInterrupt` supervisor errors propagate, and preserve first-run
+  coverage by proving the default config is created before either
    Uvicorn mode starts.
 6. Run the focused CLI/server tests, then the full pytest suite.
 
