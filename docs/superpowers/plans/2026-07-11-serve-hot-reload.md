@@ -519,7 +519,7 @@ Run:
 python -m pytest tests/test_cli.py tests/test_server.py -v
 ```
 
-Expected: `8 passed`.
+Expected: `10 passed`.
 
 - [ ] **Step 5: Verify the installed command surface**
 
