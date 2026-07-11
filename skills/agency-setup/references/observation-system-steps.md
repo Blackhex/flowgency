@@ -10,7 +10,7 @@ should be customized per-project to list the specific actions agents cannot take
 
 After completing your observation tasks, perform these steps in order:
 
-> **Memory vs. Observations:** Your `memory.md` stores persistent knowledge — corrections Chris gave you, preferences, stable facts. Observations are ephemeral findings from a single run, meant to converge into proposals. Don't write preferences or corrections as observations; those go in memory. Don't write one-run observations in memory; those are observations.
+> **Memory vs. Observations:** Your `memory.md` stores persistent knowledge — user corrections, preferences, and stable facts. Observations are ephemeral findings from a single run, meant to converge into proposals. Don't write preferences or corrections as observations; those go in memory. Don't write one-run observations in memory; those are observations.
 
 ### 1. Scan for floated observations
 Read all files in `agents/shared/observations/` where `float: true` and `status: open`.
@@ -102,7 +102,8 @@ Update the linked observations' `status` to `connected` and set their `linked_pr
 Determine which agents have relevant domain expertise for this proposal. List them in
 `feedback_requested`. Then, for each agent:
 
-1. Read the agent's identity file (e.g., `agents/{agent-name}/CLAUDE.md`) to understand their role
+1. Read the agent's identity file (`agents/{agent-name}/CLAUDE.md` for Claude/Linux or
+  `agents/{agent-name}/AGENTS.md` for Copilot/Windows) to understand their role
 2. Spawn the agent as a **subagent** with a prompt like:
    > "Review the proposal at `agents/shared/proposals/{filename}`. From your domain perspective,
    > provide 2-4 sentences: Does this make sense? What risks or opportunities do you see?
@@ -138,12 +139,13 @@ The proposal is now ready for the user's inbox.
 
 You may NOT:
 - Push git commits or create PRs
-- Restart or modify systemd services or containers
-- Run destructive bash commands (`rm -rf`, `git reset --hard`, etc.)
+- Restart or modify systemd services, Windows services, Scheduled Tasks, or containers
+- Run destructive commands (`rm -rf`, `Remove-Item -Recurse -Force`,
+  `git reset --hard`, etc.)
 - Edit files outside the project directory
 
-**Agent-specific permissions override these defaults** — check your CLAUDE.md for what
-you ARE allowed to do. For example, the builder agent can edit source code, while
-read-only agents cannot.
+**Agent-specific permissions override these defaults** — check your selected identity
+file (`CLAUDE.md` or `AGENTS.md`) for what you ARE allowed to do. For example, the
+builder agent can edit source code, while read-only agents cannot.
 
 If your proposal requires an action beyond your permissions, propose it — do not do it yourself.

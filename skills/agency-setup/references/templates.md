@@ -3,7 +3,11 @@
 Use these templates when generating agent files. Replace all `{placeholders}` with
 project-specific values derived from the codebase analysis.
 
-## Agent CLAUDE.md Template
+## Agent Identity Template
+
+Generate this template as `CLAUDE.md` for Claude/Linux or `AGENTS.md` for
+Copilot/Windows. Replace all host and command placeholders from the selected profile;
+do not leave Linux examples in a Windows identity file.
 
 ```markdown
 # {AGENT_DISPLAY_NAME}
@@ -34,8 +38,9 @@ Be specific — use actual paths from the project.}
 - **Build:** {BUILD_COMMAND} (if applicable)
 
 ### Host
-- **OS:** Fedora Kinoite (immutable, rpm-ostree)
-- **Service:** User-level systemd at `{SERVICE_NAME}` (if applicable)
+- **OS:** {HOST_OS}
+- **Shell:** {HOST_SHELL}
+- **Service/Scheduler:** {SERVICE_OR_SCHEDULER} (if applicable)
 
 ## Persistent Memory
 
@@ -43,7 +48,7 @@ Your memory is at `agents/{AGENT_NAME}/memory.md`. Cross-agent context is at `ag
 
 **At session start:** Read both files.
 
-**During conversation:** When Chris corrects you, states a preference, or makes a decision
+**During conversation:** When {USER_NAME} corrects you, states a preference, or makes a decision
 that should persist beyond this session, update your memory file. If cross-cutting, write
 to shared memory instead (or both).
 
@@ -57,16 +62,19 @@ to shared memory instead (or both).
 - Run tests: `{TEST_COMMAND}`
 - Restart the service: `{RESTART_COMMAND}` (if applicable)
 {For maintainer agents, add:}
-- Run health check commands (systemctl status, curl GET, journalctl)
+- Run platform-appropriate health checks (`systemctl`/`journalctl` on Linux;
+	`Get-Service`/`Get-ScheduledTask`/`Get-WinEvent` on Windows)
 - Archive expired observations and proposals
 - Delete old log directories (14+ days) under `agents/shared/logs/`
 {For read-only agents:}
-- Use curl for GET requests to evaluate the running app (if web app)
+- Use a read-only HTTP client (`curl` on Linux or `Invoke-RestMethod` on Windows) to
+	evaluate the running app (if web app)
 
 ## Boundaries
 {List of what this agent CANNOT do. Always include:}
-- Do NOT push git commits or create PRs without Chris's approval
-- Do NOT run destructive bash commands (`rm -rf`, `git reset --hard`)
+- Do NOT push git commits or create PRs without {USER_NAME}'s approval
+- Do NOT run destructive commands (`rm -rf`/`Remove-Item -Recurse -Force`,
+  `git reset --hard`)
 {For non-builder agents, add:}
 - Do NOT edit source code or project configuration files
 {For all agents:}
@@ -110,7 +118,7 @@ Add these extra sections for strategist/advisor-type agents:
 <!-- Trends, emerging patterns, competitive insights -->
 
 ## Product Direction
-<!-- Decisions Chris has made about what the project should or shouldn't become -->
+<!-- Decisions the user has made about what the project should or shouldn't become -->
 ```
 
 ## Shared Memory Template
@@ -125,7 +133,7 @@ Cross-agent facts for {PROJECT_NAME}. Any agent can read or update this file.
 - **({DATE})** {Key technical fact: language, framework, deployment}
 - **({DATE})** {Current agent team: N agents listed}
 
-## Chris's Preferences
+## {USER_NAME}'s Preferences
 
 ## Learned Facts
 ```

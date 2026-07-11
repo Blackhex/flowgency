@@ -27,12 +27,14 @@ Use project-appropriate commands — npm/pytest/go test/cargo, not generic place
 {Another observation task. 3-5 tasks is the sweet spot.}
 
 ## Pre-Approved Actions
-{Copy from agent's CLAUDE.md, scoped to what makes sense during dispatch.}
+{Copy from the agent's selected identity file (`CLAUDE.md` or `AGENTS.md`), scoped to
+what makes sense during dispatch.}
 - Read any file in the project
 - Write and update observation/proposal files in `agents/shared/`
 
 ## Boundaries
-{Copy from agent's CLAUDE.md boundaries, plus dispatch-specific restrictions like:}
+{Copy from the agent's selected identity file boundaries, plus dispatch-specific
+restrictions like:}
 - Do NOT edit source code during routine — save fixes for dedicated sessions
 {For the builder agent's routine, code edits should wait for interactive sessions.}
 
@@ -74,8 +76,19 @@ For each proposal:
   - Move the file to `agents/shared/proposals/archive/`
 
 ### 3. Clean Old Logs
+
+Claude/Linux:
+
 ```bash
 find agents/shared/logs/ -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
+```
+
+Copilot/Windows:
+
+```powershell
+Get-ChildItem agents/shared/logs -Directory |
+  Where-Object LastWriteTime -LT (Get-Date).AddDays(-14) |
+  Remove-Item -Recurse -Force
 ```
 NOTE: This is an explicit exception to the "no destructive commands" rule — cleanup
 is specifically authorized to delete old log directories.
@@ -101,11 +114,21 @@ Read all files in `agents/shared/proposals/`.
 For any proposal where `status: feedback`:
 - Check which agents are in `feedback_requested` but not in `feedback_received`
 - For each missing agent, spawn the agent headlessly:
+
+  Claude/Linux:
+
   ```bash
   cd {PROJECT_ROOT}/agents/{agent} && \
     claude --dangerously-skip-permissions -p "Read agents/shared/proposals/{file}.
     Your feedback is requested. Add your feedback under ### Agent Feedback.
     Add your agent name to feedback_received in the frontmatter. Keep to 2-4 sentences."
+  ```
+
+  Copilot/Windows (run from `agents/{agent}` with the real `copilot.exe` resolved as
+  shown in the PowerShell dispatcher template below):
+
+  ```powershell
+  & $copilotExe -p "Read agents/shared/proposals/{file}. Your feedback is requested. Add your feedback under ### Agent Feedback. Add your agent name to feedback_received in the frontmatter. Keep to 2-4 sentences." --autopilot --experimental
   ```
 
 ### N+1. Finalize Completed Proposals
@@ -117,6 +140,8 @@ For any proposal where `feedback_received` matches `feedback_requested`:
 ---
 
 ## dispatch.sh Template
+
+Claude/Linux only. Filename: `agents/shared/dispatch.sh`.
 
 Replace `{PROJECT_NAME}`, `{PROJECT_ROOT}`, and the agent/prompt pairs in event handlers.
 
@@ -316,7 +341,219 @@ main "$@"
 
 ---
 
+## PowerShell Dispatch Template
+
+Copilot/Windows only. Filename: `agents/shared/dispatch.ps1`.
+
+Replace `{PROJECT_NAME}`, `{PROJECT_ROOT}`, and the agent/prompt calls in the event
+handlers. Use an absolute Windows path for `{PROJECT_ROOT}`. The script intentionally
+resolves `copilot.exe` behind package-manager wrappers for reliable headless execution.
+
+```powershell
+[CmdletBinding()]
+param([switch]$DryRun)
+
+$ErrorActionPreference = 'Stop'
+$ProjectRoot = '{PROJECT_ROOT}'
+$AgentsDir = Join-Path $ProjectRoot 'agents'
+$SharedDir = Join-Path $AgentsDir 'shared'
+$LogBase = Join-Path $SharedDir 'logs'
+$LogDir = Join-Path $LogBase (Get-Date -Format 'yyyy-MM-dd')
+$MaxDailyRuns = 15
+$AgentTimeoutSeconds = 300
+
+function Write-Log {
+  param([string]$Message)
+  Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
+}
+
+function Get-CopilotExecutable {
+  $commands = @(Get-Command copilot -All -ErrorAction SilentlyContinue)
+  $executable = $commands | Where-Object {
+    $_.Source -and [System.IO.Path]::GetExtension($_.Source) -ieq '.exe'
+  } | Select-Object -First 1
+  if ($executable) { return $executable.Source }
+
+  $wrapper = $commands | Select-Object -First 1
+  $wrapperDirectory = if ($wrapper.Source) {
+    Split-Path -Parent $wrapper.Source
+  } else { $null }
+  foreach ($directory in ($env:PATH -split [System.IO.Path]::PathSeparator)) {
+    if (-not $directory -or $directory -eq $wrapperDirectory) { continue }
+    $candidate = Join-Path $directory 'copilot.exe'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return (Resolve-Path -LiteralPath $candidate).Path
+    }
+  }
+  throw 'GitHub Copilot CLI executable was not found on PATH.'
+}
+
+function Test-DailyLimit {
+  New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+  $count = @(Get-ChildItem -LiteralPath $LogDir -Filter '*.run' -File -ErrorAction SilentlyContinue).Count
+  if ($count -ge $MaxDailyRuns) {
+    Write-Log "Daily limit reached ($count/$MaxDailyRuns)."
+    return $false
+  }
+  Write-Log "Daily run count: $count/$MaxDailyRuns"
+  return $true
+}
+
+function Test-EventDone {
+  param([string]$Name)
+  Test-Path -LiteralPath (Join-Path $LogDir ".event-$Name")
+}
+
+function Set-EventDone {
+  param([string]$Name)
+  New-Item -ItemType File -Force -Path (Join-Path $LogDir ".event-$Name") | Out-Null
+}
+
+function Invoke-Agent {
+  param([string]$Agent, [string]$PromptFile)
+
+  if (-not (Test-DailyLimit)) { return $false }
+  $timestamp = Get-Date -Format 'HHmmss'
+  New-Item -ItemType File -Force -Path (Join-Path $LogDir "$Agent-$timestamp.run") | Out-Null
+  Write-Log "Starting agent: $Agent with $PromptFile"
+
+  if ($DryRun) {
+    Write-Log "DRY RUN: would run $Agent with $PromptFile"
+    return $true
+  }
+
+  $agentDir = Join-Path $AgentsDir $Agent
+  $promptPath = Join-Path (Join-Path $SharedDir 'prompts') $PromptFile
+  if (-not (Test-Path -LiteralPath $agentDir -PathType Container)) {
+    Write-Log "ERROR: Agent directory not found: $agentDir"
+    return $false
+  }
+  if (-not (Test-Path -LiteralPath $promptPath -PathType Leaf)) {
+    Write-Log "ERROR: Prompt file not found: $promptPath"
+    return $false
+  }
+
+  $copilotExe = Get-CopilotExecutable
+  $prompt = Get-Content -LiteralPath $promptPath -Raw
+  $escapedPrompt = '"' + $prompt.Replace('"', '\"') + '"'
+  $stdoutPath = Join-Path $LogDir "$Agent-$timestamp.out"
+  $stderrPath = Join-Path $LogDir "$Agent-$timestamp.err"
+  $process = Start-Process -FilePath $copilotExe -WorkingDirectory $agentDir -PassThru `
+    -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath `
+    -ArgumentList @('-p', $escapedPrompt, '--autopilot', '--experimental')
+
+  try {
+    Wait-Process -Id $process.Id -Timeout $AgentTimeoutSeconds -ErrorAction Stop
+  } catch {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    Write-Log "TIMEOUT: $Agent exceeded ${AgentTimeoutSeconds}s"
+    return $false
+  }
+  $process.Refresh()
+  if ($process.ExitCode -ne 0) {
+    Write-Log "FAILED: $Agent exited with code $($process.ExitCode)"
+    return $false
+  }
+  Write-Log "Completed: $Agent"
+  return $true
+}
+
+function Invoke-Morning {
+  Write-Log 'Event: morning'
+  if (Test-EventDone 'morning') {
+    Write-Log 'morning already ran today, skipping'
+    return
+  }
+  Set-EventDone 'morning'
+  # {MORNING_AGENT_CALLS: Invoke-Agent 'agent' 'agent-routine.md'}
+  {MORNING_AGENT_CALLS}
+}
+
+function Invoke-Evening {
+  Write-Log 'Event: evening'
+  if (Test-EventDone 'evening') {
+    Write-Log 'evening already ran today, skipping'
+    return
+  }
+  Set-EventDone 'evening'
+  # {EVENING_AGENT_CALLS: Invoke-Agent 'agent' 'agent-routine.md'}
+  {EVENING_AGENT_CALLS}
+}
+
+function Invoke-ProposalRouter {
+  $proposalsDir = Join-Path $SharedDir 'proposals'
+  if (-not (Test-Path -LiteralPath $proposalsDir -PathType Container)) { return }
+  $pending = Get-ChildItem -LiteralPath $proposalsDir -Filter '*.md' -File |
+    Select-String -Pattern '^status: feedback$' | Select-Object -First 1
+  if (-not $pending) {
+    Write-Log 'No pending proposal feedback requests'
+    return
+  }
+  Write-Log 'Found pending proposal feedback - running coordinator'
+  Invoke-Agent '{COORDINATOR_AGENT}' '{COORDINATOR_AGENT}-routine.md' | Out-Null
+}
+
+Write-Log '=== {PROJECT_NAME} Agent Dispatcher Starting ==='
+if (-not (Test-DailyLimit)) { exit 0 }
+$hour = (Get-Date).Hour
+if ($hour -ge 6 -and $hour -lt 8) {
+  Invoke-Morning
+} elseif ($hour -ge 20 -and $hour -lt 22) {
+  Invoke-Evening
+} else {
+  Write-Log 'No event matches current time window, exiting'
+}
+Invoke-ProposalRouter
+Write-Log '=== {PROJECT_NAME} Agent Dispatcher Complete ==='
+```
+
+When generating, replace event placeholders with explicit `Invoke-Agent` calls. If a
+project requires ET rather than local Windows time, convert the current time with
+`[System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), 'Eastern Standard Time')`
+before selecting the hour.
+
+## Windows Scheduled Task Installer Template
+
+Copilot/Windows only. Filename: `agents/shared/install-dispatch.ps1`.
+
+```powershell
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$TaskName = '{PROJECT_KEY}-dispatch'
+$DispatchScript = Join-Path $PSScriptRoot 'dispatch.ps1'
+$PowerShellExe = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
+if (-not $PowerShellExe) {
+  $PowerShellExe = (Get-Command powershell.exe -ErrorAction Stop).Source
+}
+
+$arguments = "-NoProfile -NonInteractive -File `"$DispatchScript`""
+$action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments `
+  -WorkingDirectory '{PROJECT_ROOT}'
+$triggers = @(
+  New-ScheduledTaskTrigger -Daily -At '07:00'
+  New-ScheduledTaskTrigger -Daily -At '21:00'
+)
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+$userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
+$task = New-ScheduledTask -Action $action -Trigger $triggers -Settings $settings -Principal $principal `
+  -Description '{PROJECT_NAME} agent dispatch at 07:00 and 21:00 local time'
+
+Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
+$info = Get-ScheduledTaskInfo -TaskName $TaskName
+Write-Host "Registered $TaskName. Next run: $($info.NextRunTime)"
+```
+
+This installer is idempotent, registers for the current user with limited privileges,
+and does not store credentials or change machine/user execution policy.
+
+---
+
 ## Systemd Timer Template
+
+Claude/Linux only.
 
 Filename: `agents/shared/{PROJECT_KEY}-dispatch.timer`
 
@@ -335,6 +572,8 @@ WantedBy=timers.target
 
 ## Systemd Service Template
 
+Claude/Linux only.
+
 Filename: `agents/shared/{PROJECT_KEY}-dispatch.service`
 
 ```ini
@@ -346,7 +585,7 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory={PROJECT_ROOT}
 ExecStart={PROJECT_ROOT}/agents/shared/dispatch.sh
-Environment=PATH=/var/home/chris/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/var/home/{USER_NAME}/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 StandardOutput=journal
 StandardError=journal
@@ -357,6 +596,8 @@ TimeoutStartSec=1800
 ---
 
 ## Tmux Launch Script Template
+
+Claude/Linux only.
 
 Filename: `agents/shared/tmux-agents.sh`
 
@@ -439,3 +680,51 @@ When generating:
 - Each agent pane runs: `cd $PROJECT_ROOT/agents/{agent} && claude --dangerously-skip-permissions`
 - The last pane is always Terminal (plain shell)
 - Use UPPERCASE agent names with symbols for labels (e.g., "◆ PRODUCT MANAGER")
+
+---
+
+## Windows Terminal Launch Script Template
+
+Copilot/Windows only. Filename: `agents/shared/start-agents.ps1`.
+
+```powershell
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$ProjectRoot = '{PROJECT_ROOT}'
+$Agents = @({AGENT_NAME_LITERALS})
+$shell = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
+if (-not $shell) { $shell = (Get-Command powershell.exe -ErrorAction Stop).Source }
+$terminal = Get-Command wt.exe -ErrorAction SilentlyContinue
+
+if ($terminal) {
+  $arguments = @()
+  foreach ($agent in $Agents) {
+    if ($arguments.Count -gt 0) { $arguments += ';' }
+    $agentDir = Join-Path (Join-Path $ProjectRoot 'agents') $agent
+    $arguments += @(
+      'new-tab', '--title', $agent, '--startingDirectory', $agentDir,
+      $shell, '-NoExit', '-Command', 'copilot --autopilot --experimental'
+    )
+  }
+  if ($arguments.Count -gt 0) { $arguments += ';' }
+  $arguments += @(
+    'new-tab', '--title', 'Terminal', '--startingDirectory', $ProjectRoot,
+    $shell, '-NoExit'
+  )
+  Start-Process -FilePath $terminal.Source -ArgumentList $arguments
+  return
+}
+
+foreach ($agent in $Agents) {
+  $agentDir = Join-Path (Join-Path $ProjectRoot 'agents') $agent
+  Start-Process -FilePath $shell -WorkingDirectory $agentDir `
+    -ArgumentList @('-NoExit', '-Command', 'copilot --autopilot --experimental')
+}
+Start-Process -FilePath $shell -WorkingDirectory $ProjectRoot -ArgumentList '-NoExit'
+```
+
+Replace `{AGENT_NAME_LITERALS}` with comma-separated, single-quoted agent names. Keep
+agent names restricted to the setup's validated directory names. Do not interpolate
+untrusted text into `-Command`.
