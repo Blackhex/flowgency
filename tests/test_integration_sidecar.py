@@ -727,6 +727,34 @@ class TestCopilot:
         assert result.changed_files[0].status == "added"
         assert result.changed_files[0].lines_added == 3
 
+    def test_run_timeout_preserves_partial_output(self, integration, tmp_agent_dir, monkeypatch):
+        import json
+        import agency.integrations.agency.copilot as mod
+
+        jsonl = json.dumps({
+            "type": "assistant.message",
+            "data": {"content": "Implemented the first part."},
+        }).encode()
+
+        def time_out(cmd, **kwargs):
+            raise mod.subprocess.TimeoutExpired(
+                cmd,
+                kwargs["timeout"],
+                output=jsonl,
+                stderr=b"Work was still in progress.",
+            )
+
+        monkeypatch.setattr(mod.subprocess, "run", time_out)
+        prompt_file = tmp_agent_dir / "prompt.md"
+        prompt_file.write_text("Do the thing")
+
+        result = integration.run(tmp_agent_dir, prompt_file, timeout=30)
+
+        assert result.exit_code == 124
+        assert result.stdout == "Implemented the first part."
+        assert "Work was still in progress." in result.stderr
+        assert "Timed out after 30 seconds." in result.stderr
+
     def test_parse_jsonl_result_event_fallback(self):
         """M2: result event with filesModified falls back when no per-tool edits parsed."""
         import json

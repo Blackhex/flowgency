@@ -119,11 +119,12 @@ def execute_job(job_path: Path) -> JobRecord:
             for item in native_changes
         ]
         status = "complete" if result.exit_code == 0 else "failed"
-        summary = (
-            "Agent completed execution (inferred from exit code)."
-            if status == "complete"
-            else f"Agent exited with code {result.exit_code}."
-        )
+        if status == "complete":
+            summary = "Agent completed execution (inferred from exit code)."
+        elif result.exit_code == 124:
+            summary = f"Agent timed out after {context.timeout} seconds."
+        else:
+            summary = f"Agent exited with code {result.exit_code}."
         final = transition_job(
             job_path,
             "running",

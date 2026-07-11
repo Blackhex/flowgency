@@ -219,9 +219,29 @@ class CopilotIntegration(BaseIntegration):
                 duration_seconds=duration,
                 changed_files=changed_files,
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as error:
             duration = time.monotonic() - start
-            return RunResult(exit_code=124, stdout="", stderr="Timed out", duration_seconds=duration)
+            partial_stdout = error.stdout or ""
+            partial_stderr = error.stderr or ""
+            if isinstance(partial_stdout, bytes):
+                partial_stdout = partial_stdout.decode(errors="replace")
+            if isinstance(partial_stderr, bytes):
+                partial_stderr = partial_stderr.decode(errors="replace")
+            parse_root = roots[0] if roots else agent_dir
+            parsed_text, changed_files = self._parse_jsonl_output(partial_stdout, parse_root)
+            timeout_message = f"Timed out after {timeout} seconds."
+            stderr = (
+                f"{partial_stderr.rstrip()}\n{timeout_message}"
+                if partial_stderr
+                else timeout_message
+            )
+            return RunResult(
+                exit_code=124,
+                stdout=parsed_text,
+                stderr=stderr,
+                duration_seconds=duration,
+                changed_files=changed_files,
+            )
         except FileNotFoundError:
             raise IntegrationError(f"GitHub Copilot CLI not found. Looked for: {cmd}")
 

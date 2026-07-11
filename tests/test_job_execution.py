@@ -159,7 +159,7 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
 
     assert result.status == "failed"
     assert result.exit_code == 124
-    assert result.execution_summary == "Agent exited with code 124."
+    assert result.execution_summary == "Agent timed out after 30 seconds."
 
 
 def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch):
