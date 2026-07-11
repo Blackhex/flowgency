@@ -3306,21 +3306,74 @@ async def workspace_file_save(request: Request, group: str, idx: int):
     return RedirectResponse(f"/{group}/workspaces/{idx}/file?path={urllib.parse.quote(file_path, safe='')}", status_code=303)
 
 
+RELOAD_INCLUDES = (
+    "*.py",
+    "*.html",
+    "*.css",
+    "*.js",
+    "*.json",
+    "*.yaml",
+    "*.yml",
+)
+
+RELOAD_EXCLUDE_DIRS = (
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "christag_agency.egg-info",
+)
+
+RELOAD_EXCLUDES = (
+    "**/shared/*",
+    "**/shared/**/*",
+)
+
+
+def _reload_excludes(root: Path) -> list[str]:
+    """Build Uvicorn exclusions with absolute artifact directory paths."""
+    artifact_paths = (root / directory for directory in RELOAD_EXCLUDE_DIRS)
+    return [
+        *(str(path.resolve()) for path in artifact_paths if path.is_dir()),
+        *RELOAD_EXCLUDES,
+    ]
+
+
+def run_server(host: str, port: int, reload: bool = False) -> None:
+    """Initialize Agency and run the web server."""
+    if not CONFIG_PATH.exists():
+        save_config({"agency": {"title": "Agency", "default_group": ""}, "groups": {}})
+        print(f"First run — created config.yaml in {CONFIG_PATH.parent}")
+        print(f"Visit http://localhost:{port}/admin/ to set up your first agent group.")
+
+    reload_groups()
+    if reload:
+        reload_root = Path.cwd().resolve()
+        uvicorn.run(
+            "agency.app:app",
+            host=host,
+            port=port,
+            reload=True,
+            reload_dirs=[str(reload_root)],
+            reload_includes=list(RELOAD_INCLUDES),
+            reload_excludes=_reload_excludes(reload_root),
+        )
+        return
+
+    uvicorn.run(app, host=host, port=port)
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Agency — Agent Management Dashboard")
     parser.add_argument("--port", type=int, default=8500, help="Port to serve on (default: 8500)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+    parser.add_argument("--reload", action="store_true", help="Restart when project files change")
     args = parser.parse_args()
-
-    # First-run: create default config
-    if not CONFIG_PATH.exists():
-        save_config({"agency": {"title": "Agency", "default_group": ""}, "groups": {}})
-        print(f"First run — created config.yaml in {CONFIG_PATH.parent}")
-        print(f"Visit http://localhost:{args.port}/admin/ to set up your first agent group.")
-
-    reload_groups()
-    uvicorn.run(app, host=args.host, port=args.port)
+    run_server(host=args.host, port=args.port, reload=args.reload)
 
 
 if __name__ == "__main__":

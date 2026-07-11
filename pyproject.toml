@@ -7,6 +7,7 @@ dependencies = [
     "starlette<1.0",
     "uvicorn; sys_platform == 'win32'",
     "uvicorn[standard]; sys_platform != 'win32'",
+    "watchfiles>=0.20; sys_platform == 'win32'",
     "jinja2",
     "markdown",
     "pyyaml",
