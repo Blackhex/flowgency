@@ -34,7 +34,11 @@ class CopilotIntegration(BaseIntegration):
     def parse_identity(self, agent_dir: Path) -> AgentIdentity | None:
         return self._parse_sidecar_identity(agent_dir, self._identity_file(agent_dir))
 
+    def prepare_agent_dir(self, agent_dir: Path) -> None:
+        (agent_dir / ".copilot").mkdir(parents=True, exist_ok=True)
+
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
+        self.prepare_agent_dir(agent_dir)
         self._write_sidecar_identity(agent_dir, self._identity_file(agent_dir), identity)
 
     # Copilot native file-edit tools that mutate the filesystem. Read-only

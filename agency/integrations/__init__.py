@@ -93,6 +93,9 @@ class BaseIntegration:
         """Read the tool's native file and extract agent identity."""
         raise NotImplementedError
 
+    def prepare_agent_dir(self, agent_dir: Path) -> None:
+        """Create integration-specific filesystem markers before identity writes."""
+
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
         """Write agent identity back in the tool's native format."""
         raise NotImplementedError

@@ -2205,6 +2205,7 @@ async def admin_agent_create(request: Request, org: str):
     # Use group's default integration to determine identity file
     default_int = g.get("default_integration", "claude-code")
     integration = get_integration(default_int)
+    integration.prepare_agent_dir(agent_dir)
     identity_file = agent_dir / integration.identity_filename()
     if not identity_file.exists():
         identity_file.write_text(f"# {agent_name.replace('-', ' ').title()} Agent\n\nRole definition goes here.\n")

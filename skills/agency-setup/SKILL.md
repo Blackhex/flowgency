@@ -127,7 +127,10 @@ Copilot/Windows (PowerShell):
 
 ```powershell
 $agentNames = @('{agent1}', '{agent2}')
-$agentNames | ForEach-Object { New-Item -ItemType Directory -Force "agents/$_" | Out-Null }
+$agentNames | ForEach-Object {
+  New-Item -ItemType Directory -Force "agents/$_" | Out-Null
+  New-Item -ItemType Directory -Force "agents/$_/.copilot" | Out-Null
+}
 @('observations', 'proposals', 'decisions', 'logs', 'prompts') |
   ForEach-Object { New-Item -ItemType Directory -Force "agents/shared/$_" | Out-Null }
 ```
@@ -137,6 +140,8 @@ $agentNames | ForEach-Object { New-Item -ItemType Directory -Force "agents/$_" |
 For each agent, generate from the templates in `references/templates.md`:
 - Claude/Linux: `agents/{agent}/CLAUDE.md`
 - Copilot/Windows: `agents/{agent}/AGENTS.md`
+- Copilot/Windows: `agents/{agent}/.copilot/` - required detection marker that
+  distinguishes Copilot from Codex, which also uses `AGENTS.md`.
 - Fill the selected identity file with project-specific context. Adapt template labels,
   host details, commands, path separators, and boundaries to the selected profile; do
   not claim the host is Fedora or the runtime is Claude when generating for Windows.
@@ -145,6 +150,11 @@ For each agent, generate from the templates in `references/templates.md`:
 Plus shared files:
 - `agents/shared/memory.md` — Project context, preferences, learned facts
 - `agents/shared/prompts/_observation-system-steps.md` — Copy from `references/observation-system-steps.md`
+
+After generation, verify every Copilot agent is detectable. When Agency's Python
+package is importable, assert `detect_integration(agent_dir).name == "copilot"` for
+each agent directory. Otherwise verify both `agents/{agent}/.copilot/` and
+`agents/{agent}/AGENTS.md` exist for every Copilot agent.
 
 ### 4.3 Dispatch Prompts
 

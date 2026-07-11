@@ -364,6 +364,48 @@ class TestCopilot:
         sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
+    def test_write_identity_creates_detection_marker(self, integration, tmp_agent_dir):
+        identity = AgentIdentity(
+            display_name="Copilot Bot",
+            title="Builder",
+            emoji="",
+            body="# Copilot Bot\n",
+        )
+
+        integration.write_identity(tmp_agent_dir, identity)
+
+        assert (tmp_agent_dir / ".copilot").is_dir()
+        assert detect_integration(tmp_agent_dir).name == "copilot"
+
+    def test_prepare_agent_dir_is_idempotent(self, integration, tmp_agent_dir):
+        integration.prepare_agent_dir(tmp_agent_dir)
+        integration.prepare_agent_dir(tmp_agent_dir)
+
+        assert (tmp_agent_dir / ".copilot").is_dir()
+
+    def test_write_identity_propagates_prepare_error_without_partial_files(
+        self, integration, tmp_agent_dir, monkeypatch
+    ):
+        error = PermissionError("marker creation denied")
+
+        def fail_preparation(agent_dir):
+            raise error
+
+        monkeypatch.setattr(integration, "prepare_agent_dir", fail_preparation)
+        identity = AgentIdentity(
+            display_name="Copilot Bot",
+            title="Builder",
+            emoji="",
+            body="# Copilot Bot\n",
+        )
+
+        with pytest.raises(PermissionError) as exc_info:
+            integration.write_identity(tmp_agent_dir, identity)
+
+        assert exc_info.value is error
+        assert not (tmp_agent_dir / "AGENTS.md").exists()
+        assert not (tmp_agent_dir / ".agency-meta.yaml").exists()
+
     def test_missing_file(self, integration, tmp_agent_dir):
         assert integration.parse_identity(tmp_agent_dir) is None
 
