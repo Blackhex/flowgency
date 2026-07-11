@@ -88,11 +88,12 @@
     },
     {
       "args": [
-        "-m",
-        "agency.app"
+        "serve",
+        "--host",
+        "127.0.0.1"
       ],
-      "command": "python",
-      "detail": "Start the FastAPI web dashboard on http://127.0.0.1:8500",
+      "command": "christag-agency",
+      "detail": "Start Agency dashboard on http://127.0.0.1:8500",
       "group": "none",
       "isBackground": true,
       "label": "Serve dashboard",
@@ -113,19 +114,13 @@
     },
     {
       "args": [
-        "-m",
-        "uvicorn",
-        "agency.app:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "8500",
+        "serve",
         "--reload",
-        "--reload-dir",
-        "agency"
+        "--host",
+        "127.0.0.1"
       ],
-      "command": "python",
-      "detail": "Start the FastAPI dashboard with hot-reload on http://127.0.0.1:8500 (restarts on source changes)",
+      "command": "christag-agency",
+      "detail": "Start the Agency dashboard with hot-reload on http://127.0.0.1:8500",
       "group": "none",
       "isBackground": true,
       "label": "Serve dashboard (hot-reload)",
