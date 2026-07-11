@@ -212,22 +212,41 @@ existing entries.
 
 ### 4.7 Agency Registration
 
-Check common platform paths for an Agency config, plus `$AGENCY_CONFIG` when set:
-- Linux: `~/agency/config.yaml`
-- Windows: `$HOME\agency\config.yaml` and `$HOME\Projects\agency\config.yaml`
+Build an ordered, de-duplicated list of Agency config candidates:
+1. `$AGENCY_CONFIG`, when set (explicit override)
+2. `{project_root}/config.yaml` (the project being set up may itself be Agency)
+3. Common platform paths:
+   - Linux: `~/agency/config.yaml`
+   - Windows: `$HOME\agency\config.yaml` and `$HOME\Projects\agency\config.yaml`
 
-If found, ask: "Register this agent group with Agency dashboard? (Y/n)"
+Do not assume that every `config.yaml` belongs to Agency. Parse each existing candidate
+with a YAML parser, not regex or line editing. A workspace-local candidate is valid only
+when the document is a mapping with a top-level `groups` mapping and either a top-level
+`agency` mapping or at least one group containing both `name` and `path`. Skip malformed
+or unrelated candidates. The explicit `$AGENCY_CONFIG` wins when valid; otherwise prefer
+the valid workspace-local config. If multiple remaining candidates are valid, ask which
+one to use. If none are valid, skip registration silently and do not create a new Agency
+config file.
+
+If found, ask: "Register this agent group with Agency dashboard at `{config_path}`? (Y/n)"
 
 If yes:
-- Derive a group key from the project directory name (lowercase, hyphens)
-- Add to config.yaml under `groups:` with name, absolute path, and agents list
+- Resolve `{project_root}/agents` and all configured group paths to canonical absolute
+  paths. If a group already points to that agents directory, update that group in place
+  and preserve its key and unrelated settings. This makes registration idempotent and
+  replaces stale agent lists rather than creating duplicate groups.
+- Otherwise derive a group key from the project directory name (lowercase, hyphens) and
+  add it under `groups:`. If that key already points elsewhere, do not overwrite it;
+  ask for a different key.
+- Set the group's `name`, absolute `path` to `{project_root}/agents`, and complete agents
+  list. Preserve unrelated top-level config and unrelated groups.
 - Set `default_integration: claude-code` for Claude/Linux or
   `default_integration: copilot` for Copilot/Windows
 - Write agents in dict form with each agent's selected `integration`
-- Add a `workspaces` entry. Use type `tmux` with the absolute `tmux-agents.sh` path on
-  Linux. On Windows, use type `custom` with `config_path` set to the absolute
-  `start-agents.ps1` path, `language: text`, and `launch_cmd` set to a safely quoted
-  per-process PowerShell invocation of that script.
+- Upsert the generated `workspaces` entry without deleting unrelated entries. Use type
+  `tmux` with the absolute `tmux-agents.sh` path on Linux. On Windows, use type `custom`
+  with `config_path` set to the absolute `start-agents.ps1` path, `language: text`, and
+  `launch_cmd` set to a safely quoted per-process PowerShell invocation of that script.
 - **Write dispatch config** derived from the generated platform dispatch script's event
   handlers:
   - Set `dispatch.enabled: true`, `dispatch.timeout: 300`, `dispatch.daily_limit: 15`
@@ -251,8 +270,12 @@ If yes:
     `condition: condition-name` to the rule — these display as read-only in the UI
   - This keeps config.yaml in sync with the platform dispatch script so the Agency
     dashboard shows accurate schedules
-
-If not found, skip silently.
+- Write the parsed config atomically (temporary file plus replace), then parse it again
+  and verify every generated agent name, integration, workspace, and dispatch rule.
+- If a running Agency dashboard uses this config, reload or restart it with its existing
+  non-elevated service/process mechanism and verify that the group page shows the expected
+  agent count. Do not terminate an unknown process; if a safe reload mechanism cannot be
+  identified, report that a dashboard restart is required and provide the exact command.
 
 ### 4.8 Scheduler Setup
 
