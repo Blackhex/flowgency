@@ -10,6 +10,7 @@ import pytest
 from agency import app as app_module
 from agency.app import (
     compute_next_run,
+    compute_next_run_detail,
     get_agent_last_run,
     is_agent_running,
     relative_future,
@@ -212,6 +213,79 @@ def test_next_run_returns_soonest(tmp_path):
     ]}}
     result = compute_next_run(g, "product", cfg)
     assert result.strftime("%H:%M") == soon
+
+
+def test_next_run_detail_identifies_winning_rule(tmp_path):
+    g = _group_with_logs(tmp_path)
+    fixed_now = datetime(2026, 1, 15, 12, 0, 0)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    cfg = {"enabled": True, "agents": {"product": [
+        {"prompt": "later.md", "at": "17:00"},
+        {"prompt": "soon.md", "at": "12:30"},
+    ]}}
+
+    with patch.object(app_module, "datetime", _Frozen):
+        detail = compute_next_run_detail(g, "product", cfg)
+        compatible_value = compute_next_run(g, "product", cfg)
+
+    assert detail == {
+        "when": fixed_now + timedelta(minutes=30),
+        "prompt": "soon.md",
+        "rule_index": 1,
+    }
+    assert compatible_value == detail["when"]
+
+
+def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
+    g = _group_with_logs(tmp_path)
+    fixed_now = datetime(2026, 1, 15, 12, 0, 0)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    cfg = {"enabled": True, "agents": {"product": [
+        {"prompt": "first.md", "at": "13:00"},
+        {"prompt": "second.md", "at": "13:00"},
+    ]}}
+
+    with patch.object(app_module, "datetime", _Frozen):
+        detail = compute_next_run_detail(g, "product", cfg)
+
+    assert detail["prompt"] == "first.md"
+    assert detail["rule_index"] == 0
+
+
+def test_collect_prompts_preserves_original_agent_rule_index(tmp_path):
+    g = _group_with_logs(tmp_path)
+    g["agents"] = ["product"]
+    prompts_dir = g["shared"] / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "routine.md").write_text("# Routine\n")
+    groups_cfg = {"grp": {"dispatch": {"agents": {"product": [
+        {"prompt": "missing.md", "at": "08:00"},
+        {"prompt": "routine.md", "at": "09:00"},
+    ]}}}}
+
+    with patch.object(app_module, "GROUPS", groups_cfg):
+        prompt = next(
+            item for item in app_module.collect_prompts(g)
+            if item["name"] == "routine.md"
+        )
+
+    assert prompt["assignments"] == [{
+        "agent": "product",
+        "condition": "",
+        "rule_index": 1,
+        "type": "at",
+        "value": "09:00",
+    }]
 
 
 def test_relative_future_none():

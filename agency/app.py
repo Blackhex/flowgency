@@ -764,13 +764,17 @@ def collect_prompts(g: dict) -> list[dict]:
     # Invert: {prompt_filename: [{agent, type, value}, ...]}
     prompt_assignments: dict[str, list[dict]] = {}
     for agent_name, rules in dispatch_agents.items():
-        for rule in rules:
+        for rule_index, rule in enumerate(rules):
             prompt_file = rule.get("prompt", "")
             if not prompt_file:
                 continue
             if prompt_file not in prompt_assignments:
                 prompt_assignments[prompt_file] = []
-            entry = {"agent": agent_name, "condition": rule.get("condition", "")}
+            entry = {
+                "agent": agent_name,
+                "condition": rule.get("condition", ""),
+                "rule_index": rule_index,
+            }
             if rule.get("at"):
                 entry["type"] = "at"
                 entry["value"] = rule["at"]
@@ -1011,13 +1015,12 @@ def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
     return bool(active_jobs(g["path"], agent_name))
 
 
-def compute_next_run(g: dict, agent_name: str, dispatch_cfg: dict) -> datetime | None:
-    """Soonest upcoming dispatch datetime for an agent, or None.
-
-    Mirrors the dispatcher's rule semantics: skips condition rules and rules
-    without a prompt. 'at HH:MM' -> next occurrence (today or tomorrow).
-    'every Nm/Nh' -> .last-<agent>-<stem> mtime + interval (due now if absent).
-    """
+def compute_next_run_detail(
+    g: dict,
+    agent_name: str,
+    dispatch_cfg: dict,
+) -> dict | None:
+    """Return the soonest scheduled run with its originating rule identity."""
     if not dispatch_cfg.get("enabled", False):
         return None
     rules = dispatch_cfg.get("agents", {}).get(agent_name, [])
@@ -1026,9 +1029,9 @@ def compute_next_run(g: dict, agent_name: str, dispatch_cfg: dict) -> datetime |
 
     now = datetime.now()
     logs_root = g["shared"] / "logs"
-    candidates: list[datetime] = []
+    candidates: list[dict] = []
 
-    for rule in rules:
+    for rule_index, rule in enumerate(rules):
         if not isinstance(rule, dict):
             continue
         prompt = rule.get("prompt", "")
@@ -1047,24 +1050,36 @@ def compute_next_run(g: dict, agent_name: str, dispatch_cfg: dict) -> datetime |
                 continue
             if target <= now:
                 target += timedelta(days=1)
-            candidates.append(target)
         elif every_val:
             match = re.fullmatch(r"(\d+)(m|h)", every_val)
             if not match:
                 continue
-            val = int(match.group(1))
-            seconds = val * 60 if match.group(2) == "m" else val * 3600
+            value = int(match.group(1))
+            seconds = value * 60 if match.group(2) == "m" else value * 3600
             stem = prompt.removesuffix(".md")
             marker = logs_root / f".last-{agent_name}-{stem}"
-            if not marker.exists():
-                candidates.append(now)
-            else:
-                candidates.append(
-                    datetime.fromtimestamp(marker.stat().st_mtime)
-                    + timedelta(seconds=seconds)
-                )
+            target = (
+                now
+                if not marker.exists()
+                else datetime.fromtimestamp(marker.stat().st_mtime)
+                + timedelta(seconds=seconds)
+            )
+        else:
+            continue
 
-    return min(candidates) if candidates else None
+        candidates.append({
+            "when": target,
+            "prompt": prompt,
+            "rule_index": rule_index,
+        })
+
+    return min(candidates, key=lambda candidate: candidate["when"], default=None)
+
+
+def compute_next_run(g: dict, agent_name: str, dispatch_cfg: dict) -> datetime | None:
+    """Return the soonest upcoming dispatch datetime for an agent."""
+    detail = compute_next_run_detail(g, agent_name, dispatch_cfg)
+    return detail["when"] if detail else None
 
 
 def relative_time(dt: datetime | None) -> str:
