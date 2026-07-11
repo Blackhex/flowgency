@@ -38,12 +38,13 @@ A group is a collection of agents that work together. Each group points to a dir
 
 ### The Pipeline
 
-Agency organizes agent work into a four-stage pipeline:
+Agency organizes agent work into a five-stage pipeline:
 
 - **Observations** — things an agent noticed (written as markdown files)
 - **Proposals** — actionable suggestions that emerge from observations
 - **Decisions** — your answers to the proposal's questions (approve/defer/reject, choose from options, or free-text input)
 - **Execution** — Agency dispatches the agent to act on your answers
+- **Verification** — confirm the outcome satisfied the proposal, or open a linked follow-up observation when it didn't
 
 Every item in the pipeline links to its neighbors, so you can always trace the full chain.
 

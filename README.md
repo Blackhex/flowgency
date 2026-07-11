@@ -11,14 +11,14 @@
 <p align="center">
   <a href="https://github.com/christag/agency/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="AGPL-3.0 License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/tests-98%20passing-brightgreen.svg" alt="98 tests passing">
+  <img src="https://img.shields.io/badge/tests-471%20passing-brightgreen.svg" alt="471 tests passing">
   <img src="https://img.shields.io/badge/database-none-orange.svg" alt="No database">
   <img src="https://img.shields.io/badge/docker-not%20required-orange.svg" alt="No Docker required">
 </p>
 
 ---
 
-Agency is an open-source management dashboard for AI agent teams. It connects to 9 LLM tools — Claude Code, Codex, Gemini, Aider, Goose, OpenCode, Pi, custom scripts, and SDK agents — and gives you a unified pipeline to see what your agents observe, review their proposals, and make decisions. It currently manages 21 agents across 3 groups in production. Everything is stored as markdown files with YAML frontmatter. No database, no Docker, no build step. 229 tests passing.
+Agency is an open-source management dashboard for AI agent teams. It connects to 9 LLM tools — Claude Code, Codex, Gemini, Aider, Goose, OpenCode, Pi, custom scripts, and SDK agents — and gives you a unified pipeline to see what your agents observe, review their proposals, make decisions, and confirm the outcomes. It currently manages 21 agents across 3 groups in production. Everything is stored as markdown files with YAML frontmatter. No database, no Docker, no build step. 471 tests passing.
 
 <p align="center">
   <img src="screenshots/inbox.png" width="800" alt="Agency mission control dashboard with fleet status, pipeline pulse, attention queue, and activity feed">
@@ -30,7 +30,7 @@ Agency is for people who treat AI agents like team members on a project — not 
 
 If you have a codebase where an agent handles docs, another watches for quality issues, and a third manages releases, those agents need persistent identities, accumulated knowledge, and a structured way to surface what they've found. Agency gives them that. Each agent has a name, a role, a memory, and a history. They live in your project long-term, like virtual employees with specific responsibilities.
 
-**This is not an agent runner.** Tools like [Superset](https://superset.sh) are great at spinning up parallel workspaces, streaming real-time output, and managing active coding sessions. Agency sits above that layer. It's the coordination brain — deciding *what* agents should work on, reviewing *what they found*, and keeping a record of *what was decided*. Agency dispatches intent. Your runner of choice executes it.
+**This is not an agent runner.** Tools like [Superset](https://superset.sh) are great at spinning up parallel workspaces, streaming real-time output, and managing active coding sessions. Agency sits above that layer. It's the coordination brain — deciding *what* agents should work on, reviewing *what they found*, keeping a record of *what was decided*, and confirming *whether the outcome actually satisfied the intent*. Agency dispatches intent and governs the result. Your runner of choice executes it.
 
 If you have multiple projects, each with their own agent team, Agency manages all of them from one dashboard. Same pipeline, same governance, separate groups.
 
@@ -50,8 +50,9 @@ Agents write down what they notice. Agency organizes those observations into a p
 2. **Propose** — observations converge into a proposal worth considering
 3. **Decide** — you approve, defer, or reject right from the dashboard
 4. **Execute** — approved decisions auto-dispatch the agent to do the work
+5. **Verify** — confirm the outcome satisfied the proposal, or open a linked follow-up when it didn't
 
-Every item links to what came before and after, so you can always trace how an observation became an action.
+Every item links to what came before and after, so you can always trace how an observation became an action — and whether that action actually resolved what it set out to.
 
 <p align="center">
   <img src="screenshots/proposal-detail.png" width="800" alt="Proposal detail showing the full pipeline chain from observation to decision">
@@ -103,6 +104,8 @@ Everything you can do in the browser, you can do from the terminal:
 agency inbox           # What needs your attention
 agency status          # Fleet overview
 agency decide <slug>   # Decide on a proposal
+agency jobs            # Execution status, agent, and changed files
+agency logs <job_id>   # Tail a job's execution log
 ```
 
 ### Edit everything in the browser

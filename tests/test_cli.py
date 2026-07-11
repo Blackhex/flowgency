@@ -7,7 +7,45 @@ import sys
 import pytest
 import yaml
 
+import agency.app as app_mod
 from agency import cli
+from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.store import write_job
+
+
+def _setup_jobs_group(tmp_path, monkeypatch):
+    """Create a group with one complete job that has changed files, and wire it
+    into the app registry the CLI reads through get_group."""
+    group = tmp_path / "group"
+    jobs_dir = group / "shared" / "jobs"
+    jobs_dir.mkdir(parents=True)
+
+    spec = JobSpec.create(
+        config_path=tmp_path / "config.yaml",
+        group_key="test",
+        agent_name="engineer",
+        trigger="decision",
+        prompt_source={"type": "decision"},
+        prompt_content="Do the work",
+    )
+    record = JobRecord.from_spec(spec)
+    record.status = "complete"
+    record.exit_code = 0
+    record.started_at = "2026-07-11T10:00:00+00:00"
+    record.completed_at = "2026-07-11T10:00:05+00:00"
+    record.changed_files = [{"path": "a.txt", "status": "modified", "lines_added": 2, "lines_removed": 1}]
+    stdout_path = group / "shared" / "logs" / f"{spec.job_id}.out"
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_path.write_text("line one\nline two\nline three\n", encoding="utf-8")
+    record.stdout_path = str(stdout_path)
+    write_job(jobs_dir / f"{spec.job_id}.yaml", record)
+
+    monkeypatch.setattr(app_mod, "CONFIG", {"groups": {"test": {"path": str(group)}}})
+    monkeypatch.setattr(app_mod, "GROUPS", {"test": {
+        "key": "test", "name": "Test", "path": group,
+        "agents": ["engineer"], "_agents_normalized": [{"name": "engineer"}],
+    }})
+    return spec
 
 
 def test_cli_help_shows_subcommands():
@@ -127,3 +165,63 @@ def test_cmd_dispatch_uninstall_forwards_force(tmp_path, monkeypatch):
     args = Namespace(dispatch_command="uninstall", config=str(config_path), interval=None, replace=False, force=True)
     assert cli.cmd_dispatch(args) == 0
     assert calls == [(str(config_path.resolve()), True)]
+
+
+def test_cli_help_shows_jobs_and_logs():
+    result = subprocess.run(
+        [sys.executable, "-m", "agency.cli", "--help"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "jobs" in result.stdout
+    assert "logs" in result.stdout
+
+
+def test_cmd_jobs_lists_records(tmp_path, monkeypatch, capsys):
+    _setup_jobs_group(tmp_path, monkeypatch)
+    cli.cmd_jobs(Namespace(group="test", status=None, agent=None, json=False))
+    out = capsys.readouterr().out
+    assert "engineer" in out
+    assert "complete" in out
+    assert "1 file(s)" in out
+
+
+def test_cmd_jobs_json_reports_changed_file_count(tmp_path, monkeypatch, capsys):
+    spec = _setup_jobs_group(tmp_path, monkeypatch)
+    cli.cmd_jobs(Namespace(group="test", status=None, agent=None, json=True))
+    out = capsys.readouterr().out
+    assert spec.job_id in out
+    assert '"changed_files": 1' in out
+
+
+def test_cmd_jobs_status_filter_excludes_non_matching(tmp_path, monkeypatch, capsys):
+    _setup_jobs_group(tmp_path, monkeypatch)
+    cli.cmd_jobs(Namespace(group="test", status="failed", agent=None, json=False))
+    out = capsys.readouterr().out
+    assert "engineer" not in out
+
+
+def test_cmd_logs_tails_execution_log(tmp_path, monkeypatch, capsys):
+    spec = _setup_jobs_group(tmp_path, monkeypatch)
+    cli.cmd_logs(Namespace(group="test", job_id=spec.job_id, lines=40, stderr=False))
+    out = capsys.readouterr().out
+    assert "line one" in out
+    assert "line three" in out
+
+
+def test_cmd_logs_no_job_id_lists_recent(tmp_path, monkeypatch, capsys):
+    spec = _setup_jobs_group(tmp_path, monkeypatch)
+    cli.cmd_logs(Namespace(group="test", job_id=None, lines=40, stderr=False))
+    out = capsys.readouterr().out
+    assert spec.job_id in out
+
+
+def test_cmd_logs_unknown_job_exits(tmp_path, monkeypatch):
+    _setup_jobs_group(tmp_path, monkeypatch)
+    try:
+        cli.cmd_logs(Namespace(group="test", job_id="deadbeef", lines=40, stderr=False))
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("expected SystemExit for unknown job id")
