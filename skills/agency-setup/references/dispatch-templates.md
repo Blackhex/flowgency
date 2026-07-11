@@ -698,6 +698,30 @@ $shell = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
 if (-not $shell) { $shell = (Get-Command powershell.exe -ErrorAction Stop).Source }
 $terminal = Get-Command wt.exe -ErrorAction SilentlyContinue
 
+function Get-CopilotExecutable {
+  $commands = @(Get-Command copilot -All -ErrorAction SilentlyContinue)
+  $executable = $commands | Where-Object {
+    $_.Source -and [System.IO.Path]::GetExtension($_.Source) -ieq '.exe'
+  } | Select-Object -First 1
+  if ($executable) { return $executable.Source }
+
+  foreach ($directory in ($env:PATH -split [System.IO.Path]::PathSeparator)) {
+    if (-not $directory) { continue }
+    $candidate = Join-Path $directory 'copilot.exe'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return (Resolve-Path -LiteralPath $candidate).Path
+    }
+  }
+  throw 'GitHub Copilot CLI executable was not found on PATH.'
+}
+
+$copilotExe = Get-CopilotExecutable
+$escapedCopilotExe = $copilotExe.Replace("'", "''")
+$copilotCommand = "& '$escapedCopilotExe' --autopilot --experimental"
+$encodedCopilotCommand = [Convert]::ToBase64String(
+  [Text.Encoding]::Unicode.GetBytes($copilotCommand)
+)
+
 if ($terminal) {
   $arguments = @()
   foreach ($agent in $Agents) {
@@ -705,7 +729,7 @@ if ($terminal) {
     $agentDir = Join-Path (Join-Path $ProjectRoot 'agents') $agent
     $arguments += @(
       'new-tab', '--title', $agent, '--startingDirectory', $agentDir,
-      $shell, '-NoExit', '-Command', 'copilot --autopilot --experimental'
+      $shell, '-NoExit', '-EncodedCommand', $encodedCopilotCommand
     )
   }
   if ($arguments.Count -gt 0) { $arguments += ';' }
@@ -720,11 +744,13 @@ if ($terminal) {
 foreach ($agent in $Agents) {
   $agentDir = Join-Path (Join-Path $ProjectRoot 'agents') $agent
   Start-Process -FilePath $shell -WorkingDirectory $agentDir `
-    -ArgumentList @('-NoExit', '-Command', 'copilot --autopilot --experimental')
+    -ArgumentList @('-NoExit', '-EncodedCommand', $encodedCopilotCommand)
 }
 Start-Process -FilePath $shell -WorkingDirectory $ProjectRoot -ArgumentList '-NoExit'
 ```
 
 Replace `{AGENT_NAME_LITERALS}` with comma-separated, single-quoted agent names. Keep
-agent names restricted to the setup's validated directory names. Do not interpolate
-untrusted text into `-Command`.
+agent names restricted to the setup's validated directory names. Resolve the real
+`copilot.exe` in the parent process and pass its absolute path via `-EncodedCommand`;
+Windows Terminal may reuse a process whose `PATH` predates the Copilot installation.
+Do not interpolate untrusted text into the encoded command.

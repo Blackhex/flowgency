@@ -194,7 +194,10 @@ Generate one surface per agent plus one plain terminal using the selected profil
   executable with `chmod +x`.
 - **Copilot/Windows:** Set each tab's working directory to `agents/{agent}`. If
   `wt.exe` is unavailable, open separate PowerShell processes. Use argument arrays and
-  safe path quoting; do not interpolate untrusted text into commands.
+  safe path quoting; do not interpolate untrusted text into commands. Resolve the real
+  `copilot.exe` in the launcher process and pass its absolute path to each child via a
+  safely encoded PowerShell command; do not rely on a child shell or an existing Windows
+  Terminal process inheriting the current `PATH`.
 
 ### 4.6 Gitignore
 
