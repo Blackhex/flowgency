@@ -11,7 +11,7 @@ from agency.app import (
     list_observations, list_proposals, list_decisions,
     collect_agents_with_identity, extract_display_title,
     parse_frontmatter, update_frontmatter_field,
-    GROUPS, CONFIG, CONFIG_PATH,
+    GROUPS, CONFIG, CONFIG_PATH, run_server,
 )
 
 
@@ -80,14 +80,7 @@ def _relative_time(dt_val) -> str:
 
 def cmd_serve(args):
     """Start the web server."""
-    from agency.app import main as app_main
-    # Override sys.argv so argparse in app.main doesn't see our args
-    sys.argv = ["agency"]
-    if args.port:
-        sys.argv += ["--port", str(args.port)]
-    if args.host:
-        sys.argv += ["--host", args.host]
-    app_main()
+    run_server(host=args.host, port=args.port, reload=args.reload)
 
 def cmd_inbox(args):
     """Show what needs attention."""
@@ -370,6 +363,7 @@ def main():
     p = sub.add_parser("serve", help="Start the web dashboard")
     p.add_argument("--port", type=int, default=8500)
     p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--reload", action="store_true", help="Restart when project files change")
 
     # inbox
     p = sub.add_parser("inbox", help="What needs attention")
