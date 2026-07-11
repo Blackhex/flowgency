@@ -5,7 +5,8 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.116",
     "starlette<1.0",
-    "uvicorn[standard]",
+    "uvicorn; sys_platform == 'win32'",
+    "uvicorn[standard]; sys_platform != 'win32'",
     "jinja2",
     "markdown",
     "pyyaml",
