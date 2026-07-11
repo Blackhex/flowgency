@@ -1,5 +1,6 @@
 """Agency Dashboard — multi-group agent management interface."""
 
+import copy
 import csv
 import io
 import os
@@ -64,6 +65,18 @@ def save_config(config: dict) -> None:
         raise
 
 
+def _runtime_groups(config: dict) -> dict:
+    """Build normalized runtime groups without mutating raw config data."""
+    groups = copy.deepcopy(config.get("groups", {}))
+    for key, group in groups.items():
+        default_integration = group.get("default_integration", "claude-code")
+        normalized = normalize_agents(group.get("agents", []), default_integration)
+        group["_agents_normalized"] = normalized
+        group["agents"] = agent_names(normalized)
+        groups[key] = migrate_tmux_config(group)
+    return groups
+
+
 def _parse_sandbox_roots(text: str):
     """Parse a sandbox_root textarea (one path per line) into config form.
 
@@ -91,25 +104,11 @@ def reload_groups() -> None:
     """Reload the global GROUPS dict from config."""
     global GROUPS, CONFIG
     CONFIG = load_config()
-    GROUPS = CONFIG.get("groups", {})
-    # Normalize agent lists so all code paths see consistent data
-    for key, g in GROUPS.items():
-        default_int = g.get("default_integration", "claude-code")
-        raw_agents = g.get("agents", [])
-        g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
-        # Keep agents as a name list for backward compat
-        g["agents"] = agent_names(g["_agents_normalized"])
-        GROUPS[key] = migrate_tmux_config(GROUPS[key])
+    GROUPS = _runtime_groups(CONFIG)
 
 
 CONFIG = load_config()
-GROUPS = CONFIG.get("groups", {})
-for key, g in GROUPS.items():
-    default_int = g.get("default_integration", "claude-code")
-    raw_agents = g.get("agents", [])
-    g["_agents_normalized"] = normalize_agents(raw_agents, default_int)
-    g["agents"] = agent_names(g["_agents_normalized"])
-    g.update(migrate_tmux_config(g))
+GROUPS = _runtime_groups(CONFIG)
 
 
 def get_agency_config() -> dict:
@@ -1075,7 +1074,7 @@ def relative_future(dt: datetime | None) -> str:
     if minutes < 60:
         return f"{minutes}m away"
     hours = minutes // 60
-    if hours < 24 and dt.date() == now.date():
+    if hours < 24:
         return f"{hours}h away"
     if dt.date() == (now + timedelta(days=1)).date():
         return f"tomorrow {dt.strftime('%H:%M')}"
@@ -1822,7 +1821,12 @@ async def admin_org_save(request: Request, org: str):
     config["groups"][org]["name"] = name or config["groups"][org]["name"]
     if path:
         config["groups"][org]["path"] = path
-    config["groups"][org]["agents"] = agents
+    existing_agents = config["groups"][org].get("agents", [])
+    merged_agents = []
+    for agent_name in agents:
+        _, existing = find_agent_in_config(existing_agents, agent_name)
+        merged_agents.append(existing if isinstance(existing, dict) else agent_name)
+    config["groups"][org]["agents"] = merged_agents
     if ws_list:
         config["groups"][org]["workspaces"] = ws_list
     elif "workspaces" in config["groups"].get(org, {}):

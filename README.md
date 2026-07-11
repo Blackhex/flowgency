@@ -131,7 +131,7 @@ Reload mode watches project code, templates, static assets, themes, and `config.
 
 ## Add-on: Agency Setup Skill
 
-Agency ships with a skill that can bootstrap a full agent team for any project. Install it and run `/agency-setup` from any project directory — it works with any LLM tool Agency supports.
+Agency ships with a skill that can bootstrap a full agent team for any project. Install it and run `/agency-setup` from any project directory. It currently generates native Claude/Linux and GitHub Copilot/Windows profiles.
 
 It analyzes your project (code, business operations, creative work — whatever it is), proposes 3-5 agents tailored to the project's actual domains, generates everything Agency needs (role definitions, shared folders, dispatch prompts, tmux config), and registers the group with your dashboard. Agent suggestions go beyond just "who writes code" — the skill looks at the full project lifecycle and proposes roles you wouldn't think to create yourself.
 

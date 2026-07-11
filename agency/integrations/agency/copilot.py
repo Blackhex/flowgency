@@ -260,15 +260,10 @@ class CopilotIntegration(BaseIntegration):
         wrapper = Path(cmd)
         if wrapper.suffix.lower() not in (".bat", ".cmd", ".ps1"):
             return cmd
-        # Re-search PATH with the wrapper's own directory removed, mirroring
-        # the wrapper's Find-RealCopilot logic, to locate the real binary. Pass
-        # the pruned path explicitly (rather than mutating os.environ) so the
-        # lookup is thread-safe under concurrent dispatch.
-        search = os.pathsep.join(
-            d for d in os.environ.get("PATH", "").split(os.pathsep)
-            if d and Path(d) != wrapper.parent
-        )
-        real = shutil.which("copilot", path=search)
+        # Search for the exact executable name so any number of package-manager
+        # .bat/.cmd/.ps1 shims earlier on PATH are skipped without mutating the
+        # process environment.
+        real = shutil.which("copilot.exe", path=os.environ.get("PATH", ""))
         if real and Path(real).suffix.lower() == ".exe":
             return real
         return cmd

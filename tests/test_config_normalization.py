@@ -54,6 +54,83 @@ def test_agent_names_helper():
     assert agent_names(agents) == ["product", "bot"]
 
 
+def test_runtime_groups_preserve_raw_agent_entries():
+    from agency.app import _runtime_groups
+
+    raw_config = {
+        "groups": {
+            "team": {
+                "name": "Team",
+                "path": "/groups/team",
+                "default_integration": "copilot",
+                "agents": [
+                    {
+                        "name": "builder",
+                        "integration": "copilot",
+                        "integration_config": {"model": "gpt-5"},
+                    }
+                ],
+            }
+        }
+    }
+
+    runtime = _runtime_groups(raw_config)
+
+    assert raw_config["groups"]["team"]["agents"] == [
+        {
+            "name": "builder",
+            "integration": "copilot",
+            "integration_config": {"model": "gpt-5"},
+        }
+    ]
+    assert runtime["team"]["agents"] == ["builder"]
+    assert runtime["team"]["_agents_normalized"] == [
+        {
+            "name": "builder",
+            "integration": "copilot",
+            "integration_config": {"model": "gpt-5"},
+        }
+    ]
+
+
+def test_reload_then_save_preserves_explicit_agent_config(tmp_path, monkeypatch):
+    import yaml
+    from agency import app as app_module
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "agency": {"title": "Agency"},
+                "groups": {
+                    "team": {
+                        "name": "Team",
+                        "path": str(tmp_path / "agents"),
+                        "default_integration": "copilot",
+                        "agents": [
+                            {"name": "builder", "integration": "copilot"},
+                        ],
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_module, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(app_module, "CONFIG", {})
+    monkeypatch.setattr(app_module, "GROUPS", {})
+
+    app_module.reload_groups()
+    app_module.save_config(app_module.CONFIG)
+
+    persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert persisted["groups"]["team"]["agents"] == [
+        {"name": "builder", "integration": "copilot"},
+    ]
+    assert app_module.GROUPS["team"]["agents"] == ["builder"]
+
+
 # Task 1: Regression tests for path preservation in normalize_agents
 
 def test_normalize_preserves_path():

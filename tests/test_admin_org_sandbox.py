@@ -224,6 +224,50 @@ def test_admin_org_save_clears_allowed_tools_when_none_checked(tmp_path, monkeyp
     assert "allowed_tools" not in saved["groups"]["grp"]
 
 
+def test_admin_org_save_preserves_metadata_for_retained_agents(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.yaml"
+    agents_path = tmp_path / "agents"
+    agents_path.mkdir()
+    external_path = tmp_path / "shared" / "core-builder"
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", cfg_path)
+    core_builder = {
+        "name": "core-builder",
+        "integration": "copilot",
+        "path": str(external_path),
+        "integration_config": {"model": "gpt-5"},
+    }
+    app_mod.save_config({
+        "agency": {"title": "Agency", "default_group": "grp"},
+        "groups": {
+            "grp": {
+                "name": "Grp",
+                "path": str(agents_path),
+                "default_integration": "copilot",
+                "agents": [core_builder, "superseded", {"name": "removed", "integration": "codex"}],
+            }
+        },
+    })
+    app_mod.reload_groups()
+
+    form = FakeForm({
+        "name": "Grp",
+        "path": str(agents_path),
+        "agents": "superseded\ncore-builder\nnew-builder",
+        "workspaces_json": "[]",
+        "default_integration": "copilot",
+        "sandbox_root": "",
+    })
+
+    _run(app_mod.admin_org_save(FakeRequest(form), "grp"))
+
+    saved = app_mod.load_config()
+    assert saved["groups"]["grp"]["agents"] == [
+        "superseded",
+        core_builder,
+        "new-builder",
+    ]
+
+
 def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch):
     cfg_path = tmp_path / "config.yaml"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", cfg_path)

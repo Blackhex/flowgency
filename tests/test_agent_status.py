@@ -162,12 +162,28 @@ def test_relative_future_minutes():
 
 
 def test_relative_future_hours():
-    assert relative_future(datetime.now() + timedelta(hours=2, minutes=1)) == "2h away"
+    fixed_now = datetime(2026, 7, 11, 23, 30)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    with patch.object(app_module, "datetime", _Frozen):
+        assert relative_future(fixed_now + timedelta(hours=2, minutes=1)) == "2h away"
 
 
 def test_relative_future_tomorrow():
-    dt = datetime.now() + timedelta(days=1)
-    assert relative_future(dt) == f"tomorrow {dt.strftime('%H:%M')}"
+    fixed_now = datetime(2026, 7, 11, 12, 0)
+    dt = fixed_now + timedelta(days=1)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    with patch.object(app_module, "datetime", _Frozen):
+        assert relative_future(dt) == f"tomorrow {dt.strftime('%H:%M')}"
 
 
 def test_relative_future_under_a_minute():

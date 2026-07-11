@@ -156,6 +156,23 @@ package is importable, assert `detect_integration(agent_dir).name == "copilot"` 
 each agent directory. Otherwise verify both `agents/{agent}/.copilot/` and
 `agents/{agent}/AGENTS.md` exist for every Copilot agent.
 
+For Copilot/Windows, also verify the real executable before declaring generation
+complete. Enumerate all command candidates rather than accepting the first wrapper:
+
+```powershell
+$copilotExe = @(Get-Command copilot -All -ErrorAction SilentlyContinue) |
+  Where-Object {
+    $_.Source -and [System.IO.Path]::GetExtension($_.Source) -ieq '.exe'
+  } |
+  Select-Object -First 1
+if (-not $copilotExe) { throw 'GitHub Copilot CLI copilot.exe was not found on PATH.' }
+& $copilotExe.Source --version
+if ($LASTEXITCODE -ne 0) { throw 'GitHub Copilot CLI executable validation failed.' }
+```
+
+Do not treat a `.ps1`, `.bat`, or `.cmd` result as successful executable validation;
+multiple package-manager wrappers may appear on `PATH` before the real binary.
+
 ### 4.3 Dispatch Prompts
 
 For each agent, generate a dispatch prompt at `agents/shared/prompts/{agent}-routine.md`.
@@ -285,10 +302,20 @@ If yes:
     dashboard shows accurate schedules
 - Write the parsed config atomically (temporary file plus replace), then parse it again
   and verify every generated agent name, integration, workspace, and dispatch rule.
+  Immediately before replace, detect whether the source file changed since it was read.
+  If it changed, re-read the latest document and reapply only the intended group merge to
+  preserve concurrent changes; never overwrite with a stale pre-reload object.
 - If a running Agency dashboard uses this config, reload or restart it with its existing
   non-elevated service/process mechanism and verify that the group page shows the expected
   agent count. Do not terminate an unknown process; if a safe reload mechanism cannot be
   identified, report that a dashboard restart is required and provide the exact command.
+- After dashboard reload and HTTP verification, parse the config from disk again and
+  re-verify dict-form agent integrations, workspace configuration, and every dispatch
+  rule. A rendered page is insufficient because normalized shorthand can look equivalent.
+  If generated fields drifted, re-read the latest config, reapply only those fields while
+  preserving unrelated changes, atomically replace it, then reload and verify once more.
+  If the second verification still drifts, stop and report the competing writer instead
+  of retrying indefinitely.
 
 ### 4.8 Scheduler Setup
 

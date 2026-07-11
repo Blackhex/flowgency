@@ -604,19 +604,26 @@ class TestCopilot:
         assert captured["kwargs"].get("stdin") is copilot_mod.subprocess.DEVNULL
         assert "creationflags" in captured["kwargs"]
 
-    def test_copilot_resolve_real_cmd_bypasses_windows_wrapper(self, monkeypatch):
+    def test_copilot_resolve_real_cmd_skips_layered_windows_wrappers(self, monkeypatch):
         import agency.integrations.agency.copilot as copilot_mod
 
-        # On Windows the .bat/.cmd/.ps1 wrapper is resolved to the real .exe so
-        # CREATE_NO_WINDOW actually suppresses the CLI's console. On other
-        # platforms (or when no wrapper is detected) the command is unchanged.
         wrapper = r"C:\wrap\copilot.BAT"
+        npm_wrapper = r"C:\npm\copilot.CMD"
         real = r"C:\real\copilot.EXE"
+        calls = []
+
+        def fake_which(name, path=None):
+            calls.append(name)
+            return {
+                "copilot": npm_wrapper,
+                "copilot.exe": real,
+            }.get(name)
 
         monkeypatch.setattr(copilot_mod.sys, "platform", "win32")
-        monkeypatch.setattr(copilot_mod.shutil, "which", lambda name, path=None: real)
+        monkeypatch.setattr(copilot_mod.shutil, "which", fake_which)
 
         assert CopilotIntegration._resolve_real_cmd(wrapper) == real
+        assert calls == ["copilot.exe"]
 
     def test_copilot_resolve_real_cmd_noop_off_windows(self, monkeypatch):
         import agency.integrations.agency.copilot as copilot_mod
