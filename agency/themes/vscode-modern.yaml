@@ -1,0 +1,112 @@
+name: VS Code Modern
+description: Dark Modern + Light Modern — familiar editor-focused workspace
+author: agency
+
+dark:
+  # Surfaces
+  bg: "#1f1f1f"
+  bg_surface: "#181818"
+  bg_card: "#252526"
+  bg_card_hover: "#2a2d2e"
+  border: "#3c3c3c"
+  border_subtle: "#2b2b2b"
+
+  # Sidebar
+  sidebar_bg: "#181818"
+  sidebar_text: "#9d9d9d"
+  sidebar_active_bg: "rgba(0,120,212,0.18)"
+  sidebar_active_text: "#ffffff"
+  sidebar_section: "#6f6f6f"
+
+  # Typography
+  text: "#cccccc"
+  text_heading: "#ffffff"
+  text_muted: "#9d9d9d"
+  text_faint: "#6f6f6f"
+
+  # Primary action
+  primary: "#0078d4"
+  primary_text: "#ffffff"
+  primary_hover: "#026ec1"
+
+  # Secondary action
+  secondary: "#313131"
+  secondary_text: "#cccccc"
+  secondary_hover: "#3c3c3c"
+
+  # Outline action
+  outline: "#0078d4"
+
+  # Code
+  code_bg: "#181818"
+
+  # Prose
+  link: "#4daafc"
+
+light:
+  # Surfaces
+  bg: "#ffffff"
+  bg_surface: "#f8f8f8"
+  bg_card: "#ffffff"
+  bg_card_hover: "#f3f3f3"
+  border: "#d4d4d4"
+  border_subtle: "#e5e5e5"
+
+  # Sidebar
+  sidebar_bg: "#f8f8f8"
+  sidebar_text: "#616161"
+  sidebar_active_bg: "rgba(0,120,212,0.10)"
+  sidebar_active_text: "#005fb8"
+  sidebar_section: "#8a8a8a"
+
+  # Typography
+  text: "#3b3b3b"
+  text_heading: "#1f1f1f"
+  text_muted: "#616161"
+  text_faint: "#8a8a8a"
+
+  # Primary action
+  primary: "#0078d4"
+  primary_text: "#ffffff"
+  primary_hover: "#005fb8"
+
+  # Secondary action
+  secondary: "#e5e5e5"
+  secondary_text: "#3b3b3b"
+  secondary_hover: "#d6d6d6"
+
+  # Outline action
+  outline: "#0078d4"
+
+  # Code
+  code_bg: "#f3f3f3"
+
+  # Prose
+  link: "#005fb8"
+
+logo:
+  dark:
+    bg: "#252526"
+    node: "#4daafc"
+    line: "#9cdcfe"
+  light:
+    bg: "#f8f8f8"
+    bg_border: "#d4d4d4"
+    node: "#0078d4"
+    line: "#005fb8"
+
+status:
+  healthy: { bg_dark: "rgba(78,201,176,0.15)", text_dark: "#4ec9b0", bg_light: "#dff6f1", text_light: "#167d6b" }
+  pending: { bg_dark: "rgba(206,145,120,0.18)", text_dark: "#ce9178", bg_light: "#fce8df", text_light: "#9a4d2e" }
+  error: { bg_dark: "rgba(244,71,71,0.15)", text_dark: "#f44747", bg_light: "#fde2e2", text_light: "#a1260d" }
+
+scale:
+  50: "#f8f8f8"
+  100: "#f3f3f3"
+  200: "#d4d4d4"
+  500: "#0078d4"
+  600: "#005fb8"
+  700: "#004578"
+  800: "#252526"
+  900: "#1f1f1f"
+  950: "#181818"
