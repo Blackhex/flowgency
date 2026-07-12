@@ -40,7 +40,7 @@
 
 ---
 
-### Task 1: Shared Timer Status Contract and Windows Definition Validation
+### Task 1: Cross-Platform Scheduler Definition Contract
 
 **Files:**
 - Modify: `agency/dispatch/install.py`
@@ -480,62 +480,6 @@ Inside `_install_windows()`, set `canonical_path = _canonical_config_path(config
         action.Arguments = f'-m agency.dispatch.run --config "{canonical_path}"'
 ```
 
-Keep Task 1 independently runnable on Unix by adapting the existing shallow Unix
-helpers to the new arguments until Task 2 replaces them with definition parsing:
-
-```python
-def _status_linux(config_path: str | Path, interval: int) -> TimerStatus:
-    service_file = SYSTEMD_USER_DIR / "agency-dispatch.service"
-    installed = service_file.exists()
-    active = False
-    if installed:
-        try:
-            result = subprocess.run(
-                ["systemctl", "--user", "is-active", "agency-dispatch.timer"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            active = result.stdout.strip() == "active"
-        except Exception:
-            active = False
-    return _make_status(
-        expected_config_path=config_path,
-        expected_interval=interval,
-        installed=installed,
-        enabled=active,
-        timer_active=active,
-        config_path=config_path if installed else None,
-        interval=interval if installed else None,
-    )
-
-
-def _status_macos(config_path: str | Path, interval: int) -> TimerStatus:
-    plist_file = LAUNCHD_AGENTS_DIR / f"{LAUNCHD_PLIST}.plist"
-    installed = plist_file.exists()
-    active = False
-    if installed:
-        try:
-            result = subprocess.run(
-                ["launchctl", "list", LAUNCHD_PLIST],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            active = result.returncode == 0
-        except Exception:
-            active = False
-    return _make_status(
-        expected_config_path=config_path,
-        expected_interval=interval,
-        installed=installed,
-        enabled=active,
-        timer_active=active,
-        config_path=config_path if installed else None,
-        interval=interval if installed else None,
-    )
-```
-
 In the existing `test_install_windows_registers_task()`, make the preflight status
 see an absent task before asserting registration:
 
@@ -555,26 +499,17 @@ python -m pytest tests/test_dispatch_install.py -v -k "windows or another_config
 
 Expected: PASS. Preserve the missing-pywin32 and task-not-found tests by updating them to the rich status contract.
 
-- [ ] **Step 6: Commit the shared contract**
-
-```powershell
-git add agency/dispatch/install.py tests/test_dispatch_install.py
-git commit -m "feat(dispatch): validate global scheduler definition"
-```
-
----
-
-### Task 2: Linux and macOS Definition Parity
+#### Linux and macOS Definition Parity
 
 **Files:**
 - Modify: `agency/dispatch/install.py`
 - Modify: `tests/test_dispatch_install.py`
 
 **Interfaces:**
-- Consumes: `TimerStatus`, `_make_status()`, `_canonical_config_path()`, and `_paths_equal()` from Task 1.
+- Consumes: `TimerStatus`, `_make_status()`, `_canonical_config_path()`, and `_paths_equal()` implemented above in this task.
 - Produces: `_status_linux(config_path, interval) -> TimerStatus`, `_status_macos(config_path, interval) -> TimerStatus`, and canonical idempotent systemd/launchd definitions.
 
-- [ ] **Step 1: Add failing Linux and macOS definition tests**
+- [ ] **Step 6: Add failing Linux and macOS definition tests**
 
 Append these tests to `tests/test_dispatch_install.py`:
 
@@ -718,7 +653,7 @@ def test_uninstall_macos_unloads_and_removes_plist(tmp_path, monkeypatch):
     assert calls == [["launchctl", "unload", str(plist_path)]]
 ```
 
-- [ ] **Step 2: Run the Unix backend tests and verify shallow status fails**
+- [ ] **Step 7: Run the Unix backend tests and verify shallow status fails**
 
 Run:
 
@@ -728,7 +663,7 @@ python -m pytest tests/test_dispatch_install.py -v -k "linux_status or macos_sta
 
 Expected: FAIL because the status helpers do not parse expected config, action, and interval.
 
-- [ ] **Step 3: Implement structured systemd generation and inspection**
+- [ ] **Step 8: Implement structured systemd generation and inspection**
 
 Add `shlex`, then replace Linux install/status with:
 
@@ -852,7 +787,7 @@ def _status_linux(config_path: str | Path, interval: int) -> TimerStatus:
     )
 ```
 
-- [ ] **Step 4: Implement structured launchd generation and inspection**
+- [ ] **Step 9: Implement structured launchd generation and inspection**
 
 Add `plistlib`, then replace macOS install/status with:
 
@@ -962,7 +897,7 @@ def _status_macos(config_path: str | Path, interval: int) -> TimerStatus:
     )
 ```
 
-- [ ] **Step 5: Run and commit all platform scheduler tests**
+- [ ] **Step 10: Run and commit the complete cross-platform contract**
 
 Run:
 
@@ -976,12 +911,12 @@ Commit:
 
 ```powershell
 git add agency/dispatch/install.py tests/test_dispatch_install.py
-git commit -m "feat(dispatch): inspect systemd and launchd definitions"
+git commit -m "feat(dispatch): validate global scheduler definitions"
 ```
 
 ---
 
-### Task 3: Official Dispatch CLI and Explicit Atomic Config Writes
+### Task 2: Official Dispatch CLI and Explicit Atomic Config Writes
 
 **Files:**
 - Modify: `agency/config.py`
@@ -990,7 +925,7 @@ git commit -m "feat(dispatch): inspect systemd and launchd definitions"
 - Modify: `tests/test_cli.py`
 
 **Interfaces:**
-- Consumes: Scheduler API from Tasks 1-2.
+- Consumes: Scheduler API from Task 1.
 - Produces: `save_config_path(path: Path, config: dict) -> None`; `cmd_dispatch(args: argparse.Namespace) -> int`; approved nested CLI.
 - `dispatch status` exits: `0` active, `1` absent, `2` inactive, `3` misconfigured, `4` inspection or operation failure.
 
@@ -1250,7 +1185,7 @@ git commit -m "feat(cli): manage singleton dispatcher"
 
 ---
 
-### Task 4: Dashboard Runtime Status and Independent Schedule UI
+### Task 3: Dashboard Runtime Status and Independent Schedule UI
 
 **Files:**
 - Create: `tests/test_admin_dispatch.py`
@@ -1261,7 +1196,7 @@ git commit -m "feat(cli): manage singleton dispatcher"
 - Modify: `agency/templates/agent_profile.html`
 
 **Interfaces:**
-- Consumes: Rich `TimerStatus` and guarded `install_timer()` from Tasks 1-2.
+- Consumes: Rich `TimerStatus` and guarded `install_timer()` from Task 1.
 - Produces: `get_dispatch_status() -> TimerStatus`; `install_dispatch(interval: int | None = None, replace: bool = False) -> str | None`; platform-neutral UI with always-visible group schedules.
 
 - [ ] **Step 1: Create failing dashboard regression tests**
@@ -1614,7 +1549,7 @@ git commit -m "fix(dashboard): separate schedules from dispatcher health"
 
 ---
 
-### Task 5: Agency Setup Uses the Singleton Scheduler
+### Task 4: Agency Setup Uses the Singleton Scheduler
 
 **Files:**
 - Modify: `skills/agency-setup/SKILL.md`
@@ -1622,7 +1557,7 @@ git commit -m "fix(dashboard): separate schedules from dispatcher health"
 - Modify: `tests/test_agency_setup_skill.py`
 
 **Interfaces:**
-- Consumes: `christag-agency dispatch install --config PATH` and `christag-agency dispatch status --config PATH` from Task 3.
+- Consumes: `christag-agency dispatch install --config PATH` and `christag-agency dispatch status --config PATH` from Task 2.
 - Produces: Config-native 07:00/21:00 rules, no generated scheduler artifacts, and optional verified singleton scheduling.
 
 - [ ] **Step 1: Replace old template assertions with failing singleton assertions**
@@ -1812,7 +1747,7 @@ git commit -m "fix(agency-setup): use global dispatcher"
 
 ---
 
-### Task 6: Multi-Group Runner Proof and Documentation
+### Task 5: Multi-Group Runner Proof and Documentation
 
 **Files:**
 - Modify: `tests/test_dispatch_run.py`
@@ -1823,7 +1758,7 @@ git commit -m "fix(agency-setup): use global dispatcher"
 - Modify: `CLAUDE.md`
 
 **Interfaces:**
-- Consumes: `run_dispatch_cycle(config, config_path, launcher=None)` and all behavior from Tasks 1-5.
+- Consumes: `run_dispatch_cycle(config, config_path, launcher=None)` and all behavior from Tasks 1-4.
 - Produces: Proof that one heartbeat handles multiple enabled groups without duplicate events; user and maintainer documentation matching singleton ownership.
 
 - [ ] **Step 1: Add multi-group and duplicate-event regression tests**
@@ -1968,7 +1903,7 @@ Keep `/admin/dispatch/install` documented as the dashboard setup/repair endpoint
 Run:
 
 ```powershell
-$stale = rg -n "dispatch\.installed|Windows:.*Not yet automated|agents/shared/(dispatch|install-dispatch)|runs independently via its own timer|using a systemd timer" README.md CLAUDE.md kb skills/agency-setup
+$stale = rg -n "installed:\s*true|Set after first dispatch init|Windows:.*Not yet automated|agents/shared/(dispatch|install-dispatch)|runs independently via its own timer|using a systemd timer" README.md CLAUDE.md kb skills/agency-setup
 if ($LASTEXITCODE -eq 0) { $stale; throw 'Stale singleton-dispatch documentation remains.' }
 if ($LASTEXITCODE -ne 1) { throw "rg failed with exit code $LASTEXITCODE" }
 ```
@@ -1995,7 +1930,7 @@ git commit -m "docs(dispatch): document singleton scheduler"
 
 ---
 
-### Task 7: Verify UI and Replace the Local Windows Scheduler
+### Task 6: Verify UI and Replace the Local Windows Scheduler
 
 **Files:**
 - Delete ignored local file: `agents/shared/dispatch.ps1`
@@ -2004,7 +1939,7 @@ git commit -m "docs(dispatch): document singleton scheduler"
 - No production source files
 
 **Interfaces:**
-- Consumes: Fully tested CLI, dashboard, setup, and scheduler implementation from Tasks 1-6.
+- Consumes: Fully tested CLI, dashboard, setup, and scheduler implementation from Tasks 1-5.
 - Produces: One active local `AgencyDispatch` pointing at the authoritative checkout; no `christag-agency-dispatch` or obsolete generated scheduler scripts.
 
 - [ ] **Step 1: Confirm a clean authoritative checkout**
@@ -2217,7 +2152,7 @@ Expected: full tests pass, exactly one global task remains, CLI status exits `0`
 
 ## Execution Notes
 
-- Tasks 1-6 may run in an isolated worktree.
-- Integrate Tasks 1-6 into the permanent checkout before Task 7.
-- Task 7 changes real per-user Task Scheduler state and must not run in a temporary checkout, container, or remote environment.
-- If Task 7 rolls back, stop and report the exact failed verification; do not redesign the scheduler during cutover.
+- Tasks 1-5 may run in an isolated worktree.
+- Integrate Tasks 1-5 into the permanent checkout before Task 6.
+- Task 6 changes real per-user Task Scheduler state and must not run in a temporary checkout, container, or remote environment.
+- If Task 6 rolls back, stop and report the exact failed verification; do not redesign the scheduler during cutover.
