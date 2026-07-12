@@ -29,7 +29,7 @@
       </div>
       {% if dispatch.state != 'active' %}
       <form method="post" action="/admin/dispatch/install"
-            {% if dispatch.config_conflict %}onsubmit="return confirm('Replace the dispatcher for {{ dispatch.config_path }} with this dashboard config?')"{% endif %}>
+            {% if dispatch.config_conflict %}onsubmit="return confirm('Replace the existing dispatcher with this dashboard config?')"{% endif %}>
         {% if dispatch.config_conflict %}<input type="hidden" name="replace" value="true">{% endif %}
         <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
           {{ 'Set Up Dispatcher' if not dispatch.installed else 'Repair Dispatcher' }}
