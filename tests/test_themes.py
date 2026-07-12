@@ -15,3 +15,4 @@ def test_vscode_modern_theme_is_discovered_and_generates_css():
     assert "--t-sidebar-bg: #181818;" in css
     assert "--t-primary: #0078d4;" in css
     assert "--t-bg: #ffffff;" in css
+    assert ".nav-item.active { color: var(--t-sidebar-active-text, #fff) !important;" in css

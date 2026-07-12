@@ -190,7 +190,7 @@ body { background-color: var(--t-bg) !important; color: var(--t-text) !important
 nav#sidebar { background-color: var(--t-sidebar-bg) !important; }
 .nav-item { color: var(--t-sidebar-text) !important; }
 .nav-item:hover { color: var(--t-sidebar-active-text) !important; }
-.nav-item.active { color: #fff !important; background: var(--t-sidebar-active-bg) !important; }
+.nav-item.active { color: var(--t-sidebar-active-text, #fff) !important; background: var(--t-sidebar-active-bg) !important; }
 .nav-section { color: var(--t-sidebar-section) !important; }
 .theme-toggle { color: var(--t-sidebar-text) !important; }
 .theme-toggle:hover { color: var(--t-sidebar-active-text) !important; }
