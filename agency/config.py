@@ -1,7 +1,9 @@
 """Shared config utilities for Agency."""
 
 from dataclasses import dataclass
+import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
+import tempfile
 
 import yaml
 
@@ -12,6 +14,21 @@ def load_config_path(path: Path) -> dict:
         return {"agency": {"title": "Agency", "default_group": ""}, "groups": {}}
     with path.open(encoding="utf-8") as config_file:
         return yaml.safe_load(config_file) or {}
+
+
+def save_config_path(path: Path, config: dict) -> None:
+    """Atomically write an Agency config to an explicit path."""
+    destination = path.expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(dir=destination.parent, suffix=".yaml")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as config_file:
+            yaml.dump(config, config_file, default_flow_style=False, sort_keys=False)
+        os.replace(temporary_path, destination)
+    except Exception:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+        raise
 
 
 @dataclass(frozen=True)

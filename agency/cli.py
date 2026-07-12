@@ -1,9 +1,12 @@
 """Agency CLI — terminal interface for agent management."""
 import argparse
+from argparse import Namespace
 import json
 import sys
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 # Import shared helpers from the web app module
 from agency.app import (
@@ -13,6 +16,8 @@ from agency.app import (
     parse_frontmatter, update_frontmatter_field,
     GROUPS, CONFIG, CONFIG_PATH, run_server,
 )
+from agency.config import load_config_path, save_config_path
+from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status
 
 
 # ── ANSI Colors ──────────────────────────────────────────────────────────────
@@ -350,6 +355,78 @@ def cmd_decide(args):
             print(f"  {qid}: {ans}")
 
 
+# ── Dispatch Command ─────────────────────────────────────────────────────────
+
+def _dispatch_config_path(args: Namespace) -> Path:
+    selected = Path(args.config).expanduser() if args.config else CONFIG_PATH
+    config_path = selected.resolve()
+    if not config_path.is_file():
+        raise ValueError(f"Agency config not found: {config_path}")
+    return config_path
+
+
+def _dispatch_interval(config: dict) -> int:
+    return int(config.get("agency", {}).get("dispatch", {}).get("interval", 15))
+
+
+def _dispatch_status_exit_code(status: dict) -> int:
+    if status["error"]:
+        return 4
+    if not status["installed"]:
+        return 1
+    if status["state"] == "inactive":
+        return 2
+    if status["state"] == "misconfigured":
+        return 3
+    return 0
+
+
+def _print_dispatch_status(status: dict) -> None:
+    if status["error"]:
+        print(f"Dispatcher inspection failed: {status['error']}", file=sys.stderr)
+    elif not status["installed"]:
+        print("Dispatcher absent")
+    elif status["state"] == "misconfigured":
+        print("Dispatcher misconfigured: " + ", ".join(status["mismatches"]))
+    elif status["state"] == "inactive":
+        print("Dispatcher inactive")
+    else:
+        print(f"Dispatcher active: heartbeat every {status['expected_interval']} minutes")
+
+
+def cmd_dispatch(args: Namespace) -> int:
+    try:
+        config_path = _dispatch_config_path(args)
+    except ValueError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 4
+    config = load_config_path(config_path)
+    interval = args.interval if args.interval is not None else _dispatch_interval(config)
+    if args.dispatch_command == "install":
+        if args.interval is not None:
+            dispatch_config = config.setdefault("agency", {}).setdefault("dispatch", {})
+            dispatch_config.pop("installed", None)
+            dispatch_config["interval"] = interval
+            save_config_path(config_path, config)
+        error = install_timer(str(config_path), interval, replace=args.replace)
+        if error:
+            print(f"Error: {error}", file=sys.stderr)
+            return 4
+        status = get_timer_status(str(config_path), interval)
+        _print_dispatch_status(status)
+        return _dispatch_status_exit_code(status)
+    if args.dispatch_command == "status":
+        status = get_timer_status(str(config_path), interval)
+        _print_dispatch_status(status)
+        return _dispatch_status_exit_code(status)
+    error = uninstall_timer(str(config_path), force=args.force)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 4
+    print("Dispatcher removed")
+    return 0
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -402,6 +479,22 @@ def main():
     p.add_argument("--group", "-g")
     p.add_argument("--json", action="store_true")
 
+    # dispatch
+    dispatch_parser = sub.add_parser("dispatch", help="Manage the global dispatcher")
+    dispatch_sub = dispatch_parser.add_subparsers(dest="dispatch_command", required=True)
+    install_parser = dispatch_sub.add_parser("install", help="Install or repair the dispatcher")
+    install_parser.add_argument("--config")
+    install_parser.add_argument("--interval", type=int, choices=range(5, 121))
+    install_parser.add_argument("--replace", action="store_true")
+    install_parser.set_defaults(force=False)
+    status_parser = dispatch_sub.add_parser("status", help="Inspect the dispatcher")
+    status_parser.add_argument("--config")
+    status_parser.set_defaults(interval=None, replace=False, force=False)
+    uninstall_parser = dispatch_sub.add_parser("uninstall", help="Remove the dispatcher")
+    uninstall_parser.add_argument("--config")
+    uninstall_parser.add_argument("--force", action="store_true")
+    uninstall_parser.set_defaults(interval=None, replace=False)
+
     args = parser.parse_args()
 
     # No command → show help
@@ -409,8 +502,8 @@ def main():
         parser.print_help()
         return
 
-    # Initialize config for all commands except serve (which does its own init)
-    if args.command != "serve":
+    # Initialize config for all commands except serve and dispatch (which do their own init)
+    if args.command not in ("serve", "dispatch"):
         if not CONFIG_PATH.exists():
             print("Error: No config.yaml found. Run 'agency serve' first.", file=sys.stderr)
             sys.exit(1)
@@ -425,8 +518,11 @@ def main():
         "decisions": cmd_decisions,
         "decide": cmd_decide,
         "agents": cmd_agents,
+        "dispatch": cmd_dispatch,
     }
-    dispatch[args.command](args)
+    result = dispatch[args.command](args)
+    if isinstance(result, int) and result:
+        raise SystemExit(result)
 
 
 if __name__ == "__main__":

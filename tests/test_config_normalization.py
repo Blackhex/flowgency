@@ -325,3 +325,30 @@ def test_get_sandbox_root_list_drops_blank_entries():
     from agency.config import get_sandbox_root, SandboxSpec
     g = {"path": "/groups/agents", "sandbox_root": ["/a", "  "]}
     assert get_sandbox_root(g) == SandboxSpec(roots=(Path("/a"),), allowed_tools=())
+
+
+# Task 2 (Official Dispatch CLI): Tests for save_config_path
+
+import os
+import yaml
+
+from agency.config import save_config_path
+
+
+def test_save_config_path_atomically_replaces_destination(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    replacements = []
+    real_replace = os.replace
+
+    def recording_replace(source, destination):
+        replacements.append((Path(source), Path(destination)))
+        real_replace(source, destination)
+
+    monkeypatch.setattr("agency.config.os.replace", recording_replace)
+    save_config_path(
+        config_path,
+        {"agency": {"dispatch": {"interval": 30}}, "groups": {}},
+    )
+    assert replacements[0][1] == config_path
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["agency"]["dispatch"]["interval"] == 30
