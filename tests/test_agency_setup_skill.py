@@ -52,7 +52,7 @@ def test_setup_uses_official_singleton_scheduler_cli():
     assert "christag-agency dispatch install --config" in skill
     assert "christag-agency dispatch status --config" in skill
     assert "exactly one Agency dashboard" in skill
-    assert "does not create a fallback project scheduler" in skill
+    assert "do not create a fallback project scheduler" in skill
 
 
 def test_setup_does_not_generate_project_scheduler_artifacts():
@@ -88,3 +88,51 @@ def test_windows_launcher_still_resolves_real_copilot_executable():
     assert "-ieq '.exe'" in launcher
     assert "-EncodedCommand" in launcher
     assert "Invoke-Expression" not in launcher
+
+
+def test_registration_skipped_when_user_declines_config_selection():
+    """When multiple configs exist and user declines/skips/invalid, skip registration and scheduler setup."""
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
+        "### 4.8 Singleton Scheduler Setup", maxsplit=1
+    )[0]
+    # Normalize whitespace for assertions that may span line breaks
+    normalized = " ".join(registration.split())
+    
+    # Must ask when multiple valid configs exist
+    assert "If multiple remaining candidates are valid" in normalized
+    assert "ask which" in normalized
+    # Must skip registration when user declines/invalid
+    assert "If the user declines, skips, or supplies an invalid selection" in normalized
+    assert "skip registration and scheduler setup" in normalized
+    # Never pick implicitly
+    assert "never pick one implicitly" in normalized
+
+
+def test_scheduler_setup_only_after_registration_verification():
+    """Phase 4.8 scheduler setup offered only after registration and on-disk verification succeed."""
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    scheduler = skill.split("### 4.8 Singleton Scheduler Setup", maxsplit=1)[1]
+    # Normalize whitespace for assertions that may span line breaks
+    normalized = " ".join(scheduler.split())
+    
+    # Must enforce registration prerequisite
+    assert "Only offer scheduler setup after registration and on-disk verification succeed" in normalized
+    # Must report when registration was skipped
+    assert "If no authoritative Agency config was found" in normalized
+    assert "registration and scheduling were not completed" in normalized
+    assert "do not create a fallback project scheduler" in normalized
+
+
+def test_condition_rules_skipped_by_python_dispatcher():
+    """Rules with condition field are skipped by Python dispatcher, run by external code only."""
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
+        "### 4.8 Singleton Scheduler Setup", maxsplit=1
+    )[0]
+    
+    # Must explain condition rules are skipped by Python dispatcher
+    assert "condition:" in registration
+    assert "skipped by" in registration or "runs only when triggered by external" in registration
+    # Must say they remain read-only in UI
+    assert "read-only" in registration

@@ -256,8 +256,9 @@ when the document is a mapping with a top-level `groups` mapping and either a to
 `agency` mapping or at least one group containing both `name` and `path`. Skip malformed
 or unrelated candidates. The explicit `$AGENCY_CONFIG` wins when valid; otherwise prefer
 the valid workspace-local config. If multiple remaining candidates are valid, ask which
-one to use. If none are valid, skip registration silently and do not create a new Agency
-config file.
+one to use. If the user declines, skips, or supplies an invalid selection, skip
+registration and scheduler setup; never pick one implicitly. If none are valid, skip
+registration silently and do not create a new Agency config file.
 
 If found, ask: "Register this agent group with Agency dashboard at `{config_path}`? (Y/n)"
 
@@ -299,7 +300,9 @@ If yes:
   - Use `"07:00"` for morning assignments and `"21:00"` for evening assignments
   - Preserve assignment order and de-duplicate identical prompt/time pairs
   - If an assignment has a code condition (e.g., only runs when a DB check passes), add
-    `condition: condition-name` to the rule — these display as read-only in the UI
+    `condition: condition-name` to the rule. A rule with `condition` is skipped by
+    Agency's Python dispatcher and runs only when triggered by external code; it remains
+    read-only in the UI.
 - Write the parsed config atomically (temporary file plus replace), then parse it again
   and verify every generated agent name, integration, workspace, and dispatch rule.
   Immediately before replace, detect whether the source file changed since it was read.
@@ -321,7 +324,7 @@ If yes:
 
 Only offer scheduler setup after registration and on-disk verification succeed.
 If no authoritative Agency config was found, report that registration and
-scheduling were not completed and does not create a fallback project scheduler.
+scheduling were not completed and do not create a fallback project scheduler.
 
 Ask: "Enable the global Agency dispatcher? It checks all enabled groups every 15
 minutes. (Y/n)"
