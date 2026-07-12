@@ -4,6 +4,12 @@
       "description": "pytest -k keyword expression (e.g. 'copilot or dispatch')",
       "id": "testKeyword",
       "type": "promptString"
+    },
+    {
+      "args": "http://127.0.0.1:8500",
+      "command": "simpleBrowser.show",
+      "id": "openDashboard",
+      "type": "command"
     }
   ],
   "options": {
@@ -122,8 +128,9 @@
       "command": "christag-agency",
       "detail": "Start the Agency dashboard with hot-reload on http://127.0.0.1:8500",
       "group": "none",
+      "hide": true,
       "isBackground": true,
-      "label": "Serve dashboard (hot-reload)",
+      "label": "Serve dashboard (hot-reload): server",
       "problemMatcher": {
         "background": {
           "activeOnStart": true,
@@ -138,6 +145,26 @@
         }
       },
       "type": "shell"
+    },
+    {
+      "command": "${input:openDashboard}",
+      "hide": true,
+      "label": "Open dashboard (internal)",
+      "presentation": {
+        "reveal": "never"
+      },
+      "problemMatcher": [],
+      "type": "shell"
+    },
+    {
+      "dependsOn": [
+        "Serve dashboard (hot-reload): server",
+        "Open dashboard (internal)"
+      ],
+      "dependsOrder": "sequence",
+      "detail": "Start the Agency dashboard with hot-reload and open it internally on http://127.0.0.1:8500",
+      "group": "none",
+      "label": "Serve dashboard (hot-reload)"
     },
     {
       "args": [
