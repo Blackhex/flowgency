@@ -101,5 +101,6 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     response = client.get("/test/logs")
 
     assert response.status_code == 200
-    assert "20:06" in response.text
-    assert response.text.index("20:06") < response.text.index("OUT")
+    time_pos = response.text.index("20:06")
+    badge_pos = response.text.index(">OUT<", time_pos)
+    assert time_pos < badge_pos
