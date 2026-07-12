@@ -54,6 +54,26 @@ def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
     assert "execution_status: failed" in decision.read_text()
 
 
+def test_reconcile_projects_terminal_job_to_stale_decision(tmp_path):
+    group, decision, path = running_decision_job(tmp_path)
+    record = read_job(path)
+    write_job(
+        path,
+        replace(
+            record,
+            status="failed",
+            completed_at="2026-07-11T22:14:14+00:00",
+            execution_summary="Agent timed out after 300 seconds.",
+        ),
+    )
+
+    reconcile_jobs({"test": {"path": str(group)}})
+
+    decision_text = decision.read_text()
+    assert "execution_status: failed" in decision_text
+    assert "Agent timed out after 300 seconds." in decision_text
+
+
 def test_reconcile_leaves_uncertain_worker_running(tmp_path, monkeypatch):
     group, _, path = running_decision_job(tmp_path)
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: None)

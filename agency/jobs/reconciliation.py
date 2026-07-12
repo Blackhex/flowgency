@@ -65,6 +65,16 @@ def reconcile_jobs(groups: dict) -> ReconciliationResult:
             except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
                 logger.warning("Ignoring malformed job record %s: %s", path, error)
                 continue
+            if record.status in {"complete", "failed"}:
+                try:
+                    project_decision(record)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to project terminal job %s to its decision: %s",
+                        record.spec.job_id,
+                        error,
+                    )
+                continue
             if record.status != "running":
                 continue
             if worker_alive(record.worker_pid) is not False:
