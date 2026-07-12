@@ -39,7 +39,7 @@ def test_copilot_profile_verifies_real_executable_before_completion():
 def test_registration_revalidates_disk_after_dashboard_reload():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
-        "### 4.8 Scheduler Setup", maxsplit=1
+        "### 4.8 Singleton Scheduler Setup", maxsplit=1
     )[0]
 
     assert "parse the config from disk again" in registration
@@ -47,10 +47,44 @@ def test_registration_revalidates_disk_after_dashboard_reload():
     assert "stale pre-reload object" in registration
 
 
-def test_windows_templates_enumerate_real_copilot_executable():
-    templates = DISPATCH_TEMPLATES_PATH.read_text(encoding="utf-8")
+def test_setup_uses_official_singleton_scheduler_cli():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    assert "christag-agency dispatch install --config" in skill
+    assert "christag-agency dispatch status --config" in skill
+    assert "exactly one Agency dashboard" in skill
+    assert "does not create a fallback project scheduler" in skill
 
-    assert templates.count("Get-Command copilot -All") >= 2
-    assert templates.count("-ieq '.exe'") >= 2
-    assert templates.count("Start-Process -FilePath $copilotExe") >= 1
-    assert "Invoke-Expression" not in templates
+
+def test_setup_does_not_generate_project_scheduler_artifacts():
+    combined = SKILL_PATH.read_text(encoding="utf-8") + DISPATCH_TEMPLATES_PATH.read_text(encoding="utf-8")
+    forbidden = [
+        "agents/shared/dispatch.ps1",
+        "agents/shared/install-dispatch.ps1",
+        "agents/shared/dispatch.sh",
+        "## Windows Scheduled Task Installer Template",
+        "## Systemd Timer Template",
+        "## Systemd Service Template",
+    ]
+    for text in forbidden:
+        assert text not in combined
+
+
+def test_setup_writes_schedule_rules_directly_from_assignments():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
+        "### 4.8 Singleton Scheduler Setup",
+        maxsplit=1,
+    )[0]
+    assert 'at: "07:00"' in registration
+    assert 'at: "21:00"' in registration
+    assert "Phase 2 dispatch assignment" in registration
+    assert "generated platform dispatch script" not in registration
+
+
+def test_windows_launcher_still_resolves_real_copilot_executable():
+    templates = DISPATCH_TEMPLATES_PATH.read_text(encoding="utf-8")
+    launcher = templates.split("## Windows Terminal Launch Script Template", maxsplit=1)[1]
+    assert "Get-Command copilot -All" in launcher
+    assert "-ieq '.exe'" in launcher
+    assert "-EncodedCommand" in launcher
+    assert "Invoke-Expression" not in launcher

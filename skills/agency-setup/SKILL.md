@@ -4,7 +4,7 @@ description: >
   Set up a fully functional agent team for any codebase with Agency-compatible
   structure. Use when 'agency setup', 'set up agents', 'create agent team',
   'bootstrap agents', 'add agents to this project', or setting up agent
-  infrastructure for a repository. Creates agents/, shared/, dispatch, runtime
+  infrastructure for a repository. Creates agents/, shared/, prompts, runtime
   workspace, and optionally registers with Agency dashboard.
 user_invocable: true
 ---
@@ -20,10 +20,10 @@ tweaks.
 Before Phase 1, detect the host OS, active shell, and available agent CLI. Do not ask
 when these are unambiguous. Use these profiles throughout generation:
 
-| Profile | Identity file | Agent command | Scripts | Scheduler | Workspace |
-|---------|---------------|---------------|---------|-----------|-----------|
-| Claude/Linux | `CLAUDE.md` | `claude --dangerously-skip-permissions` | Bash (`.sh`) | user systemd | tmux |
-| Copilot/Windows | `AGENTS.md` | `copilot --autopilot --experimental` | PowerShell (`.ps1`) | Task Scheduler | Windows Terminal/PowerShell |
+| Profile | Identity file | Agent command | Workspace |
+|---------|---------------|---------------|-----------|
+| Claude/Linux | `CLAUDE.md` | `claude --dangerously-skip-permissions` | tmux |
+| Copilot/Windows | `AGENTS.md` | `copilot --autopilot --experimental` | Windows Terminal/PowerShell |
 
 - On Linux, preserve the existing Claude/Linux behavior unless another runtime is
   explicitly requested.
@@ -186,27 +186,23 @@ Follow the structure in `references/dispatch-templates.md`:
 
 If the maintainer/cleanup agent exists, also generate `{agent}-cleanup.md`.
 
-### 4.4 Dispatch Infrastructure
+### 4.4 Schedule Definitions
 
-Generate the selected profile from `references/dispatch-templates.md`. Both profiles
-must provide morning and evening events, a 15-run daily limit, event-marker
-deduplication, per-agent stdout/stderr logs, dry-run support, a 300-second agent
-timeout, proposal routing, and an idempotent scheduler setup.
+Do not generate a dispatcher, Task Scheduler installer, systemd unit, launchd
+plist, or project-specific scheduler artifact. Agency's global 15-minute
+heartbeat runs schedule rules stored in the singleton dashboard config.
 
-| Profile | Dispatcher | Scheduler artifacts | Agent invocation |
-|---------|------------|---------------------|------------------|
-| Claude/Linux | `agents/shared/dispatch.sh` | `{project}-dispatch.timer` and `{project}-dispatch.service` | `claude --dangerously-skip-permissions -p "$prompt"` |
-| Copilot/Windows | `agents/shared/dispatch.ps1` | `install-dispatch.ps1` registering `{project}-dispatch` | `copilot -p $prompt --autopilot --experimental` |
+Record each approved Phase 2 dispatch assignment for Phase 4.7:
 
-Use the project directory name as `{project}`. Apply these profile-specific execution
-requirements:
+- `morning` creates the routine rule at `"07:00"`.
+- `evening` creates the routine rule at `"21:00"`.
+- `morning, evening` creates both routine rules.
+- A generated cleanup prompt creates an additional cleanup rule at `"21:00"`.
+- All `at` values use the scheduler host's local time.
 
-- **Claude/Linux:** Generate the user-systemd timer and oneshot service for 7am and
-  9pm ET. Make `dispatch.sh` executable with `chmod +x`.
-- **Copilot/Windows:** Use PowerShell/.NET path and filesystem APIs. Invoke the real
-  `copilot.exe` rather than a wrapper during headless dispatch. Use `Start-Process`
-  with redirected output and timeout enforcement; never use `Invoke-Expression`.
-  Windows does not use executable mode bits.
+Use `dispatch.timeout: 300` and `dispatch.daily_limit: 15`. Marker
+deduplication, logs, timeout enforcement, and job lifecycle belong to Agency's
+Python dispatcher and job system.
 
 ### 4.5 Runtime Workspace
 
@@ -241,6 +237,11 @@ when no line exactly matches it. Use `Get-Content` and `Add-Content`; do not ove
 existing entries.
 
 ### 4.7 Agency Registration
+
+Agency supports exactly one Agency dashboard and one authoritative `config.yaml`
+per OS user. `$AGENCY_CONFIG` wins when valid. If more than one remaining valid
+candidate exists, ask which config is authoritative; never register or schedule
+all candidates.
 
 Build an ordered, de-duplicated list of Agency config candidates:
 1. `$AGENCY_CONFIG`, when set (explicit override)
@@ -277,29 +278,28 @@ If yes:
   `tmux` with the absolute `tmux-agents.sh` path on Linux. On Windows, use type `custom`
   with `config_path` set to the absolute `start-agents.ps1` path, `language: text`, and
   `launch_cmd` set to a safely quoted per-process PowerShell invocation of that script.
-- **Write dispatch config** derived from the generated platform dispatch script's event
-  handlers:
+- **Write dispatch config** directly from Phase 2 dispatch assignments:
   - Set `dispatch.enabled: true`, `dispatch.timeout: 300`, `dispatch.daily_limit: 15`
-  - For each agent→prompt mapping in the generated dispatch script, add a rule under
-    `dispatch.agents`:
+  - For each agent with a Phase 2 dispatch assignment, add rules under `dispatch.agents`:
     ```yaml
     dispatch:
       enabled: true
       timeout: 300
       daily_limit: 15
       agents:
-        agent-name:
-        - prompt: agent-name-routine.md
-          at: "07:00"        # From the morning event handler time
-        - prompt: agent-name-cleanup.md
-          at: "21:00"        # From the evening event handler time
+        morning-agent:
+        - prompt: morning-agent-routine.md
+          at: "07:00"
+        cleanup-agent:
+        - prompt: cleanup-agent-routine.md
+          at: "21:00"
+        - prompt: cleanup-agent-cleanup.md
+          at: "21:00"
     ```
-  - The `at` time should match the midpoint of the dispatch script's time window for
-    that event
+  - Use `"07:00"` for morning assignments and `"21:00"` for evening assignments
+  - Preserve assignment order and de-duplicate identical prompt/time pairs
   - If an assignment has a code condition (e.g., only runs when a DB check passes), add
     `condition: condition-name` to the rule — these display as read-only in the UI
-  - This keeps config.yaml in sync with the platform dispatch script so the Agency
-    dashboard shows accurate schedules
 - Write the parsed config atomically (temporary file plus replace), then parse it again
   and verify every generated agent name, integration, workspace, and dispatch rule.
   Immediately before replace, detect whether the source file changed since it was read.
@@ -317,39 +317,33 @@ If yes:
   If the second verification still drifts, stop and report the competing writer instead
   of retrying indefinitely.
 
-### 4.8 Scheduler Setup
+### 4.8 Singleton Scheduler Setup
 
-For Claude/Linux, ask: "Enable dispatch timer? This will run agents at 7am and 9pm ET
-daily. (Y/n)"
+Only offer scheduler setup after registration and on-disk verification succeed.
+If no authoritative Agency config was found, report that registration and
+scheduling were not completed and does not create a fallback project scheduler.
 
-If yes:
-- Symlink timer and service to `~/.config/systemd/user/`
-- Run `systemctl --user daemon-reload`
-- Run `systemctl --user enable --now {project}-dispatch.timer`
-- Show the next fire time
-
-For Copilot/Windows, ask: "Enable dispatch scheduling? This will run agents at 7am and
-9pm daily. (Y/n)"
+Ask: "Enable the global Agency dispatcher? It checks all enabled groups every 15
+minutes. (Y/n)"
 
 If yes:
-- Explain that Task Scheduler uses the Windows host's local time zone. If the host is
-  not in Eastern Time, ask whether `07:00`/`21:00` should be local time or converted
-  from ET before registering triggers.
-- Run `agents/shared/install-dispatch.ps1` in PowerShell without requesting elevation.
-- Register the task for the current user only and do not store or request credentials.
-- Show the registered task and its next run time with `Get-ScheduledTask` and
-  `Get-ScheduledTaskInfo`.
-- If ScheduledTasks cmdlets are unavailable or registration requires elevation, leave
-  the generated installer in place and report the exact manual command instead of
-  weakening execution policy globally.
+
+1. Resolve the selected config to a canonical absolute path.
+2. Run `christag-agency dispatch install --config "{config_path}"` as the current user.
+3. Run `christag-agency dispatch status --config "{config_path}"`.
+4. Treat only exit status 0 as verified active scheduling.
+5. If install reports another config, ask before rerunning with `--replace`.
+6. Never request credentials, elevation, or a weaker execution policy.
+7. If the CLI is unavailable, report the exact command to run after Agency is
+   installed; do not generate another scheduler implementation.
 
 ## Phase 5: Summary
 
 Print a summary of everything created:
 - Number of agents and their names
 - File count
-- Dispatch schedule (if enabled)
-- Agency registration status
+- Agency registration status (config path if registered)
+- Global dispatcher status (active/inactive/not configured)
 - Launch command: `agents/shared/tmux-agents.sh` on Claude/Linux or
   `.\agents\shared\start-agents.ps1` on Copilot/Windows
 
