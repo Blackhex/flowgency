@@ -102,7 +102,7 @@ Everything you can do in the browser, you can do from the terminal:
 ```
 agency inbox           # What needs your attention
 agency status          # Fleet overview
-agency approve <slug>  # Approve a proposal
+agency decide <slug>   # Decide on a proposal
 ```
 
 ### Edit everything in the browser
