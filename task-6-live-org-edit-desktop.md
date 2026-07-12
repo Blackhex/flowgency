@@ -1,0 +1,209 @@
+- generic [ref=f2e2] [box=0,0,1280,800]:
+  - navigation [ref=f2e3] [box=0,0,216,800]:
+    - link "Agency" [ref=f2e5] [cursor=pointer] [box=16,20,106,32]:
+      - /url: /
+    - generic [ref=f2e18] [box=0,56,216,682]:
+      - link [ref=f2e19] [cursor=pointer] [box=12,64,192,37]:
+        - /url: /
+      - link [ref=f2e24] [cursor=pointer] [box=12,118,192,37]:
+        - /url: /admin/
+      - link [ref=f2e29] [cursor=pointer] [box=12,154,192,37]:
+        - /url: /admin/dispatch
+      - link [ref=f2e33] [cursor=pointer] [box=12,191,192,37]:
+        - /url: /admin/groups
+      - link [ref=f2e37] [cursor=pointer] [box=12,228,192,37]:
+        - /url: /admin/integrations
+    - button "Dark mode" [ref=f2e42] [cursor=pointer] [box=12,747,192,37]
+  - main [ref=f2e46] [box=216,0,1064,800]:
+    - generic [ref=f2e48] [box=252,24,768,3213]:
+      - link "← Back to Groups" [ref=f2e50] [cursor=pointer] [box=252,28,116,19]:
+        - /url: /admin/groups
+      - 'heading "Edit: Agents" [level=1] [ref=f2e51] [box=252,74,768,32]'
+      - generic [ref=f2e52] [box=252,130,768,891]:
+        - heading "Group Settings" [level=2] [ref=f2e53] [box=277,154,719,20]
+        - generic [ref=f2e54] [box=277,194,719,61]:
+          - generic [ref=f2e55] [box=277,194,719,20]: Name
+          - textbox "Name" [ref=f2e56] [box=277,218,719,37]:
+            - /placeholder: e.g. Newsletter Agents
+            - text: Agents
+        - generic [ref=f2e57] [box=277,276,719,81]:
+          - generic [ref=f2e58] [box=277,276,719,20]: Path
+          - textbox "Path" [ref=f2e59] [box=277,300,719,37]:
+            - /placeholder: /path/to/your/agents
+            - text: C:\Users\black\Projects\christag-agency\agents
+          - paragraph [ref=f2e60] [box=277,341,719,16]: Filesystem path to the agents directory.
+        - generic [ref=f2e61] [box=277,377,719,145]:
+          - generic [ref=f2e62] [box=277,377,719,20]: Sandbox roots (optional)
+          - textbox "Sandbox roots (optional)" [ref=f2e63] [box=277,401,719,77]:
+            - /placeholder: "/path/to/repository/root\n/another/allowed/root"
+          - paragraph [ref=f2e64] [box=277,490,719,32]: Directories the agent may read and write at runtime — one path per line. The first line is the working directory (relative writes land there). Leave empty to give agents full filesystem access. Does not affect the dashboard's file browsers.
+        - generic [ref=f2e65] [box=277,542,719,64]:
+          - generic [ref=f2e66] [box=277,542,719,20]: Allowed tools (optional)
+          - generic [ref=f2e67] [box=277,566,719,20]:
+            - generic [ref=f2e68] [box=277,566,63,20]
+            - generic [ref=f2e70] [box=356,566,63,20]
+          - paragraph [ref=f2e72] [box=277,590,719,16]: Tools the agent may use at runtime. Leave all unchecked to grant every tool. Read and search are always available.
+        - generic [ref=f2e73] [box=277,626,719,205]:
+          - generic [ref=f2e74] [box=277,626,719,20]: Workspaces
+          - paragraph [ref=f2e75] [box=277,650,719,16]: Define how you interact with this agent group at runtime.
+          - generic [ref=f2e77] [box=277,678,719,112]:
+            - generic [ref=f2e78] [box=290,690,693,29]
+            - textbox "Config (JSON)" [ref=f2e82] [box=290,728,693,41]: "{ \"label\": \"Agent Terminals\", \"config_path\": \"C:\\\\Users\\\\black\\\\Projects\\\\christag-agency\\\\agents\\\\shared\\\\start-agents.ps1\", \"language\": \"text\", \"launch_cmd\": \"pwsh.exe -NoProfile -File \\\"C:\\\\Users\\\\black\\\\Projects\\\\christag-agency\\\\agents\\\\shared\\\\start-agents.ps1\\\"\" }"
+          - button "+ Add Workspace" [ref=f2e83] [cursor=pointer] [box=277,801,139,29]
+        - generic [ref=f2e84] [box=277,851,719,81]:
+          - generic [ref=f2e85] [box=277,851,719,20]: Default Integration
+          - combobox [ref=f2e86] [box=277,875,384,37]:
+            - option "Claude Code" [box=0,0,0,0]
+            - option "OpenAI Codex" [box=0,0,0,0]
+            - option "GitHub Copilot" [selected] [box=0,0,0,0]
+            - option "Google Gemini CLI" [box=0,0,0,0]
+            - option "Aider" [box=0,0,0,0]
+            - option "Goose" [box=0,0,0,0]
+            - option "OpenCode" [box=0,0,0,0]
+            - option "Pi" [box=0,0,0,0]
+            - option "Custom Script" [box=0,0,0,0]
+            - option "SDK (File Contract)" [box=0,0,0,0]
+          - paragraph [ref=f2e87] [box=277,916,719,16]: Default LLM tool for agents in this group.
+        - generic [ref=f2e88] [box=277,952,719,44]:
+          - button "Save Group Settings" [ref=f2e89] [cursor=pointer] [box=277,960,166,36]
+          - link "Cancel" [ref=f2e90] [cursor=pointer] [box=455,960,78,36]:
+            - /url: /admin/
+      - generic [ref=f2e91] [box=252,1053,768,1455]:
+        - heading "Dispatch Schedule" [level=2] [ref=f2e92] [box=277,1077,719,20]
+        - generic [ref=f2e93] [box=277,1117,719,33]:
+          - generic [ref=f2e94] [box=277,1124,73,20]:
+            - checkbox "Enabled" [checked] [ref=f2e95] [box=277,1127,13,13]
+            - text: Enabled
+          - generic [ref=f2e96] [box=374,1117,178,33]:
+            - generic [ref=f2e97] [box=374,1124,74,20]: Timeout (s)
+            - spinbutton "Timeout (s)" [ref=f2e98] [box=457,1117,96,33]: "300"
+          - generic [ref=f2e99] [box=577,1117,151,33]:
+            - generic [ref=f2e100] [box=577,1124,63,20]: Daily limit
+            - spinbutton "Daily limit" [ref=f2e101] [box=648,1117,80,33]: "15"
+        - generic [ref=f2e102] [box=277,1171,719,103]:
+          - generic [ref=f2e103] [box=294,1187,685,24]:
+            - heading "product-strategist" [level=3] [ref=f2e104] [box=294,1189,128,20]
+            - button "+ Add rule" [ref=f2e105] [cursor=pointer] [box=906,1187,73,24]
+          - generic [ref=f2e107] [box=294,1223,685,33]:
+            - combobox [ref=f2e108] [box=294,1223,73,33]
+            - textbox "09:00 or 6h" [ref=f2e109] [box=375,1223,128,33]: 07:00
+            - combobox [ref=f2e110] [box=511,1223,399,33]
+            - button "Remove" [ref=f2e111] [cursor=pointer] [box=918,1226,61,28]
+        - generic [ref=f2e112] [box=277,1293,719,103]:
+          - generic [ref=f2e113] [box=294,1310,685,24]:
+            - heading "program-manager" [level=3] [ref=f2e114] [box=294,1312,124,20]
+            - button "+ Add rule" [ref=f2e115] [cursor=pointer] [box=906,1310,73,24]
+          - generic [ref=f2e117] [box=294,1346,685,33]:
+            - combobox [ref=f2e118] [box=294,1346,73,33]
+            - textbox "09:00 or 6h" [ref=f2e119] [box=375,1346,128,33]: 07:00
+            - combobox [ref=f2e120] [box=511,1346,399,33]
+            - button "Remove" [ref=f2e121] [cursor=pointer] [box=918,1349,61,28]
+        - generic [ref=f2e122] [box=277,1416,719,103]:
+          - generic [ref=f2e123] [box=294,1433,685,24]:
+            - heading "ecosystem-analyst" [level=3] [ref=f2e124] [box=294,1435,131,20]
+            - button "+ Add rule" [ref=f2e125] [cursor=pointer] [box=906,1433,73,24]
+          - generic [ref=f2e127] [box=294,1469,685,33]:
+            - combobox [ref=f2e128] [box=294,1469,73,33]
+            - textbox "09:00 or 6h" [ref=f2e129] [box=375,1469,128,33]: 07:00
+            - combobox [ref=f2e130] [box=511,1469,399,33]
+            - button "Remove" [ref=f2e131] [cursor=pointer] [box=918,1471,61,28]
+        - generic [ref=f2e132] [box=277,1539,719,103]:
+          - generic [ref=f2e133] [box=294,1555,685,24]:
+            - heading "application-builder" [level=3] [ref=f2e134] [box=294,1557,132,20]
+            - button "+ Add rule" [ref=f2e135] [cursor=pointer] [box=906,1555,73,24]
+          - generic [ref=f2e137] [box=294,1591,685,33]:
+            - combobox [ref=f2e138] [box=294,1591,73,33]
+            - textbox "09:00 or 6h" [ref=f2e139] [box=375,1591,128,33]: 21:00
+            - combobox [ref=f2e140] [box=511,1591,399,33]
+            - button "Remove" [ref=f2e141] [cursor=pointer] [box=918,1594,61,28]
+        - generic [ref=f2e142] [box=277,1661,719,103]:
+          - generic [ref=f2e143] [box=294,1678,685,24]:
+            - heading "jobs-builder" [level=3] [ref=f2e144] [box=294,1680,84,20]
+            - button "+ Add rule" [ref=f2e145] [cursor=pointer] [box=906,1678,73,24]
+          - generic [ref=f2e147] [box=294,1714,685,33]:
+            - combobox [ref=f2e148] [box=294,1714,73,33]
+            - textbox "09:00 or 6h" [ref=f2e149] [box=375,1714,128,33]: 21:00
+            - combobox [ref=f2e150] [box=511,1714,399,33]
+            - button "Remove" [ref=f2e151] [cursor=pointer] [box=918,1717,61,28]
+        - generic [ref=f2e152] [box=277,1784,719,103]:
+          - generic [ref=f2e153] [box=294,1801,685,24]:
+            - heading "integration-builder" [level=3] [ref=f2e154] [box=294,1803,130,20]
+            - button "+ Add rule" [ref=f2e155] [cursor=pointer] [box=906,1801,73,24]
+          - generic [ref=f2e157] [box=294,1837,685,33]:
+            - combobox [ref=f2e158] [box=294,1837,73,33]
+            - textbox "09:00 or 6h" [ref=f2e159] [box=375,1837,128,33]: 21:00
+            - combobox [ref=f2e160] [box=511,1837,399,33]
+            - button "Remove" [ref=f2e161] [cursor=pointer] [box=918,1839,61,28]
+        - generic [ref=f2e162] [box=277,1907,719,103]:
+          - generic [ref=f2e163] [box=294,1923,685,24]:
+            - heading "experience-builder" [level=3] [ref=f2e164] [box=294,1925,131,20]
+            - button "+ Add rule" [ref=f2e165] [cursor=pointer] [box=906,1923,73,24]
+          - generic [ref=f2e167] [box=294,1959,685,33]:
+            - combobox [ref=f2e168] [box=294,1959,73,33]
+            - textbox "09:00 or 6h" [ref=f2e169] [box=375,1959,128,33]: 21:00
+            - combobox [ref=f2e170] [box=511,1959,399,33]
+            - button "Remove" [ref=f2e171] [cursor=pointer] [box=918,1962,61,28]
+        - generic [ref=f2e172] [box=277,2029,719,103]:
+          - generic [ref=f2e173] [box=294,2046,685,24]:
+            - heading "test-architect" [level=3] [ref=f2e174] [box=294,2048,97,20]
+            - button "+ Add rule" [ref=f2e175] [cursor=pointer] [box=906,2046,73,24]
+          - generic [ref=f2e177] [box=294,2082,685,33]:
+            - combobox [ref=f2e178] [box=294,2082,73,33]
+            - textbox "09:00 or 6h" [ref=f2e179] [box=375,2082,128,33]: 07:00
+            - combobox [ref=f2e180] [box=511,2082,399,33]
+            - button "Remove" [ref=f2e181] [cursor=pointer] [box=918,2085,61,28]
+        - generic [ref=f2e182] [box=277,2152,719,144]:
+          - generic [ref=f2e183] [box=294,2169,685,24]:
+            - heading "reliability-auditor" [level=3] [ref=f2e184] [box=294,2171,120,20]
+            - button "+ Add rule" [ref=f2e185] [cursor=pointer] [box=906,2169,73,24]
+          - generic [ref=f2e186] [box=294,2205,685,75]:
+            - generic [ref=f2e187] [box=294,2205,685,33]
+            - generic [ref=f2e192] [box=294,2246,685,33]
+        - generic [ref=f2e197] [box=277,2316,719,103]:
+          - generic [ref=f2e198] [box=294,2333,685,24]:
+            - heading "security-reviewer" [level=3] [ref=f2e199] [box=294,2335,121,20]
+            - button "+ Add rule" [ref=f2e200] [cursor=pointer] [box=906,2333,73,24]
+          - generic [ref=f2e202] [box=294,2369,685,33]:
+            - combobox [ref=f2e203] [box=294,2369,73,33]
+            - textbox "09:00 or 6h" [ref=f2e204] [box=375,2369,128,33]: 21:00
+            - combobox [ref=f2e205] [box=511,2369,399,33]
+            - button "Remove" [ref=f2e206] [cursor=pointer] [box=918,2371,61,28]
+        - button "Save Dispatch Config" [ref=f2e208] [cursor=pointer] [box=277,2447,172,36]
+      - generic [ref=f2e209] [box=252,2539,768,697]:
+        - generic [ref=f2e210] [box=252,2539,768,28]:
+          - heading "Agent Roster" [level=2] [ref=f2e211] [box=252,2539,126,28]
+          - generic [ref=f2e212] [box=823,2539,197,28]:
+            - button "Auto-detect" [ref=f2e213] [cursor=pointer] [box=823,2539,96,28]
+            - button "+ Add Agent" [ref=f2e214] [cursor=pointer] [box=927,2539,94,28]
+        - generic [ref=f2e215] [box=252,2583,768,625]:
+          - generic [ref=f2e216] [box=252,2583,768,55]:
+            - generic [ref=f2e217] [box=273,2601,259,20]
+            - generic [ref=f2e227] [box=865,2598,135,26]
+          - generic [ref=f2e231] [box=252,2647,768,55]:
+            - generic [ref=f2e232] [box=273,2664,255,20]
+            - generic [ref=f2e242] [box=865,2661,135,26]
+          - generic [ref=f2e246] [box=252,2710,768,55]:
+            - generic [ref=f2e247] [box=273,2728,262,20]
+            - generic [ref=f2e257] [box=865,2725,135,26]
+          - generic [ref=f2e261] [box=252,2773,768,55]:
+            - generic [ref=f2e262] [box=273,2791,263,20]
+            - generic [ref=f2e272] [box=865,2788,135,26]
+          - generic [ref=f2e276] [box=252,2837,768,55]:
+            - generic [ref=f2e277] [box=273,2854,215,20]
+            - generic [ref=f2e287] [box=865,2851,135,26]
+          - generic [ref=f2e291] [box=252,2900,768,55]:
+            - generic [ref=f2e292] [box=273,2918,261,20]
+            - generic [ref=f2e302] [box=865,2915,135,26]
+          - generic [ref=f2e306] [box=252,2963,768,55]:
+            - generic [ref=f2e307] [box=273,2981,262,20]
+            - generic [ref=f2e317] [box=865,2978,135,26]
+          - generic [ref=f2e321] [box=252,3027,768,55]:
+            - generic [ref=f2e322] [box=273,3044,228,20]
+            - generic [ref=f2e332] [box=865,3041,135,26]
+          - generic [ref=f2e336] [box=252,3090,768,55]:
+            - generic [ref=f2e337] [box=273,3108,251,20]
+            - generic [ref=f2e347] [box=865,3105,135,26]
+          - generic [ref=f2e351] [box=252,3153,768,55]:
+            - generic [ref=f2e352] [box=273,3171,252,20]
+            - generic [ref=f2e362] [box=865,3168,135,26]
+        - paragraph [ref=f2e366] [box=252,3221,768,16]: 10 agents in group. Hover a row for actions.

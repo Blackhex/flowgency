@@ -1,0 +1,485 @@
+- generic [ref=f2e2]:
+  - navigation [ref=f2e3]:
+    - link "Agency" [ref=f2e5] [cursor=pointer]:
+      - /url: /
+    - generic [ref=f2e18]:
+      - link [ref=f2e19] [cursor=pointer]:
+        - /url: /
+      - link [ref=f2e24] [cursor=pointer]:
+        - /url: /admin/
+      - link [ref=f2e29] [cursor=pointer]:
+        - /url: /admin/dispatch
+      - link [ref=f2e33] [cursor=pointer]:
+        - /url: /admin/groups
+      - link [ref=f2e37] [cursor=pointer]:
+        - /url: /admin/integrations
+    - button "Dark mode" [ref=f2e42] [cursor=pointer]
+  - main [ref=f2e46]:
+    - generic [ref=f2e48]:
+      - link "← Back to Groups" [ref=f2e50] [cursor=pointer]:
+        - /url: /admin/groups
+      - 'heading "Edit: Agents" [level=1] [ref=f2e51]'
+      - generic [ref=f2e52]:
+        - heading "Group Settings" [level=2] [ref=f2e53]
+        - generic [ref=f2e54]:
+          - generic [ref=f2e55]: Name
+          - textbox "Name" [ref=f2e56]:
+            - /placeholder: e.g. Newsletter Agents
+            - text: Agents
+        - generic [ref=f2e57]:
+          - generic [ref=f2e58]: Path
+          - textbox "Path" [ref=f2e59]:
+            - /placeholder: /path/to/your/agents
+            - text: C:\Users\black\Projects\christag-agency\agents
+          - paragraph [ref=f2e60]: Filesystem path to the agents directory.
+        - generic [ref=f2e61]:
+          - generic [ref=f2e62]: Sandbox roots (optional)
+          - textbox "Sandbox roots (optional)" [ref=f2e63]:
+            - /placeholder: "/path/to/repository/root\n/another/allowed/root"
+          - paragraph [ref=f2e64]: Directories the agent may read and write at runtime — one path per line. The first line is the working directory (relative writes land there). Leave empty to give agents full filesystem access. Does not affect the dashboard's file browsers.
+        - generic [ref=f2e65]:
+          - generic [ref=f2e66]: Allowed tools (optional)
+          - generic [ref=f2e67]:
+            - generic [ref=f2e68]:
+              - checkbox "shell" [ref=f2e69]
+              - text: shell
+            - generic [ref=f2e70]:
+              - checkbox "write" [ref=f2e71]
+              - text: write
+          - paragraph [ref=f2e72]: Tools the agent may use at runtime. Leave all unchecked to grant every tool. Read and search are always available.
+        - generic [ref=f2e73]:
+          - generic [ref=f2e74]: Workspaces
+          - paragraph [ref=f2e75]: Define how you interact with this agent group at runtime.
+          - generic [ref=f2e77]:
+            - generic [ref=f2e78]:
+              - textbox "Workspace name" [ref=f2e79]: Agent Terminals
+              - combobox [ref=f2e80]:
+                - option "tmux"
+                - option "Cursor"
+                - option "Superset"
+                - option "IDE"
+                - option "Chat"
+                - option "Custom" [selected]
+              - button "×" [ref=f2e81] [cursor=pointer]
+            - textbox "Config (JSON)" [ref=f2e82]: "{ \"label\": \"Agent Terminals\", \"config_path\": \"C:\\\\Users\\\\black\\\\Projects\\\\christag-agency\\\\agents\\\\shared\\\\start-agents.ps1\", \"language\": \"text\", \"launch_cmd\": \"pwsh.exe -NoProfile -File \\\"C:\\\\Users\\\\black\\\\Projects\\\\christag-agency\\\\agents\\\\shared\\\\start-agents.ps1\\\"\" }"
+          - button "+ Add Workspace" [ref=f2e83] [cursor=pointer]
+        - generic [ref=f2e84]:
+          - generic [ref=f2e85]: Default Integration
+          - combobox [ref=f2e86]:
+            - option "Claude Code"
+            - option "OpenAI Codex"
+            - option "GitHub Copilot" [selected]
+            - option "Google Gemini CLI"
+            - option "Aider"
+            - option "Goose"
+            - option "OpenCode"
+            - option "Pi"
+            - option "Custom Script"
+            - option "SDK (File Contract)"
+          - paragraph [ref=f2e87]: Default LLM tool for agents in this group.
+        - generic [ref=f2e88]:
+          - button "Save Group Settings" [ref=f2e89] [cursor=pointer]
+          - link "Cancel" [ref=f2e90] [cursor=pointer]:
+            - /url: /admin/
+      - generic [ref=f2e91]:
+        - heading "Dispatch Schedule" [level=2] [ref=f2e92]
+        - generic [ref=f2e93]:
+          - generic [ref=f2e94]:
+            - checkbox "Enabled" [checked] [ref=f2e95]
+            - text: Enabled
+          - generic [ref=f2e96]:
+            - generic [ref=f2e97]: Timeout (s)
+            - spinbutton "Timeout (s)" [ref=f2e98]: "300"
+          - generic [ref=f2e99]:
+            - generic [ref=f2e100]: Daily limit
+            - spinbutton "Daily limit" [ref=f2e101]: "15"
+        - generic [ref=f2e102]:
+          - generic [ref=f2e103]:
+            - heading "product-strategist" [level=3] [ref=f2e104]
+            - button "+ Add rule" [ref=f2e105] [cursor=pointer]
+          - generic [ref=f2e107]:
+            - combobox [ref=f2e108]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e109]: 07:00
+            - combobox [ref=f2e110]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md"
+              - option "ecosystem-analyst-routine.md"
+              - option "experience-builder-routine.md"
+              - option "integration-builder-routine.md"
+              - option "jobs-builder-routine.md"
+              - option "product-strategist-routine.md" [selected]
+              - option "program-manager-routine.md"
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md"
+              - option "test-architect-routine.md"
+            - button "Remove" [ref=f2e111] [cursor=pointer]
+        - generic [ref=f2e112]:
+          - generic [ref=f2e113]:
+            - heading "program-manager" [level=3] [ref=f2e114]
+            - button "+ Add rule" [ref=f2e115] [cursor=pointer]
+          - generic [ref=f2e117]:
+            - combobox [ref=f2e118]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e119]: 07:00
+            - combobox [ref=f2e120]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md"
+              - option "ecosystem-analyst-routine.md"
+              - option "experience-builder-routine.md"
+              - option "integration-builder-routine.md"
+              - option "jobs-builder-routine.md"
+              - option "product-strategist-routine.md"
+              - option "program-manager-routine.md" [selected]
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md"
+              - option "test-architect-routine.md"
+            - button "Remove" [ref=f2e121] [cursor=pointer]
+        - generic [ref=f2e122]:
+          - generic [ref=f2e123]:
+            - heading "ecosystem-analyst" [level=3] [ref=f2e124]
+            - button "+ Add rule" [ref=f2e125] [cursor=pointer]
+          - generic [ref=f2e127]:
+            - combobox [ref=f2e128]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e129]: 07:00
+            - combobox [ref=f2e130]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md"
+              - option "ecosystem-analyst-routine.md" [selected]
+              - option "experience-builder-routine.md"
+              - option "integration-builder-routine.md"
+              - option "jobs-builder-routine.md"
+              - option "product-strategist-routine.md"
+              - option "program-manager-routine.md"
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md"
+              - option "test-architect-routine.md"
+            - button "Remove" [ref=f2e131] [cursor=pointer]
+        - generic [ref=f2e132]:
+          - generic [ref=f2e133]:
+            - heading "application-builder" [level=3] [ref=f2e134]
+            - button "+ Add rule" [ref=f2e135] [cursor=pointer]
+          - generic [ref=f2e137]:
+            - combobox [ref=f2e138]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e139]: 21:00
+            - combobox [ref=f2e140]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md" [selected]
+              - option "ecosystem-analyst-routine.md"
+              - option "experience-builder-routine.md"
+              - option "integration-builder-routine.md"
+              - option "jobs-builder-routine.md"
+              - option "product-strategist-routine.md"
+              - option "program-manager-routine.md"
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md"
+              - option "test-architect-routine.md"
+            - button "Remove" [ref=f2e141] [cursor=pointer]
+        - generic [ref=f2e142]:
+          - generic [ref=f2e143]:
+            - heading "jobs-builder" [level=3] [ref=f2e144]
+            - button "+ Add rule" [ref=f2e145] [cursor=pointer]
+          - generic [ref=f2e147]:
+            - combobox [ref=f2e148]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e149]: 21:00
+            - combobox [ref=f2e150]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md"
+              - option "ecosystem-analyst-routine.md"
+              - option "experience-builder-routine.md"
+              - option "integration-builder-routine.md"
+              - option "jobs-builder-routine.md" [selected]
+              - option "product-strategist-routine.md"
+              - option "program-manager-routine.md"
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md"
+              - option "test-architect-routine.md"
+            - button "Remove" [ref=f2e151] [cursor=pointer]
+        - generic [ref=f2e152]:
+          - generic [ref=f2e153]:
+            - heading "integration-builder" [level=3] [ref=f2e154]
+            - button "+ Add rule" [ref=f2e155] [cursor=pointer]
+          - generic [ref=f2e157]:
+            - combobox [ref=f2e158]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e159]: 21:00
+            - combobox [ref=f2e160]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md"
+              - option "ecosystem-analyst-routine.md"
+              - option "experience-builder-routine.md"
+              - option "integration-builder-routine.md" [selected]
+              - option "jobs-builder-routine.md"
+              - option "product-strategist-routine.md"
+              - option "program-manager-routine.md"
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md"
+              - option "test-architect-routine.md"
+            - button "Remove" [ref=f2e161] [cursor=pointer]
+        - generic [ref=f2e162]:
+          - generic [ref=f2e163]:
+            - heading "experience-builder" [level=3] [ref=f2e164]
+            - button "+ Add rule" [ref=f2e165] [cursor=pointer]
+          - generic [ref=f2e167]:
+            - combobox [ref=f2e168]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e169]: 21:00
+            - combobox [ref=f2e170]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md"
+              - option "ecosystem-analyst-routine.md"
+              - option "experience-builder-routine.md" [selected]
+              - option "integration-builder-routine.md"
+              - option "jobs-builder-routine.md"
+              - option "product-strategist-routine.md"
+              - option "program-manager-routine.md"
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md"
+              - option "test-architect-routine.md"
+            - button "Remove" [ref=f2e171] [cursor=pointer]
+        - generic [ref=f2e172]:
+          - generic [ref=f2e173]:
+            - heading "test-architect" [level=3] [ref=f2e174]
+            - button "+ Add rule" [ref=f2e175] [cursor=pointer]
+          - generic [ref=f2e177]:
+            - combobox [ref=f2e178]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e179]: 07:00
+            - combobox [ref=f2e180]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md"
+              - option "ecosystem-analyst-routine.md"
+              - option "experience-builder-routine.md"
+              - option "integration-builder-routine.md"
+              - option "jobs-builder-routine.md"
+              - option "product-strategist-routine.md"
+              - option "program-manager-routine.md"
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md"
+              - option "test-architect-routine.md" [selected]
+            - button "Remove" [ref=f2e181] [cursor=pointer]
+        - generic [ref=f2e182]:
+          - generic [ref=f2e183]:
+            - heading "reliability-auditor" [level=3] [ref=f2e184]
+            - button "+ Add rule" [ref=f2e185] [cursor=pointer]
+          - generic [ref=f2e186]:
+            - generic [ref=f2e187]:
+              - combobox [ref=f2e188]:
+                - option "at" [selected]
+                - option "every"
+              - textbox "09:00 or 6h" [ref=f2e189]: 21:00
+              - combobox [ref=f2e190]:
+                - option "-- prompt --"
+                - option "_observation-system-steps.md"
+                - option "application-builder-routine.md"
+                - option "ecosystem-analyst-routine.md"
+                - option "experience-builder-routine.md"
+                - option "integration-builder-routine.md"
+                - option "jobs-builder-routine.md"
+                - option "product-strategist-routine.md"
+                - option "program-manager-routine.md"
+                - option "reliability-auditor-cleanup.md"
+                - option "reliability-auditor-routine.md" [selected]
+                - option "security-reviewer-routine.md"
+                - option "test-architect-routine.md"
+              - button "Remove" [ref=f2e191] [cursor=pointer]
+            - generic [ref=f2e192]:
+              - combobox [ref=f2e193]:
+                - option "at" [selected]
+                - option "every"
+              - textbox "09:00 or 6h" [ref=f2e194]: 21:00
+              - combobox [ref=f2e195]:
+                - option "-- prompt --"
+                - option "_observation-system-steps.md"
+                - option "application-builder-routine.md"
+                - option "ecosystem-analyst-routine.md"
+                - option "experience-builder-routine.md"
+                - option "integration-builder-routine.md"
+                - option "jobs-builder-routine.md"
+                - option "product-strategist-routine.md"
+                - option "program-manager-routine.md"
+                - option "reliability-auditor-cleanup.md" [selected]
+                - option "reliability-auditor-routine.md"
+                - option "security-reviewer-routine.md"
+                - option "test-architect-routine.md"
+              - button "Remove" [ref=f2e196] [cursor=pointer]
+        - generic [ref=f2e197]:
+          - generic [ref=f2e198]:
+            - heading "security-reviewer" [level=3] [ref=f2e199]
+            - button "+ Add rule" [ref=f2e200] [cursor=pointer]
+          - generic [ref=f2e202]:
+            - combobox [ref=f2e203]:
+              - option "at" [selected]
+              - option "every"
+            - textbox "09:00 or 6h" [ref=f2e204]: 21:00
+            - combobox [ref=f2e205]:
+              - option "-- prompt --"
+              - option "_observation-system-steps.md"
+              - option "application-builder-routine.md"
+              - option "ecosystem-analyst-routine.md"
+              - option "experience-builder-routine.md"
+              - option "integration-builder-routine.md"
+              - option "jobs-builder-routine.md"
+              - option "product-strategist-routine.md"
+              - option "program-manager-routine.md"
+              - option "reliability-auditor-cleanup.md"
+              - option "reliability-auditor-routine.md"
+              - option "security-reviewer-routine.md" [selected]
+              - option "test-architect-routine.md"
+            - button "Remove" [ref=f2e206] [cursor=pointer]
+        - button "Save Dispatch Config" [ref=f2e208] [cursor=pointer]
+      - generic [ref=f2e209]:
+        - generic [ref=f2e210]:
+          - heading "Agent Roster" [level=2] [ref=f2e211]
+          - generic [ref=f2e212]:
+            - button "Auto-detect" [ref=f2e213] [cursor=pointer]
+            - button "+ Add Agent" [ref=f2e214] [cursor=pointer]
+        - generic [ref=f2e215]:
+          - generic [ref=f2e216]:
+            - generic [ref=f2e217]:
+              - generic "Healthy — directory and definition present" [ref=f2e218]
+              - link "product-strategist" [ref=f2e219] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/product-strategist
+              - generic [ref=f2e220]:
+                - generic "Definition present" [ref=f2e221]: role
+                - generic "memory.md present" [ref=f2e224]: mem
+            - generic [ref=f2e227]:
+              - link "Manage" [ref=f2e228] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/product-strategist
+              - button "Remove" [ref=f2e230] [cursor=pointer]
+          - generic [ref=f2e231]:
+            - generic [ref=f2e232]:
+              - generic "Healthy — directory and definition present" [ref=f2e233]
+              - link "program-manager" [ref=f2e234] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/program-manager
+              - generic [ref=f2e235]:
+                - generic "Definition present" [ref=f2e236]: role
+                - generic "memory.md present" [ref=f2e239]: mem
+            - generic [ref=f2e242]:
+              - link "Manage" [ref=f2e243] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/program-manager
+              - button "Remove" [ref=f2e245] [cursor=pointer]
+          - generic [ref=f2e246]:
+            - generic [ref=f2e247]:
+              - generic "Healthy — directory and definition present" [ref=f2e248]
+              - link "ecosystem-analyst" [ref=f2e249] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/ecosystem-analyst
+              - generic [ref=f2e250]:
+                - generic "Definition present" [ref=f2e251]: role
+                - generic "memory.md present" [ref=f2e254]: mem
+            - generic [ref=f2e257]:
+              - link "Manage" [ref=f2e258] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/ecosystem-analyst
+              - button "Remove" [ref=f2e260] [cursor=pointer]
+          - generic [ref=f2e261]:
+            - generic [ref=f2e262]:
+              - generic "Healthy — directory and definition present" [ref=f2e263]
+              - link "application-builder" [ref=f2e264] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/application-builder
+              - generic [ref=f2e265]:
+                - generic "Definition present" [ref=f2e266]: role
+                - generic "memory.md present" [ref=f2e269]: mem
+            - generic [ref=f2e272]:
+              - link "Manage" [ref=f2e273] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/application-builder
+              - button "Remove" [ref=f2e275] [cursor=pointer]
+          - generic [ref=f2e276]:
+            - generic [ref=f2e277]:
+              - generic "Healthy — directory and definition present" [ref=f2e278]
+              - link "jobs-builder" [ref=f2e279] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/jobs-builder
+              - generic [ref=f2e280]:
+                - generic "Definition present" [ref=f2e281]: role
+                - generic "memory.md present" [ref=f2e284]: mem
+            - generic [ref=f2e287]:
+              - link "Manage" [ref=f2e288] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/jobs-builder
+              - button "Remove" [ref=f2e290] [cursor=pointer]
+          - generic [ref=f2e291]:
+            - generic [ref=f2e292]:
+              - generic "Healthy — directory and definition present" [ref=f2e293]
+              - link "integration-builder" [ref=f2e294] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/integration-builder
+              - generic [ref=f2e295]:
+                - generic "Definition present" [ref=f2e296]: role
+                - generic "memory.md present" [ref=f2e299]: mem
+            - generic [ref=f2e302]:
+              - link "Manage" [ref=f2e303] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/integration-builder
+              - button "Remove" [ref=f2e305] [cursor=pointer]
+          - generic [ref=f2e306]:
+            - generic [ref=f2e307]:
+              - generic "Healthy — directory and definition present" [ref=f2e308]
+              - link "experience-builder" [ref=f2e309] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/experience-builder
+              - generic [ref=f2e310]:
+                - generic "Definition present" [ref=f2e311]: role
+                - generic "memory.md present" [ref=f2e314]: mem
+            - generic [ref=f2e317]:
+              - link "Manage" [ref=f2e318] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/experience-builder
+              - button "Remove" [ref=f2e320] [cursor=pointer]
+          - generic [ref=f2e321]:
+            - generic [ref=f2e322]:
+              - generic "Healthy — directory and definition present" [ref=f2e323]
+              - link "test-architect" [ref=f2e324] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/test-architect
+              - generic [ref=f2e325]:
+                - generic "Definition present" [ref=f2e326]: role
+                - generic "memory.md present" [ref=f2e329]: mem
+            - generic [ref=f2e332]:
+              - link "Manage" [ref=f2e333] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/test-architect
+              - button "Remove" [ref=f2e335] [cursor=pointer]
+          - generic [ref=f2e336]:
+            - generic [ref=f2e337]:
+              - generic "Healthy — directory and definition present" [ref=f2e338]
+              - link "reliability-auditor" [ref=f2e339] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/reliability-auditor
+              - generic [ref=f2e340]:
+                - generic "Definition present" [ref=f2e341]: role
+                - generic "memory.md present" [ref=f2e344]: mem
+            - generic [ref=f2e347]:
+              - link "Manage" [ref=f2e348] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/reliability-auditor
+              - button "Remove" [ref=f2e350] [cursor=pointer]
+          - generic [ref=f2e351]:
+            - generic [ref=f2e352]:
+              - generic "Healthy — directory and definition present" [ref=f2e353]
+              - link "security-reviewer" [ref=f2e354] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/security-reviewer
+              - generic [ref=f2e355]:
+                - generic "Definition present" [ref=f2e356]: role
+                - generic "memory.md present" [ref=f2e359]: mem
+            - generic [ref=f2e362]:
+              - link "Manage" [ref=f2e363] [cursor=pointer]:
+                - /url: /admin/orgs/agents/agents/security-reviewer
+              - button "Remove" [ref=f2e365] [cursor=pointer]
+        - paragraph [ref=f2e366]: 10 agents in group. Hover a row for actions.

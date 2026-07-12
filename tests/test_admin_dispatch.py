@@ -183,16 +183,22 @@ def test_interval_update_returns_409_when_inspection_error(tmp_path, monkeypatch
     assert "Task Scheduler service is unavailable" in response.text
 
 
-def test_admin_groups_card_actions_use_mobile_wrapping_layout(tmp_path, monkeypatch):
-    """Group card action buttons must wrap on mobile and return to row at sm breakpoint."""
+def test_admin_groups_card_layout_stacks_on_mobile(tmp_path, monkeypatch):
+    """Group card outer layout must stack content above actions on mobile, return to row at sm."""
     client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
     response = client.get("/admin/groups")
     assert response.status_code == 200
-    # Actions container must use flex-col on mobile, flex-row at sm
-    assert 'class="flex flex-col sm:flex-row items-start sm:items-center gap-2"' in response.text or \
-           'class="flex flex-col sm:flex-row gap-2 items-start sm:items-center"' in response.text
-    # No unconditional margin-left that would push actions off-screen
-    assert 'shrink-0 ml-4"' not in response.text
+    # Outer card layout must stack on mobile: flex flex-col on base, flex-row at sm
+    assert 'flex flex-col' in response.text and 'sm:flex-row' in response.text
+    # Content area must allow text wrapping with min-w-0
+    assert 'min-w-0' in response.text
+    # Path text must break on mobile
+    assert 'break-all' in response.text or 'break-words' in response.text
+    # Status badges must wrap
+    assert 'flex-wrap' in response.text
+    # Actions must not have margin-left on mobile (only at sm+)
+    assert 'sm:ml-4' in response.text
+    assert 'class="flex items-start justify-between"' not in response.text  # Old layout
 
 
 def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monkeypatch):

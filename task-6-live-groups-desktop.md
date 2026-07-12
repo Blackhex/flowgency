@@ -1,0 +1,32 @@
+- generic [ref=e2] [box=0,0,1280,800]:
+  - navigation [ref=e3] [box=0,0,216,800]:
+    - link "Agency" [ref=e5] [cursor=pointer] [box=16,20,106,32]:
+      - /url: /
+    - generic [ref=e18] [box=0,56,216,682]:
+      - link [ref=e19] [cursor=pointer] [box=12,64,192,37]:
+        - /url: /
+      - link [ref=e24] [cursor=pointer] [box=12,118,192,37]:
+        - /url: /admin/
+      - link [ref=e29] [cursor=pointer] [box=12,154,192,37]:
+        - /url: /admin/dispatch
+      - link [ref=e33] [cursor=pointer] [box=12,191,192,37]:
+        - /url: /admin/groups
+      - link [ref=e37] [cursor=pointer] [box=12,228,192,37]:
+        - /url: /admin/integrations
+    - button "Dark mode" [ref=e42] [cursor=pointer] [box=12,747,192,37]
+  - main [ref=e46] [box=216,0,1064,800]:
+    - generic [ref=e48] [box=260,24,976,181]:
+      - generic [ref=e49] [box=260,24,976,36]:
+        - heading "Agent Groups" [level=1] [ref=e50] [box=260,26,162,32]
+        - link "+ Add New Group" [ref=e51] [cursor=pointer] [box=1089,24,147,36]:
+          - /url: /admin/orgs/new
+      - generic [ref=e54] [box=281,105,935,80]:
+        - generic [ref=e55] [box=281,105,386,80]:
+          - heading "Agents" [level=3] [ref=e56] [box=281,105,386,28]
+          - paragraph [ref=e57] [box=281,139,386,20]: C:\Users\black\Projects\christag-agency\agents
+          - generic [ref=e58] [box=281,165,386,20]
+        - generic [ref=e68] [box=1005,105,210,32]:
+          - link "Edit" [ref=e69] [cursor=pointer] [box=1005,105,50,32]:
+            - /url: /admin/orgs/agents/edit
+          - button "Initialize" [ref=e71] [cursor=pointer] [box=1063,105,78,32]
+          - button "Delete" [ref=e73] [cursor=pointer] [box=1149,105,67,32]

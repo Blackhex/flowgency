@@ -1,0 +1,113 @@
+- generic [active] [ref=f5e1] [box=0,0,390,844]:
+  - generic [ref=f5e2] [box=0,0,390,48]:
+    - button [ref=f5e3] [cursor=pointer] [box=12,8,32,32]
+    - generic [ref=f5e6] [box=52,14,51,20]: Agency
+  - generic [ref=f5e7] [box=0,0,390,844]:
+    - navigation [ref=f5e8] [box=-216,0,216,844]:
+      - generic [ref=f5e9] [box=-216,0,216,56]:
+        - link "Agency" [ref=f5e10] [cursor=pointer] [box=-200,20,106,32]:
+          - /url: /
+        - button [ref=f5e23] [cursor=pointer] [box=-40,24,24,24]
+      - generic [ref=f5e26] [box=-216,56,216,726]:
+        - link [ref=f5e27] [cursor=pointer] [box=-204,64,192,37]:
+          - /url: /
+        - link [ref=f5e32] [cursor=pointer] [box=-204,118,192,37]:
+          - /url: /admin/
+        - link [ref=f5e37] [cursor=pointer] [box=-204,154,192,37]:
+          - /url: /admin/dispatch
+        - link [ref=f5e41] [cursor=pointer] [box=-204,191,192,37]:
+          - /url: /admin/groups
+        - link [ref=f5e45] [cursor=pointer] [box=-204,228,192,37]:
+          - /url: /admin/integrations
+      - button "Dark mode" [ref=f5e50] [cursor=pointer] [box=-204,791,192,37]
+    - main [ref=f5e54] [box=0,0,390,844]:
+      - generic [ref=f5e56] [box=16,64,343,3366]:
+        - link "← Back to Groups" [ref=f5e58] [cursor=pointer] [box=16,68,116,19]:
+          - /url: /admin/groups
+        - 'heading "Edit: Agents" [level=1] [ref=f5e59] [box=16,114,343,32]'
+        - generic [ref=f5e60] [box=16,170,343,987]:
+          - heading "Group Settings" [level=2] [ref=f5e61] [box=41,194,293,20]
+          - generic [ref=f5e62] [box=41,234,293,61]:
+            - generic [ref=f5e63] [box=41,234,293,20]: Name
+            - textbox "Name" [ref=f5e64] [box=41,258,293,37]:
+              - /placeholder: e.g. Newsletter Agents
+          - generic [ref=f5e65] [box=41,316,293,81]:
+            - generic [ref=f5e66] [box=41,316,293,20]: Path
+            - textbox "Path" [ref=f5e67] [box=41,340,293,37]:
+              - /placeholder: /path/to/your/agents
+            - paragraph [ref=f5e68] [box=41,381,293,16]: Filesystem path to the agents directory.
+          - generic [ref=f5e69] [box=41,417,293,193]:
+            - generic [ref=f5e70] [box=41,417,293,20]: Sandbox roots (optional)
+            - textbox "Sandbox roots (optional)" [ref=f5e71] [box=41,441,293,77]:
+              - /placeholder: "/path/to/repository/root\n/another/allowed/root"
+            - paragraph [ref=f5e72] [box=41,530,293,80]: Directories the agent may read and write at runtime — one path per line. The first line is the working directory (relative writes land there). Leave empty to give agents full filesystem access. Does not affect the dashboard's file browsers.
+          - generic [ref=f5e73] [box=41,630,293,96]:
+            - generic [ref=f5e74] [box=41,630,293,20]: Allowed tools (optional)
+            - generic [ref=f5e75] [box=41,654,293,20]
+            - paragraph [ref=f5e80] [box=41,678,293,48]: Tools the agent may use at runtime. Leave all unchecked to grant every tool. Read and search are always available.
+          - generic [ref=f5e81] [box=41,746,293,221]:
+            - generic [ref=f5e82] [box=41,746,293,20]: Workspaces
+            - paragraph [ref=f5e83] [box=41,770,293,32]: Define how you interact with this agent group at runtime.
+            - generic [ref=f5e85] [box=41,814,293,112]
+            - button "+ Add Workspace" [ref=f5e91] [cursor=pointer] [box=41,937,139,29]
+          - generic [ref=f5e92] [box=41,987,293,81]:
+            - generic [ref=f5e93] [box=41,987,293,20]: Default Integration
+            - combobox [ref=f5e94] [box=41,1011,293,37]
+            - paragraph [ref=f5e95] [box=41,1052,293,16]: Default LLM tool for agents in this group.
+          - generic [ref=f5e96] [box=41,1088,293,44]:
+            - button "Save Group Settings" [ref=f5e97] [cursor=pointer] [box=41,1096,166,36]
+            - link "Cancel" [ref=f5e98] [cursor=pointer] [box=219,1096,78,36]:
+              - /url: /admin/
+        - generic [ref=f5e99] [box=16,1189,343,1512]:
+          - heading "Dispatch Schedule" [level=2] [ref=f5e100] [box=41,1213,293,20]
+          - generic [ref=f5e101] [box=41,1253,293,91]:
+            - generic [ref=f5e102] [box=41,1260,73,20]
+            - generic [ref=f5e104] [box=138,1253,178,33]
+            - generic [ref=f5e107] [box=41,1311,151,33]
+          - generic [ref=f5e110] [box=41,1364,293,103]:
+            - generic [ref=f5e111] [box=57,1381,260,24]
+            - generic [ref=f5e115] [box=57,1417,260,33]
+          - generic [ref=f5e120] [box=41,1487,293,103]:
+            - generic [ref=f5e121] [box=57,1503,260,24]
+            - generic [ref=f5e125] [box=57,1539,260,33]
+          - generic [ref=f5e130] [box=41,1609,293,103]:
+            - generic [ref=f5e131] [box=57,1626,260,24]
+            - generic [ref=f5e135] [box=57,1662,260,33]
+          - generic [ref=f5e140] [box=41,1732,293,103]:
+            - generic [ref=f5e141] [box=57,1749,260,24]
+            - generic [ref=f5e145] [box=57,1785,260,33]
+          - generic [ref=f5e150] [box=41,1855,293,103]:
+            - generic [ref=f5e151] [box=57,1871,260,24]
+            - generic [ref=f5e155] [box=57,1907,260,33]
+          - generic [ref=f5e160] [box=41,1977,293,103]:
+            - generic [ref=f5e161] [box=57,1994,260,24]
+            - generic [ref=f5e165] [box=57,2030,260,33]
+          - generic [ref=f5e170] [box=41,2100,293,103]:
+            - generic [ref=f5e171] [box=57,2117,260,24]
+            - generic [ref=f5e175] [box=57,2153,260,33]
+          - generic [ref=f5e180] [box=41,2223,293,103]:
+            - generic [ref=f5e181] [box=57,2239,260,24]
+            - generic [ref=f5e185] [box=57,2275,260,33]
+          - generic [ref=f5e190] [box=41,2345,293,144]:
+            - generic [ref=f5e191] [box=57,2362,260,24]
+            - generic [ref=f5e194] [box=57,2398,260,75]
+          - generic [ref=f5e205] [box=41,2509,293,103]:
+            - generic [ref=f5e206] [box=57,2526,260,24]
+            - generic [ref=f5e210] [box=57,2562,260,33]
+          - button "Save Dispatch Config" [ref=f5e216] [cursor=pointer] [box=41,2640,172,36]
+        - generic [ref=f5e217] [box=16,2733,343,697]:
+          - generic [ref=f5e218] [box=16,2733,343,28]:
+            - heading "Agent Roster" [level=2] [ref=f5e219] [box=16,2733,126,28]
+            - generic [ref=f5e220] [box=161,2733,197,28]
+          - generic [ref=f5e223] [box=16,2777,343,625]:
+            - generic [ref=f5e224] [box=16,2777,343,55]
+            - generic [ref=f5e239] [box=16,2840,343,55]
+            - generic [ref=f5e254] [box=16,2903,343,55]
+            - generic [ref=f5e269] [box=16,2967,343,55]
+            - generic [ref=f5e284] [box=16,3030,343,55]
+            - generic [ref=f5e299] [box=16,3093,343,55]
+            - generic [ref=f5e314] [box=16,3157,343,55]
+            - generic [ref=f5e329] [box=16,3220,343,55]
+            - generic [ref=f5e344] [box=16,3283,343,55]
+            - generic [ref=f5e359] [box=16,3347,343,55]
+          - paragraph [ref=f5e374] [box=16,3414,343,16]: 10 agents in group. Hover a row for actions.

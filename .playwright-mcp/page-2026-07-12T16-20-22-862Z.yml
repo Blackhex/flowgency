@@ -1,0 +1,40 @@
+- generic [active] [ref=f7e1]:
+  - generic [ref=f7e2]:
+    - button [ref=f7e3] [cursor=pointer]
+    - generic [ref=f7e6]: Agency
+  - generic [ref=f7e7]:
+    - navigation [ref=f7e8]:
+      - generic [ref=f7e9]:
+        - link "Agency" [ref=f7e10] [cursor=pointer]:
+          - /url: /
+        - button [ref=f7e23] [cursor=pointer]
+      - generic [ref=f7e26]:
+        - link [ref=f7e27] [cursor=pointer]:
+          - /url: /
+        - link [ref=f7e32] [cursor=pointer]:
+          - /url: /admin/
+        - link [ref=f7e37] [cursor=pointer]:
+          - /url: /admin/dispatch
+        - link [ref=f7e41] [cursor=pointer]:
+          - /url: /admin/groups
+        - link [ref=f7e45] [cursor=pointer]:
+          - /url: /admin/integrations
+      - button "Dark mode" [ref=f7e50] [cursor=pointer]
+    - main [ref=f7e54]:
+      - generic [ref=f7e56]:
+        - heading "Dispatch" [level=1] [ref=f7e57]
+        - generic [ref=f7e60]:
+          - paragraph [ref=f7e61]: Dispatcher active
+          - paragraph [ref=f7e62]: The user-level system scheduler checks all enabled groups every 15 minutes.
+        - generic [ref=f7e63]:
+          - generic [ref=f7e65]:
+            - generic [ref=f7e66]: Heartbeat interval
+            - spinbutton "Heartbeat interval" [ref=f7e67]: "15"
+            - generic [ref=f7e68]: minutes
+            - button "Update" [ref=f7e69] [cursor=pointer]
+          - generic [ref=f7e70]:
+            - heading "Group Dispatch Status" [level=3] [ref=f7e71]
+            - generic [ref=f7e73]:
+              - generic [ref=f7e74]: Agents
+              - link "Configure" [ref=f7e77] [cursor=pointer]:
+                - /url: /admin/orgs/agents/edit
