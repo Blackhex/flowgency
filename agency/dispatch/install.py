@@ -120,12 +120,20 @@ def detect_platform() -> str:
 
 def get_timer_status(config_path: str | Path, interval: int = 15) -> TimerStatus:
     """Check if timer is installed and active. Returns rich status dict."""
-    platform_name = detect_platform()
-    if platform_name == "linux":
-        return _status_linux(config_path, interval)
-    if platform_name == "macos":
-        return _status_macos(config_path, interval)
-    return _status_windows(config_path, interval)
+    try:
+        platform_name = detect_platform()
+        if platform_name == "linux":
+            return _status_linux(config_path, interval)
+        if platform_name == "macos":
+            return _status_macos(config_path, interval)
+        return _status_windows(config_path, interval)
+    except Exception as e:
+        return _make_status(
+            expected_config_path=config_path,
+            expected_interval=interval,
+            installed=False,
+            error=str(e),
+        )
 
 
 def install_timer(config_path: str | Path, interval: int = 15, replace: bool = False) -> str | None:

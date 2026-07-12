@@ -161,3 +161,23 @@ def test_interval_update_repairs_dispatcher_through_shared_api(tmp_path, monkeyp
     saved = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
     assert saved["agency"]["dispatch"]["interval"] == 30
     assert "installed" not in saved["agency"]["dispatch"]
+
+
+def test_interval_update_returns_409_when_inspection_error(tmp_path, monkeypatch):
+    """Prove interval POST receiving inspection error renders status 409 with error text."""
+    failed_status = _status()
+    failed_status["error"] = "Task Scheduler service is unavailable"
+    client = _configure_admin(tmp_path, monkeypatch, failed_status)
+    response = client.post(
+        "/admin/settings",
+        data={
+            "title": "Agency",
+            "default_group": "test",
+            "ai_backend": "copilot",
+            "theme": "",
+            "dispatch_interval": "30",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 409
+    assert "Task Scheduler service is unavailable" in response.text

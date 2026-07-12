@@ -1662,7 +1662,9 @@ async def admin_save_settings(request: Request):
     dispatch_error = ""
     if dispatch_interval is not None:
         runtime_status = _get_timer_status(CONFIG_PATH.resolve(), dispatch_interval)
-        if runtime_status["installed"]:
+        if runtime_status["error"]:
+            dispatch_error = runtime_status["error"]
+        elif runtime_status["installed"]:
             dispatch_error = install_timer(
                 str(CONFIG_PATH.resolve()),
                 dispatch_interval,
