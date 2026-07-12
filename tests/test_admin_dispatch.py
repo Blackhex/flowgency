@@ -215,3 +215,16 @@ def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monk
     assert 'class="col-span-2 sm:col-span-1 sm:flex-1 px-2 py-1.5' in response.text  # prompt
     # Remove button must be full-width on mobile, auto at sm
     assert 'class="w-full sm:w-auto px-2 py-1.5 text-xs font-medium text-red-600' in response.text
+
+
+def test_admin_org_edit_preserves_selected_theme(tmp_path, monkeypatch):
+    client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
+    config = app_mod.load_config()
+    config["agency"]["theme"] = "workshop"
+    app_mod.save_config(config)
+    app_mod.reload_groups()
+
+    response = client.get("/admin/orgs/test/edit")
+
+    assert response.status_code == 200
+    assert "/* Theme: Workshop */" in response.text
