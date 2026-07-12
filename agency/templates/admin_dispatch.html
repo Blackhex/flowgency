@@ -10,41 +10,44 @@
   </div>
   {% endif %}
 
-  {% if not dispatch.installed %}
-  <div class="bg-white rounded-xl border border-gray-200 p-8 text-center">
-    <p class="text-gray-600 mb-2">Dispatch runs your agents on a schedule using a systemd timer.</p>
-    <p class="text-sm text-gray-500 mb-6">This will install a user-level systemd service and timer that triggers agent dispatch every 15 minutes.</p>
-    <form method="post" action="/admin/dispatch/install">
-      <button type="submit"
-              class="px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
-        Set Up Dispatch
-      </button>
-    </form>
-  </div>
-  {% else %}
   <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
-    <!-- Status -->
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        {% if dispatch.timer_active %}
-        <span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500"></span>
-        <span class="text-sm font-medium text-gray-900">Timer active</span>
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        {% if dispatch.state == 'active' %}
+        <p class="text-sm font-medium text-gray-900">Dispatcher active</p>
+        <p class="mt-2 text-sm text-gray-500">The user-level system scheduler checks all enabled groups every {{ dispatch.expected_interval }} minutes.</p>
+        {% elif dispatch.state == 'misconfigured' %}
+        <p class="text-sm font-medium text-gray-900">Dispatcher misconfigured</p>
+        <p class="mt-2 text-sm text-gray-500">Mismatched fields: {{ dispatch.mismatches | join(', ') }}</p>
         {% else %}
-        <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
-        <span class="text-sm font-medium text-gray-900">Timer inactive</span>
+        <p class="text-sm font-medium text-gray-900">Dispatcher inactive</p>
+        <p class="mt-2 text-sm text-gray-500">Set up the user-level system scheduler to run enabled group schedules.</p>
         {% endif %}
-        <span class="text-sm text-gray-500">Heartbeat every {{ dispatch.interval }} minutes</span>
+      {% if dispatch.error %}
+      <p class="mt-2 text-sm text-red-700">{{ dispatch.error }}</p>
+      {% endif %}
       </div>
+      {% if dispatch.state != 'active' %}
+      <form method="post" action="/admin/dispatch/install"
+            {% if dispatch.config_conflict %}onsubmit="return confirm('Replace the dispatcher for {{ dispatch.config_path }} with this dashboard config?')"{% endif %}>
+        {% if dispatch.config_conflict %}<input type="hidden" name="replace" value="true">{% endif %}
+        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+          {{ 'Set Up Dispatcher' if not dispatch.installed else 'Repair Dispatcher' }}
+        </button>
+      </form>
+      {% endif %}
     </div>
+  </div>
 
+  <div class="mt-6 bg-white rounded-xl border border-gray-200 p-6 space-y-6">
     <!-- Interval Setting -->
-    <div class="pt-4 border-t border-gray-100">
+    <div>
       <form method="post" action="/admin/settings" class="flex items-center gap-3">
         <input type="hidden" name="title" value="{{ agency_title }}">
         <input type="hidden" name="default_group" value="{{ default_group }}">
         <label for="dispatch_interval" class="text-sm font-medium text-gray-700">Heartbeat interval</label>
         <input type="number" name="dispatch_interval" id="dispatch_interval"
-               value="{{ dispatch.interval }}" min="5" max="120" step="5"
+               value="{{ dispatch.expected_interval }}" min="5" max="120" step="5"
                class="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
         <span class="text-sm text-gray-500">minutes</span>
         <button type="submit"
@@ -76,6 +79,5 @@
     </div>
     {% endif %}
   </div>
-  {% endif %}
 </div>
 {% endblock %}

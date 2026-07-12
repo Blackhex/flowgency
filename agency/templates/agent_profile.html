@@ -46,7 +46,7 @@
       {% endif %}
       {% if agent_schedule %}
       <div class="flex flex-wrap items-center gap-1.5 mt-2">
-        <span class="inline-block w-1.5 h-1.5 rounded-full {% if dispatch_enabled %}bg-emerald-400{% else %}bg-gray-300{% endif %}" title="Dispatch {{ 'enabled' if dispatch_enabled else 'disabled' }}"></span>
+        <span class="inline-block w-1.5 h-1.5 rounded-full {% if dispatch_enabled %}bg-emerald-400{% else %}bg-gray-300{% endif %}" title="Schedule {{ 'enabled' if dispatch_enabled else 'disabled' }}"></span>
         {% for rule in agent_schedule %}
         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono {% if dispatch_enabled %}bg-indigo-50 text-indigo-700{% else %}bg-gray-100 text-gray-500{% endif %}">
           {{ rule.get('prompt', '') }}
@@ -56,7 +56,7 @@
       </div>
       {% else %}
       <div class="mt-2">
-        <span class="text-xs text-gray-400">No dispatch schedule</span>
+        <span class="text-xs text-gray-400">No schedule configured</span>
       </div>
       {% endif %}
     </div>

@@ -277,30 +277,23 @@ def _workspace_types_json() -> str:
 
 
 def get_dispatch_status() -> dict:
-    """Return dispatch installation status."""
-    status = _get_timer_status()
-    config_dispatch = CONFIG.get("agency", {}).get("dispatch", {})
-    status["interval"] = config_dispatch.get("interval", 15)
-    status["installed"] = status["installed"] or config_dispatch.get("installed", False)
-    return status
-
-
-def install_dispatch(interval: int = 15) -> str | None:
-    """Install dispatch timer using platform-native scheduler."""
-    error = install_timer(str(CONFIG_PATH), interval)
-    if error:
-        return error
-    # Update config
+    """Return runtime scheduler status for the active singleton config."""
     config = load_config()
-    if "agency" not in config:
-        config["agency"] = {}
-    if "dispatch" not in config["agency"]:
-        config["agency"]["dispatch"] = {}
-    config["agency"]["dispatch"]["installed"] = True
-    config["agency"]["dispatch"]["interval"] = interval
-    save_config(config)
-    reload_groups()
-    return None
+    interval = config.get("agency", {}).get("dispatch", {}).get("interval", 15)
+    return _get_timer_status(CONFIG_PATH.resolve(), interval)
+
+
+def install_dispatch(interval: int | None = None, replace: bool = False) -> str | None:
+    """Install or repair the scheduler for the active singleton config."""
+    config = load_config()
+    dispatch_config = config.setdefault("agency", {}).setdefault("dispatch", {})
+    dispatch_config.pop("installed", None)
+    desired_interval = interval if interval is not None else dispatch_config.get("interval", 15)
+    if interval is not None:
+        dispatch_config["interval"] = desired_interval
+        save_config(config)
+        reload_groups()
+    return install_timer(str(CONFIG_PATH.resolve()), desired_interval, replace=replace)
 
 
 @asynccontextmanager
@@ -1651,30 +1644,37 @@ async def admin_save_settings(request: Request):
     _THEME_CSS_CACHE.clear()  # Invalidate cached CSS
 
     # Handle dispatch interval update
+    dispatch_interval = None
     dispatch_interval_raw = form.get("dispatch_interval", "")
     if dispatch_interval_raw:
         try:
-            new_interval = int(dispatch_interval_raw)
-            if 5 <= new_interval <= 120:
-                if "dispatch" not in config["agency"]:
-                    config["agency"]["dispatch"] = {}
-                old_interval = config["agency"]["dispatch"].get("interval", 15)
-                config["agency"]["dispatch"]["interval"] = new_interval
-                # If interval changed and dispatch is installed, reload timer
-                if new_interval != old_interval and config["agency"]["dispatch"].get("installed", False):
-                    subprocess.run(
-                        ["systemctl", "--user", "daemon-reload"],
-                        capture_output=True, text=True, timeout=10,
-                    )
-                    subprocess.run(
-                        ["systemctl", "--user", "restart", "agency-dispatch.timer"],
-                        capture_output=True, text=True, timeout=10,
-                    )
+            candidate_interval = int(dispatch_interval_raw)
         except (ValueError, TypeError):
-            pass
+            candidate_interval = 0
+        if 5 <= candidate_interval <= 120:
+            dispatch_interval = candidate_interval
+            dispatch_config = config.setdefault("agency", {}).setdefault("dispatch", {})
+            dispatch_config.pop("installed", None)
+            dispatch_config["interval"] = dispatch_interval
 
     save_config(config)
     reload_groups()
+    dispatch_error = ""
+    if dispatch_interval is not None:
+        runtime_status = _get_timer_status(CONFIG_PATH.resolve(), dispatch_interval)
+        if runtime_status["installed"]:
+            dispatch_error = install_timer(
+                str(CONFIG_PATH.resolve()),
+                dispatch_interval,
+                replace=False,
+            ) or ""
+    if dispatch_error:
+        return templates.TemplateResponse(
+            request,
+            "admin_dispatch.html",
+            {"request": request, **admin_context("dispatch", dispatch_error=dispatch_error)},
+            status_code=409,
+        )
     # Redirect back to dispatch page if interval was changed, otherwise settings
     redirect = "/admin/dispatch" if dispatch_interval_raw else "/admin/"
     return RedirectResponse(redirect, status_code=303)
@@ -1682,13 +1682,16 @@ async def admin_save_settings(request: Request):
 
 @app.post("/admin/dispatch/install", response_class=HTMLResponse)
 async def admin_dispatch_install(request: Request):
-    """Install the dispatch systemd timer."""
-    error = install_dispatch()
+    """Install or repair the global platform scheduler."""
+    form = await request.form()
+    error = install_dispatch(replace=form.get("replace") == "true")
     if error:
-        return templates.TemplateResponse(request, "admin_dispatch.html", {
-            "request": request,
-            **admin_context("dispatch", dispatch_error=error),
-        })
+        return templates.TemplateResponse(
+            request,
+            "admin_dispatch.html",
+            {"request": request, **admin_context("dispatch", dispatch_error=error)},
+            status_code=409,
+        )
     return RedirectResponse("/admin/dispatch", status_code=303)
 
 
@@ -1845,7 +1848,7 @@ async def admin_org_edit(request: Request, org: str):
         "dispatch_timeout": dispatch_cfg.get("timeout", 1800),
         "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
         "dispatch_agents": dispatch_cfg.get("agents", {}),
-        "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
+        "dispatcher_active": get_dispatch_status()["state"] == "active",
         "available_prompts": prompts,
         "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
         "default_integration": g.get("default_integration", "claude-code"),
@@ -1935,7 +1938,7 @@ async def admin_org_save(request: Request, org: str):
             "dispatch_timeout": config["groups"][org].get("dispatch", {}).get("timeout", 1800),
             "dispatch_daily_limit": config["groups"][org].get("dispatch", {}).get("daily_limit", 20),
             "dispatch_agents": config["groups"][org].get("dispatch", {}).get("agents", {}),
-            "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
+            "dispatcher_active": get_dispatch_status()["state"] == "active",
             "available_prompts": sorted(f.name for f in (Path(path) / "shared" / "prompts").glob("*.md")) if (Path(path) / "shared" / "prompts").exists() else [],
             "warning": warning + " Changes saved.",
         })
@@ -2112,7 +2115,7 @@ async def admin_org_autodetect(request: Request, org: str):
         "dispatch_timeout": dispatch_cfg.get("timeout", 1800),
         "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
         "dispatch_agents": dispatch_cfg.get("agents", {}),
-        "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
+        "dispatcher_active": get_dispatch_status()["state"] == "active",
         "available_prompts": prompts,
         "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
         "default_integration": g.get("default_integration", "claude-code"),
