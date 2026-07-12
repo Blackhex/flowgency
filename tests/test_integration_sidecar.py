@@ -773,6 +773,95 @@ class TestCopilot:
         assert changes[0].lines_added == 0
         assert changes[0].lines_removed == 0
 
+    def test_usage_summary_reads_session_shutdown_metrics(self, tmp_path, monkeypatch):
+        import json
+        from agency.integrations.agency.copilot import CopilotIntegration
+
+        session_id = "12345678-abcd"
+        state_dir = tmp_path / "session-state" / session_id
+        state_dir.mkdir(parents=True)
+        shutdown = {
+            "type": "session.shutdown",
+            "data": {
+                "totalPremiumRequests": 62,
+                "tokenDetails": {
+                    "input": {"tokenCount": 100},
+                    "cache_read": {"tokenCount": 568700},
+                    "cache_write": {"tokenCount": 29200},
+                    "output": {"tokenCount": 6100},
+                },
+                "modelMetrics": {
+                    "model": {"usage": {"reasoningTokens": 3400}},
+                },
+                "codeChanges": {"linesAdded": 4, "linesRemoved": 2},
+            },
+        }
+        (state_dir / "events.jsonl").write_text(json.dumps(shutdown) + "\n")
+        monkeypatch.setenv("COPILOT_HOME", str(tmp_path))
+        raw = json.dumps({
+            "type": "result",
+            "sessionId": session_id,
+            "usage": {"sessionDurationMs": 117000},
+        })
+
+        summary = CopilotIntegration._usage_summary(raw)
+
+        assert summary == (
+            "Changes    +4 -2\n"
+            "AI Credits 62 (1m 57s)\n"
+            "Tokens     \u2191 598.0k (568.7k cached, 29.2k written) "
+            "\u2022 \u2193 6.1k (3.4k reasoning)\n"
+            "Resume     copilot --resume=12345678-abcd"
+        )
+
+    def test_run_writes_usage_summary_to_stderr(
+        self, integration, tmp_agent_dir, tmp_path, monkeypatch
+    ):
+        import json
+        import agency.integrations.agency.copilot as mod
+
+        session_id = "usage-session"
+        state_dir = tmp_path / "session-state" / session_id
+        state_dir.mkdir(parents=True)
+        (state_dir / "events.jsonl").write_text(json.dumps({
+            "type": "session.shutdown",
+            "data": {
+                "totalPremiumRequests": 5,
+                "tokenDetails": {
+                    "input": {"tokenCount": 10},
+                    "cache_read": {"tokenCount": 20},
+                    "cache_write": {"tokenCount": 30},
+                    "output": {"tokenCount": 40},
+                },
+                "modelMetrics": {},
+                "codeChanges": {"linesAdded": 0, "linesRemoved": 0},
+            },
+        }) + "\n")
+        monkeypatch.setenv("COPILOT_HOME", str(tmp_path))
+        jsonl = "\n".join([
+            json.dumps({"type": "assistant.message", "data": {"content": "Done."}}),
+            json.dumps({
+                "type": "result",
+                "sessionId": session_id,
+                "usage": {"sessionDurationMs": 1000},
+            }),
+        ])
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = jsonl
+            stderr = ""
+
+        monkeypatch.setattr(mod.subprocess, "run", lambda *args, **kwargs: FakeCompleted())
+        prompt_file = tmp_agent_dir / "prompt.md"
+        prompt_file.write_text("Do the thing")
+
+        result = integration.run(tmp_agent_dir, prompt_file, timeout=30)
+
+        assert "AI Credits 5 (1s)" in result.stderr
+        assert "Tokens     \u2191 60" in result.stderr
+        assert "Resume     copilot --resume=usage-session" in result.stderr
+
     def test_parse_jsonl_same_path_aggregation(self):
         """M3: create then edit on same path yields single FileChange with status=added and summed lines."""
         import json

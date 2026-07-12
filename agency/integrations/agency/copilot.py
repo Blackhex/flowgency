@@ -117,7 +117,7 @@ class CopilotIntegration(BaseIntegration):
                         texts.append(content)
                 elif etype == "result":
                     # Fallback source for file list if no per-tool edits parsed.
-                    usage = data.get("usage") or {}
+                    usage = obj.get("usage") or data.get("usage") or {}
                     code_changes = usage.get("codeChanges") or {}
                     for p in code_changes.get("filesModified") or []:
                         rel = CopilotIntegration._relativize(p, root)
@@ -140,6 +140,85 @@ class CopilotIntegration(BaseIntegration):
             return text, changes
         except Exception:
             return raw, []
+
+    @staticmethod
+    def _compact_number(value: int | float) -> str:
+        if value < 1000:
+            return f"{value:g}"
+        if value < 1_000_000:
+            return f"{value / 1000:.1f}k"
+        return f"{value / 1_000_000:.1f}m"
+
+    @staticmethod
+    def _format_duration(milliseconds: int | float) -> str:
+        seconds = max(0, round(milliseconds / 1000))
+        minutes, seconds = divmod(seconds, 60)
+        if minutes:
+            return f"{minutes}m {seconds}s"
+        return f"{seconds}s"
+
+    @staticmethod
+    def _usage_summary(raw: str) -> str:
+        result = None
+        for line in raw.splitlines():
+            try:
+                event = json.loads(line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if event.get("type") == "result":
+                result = event
+        if not result or not result.get("sessionId"):
+            return ""
+
+        copilot_home = Path(os.environ.get("COPILOT_HOME", Path.home() / ".copilot"))
+        events_path = (
+            copilot_home / "session-state" / result["sessionId"] / "events.jsonl"
+        )
+        try:
+            lines = events_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return ""
+
+        shutdown = None
+        for line in reversed(lines):
+            try:
+                event = json.loads(line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if event.get("type") == "session.shutdown":
+                shutdown = event.get("data") or {}
+                break
+        if shutdown is None:
+            return ""
+
+        token_details = shutdown.get("tokenDetails") or {}
+        input_tokens = (token_details.get("input") or {}).get("tokenCount", 0)
+        cached_tokens = (token_details.get("cache_read") or {}).get("tokenCount", 0)
+        written_tokens = (token_details.get("cache_write") or {}).get("tokenCount", 0)
+        output_tokens = (token_details.get("output") or {}).get("tokenCount", 0)
+        total_input = input_tokens + cached_tokens + written_tokens
+        reasoning_tokens = sum(
+            ((metrics.get("usage") or {}).get("reasoningTokens") or 0)
+            for metrics in (shutdown.get("modelMetrics") or {}).values()
+        )
+        changes = shutdown.get("codeChanges") or {}
+        usage = result.get("usage") or {}
+        credits = shutdown.get("totalPremiumRequests", usage.get("premiumRequests", 0))
+        duration = CopilotIntegration._format_duration(
+            usage.get("sessionDurationMs", 0)
+        )
+
+        return (
+            f"Changes    +{changes.get('linesAdded', 0)} "
+            f"-{changes.get('linesRemoved', 0)}\n"
+            f"AI Credits {credits:g} ({duration})\n"
+            f"Tokens     \u2191 {CopilotIntegration._compact_number(total_input)} "
+            f"({CopilotIntegration._compact_number(cached_tokens)} cached, "
+            f"{CopilotIntegration._compact_number(written_tokens)} written) "
+            f"\u2022 \u2193 {CopilotIntegration._compact_number(output_tokens)} "
+            f"({CopilotIntegration._compact_number(reasoning_tokens)} reasoning)\n"
+            f"Resume     copilot --resume={result['sessionId']}"
+        )
 
     @staticmethod
     def _relativize(path: str, root: "Path | None") -> str:
@@ -212,10 +291,18 @@ class CopilotIntegration(BaseIntegration):
             duration = time.monotonic() - start
             parse_root = roots[0] if roots else agent_dir
             parsed_text, changed_files = self._parse_jsonl_output(result.stdout, parse_root)
+            usage_summary = self._usage_summary(result.stdout)
+            stderr = result.stderr
+            if usage_summary:
+                stderr = (
+                    f"{stderr.rstrip()}\n\n{usage_summary}"
+                    if stderr
+                    else usage_summary
+                )
             return RunResult(
                 exit_code=result.returncode,
                 stdout=parsed_text,
-                stderr=result.stderr,
+                stderr=stderr,
                 duration_seconds=duration,
                 changed_files=changed_files,
             )

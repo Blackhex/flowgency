@@ -97,7 +97,10 @@ def execute_job(job_path: Path) -> JobRecord:
             sandbox_root=context.sandbox_root,
         )
         stdout_path.write_text(result.stdout, encoding="utf-8")
-        stderr_path.write_text(result.stderr, encoding="utf-8")
+        persisted_stderr_path = None
+        if result.stderr:
+            stderr_path.write_text(result.stderr, encoding="utf-8")
+            persisted_stderr_path = str(stderr_path.resolve())
         native_changes = list(getattr(result, "changed_files", []))
         # Native per-file edits (currently only Copilot) win when present. For
         # every other integration, fall back to a git-status diff of the sandbox
@@ -131,7 +134,7 @@ def execute_job(job_path: Path) -> JobRecord:
             status,
             completed_at=datetime.now(timezone.utc).isoformat(),
             stdout_path=str(stdout_path.resolve()),
-            stderr_path=str(stderr_path.resolve()),
+            stderr_path=persisted_stderr_path,
             exit_code=result.exit_code,
             duration_seconds=result.duration_seconds,
             changed_files=changes,

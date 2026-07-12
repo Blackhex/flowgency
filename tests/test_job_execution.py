@@ -82,6 +82,29 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     assert read_job(path) == result
 
 
+def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
+    path, _ = queued_job(tmp_path)
+    agent_dir = tmp_path / "group" / "product"
+    agent_dir.mkdir(parents=True)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            agent_dir=agent_dir,
+            integration=SimpleNamespace(
+                run=lambda *args, **kwargs: RunResult(0, "done", "", 0.1)
+            ),
+            timeout=30,
+            sandbox_root=None,
+            group_path=tmp_path / "group",
+        ),
+    )
+
+    result = execute_job(path)
+
+    assert result.stderr_path is None
+    assert not list((tmp_path / "group" / "shared" / "logs").rglob("*.err"))
+
+
 def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
     path, _ = queued_job(tmp_path)
     context = SimpleNamespace(

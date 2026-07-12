@@ -704,6 +704,12 @@ def collect_documents(g: dict) -> list[dict]:
     return docs
 
 
+def _is_empty_error_log(path: Path, size: int | None = None) -> bool:
+    return path.suffix.lower() == ".err" and (
+        path.stat().st_size if size is None else size
+    ) == 0
+
+
 def collect_logs(g: dict) -> dict[str, list[dict]]:
     """Collect log files grouped by date."""
     logs_dir = g["shared"] / "logs"
@@ -717,11 +723,14 @@ def collect_logs(g: dict) -> dict[str, list[dict]]:
         for f in sorted(date_dir.iterdir(), reverse=True):
             if f.name.startswith("."):
                 continue
+            size = f.stat().st_size
+            if _is_empty_error_log(f, size):
+                continue
             entries.append({
                 "name": f.name,
                 "path": str(f),
                 "suffix": f.suffix,
-                "size": f.stat().st_size,
+                "size": size,
             })
         if entries:
             result[date_dir.name] = entries
@@ -1245,7 +1254,10 @@ def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:
             continue
         for f in sorted(date_dir.iterdir(), reverse=True):
             if f.name.startswith(f"{agent_name}-") and f.suffix in (".out", ".err"):
-                results.append({"name": f.name, "path": str(f), "date": date_dir.name, "size": f.stat().st_size, "suffix": f.suffix})
+                size = f.stat().st_size
+                if _is_empty_error_log(f, size):
+                    continue
+                results.append({"name": f.name, "path": str(f), "date": date_dir.name, "size": size, "suffix": f.suffix})
                 if len(results) >= limit:
                     return results
     return results
@@ -1264,14 +1276,17 @@ def build_agent_timeline(g: dict, agent_name: str, agent_observations: list[dict
                 continue
             for f in sorted(date_dir.iterdir(), reverse=True):
                 if f.name.startswith(f"{agent_name}-") and f.suffix in (".out", ".err"):
-                    mtime = datetime.fromtimestamp(f.stat().st_mtime)
+                    stat = f.stat()
+                    if _is_empty_error_log(f, stat.st_size):
+                        continue
+                    mtime = datetime.fromtimestamp(stat.st_mtime)
                     events.append({
                         "type": "log",
                         "timestamp": mtime,
                         "name": f.name,
                         "path": str(f),
                         "date": date_dir.name,
-                        "size": f.stat().st_size,
+                        "size": stat.st_size,
                         "suffix": f.suffix,
                     })
 
