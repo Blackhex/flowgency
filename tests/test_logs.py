@@ -1,6 +1,10 @@
 import os
 from datetime import datetime
+from pathlib import Path
 
+from fastapi.testclient import TestClient
+
+import agency.app as app_mod
 from agency.app import build_agent_timeline, collect_logs, get_agent_logs
 
 
@@ -60,3 +64,42 @@ def test_agent_log_views_omit_empty_error_files(tmp_path):
 
     assert [entry["name"] for entry in recent] == ["agent-run.out"]
     assert [event["name"] for event in timeline] == ["agent-run.out"]
+
+
+def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
+    group_path = tmp_path / "test"
+    logs_dir = group_path / "shared" / "logs" / "2026-07-12"
+    logs_dir.mkdir(parents=True)
+    (group_path / "shared" / "observations").mkdir(parents=True)
+    (group_path / "shared" / "proposals").mkdir(parents=True)
+    (group_path / "shared" / "decisions").mkdir(parents=True)
+    (group_path / "shared" / "prompts").mkdir(parents=True)
+    (group_path / "shared" / "memory.md").write_text("# Shared Memory\n", encoding="utf-8")
+
+    log_file = logs_dir / "agent-run.out"
+    log_file.write_text("completed", encoding="utf-8")
+    mtime = datetime(2026, 7, 12, 20, 6).timestamp()
+    os.utime(log_file, (mtime, mtime))
+
+    monkeypatch.setattr(app_mod, "CONFIG", {"agency": {"title": "Agency"}})
+    monkeypatch.setattr(
+        app_mod,
+        "GROUPS",
+        {
+            "test": {
+                "key": "test",
+                "name": "Test Group",
+                "path": Path(group_path),
+                "shared": group_path / "shared",
+                "agents": ["agent"],
+                "_agents_normalized": [{"name": "agent", "integration": "script"}],
+            }
+        },
+    )
+
+    client = TestClient(app_mod.app)
+    response = client.get("/test/logs")
+
+    assert response.status_code == 200
+    assert "20:06" in response.text
+    assert response.text.index("20:06") < response.text.index("OUT")
