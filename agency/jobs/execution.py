@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from .atomic import atomic_write_text
-from .changes import capture_git_changes
+from .changes import capture_base_sha, capture_git_changes
 from .context import resolve_job_context
 from .models import JobRecord
 from .store import read_job, transition_job
@@ -82,8 +82,21 @@ def execute_job(job_path: Path) -> JobRecord:
         )
 
     prompt_path = Path(job_path).with_suffix(".prompt")
+    base_sha = None
     try:
         context = resolve_job_context(record.spec)
+        # The capture must be tied to the one root the job actually ran in: prefer
+        # the sandbox root the integration executes against, falling back to the
+        # agent directory. Both selection and rev-parse are best-effort.
+        git_root = None
+        if context.sandbox_root and context.sandbox_root.roots:
+            git_root = Path(context.sandbox_root.roots[0])
+        elif context.agent_dir:
+            git_root = Path(context.agent_dir)
+        # Record HEAD before the run so committed work is visible afterwards. A
+        # fleet whose agents must commit every atomic change leaves a clean tree,
+        # so working-tree-only would miss the rule and capture only the exception.
+        base_sha = capture_base_sha(git_root)
         log_dir = context.group_path / "shared" / "logs" / started.strftime("%Y-%m-%d")
         log_dir.mkdir(parents=True, exist_ok=True)
         stem = f"{record.spec.agent_name}-{record.spec.trigger}-{record.spec.job_id}"
@@ -103,15 +116,11 @@ def execute_job(job_path: Path) -> JobRecord:
             persisted_stderr_path = str(stderr_path.resolve())
         native_changes = list(getattr(result, "changed_files", []))
         # Native per-file edits (currently only Copilot) win when present. For
-        # every other integration, fall back to a git-status diff of the sandbox
-        # root so outcome visibility is integration-agnostic, not Copilot-only.
+        # every other integration, fall back to a git diff of the sandbox root —
+        # unioning the working tree with the committed range base_sha..HEAD — so
+        # outcome visibility is integration-agnostic, not Copilot-only.
         if not native_changes:
-            git_root = None
-            if context.sandbox_root and context.sandbox_root.roots:
-                git_root = Path(context.sandbox_root.roots[0])
-            elif context.agent_dir:
-                git_root = Path(context.agent_dir)
-            native_changes = capture_git_changes(git_root)
+            native_changes = capture_git_changes(git_root, base_sha)
         changes = [
             {
                 "path": item.path,
@@ -123,7 +132,14 @@ def execute_job(job_path: Path) -> JobRecord:
         ]
         status = "complete" if result.exit_code == 0 else "failed"
         if status == "complete":
-            summary = "Agent completed execution (inferred from exit code)."
+            if changes:
+                noun = "file" if len(changes) == 1 else "files"
+                summary = (
+                    f"Agent completed execution; captured "
+                    f"{len(changes)} changed {noun}."
+                )
+            else:
+                summary = "Agent completed execution (inferred from exit code)."
         elif result.exit_code == 124:
             summary = f"Agent timed out after {context.timeout} seconds."
         else:
@@ -139,6 +155,7 @@ def execute_job(job_path: Path) -> JobRecord:
             duration_seconds=result.duration_seconds,
             changed_files=changes,
             execution_summary=summary,
+            base_sha=base_sha,
         )
     except Exception as error:
         final = transition_job(
@@ -147,6 +164,7 @@ def execute_job(job_path: Path) -> JobRecord:
             "failed",
             completed_at=datetime.now(timezone.utc).isoformat(),
             execution_summary=f"Execution error: {error}",
+            base_sha=base_sha,
         )
     finally:
         prompt_path.unlink(missing_ok=True)

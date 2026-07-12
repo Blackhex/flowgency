@@ -1,6 +1,8 @@
 from dataclasses import replace
 from pathlib import Path
 
+import yaml
+
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.reconciliation import reconcile_jobs, worker_alive
 from agency.jobs.store import job_path, read_job, write_job
@@ -72,6 +74,39 @@ def test_reconcile_projects_terminal_job_to_stale_decision(tmp_path):
     decision_text = decision.read_text()
     assert "execution_status: failed" in decision_text
     assert "Agent timed out after 300 seconds." in decision_text
+
+
+def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
+    """A terminal ``complete`` job carrying non-empty ``changed_files`` must
+    project both its status and the captured files onto a stale ``running``
+    decision. This is the exact behaviour the cross-tool capture advertises and
+    was previously only asserted for a failed, empty-changes job."""
+    group, decision, path = running_decision_job(tmp_path)
+    record = read_job(path)
+    changed_files = [
+        {"path": "a.py", "status": "modified", "lines_added": 3, "lines_removed": 1},
+        {"path": "b.py", "status": "added", "lines_added": 10, "lines_removed": 0},
+    ]
+    write_job(
+        path,
+        replace(
+            record,
+            status="complete",
+            completed_at="2026-07-11T22:14:14+00:00",
+            changed_files=changed_files,
+            execution_summary="Agent completed execution; captured 2 changed files.",
+        ),
+    )
+
+    reconcile_jobs({"test": {"path": str(group)}})
+
+    metadata = yaml.safe_load(decision.read_text().split("---")[1])
+    assert metadata["execution_status"] == "complete"
+    assert metadata["changed_files"] == changed_files
+    assert metadata["execution_summary"] == (
+        "Agent completed execution; captured 2 changed files."
+    )
+    assert read_job(path).status == "complete"
 
 
 def test_reconcile_leaves_uncertain_worker_running(tmp_path, monkeypatch):
