@@ -534,12 +534,12 @@ def test_get_timer_status_converts_unexpected_exception_to_error_status(monkeypa
     """Prove that unexpected platform-helper exceptions are converted to rich inactive TimerStatus."""
     def raise_unexpected(*args, **kwargs):
         raise IOError("Unexpected file read failure")
-    
+
     monkeypatch.setattr(dispatch_install, "_status_windows", raise_unexpected)
     monkeypatch.setattr("platform.system", lambda: "Windows")
-    
+
     status = get_timer_status("C:\\config.yaml", 15)
-    
+
     assert status["state"] == "inactive"
     assert status["installed"] is False
     assert status["expected_config_path"] == str(Path("C:\\config.yaml").resolve())
@@ -547,4 +547,3 @@ def test_get_timer_status_converts_unexpected_exception_to_error_status(monkeypa
     assert status["error"] == "Unexpected file read failure"
     assert status["config_path"] is None
     assert status["interval"] is None
-

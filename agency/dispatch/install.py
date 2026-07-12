@@ -141,7 +141,7 @@ def install_timer(config_path: str | Path, interval: int = 15, replace: bool = F
     # Validate interval range before any platform operations
     if not (5 <= interval <= 120):
         return f"Dispatch interval must be between 5 and 120 minutes (got {interval})."
-    
+
     canonical_path = _canonical_config_path(config_path)
     status = get_timer_status(canonical_path, interval)
     if status["error"] and not status["installed"]:

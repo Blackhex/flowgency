@@ -24,7 +24,7 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    
+
     # Mock status with a path containing single quote (O'Brien)
     conflict_status = {
         "state": "misconfigured",
@@ -46,28 +46,28 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
         lambda path, interval: conflict_status
     )
     app_mod.reload_groups()
-    
+
     client = TestClient(app_mod.app)
     response = client.get("/admin/dispatch")
-    
+
     assert response.status_code == 200
-    
+
     # Debug: print patterns found
     import re
     html = response.text
     onsubmit_patterns = re.findall(r'onsubmit="[^"]*"', html, re.IGNORECASE)
     print(f"\nFound onsubmit patterns: {onsubmit_patterns}")
     print(f"\nO'Brien in text: {'O' in html or 'Brien' in html}")
-    
+
     # Must not interpolate the path into onsubmit attribute
     for pattern in onsubmit_patterns:
         print(f"Checking pattern: {pattern}")
         assert "O'Brien" not in pattern, f"Path must not be in onsubmit handler: {pattern}"
         assert "Brien" not in pattern, f"Path must not be in onsubmit handler: {pattern}"
-    
+
     # Must still have the replace hidden input
     assert 'name="replace" value="true"' in response.text
-    
+
     # Confirmation message should be static (not contain the dynamic path)
     if onsubmit_patterns:
         # Should use a generic message like "Replace the existing dispatcher"

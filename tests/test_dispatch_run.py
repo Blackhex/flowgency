@@ -154,30 +154,30 @@ def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, mo
 
 def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypatch):
     """Prove at rules use consistent date when checking markers, preventing duplication.
-    
+
     Uses fixed datetime to prevent rare midnight-crossing flakes.
     """
     group_path, _, log_dir = _make_group(tmp_path)
-    
+
     # Fixed time: 2026-07-03 09:15:00 (within window of 09:00 at rule)
     fixed_dt = datetime(2026, 7, 3, 9, 15, 0)
-    
+
     # Monkeypatch datetime.now() in dispatch.run module
     class MockDatetime:
         @staticmethod
         def now():
             return fixed_dt
-        
+
         @staticmethod
         def fromtimestamp(ts):
             return datetime.fromtimestamp(ts)
-        
+
         @staticmethod
         def strptime(date_string, format):
             return datetime.strptime(date_string, format)
-    
+
     monkeypatch.setattr("agency.dispatch.run.datetime", MockDatetime)
-    
+
     config = _enabled_config(group_path)
     config["groups"]["test"]["dispatch"]["agents"]["product"] = [
         {"prompt": "routine.md", "at": "09:00"},
@@ -190,7 +190,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
     run_dispatch_cycle(config, tmp_path / "config.yaml")
     run_dispatch_cycle(config, tmp_path / "config.yaml")
     assert len(submitted) == 1
-    
+
     # Verify the event marker was created in the correct date subdirectory
     event_marker = log_dir / ".event-product-routine"
     assert event_marker.exists()

@@ -98,7 +98,7 @@ def test_registration_skipped_when_user_declines_config_selection():
     )[0]
     # Normalize whitespace for assertions that may span line breaks
     normalized = " ".join(registration.split())
-    
+
     # Must ask when multiple valid configs exist
     assert "If multiple remaining candidates are valid" in normalized
     assert "ask which" in normalized
@@ -115,7 +115,7 @@ def test_scheduler_setup_only_after_registration_verification():
     scheduler = skill.split("### 4.8 Singleton Scheduler Setup", maxsplit=1)[1]
     # Normalize whitespace for assertions that may span line breaks
     normalized = " ".join(scheduler.split())
-    
+
     # Must enforce registration prerequisite
     assert "Only offer scheduler setup after registration and on-disk verification succeed" in normalized
     # Must report when registration was skipped
@@ -130,7 +130,7 @@ def test_condition_rules_skipped_by_python_dispatcher():
     registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
         "### 4.8 Singleton Scheduler Setup", maxsplit=1
     )[0]
-    
+
     # Must explain condition rules are skipped by Python dispatcher
     assert "condition:" in registration
     assert "skipped by" in registration or "runs only when triggered by external" in registration
