@@ -9,7 +9,6 @@ agency:
   decided_by: admin                # Default name for decisions
   ai_backend: claude-code          # Integration used for Agency's own AI features
   dispatch:
-    installed: true                # Set after first dispatch init
     interval: 15                   # Heartbeat interval in minutes
 
 groups:
@@ -47,8 +46,9 @@ groups:
 | `default_group` | first group | Group to redirect to from `/` |
 | `decided_by` | `admin` | Default name attached to decisions |
 | `ai_backend` | `claude-code` | Integration used for Agency's own AI features |
-| `dispatch.installed` | `false` | Set automatically after dispatch init |
-| `dispatch.interval` | `15` | Heartbeat interval in minutes (5-120) |
+| `dispatch.interval` | `15` | Desired global heartbeat interval in minutes (5-120) |
+
+Dispatcher installed/active state is inspected from the OS scheduler and is never authoritative YAML data.
 
 ## Group Settings
 

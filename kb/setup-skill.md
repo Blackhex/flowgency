@@ -5,8 +5,8 @@ an existing codebase. It currently generates one of two host profiles:
 
 | Profile | Identity | Dispatch | Workspace |
 |---|---|---|---|
-| Claude on Linux | `CLAUDE.md` | Bash and user systemd | tmux panes |
-| GitHub Copilot on Windows | `AGENTS.md` plus `.copilot/` | PowerShell and Task Scheduler | Windows Terminal tabs |
+| Claude on Linux | `CLAUDE.md` | Agency global dispatcher | tmux panes |
+| GitHub Copilot on Windows | `AGENTS.md` plus `.copilot/` | Agency global dispatcher | Windows Terminal tabs |
 
 ## Install
 
@@ -53,9 +53,9 @@ It asks only when multiple runtimes make the intended profile ambiguous.
    - Agent role definitions and memory files
    - `shared/` folder with observations, proposals, decisions, logs, prompts
    - Dispatch prompts with project-specific observation tasks
-   - Platform-native dispatcher, scheduler installer, and runtime workspace
-4. **Registers the new group** with Agency (if installed)
-5. **Enables the dispatch timer** so agents start running on schedule
+   - Platform-native runtime workspace
+4. **Registers the new group** with Agency (if installed), including config-native dispatch schedules
+5. **Verifies the dispatch timer** via official CLI so agents start running on schedule
 
 ## Verification and Safety
 
@@ -63,7 +63,3 @@ The skill verifies generated agent detection and, on Windows, resolves and start
 real `copilot.exe` rather than accepting package-manager wrappers. Registration uses a
 YAML parser and atomic replacement, preserves unrelated settings, and reparses the file
 after dashboard reload so concurrent writes or normalization drift cannot pass unnoticed.
-
-Generated dispatchers enforce a 15-run daily limit, event-marker deduplication,
-per-agent logs, and a 300-second timeout. Scheduler installation is optional and uses
-the current user without storing credentials or weakening execution policy.

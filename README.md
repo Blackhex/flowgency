@@ -133,7 +133,7 @@ Reload mode watches project code, templates, static assets, themes, and `config.
 
 Agency ships with a skill that can bootstrap a full agent team for any project. Install it and run `/agency-setup` from any project directory. It currently generates native Claude/Linux and GitHub Copilot/Windows profiles.
 
-It analyzes your project (code, business operations, creative work — whatever it is), proposes 3-5 agents tailored to the project's actual domains, generates everything Agency needs (role definitions, shared folders, dispatch prompts, tmux config), and registers the group with your dashboard. Agent suggestions go beyond just "who writes code" — the skill looks at the full project lifecycle and proposes roles you wouldn't think to create yourself.
+It analyzes your project, proposes a tailored agent team, generates identities, memory, shared prompts, and an interactive workspace, then atomically registers the group and its schedules with the singleton Agency dashboard. With approval, it verifies Agency's one global user-level dispatcher; it never creates a project-specific scheduler.
 
 See [Setup Skill details](kb/setup-skill.md) for installation and what it creates.
 

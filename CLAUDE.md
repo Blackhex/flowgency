@@ -6,9 +6,9 @@
 
 - **Framework:** FastAPI + Jinja2 + Tailwind CSS (CDN, no build step)
 - **Database:** None — entirely filesystem-based. Reads markdown files with YAML frontmatter from agent directories.
-- **Config:** `config.yaml` — defines agent groups, Agency settings. Written atomically (temp + rename).
+- **Config:** One authoritative `config.yaml` per user — defines agent groups, Agency settings. Written atomically (temp + rename).
 - **Integrations:** Plugin system (`agency/integrations/`) translates between LLM tools and Agency's internal model. Each agent declares which integration it uses.
-- **Dispatch:** Python-based scheduler (`agency/dispatch/run.py`) with platform-native timers (systemd on Linux, launchd on macOS).
+- **Dispatch:** Python-based scheduler (`agency/dispatch/run.py`) with one global platform-native timer per user (systemd on Linux, launchd on macOS, Windows Task Scheduler).
 - **Deployment:** User-level systemd service (`agency.service`) on port 8500.
 
 ## Project Structure
@@ -188,8 +188,7 @@ agency:
   default_group: newsletter        # Group to redirect to from /
   ai_backend: claude-code          # Integration Agency uses for its own AI features
   dispatch:
-    installed: true                # Set after first dispatch init
-    interval: 15                   # Heartbeat interval in minutes
+    interval: 15                   # Desired heartbeat interval in minutes (5-120)
 
 groups:
   newsletter:
@@ -251,7 +250,7 @@ Agents with a `path` override resolve their directory from the configured path i
 | `every` | One of at/every | Recurring interval (e.g., `6h`, `30m`) |
 | `condition` | No | Code condition name — makes rule read-only in UI, skipped by Python dispatcher |
 
-Rules with `condition` are skipped by the Python dispatcher with an info log. Groups that need condition-based dispatch can provide their own `shared/dispatch.sh` script, run independently.
+Rules with `condition` are skipped by the Python dispatcher with an info log.
 
 ## How Agent Groups Work
 
@@ -427,11 +426,12 @@ execution_summary: ~
 
 ### Dispatch System
 - Python dispatcher at `agency/dispatch/run.py` — called by OS-native timer
-- Platform installer at `agency/dispatch/install.py` — supports systemd (Linux) and launchd (macOS)
+- Platform installer at `agency/dispatch/install.py` — supports systemd, launchd, and Windows Task Scheduler and validates the complete definition
 - `get_dispatch_status()` checks platform-native timer state
 - `install_dispatch()` delegates to the platform installer
+- The CLI exposes `dispatch install|status|uninstall`
 - Schedule rules: `at` (daily at specific time) and `every` (recurring interval)
-- Condition rules are skipped by the Python dispatcher (require per-group scripts)
+- Condition rules are skipped by the Python dispatcher
 - TTL-style marker files for dedup: `.event-*` for `at` rules, `.last-*` for `every` rules
 
 ### Agent Profiles
@@ -587,7 +587,6 @@ Available in all templates:
 - MCP config viewing/editing on agent profile page
 - Skills CRUD + SkillsMCP marketplace integration
 - Per-agent integration change from profile page dropdown
-- Windows Task Scheduler support for dispatch
 - Dashboard Phase 2: Keyboard navigation (j/k movement, a/d/x hotkeys)
 - Dashboard Phase 3: Auto-refresh (poll JSON endpoint every 30-60s)
 - Dashboard Phase 4: Activity heatmap (48h agent activity grid)

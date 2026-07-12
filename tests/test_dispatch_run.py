@@ -131,3 +131,59 @@ def test_schedule_does_not_touch_marker_when_spec_validation_fails(tmp_path, mon
 
     assert submit_calls == []
     assert not (group_path / "shared" / "logs" / ".last-product-routine").exists()
+
+
+def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, monkeypatch):
+    first_path, _, _ = _make_group(tmp_path / "first")
+    second_path, _, _ = _make_group(tmp_path / "second")
+    config = {
+        "agency": {"dispatch": {"interval": 15}},
+        "groups": {
+            "first": _enabled_config(first_path)["groups"]["test"],
+            "second": _enabled_config(second_path)["groups"]["test"],
+        },
+    }
+    submitted = []
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job",
+        lambda spec, launcher=None: submitted.append((spec.group_key, spec.agent_name)),
+    )
+    run_dispatch_cycle(config, tmp_path / "config.yaml")
+    assert submitted == [("first", "product"), ("second", "product")]
+
+
+def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypatch):
+    group_path, _, _ = _make_group(tmp_path)
+    config = _enabled_config(group_path)
+    config["groups"]["test"]["dispatch"]["agents"]["product"] = [
+        {"prompt": "routine.md", "at": datetime.now().strftime("%H:%M")},
+    ]
+    submitted = []
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job",
+        lambda spec, launcher=None: submitted.append(spec),
+    )
+    run_dispatch_cycle(config, tmp_path / "config.yaml")
+    run_dispatch_cycle(config, tmp_path / "config.yaml")
+    assert len(submitted) == 1
+
+
+def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
+    enabled_path, _, _ = _make_group(tmp_path / "enabled")
+    disabled_path, _, _ = _make_group(tmp_path / "disabled")
+    disabled_group = _enabled_config(disabled_path)["groups"]["test"]
+    disabled_group["dispatch"]["enabled"] = False
+    config = {
+        "agency": {"dispatch": {"interval": 15}},
+        "groups": {
+            "enabled": _enabled_config(enabled_path)["groups"]["test"],
+            "disabled": disabled_group,
+        },
+    }
+    submitted = []
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job",
+        lambda spec, launcher=None: submitted.append(spec.group_key),
+    )
+    run_dispatch_cycle(config, tmp_path / "config.yaml")
+    assert submitted == ["enabled"]
