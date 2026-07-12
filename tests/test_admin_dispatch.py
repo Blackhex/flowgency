@@ -181,3 +181,31 @@ def test_interval_update_returns_409_when_inspection_error(tmp_path, monkeypatch
     )
     assert response.status_code == 409
     assert "Task Scheduler service is unavailable" in response.text
+
+
+def test_admin_groups_card_actions_use_mobile_wrapping_layout(tmp_path, monkeypatch):
+    """Group card action buttons must wrap on mobile and return to row at sm breakpoint."""
+    client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
+    response = client.get("/admin/groups")
+    assert response.status_code == 200
+    # Actions container must use flex-col on mobile, flex-row at sm
+    assert 'class="flex flex-col sm:flex-row items-start sm:items-center gap-2"' in response.text or \
+           'class="flex flex-col sm:flex-row gap-2 items-start sm:items-center"' in response.text
+    # No unconditional margin-left that would push actions off-screen
+    assert 'shrink-0 ml-4"' not in response.text
+
+
+def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monkeypatch):
+    """Static schedule rules and dynamic addRule() must use identical mobile-responsive classes."""
+    client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
+    response = client.get("/admin/orgs/test/edit")
+    assert response.status_code == 200
+    # Static Jinja rule row must use grid on mobile, flex at sm
+    assert 'class="grid grid-cols-2 sm:flex sm:items-center gap-2"' in response.text
+    # JavaScript addRule must set the same className
+    assert "row.className = 'grid grid-cols-2 sm:flex sm:items-center gap-2'" in response.text
+    # Type select, value input, prompt select must have responsive width classes
+    assert 'class="w-full sm:w-auto px-2 py-1.5' in response.text  # type/value
+    assert 'class="col-span-2 sm:col-span-1 sm:flex-1 px-2 py-1.5' in response.text  # prompt
+    # Remove button must be full-width on mobile, auto at sm
+    assert 'class="w-full sm:w-auto px-2 py-1.5 text-xs font-medium text-red-600' in response.text
