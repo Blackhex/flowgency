@@ -720,10 +720,11 @@ def collect_logs(g: dict) -> dict[str, list[dict]]:
         if not date_dir.is_dir():
             continue
         entries = []
-        for f in sorted(date_dir.iterdir(), reverse=True):
+        for f in date_dir.iterdir():
             if f.name.startswith("."):
                 continue
-            size = f.stat().st_size
+            file_stat = f.stat()
+            size = file_stat.st_size
             if _is_empty_error_log(f, size):
                 continue
             entries.append({
@@ -731,8 +732,13 @@ def collect_logs(g: dict) -> dict[str, list[dict]]:
                 "path": str(f),
                 "suffix": f.suffix,
                 "size": size,
+                "timestamp": datetime.fromtimestamp(file_stat.st_mtime),
             })
         if entries:
+            entries.sort(
+                key=lambda entry: (entry["timestamp"], entry["suffix"].lower() == ".out"),
+                reverse=True,
+            )
             result[date_dir.name] = entries
     return result
 
