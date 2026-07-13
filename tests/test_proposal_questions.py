@@ -192,3 +192,27 @@ def test_invalid_executor_rerenders_without_creating_decision(tmp_path, monkeypa
     assert "does not support execution" in response.text
     assert not decision_path.exists()
     assert "status: proposed" in proposal_path.read_text()
+
+
+def test_missing_execution_agent_blocks_get_and_post(tmp_path, monkeypatch):
+    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch, explicit_executor=False)
+    get_response = client.get("/test/proposals/change")
+    post_response = client.post("/test/proposals/change/decide", data={"answer_approve": "approved", "execution_agent": "engineer"})
+    assert get_response.status_code == 200
+    assert "execution_agent is required" in get_response.text
+    assert post_response.status_code == 400
+    assert not decision_path.exists()
+    assert "status: proposed" in proposal_path.read_text()
+
+
+def test_invalid_answers_preserve_submitted_values_without_side_effects(tmp_path, monkeypatch):
+    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "deferred", "decision_note": "Keep this note", "execution_agent": "engineer"},
+    )
+    assert response.status_code == 400
+    assert "requires Approve or Decline" in response.text
+    assert "Keep this note" in response.text
+    assert not decision_path.exists()
+    assert "status: proposed" in proposal_path.read_text()

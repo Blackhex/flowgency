@@ -357,3 +357,35 @@ def test_retry_launch_failure_rerenders_decision_detail_with_error(tmp_path, mon
     assert "spawn denied" in response.text
     assert "text/html" in response.headers["content-type"]
     assert decision_path.read_text() == original_text
+
+
+def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    submitted = []
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: submitted.append(spec))
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "declined", "execution_agent": "engineer"},
+        follow_redirects=False,
+    )
+    meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert response.status_code == 303
+    assert meta["execution_status"] == "skipped"
+    assert meta["execution_summary"] == "Execution skipped because all boolean questions were declined and no other guidance was provided."
+    assert "execution_job_id" not in meta
+    assert submitted == []
+
+
+def test_declined_with_note_submits_job_and_persists_note(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    captured = []
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec))
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "declined", "decision_note": "Implement the alternate path", "execution_agent": "engineer"},
+        follow_redirects=False,
+    )
+    meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert response.status_code == 303
+    assert meta["decision_note"] == "Implement the alternate path"
+    assert "Implement the alternate path" in captured[0].prompt_content

@@ -38,6 +38,7 @@ from agency.jobs import (
 )
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
+from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision
 import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
 
@@ -2721,6 +2722,8 @@ async def proposal_detail(request: Request, group: str, slug: str):
 
 def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
                             *, selected_execution_agent: str | None = None,
+                            submitted_answers: dict | None = None,
+                            decision_note: str = "",
                             decision_error: str = "", status_code: int = 200):
     """Build the proposal_detail template response. Shared by the GET route and
     the POST /decide route so validation errors can re-render the same page."""
@@ -2733,6 +2736,14 @@ def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
         raise HTTPException(404, "Proposal not found")
     raw = path.read_text()
     meta, body = parse_frontmatter(raw)
+
+    # Compute proposal-level schema errors (shown on GET and POST)
+    proposal_errors = validate_proposal_schema(meta)
+    declared_executor = meta.get("execution_agent", "")
+    if declared_executor and declared_executor not in execution_agent_options(g):
+        proposal_errors.append(
+            f"Declared executor '{declared_executor}' is not an eligible agent"
+        )
 
     # Find linked observations
     linked = []
@@ -2761,7 +2772,7 @@ def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
     decision_answers = decision["meta"].get("answers", {}) if decision else {}
 
     if selected_execution_agent is None:
-        selected_execution_agent = meta.get("execution_agent") or meta.get("origin_agent", "")
+        selected_execution_agent = meta.get("execution_agent") or ""
 
     return templates.TemplateResponse(request, "proposal_detail.html", {
         "request": request,
@@ -2777,6 +2788,9 @@ def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
         "answers": decision_answers,
         "execution_agents": execution_agent_options(g),
         "selected_execution_agent": selected_execution_agent,
+        "proposal_errors": proposal_errors,
+        "submitted_answers": submitted_answers if submitted_answers is not None else {},
+        "decision_note": decision_note,
         "decision_error": decision_error,
     }, status_code=status_code)
 
@@ -2797,6 +2811,8 @@ async def proposal_decide(request: Request, group: str, slug: str):
     questions = cmeta.get("questions", [])
 
     form = await request.form()
+    execution_agent = form.get("execution_agent", "")
+    decision_note = str(form.get("decision_note", "")).strip()
 
     # Build answers from form data
     answers = {}
@@ -2807,16 +2823,35 @@ async def proposal_decide(request: Request, group: str, slug: str):
         else:
             answers[q["id"]] = form.get(key, "")
 
-    execution_agent = form.get("execution_agent", "")
-    if execution_agent not in execution_agent_options(g):
-        error = (
-            f"Agent '{execution_agent}' does not support execution or is unavailable."
-            if execution_agent else "Select an agent to implement this decision."
-        )
+    # 1. Schema validation — blocking before trusting answers
+    schema_errors = validate_proposal_schema(cmeta)
+    if schema_errors:
         return render_proposal_detail(
             request, g, group, slug,
             selected_execution_agent=execution_agent,
-            decision_error=error,
+            submitted_answers=answers,
+            decision_note=decision_note,
+            status_code=400,
+        )
+
+    # 2. Answer validation
+    all_errors = validate_answers(questions, answers)
+
+    # 3. Executor eligibility validation
+    if execution_agent not in execution_agent_options(g):
+        error_msg = (
+            f"Agent '{execution_agent}' does not support execution or is unavailable."
+            if execution_agent else "Select an agent to implement this decision."
+        )
+        all_errors.append(error_msg)
+
+    if all_errors:
+        return render_proposal_detail(
+            request, g, group, slug,
+            selected_execution_agent=execution_agent,
+            submitted_answers=answers,
+            decision_note=decision_note,
+            decision_error="; ".join(all_errors),
             status_code=400,
         )
 
@@ -2827,44 +2862,55 @@ async def proposal_decide(request: Request, group: str, slug: str):
     decisions_dir.mkdir(exist_ok=True)
     decision_path = decisions_dir / f"{slug}.md"
 
-    spec = JobSpec.create(
-        config_path=CONFIG_PATH,
-        group_key=group,
-        agent_name=execution_agent,
-        trigger="decision",
-        prompt_source={"type": "decision", "proposal": f"{slug}.md"},
-        prompt_content=build_decision_prompt(proposal_body, answers),
-        decision_context={
-            "decision_path": str(decision_path.resolve()),
-            "proposal_path": str(cpath.resolve()),
-        },
-    )
-
-    # Build decision frontmatter
+    # Shared metadata base
     meta = {
         "proposal": f"{slug}.md",
         "decided_by": decided_by,
         "date": today,
         "answers": answers,
-        "execution_status": "pending",
+        "decision_note": decision_note,
         "execution_agent": execution_agent,
-        "execution_job_id": spec.job_id,
         "execution_job_history": [],
     }
 
-    frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-    atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
-
-    try:
-        submit_job(spec)
-    except JobSubmissionError as error:
-        decision_path.unlink(missing_ok=True)
-        return render_proposal_detail(
-            request, g, group, slug,
-            selected_execution_agent=execution_agent,
-            decision_error=str(error),
-            status_code=400,
+    # 4. Determine execution vs skip
+    if should_execute_decision(questions, answers, decision_note):
+        spec = JobSpec.create(
+            config_path=CONFIG_PATH,
+            group_key=group,
+            agent_name=execution_agent,
+            trigger="decision",
+            prompt_source={"type": "decision", "proposal": f"{slug}.md"},
+            prompt_content=build_decision_prompt(proposal_body, answers, decision_note),
+            decision_context={
+                "decision_path": str(decision_path.resolve()),
+                "proposal_path": str(cpath.resolve()),
+            },
         )
+        meta["execution_status"] = "pending"
+        meta["execution_job_id"] = spec.job_id
+
+        frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+        atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
+
+        try:
+            submit_job(spec)
+        except JobSubmissionError as error:
+            decision_path.unlink(missing_ok=True)
+            return render_proposal_detail(
+                request, g, group, slug,
+                selected_execution_agent=execution_agent,
+                decision_error=str(error),
+                status_code=400,
+            )
+    else:
+        meta["execution_status"] = "skipped"
+        meta["execution_summary"] = (
+            "Execution skipped because all boolean questions were declined "
+            "and no other guidance was provided."
+        )
+        frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+        atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
 
     # Update proposal status to decided
     update_frontmatter_field(cpath, "status", "decided")

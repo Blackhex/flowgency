@@ -69,6 +69,11 @@
     {% if not decision %}
     {# -- Unanswered: render form -- #}
     <form method="POST" action="/{{ group }}/proposals/{{ slug }}/decide">
+      {% if proposal_errors %}
+      <div class="mb-4 p-3 border border-orange-300 bg-orange-50 text-orange-700 rounded-md" role="alert">
+        {% for err in proposal_errors %}<div>{{ err }}</div>{% endfor %}
+      </div>
+      {% endif %}
       {% if decision_error %}
       <div class="mb-4 p-3 border border-red-300 bg-red-50 text-red-700 rounded-md" role="alert">{{ decision_error }}</div>
       {% endif %}
@@ -122,6 +127,10 @@
       {% endfor %}
 
       <div class="text-right mt-4">
+        <label for="decision-note" class="block text-left text-sm font-medium text-gray-700 mb-1">Decision note <span class="text-gray-400 font-normal">(optional — guidance for the agent)</span></label>
+        <textarea id="decision-note" name="decision_note" rows="2"
+                  class="w-full border border-gray-300 rounded-lg p-3 text-sm mb-3 focus:border-purple-400 focus:ring-1 focus:ring-purple-400"
+                  placeholder="Add context or implementation guidance...">{{ decision_note }}</textarea>
         <button type="submit" class="px-6 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors">
           Submit All Answers
         </button>
