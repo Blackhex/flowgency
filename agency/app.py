@@ -2834,6 +2834,17 @@ async def proposal_decide(request: Request, group: str, slug: str):
             status_code=400,
         )
 
+    # 1b. Declared executor eligibility — mirrors render_proposal_detail check
+    declared_executor = cmeta.get("execution_agent", "")
+    if declared_executor and declared_executor not in execution_agent_options(g):
+        return render_proposal_detail(
+            request, g, group, slug,
+            selected_execution_agent=execution_agent,
+            submitted_answers=answers,
+            decision_note=decision_note,
+            status_code=400,
+        )
+
     # 2. Answer validation
     all_errors = validate_answers(questions, answers)
 
@@ -2900,6 +2911,8 @@ async def proposal_decide(request: Request, group: str, slug: str):
             return render_proposal_detail(
                 request, g, group, slug,
                 selected_execution_agent=execution_agent,
+                submitted_answers=answers,
+                decision_note=decision_note,
                 decision_error=str(error),
                 status_code=400,
             )

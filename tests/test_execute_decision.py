@@ -389,3 +389,23 @@ def test_declined_with_note_submits_job_and_persists_note(tmp_path, monkeypatch)
     assert response.status_code == 303
     assert meta["decision_note"] == "Implement the alternate path"
     assert "Implement the alternate path" in captured[0].prompt_content
+
+
+def test_launch_failure_preserves_submitted_answers_and_note_in_rerender(tmp_path, monkeypatch):
+    """On JobSubmissionError, the re-render must include the submitted answers
+    (radio pre-selected) and the decision note so all user input survives."""
+    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "agency.app.submit_job",
+        lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)),
+    )
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "approved", "decision_note": "Important guidance", "execution_agent": "engineer"},
+    )
+    assert response.status_code == 400
+    assert "spawn denied" in response.text
+    assert "Important guidance" in response.text       # decision_note preserved
+    assert 'value="approved" checked' in response.text  # boolean answer pre-selected
+    assert not decision_path.exists()
+    assert "status: proposed" in proposal_path.read_text()

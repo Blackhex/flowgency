@@ -216,3 +216,27 @@ def test_invalid_answers_preserve_submitted_values_without_side_effects(tmp_path
     assert "Keep this note" in response.text
     assert not decision_path.exists()
     assert "status: proposed" in proposal_path.read_text()
+
+
+def test_ineligible_declared_executor_blocks_post_with_eligible_submitted_executor(tmp_path, monkeypatch):
+    """POST must return 400 when the proposal's declared execution_agent is not eligible,
+    even when the submitted form selects a different eligible executor."""
+    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    # Overwrite proposal to declare an ineligible executor
+    proposal_path.write_text(
+        "---\n" + yaml.safe_dump({
+            "origin_agent": "product", "status": "proposed",
+            "execution_agent": "sdk-agent",  # ineligible: sdk integration has no write capability
+            "questions": [{"id": "approve", "type": "boolean", "prompt": "Proceed?"}],
+        }, sort_keys=False) + "---\n\nProposal body\n"
+    )
+    submitted = []
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: submitted.append(spec))
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "approved", "execution_agent": "engineer"},
+    )
+    assert response.status_code == 400
+    assert not decision_path.exists()
+    assert "status: proposed" in proposal_path.read_text()
+    assert submitted == []
