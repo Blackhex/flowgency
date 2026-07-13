@@ -58,6 +58,13 @@ def test_validate_answers_enforces_declared_choices():
     assert validate_answers(questions, {"mode": "Repair"}) == []
 
 
+def test_validate_answers_allows_optional_single_choice_to_be_unanswered():
+    questions = [question("mode", "choice", options=["Repair", "Replace"], required=False)]
+    assert validate_answers(questions, {}) == []
+    assert validate_answers(questions, {"mode": ""}) == []
+    assert validate_answers(questions, {"mode": "Other"}) == ["Question 'mode' has an invalid selection"]
+
+
 def test_validate_answers_enforces_multi_choice_shape_and_values():
     questions = [question("modes", "choice", options=["A", "B"], multi=True)]
     assert validate_answers(questions, {"modes": "A"}) == ["Question 'modes' requires a list of selections"]
