@@ -304,6 +304,31 @@ def test_cmd_decide_collects_decline_open_answer_and_note(tmp_path, monkeypatch)
     assert "Overall note" in submitted[0].prompt_content
 
 
+def test_cmd_decide_deduplicates_multi_choice_answers(tmp_path, monkeypatch):
+    args, decision_path, _ = setup_cli_proposal(
+        tmp_path,
+        monkeypatch,
+        questions=[
+            {
+                "id": "targets",
+                "type": "choice",
+                "prompt": "Targets?",
+                "multi": True,
+                "options": ["Alpha", "Beta", "Gamma"],
+            },
+        ],
+    )
+    responses = iter(["", "1,1,2", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+    submitted = []
+    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    cli.cmd_decide(args)
+    meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert meta["answers"] == {"targets": ["Alpha", "Beta"]}
+    assert meta["execution_job_id"] == submitted[0].job_id
+    assert len(submitted) == 1
+
+
 def test_cmd_decide_all_declined_without_guidance_skips_job(tmp_path, monkeypatch):
     args, decision_path, _ = setup_cli_proposal(tmp_path, monkeypatch)
     responses = iter(["", "d", ""])

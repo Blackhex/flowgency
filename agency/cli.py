@@ -352,7 +352,9 @@ def cmd_decide(args):
                 print("     (comma-separated numbers for multiple)")
                 raw = input("     > ").strip()
                 indices = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
-                answers[qid] = [labels[idx - 1] for idx in indices if 1 <= idx <= len(labels)]
+                answers[qid] = list(
+                    dict.fromkeys(labels[idx - 1] for idx in indices if 1 <= idx <= len(labels))
+                )
             else:
                 while True:
                     raw = input("     > ").strip()
