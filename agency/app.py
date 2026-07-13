@@ -38,7 +38,7 @@ from agency.jobs import (
 )
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
-from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision
+from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, question_option_labels, SKIP_EXECUTION_SUMMARY
 import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
 
@@ -2918,10 +2918,7 @@ async def proposal_decide(request: Request, group: str, slug: str):
             )
     else:
         meta["execution_status"] = "skipped"
-        meta["execution_summary"] = (
-            "Execution skipped because all boolean questions were declined "
-            "and no other guidance was provided."
-        )
+        meta["execution_summary"] = SKIP_EXECUTION_SUMMARY
         frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
         atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
 
@@ -3039,8 +3036,7 @@ async def decision_retry(request: Request, group: str, slug: str):
 
     default_agent = (
         meta.get("execution_agent")
-        or pmeta.get("execution_agent")
-        or pmeta.get("origin_agent", "")
+        or pmeta.get("execution_agent", "")
     )
 
     form = await request.form()
@@ -3049,7 +3045,7 @@ async def decision_retry(request: Request, group: str, slug: str):
     if execution_agent not in execution_agent_options(g):
         return render_decision_detail(
             request, g, group, slug,
-            decision_error=f"Agent '{execution_agent}' does not support execution or is unavailable.",
+            decision_error=f"Agent '{execution_agent}' does not support execution or is not writable.",
             status_code=400,
         )
 
@@ -3059,7 +3055,8 @@ async def decision_retry(request: Request, group: str, slug: str):
         agent_name=execution_agent,
         trigger="decision_retry",
         prompt_source={"type": "decision_retry", "proposal": f"{proposal_slug}.md"},
-        prompt_content=build_decision_prompt(proposal_body, meta.get("answers", {})),
+        prompt_content=build_decision_prompt(proposal_body, meta.get("answers", {}), meta.get("decision_note", "")),
+
         decision_context={
             "decision_path": str(decision_path.resolve()),
             "proposal_path": str(proposal_path.resolve()),

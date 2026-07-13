@@ -1,6 +1,11 @@
 SUPPORTED_QUESTION_TYPES = {"boolean", "choice", "free-response", "text"}
 OPEN_QUESTION_TYPES = {"free-response", "text"}
 
+SKIP_EXECUTION_SUMMARY = (
+    "Execution skipped because all boolean questions were declined "
+    "and no other guidance was provided."
+)
+
 
 def question_option_labels(question: dict) -> list[str]:
     labels = []

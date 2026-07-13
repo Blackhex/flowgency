@@ -225,3 +225,105 @@ def test_cmd_logs_unknown_job_exits(tmp_path, monkeypatch):
         assert exc.code == 1
     else:
         raise AssertionError("expected SystemExit for unknown job id")
+
+
+# ── Task 5: CLI decide parity tests ─────────────────────────────────────────
+
+import agency.app as app_mod  # noqa: E402  (already imported above, this is a no-op re-import)
+from agency.jobs import JobSubmissionError  # noqa: E402
+
+
+def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", questions=None):
+    group = tmp_path / "group"
+    shared = group / "shared"
+    for directory in ("proposals", "decisions", "jobs", "logs"):
+        (shared / directory).mkdir(parents=True, exist_ok=True)
+    (group / "builder").mkdir()
+    proposal_path = shared / "proposals" / "change.md"
+    proposal_meta = {
+        "origin_agent": "observer",
+        "execution_agent": execution_agent,
+        "status": "proposed",
+        "questions": questions or [
+            {"id": "approve", "type": "boolean", "prompt": "Proceed?"},
+        ],
+    }
+    proposal_path.write_text(
+        "---\n" + yaml.safe_dump(proposal_meta, sort_keys=False) + "---\n\nProposal body\n",
+        encoding="utf-8",
+    )
+    agents = [
+        {
+            "name": "builder",
+            "integration": "script",
+            "integration_config": {"command": "echo ok"},
+            "capabilities": {"write": True},
+        },
+    ]
+    runtime_group = {
+        "key": "test",
+        "name": "Test",
+        "path": group,
+        "shared": shared,
+        "agents": ["builder"],
+        "_agents_normalized": agents,
+    }
+    monkeypatch.setattr(cli, "_resolve_group", lambda args: runtime_group)
+    monkeypatch.setattr(cli, "CONFIG_PATH", tmp_path / "config.yaml")
+    return Namespace(group="test", slug="change"), shared / "decisions" / "change.md", proposal_path
+
+
+def test_cmd_decide_rejects_invalid_proposal_schema(tmp_path, monkeypatch, capsys):
+    args, _, _ = setup_cli_proposal(tmp_path, monkeypatch, execution_agent="")
+    with pytest.raises(SystemExit) as error:
+        cli.cmd_decide(args)
+    assert error.value.code == 1
+    assert "execution_agent is required" in capsys.readouterr().err
+
+
+def test_cmd_decide_collects_decline_open_answer_and_note(tmp_path, monkeypatch):
+    args, decision_path, _ = setup_cli_proposal(
+        tmp_path,
+        monkeypatch,
+        questions=[
+            {"id": "approve", "type": "boolean", "prompt": "Proceed?"},
+            {"id": "detail", "type": "free-response", "prompt": "Direction?"},
+        ],
+    )
+    responses = iter(["", "d", "Use the alternate", "Overall note"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+    submitted = []
+    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    cli.cmd_decide(args)
+    meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert meta["answers"] == {"approve": "declined", "detail": "Use the alternate"}
+    assert meta["decision_note"] == "Overall note"
+    assert meta["execution_agent"] == "builder"
+    assert meta["execution_status"] == "pending"
+    assert meta["execution_job_id"] == submitted[0].job_id
+    assert "Overall note" in submitted[0].prompt_content
+
+
+def test_cmd_decide_all_declined_without_guidance_skips_job(tmp_path, monkeypatch):
+    args, decision_path, _ = setup_cli_proposal(tmp_path, monkeypatch)
+    responses = iter(["", "d", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+    submitted = []
+    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    cli.cmd_decide(args)
+    meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert meta["execution_status"] == "skipped"
+    assert "execution_job_id" not in meta
+    assert submitted == []
+
+
+def test_cmd_decide_submission_failure_removes_decision_and_preserves_proposal(tmp_path, monkeypatch):
+    args, decision_path, proposal_path = setup_cli_proposal(tmp_path, monkeypatch)
+    responses = iter(["", "a", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+    monkeypatch.setattr(cli, "submit_job", lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)))
+    with pytest.raises(SystemExit) as error:
+        cli.cmd_decide(args)
+    assert error.value.code == 1
+    assert not decision_path.exists()
+    assert "status: proposed" in proposal_path.read_text()

@@ -14,10 +14,21 @@ from agency.app import (
     list_observations, list_proposals, list_decisions,
     collect_agents_with_identity, extract_display_title,
     parse_frontmatter, update_frontmatter_field,
+    execution_agent_options,
     GROUPS, CONFIG, CONFIG_PATH, run_server,
 )
 from agency.config import load_config_path, save_config_path
 from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status
+from agency.jobs import JobSpec, JobSubmissionError, submit_job
+from agency.jobs.atomic import atomic_write_text
+from agency.jobs.prompts import build_decision_prompt
+from agency.proposals import (
+    validate_proposal_schema,
+    question_option_labels,
+    validate_answers,
+    should_execute_decision,
+    SKIP_EXECUTION_SUMMARY,
+)
 
 
 # ── ANSI Colors ──────────────────────────────────────────────────────────────
@@ -266,86 +277,157 @@ def cmd_agents(args):
 
 def cmd_decide(args):
     """Interactively answer a proposal's questions."""
-    import yaml
-
     g = _resolve_group(args)
     slug = args.slug
     proposals_dir = g["shared"] / "proposals"
     decisions_dir = g["shared"] / "decisions"
 
-    path = proposals_dir / f"{slug}.md"
-    if not path.exists():
+    proposal_path = proposals_dir / f"{slug}.md"
+    if not proposal_path.exists():
         print(f"Error: Proposal '{slug}' not found.", file=sys.stderr)
         sys.exit(1)
 
-    meta, body = parse_frontmatter(path.read_text())
-    questions = meta.get("questions", [])
-    if not questions:
-        print("Error: Proposal has no questions.", file=sys.stderr)
+    meta, proposal_body = parse_frontmatter(proposal_path.read_text())
+
+    # Schema validation (strict — must pass before any prompting)
+    schema_errors = validate_proposal_schema(meta)
+    if schema_errors:
+        for err in schema_errors:
+            print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
 
-    origin_agent = meta.get("origin_agent", "")
+    questions = meta["questions"]
+    declared_executor = meta["execution_agent"].strip()
+
+    # Executor eligibility check
+    eligible = execution_agent_options(g)
+    if declared_executor not in eligible:
+        print(
+            f"Error: execution_agent '{declared_executor}' is not available or not writable.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     print(f"\n{bold(slug)}\n")
 
-    answers = {}
+    # Prompt for executor first
+    print("  Executor:")
+    for i, agent in enumerate(eligible, 1):
+        marker = " (default)" if agent == declared_executor else ""
+        print(f"    [{i}] {agent}{marker}")
+    execution_agent: str | None = None
+    while execution_agent is None:
+        raw = input("  > ").strip()
+        if raw == "":
+            execution_agent = declared_executor
+        elif raw.isdigit() and 1 <= int(raw) <= len(eligible):
+            execution_agent = eligible[int(raw) - 1]
+    print()
+
+    # Collect answers
+    answers: dict = {}
     for i, q in enumerate(questions, 1):
+        qid = q["id"]
+        qtype = q["type"]
+        required = q.get("required", True) is not False
+
         print(f"  {cyan(str(i))}. {q['prompt']}")
 
-        if q["type"] == "boolean":
-            print(f"     {green('[a]')}pprove  {yellow('[d]')}efer  {red('[r]')}eject")
+        if qtype == "boolean":
+            print(f"     {green('[a]')}pprove  {red('[d]')}ecline")
             while True:
                 choice = input("     > ").strip().lower()
                 if choice in ("a", "approve"):
-                    answers[q["id"]] = "approved"
+                    answers[qid] = "approved"
                     break
-                elif choice in ("d", "defer"):
-                    answers[q["id"]] = "deferred"
+                elif choice in ("d", "decline"):
+                    answers[qid] = "declined"
                     break
-                elif choice in ("r", "reject"):
-                    answers[q["id"]] = "rejected"
-                    break
-                print("     Invalid choice. Enter a/d/r.")
 
-        elif q["type"] == "choice":
-            options = q.get("options", [])
-            for j, opt in enumerate(options, 1):
-                print(f"     [{j}] {opt['label']}")
+        elif qtype == "choice":
+            labels = question_option_labels(q)
+            for j, label in enumerate(labels, 1):
+                print(f"     [{j}] {label}")
             if q.get("multi"):
                 print("     (comma-separated numbers for multiple)")
                 raw = input("     > ").strip()
                 indices = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
-                answers[q["id"]] = [options[idx - 1]["label"] for idx in indices if 1 <= idx <= len(options)]
+                answers[qid] = [labels[idx - 1] for idx in indices if 1 <= idx <= len(labels)]
             else:
                 while True:
                     raw = input("     > ").strip()
-                    if raw.isdigit() and 1 <= int(raw) <= len(options):
-                        answers[q["id"]] = options[int(raw) - 1]["label"]
+                    if raw.isdigit() and 1 <= int(raw) <= len(labels):
+                        answers[qid] = labels[int(raw) - 1]
                         break
-                    print(f"     Enter a number 1-{len(options)}.")
 
-        elif q["type"] == "free-response":
-            answers[q["id"]] = input("     > ").strip()
+        elif qtype in ("free-response", "text"):
+            while True:
+                answer = input("     > ").strip()
+                if answer or not required:
+                    answers[qid] = answer
+                    break
 
         print()
 
-    # Create decision file
+    # Optional decision note
+    decision_note = input("  Decision note (optional): ").strip()
+    print()
+
+    # Validate collected answers
+    answer_errors = validate_answers(questions, answers)
+    if answer_errors:
+        for err in answer_errors:
+            print(f"Error: {err}", file=sys.stderr)
+        sys.exit(1)
+
+    # Build base decision metadata
     today = datetime.now().strftime("%Y-%m-%d")
-    dec_meta = {
+    dec_meta: dict = {
         "proposal": f"{slug}.md",
         "decided_by": "cli",
         "date": today,
         "answers": answers,
-        "execution_status": "pending",
+        "decision_note": decision_note,
+        "execution_agent": execution_agent,
     }
-    frontmatter = yaml.dump(dec_meta, default_flow_style=False, sort_keys=False).strip()
-    content = f"---\n{frontmatter}\n---\n"
 
-    decisions_dir.mkdir(exist_ok=True)
+    decisions_dir.mkdir(parents=True, exist_ok=True)
     decision_path = decisions_dir / f"{slug}.md"
-    decision_path.write_text(content)
 
-    # Update proposal status
-    update_frontmatter_field(path, "status", "decided")
+    if should_execute_decision(questions, answers, decision_note):
+        spec = JobSpec.create(
+            config_path=CONFIG_PATH,
+            group_key=args.group,
+            agent_name=execution_agent,
+            trigger="decision",
+            prompt_source={"type": "decision", "proposal": f"{slug}.md"},
+            prompt_content=build_decision_prompt(proposal_body, answers, decision_note),
+            decision_context={
+                "decision_path": str(decision_path.resolve()),
+                "proposal_path": str(proposal_path.resolve()),
+            },
+        )
+        dec_meta["execution_status"] = "pending"
+        dec_meta["execution_job_id"] = spec.job_id
+        dec_meta["execution_job_history"] = []
+
+        frontmatter = yaml.dump(dec_meta, default_flow_style=False, sort_keys=False).strip()
+        atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
+
+        try:
+            submit_job(spec)
+        except JobSubmissionError as error:
+            decision_path.unlink(missing_ok=True)
+            print(f"Error: {error}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        dec_meta["execution_status"] = "skipped"
+        dec_meta["execution_summary"] = SKIP_EXECUTION_SUMMARY
+        frontmatter = yaml.dump(dec_meta, default_flow_style=False, sort_keys=False).strip()
+        atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
+
+    # Mark proposal decided only after successful write
+    update_frontmatter_field(proposal_path, "status", "decided")
 
     print(f"{green('✓')} Decision saved: shared/decisions/{slug}.md")
     for qid, ans in answers.items():

@@ -409,3 +409,21 @@ def test_launch_failure_preserves_submitted_answers_and_note_in_rerender(tmp_pat
     assert 'value="approved" checked' in response.text  # boolean answer pre-selected
     assert not decision_path.exists()
     assert "status: proposed" in proposal_path.read_text()
+
+
+def test_retry_rejects_read_only_executor(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    decision_path.write_text("---\nproposal: change.md\nexecution_status: failed\nexecution_agent: engineer\n---\n")
+    response = client.post("/test/decisions/change/retry", data={"execution_agent": "product"})
+    assert response.status_code == 400
+    assert "not writable" in response.text
+
+
+def test_retry_prompt_keeps_decision_note(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: approved\ndecision_note: Keep rollback\nexecution_status: failed\nexecution_agent: engineer\n---\n")
+    captured = []
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec))
+    response = client.post("/test/decisions/change/retry", data={"execution_agent": "engineer"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert "Keep rollback" in captured[0].prompt_content
