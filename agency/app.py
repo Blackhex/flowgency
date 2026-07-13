@@ -25,7 +25,7 @@ from markupsafe import Markup
 import uvicorn
 from uvicorn.supervisors.watchfilesreload import WatchFilesReload
 
-from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
+from agency.config import agent_can_write, normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 from agency.jobs import (
@@ -344,6 +344,7 @@ def get_group(group: str) -> dict:
         "name": g["name"],
         "path": Path(g["path"]),
         "agents": g["agents"],
+        "_agents_normalized": g.get("_agents_normalized", []),
         "agents_full": g.get("_agents_normalized", []),
         "shared": Path(g["path"]) / "shared",
     }
@@ -907,10 +908,12 @@ def execution_agent_options(g: dict) -> list[str]:
     """List configured agents whose directories exist and whose integration
     supports execution — i.e. valid targets for decision job submission."""
     options = []
+    agents = g.get("_agents_normalized", [])
     for name in g["agents"]:
         try:
             resolve_agent_dir(g, name)
-            if get_agent_integration(g, name).supports_execution:
+            integration = get_agent_integration(g, name)
+            if integration.supports_execution and agent_can_write(agents, name):
                 options.append(name)
         except (HTTPException, KeyError):
             continue

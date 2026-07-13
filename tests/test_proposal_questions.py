@@ -147,7 +147,12 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
     )
     agents = [
         {"name": "product", "integration": "script", "integration_config": {"command": "echo ok"}},
-        {"name": "engineer", "integration": "script", "integration_config": {"command": "echo ok"}},
+        {
+            "name": "engineer",
+            "integration": "script",
+            "integration_config": {"command": "echo ok"},
+            "capabilities": {"write": True},
+        },
         {"name": "sdk-agent", "integration": "sdk"},
     ]
     monkeypatch.setattr(app_mod, "CONFIG", {"groups": {"test": {"path": str(group), "agents": agents}}})
@@ -158,6 +163,11 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
     return TestClient(app), proposal_path, shared / "decisions" / "change.md"
 
 
+def test_executor_options_exclude_agents_without_explicit_write_capability(tmp_path, monkeypatch):
+    _setup_decision_group(tmp_path, monkeypatch)
+    assert app_mod.execution_agent_options(app_mod.GROUPS["test"]) == ["engineer"]
+
+
 def test_proposal_form_defaults_executor_to_explicit_execution_agent(tmp_path, monkeypatch):
     client, _, _ = _setup_decision_group(tmp_path, monkeypatch)
     response = client.get("/test/proposals/change")
@@ -165,10 +175,11 @@ def test_proposal_form_defaults_executor_to_explicit_execution_agent(tmp_path, m
     assert '<option value="engineer" selected>' in response.text
 
 
-def test_superseded_proposal_defaults_executor_to_origin_agent(tmp_path, monkeypatch):
+def test_superseded_proposal_excludes_origin_agent_without_write_capability(tmp_path, monkeypatch):
     client, _, _ = _setup_decision_group(tmp_path, monkeypatch, explicit_executor=False)
     response = client.get("/test/proposals/change")
-    assert '<option value="product" selected>' in response.text
+    assert '<option value="product"' not in response.text
+    assert '<option value="engineer"' in response.text
 
 
 def test_invalid_executor_rerenders_without_creating_decision(tmp_path, monkeypatch):

@@ -1,6 +1,8 @@
 import pytest
 from pathlib import Path
 
+from agency.config import agent_can_write
+
 
 def test_normalize_bare_string():
     from agency.config import normalize_agents
@@ -52,6 +54,24 @@ def test_agent_names_helper():
         {"name": "bot", "integration": "script"},
     ]
     assert agent_names(agents) == ["product", "bot"]
+
+
+@pytest.mark.parametrize(
+    ("agent", "expected"),
+    [
+        ({"name": "missing"}, False),
+        ({"name": "empty", "capabilities": {}}, False),
+        ({"name": "false", "capabilities": {"write": False}}, False),
+        ({"name": "string", "capabilities": {"write": "true"}}, False),
+        ({"name": "writer", "capabilities": {"write": True}}, True),
+    ],
+)
+def test_agent_can_write_is_explicit_and_fail_closed(agent, expected):
+    assert agent_can_write([agent], agent["name"]) is expected
+
+
+def test_agent_can_write_returns_false_for_unknown_agent():
+    assert agent_can_write([{"name": "builder", "capabilities": {"write": True}}], "missing") is False
 
 
 def test_runtime_groups_preserve_raw_agent_entries():

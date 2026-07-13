@@ -72,6 +72,15 @@ def agent_names(agents: list[dict]) -> list[str]:
     return [a["name"] for a in agents]
 
 
+def agent_can_write(agents: list[dict], agent_name: str) -> bool:
+    """Return whether an agent explicitly grants decision write authority."""
+    for agent in agents:
+        if agent.get("name") == agent_name:
+            capabilities = agent.get("capabilities")
+            return isinstance(capabilities, dict) and capabilities.get("write") is True
+    return False
+
+
 def get_agent_dir(g: dict, agent_name: str) -> Path:
     """Resolve an agent's directory. Checks for path override in config, falls back to group_path/name.
 
