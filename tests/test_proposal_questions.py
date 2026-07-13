@@ -175,6 +175,17 @@ def test_proposal_form_defaults_executor_to_explicit_execution_agent(tmp_path, m
     assert '<option value="engineer" selected>' in response.text
 
 
+def test_unanswered_boolean_form_only_offers_approve_and_decline(tmp_path, monkeypatch):
+    client, _, _ = _setup_decision_group(tmp_path, monkeypatch)
+    response = client.get("/test/proposals/change")
+    assert response.status_code == 200
+    assert 'value="approved"' in response.text
+    assert 'value="declined"' in response.text
+    assert 'value="deferred"' not in response.text
+    assert 'value="rejected"' not in response.text
+    assert ">Defer<" not in response.text
+
+
 def test_superseded_proposal_excludes_origin_agent_without_write_capability(tmp_path, monkeypatch):
     client, _, _ = _setup_decision_group(tmp_path, monkeypatch, explicit_executor=False)
     response = client.get("/test/proposals/change")

@@ -94,12 +94,8 @@
             <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium decide-pill decide-pill-approve transition-colors">Approve</span>
           </label>
           <label class="cursor-pointer">
-            <input type="radio" name="answer_{{ q.id }}" value="deferred" {% if submitted_answers.get(q.id) == 'deferred' %}checked {% endif %}class="hidden peer">
-            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium decide-pill decide-pill-defer transition-colors">Defer</span>
-          </label>
-          <label class="cursor-pointer">
-            <input type="radio" name="answer_{{ q.id }}" value="rejected" {% if submitted_answers.get(q.id) == 'rejected' %}checked {% endif %}class="hidden peer">
-            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium decide-pill decide-pill-reject transition-colors">Reject</span>
+            <input type="radio" name="answer_{{ q.id }}" value="declined" {% if submitted_answers.get(q.id) == 'declined' %}checked {% endif %}class="hidden peer">
+            <span class="inline-block px-4 py-1.5 rounded-md text-sm font-medium decide-pill decide-pill-reject transition-colors">Decline</span>
           </label>
         </div>
 
