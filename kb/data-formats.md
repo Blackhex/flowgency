@@ -76,7 +76,7 @@ Two related observations suggest this is a systemic issue, not a one-off.
 | `feedback_received` | no | Agents that responded |
 | `ttl_days` | no | Days before auto-archive |
 | `questions` | yes | List of typed questions (see below) |
-| `execution_agent` | yes | Agent that should implement decisions on this proposal. Must be an agent with `capabilities.write: true`. No default — omitting this field means no agent is pre-selected for execution. |
+| `execution_agent` | yes | Agent that should implement decisions on this proposal. Must be an agent with `capabilities.write: true`. Omitting this field, or naming an agent that is unavailable, non-executable, or lacks write permission, blocks the decide form and POST until corrected. |
 
 ### Question Types
 
@@ -124,14 +124,15 @@ decision_note: Prioritise the pre-processing approach for simplicity.
 
 ### Execution Intent and `execution_status: skipped`
 
-Not every decision triggers execution. Agency evaluates execution intent when a decision
-is created and sets the initial `execution_status` accordingly:
+Agency validates the executor and evaluates execution intent before creating a decision:
 
-| Condition | Initial `execution_status` |
-|-----------|---------------------------|
-| At least one `boolean` answer is `approved` AND `execution_agent` is set | `pending` (job submitted) |
-| No `boolean` answer is `approved` (all declined) | `skipped` (no job submitted) |
-| No writable `execution_agent` is available | `skipped` |
+| Condition | Result |
+|-----------|--------|
+| `execution_agent` is missing, invalid, non-executable, or non-writable | Decide form and POST are blocked until corrected — no decision is created |
+| Questionnaire has no `boolean` questions | `pending` (job submitted after validation) |
+| At least one `boolean` answer is `approved` | `pending` (job submitted) |
+| All `boolean` answers are `declined` AND no substantive non-boolean input (non-whitespace choice selection, open-ended answer, or decision note) | `skipped` (no job submitted) |
+| All `boolean` answers are `declined` AND at least one substantive non-boolean input is present | `pending` (job submitted) |
 
 `skipped` is a terminal status — no job is submitted and no retry is offered unless the
 decision is re-opened. The executor dropdown on the decide form lists only agents with
@@ -139,16 +140,15 @@ decision is re-opened. The executor dropdown on the decide form lists only agent
 
 ### Execution
 
-When you answer a proposal's questions and at least one boolean answer is `approved`,
-you select which agent implements the decision from the executor dropdown (only agents
-with `capabilities.write: true` are listed). Agency submits a durable job for that
-agent with an immutable snapshot of the proposal body and your answers embedded in the
-prompt — the agent never needs to re-read the proposal or decision files. Failed
-executions can be retried from the decision detail page; retrying keeps the prior
-`execution_job_id` in `execution_job_history` and lets you change the executing agent.
-
-There is no origin-agent fallback: if no writable agent is selected, `execution_status`
-is set to `skipped`.
+When you answer a proposal's questions, you select which agent implements the decision
+from the executor dropdown (only agents with `capabilities.write: true` are listed).
+Agency validates the executor and evaluates execution intent before creating the
+decision — see the table above. When a decision executes, Agency submits a durable job
+for the executor with an immutable snapshot of the proposal body and your answers
+embedded in the prompt — the agent never needs to re-read the proposal or decision
+files. Failed executions can be retried from the decision detail page; retrying keeps
+the prior `execution_job_id` in `execution_job_history` and lets you change the
+executing agent.
 
 ## TTL Enforcement
 
@@ -161,6 +161,6 @@ Agency tracks the full chain across the pipeline:
 - An **observation** can link to a proposal via `linked_proposal`
 - A **proposal** links back to its source observations via `observations`
 - A **decision** links to its proposal via `proposal`
-- A decision triggers **execution** only when at least one `boolean` answer is `approved` and a writable `execution_agent` is set; otherwise `execution_status` is set to `skipped`
+- A missing, invalid, or non-writable `execution_agent` blocks the decide form and POST until corrected; execution is `skipped` only when all `boolean` answers are `declined` with no substantive non-boolean input (choice selection, open-ended answer, or decision note)
 
 The UI renders these as clickable pipeline banners on each detail page, showing the full path from observation to action to execution.

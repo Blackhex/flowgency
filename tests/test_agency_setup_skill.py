@@ -149,3 +149,34 @@ def test_registration_writes_explicit_fail_closed_agent_capabilities():
     assert "capabilities.write: false" in normalized
     assert "Never infer write authority for an existing agent" in normalized
     assert "ask the user when a newly generated role is ambiguous" in normalized
+
+
+def test_docs_clarify_execution_agent_blocks_not_skips():
+    """kb/data-formats.md and CLAUDE.md must state that a missing, invalid, non-executable,
+    or non-writable execution_agent blocks the decide form and POST until corrected — not
+    that it silently creates a skipped decision. The prohibited superseded-skip row must be
+    absent. The substantive-input and no-boolean-questions execution rules must be stated."""
+    data_formats = (REPO_ROOT / "kb" / "data-formats.md").read_text(encoding="utf-8")
+    claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+
+    # Required: blocking language in kb/data-formats.md
+    assert "blocks the decide form" in data_formats, \
+        "data-formats.md must say missing/invalid execution_agent blocks the decide form"
+    assert "blocked until corrected" in data_formats, \
+        "data-formats.md must say the form is blocked until the executor is corrected"
+
+    # Required: substantive non-boolean input causes execution despite all booleans declined
+    assert "substantive" in data_formats, \
+        "data-formats.md must describe the substantive non-boolean input rule"
+
+    # Required: questionnaires with no boolean questions execute after validation
+    assert "no `boolean` questions" in data_formats, \
+        "data-formats.md must state that questionnaires with no boolean questions execute"
+
+    # Required: blocking language in CLAUDE.md
+    assert "blocks the decide form" in claude_md, \
+        "CLAUDE.md Pipeline Relationships must say missing/invalid execution_agent blocks the decide form"
+
+    # Prohibited: superseded-skip row implying missing executor creates a skipped decision
+    assert "No writable `execution_agent` is available | `skipped`" not in data_formats, \
+        "data-formats.md must not contain the inaccurate superseded-skip table row"

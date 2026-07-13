@@ -475,7 +475,7 @@ execution_agent: builder       # Must have capabilities.write: true
 - Proposal detail shows originating observations + resulting decision
 - Decision detail traces back through proposal to source observations
 - All rendered as clickable pipeline banners with color-coded steps
-- A decision triggers execution only when at least one `boolean` answer is `approved` and a writable `execution_agent` is set; otherwise `execution_status` is `skipped`
+- A missing, invalid, or non-writable `execution_agent` blocks the decide form and POST until corrected; execution is `skipped` only when all `boolean` answers are `declined` with no substantive non-boolean input (choice selection, open-ended answer, or decision note)
 - No origin-agent fallback: executor must be an agent with `capabilities.write: true`
 
 ### TTL Enforcement
