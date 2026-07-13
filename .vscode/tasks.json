@@ -158,6 +158,7 @@
     },
     {
       "dependsOn": [
+        "Install (editable)",
         "Serve dashboard (hot-reload): server",
         "Open dashboard (internal)"
       ],
