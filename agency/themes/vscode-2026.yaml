@@ -1,0 +1,132 @@
+name: VS Code 2026
+description: 2026 Dark + Light — the latest VS Code workbench
+author: agency
+
+dark:
+  # Surfaces
+  bg: "#191a1b"
+  bg_surface: "#191a1b"
+  bg_card: "#191a1b"
+  bg_card_hover: "#242526"
+  border: "#2a2b2cff"
+  border_subtle: "#2a2b2cff"
+
+  # Sidebar
+  sidebar_bg: "#121314"
+  sidebar_text: "#bfbfbf"
+  sidebar_hover_bg: "#ffffff14"
+  sidebar_active_bg: "#ffffff22"
+  sidebar_active_text: "#ededed"
+  sidebar_section: "#8c8c8c"
+
+  # Typography
+  text: "#bfbfbf"
+  text_heading: "#ededed"
+  text_muted: "#8c8c8c"
+  text_faint: "#555555"
+
+  # Primary action
+  primary: "#297aa0"
+  primary_text: "#ffffff"
+  primary_hover: "#2b7da3"
+
+  # Secondary action
+  secondary: "#00000000"
+  secondary_text: "#bfbfbf"
+  secondary_hover: "#ffffff10"
+
+  # Outline action
+  outline: "#3994bcb3"
+
+  # Code
+  code_bg: "#242526"
+
+  # Inputs
+  input_bg: "#191a1b"
+  input_border: "#333536"
+  input_placeholder: "#555555"
+
+  # Prose
+  link: "#48a0c7"
+
+light:
+  # Surfaces
+  bg: "#ffffff"
+  bg_surface: "#fafafd"
+  bg_card: "#ffffff"
+  bg_card_hover: "#f0f0f3"
+  border: "#e4e5e6ff"
+  border_subtle: "#f0f1f2ff"
+
+  # Sidebar
+  sidebar_bg: "#fafafd"
+  sidebar_text: "#202020"
+  sidebar_hover_bg: "#00000014"
+  sidebar_active_bg: "#00000025"
+  sidebar_active_text: "#202020"
+  sidebar_section: "#606060"
+
+  # Typography
+  text: "#202020"
+  text_heading: "#202020"
+  text_muted: "#606060"
+  text_faint: "#999999"
+
+  # Primary action
+  primary: "#0069cc"
+  primary_text: "#ffffff"
+  primary_hover: "#0063c1"
+
+  # Secondary action
+  secondary: "#eaeaea"
+  secondary_text: "#202020"
+  secondary_hover: "#f2f3f4"
+
+  # Outline action
+  outline: "#0069ccff"
+
+  # Code
+  code_bg: "#eaeaea"
+
+  # Inputs
+  input_bg: "#ffffff"
+  input_border: "#d8d8d866"
+  input_placeholder: "#999999"
+
+  # Prose
+  link: "#0069cc"
+
+logo:
+  dark:
+    bg: "#191a1b"
+    node: "#3994bc"
+    line: "#bfbfbf"
+  light:
+    bg: "#fafafd"
+    bg_border: "#f0f1f2ff"
+    node: "#0069cc"
+    line: "#606060"
+
+status:
+  healthy: { bg_dark: "#73c99126", text_dark: "#73c991", bg_light: "#587c0c26", text_light: "#587c0c" }
+  pending: { bg_dark: "#e5ba7d26", text_dark: "#e5ba7d", bg_light: "#66730926", text_light: "#667309" }
+  error: { bg_dark: "#f4877126", text_dark: "#f48771", bg_light: "#ad070726", text_light: "#ad0707" }
+
+scale:
+  50: "#fafafd"
+  100: "#f0f1f2"
+  200: "#d8d8d8"
+  500: "#3994bc"
+  600: "#297aa0"
+  700: "#1c546f"
+  800: "#202122"
+  900: "#191a1b"
+  950: "#121314"
+
+ui:
+  font_family: '"Segoe WPC", "Segoe UI", system-ui, sans-serif'
+  main_font_size: "13px"
+  nav_font_size: "13px"
+  nav_radius: "2px"
+  radius_lg: "2px"
+  radius_xl: "2px"

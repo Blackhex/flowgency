@@ -152,6 +152,7 @@ def generate_theme_css(theme: dict) -> str:
     dark = theme.get("dark", {})
     logo = theme.get("logo", {})
     scale = theme.get("scale", {})
+    ui = theme.get("ui", {})
 
     # CSS custom properties
     props_light = []
@@ -173,6 +174,10 @@ def generate_theme_css(theme: dict) -> str:
     for key, val in scale.items():
         props_light.append(f"  --t-scale-{key}: {val};")
         props_dark.append(f"  --t-scale-{key}: {val};")
+    for key, val in ui.items():
+        prop = f"  --t-ui-{key.replace('_', '-')}: {val};"
+        props_light.append(prop)
+        props_dark.append(prop)
 
     lines.append(":root {")
     lines.extend(props_light)
@@ -184,16 +189,31 @@ def generate_theme_css(theme: dict) -> str:
     # Structural overrides using the custom properties
     lines.append("""
 /* Body */
-body { background-color: var(--t-bg) !important; color: var(--t-text) !important; }
+body {
+  background-color: var(--t-bg) !important;
+  color: var(--t-text) !important;
+  font-family: var(--t-ui-font-family, "DM Sans", system-ui, sans-serif) !important;
+}
+@media (min-width: 768px) {
+  main { font-size: var(--t-ui-main-font-size, 1.0625rem); }
+}
 
 /* Sidebar */
 nav#sidebar { background-color: var(--t-sidebar-bg) !important; }
-.nav-item { color: var(--t-sidebar-text) !important; }
-.nav-item:hover { color: var(--t-sidebar-active-text) !important; }
+.nav-item {
+  color: var(--t-sidebar-text) !important;
+  border-radius: var(--t-ui-nav-radius, 0.5rem) !important;
+  font-size: var(--t-ui-nav-font-size, 0.9375rem) !important;
+}
+.nav-item:hover { color: var(--t-sidebar-active-text) !important; background: var(--t-sidebar-hover-bg, rgba(255,255,255,0.06)) !important; }
 .nav-item.active { color: var(--t-sidebar-active-text, #fff) !important; background: var(--t-sidebar-active-bg) !important; }
 .nav-section { color: var(--t-sidebar-section) !important; }
-.theme-toggle { color: var(--t-sidebar-text) !important; }
-.theme-toggle:hover { color: var(--t-sidebar-active-text) !important; }
+.theme-toggle {
+  color: var(--t-sidebar-text) !important;
+  border-radius: var(--t-ui-nav-radius, 0.5rem) !important;
+  font-size: var(--t-ui-nav-font-size, 0.9375rem) !important;
+}
+.theme-toggle:hover { color: var(--t-sidebar-active-text) !important; background: var(--t-sidebar-hover-bg, rgba(255,255,255,0.06)) !important; }
 
 /* Logo */
 nav#sidebar .logo-square { background-color: var(--t-logo-bg, var(--t-sidebar-bg)) !important; }
@@ -207,6 +227,8 @@ nav#sidebar .logo-square svg circle { fill: var(--t-logo-node, white) !important
 .bg-white, .dark .bg-white { background-color: var(--t-bg-card) !important; }
 .bg-gray-50, .dark .bg-gray-50 { background-color: var(--t-bg) !important; }
 .dark .bg-gray-100 { background-color: var(--t-bg-surface, var(--t-bg-card)) !important; }
+.rounded-lg { border-radius: var(--t-ui-radius-lg, 0.5rem) !important; }
+.rounded-xl { border-radius: var(--t-ui-radius-xl, 0.75rem) !important; }
 
 /* Borders */
 .border-gray-200, .dark .border-gray-200 { border-color: var(--t-border) !important; }
@@ -218,6 +240,7 @@ nav#sidebar .logo-square svg circle { fill: var(--t-logo-node, white) !important
 .text-gray-700, .dark .text-gray-700 { color: var(--t-text) !important; }
 .text-gray-600, .dark .text-gray-600 { color: var(--t-text-muted) !important; }
 .text-gray-500, .dark .text-gray-500 { color: var(--t-text-faint) !important; }
+html.dark body.text-gray-900 { color: var(--t-text) !important; }
 
 /* Primary action buttons */
 .bg-indigo-600, .bg-purple-600 { background-color: var(--t-primary) !important; color: var(--t-primary-text) !important; }
@@ -229,9 +252,15 @@ nav#sidebar .logo-square svg circle { fill: var(--t-logo-node, white) !important
 
 /* Form inputs */
 .dark input, .dark textarea, .dark select {
-  background-color: var(--t-code-bg) !important;
-  border-color: var(--t-border) !important;
+  background-color: var(--t-input-bg, var(--t-code-bg)) !important;
+  border-color: var(--t-input-border, var(--t-border)) !important;
   color: var(--t-text) !important;
+}
+.dark input.border-gray-300, .dark textarea.border-gray-300, .dark select.border-gray-300 {
+  border-color: var(--t-input-border, var(--t-border)) !important;
+}
+.dark input::placeholder, .dark textarea::placeholder {
+  color: var(--t-input-placeholder, var(--t-text-faint)) !important;
 }
 .dark input:focus, .dark textarea:focus, .dark select:focus {
   border-color: var(--t-primary) !important;
