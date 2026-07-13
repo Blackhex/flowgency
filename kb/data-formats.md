@@ -44,6 +44,7 @@ observations: [duplicate-ids-found.md, data-drift-detected.md]
 feedback_requested: []
 feedback_received: []
 ttl_days: 30
+execution_agent: builder
 questions:
   - id: approach
     type: choice
@@ -52,9 +53,11 @@ questions:
       - label: "Pre-processing pass"
       - label: "Real-time dedup at ingest"
     multi: false
+    required: true
   - id: approve
     type: boolean
     prompt: "Proceed with implementing this?"
+    required: true
 ---
 
 Recommend implementing a deduplication pass before the analysis pipeline runs.
@@ -73,17 +76,17 @@ Two related observations suggest this is a systemic issue, not a one-off.
 | `feedback_received` | no | Agents that responded |
 | `ttl_days` | no | Days before auto-archive |
 | `questions` | yes | List of typed questions (see below) |
-| `execution_agent` | no | Agent that should implement decisions on this proposal. Defaults to `origin_agent` when unset (superseded proposals). |
+| `execution_agent` | yes | Agent that should implement decisions on this proposal. Must be an agent with `capabilities.write: true`. No default — omitting this field means no agent is pre-selected for execution. |
 
 ### Question Types
 
 Each question has an `id`, `type`, and `prompt`. The three types:
 
-| Type | Extra Fields | Answer Format |
-|------|-------------|---------------|
-| `boolean` | — | `approved`, `deferred`, or `rejected` |
-| `choice` | `options` (list of `{label}`), `multi` (bool) | Selected label string, or list if multi |
-| `free-response` | — | Free text string |
+| Type | Extra Fields | Answer Format | Notes |
+|------|-------------|---------------|-------|
+| `boolean` | `required` (bool, default true) | `approved` or `declined` | `deferred` and `rejected` are not valid answer values |
+| `choice` | `options` (list of `{label}` or bare strings), `multi` (bool), `required` (bool, default true) | Selected label string, or list if multi | `options` is mandatory |
+| `free-response` or `text` | `required` (bool, default true) | Free text string | Both type names are accepted |
 
 ## Decision Format
 
@@ -99,6 +102,8 @@ answers:
   approve: approved
 execution_status: complete
 execution_summary: Added deduplication pass to the pre-processing pipeline. 3 duplicate entries resolved.
+execution_agent: builder
+decision_note: Prioritise the pre-processing approach for simplicity.
 ---
 ```
 
@@ -110,15 +115,40 @@ execution_summary: Added deduplication pass to the pre-processing pipeline. 3 du
 | `decided_by` | yes | Who made the decision |
 | `date` | yes | ISO 8601 date |
 | `answers` | yes | Dict of question id → answer value |
-| `execution_status` | no | `pending`, `running`, `complete`, `failed` |
+| `execution_status` | no | `pending`, `running`, `complete`, `failed`, `skipped` |
 | `execution_summary` | no | Agent's report of what it did |
-| `execution_agent` | no | Agent selected to implement this decision. Chosen when the decision is created (or retried); falls back to the proposal's `execution_agent`, then `origin_agent`, for superseded decisions with no explicit selection. |
+| `execution_agent` | no | Agent selected to implement this decision. Must have `capabilities.write: true`. Set when the decision is created or retried; no origin-agent fallback. |
 | `execution_job_id` | no | ID of the current (or most recent) durable job submitted for this decision |
-| `execution_job_history` | no | IDs of prior jobs superseded by retries, oldest first. A retry appends the previous `execution_job_id` here before replacing it. |
+| `execution_job_history` | no | IDs of prior jobs superseded by retries, oldest first |
+| `decision_note` | no | Free-text context or guidance for the executing agent |
+
+### Execution Intent and `execution_status: skipped`
+
+Not every decision triggers execution. Agency evaluates execution intent when a decision
+is created and sets the initial `execution_status` accordingly:
+
+| Condition | Initial `execution_status` |
+|-----------|---------------------------|
+| At least one `boolean` answer is `approved` AND `execution_agent` is set | `pending` (job submitted) |
+| No `boolean` answer is `approved` (all declined) | `skipped` (no job submitted) |
+| No writable `execution_agent` is available | `skipped` |
+
+`skipped` is a terminal status — no job is submitted and no retry is offered unless the
+decision is re-opened. The executor dropdown on the decide form lists only agents with
+`capabilities.write: true`; agents without this flag do not appear.
 
 ### Execution
 
-When you answer a proposal's questions, you select which agent implements the decision (defaulting to the proposal's `execution_agent`, or `origin_agent` for superseded proposals). Agency submits a durable job for that agent with an immutable snapshot of the proposal body and your answers embedded in the prompt — the agent never needs to re-read the proposal or decision files. Failed executions can be retried from the decision detail page; retrying keeps the prior `execution_job_id` in `execution_job_history` and lets you change the executing agent.
+When you answer a proposal's questions and at least one boolean answer is `approved`,
+you select which agent implements the decision from the executor dropdown (only agents
+with `capabilities.write: true` are listed). Agency submits a durable job for that
+agent with an immutable snapshot of the proposal body and your answers embedded in the
+prompt — the agent never needs to re-read the proposal or decision files. Failed
+executions can be retried from the decision detail page; retrying keeps the prior
+`execution_job_id` in `execution_job_history` and lets you change the executing agent.
+
+There is no origin-agent fallback: if no writable agent is selected, `execution_status`
+is set to `skipped`.
 
 ## TTL Enforcement
 
@@ -131,6 +161,6 @@ Agency tracks the full chain across the pipeline:
 - An **observation** can link to a proposal via `linked_proposal`
 - A **proposal** links back to its source observations via `observations`
 - A **decision** links to its proposal via `proposal`
-- Every **decision** triggers **execution**, dispatching the origin agent via its integration to act on the answers
+- A decision triggers **execution** only when at least one `boolean` answer is `approved` and a writable `execution_agent` is set; otherwise `execution_status` is set to `skipped`
 
 The UI renders these as clickable pipeline banners on each detail page, showing the full path from observation to action to execution.

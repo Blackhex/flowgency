@@ -124,6 +124,34 @@ Agents can be specified in two forms:
 
 You can mix both in the same list. The shorthand is never rewritten to disk — it stays compact.
 
+### Agent Capabilities (`capabilities.write`)
+
+Each agent can declare write authority for decision execution via `capabilities.write`:
+
+```yaml
+agents:
+  - name: builder
+    integration: claude-code
+    capabilities:
+      write: true       # Can implement approved decisions
+  - name: advisor
+    integration: claude-code
+    capabilities:
+      write: false      # Observational only — cannot implement decisions
+  - researcher          # Shorthand: capabilities.write defaults to false
+```
+
+| Value | Effect |
+|-------|--------|
+| `true` (literal boolean) | Agent may be selected to implement a decision |
+| `false` or omitted | Agent is excluded from the executor selection; observational runs are unaffected |
+
+**Fail-closed:** only an explicit `true` boolean grants decision implementation authority.
+Omitted `capabilities.write` means false. Shorthand agents (`"researcher"`) have no
+`capabilities` key and therefore cannot implement decisions. This permission does **not**
+block scheduled observational dispatch runs — agents can still be dispatched for
+observations regardless of this setting.
+
 ## Per-Agent Integration
 
 Each agent can use a different integration. Set it in the full dict form:

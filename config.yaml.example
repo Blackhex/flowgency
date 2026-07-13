@@ -5,6 +5,17 @@ groups:
   my-project:
     name: My Project Agents
     path: /path/to/your/agents
+    default_integration: claude-code
     agents:
-    - agent-one
-    - agent-two
+    - name: builder
+      integration: claude-code
+      capabilities:
+        write: true
+    - name: advisor
+      integration: claude-code
+      capabilities:
+        write: false
+    - name: sentinel
+      integration: claude-code
+      capabilities:
+        write: false

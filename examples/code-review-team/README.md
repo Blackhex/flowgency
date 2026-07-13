@@ -25,9 +25,18 @@ A 3-agent team for software projects: automated code review, security scanning, 
        path: /path/to/your/review-agents
        default_integration: claude-code
        agents:
-       - reviewer
-       - security
-       - docs
+       - name: reviewer
+         integration: claude-code
+         capabilities:
+           write: false
+       - name: security
+         integration: claude-code
+         capabilities:
+           write: false
+       - name: docs
+         integration: claude-code
+         capabilities:
+           write: false
    ```
 
 3. Edit each agent's `CLAUDE.md` to reference your project's specific tech stack, coding conventions, and security requirements.

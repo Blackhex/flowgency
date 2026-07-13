@@ -136,3 +136,16 @@ def test_condition_rules_skipped_by_python_dispatcher():
     assert "skipped by" in registration or "runs only when triggered by external" in registration
     # Must say they remain read-only in UI
     assert "read-only" in registration
+
+
+def test_registration_writes_explicit_fail_closed_agent_capabilities():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
+        "### 4.8 Singleton Scheduler Setup", maxsplit=1
+    )[0]
+    normalized = " ".join(registration.split())
+
+    assert "capabilities.write: true" in normalized
+    assert "capabilities.write: false" in normalized
+    assert "Never infer write authority for an existing agent" in normalized
+    assert "ask the user when a newly generated role is ambiguous" in normalized

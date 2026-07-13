@@ -25,9 +25,18 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
        path: /path/to/your/content-agents
        default_integration: claude-code  # or whichever tool you use
        agents:
-       - writer
-       - editor
-       - researcher
+       - name: writer
+         integration: claude-code
+         capabilities:
+           write: true
+       - name: editor
+         integration: claude-code
+         capabilities:
+           write: false
+       - name: researcher
+         integration: claude-code
+         capabilities:
+           write: false
    ```
 
 3. Edit each agent's `CLAUDE.md` (or your tool's identity file) to match your project's context — what you publish, where, and your voice/tone guidelines.

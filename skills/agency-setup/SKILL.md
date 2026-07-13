@@ -274,7 +274,28 @@ If yes:
   list. Preserve unrelated top-level config and unrelated groups.
 - Set `default_integration: claude-code` for Claude/Linux or
   `default_integration: copilot` for Copilot/Windows
-- Write agents in dict form with each agent's selected `integration`
+- Write agents in dict form with each agent's selected `integration` and explicit
+  `capabilities.write`. Implementation/builder roles set `capabilities.write: true`;
+  observational/advisory/sentinel roles set `capabilities.write: false`. Never infer
+  write authority for an existing agent — preserve its current explicit value if it has
+  one. For newly generated roles that are ambiguous (neither clearly a builder nor
+  clearly read-only), ask the user when a newly generated role is ambiguous before
+  writing the config. Example:
+  ```yaml
+  agents:
+    - name: builder
+      integration: claude-code
+      capabilities:
+        write: true
+    - name: advisor
+      integration: claude-code
+      capabilities:
+        write: false
+    - name: sentinel
+      integration: claude-code
+      capabilities:
+        write: false
+  ```
 - Upsert the generated `workspaces` entry without deleting unrelated entries. Use type
   `tmux` with the absolute `tmux-agents.sh` path on Linux. On Windows, use type `custom`
   with `config_path` set to the absolute `start-agents.ps1` path, `language: text`, and

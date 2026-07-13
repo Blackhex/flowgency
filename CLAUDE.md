@@ -200,8 +200,12 @@ groups:
     - ~/.agency-cowork                #   additional allowed root
     allowed_tools: [shell, write]     # Optional: granted tools (empty => all tools; Copilot: --autopilot only when blanket)
     agents:                        # List of agents (string shorthand or dict form)
-    - product                      # Shorthand: inherits group default_integration
+    - product                      # Shorthand: inherits group default_integration; capabilities.write defaults to false
     - editorial
+    - name: builder                # Dict form: explicit integration and capabilities
+      integration: claude-code
+      capabilities:
+        write: true                # Only explicit true grants decision implementation
     - name: custom-bot             # Dict form: explicit integration
       integration: script
       integration_config:
@@ -240,6 +244,16 @@ Agents can be specified as bare strings (shorthand) or dicts (full form):
 Config normalization happens at load time. The shorthand is never rewritten to disk.
 
 Agents with a `path` override resolve their directory from the configured path instead of `{group_path}/{name}`. This allows the same agent directory to be shared across multiple groups — useful for program-manager-style agents that span projects. All groups that reference the agent can read and edit its files.
+
+#### Agent Capabilities (`capabilities.write`)
+
+Each dict-form agent can declare write authority for decision execution:
+
+- `capabilities.write: true` — agent may implement approved decisions
+- `capabilities.write: false` or omitted — observational only; excluded from executor selection
+- Shorthand agents have no `capabilities` key and therefore cannot implement decisions
+- Omitted `capabilities.write` means false (fail-closed)
+- This permission does **not** block scheduled observational dispatch runs
 
 ### Dispatch Rule Fields
 
@@ -402,8 +416,9 @@ date: 2026-03-20
 answers:
   approve: approved
   color: "Blue"
-execution_status: pending      # pending, running, complete, failed
+execution_status: pending      # pending, running, complete, failed, skipped
 execution_summary: ~
+execution_agent: builder       # Must have capabilities.write: true
 ```
 
 ## Key Implementation Details
@@ -460,6 +475,8 @@ execution_summary: ~
 - Proposal detail shows originating observations + resulting decision
 - Decision detail traces back through proposal to source observations
 - All rendered as clickable pipeline banners with color-coded steps
+- A decision triggers execution only when at least one `boolean` answer is `approved` and a writable `execution_agent` is set; otherwise `execution_status` is `skipped`
+- No origin-agent fallback: executor must be an agent with `capabilities.write: true`
 
 ### TTL Enforcement
 - `check_ttl_expired()` and `enforce_ttl()` auto-archive stale items
