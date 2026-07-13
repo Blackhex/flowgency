@@ -340,6 +340,7 @@ def test_cmd_decide_all_declined_without_guidance_skips_job(tmp_path, monkeypatc
     assert meta["execution_status"] == "skipped"
     assert "execution_job_id" not in meta
     assert submitted == []
+    assert meta["execution_job_history"] == []  # Finding 5: shape parity with web path
 
 
 def test_cmd_decide_submission_failure_removes_decision_and_preserves_proposal(tmp_path, monkeypatch):
@@ -352,3 +353,58 @@ def test_cmd_decide_submission_failure_removes_decision_and_preserves_proposal(t
     assert error.value.code == 1
     assert not decision_path.exists()
     assert "status: proposed" in proposal_path.read_text()
+
+
+# ── Finding 6: CLI input robustness ─────────────────────────────────────────
+
+def test_cmd_decide_eoferror_exits_cleanly(tmp_path, monkeypatch, capsys):
+    """EOFError from stdin must be caught, produce a concise stderr error, and exit 1."""
+    args, _, _ = setup_cli_proposal(tmp_path, monkeypatch)
+    monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError()))
+    with pytest.raises(SystemExit) as error:
+        cli.cmd_decide(args)
+    assert error.value.code == 1
+    assert "Input closed" in capsys.readouterr().err
+
+
+def test_cmd_decide_invalid_then_valid_boolean_completes(tmp_path, monkeypatch, capsys):
+    """An invalid boolean response followed by a valid one must complete normally."""
+    args, decision_path, _ = setup_cli_proposal(tmp_path, monkeypatch)
+    responses = iter(["", "x", "a", ""])  # executor default, invalid boolean, valid boolean, empty note
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+    submitted = []
+    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    cli.cmd_decide(args)
+    # Should have printed feedback for the invalid input
+    out = capsys.readouterr().out
+    # After invalid input, some feedback line should appear
+    meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert meta["answers"]["approve"] == "approved"
+    assert len(submitted) == 1
+
+
+def test_cmd_decide_invalid_multi_choice_reprompts(tmp_path, monkeypatch, capsys):
+    """Multi-choice input that is non-empty but yields no valid indices must re-prompt
+    rather than completing with an accidental empty selection."""
+    args, decision_path, _ = setup_cli_proposal(
+        tmp_path,
+        monkeypatch,
+        questions=[
+            {
+                "id": "targets",
+                "type": "choice",
+                "prompt": "Targets?",
+                "multi": True,
+                "options": ["Alpha", "Beta", "Gamma"],
+            },
+        ],
+    )
+    # First executor input: default; then invalid multi-choice "99" (no valid index), then valid "1"; then empty note
+    responses = iter(["", "99", "1", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+    submitted = []
+    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    cli.cmd_decide(args)
+    meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert meta["answers"]["targets"] == ["Alpha"]
+    assert len(submitted) == 1

@@ -277,6 +277,15 @@ def cmd_agents(args):
 
 def cmd_decide(args):
     """Interactively answer a proposal's questions."""
+    try:
+        _cmd_decide_inner(args)
+    except EOFError:
+        print("Error: Input closed unexpectedly.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_decide_inner(args):
+    """Core logic for cmd_decide. Called by cmd_decide which catches EOFError."""
     g = _resolve_group(args)
     slug = args.slug
     proposals_dir = g["shared"] / "proposals"
@@ -322,6 +331,8 @@ def cmd_decide(args):
             execution_agent = declared_executor
         elif raw.isdigit() and 1 <= int(raw) <= len(eligible):
             execution_agent = eligible[int(raw) - 1]
+        else:
+            print(f"     Enter a number 1-{len(eligible)} or press Enter for default.")
     print()
 
     # Collect answers
@@ -343,6 +354,8 @@ def cmd_decide(args):
                 elif choice in ("d", "decline"):
                     answers[qid] = "declined"
                     break
+                else:
+                    print("     Enter a/approve or d/decline.")
 
         elif qtype == "choice":
             labels = question_option_labels(q)
@@ -350,17 +363,21 @@ def cmd_decide(args):
                 print(f"     [{j}] {label}")
             if q.get("multi"):
                 print("     (comma-separated numbers for multiple)")
-                raw = input("     > ").strip()
-                indices = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
-                answers[qid] = list(
-                    dict.fromkeys(labels[idx - 1] for idx in indices if 1 <= idx <= len(labels))
-                )
+                while True:
+                    raw = input("     > ").strip()
+                    indices = [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
+                    selected = list(dict.fromkeys(labels[idx - 1] for idx in indices if 1 <= idx <= len(labels)))
+                    if raw == "" or selected:
+                        answers[qid] = selected
+                        break
+                    print(f"     No valid selections. Enter numbers 1-{len(labels)} or leave blank to skip.")
             else:
                 while True:
                     raw = input("     > ").strip()
                     if raw.isdigit() and 1 <= int(raw) <= len(labels):
                         answers[qid] = labels[int(raw) - 1]
                         break
+                    print(f"     Enter a number 1-{len(labels)}.")
 
         elif qtype in ("free-response", "text"):
             while True:
@@ -425,6 +442,7 @@ def cmd_decide(args):
     else:
         dec_meta["execution_status"] = "skipped"
         dec_meta["execution_summary"] = SKIP_EXECUTION_SUMMARY
+        dec_meta["execution_job_history"] = []
         frontmatter = yaml.dump(dec_meta, default_flow_style=False, sort_keys=False).strip()
         atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
 

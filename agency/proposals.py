@@ -82,7 +82,10 @@ def validate_answers(questions: list[dict], answers: dict) -> list[str]:
                 elif _is_required(item) and not answer:
                     errors.append(f"Question '{question_id}' requires a selection")
             elif answer not in labels:
-                if _is_required(item) or answer not in (None, ""):
+                if answer in (None, ""):
+                    if _is_required(item):
+                        errors.append(f"Question '{question_id}' requires a selection")
+                else:
                     errors.append(f"Question '{question_id}' has an invalid selection")
         elif question_type in OPEN_QUESTION_TYPES:
             if _is_required(item) and (not isinstance(answer, str) or not answer.strip()):

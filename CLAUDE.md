@@ -201,7 +201,7 @@ groups:
     allowed_tools: [shell, write]     # Optional: granted tools (empty => all tools; Copilot: --autopilot only when blanket)
     agents:                        # List of agents (string shorthand or dict form)
     - product                      # Shorthand: inherits group default_integration; capabilities.write defaults to false
-    - editorial
+    - editorial                    # Shorthand: capabilities.write defaults to false (fail-closed)
     - name: builder                # Dict form: explicit integration and capabilities
       integration: claude-code
       capabilities:
@@ -401,6 +401,7 @@ observations: [obs1.md, obs2.md]
 feedback_requested: []         # Agents asked for input
 feedback_received: []          # Agents that responded
 ttl_days: 30
+execution_agent: builder       # Must have capabilities.write: true
 questions:
   - id: approve
     type: boolean

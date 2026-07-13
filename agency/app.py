@@ -2987,7 +2987,7 @@ def render_decision_detail(request: Request, g: dict, group: str, slug: str,
     selected_execution_agent = (
         meta.get("execution_agent")
         or pmeta.get("execution_agent")
-        or pmeta.get("origin_agent", "")
+        or ""
     )
 
     return templates.TemplateResponse(request, "decision_detail.html", {
@@ -3028,6 +3028,16 @@ async def decision_retry(request: Request, group: str, slug: str):
 
     original_text = decision_path.read_text()
     meta, body = parse_frontmatter(original_text)
+
+    # Only failed decisions may be retried
+    current_status = meta.get("execution_status", "")
+    if current_status != "failed":
+        return render_decision_detail(
+            request, g, group, slug,
+            decision_error=f"Cannot retry a decision with status \u2018{current_status}\u2019. Only failed decisions can be retried.",
+            status_code=400,
+        )
+
     proposal_slug = (meta.get("proposal", "") or "").replace(".md", "")
     proposal_path = g["shared"] / "proposals" / f"{proposal_slug}.md"
     if not proposal_slug or not proposal_path.exists():

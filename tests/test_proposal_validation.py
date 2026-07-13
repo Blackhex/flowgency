@@ -65,6 +65,23 @@ def test_validate_answers_allows_optional_single_choice_to_be_unanswered():
     assert validate_answers(questions, {"mode": "Other"}) == ["Question 'mode' has an invalid selection"]
 
 
+# Finding 4: required single-choice missing/empty → "requires a selection"
+@pytest.mark.parametrize("answer", [None, ""])
+def test_required_single_choice_absent_or_empty_reports_requires_a_selection(answer):
+    """Required single-choice with absent or empty answer must report 'requires a selection',
+    not 'has an invalid selection'."""
+    questions = [question("mode", "choice", options=["Repair", "Replace"])]
+    submitted = {"mode": answer} if answer is not None else {}
+    errors = validate_answers(questions, submitted)
+    assert errors == ["Question 'mode' requires a selection"]
+
+
+def test_required_single_choice_nonempty_invalid_still_reports_invalid_selection():
+    """A non-empty but undeclared single-choice answer must still report 'has an invalid selection'."""
+    questions = [question("mode", "choice", options=["Repair", "Replace"])]
+    assert validate_answers(questions, {"mode": "Other"}) == ["Question 'mode' has an invalid selection"]
+
+
 def test_validate_answers_enforces_multi_choice_shape_and_values():
     questions = [question("modes", "choice", options=["A", "B"], multi=True)]
     assert validate_answers(questions, {"modes": "A"}) == ["Question 'modes' requires a list of selections"]

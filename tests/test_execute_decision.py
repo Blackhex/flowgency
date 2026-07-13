@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import os
 
+import pytest
 import yaml
 
 import agency.app as app_mod
@@ -427,3 +428,42 @@ def test_retry_prompt_keeps_decision_note(tmp_path, monkeypatch):
     response = client.post("/test/decisions/change/retry", data={"execution_agent": "engineer"}, follow_redirects=False)
     assert response.status_code == 303
     assert "Keep rollback" in captured[0].prompt_content
+
+
+# ── Finding 2: server-side retry status enforcement ──────────────────────────
+
+@pytest.mark.parametrize("bad_status", ["skipped", "pending", "running", "complete"])
+def test_retry_blocked_for_non_failed_status(tmp_path, monkeypatch, bad_status):
+    """Only execution_status == 'failed' may POST to /retry.
+    Any other status must return 400, leave the decision unchanged, and call no submit_job."""
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    original = f"---\nproposal: change.md\nexecution_status: {bad_status}\nexecution_agent: engineer\n---\n"
+    decision_path.write_text(original)
+    submitted = []
+    monkeypatch.setattr("agency.app.submit_job", lambda spec: submitted.append(spec))
+    response = client.post("/test/decisions/change/retry", data={"execution_agent": "engineer"})
+    assert response.status_code == 400, f"expected 400 for status={bad_status}, got {response.status_code}"
+    assert submitted == [], f"submit_job must not be called for status={bad_status}"
+    assert decision_path.read_text() == original, "decision file must not be modified"
+
+
+# ── Finding 3: no origin_agent fallback in render_decision_detail ─────────────
+
+def test_retry_form_does_not_fall_back_to_origin_agent(tmp_path, monkeypatch):
+    """render_decision_detail must use decision.execution_agent → proposal.execution_agent → ''
+    and must NOT fall back to proposal.origin_agent."""
+    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    # Decision has no execution_agent; proposal has origin_agent but no execution_agent
+    decision_path.write_text(
+        "---\nproposal: change.md\nexecution_status: failed\n---\n"
+    )
+    # Replace proposal with one that has origin_agent=engineer but no execution_agent
+    proposal_path.write_text(
+        "---\norigin_agent: engineer\nstatus: decided\n"
+        "questions:\n  - id: approve\n    type: boolean\n    prompt: Proceed?\n---\nProposal body\n"
+    )
+    response = client.get("/test/decisions/change")
+    assert response.status_code == 200
+    # The retry form should not pre-select any agent via origin_agent fallback
+    # "engineer" is an eligible executor, so if origin_agent fallback exists it would appear selected
+    assert 'value="engineer" selected' not in response.text
