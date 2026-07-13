@@ -67,7 +67,12 @@
     </h3>
 
     {% if not decision %}
-    {# -- Unanswered: render form -- #}
+    {# -- Unanswered: show errors or render form -- #}
+    {% if question_schema_errors %}
+    <div class="mb-4 p-3 border border-orange-300 bg-orange-50 text-orange-700 rounded-md" role="alert">
+      {% for err in question_schema_errors %}<div>{{ err }}</div>{% endfor %}
+    </div>
+    {% else %}
     <form method="POST" action="/{{ group }}/proposals/{{ slug }}/decide">
       {% if proposal_errors %}
       <div class="mb-4 p-3 border border-orange-300 bg-orange-50 text-orange-700 rounded-md" role="alert">
@@ -105,9 +110,9 @@
           {% set opt_label = opt.label if opt is mapping else opt %}
           <label class="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-md cursor-pointer hover:border-purple-300 has-[:checked]:border-purple-500 has-[:checked]:bg-purple-50 transition-colors">
             {% if q.multi %}
-            <input type="checkbox" name="answer_{{ q.id }}" value="{{ opt_label }}" class="text-purple-600 rounded">
+            <input type="checkbox" name="answer_{{ q.id }}" value="{{ opt_label }}" {% if opt_label in submitted_answers.get(q.id, []) %}checked {% endif %}class="text-purple-600 rounded">
             {% else %}
-            <input type="radio" name="answer_{{ q.id }}" value="{{ opt_label }}" class="text-purple-600" {% if loop.first %}required{% endif %}>
+            <input type="radio" name="answer_{{ q.id }}" value="{{ opt_label }}" {% if submitted_answers.get(q.id) == opt_label %}checked {% endif %}class="text-purple-600" {% if q.get('required') is not sameas false %}required{% endif %}>
             {% endif %}
             <span class="text-sm">{{ opt_label }}</span>
           </label>
@@ -115,9 +120,9 @@
         </div>
 
         {% elif q.type in ["free-response", "text"] %}
-        <textarea name="answer_{{ q.id }}" rows="3" required
+        <textarea name="answer_{{ q.id }}" rows="3" {% if q.get('required') is not sameas false %}required{% endif %}
                   class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:border-purple-400 focus:ring-1 focus:ring-purple-400"
-                  placeholder="Type your answer..."></textarea>
+                  placeholder="Type your answer...">{{ submitted_answers.get(q.id, "") }}</textarea>
         {% endif %}
       </div>
       {% endfor %}
@@ -132,6 +137,7 @@
         </button>
       </div>
     </form>
+    {% endif %}{# end not question_schema_errors #}
 
     {% else %}
     {# -- Decided: show read-only answers -- #}
@@ -145,9 +151,12 @@
 
       {% set answer = answers.get(q.id, "") %}
 
-      {% if q.type == "boolean" %}
+      {% if not answer %}
+      <span class="text-sm text-gray-400 italic">No answer recorded</span>
+      {% elif q.type == "boolean" %}
       <div class="inline-block px-3 py-1 rounded-md text-sm font-medium
         {% if answer == 'approved' %}bg-emerald-100 text-emerald-700
+        {% elif answer == 'declined' %}bg-red-100 text-red-700
         {% elif answer == 'deferred' %}bg-amber-100 text-amber-700
         {% elif answer == 'rejected' %}bg-red-100 text-red-700
         {% else %}bg-gray-100 text-gray-600{% endif %}">
@@ -177,6 +186,12 @@
     </div>
     {% endfor %}
 
+    {% if decision.meta.get("decision_note") %}
+    <div class="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+      <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Decision note</div>
+      <div class="text-sm text-gray-700">{{ decision.meta.get("decision_note") }}</div>
+    </div>
+    {% endif %}
     <a href="/{{ group }}/decisions/{{ decision.slug }}" class="text-sm text-emerald-700 underline mt-2 inline-block">View decision</a>
     {% endif %}
   </div>

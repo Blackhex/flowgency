@@ -252,3 +252,96 @@ def test_ineligible_declared_executor_blocks_post_with_eligible_submitted_execut
     assert not decision_path.exists()
     assert "status: proposed" in proposal_path.read_text()
     assert submitted == []
+
+
+# ---------------------------------------------------------------------------
+# Task 4 rendered-HTML tests
+# ---------------------------------------------------------------------------
+
+def test_questionnaire_renders_decline_open_text_note_and_executor_override(tmp_path, monkeypatch):
+    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
+    meta["questions"].append({"id": "detail", "type": "free-response", "prompt": "Details?", "required": False})
+    proposal_path.write_text("---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body)
+    response = client.get("/test/proposals/change")
+    assert 'value="declined"' in response.text
+    assert "Defer" not in response.text
+    assert 'name="answer_detail"' in response.text
+    assert 'name="decision_note"' in response.text
+    assert '<select id="execution-agent"' in response.text
+
+
+def test_invalid_schema_disables_questionnaire_submission(tmp_path, monkeypatch):
+    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
+    meta["questions"] = [{"id": "mode", "type": "choice", "prompt": "Mode?"}]
+    proposal_path.write_text("---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body)
+    response = client.get("/test/proposals/change")
+    assert "requires at least one option" in response.text
+    assert "Submit All Answers" not in response.text
+
+
+def test_superseded_blank_answer_displays_no_answer_recorded(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: ''\nexecution_status: skipped\n---\n")
+    response = client.get("/test/decisions/change")
+    assert "No answer recorded" in response.text
+    assert ">Skipped<" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Task 4 choice/open answer preservation tests on POST validation failure
+# ---------------------------------------------------------------------------
+
+def test_single_choice_answer_preserved_on_post_validation_failure(tmp_path, monkeypatch):
+    """Single-choice selection is re-rendered as checked when POST fails."""
+    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
+    meta["questions"].append({
+        "id": "color", "type": "choice", "prompt": "Pick?",
+        "options": [{"label": "Red"}, {"label": "Blue"}],
+    })
+    proposal_path.write_text("---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body)
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "deferred", "answer_color": "Blue", "execution_agent": "engineer"},
+    )
+    assert response.status_code == 400
+    assert 'value="Blue" checked' in response.text
+
+
+def test_multi_choice_answers_preserved_on_post_validation_failure(tmp_path, monkeypatch):
+    """Multi-checkbox selections are re-rendered as checked when POST fails."""
+    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
+    meta["questions"].append({
+        "id": "features", "type": "choice", "prompt": "Pick features",
+        "options": [{"label": "Auth"}, {"label": "Search"}, {"label": "Chat"}],
+        "multi": True,
+    })
+    proposal_path.write_text("---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body)
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "deferred", "answer_features": ["Auth", "Chat"], "execution_agent": "engineer"},
+    )
+    assert response.status_code == 400
+    assert 'value="Auth" checked' in response.text
+    assert 'value="Chat" checked' in response.text
+    assert 'value="Search"' in response.text
+    assert 'value="Search" checked' not in response.text
+
+
+def test_open_text_answer_preserved_on_post_validation_failure(tmp_path, monkeypatch):
+    """Free-response text is re-populated in textarea when POST fails."""
+    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
+    meta["questions"].append({
+        "id": "detail", "type": "free-response", "prompt": "Details?",
+    })
+    proposal_path.write_text("---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body)
+    response = client.post(
+        "/test/proposals/change/decide",
+        data={"answer_approve": "deferred", "answer_detail": "some detail text", "execution_agent": "engineer"},
+    )
+    assert response.status_code == 400
+    assert "some detail text" in response.text
