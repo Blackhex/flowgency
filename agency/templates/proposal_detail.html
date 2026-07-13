@@ -68,17 +68,12 @@
 
     {% if not decision %}
     {# -- Unanswered: show errors or render form -- #}
-    {% if question_schema_errors %}
+    {% if proposal_errors %}
     <div class="mb-4 p-3 border border-orange-300 bg-orange-50 text-orange-700 rounded-md" role="alert">
-      {% for err in question_schema_errors %}<div>{{ err }}</div>{% endfor %}
+      {% for err in proposal_errors %}<div>{{ err }}</div>{% endfor %}
     </div>
     {% else %}
     <form method="POST" action="/{{ group }}/proposals/{{ slug }}/decide">
-      {% if proposal_errors %}
-      <div class="mb-4 p-3 border border-orange-300 bg-orange-50 text-orange-700 rounded-md" role="alert">
-        {% for err in proposal_errors %}<div>{{ err }}</div>{% endfor %}
-      </div>
-      {% endif %}
       {% if decision_error %}
       <div class="mb-4 p-3 border border-red-300 bg-red-50 text-red-700 rounded-md" role="alert">{{ decision_error }}</div>
       {% endif %}

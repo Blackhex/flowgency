@@ -189,8 +189,9 @@ def test_unanswered_boolean_form_only_offers_approve_and_decline(tmp_path, monke
 def test_superseded_proposal_excludes_origin_agent_without_write_capability(tmp_path, monkeypatch):
     client, _, _ = _setup_decision_group(tmp_path, monkeypatch, explicit_executor=False)
     response = client.get("/test/proposals/change")
+    assert "execution_agent is required" in response.text
+    assert "Submit All Answers" not in response.text
     assert '<option value="product"' not in response.text
-    assert '<option value="engineer"' in response.text
 
 
 def test_invalid_executor_rerenders_without_creating_decision(tmp_path, monkeypatch):
@@ -211,6 +212,7 @@ def test_missing_execution_agent_blocks_get_and_post(tmp_path, monkeypatch):
     post_response = client.post("/test/proposals/change/decide", data={"answer_approve": "approved", "execution_agent": "engineer"})
     assert get_response.status_code == 200
     assert "execution_agent is required" in get_response.text
+    assert "Submit All Answers" not in get_response.text
     assert post_response.status_code == 400
     assert "execution_agent is required" in post_response.text
     assert not decision_path.exists()

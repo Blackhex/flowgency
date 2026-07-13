@@ -2745,14 +2745,6 @@ def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
             f"Declared executor '{declared_executor}' is not an eligible agent"
         )
 
-    # Executor errors (missing/ineligible agent) show as warnings inside the form.
-    # Question schema errors block the form entirely.
-    _executor_prefixes = ("execution_agent is required", "Declared executor")
-    question_schema_errors = [
-        e for e in proposal_errors
-        if not any(e.startswith(p) for p in _executor_prefixes)
-    ]
-
     # Find linked observations
     linked = []
     for c in meta.get("observations", []):
@@ -2797,7 +2789,6 @@ def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
         "execution_agents": execution_agent_options(g),
         "selected_execution_agent": selected_execution_agent,
         "proposal_errors": proposal_errors,
-        "question_schema_errors": question_schema_errors,
         "submitted_answers": submitted_answers if submitted_answers is not None else {},
         "decision_note": decision_note,
         "decision_error": decision_error,
