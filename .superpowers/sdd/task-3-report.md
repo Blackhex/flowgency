@@ -257,3 +257,55 @@ Exact result: exit code 0 with no output.
 - No deferred/rejected form values or preselection branches remain.
 - Choice and free-response rendering were not changed; their preservation remains Task 4 scope.
 - The read-only rendering of historical decision values was left unchanged because this finding concerns active form controls and server-valid submissions.
+
+---
+
+## Review Fix 3
+
+### Finding addressed
+
+`test_missing_execution_agent_blocks_get_and_post` now asserts that the POST response HTML visibly contains the exact schema error `execution_agent is required`, in addition to asserting the 400 status. No production behavior changed; the existing POST error rendering already satisfied the assertion.
+
+### Verification
+
+Focused command:
+```powershell
+$env:PYTHONPATH = $PWD.Path; C:\Projects\christag-agency\.venv\Scripts\python.exe -m pytest tests/test_proposal_questions.py::test_missing_execution_agent_blocks_get_and_post -v
+```
+
+Exact focused result:
+```text
+tests/test_proposal_questions.py::test_missing_execution_agent_blocks_get_and_post PASSED [100%]
+============================== 1 passed in 0.65s ==============================
+```
+
+Proposal-question suite command:
+```powershell
+$env:PYTHONPATH = $PWD.Path; C:\Projects\christag-agency\.venv\Scripts\python.exe -m pytest tests/test_proposal_questions.py -v
+```
+
+Exact suite result:
+```text
+============================= 16 passed in 0.85s ==============================
+```
+
+Whitespace command:
+```powershell
+git diff --check
+```
+
+Exact result: exit code 0 with no output.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `tests/test_proposal_questions.py` | Added the exact visible POST schema-error assertion |
+| `.superpowers/sdd/task-3-report.md` | Added Review Fix 3 verification evidence and self-review |
+
+### Self-Review
+
+- The assertion checks the user-visible POST response body, not only the HTTP status.
+- The expected message exactly matches the schema validation error already asserted for GET.
+- The focused test passed immediately after the assertion was added, confirming this is review-driven coverage of existing behavior rather than a new TDD behavior change.
+- No junction or production code was touched.

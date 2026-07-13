@@ -212,6 +212,7 @@ def test_missing_execution_agent_blocks_get_and_post(tmp_path, monkeypatch):
     assert get_response.status_code == 200
     assert "execution_agent is required" in get_response.text
     assert post_response.status_code == 400
+    assert "execution_agent is required" in post_response.text
     assert not decision_path.exists()
     assert "status: proposed" in proposal_path.read_text()
 
