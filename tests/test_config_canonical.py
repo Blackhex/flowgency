@@ -33,6 +33,62 @@ def test_rejects_routine_default_without_routine_context(canonical_raw_config, c
     assert any(issue.code == "invalid-memory-scope" for issue in issues)
 
 
+def test_validate_config_canonical_reports_superseded_group_dispatch_agents(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["dispatch"] = {
+        "enabled": False,
+        "daily_limit": 20,
+    }
+    canonical_raw_config["groups"]["newsletter"]["dispatch"]["agents"] = {
+        "builder": [{"at": "09:00"}]
+    }
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == "superseded-group-dispatch-agents" for issue in issues)
+    assert any(issue.field == "groups.newsletter.dispatch.agents" for issue in issues)
+    assert any(
+        issue.corrective_hint
+        == "Move schedules into each agent's routines using the standalone migration utility."
+        for issue in issues
+    )
+
+
+def test_parse_config_canonical_rejects_superseded_group_dispatch_agents(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["dispatch"] = {
+        "enabled": False,
+        "daily_limit": 20,
+    }
+    canonical_raw_config["groups"]["newsletter"]["dispatch"]["agents"] = {
+        "builder": [{"at": "09:00"}]
+    }
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == "superseded-group-dispatch-agents" for issue in excinfo.value.issues)
+
+
+def test_accepts_supported_group_dispatch_and_routines(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["dispatch"] = {
+        "enabled": True,
+        "daily_limit": 12,
+    }
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert not any(issue.field == "groups.newsletter.dispatch.agents" for issue in issues)
+    assert parsed.groups["newsletter"].dispatch.enabled is True
+    assert parsed.groups["newsletter"].dispatch.daily_limit == 12
+    assert parsed.groups["newsletter"].agents["builder"].routines[0].schedule.at == "09:00"
+
+
 def test_rejects_superseded_schema_version(canonical_raw_config, canonical_paths):
     from agency.configuration.models import validate_config_canonical
 

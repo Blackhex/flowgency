@@ -108,17 +108,10 @@ class AgentInstance(BaseModel):
     routines: tuple[Routine, ...] = ()
 
 
-class DispatchRule(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    at: str | None = None
-    every: str | None = None
-
-
 class GroupDispatch(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     enabled: bool = False
     daily_limit: int = 20
-    agents: dict[str, list[DispatchRule]] = Field(default_factory=dict)
 
 
 class WorkspaceConfig(BaseModel):
@@ -299,6 +292,16 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
         dispatch = group_map.get("dispatch")
         if dispatch is not None and not _is_mapping(dispatch):
             issues.append(_shape_issue(f"{group_field}.dispatch", "mapping"))
+        elif _is_mapping(dispatch) and "agents" in dispatch:
+            issues.append(
+                _build_issue(
+                    code="superseded-group-dispatch-agents",
+                    scope=f"groups.{group_name}.dispatch",
+                    field=f"{group_field}.dispatch.agents",
+                    message="Group dispatch schedules are superseded v1 data and are not supported in canonical.",
+                    hint="Move schedules into each agent's routines using the standalone migration utility.",
+                )
+            )
 
         workspaces = group_map.get("workspaces")
         if workspaces is not None and not _is_list(workspaces):

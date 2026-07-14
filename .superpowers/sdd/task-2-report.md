@@ -300,6 +300,67 @@ Result:
 
 - None beyond the existing Task 3 raw-store preservation follow-up already noted earlier in this report.
 
+## Review Fix 6
+
+### RED
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests/test_config_canonical.py -v
+```
+
+Result:
+
+```text
+tests/test_config_canonical.py::test_validate_config_canonical_reports_superseded_group_dispatch_agents FAILED
+tests/test_config_canonical.py::test_parse_config_canonical_rejects_superseded_group_dispatch_agents FAILED
+```
+
+### GREEN
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests/test_config_canonical.py -v
+```
+
+Result:
+
+```text
+64 passed in 1.21s
+```
+
+### Full Suite
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Result:
+
+```text
+677 passed, 1 skipped in 26.16s
+```
+
+### Files Changed
+
+- [agency/configuration/models.py](agency/configuration/models.py)
+- [tests/test_config_canonical.py](tests/test_config_canonical.py)
+- [.superpowers/sdd/task-2-report.md](.superpowers/sdd/task-2-report.md)
+
+### Self-Review
+
+- `groups.<group>.dispatch.agents` now fails fast as a superseded v1 ownership violation with a deterministic corrective hint.
+- `parse_config_canonical()` and `validate_config_canonical()` share the same rejection path, so the review finding is closed in the unified pipeline.
+- Supported canonical group dispatch fields and agent routine schedules remain accepted, and the focused regression keeps that boundary explicit.
+
+### Concerns
+
+- None beyond the existing Task 3 raw-store preservation follow-up already noted earlier in this report.
+
 ## Review Fix 5
 
 ### RED
