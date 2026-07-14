@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.configuration import ValidationIssue
+from agency.configuration import ValidationFailed, ValidationIssue
 
 
 def test_canonical_defaults_are_explicit(canonical_raw_config, canonical_paths):
@@ -41,6 +41,20 @@ def test_requires_control_plane_paths(canonical_raw_config, canonical_paths):
     del canonical_raw_config["groups"]["newsletter"]["path"]
     issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
     assert any(issue.code == "missing-group-path" for issue in issues)
+
+
+def test_parse_config_canonical_raises_validation_failed_for_missing_group_path_with_additional_roots(
+    canonical_raw_config, canonical_paths
+):
+    from agency.configuration.models import parse_config_canonical
+
+    del canonical_raw_config["groups"]["newsletter"]["path"]
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+        "sandbox": {"additional_roots": ["shared"]}
+    }
+
+    with pytest.raises(ValidationFailed):
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
 
 
 def test_rejects_duplicate_agent_names(canonical_raw_config, canonical_paths):
@@ -114,6 +128,18 @@ def test_rejects_schedule_without_one_of(canonical_raw_config, canonical_paths):
     canonical_raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [
         {"id": "daily", "skill": "daily", "schedule": {}},
     ]
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert any(issue.code == "invalid-dispatch-rule" for issue in issues)
+
+
+@pytest.mark.parametrize("schedule_value", ["daily", ["at", "09:00"], 42])
+def test_rejects_non_mapping_schedule_values(canonical_raw_config, canonical_paths, schedule_value):
+    from agency.configuration.models import validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [
+        {"id": "daily", "skill": "daily", "schedule": schedule_value},
+    ]
+
     issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
     assert any(issue.code == "invalid-dispatch-rule" for issue in issues)
 

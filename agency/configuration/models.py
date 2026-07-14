@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .issues import ValidationIssue
+from .issues import ValidationFailed, ValidationIssue
 
 MemoryScope = Literal["run", "routine", "agent", "group", "channel"]
 ToolMode = Literal["all", "allowlist", "none"]
@@ -216,7 +216,15 @@ def _validate_identifier(kind: str, value: str, scope: str) -> ValidationIssue |
     return None
 
 
-def _validate_rule(rule: dict[str, Any], scope: str) -> ValidationIssue | None:
+def _validate_rule(rule: Any, scope: str) -> ValidationIssue | None:
+    if not isinstance(rule, dict):
+        return _build_issue(
+            code="invalid-dispatch-rule",
+            scope=scope,
+            field="schedule",
+            message="Dispatch rule must be a mapping with exactly one of at or every.",
+            hint="Set schedule to a mapping containing either at or every.",
+        )
     has_at = bool(rule.get("at"))
     has_every = bool(rule.get("every"))
     if has_at == has_every:
@@ -492,14 +500,16 @@ def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConf
             agent_entry = dict(agent)
             runtime = dict(agent_entry.get("runtime") or {})
             sandbox = dict(runtime.get("sandbox") or {})
-            roots = []
-            for root in sandbox.get("roots") or []:
-                roots.append(_path_from_config(root, Path(group_path)))
-            additional_roots = []
-            for root in sandbox.get("additional_roots") or []:
-                additional_roots.append(_path_from_config(root, Path(group_path)))
-            sandbox["roots"] = tuple(roots)
-            sandbox["additional_roots"] = tuple(additional_roots)
+            if group_path is not None:
+                group_root = Path(group_path)
+                roots = []
+                for root in sandbox.get("roots") or []:
+                    roots.append(_path_from_config(root, group_root))
+                additional_roots = []
+                for root in sandbox.get("additional_roots") or []:
+                    additional_roots.append(_path_from_config(root, group_root))
+                sandbox["roots"] = tuple(roots)
+                sandbox["additional_roots"] = tuple(additional_roots)
             runtime["sandbox"] = sandbox
             tools = dict(runtime.get("tools") or {})
             if tools.get("names") is not None:
@@ -521,7 +531,10 @@ def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConf
         resolved_groups[group_name] = resolved_group
     prepared["groups"] = resolved_groups
 
-    resolved = AgencyConfigcanonical.model_validate(prepared)
+    try:
+        resolved = AgencyConfigcanonical.model_validate(prepared)
+    except ValidationError as exc:
+        raise ValidationFailed(_sorted_issues(_collect_pydantic_issues(exc))) from exc
     return ParsedConfig(raw=raw, resolved=resolved)
 
 
@@ -541,6 +554,9 @@ def validate_config_canonical(raw: dict[str, Any], config_path: Path) -> tuple[V
     issues.extend(_validate_raw_config(raw, config_path))
     try:
         parsed = parse_config_canonical(raw, config_path)
+    except ValidationFailed as exc:
+        issues.extend(exc.issues)
+        return _sorted_issues(issues)
     except ValidationError as exc:
         issues.extend(_collect_pydantic_issues(exc))
         return _sorted_issues(issues)
