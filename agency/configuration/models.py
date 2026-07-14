@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -175,6 +176,12 @@ class ParsedConfig(BaseModel):
         return self.resolved.groups
 
 
+@dataclass(frozen=True)
+class _PipelineResult:
+    parsed: ParsedConfig | None
+    issues: tuple[ValidationIssue, ...]
+
+
 def _path_from_config(value: Any, config_dir: Path) -> Path:
     path = Path(str(value))
     if path.is_absolute():
@@ -201,6 +208,16 @@ def _shape_issue(field: str, expected: str) -> ValidationIssue:
         field=field,
         message=f"{field} must be a {expected}.",
         hint=f"Set {field} to a {expected} value.",
+    )
+
+
+def _routine_entry_issue(field: str) -> ValidationIssue:
+    return _build_issue(
+        code="invalid-routine-entry",
+        scope=field,
+        field=field,
+        message="Routine entry must be a mapping.",
+        hint="Define each routine as a mapping with id, skill, and schedule.",
     )
 
 
@@ -355,6 +372,7 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
                 routine_field = f"{agent_field}.routines[{routine_index}]"
                 routine_map = _mapping_or_none(routine)
                 if routine_map is None:
+                    issues.append(_routine_entry_issue(routine_field))
                     continue
                 schedule = routine_map.get("schedule")
                 if schedule is not None and not _is_mapping(schedule):
@@ -572,6 +590,11 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     )
                 )
                 continue
+            identifier_issue = _validate_identifier(
+                "agent", name, f"groups.{group_name}.agents.{name or '<unknown>'}"
+            )
+            if identifier_issue:
+                issues.append(identifier_issue)
             if name in seen_agents:
                 issues.append(
                     _build_issue(
@@ -606,8 +629,11 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     issues.append(issue)
             routines = agent.get("routines") if _is_list(agent.get("routines")) else []
             seen_routines: set[str] = set()
-            for routine in routines:
+            for routine_index, routine in enumerate(routines):
                 if not isinstance(routine, dict):
+                    issues.append(
+                        _routine_entry_issue(f"groups.{group_name}.agents[{index}].routines[{routine_index}]")
+                    )
                     continue
                 routine_id = routine.get("id")
                 if isinstance(routine_id, str) and routine_id in seen_routines:
@@ -621,6 +647,11 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                         )
                     )
                 if isinstance(routine_id, str):
+                    identifier_issue = _validate_identifier(
+                        "routine", routine_id, f"groups.{group_name}.agents.{name or '<unknown>'}"
+                    )
+                    if identifier_issue:
+                        issues.append(identifier_issue)
                     seen_routines.add(routine_id)
                 schedule = routine.get("schedule") or {}
                 issue = _validate_rule(schedule, f"groups.{group_name}.agents.{name or '<unknown>'}")
@@ -641,72 +672,45 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
             issues.extend(_validate_runtime(runtime, f"groups.{group_name}.agents.{name or '<unknown>'}"))
     return issues
 
-def _validate_agent(agent: dict[str, Any], group_name: str) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    scope = f"groups.{group_name}.agents.{agent.get('name', '<unknown>')}"
-    required = ["name", "blueprint", "integration"]
-    for key in required:
-        if not agent.get(key):
-            issues.append(
-                _build_issue(
-                    code=f"missing-{key}",
-                    scope=scope,
-                    field=key,
-                    message=f"Agent {key} is required.",
-                    hint=f"Set agent {key} explicitly.",
-                )
-            )
-    name = agent.get("name")
-    if isinstance(name, str):
-        issue = _validate_identifier("agent", name, scope)
-        if issue:
-            issues.append(issue)
-    default_memory = agent.get("default_memory")
-    if isinstance(default_memory, dict):
-        issue = _validate_memory_selector(default_memory, scope, allow_routine=False)
-        if issue:
-            issues.append(issue)
-    routines = agent.get("routines") or []
-    seen_routines: set[str] = set()
-    for routine in routines:
-        routine_name = routine.get("id")
-        if isinstance(routine_name, str):
-            issue = _validate_identifier("routine", routine_name, scope)
-            if issue:
-                issues.append(issue)
-            if routine_name in seen_routines:
-                issues.append(
-                    _build_issue(
-                        code="duplicate-routine-name",
-                        scope=scope,
-                        field="routines",
-                        message=f"Duplicate routine id: {routine_name}",
-                        hint="Give each routine a unique id within the agent.",
-                    )
-                )
-            seen_routines.add(routine_name)
-        schedule = routine.get("schedule") or {}
-        issue = _validate_rule(schedule, scope)
-        if issue:
-            issues.append(issue)
-        memory = routine.get("memory")
-        if isinstance(memory, dict):
-            issue = _validate_memory_selector(memory, scope, allow_routine=True)
-            if issue:
-                issues.append(issue)
-    issues.extend(_validate_runtime(agent.get("runtime") or {}, scope))
-    return issues
-
-
 def _sorted_issues(issues: list[ValidationIssue]) -> tuple[ValidationIssue, ...]:
     return tuple(sorted(issues, key=lambda issue: (issue.scope, issue.field, issue.code, issue.message)))
 
 
-def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConfig:
-    shape_issues = _collect_shape_issues(raw)
-    if shape_issues:
-        raise ValidationFailed(_sorted_issues(shape_issues))
+def _collect_schema_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
+    if raw.get("schema_version") == 2:
+        return []
+    return [
+        _build_issue(
+            code="invalid-schema-version",
+            scope="schema_version",
+            field="schema_version",
+            message="Only schema_version 2 is supported.",
+            hint="Run the canonical migration utility before loading config.",
+        )
+    ]
 
+
+def _prepare_runtime(runtime: Any, base_path: Path | None) -> dict[str, Any]:
+    runtime_entry = dict(runtime) if _is_mapping(runtime) else {}
+    sandbox = dict(runtime_entry.get("sandbox") or {})
+    if base_path is not None:
+        roots = []
+        for root in sandbox.get("roots") or []:
+            roots.append(_path_from_config(root, base_path))
+        additional_roots = []
+        for root in sandbox.get("additional_roots") or []:
+            additional_roots.append(_path_from_config(root, base_path))
+        sandbox["roots"] = tuple(roots)
+        sandbox["additional_roots"] = tuple(additional_roots)
+    runtime_entry["sandbox"] = sandbox
+    tools = dict(runtime_entry.get("tools") or {})
+    if tools.get("names") is not None:
+        tools["names"] = tuple(str(name) for name in tools.get("names") or ())
+    runtime_entry["tools"] = tools
+    return runtime_entry
+
+
+def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]:
     config_dir = config_path.parent.resolve()
     prepared = dict(raw)
     agency = dict(prepared.get("agency") or {})
@@ -721,78 +725,30 @@ def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConf
     groups = dict(prepared.get("groups") or {})
     resolved_groups: dict[str, Any] = {}
     for group_name, group in groups.items():
+        if not _is_mapping(group):
+            continue
         resolved_group = dict(group)
         if resolved_group.get("path") is not None:
             resolved_group["path"] = _path_from_config(resolved_group["path"], config_dir)
         group_path = resolved_group.get("path")
-        if group_path is not None:
-            runtime = dict(resolved_group.get("runtime") or {})
-            sandbox = dict(runtime.get("sandbox") or {})
-            roots = []
-            for root in sandbox.get("roots") or []:
-                roots.append(_path_from_config(root, Path(group_path)))
-            additional_roots = []
-            for root in sandbox.get("additional_roots") or []:
-                additional_roots.append(_path_from_config(root, Path(group_path)))
-            sandbox["roots"] = tuple(roots)
-            sandbox["additional_roots"] = tuple(additional_roots)
-            runtime["sandbox"] = sandbox
-            resolved_group["runtime"] = runtime
+        group_root = Path(group_path) if group_path is not None else None
+        resolved_group["runtime"] = _prepare_runtime(resolved_group.get("runtime") or {}, group_root)
         agents = {}
-        for index, agent in enumerate(resolved_group.get("agents") or []):
+        for agent in resolved_group.get("agents") or []:
             if not isinstance(agent, dict):
-                raise ValidationFailed(
-                    _sorted_issues(
-                        [
-                            _build_issue(
-                                code="invalid-agent-entry",
-                                scope=f"groups.{group_name}.agents[{index}]",
-                                field=f"agents[{index}]",
-                                message="Agent entry must be a mapping.",
-                                hint="Define each agent as a mapping with name, blueprint, and integration.",
-                            )
-                        ]
-                    )
-                )
+                continue
             name = agent.get("name")
             if not isinstance(name, str) or not name.strip():
-                raise ValidationFailed(
-                    _sorted_issues(
-                        [
-                            _build_issue(
-                                code="missing-agent-name",
-                                scope=f"groups.{group_name}.agents[{index}]",
-                                field=f"agents[{index}].name",
-                                message="Agent name is required.",
-                                hint="Set agent.name to a non-empty identifier.",
-                            )
-                        ]
-                    )
-                )
+                continue
             agent_entry = dict(agent)
-            runtime = dict(agent_entry.get("runtime") or {})
-            sandbox = dict(runtime.get("sandbox") or {})
-            if group_path is not None:
-                group_root = Path(group_path)
-                roots = []
-                for root in sandbox.get("roots") or []:
-                    roots.append(_path_from_config(root, group_root))
-                additional_roots = []
-                for root in sandbox.get("additional_roots") or []:
-                    additional_roots.append(_path_from_config(root, group_root))
-                sandbox["roots"] = tuple(roots)
-                sandbox["additional_roots"] = tuple(additional_roots)
-            runtime["sandbox"] = sandbox
-            tools = dict(runtime.get("tools") or {})
-            if tools.get("names") is not None:
-                tools["names"] = tuple(str(name) for name in tools.get("names") or ())
-            runtime["tools"] = tools
-            agent_entry["runtime"] = runtime
+            agent_entry["runtime"] = _prepare_runtime(agent_entry.get("runtime") or {}, group_root)
             if agent_entry.get("routines") is not None:
                 routines = []
                 for routine in agent_entry.get("routines") or []:
+                    if not _is_mapping(routine):
+                        continue
                     routine_entry = dict(routine)
-                    if routine_entry.get("memory") is not None:
+                    if _is_mapping(routine_entry.get("memory")):
                         routine_entry["memory"] = dict(routine_entry["memory"])
                     routines.append(routine_entry)
                 agent_entry["routines"] = tuple(routines)
@@ -802,45 +758,13 @@ def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConf
             resolved_group["workspaces"] = tuple(resolved_group.get("workspaces") or ())
         resolved_groups[group_name] = resolved_group
     prepared["groups"] = resolved_groups
-
-    try:
-        resolved = AgencyConfigcanonical.model_validate(prepared)
-    except ValidationError as exc:
-        raise ValidationFailed(_sorted_issues(_collect_pydantic_issues(exc))) from exc
-    return ParsedConfig(raw=raw, resolved=resolved)
+    return prepared
 
 
-def validate_config_canonical(raw: dict[str, Any], config_path: Path) -> tuple[ValidationIssue, ...]:
+def _collect_post_parse_issues(parsed: ParsedConfig) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    if raw.get("schema_version") != 2:
-        issues.append(
-            _build_issue(
-                code="invalid-schema-version",
-                scope="schema_version",
-                field="schema_version",
-                message="Only schema_version 2 is supported.",
-                hint="Run the canonical migration utility before loading config.",
-            )
-        )
-        return _sorted_issues(issues)
-    shape_issues = _collect_shape_issues(raw)
-    if shape_issues:
-        issues.extend(shape_issues)
-        return _sorted_issues(issues)
-    issues.extend(_validate_raw_config(raw, config_path))
-    try:
-        parsed = parse_config_canonical(raw, config_path)
-    except ValidationFailed as exc:
-        issues.extend(exc.issues)
-        return _sorted_issues(issues)
-    except ValidationError as exc:
-        issues.extend(_collect_pydantic_issues(exc))
-        return _sorted_issues(issues)
-
-    cfg = parsed.resolved
-    config_dir = config_path.parent.resolve()
     for field_name in ("agent_library", "compilation_cache", "memory_store"):
-        value = getattr(cfg.agency, field_name)
+        value = getattr(parsed.agency, field_name)
         if value is None:
             issues.append(
                 _build_issue(
@@ -848,7 +772,7 @@ def validate_config_canonical(raw: dict[str, Any], config_path: Path) -> tuple[V
                     scope="agency",
                     field=field_name,
                     message=f"{field_name} is required.",
-                        hint=f"Set agency.{field_name} relative to config.yaml.",
+                    hint=f"Set agency.{field_name} relative to config.yaml.",
                 )
             )
         elif not Path(value).is_absolute():
@@ -858,10 +782,10 @@ def validate_config_canonical(raw: dict[str, Any], config_path: Path) -> tuple[V
                     scope="agency",
                     field=field_name,
                     message=f"{field_name} must resolve to an absolute path.",
-                        hint="Use a path relative to the config directory or an absolute path.",
+                    hint="Use a path relative to the config directory or an absolute path.",
                 )
             )
-    for group_name, group in cfg.groups.items():
+    for group_name, group in parsed.groups.items():
         if not group.path.is_absolute():
             issues.append(
                 _build_issue(
@@ -872,28 +796,41 @@ def validate_config_canonical(raw: dict[str, Any], config_path: Path) -> tuple[V
                     hint="Set group.path relative to config.yaml.",
                 )
             )
-        agent_names = set()
-        for agent_name, agent in group.agents.items():
-            if agent_name in agent_names:
-                issues.append(
-                    _build_issue(
-                        code="duplicate-agent-name",
-                        scope=f"groups.{group_name}",
-                        field="agents",
-                        message=f"Duplicate agent name: {agent_name}",
-                        hint="Give each agent a unique name within the group.",
-                    )
-                )
-            agent_names.add(agent_name)
-            if agent.integration is None or not str(agent.integration).strip():
-                issues.append(
-                    _build_issue(
-                        code="missing-explicit-integration",
-                        scope=f"groups.{group_name}.agents.{agent_name}",
-                        field="integration",
-                        message="Each agent must declare an explicit integration.",
-                        hint="Set integration on every agent instance.",
-                    )
-                )
-            issues.extend(_validate_agent(agent.model_dump(mode="python"), group_name))
-    return _sorted_issues(issues)
+    return issues
+
+
+def _build_pipeline_result(raw: dict[str, Any], config_path: Path) -> _PipelineResult:
+    issues: list[ValidationIssue] = []
+    schema_issues = _collect_schema_issues(raw)
+    shape_issues = _collect_shape_issues(raw)
+    raw_issues = _validate_raw_config(raw, config_path)
+    issues.extend(schema_issues)
+    issues.extend(shape_issues)
+    issues.extend(raw_issues)
+
+    if schema_issues or shape_issues or raw_issues:
+        return _PipelineResult(parsed=None, issues=_sorted_issues(issues))
+
+    prepared = _prepare_for_model(raw, config_path)
+    try:
+        resolved = AgencyConfigcanonical.model_validate(prepared)
+    except ValidationError as exc:
+        issues.extend(_collect_pydantic_issues(exc))
+        return _PipelineResult(parsed=None, issues=_sorted_issues(issues))
+
+    parsed = ParsedConfig(raw=raw, resolved=resolved)
+    issues.extend(_collect_post_parse_issues(parsed))
+    sorted_issues = _sorted_issues(issues)
+    return _PipelineResult(parsed=parsed if not sorted_issues else None, issues=sorted_issues)
+
+
+def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConfig:
+    result = _build_pipeline_result(raw, config_path)
+    if result.issues:
+        raise ValidationFailed(result.issues)
+    assert result.parsed is not None
+    return result.parsed
+
+
+def validate_config_canonical(raw: dict[str, Any], config_path: Path) -> tuple[ValidationIssue, ...]:
+    return _build_pipeline_result(raw, config_path).issues

@@ -299,3 +299,63 @@ Result:
 ### Concerns
 
 - None beyond the existing Task 3 raw-store preservation follow-up already noted earlier in this report.
+
+## Review Fix 5
+
+### RED
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests/test_config_canonical.py -q
+```
+
+Result:
+
+```text
+47 passed, 14 failed in 0.69s
+```
+
+### GREEN
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests/test_config_canonical.py -q
+```
+
+Result:
+
+```text
+61 passed in 1.15s
+```
+
+### Full Suite
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Result:
+
+```text
+674 passed, 1 skipped in 27.72s
+```
+
+### Files Changed
+
+- [agency/configuration/models.py](agency/configuration/models.py)
+- [tests/test_config_canonical.py](tests/test_config_canonical.py)
+- [.superpowers/sdd/task-2-report.md](.superpowers/sdd/task-2-report.md)
+
+### Self-Review
+
+- Replaced the split parser/validator behavior with one internal non-recursive pipeline that collects schema, shape, raw semantic, typed-model, and post-parse issues once and reuses the same parsed object for `parse_config_canonical()`.
+- Malformed scalar and list routine items now emit field-specific `invalid-routine-entry` issues and can no longer leak `dict(routine)` type errors.
+- Parse/validate parity is covered with representative semantic-invalid fixtures and a valid fixture proving both boundaries accept the same configuration model.
+
+### Concerns
+
+- None beyond the existing Task 3 raw-store preservation follow-up already noted earlier in this report.

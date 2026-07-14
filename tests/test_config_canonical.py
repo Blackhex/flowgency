@@ -5,6 +5,12 @@ import pytest
 from agency.configuration import ValidationFailed, ValidationIssue
 
 
+def _clone_config(raw: dict) -> dict:
+    import copy
+
+    return copy.deepcopy(raw)
+
+
 def test_canonical_defaults_are_explicit(canonical_raw_config, canonical_paths):
     from agency.configuration.models import parse_config_canonical
 
@@ -166,6 +172,34 @@ def test_rejects_non_mapping_schedule_values(canonical_raw_config, canonical_pat
     assert any(issue.code == "invalid-dispatch-rule" for issue in issues)
 
 
+@pytest.mark.parametrize("routine_value", [None, "daily", ["daily"], 42])
+def test_rejects_non_mapping_routine_entries(canonical_raw_config, canonical_paths, routine_value):
+    from agency.configuration.models import validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [routine_value]
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert any(
+        issue.code == "invalid-routine-entry" and issue.field == "groups.newsletter.agents[0].routines[0]"
+        for issue in issues
+    )
+
+
+@pytest.mark.parametrize("routine_value", [None, "daily", ["daily"], 42])
+def test_parse_config_canonical_rejects_non_mapping_routine_entries(canonical_raw_config, canonical_paths, routine_value):
+    from agency.configuration.models import parse_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [routine_value]
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(
+        issue.code == "invalid-routine-entry" and issue.field == "groups.newsletter.agents[0].routines[0]"
+        for issue in excinfo.value.issues
+    )
+
+
 def test_rejects_empty_allowlist(canonical_raw_config, canonical_paths):
     from agency.configuration.models import validate_config_canonical
 
@@ -204,6 +238,83 @@ def test_preserves_supported_workspace_fields(canonical_raw_config, canonical_pa
     canonical_raw_config["groups"]["newsletter"]["workspaces"][0]["extra"] = "kept"
     parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
     assert parsed.groups["newsletter"].workspaces[0].extra == "kept"
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        pytest.param(
+            lambda raw: raw["groups"]["newsletter"]["agents"].append(
+                {
+                    "name": "builder",
+                    "blueprint": "other-blueprint",
+                    "integration": "claude-code",
+                }
+            ),
+            id="duplicate-agent-name",
+        ),
+        pytest.param(
+            lambda raw: raw["groups"]["newsletter"]["agents"][0].update({"name": "bad name"}),
+            id="invalid-agent-identifier",
+        ),
+        pytest.param(
+            lambda raw: raw["groups"]["newsletter"]["agents"][0]["default_memory"].update(
+                {"scope": "channel", "channel": "missing"}
+            ),
+            id="missing-channel-reference",
+        ),
+        pytest.param(
+            lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+                {"runtime": {"tools": {"mode": "allowlist", "names": [""]}}}
+            ),
+            id="blank-allowlist-name",
+        ),
+        pytest.param(
+            lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+                {"runtime": {"sandbox": {"mode": "unrestricted", "additional_roots": ["tmp"]}}}
+            ),
+            id="sandbox-contradiction",
+        ),
+        pytest.param(
+            lambda raw: raw["groups"]["newsletter"]["agents"][0]["routines"].append(
+                {
+                    "id": "daily-review",
+                    "skill": "daily-review-2",
+                    "schedule": {"every": "6h"},
+                }
+            ),
+            id="duplicate-routine-name",
+        ),
+    ],
+)
+def test_parse_and_validate_reject_same_semantic_invalid_configs(canonical_raw_config, canonical_paths, mutator):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    candidate = _clone_config(canonical_raw_config)
+    agent = candidate["groups"]["newsletter"]["agents"][0]
+    agent.setdefault("default_memory", {"scope": "agent"})
+    mutator(candidate)
+
+    issues = validate_config_canonical(candidate, canonical_paths["config_path"])
+    assert issues
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(candidate, canonical_paths["config_path"])
+
+    assert excinfo.value.issues == issues
+
+
+def test_parse_and_validate_share_same_valid_result(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    candidate = _clone_config(canonical_raw_config)
+
+    issues = validate_config_canonical(candidate, canonical_paths["config_path"])
+    parsed = parse_config_canonical(candidate, canonical_paths["config_path"])
+
+    assert issues == ()
+    assert parsed.schema_version == 2
+    assert parsed.groups["newsletter"].agents["builder"].routines[0].id == "daily-review"
 
 
 @pytest.mark.parametrize(
