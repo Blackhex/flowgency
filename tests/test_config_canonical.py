@@ -85,6 +85,29 @@ def test_rejects_channel_memory_reference_without_channel(canonical_raw_config, 
     assert any(issue.code == "missing-memory-channel" for issue in issues)
 
 
+def test_rejects_undeclared_channel_memory_reference(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["default_memory"] = {
+        "scope": "channel",
+        "channel": "missing",
+    }
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert any(issue.code == "missing-memory-channel" for issue in issues)
+
+
+def test_accepts_declared_channel_memory_reference(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import validate_config_canonical
+
+    canonical_raw_config["memory"]["channels"] = {"ops": {"display_name": "Ops"}}
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["default_memory"] = {
+        "scope": "channel",
+        "channel": "ops",
+    }
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert not any(issue.code == "missing-memory-channel" for issue in issues)
+
+
 def test_rejects_schedule_without_one_of(canonical_raw_config, canonical_paths):
     from agency.configuration.models import validate_config_canonical
 

@@ -230,7 +230,12 @@ def _validate_rule(rule: dict[str, Any], scope: str) -> ValidationIssue | None:
     return None
 
 
-def _validate_memory_selector(selector: dict[str, Any], scope: str, allow_routine: bool) -> ValidationIssue | None:
+def _validate_memory_selector(
+    selector: dict[str, Any],
+    scope: str,
+    allow_routine: bool,
+    declared_channels: set[str] | None = None,
+) -> ValidationIssue | None:
     selected_scope = selector.get("scope")
     if selected_scope == "routine" and not allow_routine:
         return _build_issue(
@@ -248,6 +253,16 @@ def _validate_memory_selector(selector: dict[str, Any], scope: str, allow_routin
             message="Channel memory selectors require a channel.",
             hint="Set channel to a declared memory channel key.",
         )
+    if selected_scope == "channel" and declared_channels is not None:
+        channel = selector.get("channel")
+        if channel and channel not in declared_channels:
+            return _build_issue(
+                code="missing-memory-channel",
+                scope=scope,
+                field="default_memory.channel",
+                message=f"Unknown memory channel: {channel}",
+                hint="Declare the channel under memory.channels or point to an existing key.",
+            )
     return None
 
 
@@ -281,6 +296,7 @@ def _validate_runtime(runtime: dict[str, Any], scope: str) -> list[ValidationIss
 def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     agency = raw.get("agency") or {}
+    declared_channels = set((raw.get("memory") or {}).get("channels") or {})
     for field_name in ("agent_library", "compilation_cache", "memory_store"):
         if not str(agency.get(field_name, "")).strip():
             issues.append(
@@ -334,7 +350,12 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 )
             default_memory = agent.get("default_memory") or {}
             if isinstance(default_memory, dict):
-                issue = _validate_memory_selector(default_memory, f"groups.{group_name}.agents.{name or '<unknown>'}", allow_routine=False)
+                issue = _validate_memory_selector(
+                    default_memory,
+                    f"groups.{group_name}.agents.{name or '<unknown>'}",
+                    allow_routine=False,
+                    declared_channels=declared_channels,
+                )
                 if issue:
                     issues.append(issue)
             routines = agent.get("routines") or []
@@ -361,7 +382,12 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     issues.append(issue)
                 memory = routine.get("memory")
                 if isinstance(memory, dict):
-                    issue = _validate_memory_selector(memory, f"groups.{group_name}.agents.{name or '<unknown>'}", allow_routine=True)
+                    issue = _validate_memory_selector(
+                        memory,
+                        f"groups.{group_name}.agents.{name or '<unknown>'}",
+                        allow_routine=True,
+                        declared_channels=declared_channels,
+                    )
                     if issue:
                         issues.append(issue)
             runtime = agent.get("runtime") or {}
