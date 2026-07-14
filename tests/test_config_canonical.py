@@ -89,6 +89,42 @@ def test_accepts_supported_group_dispatch_and_routines(canonical_raw_config, can
     assert parsed.groups["newsletter"].agents["builder"].routines[0].schedule.at == "09:00"
 
 
+def test_rejects_other_unknown_group_dispatch_keys(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["dispatch"] = {
+        "enabled": True,
+        "daily_limit": 12,
+        "owner": "ops",
+    }
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == "invalid-config" for issue in issues)
+    assert any(issue.field == "groups.newsletter.dispatch.owner" for issue in issues)
+
+
+@pytest.mark.parametrize("blueprint_value", [None, "", "   "])
+def test_rejects_missing_or_blank_blueprint(canonical_raw_config, canonical_paths, blueprint_value):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    agent = canonical_raw_config["groups"]["newsletter"]["agents"][0]
+    if blueprint_value is None:
+        del agent["blueprint"]
+    else:
+        agent["blueprint"] = blueprint_value
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == "missing-blueprint" for issue in issues)
+    assert any(issue.field == "blueprint" for issue in issues)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == "missing-blueprint" for issue in excinfo.value.issues)
+
+
 def test_rejects_superseded_schema_version(canonical_raw_config, canonical_paths):
     from agency.configuration.models import validate_config_canonical
 

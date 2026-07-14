@@ -67,6 +67,62 @@ Result:
 ## Concerns
 
 - The canonical parser currently resolves and validates the strict typed shape, but Task 3 still needs to preserve raw YAML round-trip behavior in the config store.
+
+## Review Fix 7
+
+### RED
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests\test_config_canonical.py -v
+```
+
+Result:
+
+```text
+Focused red phase was established by adding regressions for strict group dispatch validation and explicit missing/blank blueprint semantic validation.
+```
+
+### GREEN
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests\test_config_canonical.py -v
+```
+
+Result:
+
+```text
+68 passed in 0.77s
+```
+
+### Full Suite
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Result:
+
+```text
+681 passed, 1 skipped in 31.46s
+```
+
+### Files Changed
+
+- [agency/configuration/models.py](agency/configuration/models.py)
+- [tests/test_config_canonical.py](tests/test_config_canonical.py)
+- [.superpowers/sdd/task-2-report.md](.superpowers/sdd/task-2-report.md)
+
+### Self-Review
+
+- Human ruling applied: group dispatch is strict and now rejects any unknown field, while `dispatch.agents` keeps its dedicated superseded migration issue.
+- `GroupDispatch` now forbids extras, and the raw validator emits the stable `invalid-config` issue for any other unknown dispatch key.
+- Blueprint absence and blank values now surface as explicit `missing-blueprint` issues before Pydantic enforcement still guards the typed model.
 - Full-suite validation required installing `portalocker` into the local venv before tests could run successfully.
 
 ## Review Fix 1

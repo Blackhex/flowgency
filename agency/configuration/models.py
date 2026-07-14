@@ -109,7 +109,7 @@ class AgentInstance(BaseModel):
 
 
 class GroupDispatch(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = False
     daily_limit: int = 20
 
@@ -536,6 +536,21 @@ def _validate_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     return issues
 
 
+def _validate_blueprint(agent: Any, scope: str) -> ValidationIssue | None:
+    if not _is_mapping(agent):
+        return None
+    blueprint = agent.get("blueprint")
+    if not isinstance(blueprint, str) or not blueprint.strip():
+        return _build_issue(
+            code="missing-blueprint",
+            scope=scope,
+            field="blueprint",
+            message="Blueprint is required.",
+            hint="Set blueprint to a non-empty identifier for the agent instance.",
+        )
+    return None
+
+
 def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     agency = raw.get("agency") if _is_mapping(raw.get("agency")) else {}
@@ -609,6 +624,9 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     )
                 )
             seen_agents.add(name)
+            blueprint_issue = _validate_blueprint(agent, f"groups.{group_name}.agents.{name or '<unknown>'}")
+            if blueprint_issue:
+                issues.append(blueprint_issue)
             if not str(agent.get("integration", "")).strip():
                 issues.append(
                     _build_issue(
@@ -673,6 +691,20 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                         issues.append(issue)
             runtime = agent.get("runtime") or {}
             issues.extend(_validate_runtime(runtime, f"groups.{group_name}.agents.{name or '<unknown>'}"))
+
+        dispatch = group.get("dispatch") if _is_mapping(group.get("dispatch")) else {}
+        if _is_mapping(dispatch):
+            for key in dispatch:
+                if key not in {"enabled", "daily_limit"} and key != "agents":
+                    issues.append(
+                        _build_issue(
+                            code="invalid-config",
+                            scope=f"groups.{group_name}.dispatch",
+                            field=f"groups.{group_name}.dispatch.{key}",
+                            message=f"Unknown group dispatch field: {key}",
+                            hint="Remove the unsupported field or migrate it to a supported location.",
+                        )
+                    )
     return issues
 
 def _sorted_issues(issues: list[ValidationIssue]) -> tuple[ValidationIssue, ...]:
