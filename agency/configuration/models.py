@@ -288,16 +288,30 @@ def _validate_runtime(runtime: dict[str, Any], scope: str) -> list[ValidationIss
             )
         )
     tools = runtime.get("tools") or {}
-    if tools.get("mode") == "allowlist" and not tools.get("names"):
-        issues.append(
-            _build_issue(
-                code="empty-allowlist",
-                scope=scope,
-                field="runtime.tools.names",
-                message="Allowlist mode requires at least one tool name.",
-                hint="Add one or more tool names to the allowlist.",
+    if tools.get("mode") == "allowlist":
+        names = tools.get("names") or []
+        if not names:
+            issues.append(
+                _build_issue(
+                    code="empty-allowlist",
+                    scope=scope,
+                    field="runtime.tools.names",
+                    message="Allowlist mode requires at least one tool name.",
+                    hint="Add one or more tool names to the allowlist.",
+                )
             )
-        )
+        else:
+            for index, name in enumerate(names):
+                if not isinstance(name, str) or not name.strip():
+                    issues.append(
+                        _build_issue(
+                            code="invalid-allowlist-name",
+                            scope=scope,
+                            field=f"runtime.tools.names[{index}]",
+                            message="Allowlist names must be non-empty trimmed strings.",
+                            hint="Remove blank entries and keep each allowlist name as a trimmed string.",
+                        )
+                    )
     return issues
 
 
@@ -330,22 +344,41 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
             )
         agents = group.get("agents") or []
         seen_agents: set[str] = set()
-        for agent in agents:
+        for index, agent in enumerate(agents):
             if not isinstance(agent, dict):
+                issues.append(
+                    _build_issue(
+                        code="invalid-agent-entry",
+                        scope=f"groups.{group_name}.agents[{index}]",
+                        field=f"agents[{index}]",
+                        message="Agent entry must be a mapping.",
+                        hint="Define each agent as a mapping with name, blueprint, and integration.",
+                    )
+                )
                 continue
             name = agent.get("name")
-            if isinstance(name, str):
-                if name in seen_agents:
-                    issues.append(
-                        _build_issue(
-                            code="duplicate-agent-name",
-                            scope=f"groups.{group_name}",
-                            field="agents",
-                            message=f"Duplicate agent name: {name}",
-                            hint="Give each agent a unique name within the group.",
-                        )
+            if not isinstance(name, str) or not name.strip():
+                issues.append(
+                    _build_issue(
+                        code="missing-agent-name",
+                        scope=f"groups.{group_name}.agents[{index}]",
+                        field=f"agents[{index}].name",
+                        message="Agent name is required.",
+                        hint="Set agent.name to a non-empty identifier.",
                     )
-                seen_agents.add(name)
+                )
+                continue
+            if name in seen_agents:
+                issues.append(
+                    _build_issue(
+                        code="duplicate-agent-name",
+                        scope=f"groups.{group_name}",
+                        field="agents",
+                        message=f"Duplicate agent name: {name}",
+                        hint="Give each agent a unique name within the group.",
+                    )
+                )
+            seen_agents.add(name)
             if not str(agent.get("integration", "")).strip():
                 issues.append(
                     _build_issue(
@@ -496,7 +529,36 @@ def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConf
             runtime["sandbox"] = sandbox
             resolved_group["runtime"] = runtime
         agents = {}
-        for agent in resolved_group.get("agents") or []:
+        for index, agent in enumerate(resolved_group.get("agents") or []):
+            if not isinstance(agent, dict):
+                raise ValidationFailed(
+                    _sorted_issues(
+                        [
+                            _build_issue(
+                                code="invalid-agent-entry",
+                                scope=f"groups.{group_name}.agents[{index}]",
+                                field=f"agents[{index}]",
+                                message="Agent entry must be a mapping.",
+                                hint="Define each agent as a mapping with name, blueprint, and integration.",
+                            )
+                        ]
+                    )
+                )
+            name = agent.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise ValidationFailed(
+                    _sorted_issues(
+                        [
+                            _build_issue(
+                                code="missing-agent-name",
+                                scope=f"groups.{group_name}.agents[{index}]",
+                                field=f"agents[{index}].name",
+                                message="Agent name is required.",
+                                hint="Set agent.name to a non-empty identifier.",
+                            )
+                        ]
+                    )
+                )
             agent_entry = dict(agent)
             runtime = dict(agent_entry.get("runtime") or {})
             sandbox = dict(runtime.get("sandbox") or {})
@@ -524,7 +586,7 @@ def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConf
                         routine_entry["memory"] = dict(routine_entry["memory"])
                     routines.append(routine_entry)
                 agent_entry["routines"] = tuple(routines)
-            agents[agent_entry["name"]] = agent_entry
+            agents[name] = agent_entry
         resolved_group["agents"] = agents
         if resolved_group.get("workspaces") is not None:
             resolved_group["workspaces"] = tuple(resolved_group.get("workspaces") or ())

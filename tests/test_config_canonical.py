@@ -57,6 +57,28 @@ def test_parse_config_canonical_raises_validation_failed_for_missing_group_path_
         parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
 
 
+@pytest.mark.parametrize(
+    ("agent_entry", "expected_code", "expected_field"),
+    [
+        (None, "invalid-agent-entry", "agents[0]"),
+        ("builder", "invalid-agent-entry", "agents[0]"),
+        (["builder"], "invalid-agent-entry", "agents[0]"),
+        ({}, "missing-agent-name", "agents[0].name"),
+    ],
+)
+def test_parse_config_canonical_rejects_malformed_agent_entries(
+    canonical_raw_config, canonical_paths, agent_entry, expected_code, expected_field
+):
+    from agency.configuration.models import parse_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"] = [agent_entry]
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == expected_code and issue.field == expected_field for issue in excinfo.value.issues)
+
+
 def test_rejects_duplicate_agent_names(canonical_raw_config, canonical_paths):
     from agency.configuration.models import validate_config_canonical
 
@@ -152,6 +174,18 @@ def test_rejects_empty_allowlist(canonical_raw_config, canonical_paths):
     }
     issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
     assert any(issue.code == "empty-allowlist" for issue in issues)
+
+
+@pytest.mark.parametrize("names, expected_field", [([""], "runtime.tools.names[0]"), (["   "], "runtime.tools.names[0]")])
+def test_rejects_blank_allowlist_names(canonical_raw_config, canonical_paths, names, expected_field):
+    from agency.configuration.models import validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+        "tools": {"mode": "allowlist", "names": names}
+    }
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert any(issue.code == "invalid-allowlist-name" and issue.field == expected_field for issue in issues)
+    assert not any(issue.code == "empty-allowlist" for issue in issues)
 
 
 def test_rejects_unrestricted_with_additions(canonical_raw_config, canonical_paths):
