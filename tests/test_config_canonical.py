@@ -204,3 +204,81 @@ def test_preserves_supported_workspace_fields(canonical_raw_config, canonical_pa
     canonical_raw_config["groups"]["newsletter"]["workspaces"][0]["extra"] = "kept"
     parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
     assert parsed.groups["newsletter"].workspaces[0].extra == "kept"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value", "expected_field"),
+    [
+        ("agency", [], "agency"),
+        ("memory", [], "memory"),
+        ("groups", [], "groups"),
+    ],
+)
+def test_parse_config_canonical_rejects_malformed_top_level_mappings(
+    canonical_raw_config, canonical_paths, field_name, bad_value, expected_field
+):
+    from agency.configuration.models import parse_config_canonical
+
+    canonical_raw_config[field_name] = bad_value
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.field == expected_field for issue in excinfo.value.issues)
+
+
+@pytest.mark.parametrize(
+    ("group_value", "expected_field"),
+    [
+        ([], "groups.newsletter"),
+        ("newsletter", "groups.newsletter"),
+    ],
+)
+def test_parse_config_canonical_rejects_malformed_group_records(canonical_raw_config, canonical_paths, group_value, expected_field):
+    from agency.configuration.models import parse_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"] = group_value
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.field == expected_field for issue in excinfo.value.issues)
+
+
+@pytest.mark.parametrize(
+    ("path", "bad_value", "expected_field"),
+    [
+        (["memory", "channels"], [], "memory.channels"),
+        (["memory", "channels", "support"], [], "memory.channels.support"),
+        (["groups", "newsletter", "runtime"], [], "groups.newsletter.runtime"),
+        (["groups", "newsletter", "runtime", "sandbox"], [], "groups.newsletter.runtime.sandbox"),
+        (["groups", "newsletter", "runtime", "tools"], [], "groups.newsletter.runtime.tools"),
+        (["groups", "newsletter", "dispatch"], [], "groups.newsletter.dispatch"),
+        (["groups", "newsletter", "workspaces"], {}, "groups.newsletter.workspaces"),
+        (["groups", "newsletter", "agents"], {}, "groups.newsletter.agents"),
+        (["groups", "newsletter", "agents", 0, "identity"], [], "groups.newsletter.agents[0].identity"),
+        (["groups", "newsletter", "agents", 0, "capabilities"], [], "groups.newsletter.agents[0].capabilities"),
+        (["groups", "newsletter", "agents", 0, "runtime"], [], "groups.newsletter.agents[0].runtime"),
+        (["groups", "newsletter", "agents", 0, "runtime", "sandbox"], [], "groups.newsletter.agents[0].runtime.sandbox"),
+        (["groups", "newsletter", "agents", 0, "runtime", "tools"], [], "groups.newsletter.agents[0].runtime.tools"),
+        (["groups", "newsletter", "agents", 0, "default_memory"], [], "groups.newsletter.agents[0].default_memory"),
+        (["groups", "newsletter", "agents", 0, "routines"], {}, "groups.newsletter.agents[0].routines"),
+        (["groups", "newsletter", "agents", 0, "routines", 0, "schedule"], [], "groups.newsletter.agents[0].routines[0].schedule"),
+        (["groups", "newsletter", "agents", 0, "routines", 0, "memory"], [], "groups.newsletter.agents[0].routines[0].memory"),
+    ],
+)
+def test_parse_config_canonical_rejects_malformed_nested_shapes(canonical_raw_config, canonical_paths, path, bad_value, expected_field):
+    from agency.configuration.models import parse_config_canonical
+
+    target = canonical_raw_config
+    for segment in path[:-1]:
+        if isinstance(segment, str) and segment not in target:
+            next_segment = path[path.index(segment) + 1]
+            target[segment] = [] if isinstance(next_segment, int) else {}
+        target = target[segment]
+    target[path[-1]] = bad_value
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.field == expected_field for issue in excinfo.value.issues)

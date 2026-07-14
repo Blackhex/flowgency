@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -185,6 +186,194 @@ def _build_issue(code: str, scope: str, field: str, message: str, hint: str) -> 
     return ValidationIssue(code=code, scope=scope, field=field, message=message, corrective_hint=hint)
 
 
+def _shape_scope(field: str) -> str:
+    if "[" in field and "." not in field:
+        return field.split("[", 1)[0]
+    if "." in field:
+        return field.rsplit(".", 1)[0]
+    return field
+
+
+def _shape_issue(field: str, expected: str) -> ValidationIssue:
+    return _build_issue(
+        code="invalid-field-shape",
+        scope=_shape_scope(field),
+        field=field,
+        message=f"{field} must be a {expected}.",
+        hint=f"Set {field} to a {expected} value.",
+    )
+
+
+def _is_mapping(value: Any) -> bool:
+    return isinstance(value, Mapping)
+
+
+def _is_list(value: Any) -> bool:
+    return isinstance(value, list)
+
+
+def _mapping_or_none(value: Any) -> Mapping[str, Any] | None:
+    if _is_mapping(value):
+        return value
+    return None
+
+
+def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    agency = raw.get("agency")
+    if agency is not None and not _is_mapping(agency):
+        issues.append(_shape_issue("agency", "mapping"))
+
+    memory = raw.get("memory")
+    memory_map = _mapping_or_none(memory)
+    if memory is not None and memory_map is None:
+        issues.append(_shape_issue("memory", "mapping"))
+    channels = None
+    if memory_map is not None:
+        channels = memory_map.get("channels")
+        channels_map = _mapping_or_none(channels)
+        if channels is not None and channels_map is None:
+            issues.append(_shape_issue("memory.channels", "mapping"))
+        elif channels_map is not None:
+            for channel_name, channel in channels_map.items():
+                if not _is_mapping(channel):
+                    issues.append(_shape_issue(f"memory.channels.{channel_name}", "mapping"))
+
+    groups = raw.get("groups")
+    groups_map = _mapping_or_none(groups)
+    if groups_map is None:
+        issues.append(_shape_issue("groups", "mapping"))
+        return issues
+
+    for group_name, group in groups_map.items():
+        group_field = f"groups.{group_name}"
+        group_map = _mapping_or_none(group)
+        if group_map is None:
+            issues.append(_shape_issue(group_field, "mapping"))
+            continue
+
+        runtime = group_map.get("runtime")
+        runtime_map = _mapping_or_none(runtime)
+        if runtime is not None and runtime_map is None:
+            issues.append(_shape_issue(f"{group_field}.runtime", "mapping"))
+        if runtime_map is not None:
+            sandbox = runtime_map.get("sandbox")
+            sandbox_map = _mapping_or_none(sandbox)
+            if sandbox is not None and sandbox_map is None:
+                issues.append(_shape_issue(f"{group_field}.runtime.sandbox", "mapping"))
+            elif sandbox_map is not None:
+                roots = sandbox_map.get("roots")
+                if roots is not None and not _is_list(roots):
+                    issues.append(_shape_issue(f"{group_field}.runtime.sandbox.roots", "list"))
+                additional_roots = sandbox_map.get("additional_roots")
+                if additional_roots is not None and not _is_list(additional_roots):
+                    issues.append(_shape_issue(f"{group_field}.runtime.sandbox.additional_roots", "list"))
+
+            tools = runtime_map.get("tools")
+            tools_map = _mapping_or_none(tools)
+            if tools is not None and tools_map is None:
+                issues.append(_shape_issue(f"{group_field}.runtime.tools", "mapping"))
+            elif tools_map is not None:
+                names = tools_map.get("names")
+                if names is not None and not _is_list(names):
+                    issues.append(_shape_issue(f"{group_field}.runtime.tools.names", "list"))
+
+        dispatch = group_map.get("dispatch")
+        if dispatch is not None and not _is_mapping(dispatch):
+            issues.append(_shape_issue(f"{group_field}.dispatch", "mapping"))
+
+        workspaces = group_map.get("workspaces")
+        if workspaces is not None and not _is_list(workspaces):
+            issues.append(_shape_issue(f"{group_field}.workspaces", "list"))
+
+        agents = group_map.get("agents")
+        agents_list = None
+        if agents is not None:
+            if not _is_list(agents):
+                issues.append(_shape_issue(f"{group_field}.agents", "list"))
+            else:
+                agents_list = agents
+        if agents_list is None:
+            continue
+
+        for index, agent in enumerate(agents_list):
+            agent_field = f"{group_field}.agents[{index}]"
+            agent_map = _mapping_or_none(agent)
+            if agent_map is None:
+                continue
+
+            identity = agent_map.get("identity")
+            if identity is not None and not _is_mapping(identity):
+                issues.append(_shape_issue(f"{agent_field}.identity", "mapping"))
+
+            capabilities = agent_map.get("capabilities")
+            if capabilities is not None and not _is_mapping(capabilities):
+                issues.append(_shape_issue(f"{agent_field}.capabilities", "mapping"))
+
+            runtime = agent_map.get("runtime")
+            runtime_map = _mapping_or_none(runtime)
+            if runtime is not None and runtime_map is None:
+                issues.append(_shape_issue(f"{agent_field}.runtime", "mapping"))
+            if runtime_map is not None:
+                sandbox = runtime_map.get("sandbox")
+                sandbox_map = _mapping_or_none(sandbox)
+                if sandbox is not None and sandbox_map is None:
+                    issues.append(_shape_issue(f"{agent_field}.runtime.sandbox", "mapping"))
+                elif sandbox_map is not None:
+                    roots = sandbox_map.get("roots")
+                    if roots is not None and not _is_list(roots):
+                        issues.append(_shape_issue(f"{agent_field}.runtime.sandbox.roots", "list"))
+                    additional_roots = sandbox_map.get("additional_roots")
+                    if additional_roots is not None and not _is_list(additional_roots):
+                        issues.append(_shape_issue(f"{agent_field}.runtime.sandbox.additional_roots", "list"))
+
+                tools = runtime_map.get("tools")
+                tools_map = _mapping_or_none(tools)
+                if tools is not None and tools_map is None:
+                    issues.append(_shape_issue(f"{agent_field}.runtime.tools", "mapping"))
+                elif tools_map is not None:
+                    names = tools_map.get("names")
+                    if names is not None and not _is_list(names):
+                        issues.append(_shape_issue(f"{agent_field}.runtime.tools.names", "list"))
+
+            default_memory = agent_map.get("default_memory")
+            if default_memory is not None and not _is_mapping(default_memory):
+                issues.append(_shape_issue(f"{agent_field}.default_memory", "mapping"))
+
+            routines = agent_map.get("routines")
+            routines_list = None
+            if routines is not None:
+                if not _is_list(routines):
+                    issues.append(_shape_issue(f"{agent_field}.routines", "list"))
+                else:
+                    routines_list = routines
+            if routines_list is None:
+                continue
+
+            for routine_index, routine in enumerate(routines_list):
+                routine_field = f"{agent_field}.routines[{routine_index}]"
+                routine_map = _mapping_or_none(routine)
+                if routine_map is None:
+                    continue
+                schedule = routine_map.get("schedule")
+                if schedule is not None and not _is_mapping(schedule):
+                    issues.append(
+                        _build_issue(
+                            code="invalid-dispatch-rule",
+                            scope=routine_field,
+                            field=f"{routine_field}.schedule",
+                            message="Dispatch rule must be a mapping with exactly one of at or every.",
+                            hint="Set schedule to a mapping containing either at or every.",
+                        )
+                    )
+                memory = routine_map.get("memory")
+                if memory is not None and not _is_mapping(memory):
+                    issues.append(_shape_issue(f"{routine_field}.memory", "mapping"))
+
+    return issues
+
+
 def _collect_pydantic_issues(error: ValidationError) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     for entry in error.errors():
@@ -239,17 +428,20 @@ def _validate_rule(rule: Any, scope: str) -> ValidationIssue | None:
 
 
 def _validate_memory_selector(
-    selector: dict[str, Any],
+    selector: Any,
     scope: str,
     allow_routine: bool,
+    field_prefix: str = "default_memory",
     declared_channels: set[str] | None = None,
 ) -> ValidationIssue | None:
+    if not _is_mapping(selector):
+        return _shape_issue(field_prefix, "mapping")
     selected_scope = selector.get("scope")
     if selected_scope == "routine" and not allow_routine:
         return _build_issue(
             code="invalid-memory-scope",
             scope=scope,
-            field="default_memory.scope",
+            field=f"{field_prefix}.scope",
             message="Agent default memory cannot use routine scope.",
             hint="Choose run, agent, group, or channel for an agent default memory selector.",
         )
@@ -257,7 +449,7 @@ def _validate_memory_selector(
         return _build_issue(
             code="missing-memory-channel",
             scope=scope,
-            field="default_memory.channel",
+            field=f"{field_prefix}.channel",
             message="Channel memory selectors require a channel.",
             hint="Set channel to a declared memory channel key.",
         )
@@ -267,16 +459,20 @@ def _validate_memory_selector(
             return _build_issue(
                 code="missing-memory-channel",
                 scope=scope,
-                field="default_memory.channel",
+                field=f"{field_prefix}.channel",
                 message=f"Unknown memory channel: {channel}",
                 hint="Declare the channel under memory.channels or point to an existing key.",
             )
     return None
 
 
-def _validate_runtime(runtime: dict[str, Any], scope: str) -> list[ValidationIssue]:
+def _validate_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    if not _is_mapping(runtime):
+        return issues
     sandbox = runtime.get("sandbox") or {}
+    if not _is_mapping(sandbox):
+        return issues
     if sandbox.get("mode") == "unrestricted" and (sandbox.get("additional_roots") or sandbox.get("additions")):
         issues.append(
             _build_issue(
@@ -288,8 +484,12 @@ def _validate_runtime(runtime: dict[str, Any], scope: str) -> list[ValidationIss
             )
         )
     tools = runtime.get("tools") or {}
+    if not _is_mapping(tools):
+        return issues
     if tools.get("mode") == "allowlist":
         names = tools.get("names") or []
+        if not _is_list(names):
+            return issues
         if not names:
             issues.append(
                 _build_issue(
@@ -317,8 +517,10 @@ def _validate_runtime(runtime: dict[str, Any], scope: str) -> list[ValidationIss
 
 def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    agency = raw.get("agency") or {}
-    declared_channels = set((raw.get("memory") or {}).get("channels") or {})
+    agency = raw.get("agency") if _is_mapping(raw.get("agency")) else {}
+    memory = raw.get("memory") if _is_mapping(raw.get("memory")) else {}
+    channels = memory.get("channels") if _is_mapping(memory.get("channels")) else {}
+    declared_channels = set(channels)
     for field_name in ("agent_library", "compilation_cache", "memory_store"):
         if not str(agency.get(field_name, "")).strip():
             issues.append(
@@ -330,8 +532,10 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     hint=f"Set agency.{field_name} relative to config.yaml.",
                 )
             )
-    groups = raw.get("groups") or {}
+    groups = raw.get("groups") if _is_mapping(raw.get("groups")) else {}
     for group_name, group in groups.items():
+        if not _is_mapping(group):
+            continue
         if not str(group.get("path", "")).strip():
             issues.append(
                 _build_issue(
@@ -342,7 +546,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     hint="Set group.path relative to config.yaml.",
                 )
             )
-        agents = group.get("agents") or []
+        agents = group.get("agents") if _is_list(group.get("agents")) else []
         seen_agents: set[str] = set()
         for index, agent in enumerate(agents):
             if not isinstance(agent, dict):
@@ -390,16 +594,17 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     )
                 )
             default_memory = agent.get("default_memory") or {}
-            if isinstance(default_memory, dict):
+            if default_memory:
                 issue = _validate_memory_selector(
                     default_memory,
                     f"groups.{group_name}.agents.{name or '<unknown>'}",
                     allow_routine=False,
+                    field_prefix="default_memory",
                     declared_channels=declared_channels,
                 )
                 if issue:
                     issues.append(issue)
-            routines = agent.get("routines") or []
+            routines = agent.get("routines") if _is_list(agent.get("routines")) else []
             seen_routines: set[str] = set()
             for routine in routines:
                 if not isinstance(routine, dict):
@@ -422,11 +627,12 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 if issue:
                     issues.append(issue)
                 memory = routine.get("memory")
-                if isinstance(memory, dict):
+                if memory is not None:
                     issue = _validate_memory_selector(
                         memory,
                         f"groups.{group_name}.agents.{name or '<unknown>'}",
                         allow_routine=True,
+                        field_prefix="memory",
                         declared_channels=declared_channels,
                     )
                     if issue:
@@ -497,6 +703,10 @@ def _sorted_issues(issues: list[ValidationIssue]) -> tuple[ValidationIssue, ...]
 
 
 def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConfig:
+    shape_issues = _collect_shape_issues(raw)
+    if shape_issues:
+        raise ValidationFailed(_sorted_issues(shape_issues))
+
     config_dir = config_path.parent.resolve()
     prepared = dict(raw)
     agency = dict(prepared.get("agency") or {})
@@ -612,6 +822,10 @@ def validate_config_canonical(raw: dict[str, Any], config_path: Path) -> tuple[V
                 hint="Run the canonical migration utility before loading config.",
             )
         )
+        return _sorted_issues(issues)
+    shape_issues = _collect_shape_issues(raw)
+    if shape_issues:
+        issues.extend(shape_issues)
         return _sorted_issues(issues)
     issues.extend(_validate_raw_config(raw, config_path))
     try:
