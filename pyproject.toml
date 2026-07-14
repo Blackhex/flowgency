@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.116",
     "starlette<1.0",
+    "portalocker>=3,<4",
     "uvicorn; sys_platform == 'win32'",
     "uvicorn[standard]; sys_platform != 'win32'",
     "watchfiles>=0.20; sys_platform == 'win32'",
