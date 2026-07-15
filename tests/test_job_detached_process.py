@@ -79,12 +79,11 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     submitter_script = tmp_path / "submitter.py"
     submitter_script.write_text(
         "import os, pathlib, sys\n"
-        "from agency.jobs import JobSpec, submit_job\n"
+        "from agency.jobs import JobRequest, submit_job_request\n"
         "config, job_id_file, pid_file = map(pathlib.Path, sys.argv[1:])\n"
-        "spec = JobSpec.create(config_path=config, group_key='test', "
-        "agent_name='product', trigger='decision', "
-        "prompt_source={'type': 'decision'}, prompt_content='run')\n"
-        "handle = submit_job(spec)\n"
+        "request = JobRequest(config_path=config, group_key='test', "
+        "agent_name='product', trigger='decision', task_input='run')\n"
+        "handle = submit_job_request(request)\n"
         "job_id_file.write_text(handle.job_id)\n"
         "pid_file.write_text(str(os.getpid()))\n"
     )

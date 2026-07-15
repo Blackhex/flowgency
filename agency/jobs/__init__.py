@@ -18,7 +18,7 @@ from .models import (
 )
 from .resolution import JobValidationError, resolve_job_request
 from .store import active_jobs, cancel_job
-from .submission import JobSubmissionError, submit_job, submit_job_request
+from .submission import JobSubmissionError, submit_job_request
 
 
 def reconcile_jobs(groups: dict):
@@ -48,6 +48,5 @@ __all__ = [
     "resolve_job_request",
     "retain_failed_stage",
     "RuntimePolicySnapshot",
-    "submit_job",
     "submit_job_request",
 ]

@@ -39,25 +39,7 @@ def _resolve_request(request: JobRequest) -> JobSpec:
         integrations=REGISTRY,
     )
 
-
-def _request_from_spec(spec: JobSpec) -> JobRequest:
-    return JobRequest(
-        config_path=Path(spec.config_path),
-        group_key=spec.group_key,
-        agent_name=spec.agent_name,
-        trigger=spec.trigger,
-        task_input=spec.task_input,
-        job_id=spec.job_id,
-        routine_id=spec.routine_id,
-        timeout_override=spec.timeout_override,
-        trigger_context=spec.trigger_context,
-        superseded_prompt_source=spec.prompt_source,
-    )
-
-
 def _submit_resolved(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
-    if spec.config_revision == "compat-unresolved":
-        raise ValueError("submit requires an internally resolved JobSpec")
     spec.validate()
     group_path = Path(spec.workspace_dir)
     artifact = spec.blueprint.to_artifact()
@@ -94,11 +76,6 @@ def _submit_resolved(spec: JobSpec, launcher: JobLauncher | None = None) -> JobH
         write_job(path, failed)
         raise JobSubmissionError(str(error), path) from error
     return JobHandle(spec.job_id, "queued", path, result.worker_pid)
-
-
-def submit_job(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
-    resolved = _resolve_request(_request_from_spec(spec))
-    return _submit_resolved(resolved, launcher)
 
 
 def submit_job_request(

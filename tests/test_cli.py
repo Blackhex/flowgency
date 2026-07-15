@@ -9,7 +9,7 @@ import yaml
 
 import agency.app as app_mod
 from agency import cli
-from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import write_job
 
 
@@ -19,14 +19,49 @@ def _setup_jobs_group(tmp_path, monkeypatch):
     group = tmp_path / "group"
     jobs_dir = group / "shared" / "jobs"
     jobs_dir.mkdir(parents=True)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
 
-    spec = JobSpec.create(
-        config_path=tmp_path / "config.yaml",
+    spec = JobSpec(
+        schema_version=2,
+        job_id="cli-job",
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="test",
+        group_path=str(group.resolve()),
         agent_name="engineer",
+        workspace_dir=str(group.resolve()),
         trigger="decision",
+        integration_name="script",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="engineer-blueprint",
+            source_digest="digest-1",
+            integration="script",
+            projector_version="v1",
+            cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
+        ),
+        routine_id=None,
+        skill=None,
+        skill_arguments=(),
+        task_input="Do the work",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "run", "version": 1, "job": "cli-job"},
+            canonical_json='{"job":"cli-job","scope":"run","version":1}',
+            memory_hash="memory-hash-1",
+            path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
+        ),
+        trigger_context=None,
         prompt_source={"type": "decision"},
-        prompt_content="Do the work",
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
     record = JobRecord.from_spec(spec)
     record.status = "complete"

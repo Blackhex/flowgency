@@ -13,7 +13,7 @@ from agency.integrations.models import IntegrationRunRequest
 from agency.jobs.artifacts import JobArtifact
 from agency.jobs.execution import _selector_lock_path
 from agency.jobs.execution import execute_job
-from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import cancel_job
 from agency.jobs.reconciliation import worker_alive
 from agency.jobs.store import read_job, write_job
@@ -41,29 +41,49 @@ def queued_job(tmp_path: Path, *, decision_context=None):
         channels={},
         store_root=tmp_path / ".compat-memory-root",
     )
-    spec = JobSpec.create(
-        config_path=config_path,
+    group_path = tmp_path / "group"
+    spec = JobSpec(
+        schema_version=2,
+        job_id="queued-job",
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="test",
+        group_path=str(group_path.resolve()),
         agent_name="product",
+        workspace_dir=str(group_path.resolve()),
         trigger="decision" if decision_context else "manual_prompt",
-        blueprint={
-            "key": "compat-unresolved",
-            "source_digest": "compat-unresolved",
-            "integration": "script",
-            "projector_version": "v1",
-            "cache_path": str(cache_path.resolve()),
-        },
-        memory={
-            "selector": {"scope": "run"},
-            "canonical_json": resolved.canonical_json,
-            "memory_hash": resolved.memory_hash,
-            "path": str(resolved.directory.resolve()),
-        },
+        integration_name="script",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="compat-unresolved",
+            source_digest="compat-unresolved",
+            integration="script",
+            projector_version="v1",
+            cache_path=str(cache_path.resolve()),
+        ),
+        routine_id=None if decision_context else "daily-review",
+        skill=None if decision_context else "daily-review",
+        skill_arguments=(),
+        task_input="Immutable instructions",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "run"},
+            canonical_json=resolved.canonical_json,
+            memory_hash=resolved.memory_hash,
+            path=str(resolved.directory.resolve()),
+        ),
+        trigger_context=decision_context,
         prompt_source={"type": "decision" if decision_context else "saved_prompt"},
-        prompt_content="Immutable instructions",
-        decision_context=decision_context,
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
-    path = tmp_path / "group" / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
     write_job(path, JobRecord.from_spec(spec))
     return path, spec
 
@@ -82,39 +102,46 @@ def memory_bound_job(tmp_path: Path):
         channels={},
         store_root=tmp_path / "memory-store",
     )
-    spec = JobSpec.create(
-        config_path=config_path,
+    spec = JobSpec(
+        schema_version=2,
+        job_id="memory-bound-job",
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="test",
+        group_path=str(group_path.resolve()),
         agent_name="product",
+        workspace_dir=str(group_path.resolve()),
         trigger="manual_prompt",
         integration_name="script",
         integration_config={"command": "echo ok"},
-        config_revision="cfg-1",
-        blueprint={
-            "key": "builder-blueprint",
-            "source_digest": "digest",
-            "integration": "script",
-            "projector_version": "v1",
-            "cache_path": str(cache_path.resolve()),
-        },
-        runtime_policy={
-            "timeout": 30,
-            "sandbox_mode": "unrestricted",
-            "sandbox_roots": (),
-            "tool_mode": "all",
-            "tool_names": (),
-        },
-        memory={
-            "selector": {"scope": "agent"},
-            "canonical_json": resolved.canonical_json,
-            "memory_hash": resolved.memory_hash,
-            "path": str(resolved.directory.resolve()),
-        },
+        blueprint=BlueprintRef(
+            key="builder-blueprint",
+            source_digest="digest",
+            integration="script",
+            projector_version="v1",
+            cache_path=str(cache_path.resolve()),
+        ),
         routine_id="daily-review",
         skill="daily-review",
+        skill_arguments=(),
         task_input="Immutable instructions",
-        group_path=group_path,
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=30,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "agent"},
+            canonical_json=resolved.canonical_json,
+            memory_hash=resolved.memory_hash,
+            path=str(resolved.directory.resolve()),
+        ),
+        trigger_context=None,
         prompt_source={"type": "saved_prompt", "path": "shared/prompts/routine.md"},
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
     path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
     write_job(path, JobRecord.from_spec(spec))
@@ -460,7 +487,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     assert read_job(path) == result
 
 
-def test_execute_job_keeps_superseded_bridge_outside_typed_canonical_validation(tmp_path, monkeypatch):
+def test_execute_job_uses_resolved_skill_from_canonical_snapshot(tmp_path, monkeypatch):
     path, _ = queued_job(tmp_path)
     seen = {}
 
@@ -488,7 +515,7 @@ def test_execute_job_keeps_superseded_bridge_outside_typed_canonical_validation(
     result = execute_job(path)
 
     assert result.status == "complete"
-    assert seen == {"skill": None, "sandbox_mode": "unrestricted"}
+    assert seen == {"skill": "daily-review", "sandbox_mode": "unrestricted"}
 
 
 def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):

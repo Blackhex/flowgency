@@ -9,7 +9,7 @@ import pytest
 import agency.app as app_mod
 from agency.app import app, is_agent_running
 from agency.jobs import JobRequest
-from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import job_path, write_job
 
 
@@ -176,13 +176,46 @@ def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
 def test_agent_running_state_comes_from_active_job_records(tmp_path):
     group_path = _setup_group(tmp_path)
     for status in ("queued", "running"):
-        spec = JobSpec.create(
-            config_path=tmp_path / "config.yaml",
+        spec = JobSpec(
+            schema_version=2,
+            job_id=f"job-{status}",
+            config_path=str((tmp_path / "config.yaml").resolve()),
+            config_revision="cfg-1",
             group_key="test",
+            group_path=str(group_path.resolve()),
             agent_name="product",
+            workspace_dir=str(group_path.resolve()),
             trigger="manual_prompt",
+            integration_name="script",
+            integration_config={},
+            blueprint=BlueprintRef(
+                key="builder-blueprint",
+                source_digest="digest-1",
+                integration="script",
+                projector_version="v1",
+                cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
+            ),
+            routine_id="daily-review",
+            skill="daily-review",
+            skill_arguments=(),
+            task_input="# Routine\n",
+            runtime_policy=RuntimePolicySnapshot(
+                timeout=1800,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tool_mode="all",
+                tool_names=(),
+            ),
+            memory=MemoryBinding(
+                selector={"scope": "agent", "version": 1, "group": "test", "agent": "product"},
+                canonical_json='{"agent":"product","group":"test","scope":"agent","version":1}',
+                memory_hash="memory-hash-1",
+                path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
+            ),
+            trigger_context=None,
             prompt_source={"type": "prompt", "path": "routine.md"},
-            prompt_content="# Routine\n",
+            timeout_override=None,
+            created_at="2026-07-15T00:00:00+00:00",
         )
         record = replace(JobRecord.from_spec(spec), status=status)
         write_job(job_path(group_path, spec.job_id), record)

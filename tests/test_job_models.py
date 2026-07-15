@@ -1,5 +1,6 @@
 from pathlib import Path
 import inspect
+from uuid import uuid4
 
 import pytest
 import yaml
@@ -10,6 +11,7 @@ import agency.jobs.store as store_module
 from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
+    JobRequest,
     JobSpec,
     MemoryBinding,
     RuntimePolicySnapshot,
@@ -29,14 +31,18 @@ from agency.config import load_config_path
 def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
-    return JobSpec.create(
-        config_path=config_path,
+    return JobSpec(
+        schema_version=2,
+        job_id=uuid4().hex,
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="newsletter",
+        group_path=str(tmp_path.resolve()),
         agent_name=agent,
+        workspace_dir=str(tmp_path.resolve()),
         trigger="manual_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},
-        config_revision="cfg-1",
         blueprint=BlueprintRef(
             key="writer",
             source_digest="digest-1",
@@ -44,6 +50,10 @@ def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
             projector_version="v1",
             cache_path="C:/cache/copilot/v1/digest-1",
         ),
+        routine_id="routine-1",
+        skill="daily-review",
+        skill_arguments=("--fast",),
+        task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
             sandbox_mode="restricted",
@@ -57,11 +67,10 @@ def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
             memory_hash="memory-hash-1",
             path="C:/memory/memory-hash-1",
         ),
-        routine_id="routine-1",
-        skill="daily-review",
-        skill_arguments=("--fast",),
-        task_input="# Routine\n",
         trigger_context={"source": "test"},
+        prompt_source={"type": "routine", "routine_id": "routine-1"},
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
 
 
@@ -95,14 +104,18 @@ def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_p
 
     for trigger in ("manual_prompt", "scheduled_prompt"):
         with pytest.raises(ValueError, match="routine_id and skill"):
-            JobSpec.create(
-                config_path=config_path,
+            JobSpec(
+                schema_version=2,
+                job_id=uuid4().hex,
+                config_path=str(config_path.resolve()),
+                config_revision="cfg-1",
                 group_key="newsletter",
+                group_path=str(tmp_path.resolve()),
                 agent_name="product",
+                workspace_dir=str(tmp_path.resolve()),
                 trigger=trigger,
                 integration_name="copilot",
                 integration_config={},
-                config_revision="cfg-1",
                 blueprint=BlueprintRef(
                     key="writer",
                     source_digest="digest-1",
@@ -128,7 +141,10 @@ def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_p
                 skill_arguments=(),
                 task_input="run",
                 trigger_context={"source": "test"},
-            )
+                prompt_source={"type": "routine", "routine_id": None},
+                timeout_override=None,
+                created_at="2026-07-15T00:00:00+00:00",
+            ).validate()
 
 
 def test_job_spec_exposes_workspace_dir_as_authoritative_path(tmp_path):
@@ -147,19 +163,23 @@ def test_job_spec_serialization_omits_agent_dir_and_property_remains_compat_alia
     assert spec.agent_dir == spec.workspace_path
 
 
-def test_job_spec_create_rejects_agent_dir_constructor_input(tmp_path):
+def test_job_spec_constructor_rejects_agent_dir_input(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
 
     with pytest.raises(TypeError):
-        JobSpec.create(
-            config_path=config_path,
+        JobSpec(
+            schema_version=2,
+            job_id="job-123",
+            config_path=str(config_path.resolve()),
+            config_revision="cfg-1",
             group_key="newsletter",
+            group_path=str(tmp_path.resolve()),
             agent_name="product",
+            workspace_dir=str(tmp_path.resolve()),
             trigger="manual_prompt",
             integration_name="copilot",
             integration_config={},
-            config_revision="cfg-1",
             blueprint=BlueprintRef(
                 key="writer",
                 source_digest="digest-1",
@@ -185,8 +205,31 @@ def test_job_spec_create_rejects_agent_dir_constructor_input(tmp_path):
             skill_arguments=(),
             task_input="run",
             trigger_context={"source": "test"},
+            prompt_source={"type": "routine", "routine_id": "routine-1"},
+            timeout_override=None,
+            created_at="2026-07-15T00:00:00+00:00",
             agent_dir=tmp_path / "agent",
         )
+
+
+def test_job_request_no_longer_accepts_superseded_prompt_source(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+
+    with pytest.raises(TypeError):
+        JobRequest(
+            config_path=config_path,
+            group_key="newsletter",
+            agent_name="product",
+            trigger="manual_prompt",
+            task_input="run",
+            routine_id="routine-1",
+            superseded_prompt_source={"type": "prompt", "path": "routine.md"},
+        )
+
+
+def test_job_spec_no_longer_exposes_create_constructor():
+    assert not hasattr(JobSpec, "create")
 
 
 def test_job_spec_from_dict_ignores_superseded_agent_dir_when_workspace_matches(tmp_path):
@@ -213,14 +256,18 @@ def test_decision_jobs_require_null_routine_and_skill(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
 
-    spec = JobSpec.create(
-        config_path=config_path,
+    spec = JobSpec(
+        schema_version=2,
+        job_id="job-456",
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="newsletter",
+        group_path=str(tmp_path.resolve()),
         agent_name="product",
+        workspace_dir=str(tmp_path.resolve()),
         trigger="decision",
         integration_name="copilot",
         integration_config={},
-        config_revision="cfg-1",
         blueprint=BlueprintRef(
             key="writer",
             source_digest="digest-1",
@@ -246,6 +293,9 @@ def test_decision_jobs_require_null_routine_and_skill(tmp_path):
         skill_arguments=(),
         task_input="run",
         trigger_context={"decision": "change.md"},
+        prompt_source={"type": "decision"},
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
 
     assert spec.routine_id is None

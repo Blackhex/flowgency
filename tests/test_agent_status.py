@@ -15,7 +15,7 @@ from agency.app import (
     is_agent_running,
     relative_future,
 )
-from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import job_path, write_job
 
 
@@ -26,13 +26,48 @@ def _group(tmp_path):
 
 
 def _write_job(tmp_path, status):
-    spec = JobSpec.create(
-        config_path=tmp_path / "config.yaml",
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+    spec = JobSpec(
+        schema_version=2,
+        job_id=f"job-{status}",
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="grp",
+        group_path=str(tmp_path.resolve()),
         agent_name="product",
+        workspace_dir=str(tmp_path.resolve()),
         trigger="manual_prompt",
+        integration_name="script",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="product-blueprint",
+            source_digest="digest-1",
+            integration="script",
+            projector_version="v1",
+            cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
+        ),
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=(),
+        task_input="# Routine\n",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "agent", "version": 1, "group": "grp", "agent": "product"},
+            canonical_json='{"agent":"product","group":"grp","scope":"agent","version":1}',
+            memory_hash="memory-hash-1",
+            path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
+        ),
+        trigger_context=None,
         prompt_source={"type": "prompt", "path": "routine.md"},
-        prompt_content="# Routine\n",
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
     write_job(
         job_path(tmp_path, spec.job_id),

@@ -167,14 +167,12 @@ def resolve_job_request(
             f"Integration '{integration.name}' does not support execution"
         )
 
-    prompt_source = request.superseded_prompt_source
-    if prompt_source is None:
-        if request.trigger in {"manual_prompt", "scheduled_prompt"}:
-            prompt_source = {"type": "routine", "routine_id": routine.id if routine else None}
-        elif request.trigger == "decision":
-            prompt_source = {"type": "decision"}
-        else:
-            prompt_source = {"type": "decision_retry"}
+    if request.trigger in {"manual_prompt", "scheduled_prompt"}:
+        prompt_source = {"type": "routine", "routine_id": routine.id if routine else None}
+    elif request.trigger == "decision":
+        prompt_source = {"type": "decision"}
+    else:
+        prompt_source = {"type": "decision_retry"}
 
     return JobSpec(
         schema_version=2,

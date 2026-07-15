@@ -1,8 +1,6 @@
 """Versioned data models for durable agent jobs."""
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-import json
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -115,31 +113,6 @@ class JobRequest:
     memory_override: Any | None = None
     timeout_override: int | None = None
     trigger_context: dict[str, Any] | None = None
-    superseded_prompt_source: dict[str, Any] | None = None
-
-    @classmethod
-    def from_superseded_prompt(
-        cls,
-        *,
-        config_path: Path,
-        group_key: str,
-        agent_name: str,
-        trigger: str,
-        prompt_source: dict[str, Any],
-        prompt_content: str,
-        timeout_override: int | None = None,
-        decision_context: dict[str, Any] | None = None,
-    ) -> "JobRequest":
-        return cls(
-            config_path=config_path,
-            group_key=group_key,
-            agent_name=agent_name,
-            trigger=trigger,
-            task_input=prompt_content,
-            timeout_override=timeout_override,
-            trigger_context=decision_context,
-            superseded_prompt_source=prompt_source,
-        )
 
     @property
     def prompt_content(self) -> str:
@@ -175,169 +148,6 @@ class JobSpec:
     timeout_override: int | None
     created_at: str
 
-    @classmethod
-    def create(
-        cls,
-        *,
-        config_path: Path,
-        group_key: str,
-        agent_name: str,
-        trigger: str,
-        integration_name: str | None = None,
-        integration_config: dict[str, Any] | None = None,
-        config_revision: str | None = None,
-        blueprint: BlueprintRef | dict[str, Any] | None = None,
-        runtime_policy: RuntimePolicySnapshot | dict[str, Any] | None = None,
-        memory: MemoryBinding | dict[str, Any] | None = None,
-        routine_id: str | None = None,
-        skill: str | None = None,
-        skill_arguments: tuple[str, ...] = (),
-        task_input: str | None = None,
-        trigger_context: dict[str, Any] | None = None,
-        group_path: Path | str | None = None,
-        prompt_source: dict[str, Any] | None = None,
-        prompt_content: str | None = None,
-        timeout_override: int | None = None,
-        decision_context: dict[str, Any] | None = None,
-    ) -> "JobSpec":
-        effective_task_input = task_input if task_input is not None else prompt_content
-        effective_trigger_context = (
-            trigger_context if trigger_context is not None else decision_context
-        )
-        effective_routine_id, effective_skill = cls._compat_routine_binding(
-            trigger=trigger,
-            routine_id=routine_id,
-            skill=skill,
-            prompt_source=prompt_source,
-        )
-        resolved_group_path = cls._infer_group_path(
-            config_path=config_path,
-            group_path=group_path,
-            prompt_source=prompt_source,
-            decision_context=decision_context,
-        )
-        resolved_workspace_dir = resolved_group_path.resolve(strict=False)
-        spec = cls(
-            schema_version=SCHEMA_VERSION,
-            job_id=uuid4().hex,
-            config_revision=config_revision or "compat-unresolved",
-            config_path=str(config_path.resolve()),
-            group_key=group_key,
-            group_path=str(resolved_workspace_dir),
-            agent_name=agent_name,
-            workspace_dir=str(resolved_workspace_dir),
-            trigger=trigger,
-            integration_name=integration_name or "script",
-            integration_config=dict(integration_config or {}),
-            blueprint=cls._coerce_blueprint(blueprint, config_path),
-            routine_id=effective_routine_id,
-            skill=effective_skill,
-            skill_arguments=tuple(skill_arguments),
-            task_input=effective_task_input or "",
-            runtime_policy=cls._coerce_runtime_policy(runtime_policy, timeout_override),
-            memory=cls._coerce_memory(memory, config_path),
-            trigger_context=effective_trigger_context,
-            prompt_source=prompt_source,
-            timeout_override=timeout_override,
-            created_at=datetime.now(timezone.utc).isoformat(),
-        )
-        spec.validate()
-        return spec
-
-    @staticmethod
-    def _compat_routine_binding(
-        *,
-        trigger: str,
-        routine_id: str | None,
-        skill: str | None,
-        prompt_source: dict[str, Any] | None,
-    ) -> tuple[str | None, str | None]:
-        if trigger not in {"manual_prompt", "scheduled_prompt"}:
-            return routine_id, skill
-        if routine_id and skill:
-            return routine_id, skill
-        if not isinstance(prompt_source, dict):
-            return routine_id, skill
-        prompt_path = prompt_source.get("path")
-        if not isinstance(prompt_path, str) or not prompt_path.strip():
-            return routine_id, skill
-        stem = Path(prompt_path).stem.strip()
-        if not stem:
-            return routine_id, skill
-        return routine_id or stem, skill or stem
-
-    @staticmethod
-    def _infer_group_path(
-        *,
-        config_path: Path,
-        group_path: Path | str | None,
-        prompt_source: dict[str, Any] | None,
-        decision_context: dict[str, Any] | None,
-    ) -> Path:
-        if group_path is not None:
-            return Path(group_path)
-        if decision_context and decision_context.get("decision_path"):
-            return Path(str(decision_context["decision_path"])).resolve().parents[2]
-        prompt_path = (prompt_source or {}).get("path")
-        if isinstance(prompt_path, str):
-            prompt_candidate = Path(prompt_path)
-            if prompt_candidate.is_absolute() and prompt_candidate.exists():
-                return prompt_candidate.resolve().parents[2]
-        return config_path.resolve().parent / "group"
-
-    @staticmethod
-    def _coerce_blueprint(
-        blueprint: BlueprintRef | dict[str, Any] | None,
-        config_path: Path,
-    ) -> BlueprintRef:
-        if isinstance(blueprint, BlueprintRef):
-            return blueprint
-        if isinstance(blueprint, dict):
-            return BlueprintRef(**blueprint)
-        cache_path = config_path.resolve().parent / ".compat-cache" / "script" / "v1" / "unresolved"
-        return BlueprintRef(
-            key="compat-unresolved",
-            source_digest="compat-unresolved",
-            integration="script",
-            projector_version="v1",
-            cache_path=str(cache_path),
-        )
-
-    @staticmethod
-    def _coerce_runtime_policy(
-        runtime_policy: RuntimePolicySnapshot | dict[str, Any] | None,
-        timeout_override: int | None,
-    ) -> RuntimePolicySnapshot:
-        if isinstance(runtime_policy, RuntimePolicySnapshot):
-            return runtime_policy
-        if isinstance(runtime_policy, dict):
-            return RuntimePolicySnapshot(**runtime_policy)
-        return RuntimePolicySnapshot(
-            timeout=timeout_override if timeout_override is not None else 1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
-        )
-
-    @staticmethod
-    def _coerce_memory(
-        memory: MemoryBinding | dict[str, Any] | None,
-        config_path: Path,
-    ) -> MemoryBinding:
-        if isinstance(memory, MemoryBinding):
-            return memory
-        if isinstance(memory, dict):
-            return MemoryBinding(**memory)
-        selector = {"job": "compat-unresolved", "scope": "run", "version": 1}
-        canonical_json = json.dumps(selector, sort_keys=True, separators=(",", ":"))
-        return MemoryBinding(
-            selector=selector,
-            canonical_json=canonical_json,
-            memory_hash="compat-unresolved",
-            path=str((config_path.resolve().parent / ".compat-memory").resolve(strict=False)),
-        )
-
     def validate(self) -> None:
         if self.schema_version != SCHEMA_VERSION:
             raise ValueError(f"Unsupported job schema version: {self.schema_version}")
@@ -365,7 +175,7 @@ class JobSpec:
             raise ValueError("Agent name is required")
         if not self.task_input.strip():
             raise ValueError("Prompt content must not be blank")
-        if self.trigger in {"scheduled_prompt", "manual_prompt"} and not self._is_compat_prompt_spec():
+        if self.trigger in {"scheduled_prompt", "manual_prompt"}:
             if not self.routine_id or not self.skill:
                 raise ValueError(
                     "scheduled and manual jobs require routine_id and skill"
@@ -436,16 +246,6 @@ class JobSpec:
     @property
     def agent_dir(self) -> Path:
         return self.workspace_path
-
-    def _is_compat_prompt_spec(self) -> bool:
-        if self.schema_version != SCHEMA_VERSION:
-            return False
-        prompt_source = self.prompt_source or {}
-        prompt_type = prompt_source.get("type")
-        return (
-            self.config_revision == "compat-unresolved"
-            and prompt_type in {"saved_prompt", "prompt", "test"}
-        )
 
 
 @dataclass

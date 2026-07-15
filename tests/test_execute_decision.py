@@ -12,7 +12,7 @@ from agency.integrations import FileChange, RunResult
 from agency.integrations.models import IntegrationRunRequest
 from agency.jobs import JobRequest, JobSubmissionError
 from agency.jobs.execution import execute_job
-from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import write_job
 from agency.memory.selectors import resolve_memory_selector
 from agency.configuration.models import MemorySelector
@@ -38,30 +38,49 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
         channels={},
         store_root=tmp_path / ".compat-memory-root",
     )
-    spec = JobSpec.create(
-        config_path=config_path,
+    spec = JobSpec(
+        schema_version=2,
+        job_id=f"decision-{decision_name.replace('.', '-')}",
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="grp",
+        group_path=str(group_path.resolve()),
         agent_name="worker",
+        workspace_dir=str(group_path.resolve()),
         trigger="decision",
-        blueprint={
-            "key": "compat-unresolved",
-            "source_digest": "compat-unresolved",
-            "integration": "script",
-            "projector_version": "v1",
-            "cache_path": str(cache_path.resolve()),
-        },
-        memory={
-            "selector": {"scope": "run"},
-            "canonical_json": resolved.canonical_json,
-            "memory_hash": resolved.memory_hash,
-            "path": str(resolved.directory.resolve()),
-        },
-        prompt_source={"type": "decision"},
-        prompt_content="Immutable instructions",
-        decision_context={
+        integration_name="script",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="compat-unresolved",
+            source_digest="compat-unresolved",
+            integration="script",
+            projector_version="v1",
+            cache_path=str(cache_path.resolve()),
+        ),
+        routine_id=None,
+        skill=None,
+        skill_arguments=(),
+        task_input="Immutable instructions",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "run"},
+            canonical_json=resolved.canonical_json,
+            memory_hash=resolved.memory_hash,
+            path=str(resolved.directory.resolve()),
+        ),
+        trigger_context={
             "decision_path": str(decision_path),
             "proposal_path": "proposal.md",
         },
+        prompt_source={"type": "decision"},
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
     decision_path.write_text(
         f"---\nexecution_job_id: {spec.job_id}\nexecution_status: pending\n---\n",

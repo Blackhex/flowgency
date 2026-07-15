@@ -275,7 +275,7 @@ def test_ineligible_declared_executor_blocks_post_with_eligible_submitted_execut
         }, sort_keys=False) + "---\n\nProposal body\n"
     )
     submitted = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: submitted.append(request))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "approved", "execution_agent": "engineer"},

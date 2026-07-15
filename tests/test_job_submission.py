@@ -10,9 +10,11 @@ from agency.blueprints.projectors import StaticRuntimeProjector
 from agency.configuration.store import ConfigStore
 from agency.integrations import BaseIntegration
 from agency.integrations.models import ProjectorCapabilities, RuntimeCapabilities
-from agency.jobs import JobSpec, JobSubmissionError, submit_job, submit_job_request
+import agency.jobs as jobs_package
+from agency.jobs import JobSpec, JobSubmissionError, submit_job_request
 from agency.jobs.prompts import build_routine_task_input
 from agency.jobs.resolution import JobRequest, resolve_job_request
+from agency.jobs.models import BlueprintRef, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.launcher import (
     CREATE_NEW_PROCESS_GROUP,
     DETACHED_PROCESS,
@@ -113,139 +115,26 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
     return config
 
 
-def configured_spec(tmp_path: Path) -> JobSpec:
+def configured_request(tmp_path: Path) -> JobRequest:
     config = _write_config(tmp_path, command="echo ok")
     _write_blueprint(tmp_path / "agent-library")
-    return JobSpec.create(
+    return JobRequest(
         config_path=config,
         group_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
-        integration_name="script",
-        integration_config={"command": "echo ok"},
-        config_revision="cfg-1",
-        blueprint={
-            "key": "superseded",
-            "source_digest": "digest-1",
-            "integration": "script",
-            "projector_version": "v1",
-            "cache_path": "C:/cache/script/v1/digest-1",
-        },
-        runtime_policy={
-            "timeout": 1800,
-            "sandbox_mode": "unrestricted",
-            "sandbox_roots": (),
-            "tool_mode": "all",
-            "tool_names": (),
-        },
-        memory={
-            "selector": {"scope": "run", "version": 1, "job": "placeholder"},
-            "canonical_json": '{"job":"placeholder","scope":"run","version":1}',
-            "memory_hash": "memory-hash-superseded",
-            "path": "C:/memory/memory-hash-superseded",
-        },
         routine_id="daily-review",
-        skill="superseded",
-        skill_arguments=(),
         task_input="Run it",
         trigger_context={"source": "test"},
-        prompt_source={
-            "type": "saved_prompt",
-            "path": str(
-                tmp_path
-                / "agents"
-                / "newsletter"
-                / "shared"
-                / "prompts"
-                / "daily-review.md"
-            ),
-        },
-    )
-
-
-def _compat_spec_without_resolved_snapshots(tmp_path: Path) -> JobSpec:
-    config = _write_config(tmp_path, command="echo ok")
-    _write_blueprint(tmp_path / "agent-library")
-    return JobSpec.create(
-        config_path=config,
-        group_key="newsletter",
-        agent_name="builder",
-        trigger="manual_prompt",
-        integration_name="copilot",
-        integration_config={"command": "echo ok"},
-        config_revision="compat-unresolved",
-        blueprint={
-            "key": "superseded",
-            "source_digest": "digest-1",
-            "integration": "copilot",
-            "projector_version": "v1",
-            "cache_path": "C:/cache/copilot/v1/digest-1",
-        },
-        runtime_policy={
-            "timeout": 1800,
-            "sandbox_mode": "restricted",
-            "sandbox_roots": (str((tmp_path / "repo").resolve()),),
-            "tool_mode": "allowlist",
-            "tool_names": ("shell", "write"),
-        },
-        memory={
-            "selector": {"scope": "run", "version": 1, "job": "placeholder"},
-            "canonical_json": '{"job":"placeholder","scope":"run","version":1}',
-            "memory_hash": "memory-hash-superseded",
-            "path": "C:/memory/memory-hash-superseded",
-        },
-        prompt_source={"type": "saved_prompt", "path": str((tmp_path / "agents" / "newsletter" / "shared" / "prompts" / "daily-review.md"))},
-        prompt_content="Run it",
-    )
-
-
-def _forged_direct_spec(tmp_path: Path, *, routine_id: str = "daily-review") -> JobSpec:
-    config = _write_config(tmp_path, timeout=1800, command="echo first")
-    _write_blueprint(tmp_path / "agent-library")
-    return JobSpec.create(
-        config_path=config,
-        group_key="newsletter",
-        agent_name="builder",
-        trigger="manual_prompt",
-        integration_name="forged",
-        integration_config={"command": "echo forged"},
-        config_revision="forged-revision",
-        blueprint={
-            "key": "forged-blueprint",
-            "source_digest": "forged-digest",
-            "integration": "forged",
-            "projector_version": "forged-version",
-            "cache_path": str((tmp_path / "forged-cache" / "forged" / "v9" / "digest" / "entry.py").resolve()),
-        },
-        runtime_policy={
-            "timeout": 9,
-            "sandbox_mode": "unrestricted",
-            "sandbox_roots": (),
-            "tool_mode": "all",
-            "tool_names": (),
-        },
-        memory={
-            "selector": {"scope": "run", "version": 1, "job": "forged-job"},
-            "canonical_json": '{"job":"forged-job","scope":"run","version":1}',
-            "memory_hash": "forged-memory",
-            "path": str((tmp_path / "forged-memory").resolve()),
-        },
-        routine_id=routine_id,
-        skill="forged-skill",
-        skill_arguments=("forged",),
-        task_input="Run it",
-        trigger_context={"source": "forged", "nested": {"ok": True}},
-        group_path=tmp_path / "forged-group",
-        prompt_source={"type": "saved_prompt", "path": str((tmp_path / "agents" / "newsletter" / "shared" / "prompts" / "daily-review.md"))},
     )
 
 
 def test_submit_persists_then_launches(tmp_path):
-    spec = configured_spec(tmp_path)
+    request = configured_request(tmp_path)
     launcher = Mock()
     launcher.launch.return_value = LaunchResult(worker_pid=4321)
 
-    handle = submit_job(spec, launcher)
+    handle = submit_job_request(request, launcher)
 
     record = read_job(handle.path)
     assert record.status == "queued"
@@ -253,12 +142,12 @@ def test_submit_persists_then_launches(tmp_path):
     assert handle.worker_pid == 4321
 
 
-def test_submit_compat_spec_persists_validated_canonical_snapshot_without_bypass_marker(tmp_path):
-    spec = _compat_spec_without_resolved_snapshots(tmp_path)
+def test_submit_request_persists_validated_canonical_snapshot(tmp_path):
+    request = configured_request(tmp_path)
     launcher = Mock()
     launcher.launch.return_value = LaunchResult(worker_pid=4321)
 
-    handle = submit_job(spec, launcher)
+    handle = submit_job_request(request, launcher)
 
     record = read_job(handle.path)
     assert record.spec.config_revision not in {"compat-unresolved", "compat-submission-resolved"}
@@ -268,47 +157,21 @@ def test_submit_compat_spec_persists_validated_canonical_snapshot_without_bypass
     assert record.spec.routine_id == "daily-review"
 
 
-def test_submit_direct_spec_re_resolves_authority_and_discards_forged_snapshots(tmp_path):
-    spec = _forged_direct_spec(tmp_path)
-    launcher = Mock()
-    launcher.launch.return_value = LaunchResult(worker_pid=4321)
-
-    _write_config(tmp_path, timeout=45, command="echo second")
-
-    handle = submit_job(spec, launcher)
-
-    record = read_job(handle.path)
-    assert record.spec.job_id == spec.job_id
-    assert record.spec.trigger == spec.trigger
-    assert record.spec.task_input == spec.task_input
-    assert record.spec.routine_id == spec.routine_id
-    assert record.spec.timeout_override == spec.timeout_override
-    assert record.spec.trigger_context == spec.trigger_context
-    assert record.spec.prompt_source == spec.prompt_source
-    assert record.spec.config_revision != "forged-revision"
-    assert record.spec.integration_name == "copilot"
-    assert record.spec.integration_config == {"command": "echo second"}
-    assert record.spec.blueprint.key == "builder-blueprint"
-    assert record.spec.blueprint.source_digest != "forged-digest"
-    assert record.spec.blueprint.integration == "copilot"
-    assert str(record.spec.blueprint.cache_entry_path).startswith(str((tmp_path / "compiled-agents").resolve()))
-    assert record.spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
-    assert record.spec.runtime_policy.timeout == 45
-    assert record.spec.runtime_policy.sandbox_mode == "restricted"
-    assert record.spec.runtime_policy.tool_mode == "allowlist"
-    assert record.spec.runtime_policy.tool_names == ("shell", "write")
-    assert record.spec.memory.memory_hash != "forged-memory"
-    assert record.spec.memory.selector["scope"] == "agent"
-    assert record.spec.skill == "daily-review"
-    assert record.spec.skill_arguments == ("--mode=review", "literal value")
-
-
-def test_submit_direct_spec_with_missing_routine_fails_before_job_write(tmp_path):
-    spec = _forged_direct_spec(tmp_path, routine_id="missing-routine")
+def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
+    config = _write_config(tmp_path, timeout=1800, command="echo first")
+    _write_blueprint(tmp_path / "agent-library")
+    request = JobRequest(
+        config_path=config,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        task_input="Run it",
+        routine_id="missing-routine",
+    )
     launcher = Mock()
 
     with pytest.raises(ValueError, match="existing routine"):
-        submit_job(spec, launcher)
+        submit_job_request(request, launcher)
 
     jobs_dir = tmp_path / "agents" / "newsletter" / "shared" / "jobs"
     assert not jobs_dir.exists()
@@ -318,12 +181,12 @@ def test_submit_direct_spec_with_missing_routine_fails_before_job_write(tmp_path
 
 
 def test_submit_marks_record_failed_when_launch_fails(tmp_path):
-    spec = configured_spec(tmp_path)
+    request = configured_request(tmp_path)
     launcher = Mock()
     launcher.launch.side_effect = OSError("spawn denied")
 
     with pytest.raises(JobSubmissionError, match="spawn denied") as error:
-        submit_job(spec, launcher)
+        submit_job_request(request, launcher)
 
     record = read_job(error.value.job_path)
     assert record.status == "failed"
@@ -403,37 +266,46 @@ def test_decision_jobs_keep_empty_skill_arguments(tmp_path):
 def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
     config = _write_config(tmp_path)
     _write_blueprint(tmp_path / "agent-library")
-    return JobSpec.create(
-        config_path=config,
+    return JobSpec(
+        schema_version=2,
+        job_id="decision-job",
+        config_path=str(config.resolve()),
+        config_revision="cfg-1",
         group_key="newsletter",
+        group_path=str((tmp_path / "agents" / "newsletter").resolve()),
         agent_name="builder",
+        workspace_dir=str((tmp_path / "agents" / "newsletter").resolve()),
         trigger="decision",
         integration_name="copilot",
         integration_config={"command": "echo ok"},
-        config_revision="cfg-1",
-        blueprint={
-            "key": "builder-blueprint",
-            "source_digest": "digest-1",
-            "integration": "copilot",
-            "projector_version": "v-test",
-            "cache_path": str((tmp_path / "compiled-agents" / "copilot" / "v-test" / "digest-1" / "entry.py").resolve()),
-        },
-        runtime_policy={
-            "timeout": 1800,
-            "sandbox_mode": "restricted",
-            "sandbox_roots": (str((tmp_path / "repo").resolve()),),
-            "tool_mode": "allowlist",
-            "tool_names": ("shell", "write"),
-        },
-        memory={
-            "selector": {"scope": "run", "version": 1, "job": "placeholder"},
-            "canonical_json": '{"job":"placeholder","scope":"run","version":1}',
-            "memory_hash": "memory-hash-superseded",
-            "path": str((tmp_path / "memory" / "memory-hash-superseded").resolve()),
-        },
+        blueprint=BlueprintRef(
+            key="builder-blueprint",
+            source_digest="digest-1",
+            integration="copilot",
+            projector_version="v-test",
+            cache_path=str((tmp_path / "compiled-agents" / "copilot" / "v-test" / "digest-1" / "entry.py").resolve()),
+        ),
         task_input="Immutable decision instructions",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="restricted",
+            sandbox_roots=(str((tmp_path / "repo").resolve()),),
+            tool_mode="allowlist",
+            tool_names=("shell", "write"),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "run", "version": 1, "job": "placeholder"},
+            canonical_json='{"job":"placeholder","scope":"run","version":1}',
+            memory_hash="memory-hash-superseded",
+            path=str((tmp_path / "memory" / "memory-hash-superseded").resolve()),
+        ),
+        routine_id=None,
+        skill=None,
+        skill_arguments=(),
         trigger_context={"decision_path": "decision.md"},
         prompt_source={"type": "decision"},
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
 
 
@@ -482,7 +354,7 @@ def test_submit_releases_cache_pin_when_launch_fails(tmp_path):
     launcher.launch.side_effect = OSError("spawn denied")
 
     with pytest.raises(JobSubmissionError, match="spawn denied"):
-        submit_job(spec, launcher)
+        jobs_package.submission._submit_resolved(spec, launcher)
 
     pins_root = tmp_path / "compiled-agents" / "_pins"
     assert list(pins_root.rglob("*")) == []
@@ -629,15 +501,40 @@ def test_default_launcher_selects_detached_when_unavailable():
     assert isinstance(launcher, DetachedProcessLauncher)
 
 
-# --- submit_job uses default_launcher ---
+# --- submit_job_request uses default_launcher ---
 
 
 def test_submit_job_uses_default_launcher_when_none_provided(tmp_path):
-    """submit_job with no explicit launcher uses default_launcher factory."""
-    spec = configured_spec(tmp_path)
+    """submit_job_request with no explicit launcher uses default_launcher factory."""
+    request = configured_request(tmp_path)
     fake_launcher = Mock()
     fake_launcher.launch.return_value = LaunchResult(worker_pid=999)
     with patch("agency.jobs.submission.default_launcher", return_value=fake_launcher):
-        handle = submit_job(spec)
+        handle = submit_job_request(request)
     assert fake_launcher.launch.called
     assert handle.worker_pid == 999
+
+
+def test_jobs_package_no_longer_exports_submit_job():
+    assert not hasattr(jobs_package, "submit_job")
+
+
+def test_resolution_does_not_infer_routine_or_skill_from_prompt_source_path(tmp_path):
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
+    request = JobRequest(
+        config_path=config,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        task_input="Run it",
+    )
+
+    with pytest.raises(ValueError, match="existing routine"):
+        resolve_job_request(
+            request,
+            config_store=ConfigStore(config),
+            library=BlueprintLibrary(tmp_path / "agent-library"),
+            cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+            integrations={"copilot": FakeIntegration()},
+        )

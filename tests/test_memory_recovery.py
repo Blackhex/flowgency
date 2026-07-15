@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from agency.configuration.models import MemorySelector
-from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import read_job, write_job
 from agency.memory import MemoryStore, resolve_memory_selector
 from agency.memory.publication import apply_publication, prepare_publication
@@ -17,16 +17,49 @@ class RecoveryFixture:
         self.group_path.mkdir(parents=True)
         config_path = tmp_path / "config.yaml"
         config_path.write_text("groups: {}\n", encoding="utf-8")
-        spec = JobSpec.create(
-            config_path=config_path,
+        spec = JobSpec(
+            schema_version=2,
+            job_id="recovery-job",
+            config_path=str(config_path.resolve()),
+            config_revision="cfg-1",
             group_key="news",
+            group_path=str(self.group_path.resolve()),
             agent_name="writer",
+            workspace_dir=str(self.group_path.resolve()),
             trigger="manual_prompt",
+            integration_name="script",
+            integration_config={},
+            blueprint=BlueprintRef(
+                key="writer-blueprint",
+                source_digest="digest-1",
+                integration="script",
+                projector_version="v1",
+                cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
+            ),
+            routine_id="publish-memory",
+            skill="publish-memory",
+            skill_arguments=(),
+            task_input="Publish memory",
+            runtime_policy=RuntimePolicySnapshot(
+                timeout=1800,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tool_mode="all",
+                tool_names=(),
+            ),
+            memory=MemoryBinding(
+                selector={"scope": "agent"},
+                canonical_json='{"scope":"agent"}',
+                memory_hash="memory-hash-1",
+                path=str((tmp_path / "memory-store" / "agent").resolve()),
+            ),
+            trigger_context=None,
             prompt_source={
                 "type": "saved_prompt",
                 "path": "shared/prompts/routine.md",
             },
-            prompt_content="Publish memory",
+            timeout_override=None,
+            created_at="2026-07-15T00:00:00+00:00",
         )
         self.job_path = (
             self.group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"

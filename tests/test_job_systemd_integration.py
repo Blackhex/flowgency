@@ -68,12 +68,11 @@ def test_systemd_worker_survives_submitter_exit(tmp_path):
     submitter_script = tmp_path / "submitter.py"
     submitter_script.write_text(
         "import pathlib, sys\n"
-        "from agency.jobs import JobSpec, submit_job\n"
+        "from agency.jobs import JobRequest, submit_job_request\n"
         "config, job_id_file = map(pathlib.Path, sys.argv[1:])\n"
-        "spec = JobSpec.create(config_path=config, group_key='test', "
-        "agent_name='product', trigger='manual_prompt', "
-        "prompt_source={'type': 'test'}, prompt_content='run')\n"
-        "handle = submit_job(spec)\n"  # uses default_launcher → SystemdRunLauncher
+        "request = JobRequest(config_path=config, group_key='test', "
+        "agent_name='product', trigger='manual_prompt', task_input='run', routine_id='run-product')\n"
+        "handle = submit_job_request(request)\n"  # uses default_launcher → SystemdRunLauncher
         "job_id_file.write_text(handle.job_id)\n"
     )
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 
 from agency.blueprints.cache import active_pins, pin_artifact
-from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.reconciliation import reconcile_jobs, worker_alive
 from agency.memory.recovery import recover_publications
 from agency.jobs.store import job_path, read_job, write_job
@@ -14,17 +14,51 @@ def running_decision_job(tmp_path: Path, pid: int = 999999):
     group = tmp_path / "group"
     decision = group / "shared" / "decisions" / "change.md"
     decision.parent.mkdir(parents=True)
-    spec = JobSpec.create(
-        config_path=tmp_path / "config.yaml",
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+    spec = JobSpec(
+        schema_version=2,
+        job_id="decision-job",
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="test",
+        group_path=str(group.resolve()),
         agent_name="product",
+        workspace_dir=str(group.resolve()),
         trigger="decision",
-        prompt_source={"type": "decision"},
-        prompt_content="run",
-        decision_context={
+        integration_name="script",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="decision-blueprint",
+            source_digest="digest-1",
+            integration="script",
+            projector_version="v1",
+            cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
+        ),
+        routine_id=None,
+        skill=None,
+        skill_arguments=(),
+        task_input="run",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "run", "version": 1, "job": "decision-job"},
+            canonical_json='{"job":"decision-job","scope":"run","version":1}',
+            memory_hash="memory-hash-1",
+            path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
+        ),
+        trigger_context={
             "decision_path": str(decision),
             "proposal_path": "proposal.md",
         },
+        prompt_source={"type": "decision"},
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
     decision.write_text(
         f"---\nexecution_status: running\nexecution_job_id: {spec.job_id}\n---\n"
@@ -212,20 +246,46 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
         channels={},
         store_root=tmp_path / "memory-store",
     )
-    spec = JobSpec.create(
-        config_path=config_path,
+    spec = JobSpec(
+        schema_version=2,
+        job_id="memory-job",
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
         group_key="test",
+        group_path=str(group.resolve()),
         agent_name="product",
+        workspace_dir=str(group.resolve()),
         trigger="manual_prompt",
-        memory={
-            "selector": {"scope": "agent"},
-            "canonical_json": memory_binding.canonical_json,
-            "memory_hash": memory_binding.memory_hash,
-            "path": str(memory_binding.directory.resolve()),
-        },
+        integration_name="script",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="memory-blueprint",
+            source_digest="digest-1",
+            integration="script",
+            projector_version="v1",
+            cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
+        ),
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=(),
+        task_input="run",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "agent"},
+            canonical_json=memory_binding.canonical_json,
+            memory_hash=memory_binding.memory_hash,
+            path=str(memory_binding.directory.resolve()),
+        ),
+        trigger_context=None,
         prompt_source={"type": "saved_prompt", "path": "shared/prompts/routine.md"},
-        prompt_content="run",
-        group_path=group,
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
     )
     path = job_path(group, spec.job_id)
     write_job(path, replace(JobRecord.from_spec(spec), status="running", worker_pid=999999))
