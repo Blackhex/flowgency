@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import threading
 from uuid import uuid4
 
 import pytest
@@ -13,11 +14,14 @@ from agency.configuration.store import ConfigConflictError, ConfigStore
 from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
+    JobRequest,
     JobSpec,
     MemoryBinding,
     RuntimePolicySnapshot,
 )
+from agency.jobs.resolution import JobValidationError
 from agency.jobs.store import job_path, transition_job, write_job
+from agency.jobs.submission import submit_job_request
 from agency.memory import MemoryStore, resolve_memory_selector
 
 
@@ -523,3 +527,192 @@ def test_move_revalidates_revision_and_rolls_back_new_target_memory(
     )
     assert not target_agent.directory.exists()
     assert not target_routine.directory.exists()
+
+
+def test_move_holds_group_lock_and_concurrent_submit_re_resolves_after_move(
+    instance_service,
+    instance_env,
+    monkeypatch,
+):
+    import agency.jobs.submission as submission
+
+    preview = instance_service.preview_move(
+        "newsletter",
+        "builder",
+        "other",
+        "copy",
+    )
+    move_checked = threading.Event()
+    release_move = threading.Event()
+    original_patch = instance_env["config_store"].patch
+    submit_outcome: dict[str, object] = {}
+    move_outcome: dict[str, object] = {}
+
+    def patched_patch(expected_revision, patcher):
+        move_checked.set()
+        assert release_move.wait(timeout=5)
+        return original_patch(expected_revision, patcher)
+
+    instance_env["config_store"].patch = patched_patch
+
+    request = JobRequest(
+        config_path=instance_env["config_store"].path,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        routine_id="daily-review",
+        task_input="Run it",
+        trigger_context={"source": "test"},
+    )
+
+    def move_agent() -> None:
+        try:
+            move_outcome["snapshot"] = instance_service.move(preview)
+        except Exception as exc:  # pragma: no cover - asserted below
+            move_outcome["error"] = exc
+
+    def submit_job() -> None:
+        try:
+            submit_outcome["handle"] = submit_job_request(request)
+        except Exception as exc:  # pragma: no cover - asserted below
+            submit_outcome["error"] = exc
+
+    resolve_called = threading.Event()
+    original_resolve = submission._resolve_request
+
+    def record_resolve(job_request):
+        resolve_called.set()
+        return original_resolve(job_request)
+
+    monkeypatch.setattr(submission, "_resolve_request", record_resolve)
+
+    move_thread = threading.Thread(target=move_agent)
+    move_thread.start()
+    assert move_checked.wait(timeout=5)
+    submit_thread = threading.Thread(target=submit_job)
+    submit_thread.start()
+    assert submit_thread.is_alive()
+    assert not resolve_called.wait(timeout=0.2)
+    release_move.set()
+    move_thread.join(timeout=5)
+    submit_thread.join(timeout=5)
+
+    assert "snapshot" in move_outcome
+    assert isinstance(submit_outcome.get("error"), JobValidationError)
+    assert "Unknown agent: builder" in str(submit_outcome["error"])
+    source_jobs_dir = instance_env["newsletter_path"] / "shared" / "jobs"
+    assert not source_jobs_dir.exists() or not any(
+        source_jobs_dir.glob("*.yaml")
+    )
+
+
+def test_opposite_direction_move_lock_order_avoids_deadlock(instance_env):
+    from agency.instances import InstanceService
+    from agency.instances import AgentInstanceCreate
+
+    _write_blueprint(instance_env["library"].root, "advisor-two")
+    service = InstanceService(
+        config_store=instance_env["config_store"],
+        library=instance_env["library"],
+        memory_store=instance_env["memory_store"],
+    )
+    service.create(
+        "other",
+        AgentInstanceCreate(
+            name="advisor",
+            blueprint="advisor-two",
+            integration="copilot",
+            display_name="Advisor",
+        ),
+    )
+
+    preview_a = service.preview_move("newsletter", "builder", "other", "copy")
+    preview_b = service.preview_move("other", "advisor", "newsletter", "copy")
+    outcomes: list[object] = []
+
+    def run_move(preview):
+        try:
+            outcomes.append(service.move(preview))
+        except Exception as exc:  # pragma: no cover - asserted below
+            outcomes.append(exc)
+
+    first = threading.Thread(target=run_move, args=(preview_a,))
+    second = threading.Thread(target=run_move, args=(preview_b,))
+    first.start()
+    second.start()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert len(outcomes) == 2
+    assert any(not isinstance(item, Exception) for item in outcomes)
+
+
+def test_remove_uses_group_lock_to_block_new_submissions(
+    instance_service,
+    instance_env,
+    monkeypatch,
+):
+    import agency.jobs.submission as submission
+
+    patch_started = threading.Event()
+    release_patch = threading.Event()
+    original_patch = instance_env["config_store"].patch
+    request = JobRequest(
+        config_path=instance_env["config_store"].path,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        routine_id="daily-review",
+        task_input="Run it",
+        trigger_context={"source": "test"},
+    )
+    submit_outcome: dict[str, object] = {}
+    remove_outcome: dict[str, object] = {}
+
+    def patched_patch(expected_revision, patcher):
+        patch_started.set()
+        assert release_patch.wait(timeout=5)
+        return original_patch(expected_revision, patcher)
+
+    instance_env["config_store"].patch = patched_patch
+
+    def remove_agent() -> None:
+        try:
+            remove_outcome["result"] = instance_service.remove(
+                "newsletter",
+                "builder",
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            remove_outcome["error"] = exc
+
+    def submit_job() -> None:
+        try:
+            submit_outcome["handle"] = submit_job_request(request)
+        except Exception as exc:  # pragma: no cover - asserted below
+            submit_outcome["error"] = exc
+
+    resolve_called = threading.Event()
+    original_resolve = submission._resolve_request
+
+    def record_resolve(job_request):
+        resolve_called.set()
+        return original_resolve(job_request)
+
+    monkeypatch.setattr(submission, "_resolve_request", record_resolve)
+
+    remove_thread = threading.Thread(target=remove_agent)
+    remove_thread.start()
+    assert patch_started.wait(timeout=5)
+    submit_thread = threading.Thread(target=submit_job)
+    submit_thread.start()
+    assert submit_thread.is_alive()
+    assert not resolve_called.wait(timeout=0.2)
+    release_patch.set()
+    remove_thread.join(timeout=5)
+    submit_thread.join(timeout=5)
+
+    assert "result" in remove_outcome
+    assert isinstance(submit_outcome.get("error"), JobValidationError)
+    assert "Unknown agent: builder" in str(submit_outcome["error"])

@@ -24,6 +24,7 @@ from agency.configuration.patches import (
 from agency.fs.locks import exclusive_lock
 from agency.integrations import get_integration
 from agency.jobs import active_jobs
+from agency.jobs.store import acquire_group_operation_locks
 from agency.memory import (
     MemoryStore,
     ResolvedMemory,
@@ -116,12 +117,20 @@ def create_instance(
     group_id: str,
     agent: AgentInstance,
 ) -> ConfigSnapshot:
-    return create_agent_instance(
-        store,
-        expected_revision,
-        group_id,
-        agent.model_dump(mode="json", exclude_none=True),
-    )
+    snapshot = store.load()
+    group_path = snapshot.config.groups[group_id].path
+    with acquire_group_operation_locks(group_path):
+        refreshed = store.load()
+        if refreshed.revision != expected_revision:
+            raise ConfigConflictError(
+                "config.yaml changed; reload before saving"
+            )
+        return create_agent_instance(
+            store,
+            refreshed.revision,
+            group_id,
+            agent.model_dump(mode="json", exclude_none=True),
+        )
 
 
 def remove_instance(
@@ -130,7 +139,20 @@ def remove_instance(
     group_id: str,
     agent_id: str,
 ) -> ConfigSnapshot:
-    return remove_agent_instance(store, expected_revision, group_id, agent_id)
+    snapshot = store.load()
+    group_path = snapshot.config.groups[group_id].path
+    with acquire_group_operation_locks(group_path):
+        refreshed = store.load()
+        if refreshed.revision != expected_revision:
+            raise ConfigConflictError(
+                "config.yaml changed; reload before saving"
+            )
+        return remove_agent_instance(
+            store,
+            refreshed.revision,
+            group_id,
+            agent_id,
+        )
 
 
 def preview_move(
@@ -191,35 +213,27 @@ def move_instance(
     if preview.blocked_by:
         raise InstanceMoveConflict(preview.blocked_by)
 
-    unique = {
-        resolved.memory_hash: resolved
-        for resolved in (
-            *preview.source_memories,
-            *preview.destination_memories,
-        )
-    }
     created_targets: list[ResolvedMemory] = []
+    snapshot = store.load()
+    source_group_path = snapshot.config.groups[preview.source_group].path
+    target_group_path = snapshot.config.groups[preview.target_group].path
     with ExitStack() as stack:
-        for memory_hash in sorted(unique):
-            stack.enter_context(
-                exclusive_lock(
-                    memory_store._lock_path(unique[memory_hash]),
-                    wait=True,
-                )
-            )
+        stack.enter_context(
+            acquire_group_operation_locks(source_group_path, target_group_path)
+        )
 
-        snapshot = store.load()
-        if snapshot.revision != preview.config_revision:
+        refreshed = store.load()
+        if refreshed.revision != preview.config_revision:
             raise ConfigConflictError(
                 "config.yaml changed; reload before saving"
             )
         source_agent = get_instance(
-            snapshot,
+            refreshed,
             preview.source_group,
             preview.agent_name,
         )
         memory_pairs = _resolve_owned_memory_pairs(
-            snapshot,
+            refreshed,
             memory_store,
             source_group=preview.source_group,
             target_group=preview.target_group,
@@ -231,7 +245,7 @@ def move_instance(
         )
         blocked = tuple(
             _preview_blocks(
-                snapshot,
+                refreshed,
                 preview.source_group,
                 preview.target_group,
                 preview.agent_name,
@@ -240,6 +254,19 @@ def move_instance(
         )
         if blocked:
             raise InstanceMoveConflict(blocked)
+
+        unique = {
+            resolved.memory_hash: resolved
+            for resolved in (*source_memories, *destination_memories)
+        }
+        for memory_hash in sorted(unique):
+            stack.enter_context(
+                exclusive_lock(
+                    memory_store._lock_path(unique[memory_hash]),
+                    wait=True,
+                )
+            )
+
         current_revisions = tuple(
             (
                 resolved.memory_hash,
@@ -273,7 +300,7 @@ def move_instance(
                         )
 
             updated = store.patch(
-                preview.config_revision,
+                refreshed.revision,
                 lambda raw: _apply_move_patch(
                     raw,
                     source_group=preview.source_group,

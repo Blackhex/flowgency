@@ -1,4 +1,5 @@
 from pathlib import Path, PurePosixPath
+import threading
 import subprocess
 from unittest.mock import Mock, patch
 
@@ -26,6 +27,7 @@ from agency.jobs.launcher import (
     default_launcher,
 )
 from agency.jobs.store import read_job
+from agency.memory import MemoryStore
 
 
 def _projector(version: str = "v-test") -> StaticRuntimeProjector:
@@ -174,7 +176,8 @@ def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
         submit_job_request(request, launcher)
 
     jobs_dir = tmp_path / "agents" / "newsletter" / "shared" / "jobs"
-    assert not jobs_dir.exists()
+    if jobs_dir.exists():
+        assert not any(jobs_dir.glob("*.yaml"))
     pins_root = tmp_path / "compiled-agents" / "_pins"
     assert not pins_root.exists()
     assert launcher.launch.call_count == 0
@@ -191,6 +194,92 @@ def test_submit_marks_record_failed_when_launch_fails(tmp_path):
     record = read_job(error.value.job_path)
     assert record.status == "failed"
     assert "spawn denied" in record.execution_summary
+
+
+def test_submit_blocks_move_and_move_then_observes_active_job(
+    tmp_path,
+    monkeypatch,
+):
+    from agency.instances import InstanceService, InstanceMoveConflict
+    import agency.jobs.submission as submission
+
+    request = configured_request(tmp_path)
+    config_store = ConfigStore(request.config_path)
+    snapshot = config_store.load()
+    config_store.patch(
+        snapshot.revision,
+        lambda raw: raw["groups"].update(
+            {
+                "other": {
+                    "name": "Other",
+                    "path": str((tmp_path / "agents" / "other").resolve()),
+                    "default_integration": "copilot",
+                    "agents": [],
+                }
+            }
+        ),
+    )
+    launcher = Mock()
+    launch_started = threading.Event()
+    release_launch = threading.Event()
+
+    def hold_launch(job_file: Path):
+        launch_started.set()
+        assert release_launch.wait(timeout=5)
+        return LaunchResult(worker_pid=4321)
+
+    launcher.launch.side_effect = hold_launch
+    service = InstanceService(
+        config_store=config_store,
+        library=BlueprintLibrary(tmp_path / "agent-library"),
+        memory_store=MemoryStore(tmp_path / "memory"),
+    )
+    submit_outcome: dict[str, object] = {}
+    move_outcome: dict[str, object] = {}
+
+    preview = service.preview_move("newsletter", "builder", "other", "copy")
+    assert preview.blocked_by == ()
+
+    resolve_started = threading.Event()
+    release_resolve = threading.Event()
+    original_resolve = submission._resolve_request
+
+    def gated_resolve(job_request):
+        resolve_started.set()
+        assert release_resolve.wait(timeout=5)
+        return original_resolve(job_request)
+
+    monkeypatch.setattr(submission, "_resolve_request", gated_resolve)
+
+    def submit_job() -> None:
+        try:
+            submit_outcome["handle"] = submit_job_request(request, launcher)
+        except Exception as exc:  # pragma: no cover - asserted below
+            submit_outcome["error"] = exc
+
+    submit_thread = threading.Thread(target=submit_job)
+    submit_thread.start()
+    assert resolve_started.wait(timeout=5)
+
+    def move_agent() -> None:
+        try:
+            move_outcome["snapshot"] = service.move(preview)
+        except Exception as exc:  # pragma: no cover - asserted below
+            move_outcome["error"] = exc
+
+    move_thread = threading.Thread(target=move_agent)
+    move_thread.start()
+    move_thread.join(timeout=0.2)
+    assert move_thread.is_alive()
+    release_resolve.set()
+    assert launch_started.wait(timeout=5)
+    release_launch.set()
+    submit_thread.join(timeout=5)
+    move_thread.join(timeout=5)
+
+    assert isinstance(submit_outcome.get("handle"), jobs_package.JobHandle)
+    assert isinstance(move_outcome.get("error"), InstanceMoveConflict)
+    assert move_outcome["error"].reasons == ("active-jobs",)
 
 
 def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path):

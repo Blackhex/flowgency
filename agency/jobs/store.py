@@ -1,5 +1,6 @@
 """Atomic YAML persistence for durable agent jobs."""
 
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,31 @@ VALID_TRANSITIONS = {
 
 def job_path(group_path: Path, job_id: str) -> Path:
     return Path(group_path) / "shared" / "jobs" / f"{job_id}.yaml"
+
+
+def group_operation_lock_path(group_path: Path) -> Path:
+    return Path(group_path) / "shared" / "jobs" / ".operations.lock"
+
+
+def canonical_group_operation_lock_paths(
+    *group_paths: Path,
+) -> tuple[Path, ...]:
+    unique: dict[str, Path] = {}
+    for group_path in group_paths:
+        lock_path = group_operation_lock_path(group_path).resolve(strict=False)
+        unique[str(lock_path).lower()] = lock_path
+    return tuple(unique[key] for key in sorted(unique))
+
+
+def acquire_group_operation_locks(*group_paths: Path) -> ExitStack:
+    stack = ExitStack()
+    try:
+        for lock_path in canonical_group_operation_lock_paths(*group_paths):
+            stack.enter_context(exclusive_lock(lock_path, wait=True))
+    except Exception:
+        stack.close()
+        raise
+    return stack
 
 
 def write_job(path: Path, record: JobRecord) -> None:
@@ -76,7 +102,10 @@ def cancel_job(path: Path) -> JobRecord:
         return updated
 
 
-def active_jobs(group_path: Path, agent_name: str | None = None) -> list[JobRecord]:
+def active_jobs(
+    group_path: Path,
+    agent_name: str | None = None,
+) -> list[JobRecord]:
     """Return persisted active jobs, optionally for one agent."""
     jobs_dir = Path(group_path) / "shared" / "jobs"
     records = []

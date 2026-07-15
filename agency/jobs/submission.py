@@ -4,11 +4,12 @@ from agency.blueprints.cache import active_pins
 from agency.blueprints import BlueprintLibrary, CompilationCache
 from agency.configuration import ConfigStore
 from agency.integrations import REGISTRY
+from agency.fs.locks import exclusive_lock
 
 from .launcher import JobLauncher, default_launcher
 from .models import JobHandle, JobRecord, JobRequest, JobSpec
 from .resolution import resolve_job_request
-from .store import job_path, write_job
+from .store import group_operation_lock_path, job_path, write_job
 
 
 class JobSubmissionError(RuntimeError):
@@ -29,8 +30,12 @@ def _resolve_request(request: JobRequest) -> JobSpec:
     config_store = ConfigStore(Path(request.config_path))
     snapshot = config_store.load()
     config_dir = snapshot.path.resolve().parent
-    library_root = snapshot.config.agency.agent_library or (config_dir / "agent-library")
-    cache_root = snapshot.config.agency.compilation_cache or (config_dir / "compiled-agents")
+    library_root = snapshot.config.agency.agent_library or (
+        config_dir / "agent-library"
+    )
+    cache_root = snapshot.config.agency.compilation_cache or (
+        config_dir / "compiled-agents"
+    )
     return resolve_job_request(
         request,
         config_store=config_store,
@@ -39,7 +44,20 @@ def _resolve_request(request: JobRequest) -> JobSpec:
         integrations=REGISTRY,
     )
 
-def _submit_resolved(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
+
+def _requested_group_path(request: JobRequest) -> Path:
+    config_store = ConfigStore(Path(request.config_path))
+    snapshot = config_store.load()
+    try:
+        return snapshot.config.groups[request.group_key].path.resolve()
+    except KeyError as exc:
+        raise ValueError(f"Unknown group: {request.group_key}") from exc
+
+
+def _submit_resolved(
+    spec: JobSpec,
+    launcher: JobLauncher | None = None,
+) -> JobHandle:
     spec.validate()
     group_path = Path(spec.workspace_dir)
     artifact = spec.blueprint.to_artifact()
@@ -82,4 +100,6 @@ def submit_job_request(
     request: JobRequest,
     launcher: JobLauncher | None = None,
 ) -> JobHandle:
-    return _submit_resolved(_resolve_request(request), launcher)
+    requested_group = _requested_group_path(request)
+    with exclusive_lock(group_operation_lock_path(requested_group), wait=True):
+        return _submit_resolved(_resolve_request(request), launcher)
