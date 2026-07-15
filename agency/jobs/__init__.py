@@ -1,4 +1,5 @@
 from .context import JobValidationError
+from .artifacts import JobArtifact, retain_failed_stage
 from .launch_view import create_launch_view
 from .launcher import (
     DetachedProcessLauncher,
@@ -18,6 +19,7 @@ __all__ = [
     "active_jobs",
     "create_launch_view",
     "default_launcher",
+    "JobArtifact",
     "JobHandle",
     "JobLauncher",
     "JobRecord",
@@ -26,5 +28,6 @@ __all__ = [
     "JobValidationError",
     "LaunchResult",
     "reconcile_jobs",
+    "retain_failed_stage",
     "submit_job",
 ]

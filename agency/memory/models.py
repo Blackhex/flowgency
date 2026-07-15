@@ -30,6 +30,33 @@ class MemoryStage:
     base_revision: str
 
 
+@dataclass(frozen=True)
+class PreparedPublication:
+    stage: MemoryStage
+    job_path: Path
+    selector: dict[str, object]
+    memory_hash: str
+    old_revision: str
+    new_revision: str
+    old_files: Mapping[str, bytes]
+    new_files: Mapping[str, bytes]
+    diff_bytes: bytes
+    journal_path: Path
+    backup_path: Path
+    no_change: bool
+
+
+@dataclass(frozen=True)
+class MemoryPublicationReceipt:
+    selector: dict[str, object]
+    memory_hash: str
+    old_revision: str
+    new_revision: str
+    diff_artifact: object | None
+    published_at: str
+    no_change: bool
+
+
 class MemoryConflictError(RuntimeError):
     def __init__(
         self,

@@ -99,6 +99,7 @@ class JobRecord:
     changed_files: list[dict[str, Any]] = field(default_factory=list)
     execution_summary: str | None = None
     base_sha: str | None = None
+    memory_publication: dict[str, Any] | None = None
 
     @classmethod
     def from_spec(cls, spec: JobSpec) -> "JobRecord":
