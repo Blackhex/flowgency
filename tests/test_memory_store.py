@@ -1,5 +1,6 @@
 from multiprocessing import Event, Process
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -171,6 +172,58 @@ def test_stage_copies_last_canonical_snapshot(memory_store, resolved_memory):
     assert (stage.directory / "context.md").read_bytes() == b"keep"
 
 
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        "",
+        ".",
+        "..",
+        "nested/job",
+        "nested\\job",
+        "/absolute",
+        "C:\\escape",
+        "CON",
+        "job ",
+        "job.",
+        "Job-123",
+    ],
+)
+def test_stage_rejects_unsafe_job_ids_without_touching_neighbor_stage(
+    memory_store,
+    resolved_memory,
+    job_id,
+):
+    seeded = memory_store.ensure(resolved_memory)
+    memory_store.try_save(
+        resolved_memory,
+        seeded.revision,
+        {"memory.md": b"canonical"},
+    )
+    neighbor = (
+        memory_store.root
+        / ".staging"
+        / resolved_memory.memory_hash
+        / "job-123"
+    )
+    neighbor.mkdir(parents=True, exist_ok=True)
+    (neighbor / "sentinel.md").write_bytes(b"keep")
+
+    with pytest.raises(ValueError, match="job id"):
+        memory_store.stage(resolved_memory, job_id=job_id)
+
+    assert (neighbor / "sentinel.md").read_bytes() == b"keep"
+
+
+def test_stage_rejects_unicode_normalization_ambiguous_job_id(
+    memory_store,
+    resolved_memory,
+):
+    memory_store.ensure(resolved_memory)
+
+    with pytest.raises(ValueError, match="job id"):
+        memory_store.stage(resolved_memory, job_id="jo\u0301b")
+
+
 def test_try_save_reports_nonblocking_busy_ui_save(
     memory_store,
     resolved_memory,
@@ -232,3 +285,135 @@ def test_try_save_replaces_canonical_markdown_set_atomically(
     assert sorted(
         item.name for item in resolved_memory.directory.iterdir()
     ) == ["memory.md"]
+
+
+def test_try_save_rolls_back_if_install_fails_after_evacuating_old_files(
+    monkeypatch,
+    memory_store,
+    resolved_memory,
+):
+    seeded = memory_store.ensure(resolved_memory)
+    original = {"memory.md": b"old", "notes.md": b"keep"}
+    current = memory_store.try_save(
+        resolved_memory,
+        seeded.revision,
+        original,
+    )
+    from agency.memory import store as memory_store_module
+
+    real_move = memory_store_module._install_path
+    state = {"new_moves": 0}
+
+    def fail_after_first_new_move(src, dst):
+        source = Path(src)
+        target = Path(dst)
+        result = real_move(src, dst)
+        if target.parent == resolved_memory.directory:
+            state["new_moves"] += 1
+            if state["new_moves"] == 1:
+                raise OSError("install failed after first new file")
+        return result
+
+    monkeypatch.setattr("agency.memory.store._install_path", fail_after_first_new_move)
+
+    with pytest.raises(RuntimeError, match="rolled back"):
+        memory_store.try_save(
+            resolved_memory,
+            current.revision,
+            {"memory.md": b"new", "extra.md": b"other"},
+        )
+
+    restored = memory_store.read(resolved_memory)
+
+    assert restored.files == original
+    assert restored.revision == current.revision
+    assert sorted(item.name for item in resolved_memory.directory.iterdir()) == [
+        "memory.md",
+        "notes.md",
+    ]
+    assert not any((memory_store.root / ".backups").iterdir())
+
+
+def test_try_save_rolls_back_if_install_fails_immediately_after_evacuation(
+    monkeypatch,
+    memory_store,
+    resolved_memory,
+):
+    seeded = memory_store.ensure(resolved_memory)
+    original = {"memory.md": b"old", "notes.md": b"keep"}
+    current = memory_store.try_save(
+        resolved_memory,
+        seeded.revision,
+        original,
+    )
+    from agency.memory import store as memory_store_module
+
+    real_move = memory_store_module._install_path
+
+    def fail_on_first_new_move(src, dst):
+        target = Path(dst)
+        if target.parent == resolved_memory.directory:
+            raise OSError("install failed before any new file landed")
+        return real_move(src, dst)
+
+    monkeypatch.setattr("agency.memory.store._install_path", fail_on_first_new_move)
+
+    with pytest.raises(RuntimeError, match="rolled back"):
+        memory_store.try_save(
+            resolved_memory,
+            current.revision,
+            {"memory.md": b"new", "extra.md": b"other"},
+        )
+
+    restored = memory_store.read(resolved_memory)
+
+    assert restored.files == original
+    assert restored.revision == current.revision
+
+
+def test_try_save_preserves_backup_if_rollback_recovery_fails(
+    monkeypatch,
+    memory_store,
+    resolved_memory,
+):
+    seeded = memory_store.ensure(resolved_memory)
+    original = {"memory.md": b"old", "notes.md": b"keep"}
+    current = memory_store.try_save(
+        resolved_memory,
+        seeded.revision,
+        original,
+    )
+    from agency.memory import store as memory_store_module
+
+    real_install = memory_store_module._install_path
+    state = {"new_failed": False, "restore_attempts": 0}
+
+    def fail_install(src, dst):
+        target = Path(dst)
+        if target.parent == resolved_memory.directory and not state["new_failed"]:
+            state["new_failed"] = True
+            raise OSError("install failed")
+        return real_install(src, dst)
+
+    def fail_restore(src, dst):
+        state["restore_attempts"] += 1
+        raise OSError("restore failed")
+
+    monkeypatch.setattr("agency.memory.store._install_path", fail_install)
+    monkeypatch.setattr("agency.memory.store._restore_path", fail_restore)
+
+    with pytest.raises(RuntimeError, match="recovery failed") as excinfo:
+        memory_store.try_save(
+            resolved_memory,
+            current.revision,
+            {"memory.md": b"new", "extra.md": b"other"},
+        )
+
+    backups = list((memory_store.root / ".backups").iterdir())
+
+    assert state["restore_attempts"] >= 1
+    assert backups
+    assert "install failed" in str(excinfo.value)
+    assert "restore failed" in str(excinfo.value)
+    preserved = [item.name for item in backups[0].iterdir()]
+    assert sorted(preserved) == ["memory.md", "notes.md"]

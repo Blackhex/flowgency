@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import hashlib
-import os
 import shutil
 import stat
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from agency.fs.atomic import atomic_write_bytes
@@ -28,6 +28,10 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"COM{number}" for number in range(1, 10)),
     *(f"LPT{number}" for number in range(1, 10)),
 }
+
+
+def _normalized_key(value: str) -> str:
+    return unicodedata.normalize("NFKC", value).casefold()
 
 
 def memory_content_revision(files: Mapping[str, bytes]) -> str:
@@ -77,7 +81,11 @@ def ensure_memory(resolved: ResolvedMemory) -> MemorySnapshot:
 def stage_memory(resolved: ResolvedMemory, *, job_id: str) -> MemoryStage:
     snapshot = ensure_memory(resolved)
     root = _store_root(resolved)
-    stage_root = root / ".staging" / resolved.memory_hash / job_id
+    stage_parent = root / ".staging" / resolved.memory_hash
+    safe_job_id = _validate_job_id(job_id)
+    stage_root = (stage_parent / safe_job_id).resolve(strict=False)
+    if stage_root.parent != stage_parent.resolve():
+        raise ValueError("job id must stay within the staging directory")
     if stage_root.exists():
         shutil.rmtree(stage_root)
     stage_root.mkdir(parents=True, exist_ok=True)
@@ -244,7 +252,7 @@ def _validate_filename(name: str, seen_casefold: dict[str, str]) -> None:
     stem = candidate.stem
     if stem.upper() in _WINDOWS_RESERVED_NAMES:
         raise ValueError(f"memory filename uses reserved name: {name}")
-    folded = os.path.normcase(name)
+    folded = _normalized_key(name)
     previous = seen_casefold.get(folded)
     if previous is not None and previous != name:
         raise ValueError(
@@ -268,18 +276,97 @@ def _replace_canonical_files(
     backup_directory = Path(
         tempfile.mkdtemp(prefix=f"{directory.name}.", dir=staging_parent)
     )
+    moved_new_files: list[Path] = []
     try:
         for name, payload in files.items():
             atomic_write_bytes(temp_directory / name, payload)
         if directory.exists():
             for entry in directory.iterdir():
-                shutil.move(str(entry), backup_directory / entry.name)
+                _evacuate_path(entry, backup_directory / entry.name)
         for entry in temp_directory.iterdir():
-            shutil.move(str(entry), directory / entry.name)
-        shutil.rmtree(backup_directory, ignore_errors=True)
+            target = directory / entry.name
+            moved_new_files.append(target)
+            _install_path(entry, target)
+        shutil.rmtree(backup_directory)
+    except Exception as exc:
+        rollback_error = _rollback_canonical_replace(
+            directory,
+            backup_directory,
+            moved_new_files,
+        )
+        if rollback_error is not None:
+            raise RuntimeError(
+                "memory replacement failed and recovery failed: "
+                f"{exc}; rollback error: {rollback_error}; "
+                f"backup preserved at {backup_directory}"
+            ) from exc
+        raise RuntimeError(
+            f"memory replacement failed and rolled back: {exc}"
+        ) from exc
     finally:
         shutil.rmtree(temp_directory, ignore_errors=True)
-        shutil.rmtree(backup_directory, ignore_errors=True)
+
+
+def _rollback_canonical_replace(
+    directory: Path,
+    backup_directory: Path,
+    moved_new_files: list[Path],
+) -> Exception | None:
+    try:
+        for path in moved_new_files:
+            try:
+                if path.exists():
+                    path.unlink()
+            except FileNotFoundError:
+                continue
+        if backup_directory.exists():
+            for entry in backup_directory.iterdir():
+                _restore_path(entry, directory / entry.name)
+            shutil.rmtree(backup_directory)
+        return None
+    except Exception as rollback_error:
+        return rollback_error
+
+
+def _move_path(source: Path, target: Path) -> Path:
+    moved = shutil.move(str(source), target)
+    return Path(moved)
+
+
+def _evacuate_path(source: Path, target: Path) -> Path:
+    return _move_path(source, target)
+
+
+def _install_path(source: Path, target: Path) -> Path:
+    return _move_path(source, target)
+
+
+def _restore_path(source: Path, target: Path) -> Path:
+    return _move_path(source, target)
+
+
+def _validate_job_id(job_id: str) -> str:
+    if not isinstance(job_id, str):
+        raise TypeError("job id must be a string")
+    if job_id in {"", ".", ".."}:
+        raise ValueError("job id must be one safe filename segment")
+    if job_id.endswith((" ", ".")):
+        raise ValueError("job id must not have trailing dot or space")
+    if "/" in job_id or "\\" in job_id:
+        raise ValueError("job id must be one safe filename segment")
+    path = Path(job_id)
+    if path.name != job_id:
+        raise ValueError("job id must be one safe filename segment")
+    if path.is_absolute() or path.anchor:
+        raise ValueError("job id must be one safe filename segment")
+    normalized = unicodedata.normalize("NFKC", job_id)
+    if normalized != job_id:
+        raise ValueError("job id must not be ambiguous under Unicode normalization")
+    if _normalized_key(job_id) != job_id:
+        raise ValueError("job id must not be ambiguous under case normalization")
+    if path.stem.upper() in _WINDOWS_RESERVED_NAMES:
+        raise ValueError("job id uses a reserved Windows basename")
+    return job_id
 
 
 def _is_symlink_or_reparse(path: Path) -> bool:

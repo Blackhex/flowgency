@@ -1,5 +1,6 @@
 import hashlib
 import json
+import unicodedata
 
 import pytest
 
@@ -122,6 +123,31 @@ def test_channel_selector_rejects_unknown_channel(tmp_path):
             routine_id=None,
             channels={},
             store_root=tmp_path,
+        )
+
+
+def test_case_collision_key_is_unicode_normalized_and_casefolded(tmp_path):
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="job-a",
+        group_key="news",
+        agent_name="advisor",
+        routine_id=None,
+        channels={},
+        store_root=tmp_path,
+    )
+    from agency.memory import MemoryStore
+
+    store = MemoryStore(tmp_path)
+    seeded = store.ensure(resolved)
+    composed = "M\u00e9mory.md"
+    decomposed = unicodedata.normalize("NFD", composed)
+
+    with pytest.raises(ValueError, match="case-fold"):
+        store.try_save(
+            resolved,
+            seeded.revision,
+            {composed: b"a", decomposed: b"b"},
         )
 
 
