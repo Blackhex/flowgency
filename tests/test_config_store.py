@@ -166,3 +166,31 @@ def test_patch_detects_external_uncoordinated_edit_before_replace(
     assert (
         queue.get(timeout=1) == "config.yaml changed outside the Agency lock"
     )
+
+
+def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
+    canonical_raw_config, canonical_paths
+):
+    from agency.configuration.store import ConfigStore
+
+    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    store = ConfigStore(path)
+
+    first = store.load()
+    alias = first.raw
+    alias["agency"]["title"] = "Mutated in memory"
+
+    assert path.read_text(encoding="utf-8") != "Mutated in memory"
+    assert store.load().raw["agency"]["title"] == canonical_raw_config["agency"]["title"]
+
+    second = store.load()
+    assert second.raw["agency"]["title"] == canonical_raw_config["agency"]["title"]
+
+    updated = store.patch(
+        second.revision,
+        lambda raw: raw["agency"].update({"title": "Patched"}),
+    )
+
+    assert first.raw["agency"]["title"] == "Mutated in memory"
+    assert second.raw["agency"]["title"] == canonical_raw_config["agency"]["title"]
+    assert updated.raw["agency"]["title"] == "Patched"
