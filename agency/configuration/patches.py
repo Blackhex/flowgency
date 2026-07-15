@@ -238,16 +238,12 @@ def patch_agent_runtime(
         if not isinstance(sandbox, dict):
             raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.sandbox must be a mapping")
         _merge_mapping(sandbox, {"additional_roots": list(patch.additional_roots)})
-        if patch.additional_roots:
-            pass
 
         tools = runtime.setdefault("tools", {})
         if not isinstance(tools, dict):
             raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.tools must be a mapping")
         if patch.tools is None:
             _clear_known_keys(tools, ("mode", "names"))
-            tools.pop("mode", None)
-            tools.pop("names", None)
         else:
             _merge_mapping(tools, _tool_mapping(patch.tools))
             if patch.tools.mode != "allowlist":

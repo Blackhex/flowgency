@@ -56,13 +56,13 @@ class GroupRuntimeSandbox(BaseModel):
 
 
 class AgentRuntimeSandbox(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
     mode: SandboxMode = "unrestricted"
     additional_roots: tuple[Path, ...] = ()
 
 
 class RuntimeTools(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
     mode: ToolMode = "all"
     names: tuple[str, ...] = ()
 
@@ -539,6 +539,16 @@ def _validate_agent_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     sandbox = runtime.get("sandbox") or {}
     if not _is_mapping(sandbox):
         return issues
+    if sandbox.get("roots"):
+        issues.append(
+            _build_issue(
+                code="invalid-config",
+                scope=scope,
+                field=f"{scope}.runtime.sandbox.roots",
+                message="superseded sandbox roots are not supported for agent runtime.",
+                hint="Remove runtime.sandbox.roots and use runtime.sandbox.additional_roots instead.",
+            )
+        )
     if sandbox.get("additional_roots") and sandbox.get("mode") == "unrestricted":
         issues.append(
             _build_issue(

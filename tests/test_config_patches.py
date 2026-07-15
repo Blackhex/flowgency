@@ -229,10 +229,12 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         "sandbox": {
             "mode": "restricted",
             "additional_roots": ["superseded"],
+            "sandbox_extension": {"preserve": True},
         },
         "tools": {
             "mode": "allowlist",
             "names": ["shell"],
+            "tools_extension": {"preserve": True},
         },
         "runtime_extension": {"preserve": True},
     }
@@ -256,10 +258,13 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
 
     runtime = updated.raw["groups"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1200
+    assert runtime["sandbox"]["mode"] == "restricted"
     assert runtime["sandbox"]["additional_roots"] == ["shared", "assets"]
+    assert runtime["sandbox"]["sandbox_extension"] == {"preserve": True}
     assert runtime["tools"] == {
         "mode": "allowlist",
         "names": ["shell", "write"],
+        "tools_extension": {"preserve": True},
     }
     assert runtime["runtime_extension"] == {"preserve": True}
 
@@ -277,10 +282,12 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
         "sandbox": {
             "mode": "restricted",
             "additional_roots": ["old"],
+            "sandbox_extension": {"preserve": True},
         },
         "tools": {
             "mode": "allowlist",
             "names": ["shell"],
+            "tools_extension": {"preserve": True},
         },
         "runtime_extension": {"preserve": True},
     }
@@ -304,6 +311,11 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
 
     runtime = updated.raw["groups"]["newsletter"]["agents"][0]["runtime"]
     assert "timeout" not in runtime
-    assert runtime["sandbox"] == {"mode": "restricted"}
-    assert runtime["tools"] == {}
+    assert runtime["sandbox"] == {
+        "mode": "restricted",
+        "sandbox_extension": {"preserve": True},
+    }
+    assert runtime["tools"] == {
+        "tools_extension": {"preserve": True},
+    }
     assert runtime["runtime_extension"] == {"preserve": True}
