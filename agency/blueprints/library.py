@@ -30,6 +30,24 @@ def _raise(field: str, message: str, hint: str, *, code: str = "invalid-blueprin
     )
 
 
+def _validate_skill_name(skill_path: str, name: object, *, field: str) -> str:
+    if not isinstance(name, str) or not _IDENTIFIER_PATTERN.fullmatch(name):
+        _raise(
+            field,
+            f"Skill name must be a lowercase stable slug: {skill_path}.",
+            "Set frontmatter name to the exact skill directory slug using 1-64 lowercase letters, digits, or hyphens.",
+            code="invalid-skill-name",
+        )
+    if len(name) > 64:
+        _raise(
+            field,
+            f"Skill name must be at most 64 characters: {skill_path}.",
+            "Set frontmatter name to the exact skill directory slug using 1-64 lowercase letters, digits, or hyphens.",
+            code="invalid-skill-name",
+        )
+    return name
+
+
 def _validate_key(key: str) -> None:
     if not _IDENTIFIER_PATTERN.fullmatch(key):
         _raise(
@@ -59,8 +77,7 @@ def _parse_skill(snapshot, skill_name: str) -> None:
         _raise(skill_path, f"Skill frontmatter must be a mapping: {skill_path}.", "Set skill frontmatter to a YAML mapping with name and description.", code="invalid-skill-frontmatter")
     name = frontmatter.get("name")
     description = frontmatter.get("description")
-    if not isinstance(name, str) or not _IDENTIFIER_PATTERN.fullmatch(name):
-        _raise(skill_path, f"Skill name must be a lowercase stable slug: {skill_path}.", "Set frontmatter name to the exact skill directory slug.", code="invalid-skill-name")
+    _validate_skill_name(skill_path, name, field=skill_path)
     if name != skill_name:
         _raise(skill_path, f"Skill name must exactly match its directory: {skill_path}.", "Rename the directory or the frontmatter name so they match exactly.", code="skill-name-mismatch")
     if not isinstance(description, str):

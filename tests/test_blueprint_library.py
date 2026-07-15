@@ -110,6 +110,38 @@ def test_inspect_blueprint_requires_exact_standard_skill_name_match(
         inspect_blueprint(root, "advisor")
 
 
+def test_inspect_blueprint_accepts_64_character_skill_name(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    skill_name = "a" * 64
+    (blueprint / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_bytes(b"# Advisor\n")
+    _write_skill(blueprint / ".agents" / "skills" / skill_name, skill_name)
+
+    inspection = inspect_blueprint(root, "advisor")
+
+    assert inspection.skills == (skill_name,)
+
+
+def test_inspect_blueprint_rejects_65_character_skill_name(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    skill_name = "a" * 65
+    (blueprint / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_bytes(b"# Advisor\n")
+    _write_skill(blueprint / ".agents" / "skills" / skill_name, skill_name)
+
+    with pytest.raises(AssetValidationError) as excinfo:
+        inspect_blueprint(root, "advisor")
+
+    issue = excinfo.value.issues[0]
+    assert issue.code == "invalid-skill-name"
+    assert issue.field == f".agents/skills/{skill_name}/SKILL.md"
+    assert issue.corrective_hint == (
+        "Set frontmatter name to the exact skill directory slug using 1-64 lowercase letters, digits, or hyphens."
+    )
+
+
 def test_inspect_blueprint_requires_skill_description(tmp_path):
     root = tmp_path / "library"
     blueprint = root / "advisor"
