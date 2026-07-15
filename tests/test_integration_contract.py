@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agency.configuration.issues import ValidationIssue
+from agency.configuration.effective import resolve_effective_policy
 from agency.integrations import REGISTRY, AgentIdentity, BaseIntegration, FileChange, RunResult
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy, RuntimeCapabilities
 
@@ -103,32 +104,42 @@ def test_filechange_fields():
     assert fc.lines_removed == 1
 
 
-def test_integration_rejects_policy_it_cannot_enforce():
-    class FakeIntegration(BaseIntegration):
-        name = "fake"
-        display_name = "Fake"
-        runtime_capabilities = RuntimeCapabilities(
-            path_modes=frozenset({"unrestricted"}),
-            tool_modes=frozenset({"all"}),
-        )
+def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, canonical_paths):
+    from agency.configuration import ValidationFailed, parse_config_canonical
 
-        def identity_filename(self) -> str:
-            return "fake.md"
-
-        def parse_identity(self, agent_dir: Path) -> AgentIdentity | None:
-            return None
-
-        def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
-            return None
-
-    issues = FakeIntegration().validate_runtime_policy(
-        EffectiveRuntimePolicy(
-            timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(Path("C:/repo"),),
-            tools=ResolvedToolPolicy("none", ()),
-        )
+    integration = REGISTRY["copilot"]
+    original_capabilities = integration.runtime_capabilities
+    integration.runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"unrestricted"}),
+        tool_modes=frozenset({"all"}),
     )
+    try:
+        group = canonical_raw_config["groups"]["newsletter"]
+        group["runtime"] = {
+            "sandbox": {"mode": "restricted", "roots": ["C:/repo"]},
+            "tools": {"mode": "allowlist", "names": ["read"]},
+        }
+        agent = group["agents"][0]
+        agent["name"] = "builder"
+        agent["integration"] = "copilot"
 
-    assert {issue.code for issue in issues} == {"unsupported-path-policy", "unsupported-tool-policy"}
+        parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+        with pytest.raises(ValidationFailed) as excinfo:
+            resolve_effective_policy(parsed.resolved, "newsletter", "builder")
+
+        assert [issue.code for issue in excinfo.value.issues] == [
+            "unsupported-path-policy",
+            "unsupported-tool-policy",
+        ]
+        assert [issue.scope for issue in excinfo.value.issues] == [
+            "integrations.copilot",
+            "integrations.copilot",
+        ]
+        assert [issue.field for issue in excinfo.value.issues] == [
+            "runtime.sandbox.mode",
+            "runtime.tools.mode",
+        ]
+    finally:
+        integration.runtime_capabilities = original_capabilities
 

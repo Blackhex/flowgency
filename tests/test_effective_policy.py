@@ -111,6 +111,7 @@ def test_timeout_override_precedence_is_job_then_agent_then_group(canonical_raw_
 
 def test_agent_additional_roots_cannot_make_unrestricted_policy_ambiguous(canonical_raw_config, canonical_paths):
     from agency.configuration import parse_config_canonical
+    from agency.configuration import ValidationFailed
     from agency.configuration.effective import resolve_effective_policy
 
     group = canonical_raw_config["groups"]["newsletter"]
@@ -125,8 +126,16 @@ def test_agent_additional_roots_cannot_make_unrestricted_policy_ambiguous(canoni
 
     parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationFailed) as excinfo:
         resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
+
+    assert len(excinfo.value.issues) == 1
+    issue = excinfo.value.issues[0]
+    assert issue.code == "sandbox-contradiction"
+    assert issue.scope == "groups.newsletter.agents.advisor"
+    assert issue.field == "runtime.sandbox.additional_roots"
+    assert issue.message == "Unrestricted sandbox cannot add roots."
+    assert issue.corrective_hint == "Remove additional roots or switch to restricted mode."
 
 
 def test_unknown_integration_fails_closed(canonical_raw_config, canonical_paths):
