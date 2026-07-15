@@ -126,6 +126,21 @@ def test_channel_selector_rejects_unknown_channel(tmp_path):
         )
 
 
+@pytest.mark.parametrize("scope", ["run", "routine", "agent", "group"])
+@pytest.mark.parametrize("channel", ["support", "   "])
+def test_non_channel_selectors_reject_channel_field(tmp_path, scope, channel):
+    with pytest.raises(ValueError, match="channel field is only valid for channel scope"):
+        resolve_memory_selector(
+            MemorySelector(scope=scope, channel=channel),
+            job_id="job-a",
+            group_key="news",
+            agent_name="advisor",
+            routine_id="daily-review",
+            channels={"support": MemoryChannel(display_name="Support")},
+            store_root=tmp_path,
+        )
+
+
 def test_case_collision_key_is_unicode_normalized_and_casefolded(tmp_path):
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),

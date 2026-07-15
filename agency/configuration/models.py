@@ -479,6 +479,14 @@ def _validate_memory_selector(
             message="Channel memory selectors require a channel.",
             hint="Set channel to a declared memory channel key.",
         )
+    if selected_scope != "channel" and selector.get("channel") is not None:
+        return _build_issue(
+            code="invalid-memory-selector-shape",
+            scope=scope,
+            field=f"{field_prefix}.channel",
+            message="Only channel memory selectors may define a channel.",
+            hint="Remove channel unless scope is channel.",
+        )
     if selected_scope == "channel" and declared_channels is not None:
         channel = selector.get("channel")
         if channel and channel not in declared_channels:

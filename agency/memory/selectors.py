@@ -13,6 +13,11 @@ from .models import ResolvedMemory
 _MEMORY_HASH_DOMAIN = b"agency-memory:v1\0"
 
 
+def _validate_selector_shape(selector: MemorySelector) -> None:
+    if selector.scope != "channel" and selector.channel is not None:
+        raise ValueError("channel field is only valid for channel scope")
+
+
 def select_effective_memory(
     manual_override: MemorySelector | None,
     routine_selector: MemorySelector | None,
@@ -36,6 +41,7 @@ def resolve_memory_selector(
     channels: Mapping[str, MemoryChannel],
     store_root: Path,
 ) -> ResolvedMemory:
+    _validate_selector_shape(selector)
     criteria: dict[str, object] = {"version": 1, "scope": selector.scope}
     if selector.scope == "run":
         criteria["job"] = job_id

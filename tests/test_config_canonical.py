@@ -493,6 +493,32 @@ def test_accepts_declared_channel_memory_reference(canonical_raw_config, canonic
     assert not any(issue.code == "missing-memory-channel" for issue in issues)
 
 
+@pytest.mark.parametrize("scope_path", [
+    ["groups", "newsletter", "agents", 0, "default_memory"],
+    ["groups", "newsletter", "agents", 0, "routines", 0, "memory"],
+])
+@pytest.mark.parametrize("channel_value", ["support", "   "])
+def test_rejects_non_channel_memory_selectors_with_channel(canonical_raw_config, canonical_paths, scope_path, channel_value):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    target = canonical_raw_config
+    for segment in scope_path[:-1]:
+        if isinstance(segment, str) and segment not in target:
+            next_segment = scope_path[scope_path.index(segment) + 1]
+            target[segment] = [] if isinstance(next_segment, int) else {}
+        target = target[segment]
+    target[scope_path[-1]] = {"scope": "agent", "channel": channel_value}
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert any(issue.code == "invalid-memory-selector-shape" for issue in issues)
+    assert any(issue.field.endswith(".channel") for issue in issues)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == "invalid-memory-selector-shape" for issue in excinfo.value.issues)
+
+
 def test_rejects_schedule_without_one_of(canonical_raw_config, canonical_paths):
     from agency.configuration.models import validate_config_canonical
 
