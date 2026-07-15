@@ -78,12 +78,19 @@ def _write_canonical_config(
         (
             "          - id: {id}\n"
             "            skill: {skill}\n"
-            "            schedule:\n"
         ).format(**routine)
         + (
+            "            arguments:\n"
+            + "".join(f"              - {argument}\n" for argument in routine.get("arguments", []))
+            if routine.get("arguments")
+            else ""
+        )
+        + (
+            "            schedule:\n"
             f"              at: '{routine['schedule']['at']}'\n"
             if "at" in routine["schedule"]
-            else f"              every: {routine['schedule']['every']}\n"
+            else "            schedule:\n"
+            f"              every: {routine['schedule']['every']}\n"
         )
         + (
             f"            memory:\n              scope: {routine['memory']['scope']}\n"
@@ -166,6 +173,32 @@ def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monk
         "timeout_override": None,
     }
     assert (group_path / "shared" / "logs" / ".last-product-daily-review").exists()
+
+
+def test_due_schedule_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
+    group_path, config_path, _ = _make_group(tmp_path)
+    _write_canonical_config(
+        config_path,
+        group_path,
+        routines=[
+            {
+                "id": "daily-review",
+                "skill": "daily-review",
+                "arguments": ["--mode=review", "literal value"],
+                "schedule": {"every": "1h"},
+            }
+        ],
+    )
+    captured = []
+
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job_request",
+        lambda request, launcher=None: captured.append(request) or SimpleNamespace(job_id=request.job_id),
+    )
+
+    run_dispatch_cycle({}, config_path)
+
+    assert captured[0].task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
 
 
 def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypatch):

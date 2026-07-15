@@ -6,7 +6,7 @@ import yaml
 def build_routine_task_input(routine_id: str, skill_arguments: tuple[str, ...] = ()) -> str:
     """Render an immutable, concise routine invocation contract for a job request."""
     rendered_args = "" if not skill_arguments else f" with arguments: {', '.join(skill_arguments)}"
-    return f"Run routine '{routine_id}'.{rendered_args}"
+    return f"Run routine '{routine_id}'{rendered_args}."
 
 
 def build_decision_prompt(

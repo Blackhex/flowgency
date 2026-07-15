@@ -96,6 +96,7 @@ class Routine(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     id: str
     skill: str
+    arguments: tuple[str, ...] = ()
     schedule: ScheduleRule
     memory: MemorySelector | None = None
 
@@ -217,6 +218,27 @@ def _routine_entry_issue(field: str) -> ValidationIssue:
         message="Routine entry must be a mapping.",
         hint="Define each routine as a mapping with id, skill, and schedule.",
     )
+
+
+def _validate_routine_arguments(arguments: Any, scope: str, field: str) -> list[ValidationIssue]:
+    if not _is_list(arguments):
+        return [_shape_issue(field, "list")]
+    issues: list[ValidationIssue] = []
+    for index, value in enumerate(arguments):
+        if not isinstance(value, str):
+            issues.append(_shape_issue(f"{field}[{index}]", "string"))
+            continue
+        if value == "":
+            issues.append(
+                _build_issue(
+                    code="invalid-routine-argument",
+                    scope=scope,
+                    field=f"{field}[{index}]",
+                    message="Routine arguments must be non-empty strings.",
+                    hint="Remove empty arguments and keep each CLI argument as an explicit string.",
+                )
+            )
+    return issues
 
 
 def _is_mapping(value: Any) -> bool:
@@ -396,6 +418,9 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
                 memory = routine_map.get("memory")
                 if memory is not None and not _is_mapping(memory):
                     issues.append(_shape_issue(f"{routine_field}.memory", "mapping"))
+                arguments = routine_map.get("arguments")
+                if arguments is not None and not _is_list(arguments):
+                    issues.append(_shape_issue(f"{routine_field}.arguments", "list"))
 
     return issues
 
@@ -808,6 +833,15 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     )
                     if issue:
                         issues.append(issue)
+                arguments = routine.get("arguments")
+                if arguments is not None:
+                    issues.extend(
+                        _validate_routine_arguments(
+                            arguments,
+                            f"groups.{group_name}.agents.{name or '<unknown>'}",
+                            f"groups.{group_name}.agents[{index}].routines[{routine_index}].arguments",
+                        )
+                    )
             runtime = agent.get("runtime") or {}
             issues.extend(_validate_agent_runtime(runtime, f"groups.{group_name}.agents.{name or '<unknown>'}"))
 
@@ -908,6 +942,8 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
                     routine_entry = dict(routine)
                     if _is_mapping(routine_entry.get("memory")):
                         routine_entry["memory"] = dict(routine_entry["memory"])
+                    if routine_entry.get("arguments") is not None:
+                        routine_entry["arguments"] = tuple(routine_entry.get("arguments") or ())
                     routines.append(routine_entry)
                 agent_entry["routines"] = tuple(routines)
             agents[name] = agent_entry

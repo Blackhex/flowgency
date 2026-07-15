@@ -721,6 +721,48 @@ def test_parse_and_validate_share_same_valid_result(canonical_raw_config, canoni
     assert parsed.groups["newsletter"].agents["builder"].routines[0].id == "daily-review"
 
 
+def test_parse_config_canonical_preserves_routine_arguments_order_and_text(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["routines"][0]["arguments"] = [
+        "--mode=review",
+        "literal  value  with  spaces",
+        "--flag=",
+    ]
+
+    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert parsed.groups["newsletter"].agents["builder"].routines[0].arguments == (
+        "--mode=review",
+        "literal  value  with  spaces",
+        "--flag=",
+    )
+
+
+@pytest.mark.parametrize(
+    ("bad_arguments", "expected_field"),
+    [
+        ("--mode=review", "groups.newsletter.agents[0].routines[0].arguments"),
+        (["--ok", 3], "groups.newsletter.agents[0].routines[0].arguments[1]"),
+        (["--ok", ""], "groups.newsletter.agents[0].routines[0].arguments[1]"),
+    ],
+)
+def test_parse_config_canonical_rejects_malformed_routine_arguments(
+    canonical_raw_config, canonical_paths, bad_arguments, expected_field
+):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["routines"][0]["arguments"] = bad_arguments
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert any(issue.field == expected_field for issue in issues)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.field == expected_field for issue in excinfo.value.issues)
+
+
 @pytest.mark.parametrize(
     ("field_name", "bad_value", "expected_field"),
     [

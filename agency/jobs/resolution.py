@@ -197,7 +197,7 @@ def resolve_job_request(
         ),
         routine_id=routine.id if routine is not None else None,
         skill=routine.skill if routine is not None else None,
-        skill_arguments=(),
+        skill_arguments=routine.arguments if routine is not None else (),
         task_input=request.task_input,
         runtime_policy=RuntimePolicySnapshot.from_effective_policy(runtime_policy),
         memory=MemoryBinding(

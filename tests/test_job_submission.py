@@ -10,7 +10,8 @@ from agency.blueprints.projectors import StaticRuntimeProjector
 from agency.configuration.store import ConfigStore
 from agency.integrations import BaseIntegration
 from agency.integrations.models import ProjectorCapabilities, RuntimeCapabilities
-from agency.jobs import JobSpec, JobSubmissionError, submit_job
+from agency.jobs import JobSpec, JobSubmissionError, submit_job, submit_job_request
+from agency.jobs.prompts import build_routine_task_input
 from agency.jobs.resolution import JobRequest, resolve_job_request
 from agency.jobs.launcher import (
     CREATE_NEW_PROCESS_GROUP,
@@ -102,6 +103,9 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "        routines:\n"
         "          - id: daily-review\n"
         "            skill: daily-review\n"
+        "            arguments:\n"
+        "              - --mode=review\n"
+        "              - literal value\n"
         "            schedule:\n"
         "              at: '09:00'\n",
         encoding="utf-8",
@@ -296,7 +300,7 @@ def test_submit_direct_spec_re_resolves_authority_and_discards_forged_snapshots(
     assert record.spec.memory.memory_hash != "forged-memory"
     assert record.spec.memory.selector["scope"] == "agent"
     assert record.spec.skill == "daily-review"
-    assert record.spec.skill_arguments == ()
+    assert record.spec.skill_arguments == ("--mode=review", "literal value")
 
 
 def test_submit_direct_spec_with_missing_routine_fails_before_job_write(tmp_path):
@@ -334,7 +338,7 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
         group_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
-        task_input="Run it",
+        task_input=build_routine_task_input("daily-review", ("--mode=review", "literal value")),
         routine_id="daily-review",
     )
 
@@ -354,6 +358,83 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
     assert spec.memory.selector["scope"] == "agent"
     assert spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
     assert spec.agent_dir == spec.workspace_path
+    assert spec.skill_arguments == ("--mode=review", "literal value")
+    assert spec.task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
+
+
+def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
+    config = _write_config(tmp_path, command="echo first")
+    _write_blueprint(tmp_path / "agent-library")
+    request = JobRequest(
+        config_path=config,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        task_input="Run routine 'daily-review' with arguments: --mode=review, literal value",
+        routine_id="daily-review",
+    )
+
+    launcher = Mock()
+    launcher.launch.return_value = LaunchResult(worker_pid=4321)
+
+    handle = submit_job_request(request, launcher)
+
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "              - literal value\n",
+            "              - changed later\n",
+        ),
+        encoding="utf-8",
+    )
+
+    record = read_job(handle.path)
+    assert record.spec.skill_arguments == ("--mode=review", "literal value")
+    assert record.spec.task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value"
+
+
+def test_decision_jobs_keep_empty_skill_arguments(tmp_path):
+    spec = queued_decision_like_spec(tmp_path)
+
+    assert spec.routine_id is None
+    assert spec.skill is None
+    assert spec.skill_arguments == ()
+
+
+def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
+    config = _write_config(tmp_path)
+    _write_blueprint(tmp_path / "agent-library")
+    return JobSpec.create(
+        config_path=config,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="decision",
+        integration_name="copilot",
+        integration_config={"command": "echo ok"},
+        config_revision="cfg-1",
+        blueprint={
+            "key": "builder-blueprint",
+            "source_digest": "digest-1",
+            "integration": "copilot",
+            "projector_version": "v-test",
+            "cache_path": str((tmp_path / "compiled-agents" / "copilot" / "v-test" / "digest-1" / "entry.py").resolve()),
+        },
+        runtime_policy={
+            "timeout": 1800,
+            "sandbox_mode": "restricted",
+            "sandbox_roots": (str((tmp_path / "repo").resolve()),),
+            "tool_mode": "allowlist",
+            "tool_names": ("shell", "write"),
+        },
+        memory={
+            "selector": {"scope": "run", "version": 1, "job": "placeholder"},
+            "canonical_json": '{"job":"placeholder","scope":"run","version":1}',
+            "memory_hash": "memory-hash-superseded",
+            "path": str((tmp_path / "memory" / "memory-hash-superseded").resolve()),
+        },
+        task_input="Immutable decision instructions",
+        trigger_context={"decision_path": "decision.md"},
+        prompt_source={"type": "decision"},
+    )
 
 
 def test_resolve_job_request_snapshots_workspace_dir_despite_external_agent_path_inputs(tmp_path):

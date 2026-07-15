@@ -128,7 +128,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                             group_key=group_key,
                             agent_name=agent_name,
                             trigger="scheduled_prompt",
-                            task_input=build_routine_task_input(routine.id),
+                            task_input=build_routine_task_input(routine.id, routine.arguments),
                             routine_id=routine.id,
                         )
                         submit_job_request(request, launcher)

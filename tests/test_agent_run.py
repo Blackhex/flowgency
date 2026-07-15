@@ -45,6 +45,9 @@ def _setup_group(tmp_path: Path) -> Path:
         "        routines:\n"
         "          - id: daily-review\n"
         "            skill: daily-review\n"
+        "            arguments:\n"
+        "              - --mode=review\n"
+        "              - literal value\n"
         "            schedule:\n"
         "              every: 6h\n"
         "            memory:\n"
@@ -69,7 +72,7 @@ def _setup_group(tmp_path: Path) -> Path:
                 "integration": "script",
                 "blueprint": "builder-blueprint",
                 "routines": [
-                    {"id": "daily-review", "skill": "daily-review", "schedule": {"every": "6h"}, "memory": {"scope": "routine"}},
+                    {"id": "daily-review", "skill": "daily-review", "arguments": ["--mode=review", "literal value"], "schedule": {"every": "6h"}, "memory": {"scope": "routine"}},
                     {"id": "product-routine", "skill": "product-routine", "schedule": {"every": "6h"}},
                 ],
             }],
@@ -78,7 +81,7 @@ def _setup_group(tmp_path: Path) -> Path:
                 "integration": "script",
                 "blueprint": "builder-blueprint",
                 "routines": [
-                    {"id": "daily-review", "skill": "daily-review", "schedule": {"every": "6h"}, "memory": {"scope": "routine"}},
+                    {"id": "daily-review", "skill": "daily-review", "arguments": ["--mode=review", "literal value"], "schedule": {"every": "6h"}, "memory": {"scope": "routine"}},
                     {"id": "product-routine", "skill": "product-routine", "schedule": {"every": "6h"}},
                 ],
             }],
@@ -123,8 +126,20 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     assert request.group_key == "test"
     assert request.agent_name == "product"
     assert request.routine_id == "daily-review"
-    assert request.task_input == "Run routine 'daily-review'."
+    assert request.task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
     assert request.timeout_override is None
+
+
+def test_run_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
+    _setup_group(tmp_path)
+    calls = []
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
+    client = TestClient(app)
+
+    resp = client.post("/test/agents/product/run", data={"routine_id": "daily-review"})
+
+    assert resp.status_code == 202
+    assert calls[0].task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
 
 
 def test_run_unknown_routine_404(tmp_path, monkeypatch):

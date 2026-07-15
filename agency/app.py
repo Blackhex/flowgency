@@ -2664,7 +2664,10 @@ async def agent_run(request: Request, group: str, agent: str):
             group_key=group,
             agent_name=agent,
             trigger="manual_prompt",
-            task_input=build_routine_task_input(routine_id),
+            task_input=build_routine_task_input(
+                routine_id,
+                tuple(routine.get("arguments") or ()),
+            ),
             routine_id=routine_id,
             memory_override=memory_override,
         )
