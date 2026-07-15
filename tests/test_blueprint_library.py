@@ -45,6 +45,34 @@ def test_inspect_blueprint_requires_root_agents_md(tmp_path):
         inspect_blueprint(root, "advisor")
 
 
+def test_inspect_blueprint_rejects_invalid_root_agents_md_utf8(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    (blueprint / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_bytes(b"\xff\xfe\x00bad")
+    _write_skill(blueprint / ".agents" / "skills" / "daily-review", "daily-review")
+
+    with pytest.raises(AssetValidationError) as excinfo:
+        inspect_blueprint(root, "advisor")
+
+    issue = excinfo.value.issues[0]
+    assert issue.code == "invalid-blueprint-encoding"
+    assert issue.field == "AGENTS.md"
+    assert issue.corrective_hint == "Rewrite AGENTS.md using UTF-8 encoding."
+
+
+def test_inspect_blueprint_title_falls_back_when_agents_md_has_no_heading(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    (blueprint / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_text("Plain blueprint body only.\n", encoding="utf-8")
+    _write_skill(blueprint / ".agents" / "skills" / "daily-review", "daily-review")
+
+    inspection = inspect_blueprint(root, "advisor")
+
+    assert inspection.title == "advisor"
+
+
 @pytest.mark.parametrize("key", ["Advisor", "advisor_bot", "advisor.", ""])
 def test_inspect_blueprint_requires_stable_slug_key(tmp_path, key):
     root = tmp_path / "library"

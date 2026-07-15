@@ -67,11 +67,21 @@ def _parse_skill(snapshot, skill_name: str) -> None:
         _raise(skill_path, f"Skill description is required: {skill_path}.", "Set a non-empty human description in SKILL.md frontmatter.", code="missing-skill-description")
 
 
-def _extract_title(snapshot, key: str) -> str:
+def _load_agents_md(snapshot) -> str:
     try:
-        text = snapshot.file("AGENTS.md").content.decode("utf-8")
-    except UnicodeDecodeError:
-        return key
+        return snapshot.file("AGENTS.md").content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        _raise(
+            "AGENTS.md",
+            "Blueprint root AGENTS.md must be valid UTF-8: AGENTS.md.",
+            "Rewrite AGENTS.md using UTF-8 encoding.",
+            code="invalid-blueprint-encoding",
+        )
+        raise AssertionError("unreachable") from exc
+
+
+def _extract_title(snapshot, key: str) -> str:
+    text = _load_agents_md(snapshot)
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("#"):
