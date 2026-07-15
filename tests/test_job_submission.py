@@ -109,22 +109,13 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
     return config
 
 
-def configured_spec(tmp_path: Path, *, agent="product") -> JobSpec:
-    group = tmp_path / "group"
-    (group / agent).mkdir(parents=True)
-    config = tmp_path / "config.yaml"
-    config.write_text(
-        "groups:\n  test:\n    name: Test\n    path: "
-        + str(group).replace("\\", "/")
-        + "\n    agents:\n      - name: "
-        + agent
-        + "\n        integration: script\n"
-        "        integration_config:\n          command: echo ok\n"
-    )
+def configured_spec(tmp_path: Path) -> JobSpec:
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
     return JobSpec.create(
         config_path=config,
-        group_key="test",
-        agent_name=agent,
+        group_key="newsletter",
+        agent_name="builder",
         trigger="manual_prompt",
         integration_name="script",
         integration_config={"command": "echo ok"},
@@ -149,11 +140,22 @@ def configured_spec(tmp_path: Path, *, agent="product") -> JobSpec:
             "memory_hash": "memory-hash-superseded",
             "path": "C:/memory/memory-hash-superseded",
         },
-        routine_id="routine-1",
+        routine_id="daily-review",
         skill="superseded",
         skill_arguments=(),
         task_input="Run it",
         trigger_context={"source": "test"},
+        prompt_source={
+            "type": "saved_prompt",
+            "path": str(
+                tmp_path
+                / "agents"
+                / "newsletter"
+                / "shared"
+                / "prompts"
+                / "daily-review.md"
+            ),
+        },
     )
 
 
@@ -193,6 +195,47 @@ def _compat_spec_without_resolved_snapshots(tmp_path: Path) -> JobSpec:
     )
 
 
+def _forged_direct_spec(tmp_path: Path, *, routine_id: str = "daily-review") -> JobSpec:
+    config = _write_config(tmp_path, timeout=1800, command="echo first")
+    _write_blueprint(tmp_path / "agent-library")
+    return JobSpec.create(
+        config_path=config,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        integration_name="forged",
+        integration_config={"command": "echo forged"},
+        config_revision="forged-revision",
+        blueprint={
+            "key": "forged-blueprint",
+            "source_digest": "forged-digest",
+            "integration": "forged",
+            "projector_version": "forged-version",
+            "cache_path": str((tmp_path / "forged-cache" / "forged" / "v9" / "digest" / "entry.py").resolve()),
+        },
+        runtime_policy={
+            "timeout": 9,
+            "sandbox_mode": "unrestricted",
+            "sandbox_roots": (),
+            "tool_mode": "all",
+            "tool_names": (),
+        },
+        memory={
+            "selector": {"scope": "run", "version": 1, "job": "forged-job"},
+            "canonical_json": '{"job":"forged-job","scope":"run","version":1}',
+            "memory_hash": "forged-memory",
+            "path": str((tmp_path / "forged-memory").resolve()),
+        },
+        routine_id=routine_id,
+        skill="forged-skill",
+        skill_arguments=("forged",),
+        task_input="Run it",
+        trigger_context={"source": "forged", "nested": {"ok": True}},
+        group_path=tmp_path / "forged-group",
+        prompt_source={"type": "saved_prompt", "path": str((tmp_path / "agents" / "newsletter" / "shared" / "prompts" / "daily-review.md"))},
+    )
+
+
 def test_submit_persists_then_launches(tmp_path):
     spec = configured_spec(tmp_path)
     launcher = Mock()
@@ -219,6 +262,55 @@ def test_submit_compat_spec_persists_validated_canonical_snapshot_without_bypass
     assert record.spec.agent_dir == record.spec.workspace_path
     assert record.spec.skill == "daily-review"
     assert record.spec.routine_id == "daily-review"
+
+
+def test_submit_direct_spec_re_resolves_authority_and_discards_forged_snapshots(tmp_path):
+    spec = _forged_direct_spec(tmp_path)
+    launcher = Mock()
+    launcher.launch.return_value = LaunchResult(worker_pid=4321)
+
+    _write_config(tmp_path, timeout=45, command="echo second")
+
+    handle = submit_job(spec, launcher)
+
+    record = read_job(handle.path)
+    assert record.spec.job_id == spec.job_id
+    assert record.spec.trigger == spec.trigger
+    assert record.spec.task_input == spec.task_input
+    assert record.spec.routine_id == spec.routine_id
+    assert record.spec.timeout_override == spec.timeout_override
+    assert record.spec.trigger_context == spec.trigger_context
+    assert record.spec.prompt_source == spec.prompt_source
+    assert record.spec.config_revision != "forged-revision"
+    assert record.spec.integration_name == "copilot"
+    assert record.spec.integration_config == {"command": "echo second"}
+    assert record.spec.blueprint.key == "builder-blueprint"
+    assert record.spec.blueprint.source_digest != "forged-digest"
+    assert record.spec.blueprint.integration == "copilot"
+    assert str(record.spec.blueprint.cache_entry_path).startswith(str((tmp_path / "compiled-agents").resolve()))
+    assert record.spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
+    assert record.spec.runtime_policy.timeout == 45
+    assert record.spec.runtime_policy.sandbox_mode == "restricted"
+    assert record.spec.runtime_policy.tool_mode == "allowlist"
+    assert record.spec.runtime_policy.tool_names == ("shell", "write")
+    assert record.spec.memory.memory_hash != "forged-memory"
+    assert record.spec.memory.selector["scope"] == "agent"
+    assert record.spec.skill == "daily-review"
+    assert record.spec.skill_arguments == ()
+
+
+def test_submit_direct_spec_with_missing_routine_fails_before_job_write(tmp_path):
+    spec = _forged_direct_spec(tmp_path, routine_id="missing-routine")
+    launcher = Mock()
+
+    with pytest.raises(ValueError, match="existing routine"):
+        submit_job(spec, launcher)
+
+    jobs_dir = tmp_path / "agents" / "newsletter" / "shared" / "jobs"
+    assert not jobs_dir.exists()
+    pins_root = tmp_path / "compiled-agents" / "_pins"
+    assert not pins_root.exists()
+    assert launcher.launch.call_count == 0
 
 
 def test_submit_marks_record_failed_when_launch_fails(tmp_path):

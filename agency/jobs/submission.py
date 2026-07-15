@@ -40,51 +40,24 @@ def _resolve_request(request: JobRequest) -> JobSpec:
     )
 
 
-def _resolve_superseded_spec(spec: JobSpec) -> JobSpec:
-    if spec.config_revision != "compat-unresolved":
-        return spec
-    resolved = _resolve_request(
-        JobRequest(
-            config_path=Path(spec.config_path),
-            group_key=spec.group_key,
-            agent_name=spec.agent_name,
-            trigger=spec.trigger,
-            task_input=spec.task_input,
-            job_id=spec.job_id,
-            routine_id=spec.routine_id,
-            timeout_override=spec.timeout_override,
-            trigger_context=spec.trigger_context,
-            superseded_prompt_source=spec.prompt_source,
-        )
-    )
-    return JobSpec(
-        schema_version=resolved.schema_version,
-        job_id=resolved.job_id,
-        config_path=resolved.config_path,
-        config_revision=resolved.config_revision,
-        group_key=resolved.group_key,
-        group_path=resolved.group_path,
-        agent_name=resolved.agent_name,
-        workspace_dir=resolved.workspace_dir,
-        trigger=resolved.trigger,
-        integration_name=resolved.integration_name,
-        integration_config=resolved.integration_config,
-        blueprint=resolved.blueprint,
-        routine_id=resolved.routine_id,
-        skill=resolved.skill,
-        skill_arguments=resolved.skill_arguments,
-        task_input=resolved.task_input,
-        runtime_policy=resolved.runtime_policy,
-        memory=resolved.memory,
-        trigger_context=resolved.trigger_context,
-        prompt_source=resolved.prompt_source,
-        timeout_override=resolved.timeout_override,
-        created_at=spec.created_at,
+def _request_from_spec(spec: JobSpec) -> JobRequest:
+    return JobRequest(
+        config_path=Path(spec.config_path),
+        group_key=spec.group_key,
+        agent_name=spec.agent_name,
+        trigger=spec.trigger,
+        task_input=spec.task_input,
+        job_id=spec.job_id,
+        routine_id=spec.routine_id,
+        timeout_override=spec.timeout_override,
+        trigger_context=spec.trigger_context,
+        superseded_prompt_source=spec.prompt_source,
     )
 
 
-def submit_job(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
-    spec = _resolve_superseded_spec(spec)
+def _submit_resolved(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
+    if spec.config_revision == "compat-unresolved":
+        raise ValueError("submit requires an internally resolved JobSpec")
     spec.validate()
     group_path = Path(spec.workspace_dir)
     artifact = spec.blueprint.to_artifact()
@@ -123,8 +96,13 @@ def submit_job(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
     return JobHandle(spec.job_id, "queued", path, result.worker_pid)
 
 
+def submit_job(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
+    resolved = _resolve_request(_request_from_spec(spec))
+    return _submit_resolved(resolved, launcher)
+
+
 def submit_job_request(
     request: JobRequest,
     launcher: JobLauncher | None = None,
 ) -> JobHandle:
-    return submit_job(_resolve_request(request), launcher)
+    return _submit_resolved(_resolve_request(request), launcher)
