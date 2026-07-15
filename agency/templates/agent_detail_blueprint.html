@@ -1,0 +1,49 @@
+<section class="space-y-5">
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900">Blueprint</h2>
+    <p class="text-sm text-gray-500">Read-only source and runtime projection details for the pinned blueprint.</p>
+  </div>
+  <dl class="grid gap-4 md:grid-cols-2 text-sm text-gray-700">
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-400">Source key</dt>
+      <dd class="font-mono">{{ inspection.key }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-400">Title</dt>
+      <dd>{{ inspection.title }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-400">Digest</dt>
+      <dd class="font-mono break-all">{{ inspection.snapshot.digest }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-400">Cache status</dt>
+      <dd>{{ cache_status.state }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-400">Instruction target</dt>
+      <dd class="font-mono">{{ compatibility.instruction_target }}</dd>
+    </div>
+    <div>
+      <dt class="text-xs uppercase tracking-wide text-gray-400">Skills target</dt>
+      <dd class="font-mono">{{ compatibility.skills_target }}</dd>
+    </div>
+  </dl>
+  <div>
+    <h3 class="text-sm font-semibold text-gray-700">Skills</h3>
+    <ul class="mt-2 flex flex-wrap gap-2">
+      {% for skill in inspection.skills %}
+      <li class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">{{ skill }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="text-sm text-gray-700">
+    <p>Discovers skills: <strong>{{ 'Yes' if compatibility.discovers_skills else 'No' }}</strong></p>
+    <p>Activates selected skill: <strong>{{ 'Yes' if compatibility.activates_selected_skill else 'No' }}</strong></p>
+    <p>Cache path: <span class="font-mono break-all">{{ cache_status.path }}</span></p>
+  </div>
+  <div class="flex gap-3 text-sm">
+    <a href="{{ edit_library_href }}" class="text-indigo-600 hover:text-indigo-800">Edit blueprint</a>
+    <a href="{{ edit_skills_href }}" class="text-indigo-600 hover:text-indigo-800">Edit skills</a>
+  </div>
+</section>

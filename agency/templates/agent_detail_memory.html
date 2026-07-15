@@ -1,0 +1,61 @@
+<section class="space-y-5">
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900">Memory</h2>
+    <p class="text-sm text-gray-500">Choose the default selector and edit the resolved markdown content directly.</p>
+  </div>
+  <div class="text-sm text-gray-700">
+    <p>Default memory: <strong>{{ memory_scope_label }}</strong></p>
+  </div>
+  {% if memory_conflict %}
+  <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 space-y-2">
+    <p>Current revision: <span class="font-mono break-all">{{ memory_conflict.current_revision }}</span></p>
+    <p>Attempted revision: <span class="font-mono break-all">{{ memory_conflict.attempted_revision }}</span></p>
+    <div>
+      <h3 class="font-semibold">Current content</h3>
+      <pre class="mt-1 whitespace-pre-wrap rounded bg-white p-3 text-xs text-gray-800">{{ memory_conflict.current_content }}</pre>
+    </div>
+    <div>
+      <h3 class="font-semibold">Attempted content</h3>
+      <pre class="mt-1 whitespace-pre-wrap rounded bg-white p-3 text-xs text-gray-800">{{ memory_conflict.attempted_content }}</pre>
+    </div>
+  </div>
+  {% endif %}
+  <form method="post" action="/{{ group }}/agents/{{ agent }}/memory" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
+    <input type="hidden" name="revision" value="{{ config_revision }}">
+    <input type="hidden" name="content_revision" value="{{ memory_snapshot.revision }}">
+    <label class="block text-sm text-gray-700">
+      <span class="mb-1 block font-medium">Default selector</span>
+      <select name="default_memory_scope" class="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white">
+        <option value="run" {% if default_memory_scope == 'run' %}selected{% endif %}>Run memory</option>
+        <option value="agent" {% if default_memory_scope == 'agent' %}selected{% endif %}>Agent memory</option>
+        <option value="group" {% if default_memory_scope == 'group' %}selected{% endif %}>Group memory</option>
+        <option value="channel" {% if default_memory_scope == 'channel' %}selected{% endif %}>Channel memory</option>
+      </select>
+    </label>
+    <label class="block text-sm text-gray-700">
+      <span class="mb-1 block font-medium">Channel</span>
+      <select name="default_memory_channel" class="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white">
+        <option value="">None</option>
+        {% for channel in channel_options %}
+        <option value="{{ channel.key }}" {% if default_memory_channel == channel.key %}selected{% endif %}>{{ channel.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="block text-sm text-gray-700 md:col-span-2">
+      <span class="mb-1 block font-medium">Markdown file</span>
+      <select name="filename" class="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white font-mono text-xs">
+        {% for filename in memory_file_options %}
+        <option value="{{ filename }}" {% if selected_memory_file == filename %}selected{% endif %}>{{ filename }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="block text-sm text-gray-700 md:col-span-2">
+      <span class="mb-1 block font-medium">Content</span>
+      <textarea name="content" rows="18" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ selected_memory_content }}</textarea>
+    </label>
+    <div class="md:col-span-2 flex items-center justify-between gap-4">
+      <p class="text-xs text-gray-500">Content revision: {{ memory_snapshot.revision }}</p>
+      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save memory</button>
+    </div>
+  </form>
+</section>

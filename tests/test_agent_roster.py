@@ -239,7 +239,7 @@ def test_old_admin_agent_get_redirects_to_profile(monkeypatch, tmp_path, canonic
     assert response.headers["location"] == "/newsletter/agents/advisor/profile"
 
 
-def test_profile_placeholder_uses_config_identity(monkeypatch, tmp_path, canonical_raw_config):
+def test_profile_detail_uses_config_identity(monkeypatch, tmp_path, canonical_raw_config):
     client, _, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
 
     response = client.get("/newsletter/agents/advisor/profile")
@@ -249,6 +249,7 @@ def test_profile_placeholder_uses_config_identity(monkeypatch, tmp_path, canonic
     assert "Blueprint Librarian" in response.text
     assert "Blueprint: advisor" in response.text
     assert "copilot" in response.text
+    assert 'aria-current="page">Profile' in response.text
 
 
 def test_stale_create_revision_returns_conflict(monkeypatch, tmp_path, canonical_raw_config):

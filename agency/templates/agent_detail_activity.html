@@ -1,0 +1,48 @@
+<section class="space-y-6">
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900">Recent activity</h2>
+    <p class="text-sm text-gray-500">Current jobs, logs, observations, and proposals associated with this agent.</p>
+  </div>
+  <div class="grid gap-6 lg:grid-cols-2 text-sm text-gray-700">
+    <div>
+      <h3 class="font-semibold text-gray-900">Jobs</h3>
+      <ul class="mt-2 space-y-2">
+        {% for job in jobs %}
+        <li>{{ job.id }} <span class="text-gray-500">{{ job.status }} · {{ job.trigger }}</span></li>
+        {% else %}
+        <li class="text-gray-500">No active jobs.</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3 class="font-semibold text-gray-900">Logs</h3>
+      <ul class="mt-2 space-y-2">
+        {% for log in logs %}
+        <li><a href="{{ log.href }}" class="text-indigo-600 hover:text-indigo-800">{{ log.name }}</a></li>
+        {% else %}
+        <li class="text-gray-500">No logs found.</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3 class="font-semibold text-gray-900">Observations</h3>
+      <ul class="mt-2 space-y-2">
+        {% for item in observations %}
+        <li><a href="{{ item.href }}" class="text-indigo-600 hover:text-indigo-800">{{ item.title }}</a> <span class="text-gray-500">{{ item.meta }}</span></li>
+        {% else %}
+        <li class="text-gray-500">No observations.</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h3 class="font-semibold text-gray-900">Proposals</h3>
+      <ul class="mt-2 space-y-2">
+        {% for item in proposals %}
+        <li><a href="{{ item.href }}" class="text-indigo-600 hover:text-indigo-800">{{ item.title }}</a> <span class="text-gray-500">{{ item.meta }}</span></li>
+        {% else %}
+        <li class="text-gray-500">No proposals.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</section>

@@ -44,7 +44,7 @@ import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
 from starlette.convertors import Convertor, register_url_convertor
 from agency.web import AgencyServices, build_services, get_services
-from agency.web.routes import admin_groups_router, agents_router
+from agency.web.routes import admin_groups_router, agent_detail_router, agents_router
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1240,6 +1240,7 @@ templates.env.filters["integration_badge"] = integration_badge_filter
 
 app.include_router(admin_groups_router)
 app.include_router(agents_router)
+app.include_router(agent_detail_router)
 
 
 def agent_health_status(last_seen: datetime | None) -> str:

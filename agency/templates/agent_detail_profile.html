@@ -1,0 +1,33 @@
+<section class="space-y-4">
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900">Profile</h2>
+    <p class="text-sm text-gray-500">Edit config-backed identity fields and write capability. This page does not edit native integration files.</p>
+    <p class="mt-2 text-sm text-gray-600">Integration key: <span class="font-mono">{{ integration }}</span></p>
+  </div>
+  <form method="post" action="/{{ group }}/agents/{{ agent }}/profile" class="grid gap-4 md:grid-cols-2">
+    <input type="hidden" name="revision" value="{{ config_revision }}">
+    <label class="block text-sm text-gray-700">
+      <span class="mb-1 block font-medium">Display name</span>
+      <input type="text" name="display_name" value="{{ profile_form.display_name }}" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+    </label>
+    <label class="block text-sm text-gray-700">
+      <span class="mb-1 block font-medium">Title</span>
+      <input type="text" name="title" value="{{ profile_form.title }}" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+    </label>
+    <label class="block text-sm text-gray-700">
+      <span class="mb-1 block font-medium">Emoji</span>
+      <input type="text" name="emoji" value="{{ profile_form.emoji }}" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+    </label>
+    <div class="text-sm text-gray-700">
+      <span class="mb-1 block font-medium">Write capability</span>
+      <label class="inline-flex items-center gap-2">
+        <input type="checkbox" name="can_write" value="true" {% if profile_form.can_write %}checked{% endif %}>
+        <span>Write capability</span>
+      </label>
+    </div>
+    <div class="md:col-span-2 flex items-center justify-between gap-4 border-t border-gray-200 pt-4">
+      <p class="text-xs text-gray-500">Config revision: {{ config_revision }}</p>
+      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save profile</button>
+    </div>
+  </form>
+</section>
