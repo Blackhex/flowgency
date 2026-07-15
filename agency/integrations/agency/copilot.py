@@ -12,6 +12,7 @@ from agency.config import SandboxSpec
 from agency.integrations import (
     BaseIntegration, RunResult, FileChange, AgentIdentity, IntegrationError, _register,
 )
+from agency.integrations.models import RuntimeCapabilities
 
 
 class CopilotIntegration(BaseIntegration):
@@ -21,6 +22,10 @@ class CopilotIntegration(BaseIntegration):
     supports_ai_backend = True
     supports_sandbox = True
     detect_priority = 7
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"restricted", "unrestricted"}),
+        tool_modes=frozenset({"all", "allowlist"}),
+    )
 
     def identity_filename(self) -> str:
         return "AGENTS.md"

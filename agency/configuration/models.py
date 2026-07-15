@@ -838,23 +838,25 @@ def _collect_schema_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
 
 def _prepare_runtime(runtime: Any, base_path: Path | None) -> dict[str, Any]:
     runtime_entry = dict(runtime) if _is_mapping(runtime) else {}
-    sandbox = dict(runtime_entry.get("sandbox") or {})
-    if base_path is not None:
-        if "roots" in sandbox:
-            roots = []
-            for root in sandbox.get("roots") or []:
-                roots.append(_path_from_config(root, base_path))
-            sandbox["roots"] = tuple(roots)
-        if "additional_roots" in sandbox:
-            additional_roots = []
-            for root in sandbox.get("additional_roots") or []:
-                additional_roots.append(_path_from_config(root, base_path))
-            sandbox["additional_roots"] = tuple(additional_roots)
-    runtime_entry["sandbox"] = sandbox
-    tools = dict(runtime_entry.get("tools") or {})
-    if tools.get("names") is not None:
-        tools["names"] = tuple(str(name) for name in tools.get("names") or ())
-    runtime_entry["tools"] = tools
+    if "sandbox" in runtime_entry:
+        sandbox = dict(runtime_entry.get("sandbox") or {})
+        if base_path is not None:
+            if "roots" in sandbox:
+                roots = []
+                for root in sandbox.get("roots") or []:
+                    roots.append(_path_from_config(root, base_path))
+                sandbox["roots"] = tuple(roots)
+            if "additional_roots" in sandbox:
+                additional_roots = []
+                for root in sandbox.get("additional_roots") or []:
+                    additional_roots.append(_path_from_config(root, base_path))
+                sandbox["additional_roots"] = tuple(additional_roots)
+        runtime_entry["sandbox"] = sandbox
+    if "tools" in runtime_entry:
+        tools = dict(runtime_entry.get("tools") or {})
+        if tools.get("names") is not None:
+            tools["names"] = tuple(str(name) for name in tools.get("names") or ())
+        runtime_entry["tools"] = tools
     return runtime_entry
 
 

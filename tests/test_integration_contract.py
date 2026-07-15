@@ -1,8 +1,12 @@
 """Contract tests: validate all registered integrations meet the BaseIntegration API."""
 import inspect
-import pytest
 from pathlib import Path
-from agency.integrations import REGISTRY, BaseIntegration, AgentIdentity, RunResult, FileChange
+
+import pytest
+
+from agency.configuration.issues import ValidationIssue
+from agency.integrations import REGISTRY, AgentIdentity, BaseIntegration, FileChange, RunResult
+from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy, RuntimeCapabilities
 
 
 def all_integration_names():
@@ -51,6 +55,20 @@ class TestIntegrationContract:
     def test_is_base_integration_subclass(self, integration):
         assert isinstance(integration, BaseIntegration)
 
+    def test_runtime_capabilities_declared(self, integration):
+        assert isinstance(integration.runtime_capabilities, RuntimeCapabilities)
+
+    def test_validate_runtime_policy_returns_validation_issues(self, integration):
+        result = integration.validate_runtime_policy(
+            EffectiveRuntimePolicy(
+                timeout=1800,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            )
+        )
+        assert all(isinstance(issue, ValidationIssue) for issue in result)
+
 
 def test_all_execution_integrations_run_accepts_sandbox_root():
     """Every execution-capable integration.run must accept the sandbox_root kwarg.
@@ -83,4 +101,34 @@ def test_filechange_fields():
     assert fc.status == "modified"
     assert fc.lines_added == 2
     assert fc.lines_removed == 1
+
+
+def test_integration_rejects_policy_it_cannot_enforce():
+    class FakeIntegration(BaseIntegration):
+        name = "fake"
+        display_name = "Fake"
+        runtime_capabilities = RuntimeCapabilities(
+            path_modes=frozenset({"unrestricted"}),
+            tool_modes=frozenset({"all"}),
+        )
+
+        def identity_filename(self) -> str:
+            return "fake.md"
+
+        def parse_identity(self, agent_dir: Path) -> AgentIdentity | None:
+            return None
+
+        def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
+            return None
+
+    issues = FakeIntegration().validate_runtime_policy(
+        EffectiveRuntimePolicy(
+            timeout=1800,
+            sandbox_mode="restricted",
+            sandbox_roots=(Path("C:/repo"),),
+            tools=ResolvedToolPolicy("none", ()),
+        )
+    )
+
+    assert {issue.code for issue in issues} == {"unsupported-path-policy", "unsupported-tool-policy"}
 

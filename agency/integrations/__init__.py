@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from agency.configuration.issues import ValidationIssue
+from agency.integrations.models import EffectiveRuntimePolicy, RuntimeCapabilities
+
 if TYPE_CHECKING:
     from agency.config import SandboxSpec
 
@@ -70,6 +73,7 @@ class BaseIntegration:
     supports_ai_backend: bool = False
     supports_sandbox: bool = False
     detect_priority: int = 100
+    runtime_capabilities: RuntimeCapabilities = RuntimeCapabilities()
 
     def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
             *, sandbox_root: "SandboxSpec | None" = None) -> RunResult:
@@ -131,6 +135,39 @@ class BaseIntegration:
     def validate_config(self, config: dict) -> list[str]:
         """Validate integration_config. Return list of error messages."""
         return []
+
+    def validate_runtime_policy(
+        self,
+        policy: EffectiveRuntimePolicy,
+    ) -> tuple[ValidationIssue, ...]:
+        issues: list[ValidationIssue] = []
+        if policy.sandbox_mode not in self.runtime_capabilities.path_modes:
+            issues.append(
+                ValidationIssue(
+                    code="unsupported-path-policy",
+                    scope=f"integrations.{self.name}",
+                    field="runtime.sandbox.mode",
+                    message=(
+                        f"Integration '{self.name}' cannot enforce sandbox mode "
+                        f"'{policy.sandbox_mode}'."
+                    ),
+                    corrective_hint="Use a supported sandbox mode for this integration.",
+                )
+            )
+        if policy.tools.mode not in self.runtime_capabilities.tool_modes:
+            issues.append(
+                ValidationIssue(
+                    code="unsupported-tool-policy",
+                    scope=f"integrations.{self.name}",
+                    field="runtime.tools.mode",
+                    message=(
+                        f"Integration '{self.name}' cannot enforce tool mode "
+                        f"'{policy.tools.mode}'."
+                    ),
+                    corrective_hint="Use a supported tool mode for this integration.",
+                )
+            )
+        return tuple(issues)
 
     def _write_sidecar_identity(self, agent_dir: Path, identity_file: Path, identity: AgentIdentity) -> None:
         """Write identity for sidecar-based integrations (body to identity file, meta to sidecar)."""
