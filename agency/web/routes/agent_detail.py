@@ -192,7 +192,7 @@ def _list_markdown_items(directory: Path) -> list[dict[str, Any]]:
     return items
 
 
-def _recent_log_rows(group_path: Path, agent_id: str) -> list[dict[str, str]]:
+def _recent_log_rows(group_id: str, group_path: Path, agent_id: str) -> list[dict[str, str]]:
     logs_root = group_path / "shared" / "logs"
     rows: list[dict[str, str]] = []
     if not logs_root.exists():
@@ -206,7 +206,7 @@ def _recent_log_rows(group_path: Path, agent_id: str) -> list[dict[str, str]]:
             rows.append(
                 {
                     "name": candidate.name,
-                    "href": f"/{group_path.name}/logs/view?path={quote(str(candidate.resolve()))}",
+                    "href": f"/{quote(group_id, safe='')}/logs/view?path={quote(str(candidate.resolve()))}",
                     "when": candidate.stat().st_mtime_ns,
                 }
             )
@@ -248,7 +248,7 @@ def _activity_items(group_id: str, group_path: Path, agent_id: str) -> dict[str,
         "observations": observations[:8],
         "proposals": proposals[:8],
         "jobs": jobs[:8],
-        "logs": _recent_log_rows(group_path, agent_id),
+        "logs": _recent_log_rows(group_id, group_path, agent_id),
     }
 
 

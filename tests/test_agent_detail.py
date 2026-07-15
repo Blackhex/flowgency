@@ -100,6 +100,46 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
     return TestClient(app_mod.app), config_path
 
 
+def _seed_activity_app(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    group_root = tmp_path / "groups" / "newsletter-workspace"
+    raw["agency"]["default_group"] = "newsletter-prod"
+    raw["groups"] = {
+        "newsletter-prod": {
+            **raw["groups"]["newsletter"],
+            "path": str(group_root),
+            "name": "Newsletter Prod",
+            "agents": [
+                {
+                    **raw["groups"]["newsletter"]["agents"][0],
+                    "name": "advisor",
+                }
+            ],
+        }
+    }
+    raw["groups"]["newsletter-prod"]["agents"][0]["name"] = "advisor"
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    group_root.joinpath("shared", "jobs").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("shared", "observations").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("shared", "proposals").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("shared", "decisions").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("shared", "memory.md").write_text("# Shared\n", encoding="utf-8")
+    group_root.joinpath("shared", "observations", "status.md").write_text(
+        "---\nagent: advisor\nstatus: open\n---\n\nObservation.\n",
+        encoding="utf-8",
+    )
+    log_file = group_root.joinpath("shared", "logs", "2026-07-16", "advisor-run.out")
+    log_file.write_text("# log\n", encoding="utf-8")
+    app_mod.reload_groups()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    return TestClient(app_mod.app), config_path, log_file
+
+
 def _revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
 
@@ -224,6 +264,27 @@ def test_activity_tab_is_read_only(monkeypatch, tmp_path, canonical_raw_config):
     assert response.status_code == 200
     assert "Recent activity" in response.text
     assert '<form' not in response.text
+
+
+def test_activity_links_use_routed_group_key_and_round_trip(monkeypatch, tmp_path, canonical_raw_config):
+    client, _, log_file = _seed_activity_app(monkeypatch, tmp_path, canonical_raw_config)
+
+    response = client.get("/newsletter-prod/agents/advisor/activity")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "/newsletter-workspace/" not in body
+    assert "/newsletter-prod/observations/status" in body
+    assert "/newsletter-prod/proposals/" not in body
+    log_href_match = __import__("re").search(r'href="([^"]+/logs/view\?path=[^"]+)"', body)
+    assert log_href_match is not None
+    log_href = log_href_match.group(1)
+    assert log_href.startswith("/newsletter-prod/logs/view?path=")
+    assert "%3A" in log_href or "%5C" in log_href
+
+    log_response = client.get(log_href)
+    assert log_response.status_code == 200
+    assert log_file.name in log_response.text
 
 
 def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path, canonical_raw_config):
