@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from html.parser import HTMLParser
 from pathlib import Path
 
 import yaml
@@ -9,6 +10,31 @@ from fastapi.testclient import TestClient
 from agency.configuration.store import ConfigStore
 from agency.configuration.store import config_revision
 from agency import app as app_mod
+
+
+class _FormParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.forms = []
+        self._current = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form":
+            self._current = {"attrs": attrs, "inputs": []}
+        elif tag == "input" and self._current is not None:
+            self._current["inputs"].append(attrs)
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self._current is not None:
+            self.forms.append(self._current)
+            self._current = None
+
+
+def _parse_forms(html: str):
+    parser = _FormParser()
+    parser.feed(html)
+    return parser.forms
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -156,6 +182,49 @@ def test_setup_page_includes_expected_revision_for_existing_bootstrap_config(
     assert response.status_code == 200
     assert 'name="expected_revision"' in response.text
     assert f'value="{config_revision(original)}"' in response.text
+
+
+def test_setup_form_has_distinct_group_key_and_expected_revision_inputs(
+    monkeypatch, tmp_path
+):
+    config_path = tmp_path / "config.yaml"
+    original = b"agency:\n  title: Agency\ngroups: {}\n"
+    config_path.write_bytes(original)
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.reload_groups()
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup")
+
+    assert response.status_code == 200
+    forms = [form for form in _parse_forms(response.text) if form["attrs"].get("action") == "/setup"]
+    assert len(forms) == 1
+    setup_form = forms[0]
+    inputs = {input_["name"]: input_ for input_ in setup_form["inputs"] if input_.get("name")}
+
+    assert inputs["group_key"]["value"] == ""
+    assert inputs["expected_revision"]["value"] == config_revision(original)
+    assert inputs["group_key"] is not inputs["expected_revision"]
+
+    payload = {
+        "expected_revision": inputs["expected_revision"]["value"],
+        "group_key": "newsletter",
+        "group_name": "Newsletter",
+        "path": str(tmp_path / "groups" / "newsletter"),
+        "agent_library": str(tmp_path / "agent-library"),
+        "compilation_cache": str(tmp_path / "compiled-agents"),
+        "memory_store": str(tmp_path / "memory-store"),
+        "workspace_name": "Terminal Grid",
+        "workspace_type": "tmux",
+        "workspace_config": '{"script_path": "tmux-agents.sh"}',
+    }
+
+    first = client.post("/setup", data=payload, follow_redirects=False)
+    assert first.status_code == 303
+
+    second = client.post("/setup", data=payload, follow_redirects=False)
+    assert second.status_code == 409
+    assert "Configuration changed" in second.text
 
 
 def test_setup_post_write_failure_preserves_existing_bytes(

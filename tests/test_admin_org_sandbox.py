@@ -1,4 +1,5 @@
 from copy import deepcopy
+from html.parser import HTMLParser
 from pathlib import Path
 
 import yaml
@@ -6,6 +7,33 @@ from fastapi.testclient import TestClient
 
 import agency.app as app_mod
 from agency.configuration import ConfigStore
+
+
+class _FormParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.forms = []
+        self._current = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form":
+            self._current = {"attrs": attrs, "inputs": [], "options": []}
+        elif tag == "input" and self._current is not None:
+            self._current["inputs"].append(attrs)
+        elif tag == "option" and self._current is not None:
+            self._current["options"].append(attrs)
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self._current is not None:
+            self.forms.append(self._current)
+            self._current = None
+
+
+def _parse_forms(html: str):
+    parser = _FormParser()
+    parser.feed(html)
+    return parser.forms
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -345,6 +373,59 @@ def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch, ca
         "mode": "allowlist",
         "names": ["shell", "write"],
     }
+
+
+def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
+    tmp_path, monkeypatch, canonical_raw_config
+):
+    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+    (tmp_path / "new-agents").mkdir()
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "key": "copilot-group",
+            "name": "Copilot Group",
+            "path": str(tmp_path / "new-agents"),
+            "workspaces_json": "[]",
+            "default_integration": "copilot",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert store.load().raw["groups"]["copilot-group"]["default_integration"] == "copilot"
+
+    bad = client.post(
+        "/admin/orgs/create",
+        data={
+            "key": "bad-group",
+            "name": "Bad Group",
+            "path": str(tmp_path / "new-agents"),
+            "workspaces_json": "[]",
+            "default_integration": "not-registered",
+        },
+        follow_redirects=False,
+    )
+
+    assert bad.status_code == 409
+    assert "not-registered" in bad.text
+    assert 'name="default_integration"' in bad.text
+    assert "selected" in bad.text
+    assert "bad-group" not in store.load().raw["groups"]
+
+
+def test_admin_org_create_form_parser_smoke_preserves_default_integration_select(
+    monkeypatch, tmp_path, canonical_raw_config
+):
+    client, _ = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+
+    response = client.get("/admin/orgs/new")
+
+    assert response.status_code == 200
+    forms = [form for form in _parse_forms(response.text) if form["attrs"].get("action") == "/admin/orgs/create"]
+    assert len(forms) == 1
+    assert any(option.get("value") == "copilot" for option in forms[0]["options"])
 
 
 def test_admin_org_create_calls_one_patch_and_persists_full_group_state(

@@ -1712,6 +1712,7 @@ async def admin_org_new(request: Request):
         "org_key": "",
         "org_name": "",
         "org_path": "",
+        "default_integration": "claude-code",
         "org_agents": "",
         "org_workspaces_json": json_module.dumps([]),
         "workspace_types_json": _workspace_types_json(),

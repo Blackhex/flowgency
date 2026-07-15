@@ -15,6 +15,7 @@ from agency.configuration import (
     patch_group_settings_state,
     validate_config_canonical,
 )
+from agency.integrations import REGISTRY
 from agency.web.dependencies import AgencyServices, get_services
 
 
@@ -157,6 +158,10 @@ def _group_settings_response(
 
 def _split_lines(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _integration_names() -> list[str]:
+    return sorted(REGISTRY)
 
 
 @router.get("/setup", response_class=HTMLResponse)
@@ -413,13 +418,34 @@ async def admin_org_create(
                 "org_key": key,
                 "org_name": name,
                 "org_path": path,
+                "default_integration": str(form.get("default_integration", "")).strip(),
                 "org_workspaces_json": str(form.get("workspaces_json", "[]")),
                 "workspace_types_json": _workspace_types_json(request),
                 "warning": "Key, name, and path are required.",
+                "integration_names": _integration_names(),
             },
         )
     snapshot = services.config_store.load()
     roots = _split_lines(str(form.get("sandbox_root", "")))
+    default_integration = str(form.get("default_integration", "")).strip()
+    if default_integration and default_integration not in REGISTRY:
+        return _templates(request).TemplateResponse(
+            request,
+            "admin_org_edit.html",
+            {
+                **_base_admin_context(request, snapshot),
+                "mode": "create",
+                "org_key": key,
+                "org_name": name,
+                "org_path": path,
+                "default_integration": default_integration,
+                "org_workspaces_json": str(form.get("workspaces_json", "[]")),
+                "workspace_types_json": _workspace_types_json(request),
+                "warning": f"Integration '{default_integration}' is not registered.",
+                "integration_names": _integration_names(),
+            },
+            status_code=409,
+        )
     tools = [
         item.strip() for item in form.getlist("allowed_tools") if item.strip()
     ]
@@ -438,9 +464,11 @@ async def admin_org_create(
                 "org_key": key,
                 "org_name": name,
                 "org_path": path,
+                "default_integration": default_integration,
                 "org_workspaces_json": workspaces_json,
                 "workspace_types_json": _workspace_types_json(request),
                 "warning": "Workspaces payload is invalid.",
+                "integration_names": _integration_names(),
             },
             status_code=409,
         )
@@ -451,7 +479,7 @@ async def admin_org_create(
         GroupCreateStatePatch(
             name=name,
             path=path,
-            default_integration="claude-code",
+            default_integration=default_integration or "claude-code",
             runtime_timeout=1800,
             sandbox_mode="restricted" if roots else "unrestricted",
             sandbox_roots=tuple(roots),
