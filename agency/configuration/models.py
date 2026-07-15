@@ -49,10 +49,15 @@ class MemorySelector(BaseModel):
     channel: str | None = None
 
 
-class RuntimeSandbox(BaseModel):
+class GroupRuntimeSandbox(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     mode: SandboxMode = "unrestricted"
     roots: tuple[Path, ...] = ()
+
+
+class AgentRuntimeSandbox(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    mode: SandboxMode = "unrestricted"
     additional_roots: tuple[Path, ...] = ()
 
 
@@ -65,7 +70,7 @@ class RuntimeTools(BaseModel):
 class AgentRuntime(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     timeout: int = 1800
-    sandbox: RuntimeSandbox = Field(default_factory=RuntimeSandbox)
+    sandbox: AgentRuntimeSandbox = Field(default_factory=AgentRuntimeSandbox)
     tools: RuntimeTools = Field(default_factory=RuntimeTools)
 
 
@@ -124,7 +129,7 @@ class WorkspaceConfig(BaseModel):
 class GroupRuntime(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     timeout: int = 1800
-    sandbox: RuntimeSandbox = Field(default_factory=lambda: RuntimeSandbox(mode="unrestricted"))
+    sandbox: GroupRuntimeSandbox = Field(default_factory=lambda: GroupRuntimeSandbox(mode="unrestricted"))
     tools: RuntimeTools = Field(default_factory=RuntimeTools)
 
 
@@ -487,27 +492,71 @@ def _validate_memory_selector(
     return None
 
 
+def _validate_blueprint(agent: Any, scope: str) -> ValidationIssue | None:
+    if not _is_mapping(agent):
+        return None
+    blueprint = agent.get("blueprint")
+    if not isinstance(blueprint, str) or not blueprint.strip():
+        return _build_issue(
+            code="missing-blueprint",
+            scope=scope,
+            field="blueprint",
+            message="Blueprint is required.",
+            hint="Set blueprint to a non-empty identifier for the agent instance.",
+        )
+    return _validate_identifier("blueprint", blueprint, scope)
+
+
 def _validate_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
-    return _validate_runtime_with_roots(runtime, scope, root_field="additional_roots")
+    return _validate_agent_runtime(runtime, scope)
 
 
-def _validate_runtime_with_roots(runtime: Any, scope: str, root_field: str) -> list[ValidationIssue]:
+def _validate_group_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if not _is_mapping(runtime):
         return issues
     sandbox = runtime.get("sandbox") or {}
     if not _is_mapping(sandbox):
         return issues
-    if sandbox.get("mode") == "unrestricted" and sandbox.get(root_field):
+    if sandbox.get("mode") == "unrestricted" and sandbox.get("roots"):
         issues.append(
             _build_issue(
                 code="sandbox-contradiction",
                 scope=scope,
-                field=f"runtime.sandbox.{root_field}",
+                field="runtime.sandbox.roots",
+                message="Unrestricted sandbox cannot add roots.",
+                hint="Remove roots or switch to restricted mode.",
+            )
+        )
+    issues.extend(_validate_runtime_tools(runtime, scope))
+    return issues
+
+
+def _validate_agent_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if not _is_mapping(runtime):
+        return issues
+    sandbox = runtime.get("sandbox") or {}
+    if not _is_mapping(sandbox):
+        return issues
+    if sandbox.get("additional_roots") and sandbox.get("mode") == "unrestricted":
+        issues.append(
+            _build_issue(
+                code="sandbox-contradiction",
+                scope=scope,
+                field="runtime.sandbox.additional_roots",
                 message="Unrestricted sandbox cannot add roots.",
                 hint="Remove additional roots or switch to restricted mode.",
             )
         )
+    issues.extend(_validate_runtime_tools(runtime, scope))
+    return issues
+
+
+def _validate_runtime_tools(runtime: Any, scope: str) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if not _is_mapping(runtime):
+        return issues
     tools = runtime.get("tools") or {}
     if not _is_mapping(tools):
         return issues
@@ -540,21 +589,6 @@ def _validate_runtime_with_roots(runtime: Any, scope: str, root_field: str) -> l
                 )
             )
     return issues
-
-
-def _validate_blueprint(agent: Any, scope: str) -> ValidationIssue | None:
-    if not _is_mapping(agent):
-        return None
-    blueprint = agent.get("blueprint")
-    if not isinstance(blueprint, str) or not blueprint.strip():
-        return _build_issue(
-            code="missing-blueprint",
-            scope=scope,
-            field="blueprint",
-            message="Blueprint is required.",
-            hint="Set blueprint to a non-empty identifier for the agent instance.",
-        )
-    return _validate_identifier("blueprint", blueprint, scope)
 
 
 def _validate_default_group(default_group: Any, groups: Mapping[str, Any]) -> list[ValidationIssue]:
@@ -648,7 +682,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 )
             )
         runtime = group.get("runtime") or {}
-        issues.extend(_validate_runtime_with_roots(runtime, f"groups.{group_name}", root_field="roots"))
+        issues.extend(_validate_group_runtime(runtime, f"groups.{group_name}"))
         agents = group.get("agents") if _is_list(group.get("agents")) else []
         seen_agents: set[str] = set()
         for index, agent in enumerate(agents):
@@ -757,7 +791,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     if issue:
                         issues.append(issue)
             runtime = agent.get("runtime") or {}
-            issues.extend(_validate_runtime(runtime, f"groups.{group_name}.agents.{name or '<unknown>'}"))
+            issues.extend(_validate_agent_runtime(runtime, f"groups.{group_name}.agents.{name or '<unknown>'}"))
 
         dispatch = group.get("dispatch") if _is_mapping(group.get("dispatch")) else {}
         if _is_mapping(dispatch):
@@ -796,14 +830,16 @@ def _prepare_runtime(runtime: Any, base_path: Path | None) -> dict[str, Any]:
     runtime_entry = dict(runtime) if _is_mapping(runtime) else {}
     sandbox = dict(runtime_entry.get("sandbox") or {})
     if base_path is not None:
-        roots = []
-        for root in sandbox.get("roots") or []:
-            roots.append(_path_from_config(root, base_path))
-        additional_roots = []
-        for root in sandbox.get("additional_roots") or []:
-            additional_roots.append(_path_from_config(root, base_path))
-        sandbox["roots"] = tuple(roots)
-        sandbox["additional_roots"] = tuple(additional_roots)
+        if "roots" in sandbox:
+            roots = []
+            for root in sandbox.get("roots") or []:
+                roots.append(_path_from_config(root, base_path))
+            sandbox["roots"] = tuple(roots)
+        if "additional_roots" in sandbox:
+            additional_roots = []
+            for root in sandbox.get("additional_roots") or []:
+                additional_roots.append(_path_from_config(root, base_path))
+            sandbox["additional_roots"] = tuple(additional_roots)
     runtime_entry["sandbox"] = sandbox
     tools = dict(runtime_entry.get("tools") or {})
     if tools.get("names") is not None:

@@ -259,6 +259,67 @@ Result:
 ...FF.FF....FFF...
 ```
 
+## Review Fix 10
+
+### RED
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests\test_config_canonical.py -q
+```
+
+Result:
+
+```text
+Initial sandbox ownership regressions failed because the config model still shared one runtime sandbox shape across group and agent scopes.
+```
+
+### GREEN
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests\test_config_canonical.py -q
+```
+
+Result:
+
+```text
+95 passed in 0.60s
+```
+
+### Full Suite
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Result:
+
+```text
+708 passed, 1 skipped in 23.34s
+```
+
+### Files Changed
+
+- [agency/configuration/models.py](agency/configuration/models.py)
+- [tests/test_config_canonical.py](tests/test_config_canonical.py)
+- [.superpowers/sdd/task-2-report.md](.superpowers/sdd/task-2-report.md)
+
+### Self-Review
+
+- Group runtime sandbox now uses its own strict model with `mode` and `roots` only.
+- Agent runtime sandbox now uses its own strict model with `mode` and `additional_roots` only.
+- Wrong-owner sandbox fields are rejected by model validation with `invalid-config`, not just by semantic contradiction checks.
+- The existing allowlist and blueprint validators were restored after the refactor so unrelated config behavior stayed intact.
+
+### Concerns
+
+- The validator still emits named-agent field paths for agent sandbox errors, which is correct for the current model but should be kept stable if downstream tooling depends on positional indices.
+
 ## Review Fix 9
 
 ### RED

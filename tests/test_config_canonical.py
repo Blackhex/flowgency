@@ -394,37 +394,72 @@ def test_rejects_invalid_group_allowlist(canonical_raw_config, canonical_paths):
     assert excinfo.value.issues == issues
 
 
-@pytest.mark.parametrize(
-    ("runtime_value", "expected_code", "expected_field"),
-    [
-        ({"sandbox": {"mode": "unrestricted", "roots": ["tmp"]}}, "sandbox-contradiction", "runtime.sandbox.roots"),
-        (
-            {"sandbox": {"mode": "restricted", "roots": ["shared"], "additional_roots": ["tmp"]}},
-            None,
-            None,
-        ),
-    ],
-)
-def test_validates_group_sandbox_semantics(canonical_raw_config, canonical_paths, runtime_value, expected_code, expected_field):
-    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+def test_rejects_group_additional_roots(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import validate_config_canonical
 
-    canonical_raw_config["groups"]["newsletter"]["runtime"] = runtime_value
+    canonical_raw_config["groups"]["newsletter"]["runtime"] = {
+        "sandbox": {"mode": "restricted", "roots": ["shared"], "additional_roots": ["tmp"]}
+    }
 
     issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
 
-    if expected_code is None:
-        assert not any(issue.code == "sandbox-contradiction" for issue in issues)
-        parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
-        assert parsed.groups["newsletter"].runtime.sandbox.mode == "restricted"
-        assert parsed.groups["newsletter"].runtime.sandbox.roots[0].name == "shared"
-        return
+    assert any(issue.code == "invalid-config" and issue.field == "groups.newsletter.runtime.sandbox.additional_roots" for issue in issues)
 
-    assert any(issue.code == expected_code and issue.field == expected_field for issue in issues)
+
+def test_rejects_agent_roots(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+        "sandbox": {"mode": "restricted", "roots": ["tmp"]}
+    }
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == "invalid-config" and issue.field == "groups.newsletter.agents.builder.runtime.sandbox.roots" for issue in issues)
+
+
+def test_validates_group_sandbox_semantics(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["runtime"] = {"sandbox": {"mode": "unrestricted", "roots": ["tmp"]}}
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == "sandbox-contradiction" and issue.field == "runtime.sandbox.roots" for issue in issues)
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
 
-    assert any(issue.code == expected_code and issue.field == expected_field for issue in excinfo.value.issues)
+    assert any(issue.code == "sandbox-contradiction" and issue.field == "runtime.sandbox.roots" for issue in excinfo.value.issues)
+
+
+def test_accepts_restricted_group_roots(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["runtime"] = {
+        "sandbox": {"mode": "restricted", "roots": ["shared"]}
+    }
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert not any(issue.code == "invalid-field-shape" for issue in issues)
+
+    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert parsed.groups["newsletter"].runtime.sandbox.mode == "restricted"
+    assert parsed.groups["newsletter"].runtime.sandbox.roots[0].name == "shared"
+
+
+def test_accepts_agent_additions(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+        "sandbox": {"mode": "restricted", "additional_roots": ["tmp"]}
+    }
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert not any(issue.code == "invalid-field-shape" for issue in issues)
+
+    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert parsed.groups["newsletter"].agents["builder"].runtime.sandbox.additional_roots[0].name == "tmp"
 
 
 def test_rejects_channel_memory_reference_without_channel(canonical_raw_config, canonical_paths):
@@ -538,6 +573,25 @@ def test_rejects_unrestricted_with_additions(canonical_raw_config, canonical_pat
     }
     issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
     assert any(issue.code == "sandbox-contradiction" for issue in issues)
+
+
+def test_parse_validate_parity_for_sandbox_ownership(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    candidate = _clone_config(canonical_raw_config)
+    candidate["groups"]["newsletter"]["runtime"] = {
+        "sandbox": {"mode": "restricted", "roots": ["shared"], "additional_roots": ["tmp"]}
+    }
+    candidate["groups"]["newsletter"]["agents"][0]["runtime"] = {
+        "sandbox": {"mode": "restricted", "roots": ["tmp"]}
+    }
+
+    issues = validate_config_canonical(candidate, canonical_paths["config_path"])
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(candidate, canonical_paths["config_path"])
+
+    assert excinfo.value.issues == issues
 
 
 def test_preserves_supported_workspace_fields(canonical_raw_config, canonical_paths):
