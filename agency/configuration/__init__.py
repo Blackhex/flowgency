@@ -1,13 +1,68 @@
-"""Strict canonical configuration models and validation primitives."""
+"""Strict canonical configuration models, store, and validation primitives."""
 
+from .compat import SandboxSpec, load_config_path, save_config_path
 from .issues import ValidationFailed, ValidationIssue
-from .models import AgencyConfigcanonical, ParsedConfig, parse_config_canonical, validate_config_canonical
+from .models import (
+    AgencyConfigcanonical,
+    ParsedConfig,
+    parse_config_canonical,
+    validate_config_canonical,
+)
+from .patches import (
+    AgencySettingsPatch,
+    AgentProfilePatch,
+    AgentRuntimePatch,
+    GroupDispatchPatch,
+    GroupSettingsPatch,
+    ToolPolicy,
+    create_agent_instance,
+    create_group,
+    patch_agency_settings,
+    patch_agent_profile,
+    patch_agent_runtime,
+    patch_group_dispatch,
+    patch_group_settings,
+    patch_memory_channels,
+    remove_agent_instance,
+    replace_agent_routines,
+)
+from .store import (
+    ConfigConflictError,
+    ConfigSnapshot,
+    ConfigStore,
+    config_revision,
+    load_config_snapshot,
+)
 
 __all__ = [
-	"AgencyConfigcanonical",
-	"ParsedConfig",
-	"ValidationFailed",
-	"ValidationIssue",
-	"parse_config_canonical",
-	"validate_config_canonical",
+    "AgencyConfigcanonical",
+    "AgencySettingsPatch",
+    "AgentProfilePatch",
+    "AgentRuntimePatch",
+    "ConfigConflictError",
+    "ConfigSnapshot",
+    "ConfigStore",
+    "GroupDispatchPatch",
+    "GroupSettingsPatch",
+    "ParsedConfig",
+    "SandboxSpec",
+    "ToolPolicy",
+    "ValidationFailed",
+    "ValidationIssue",
+    "config_revision",
+    "create_agent_instance",
+    "create_group",
+    "load_config_path",
+    "load_config_snapshot",
+    "patch_agency_settings",
+    "patch_agent_profile",
+    "patch_agent_runtime",
+    "patch_group_dispatch",
+    "patch_group_settings",
+    "patch_memory_channels",
+    "parse_config_canonical",
+    "remove_agent_instance",
+    "replace_agent_routines",
+    "save_config_path",
+    "validate_config_canonical",
 ]
