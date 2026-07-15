@@ -164,6 +164,30 @@ def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_pat
     assert "Research/editorial" in response.text.replace("\\", "/")
 
 
+def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    shared_root = str((tmp_path / "Research" / "shared").resolve())
+    editorial_root = str((tmp_path / "Research" / "editorial").resolve())
+    raw["groups"]["newsletter"]["agents"][0]["runtime"]["sandbox"]["additional_roots"] = [
+        shared_root,
+        editorial_root,
+    ]
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    app_mod.reload_groups()
+
+    response = client.get("/newsletter/agents/advisor/runtime")
+
+    assert response.status_code == 200
+    body = response.text.replace("\\", "/")
+    assert body.count(f"Group default: <span class=\"font-mono break-all\">{shared_root.replace('\\', '/')}</span>") == 2
+    assert f"Agent addition: <span class=\"font-mono break-all\">{shared_root.replace('\\', '/')}</span>" not in body
+    assert f"Agent addition: <span class=\"font-mono break-all\">{editorial_root.replace('\\', '/')}</span>" in body
+
+
 def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, canonical_raw_config):
     client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
 
@@ -172,7 +196,10 @@ def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, canonical_raw_config)
     assert response.status_code == 200
     assert "daily-review" in response.text
     assert "cache" in response.text.lower()
-    assert "Edit blueprint" in response.text
+    assert "Open in Agent Library" in response.text
+    assert "View skills in Agent Library" in response.text
+    assert "/admin/agent-library/blueprints/advisor" in response.text
+    assert "/admin/agent-library/blueprints/advisor/skills" in response.text
     assert '<form' not in response.text
 
 
@@ -333,7 +360,7 @@ def test_routines_post_rejects_duplicate_ids(monkeypatch, tmp_path, canonical_ra
     assert "Duplicate routine id" in response.text
 
 
-def test_memory_post_updates_selector_and_content(monkeypatch, tmp_path, canonical_raw_config):
+def test_memory_post_selector_updates_only_config(monkeypatch, tmp_path, canonical_raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
     store = ConfigStore(config_path)
     snapshot = store.load()
@@ -346,19 +373,17 @@ def test_memory_post_updates_selector_and_content(monkeypatch, tmp_path, canonic
         channels=snapshot.config.memory.channels,
         store_root=(tmp_path / "memory-store"),
     )
-    app_mod.app.state.services.memory_store.ensure(resolved)
+    memory_store = app_mod.app.state.services.memory_store
+    before = memory_store.ensure(resolved)
     revision = snapshot.revision
-    content_revision = app_mod.app.state.services.memory_store.read(resolved).revision
 
     response = client.post(
         "/newsletter/agents/advisor/memory",
         data={
+            "action": "selector",
             "revision": revision,
-            "content_revision": content_revision,
             "default_memory_scope": "group",
             "default_memory_channel": "",
-            "filename": "memory.md",
-            "content": "Updated memory",
         },
         follow_redirects=False,
     )
@@ -366,6 +391,44 @@ def test_memory_post_updates_selector_and_content(monkeypatch, tmp_path, canonic
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["groups"]["newsletter"]["agents"][0]["default_memory"] == {"scope": "group"}
+    after = memory_store.read(resolved)
+    assert after.revision == before.revision
+    assert after.files == before.files
+
+
+def test_memory_post_content_updates_only_selected_memory(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    store = ConfigStore(config_path)
+    snapshot = store.load()
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="detail-newsletter-advisor",
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=snapshot.config.memory.channels,
+        store_root=(tmp_path / "memory-store"),
+    )
+    memory_store = app_mod.app.state.services.memory_store
+    before_config_bytes = config_path.read_bytes()
+    seeded = memory_store.ensure(resolved)
+
+    response = client.post(
+        "/newsletter/agents/advisor/memory",
+        data={
+            "action": "content",
+            "content_revision": seeded.revision,
+            "selector_token": "agent",
+            "filename": "memory.md",
+            "content": "Updated memory",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert config_path.read_bytes() == before_config_bytes
+    current = memory_store.read(resolved)
+    assert current.files["memory.md"] == b"Updated memory"
 
 
 def test_memory_post_returns_409_for_stale_content_revision(monkeypatch, tmp_path, canonical_raw_config):
@@ -384,15 +447,14 @@ def test_memory_post_returns_409_for_stale_content_revision(monkeypatch, tmp_pat
     memory_store = app_mod.app.state.services.memory_store
     seeded = memory_store.ensure(resolved)
     current = memory_store.try_save(resolved, seeded.revision, {"memory.md": b"server"})
-    revision = snapshot.revision
+    before_config_bytes = config_path.read_bytes()
 
     response = client.post(
         "/newsletter/agents/advisor/memory",
         data={
-            "revision": revision,
+            "action": "content",
             "content_revision": seeded.revision,
-            "default_memory_scope": "agent",
-            "default_memory_channel": "",
+            "selector_token": "agent",
             "filename": "memory.md",
             "content": "client",
         },
@@ -403,6 +465,48 @@ def test_memory_post_returns_409_for_stale_content_revision(monkeypatch, tmp_pat
     assert seeded.revision in response.text
     assert "server" in response.text
     assert "client" in response.text
+    assert config_path.read_bytes() == before_config_bytes
+
+
+def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memory(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    store = ConfigStore(config_path)
+    snapshot = store.load()
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="detail-newsletter-advisor",
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=snapshot.config.memory.channels,
+        store_root=(tmp_path / "memory-store"),
+    )
+    memory_store = app_mod.app.state.services.memory_store
+    seeded = memory_store.ensure(resolved)
+    stale_revision = snapshot.revision
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["agency"]["title"] = "Changed elsewhere"
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    app_mod.reload_groups()
+
+    response = client.post(
+        "/newsletter/agents/advisor/memory",
+        data={
+            "action": "selector",
+            "revision": stale_revision,
+            "default_memory_scope": "group",
+            "default_memory_channel": "",
+        },
+    )
+
+    assert response.status_code == 409
+    current = memory_store.read(resolved)
+    assert current.revision == seeded.revision
+    assert current.files == seeded.files
 
 
 def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, canonical_raw_config):
@@ -420,6 +524,7 @@ def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, cano
     )
     memory_store = app_mod.app.state.services.memory_store
     seeded = memory_store.ensure(resolved)
+    before_config_bytes = config_path.read_bytes()
     lock_path = memory_store._lock_path(resolved)
     acquired, release = Event(), Event()
     process = Process(target=_hold_lock, args=(str(lock_path), acquired, release))
@@ -430,10 +535,9 @@ def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, cano
         response = client.post(
             "/newsletter/agents/advisor/memory",
             data={
-                "revision": snapshot.revision,
+                "action": "content",
                 "content_revision": seeded.revision,
-                "default_memory_scope": "agent",
-                "default_memory_channel": "",
+                "selector_token": "agent",
                 "filename": "memory.md",
                 "content": "blocked",
             },
@@ -445,3 +549,4 @@ def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, cano
 
     assert response.status_code == 423
     assert "Memory is busy" in response.text
+    assert config_path.read_bytes() == before_config_bytes

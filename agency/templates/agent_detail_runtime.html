@@ -29,8 +29,8 @@
       <p>Sandbox: {{ effective.sandbox_mode }}</p>
       <p>Tools: {{ effective.tools.mode }}</p>
       <ul class="space-y-1">
-        {% for root in effective.sandbox_roots %}
-        <li>Agent addition: <span class="font-mono break-all">{{ root }}</span></li>
+        {% for root in effective_root_rows %}
+        <li>{{ root.source }}: <span class="font-mono break-all">{{ root.path }}</span></li>
         {% else %}
         <li>No explicit roots</li>
         {% endfor %}

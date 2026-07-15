@@ -21,8 +21,8 @@
   </div>
   {% endif %}
   <form method="post" action="/{{ group }}/agents/{{ agent }}/memory" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
+    <input type="hidden" name="action" value="selector">
     <input type="hidden" name="revision" value="{{ config_revision }}">
-    <input type="hidden" name="content_revision" value="{{ memory_snapshot.revision }}">
     <label class="block text-sm text-gray-700">
       <span class="mb-1 block font-medium">Default selector</span>
       <select name="default_memory_scope" class="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white">
@@ -41,6 +41,14 @@
         {% endfor %}
       </select>
     </label>
+    <div class="md:col-span-2 flex justify-end">
+      <button type="submit" class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Save selector</button>
+    </div>
+  </form>
+  <form method="post" action="/{{ group }}/agents/{{ agent }}/memory" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
+    <input type="hidden" name="action" value="content">
+    <input type="hidden" name="content_revision" value="{{ memory_snapshot.revision }}">
+    <input type="hidden" name="selector_token" value="{{ selector_token }}">
     <label class="block text-sm text-gray-700 md:col-span-2">
       <span class="mb-1 block font-medium">Markdown file</span>
       <select name="filename" class="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white font-mono text-xs">

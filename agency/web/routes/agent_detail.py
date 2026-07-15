@@ -332,6 +332,34 @@ def _patch_default_memory(raw: dict[str, Any], group_id: str, agent_id: str, sel
     target["default_memory"] = payload
 
 
+def _memory_selector_token(selector: MemorySelector | None) -> str:
+    selected = selector or MemorySelector(scope="agent")
+    return selected.scope if selected.scope != "channel" else f"channel:{selected.channel or ''}"
+
+
+def _parse_memory_selector_token(token: str, channels) -> MemorySelector | None:
+    value = str(token or "").strip()
+    if not value:
+        return None
+    if value.startswith("channel:"):
+        channel = value.split(":", 1)[1].strip()
+        selector = MemorySelector(scope="channel", channel=channel or None)
+    else:
+        selector = MemorySelector(scope=value, channel=None)
+    if selector.scope == "channel" and selector.channel not in channels:
+        raise ValidationFailed(
+            (
+                type("Issue", (), {
+                    "code": "missing-memory-channel",
+                    "field": "default_memory.channel",
+                    "message": "Unknown memory channel.",
+                    "corrective_hint": "Choose a declared memory channel.",
+                })(),
+            )
+        )
+    return selector
+
+
 def _parse_memory_selector_from_form(form, channels) -> MemorySelector | None:
     scope = str(form.get("default_memory_scope", "")).strip() or "agent"
     channel = str(form.get("default_memory_channel", "")).strip() or None
@@ -417,8 +445,25 @@ def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
     integration = get_integration(instance.integration)
     issues: list[dict[str, str]] = []
     effective = None
+    effective_root_rows: list[dict[str, str]] = []
     try:
         effective = resolve_effective_policy(snapshot.config, group_id, agent_id)
+        group_roots = tuple(group.runtime.sandbox.roots)
+        additional_roots = tuple(instance.runtime.sandbox.additional_roots)
+        group_keys = {str(path.resolve(strict=False)).lower(): path for path in group_roots}
+        seen: set[str] = set()
+        for root in effective.sandbox_roots:
+            resolved = root.resolve(strict=False)
+            key = str(resolved).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            effective_root_rows.append(
+                {
+                    "path": str(resolved).replace("\\", "/"),
+                    "source": "Group default" if key in group_keys else "Agent addition",
+                }
+            )
     except ValidationFailed as exc:
         issues = _issue_dicts(exc)
     group_tool_names = tuple(group.runtime.tools.names)
@@ -435,6 +480,7 @@ def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
         "agent_tool_mode": instance.runtime.tools.mode if "tools" in instance.runtime.model_fields_set else "inherit",
         "agent_tool_names": "\n".join(instance_tool_names),
         "effective": effective,
+        "effective_root_rows": effective_root_rows,
         "issues": issues,
         "capabilities": integration.runtime_capabilities,
         "projector_capabilities": getattr(integration.projector, "capabilities", None),
@@ -468,8 +514,8 @@ def _blueprint_context(services: AgencyServices, snapshot, group_id: str, agent_
         "inspection": inspection,
         "compatibility": compatibility,
         "cache_status": cache_status,
-        "edit_library_href": f"/admin/library/{inspection.key}",
-        "edit_skills_href": f"/admin/library/{inspection.key}/skills",
+        "edit_library_href": f"/admin/agent-library/blueprints/{inspection.key}",
+        "edit_skills_href": f"/admin/agent-library/blueprints/{inspection.key}/skills",
     }
 
 
@@ -505,6 +551,7 @@ def _memory_context(snapshot, services: AgencyServices, group_id: str, agent_id:
         "default_memory_scope": (instance.default_memory.scope if instance.default_memory is not None else "agent"),
         "default_memory_channel": (instance.default_memory.channel if instance.default_memory is not None and instance.default_memory.channel else ""),
         "memory_scope_label": _memory_scope_label(instance.default_memory, snapshot.config.memory.channels),
+        "selector_token": _memory_selector_token(instance.default_memory),
         "memory_file_options": _memory_file_options(memory_snapshot),
         "selected_memory_file": selected_file,
         "selected_memory_content": _read_selected_content(memory_snapshot, selected_file),
@@ -707,37 +754,65 @@ async def agent_detail_memory(request: Request, group: str, agent: str, services
 @router.post("/{group}/agents/{agent}/memory", response_class=HTMLResponse)
 async def agent_detail_memory_save(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
     form = await request.form()
+    action = str(form.get("action", "")).strip() or "content"
     revision = str(form.get("revision", "")).strip()
     content_revision = str(form.get("content_revision", "")).strip()
     filename = str(form.get("filename", "memory.md")).strip() or "memory.md"
     content = str(form.get("content", ""))
     try:
         snapshot = services.config_store.load()
-        selector = _parse_memory_selector_from_form(form, snapshot.config.memory.channels)
-        resolved = resolve_memory_selector(
-            selector or MemorySelector(scope="agent"),
-            job_id=_preview_job_id(group, agent),
-            group_key=group,
-            agent_name=agent,
-            routine_id=None,
-            channels=snapshot.config.memory.channels,
-            store_root=services.memory_store.root,
-        )
-        with try_exclusive_lock(services.memory_store._lock_path(resolved)):
-            pass
-        memory_snapshot = _resolve_tab_memory(snapshot, services, group, agent, selector)
-        files = dict(memory_snapshot.files)
-        if filename not in files:
-            files[filename] = b""
-        files[filename] = content.encode("utf-8")
-        if not revision:
-            raise ConfigConflictError("config.yaml changed; reload before saving")
-        raw = deepcopy(snapshot.raw)
-        _patch_default_memory(raw, group, agent, selector)
-        parse_config_canonical(raw, snapshot.path)
-        services.config_store.replace(revision, raw)
-        if content_revision:
+        if action == "selector":
+            selector = _parse_memory_selector_from_form(form, snapshot.config.memory.channels)
+            if not revision:
+                raise ConfigConflictError("config.yaml changed; reload before saving")
+            raw = deepcopy(snapshot.raw)
+            _patch_default_memory(raw, group, agent, selector)
+            parse_config_canonical(raw, snapshot.path)
+            services.config_store.replace(revision, raw)
+        elif action == "content":
+            _, instance = _get_snapshot_instance(snapshot, group, agent)
+            selector_token = str(form.get("selector_token", "")).strip()
+            selector = _parse_memory_selector_token(selector_token, snapshot.config.memory.channels)
+            effective_selector = instance.default_memory
+            if selector is not None:
+                current_token = _memory_selector_token(instance.default_memory)
+                if selector_token != current_token:
+                    raise ConfigConflictError("memory selector changed; reload before saving")
+                effective_selector = selector
+            resolved = resolve_memory_selector(
+                effective_selector or MemorySelector(scope="agent"),
+                job_id=_preview_job_id(group, agent),
+                group_key=group,
+                agent_name=agent,
+                routine_id=None,
+                channels=snapshot.config.memory.channels,
+                store_root=services.memory_store.root,
+            )
+            with try_exclusive_lock(services.memory_store._lock_path(resolved)):
+                pass
+            memory_snapshot = _resolve_tab_memory(snapshot, services, group, agent, effective_selector)
+            files = dict(memory_snapshot.files)
+            if filename not in files:
+                files[filename] = b""
+            files[filename] = content.encode("utf-8")
+            if not content_revision:
+                raise MemoryConflictError(
+                    expected_revision="",
+                    current=memory_snapshot,
+                    attempted_files=files,
+                )
             services.memory_store.try_save(memory_snapshot.resolved, content_revision, files)
+        else:
+            raise ValidationFailed(
+                (
+                    type("Issue", (), {
+                        "code": "invalid-memory-action",
+                        "field": "action",
+                        "message": "Unknown memory action.",
+                        "corrective_hint": "Submit either selector or content.",
+                    })(),
+                )
+            )
     except ResourceBusyError:
         return _detail_context(
             request,
@@ -748,6 +823,7 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
             status_code=423,
             banner="Memory is busy; try again after the active writer finishes.",
             overrides={
+                "selector_token": str(form.get("selector_token", "")).strip(),
                 "selected_memory_file": filename,
                 "selected_memory_content": content,
             },
@@ -768,14 +844,15 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
                 "attempted_content": content,
             },
             overrides={
+                "selector_token": str(form.get("selector_token", "")).strip(),
                 "selected_memory_file": filename,
                 "selected_memory_content": content,
             },
         )
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "memory", status_code=409, issues=_issue_dicts(exc), overrides={"selected_memory_file": filename, "selected_memory_content": content})
+        return _detail_context(request, services, group, agent, "memory", status_code=409, issues=_issue_dicts(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
     except ConfigConflictError as exc:
-        return _detail_context(request, services, group, agent, "memory", status_code=409, banner=str(exc), overrides={"selected_memory_file": filename, "selected_memory_content": content})
+        return _detail_context(request, services, group, agent, "memory", status_code=409, banner=str(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
     request.app.state.reload_groups()
     return RedirectResponse(f"/{group}/agents/{agent}/memory", status_code=303)
 
