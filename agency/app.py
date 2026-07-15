@@ -116,7 +116,7 @@ GROUPS = _runtime_groups(CONFIG)
 
 
 class PromptSlugConvertor(Convertor[str]):
-    regex = r"(?!(?:dispatch)$)[^/]+"
+    regex = r"(?!(?:dispatch)(?:/|$))[^/]+"
 
     def convert(self, value: str) -> str:
         return value
@@ -1414,7 +1414,80 @@ async def root(request: Request):
 
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request):
-    raise HTTPException(404, "Prompts dispatch scheduling is not available")
+    """First-run wizard page."""
+    if GROUPS:
+        return RedirectResponse("/", status_code=303)
+    suggestion = str(Path.home() / "agents")
+    return templates.TemplateResponse(request, "setup.html", {
+        "request": request,
+        "agency_title": get_agency_config().get("title", "Agency"),
+        "suggestion": suggestion,
+        "error": "",
+        "path_value": "",
+    })
+
+
+@app.post("/setup", response_class=HTMLResponse)
+async def setup_process(request: Request):
+    """Process first-run setup: scan path, create group, initialize, redirect."""
+    if GROUPS:
+        return RedirectResponse("/", status_code=303)
+
+    form = await request.form()
+    path_str = form.get("path", "").strip()
+    suggestion = str(Path.home() / "agents")
+    agency_title = get_agency_config().get("title", "Agency")
+
+    # Expand ~ and validate
+    path = Path(path_str).expanduser()
+    if not path.is_dir():
+        return templates.TemplateResponse(request, "setup.html", {
+            "request": request,
+            "agency_title": agency_title,
+            "suggestion": suggestion,
+            "error": "That path doesn't exist or isn't a directory. Check the path and try again.",
+            "path_value": path_str,
+        })
+
+    # Scan for agents
+    detected = []
+    for d in sorted(path.iterdir()):
+        if d.is_dir() and d.name not in ("shared", "_subagents") and not d.name.startswith("."):
+            if detect_integration(d):
+                detected.append(d.name)
+
+    if not detected:
+        return templates.TemplateResponse(request, "setup.html", {
+            "request": request,
+            "agency_title": agency_title,
+            "suggestion": suggestion,
+            "error": 'No agents found at this path. Agency looks for subdirectories containing an agent definition file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). <a href="/admin/" class="underline">Set up manually in Settings</a>.',
+            "path_value": path_str,
+        })
+
+    # Derive group key (deduplicate)
+    base_key = path.name.lower().replace(" ", "-")
+    key = base_key
+    config = load_config()
+    counter = 2
+    while key in config.get("groups", {}):
+        key = f"{base_key}-{counter}"
+        counter += 1
+
+    name = path.name.replace("-", " ").title()
+
+    if "groups" not in config:
+        config["groups"] = {}
+    config["groups"][key] = {
+        "name": name,
+        "path": str(path),
+        "agents": detected,
+    }
+    if "agency" not in config:
+        config["agency"] = {}
+    config["agency"]["default_group"] = key
+
+    save_config(config)
     reload_groups()
 
     # Initialize shared folder structure
@@ -3360,6 +3433,8 @@ async def prompts_list(request: Request, group: str):
 @app.get("/{group}/prompts/{slug:promptslug}", response_class=HTMLResponse)
 async def prompt_detail(request: Request, group: str, slug: str):
     """View/edit a prompt."""
+    if slug == "dispatch":
+        raise HTTPException(404, "Prompt not found")
     g = get_group(group)
     path = g["shared"] / "prompts" / f"{slug}.md"
     if not path.exists():
@@ -3378,6 +3453,8 @@ async def prompt_detail(request: Request, group: str, slug: str):
 @app.post("/{group}/prompts/{slug:promptslug}/save", response_class=HTMLResponse)
 async def prompt_save(request: Request, group: str, slug: str):
     """Save edits to a prompt."""
+    if slug == "dispatch":
+        raise HTTPException(404, "Prompt not found")
     g = get_group(group)
     path = g["shared"] / "prompts" / f"{slug}.md"
     form = await request.form()

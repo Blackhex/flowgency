@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import uvicorn
 import yaml
+from fastapi.testclient import TestClient
 
 from agency import app as app_mod
 
@@ -216,3 +217,55 @@ def test_run_server_creates_config_before_starting_uvicorn(
     output = capsys.readouterr().out
     assert f"First run — created config.yaml in {tmp_path}" in output
     assert "Visit http://localhost:8602/admin/" in output
+
+
+def test_setup_get_returns_wizard_when_no_groups_exist(tmp_path, monkeypatch):
+    _configure_existing_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(app_mod, "GROUPS", {})
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup")
+
+    assert response.status_code == 200
+    assert 'action="/setup"' in response.text
+    assert 'name="path"' in response.text
+
+
+def test_setup_post_invalid_and_empty_agent_paths_render_errors(tmp_path, monkeypatch):
+    _configure_existing_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(app_mod, "GROUPS", {})
+    client = TestClient(app_mod.app)
+
+    invalid_response = client.post("/setup", data={"path": str(tmp_path / "missing")})
+    empty_dir = tmp_path / "empty-agents"
+    empty_dir.mkdir()
+    empty_response = client.post("/setup", data={"path": str(empty_dir)})
+
+    assert invalid_response.status_code == 200
+    assert "doesn't exist or isn't a directory" in invalid_response.text
+    assert empty_response.status_code == 200
+    assert "No agents found at this path" in empty_response.text
+
+
+def test_setup_post_valid_path_creates_group_and_redirects(tmp_path, monkeypatch):
+    config_path = _configure_existing_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(app_mod, "GROUPS", {})
+    agents_root = tmp_path / "newsletter-agents"
+    agent_dir = agents_root / "product"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "CLAUDE.md").write_text("# Product\n", encoding="utf-8")
+    client = TestClient(app_mod.app)
+
+    response = client.post("/setup", data={"path": str(agents_root)}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/setup/complete/newsletter-agents"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["agency"]["default_group"] == "newsletter-agents"
+    assert config["groups"]["newsletter-agents"] == {
+        "name": "Newsletter Agents",
+        "path": str(agents_root),
+        "agents": ["product"],
+    }
+    assert (agents_root / "shared" / "observations").is_dir()
+    assert (agents_root / "shared" / "prompts").is_dir()
