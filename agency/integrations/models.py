@@ -24,5 +24,5 @@ class EffectiveRuntimePolicy:
 
 @dataclass(frozen=True)
 class RuntimeCapabilities:
-    path_modes: frozenset[PathPolicyMode] = frozenset({"unrestricted"})
-    tool_modes: frozenset[ToolPolicyMode] = frozenset({"all"})
+    path_modes: frozenset[PathPolicyMode] = frozenset()
+    tool_modes: frozenset[ToolPolicyMode] = frozenset()

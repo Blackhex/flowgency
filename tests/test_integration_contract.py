@@ -71,6 +71,16 @@ class TestIntegrationContract:
         assert all(isinstance(issue, ValidationIssue) for issue in result)
 
 
+def test_registry_runtime_capabilities_surface_is_fail_closed():
+    for name, integration in REGISTRY.items():
+        if name == "copilot":
+            assert integration.runtime_capabilities.path_modes == frozenset({"restricted", "unrestricted"})
+            assert integration.runtime_capabilities.tool_modes == frozenset({"all", "allowlist"})
+        else:
+            assert integration.runtime_capabilities.path_modes == frozenset()
+            assert integration.runtime_capabilities.tool_modes == frozenset()
+
+
 def test_all_execution_integrations_run_accepts_sandbox_root():
     """Every execution-capable integration.run must accept the sandbox_root kwarg.
 
@@ -107,44 +117,30 @@ def test_filechange_fields():
 def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, canonical_paths):
     from agency.configuration import ValidationFailed, parse_config_canonical
 
-    class FakeLimitedIntegration(BaseIntegration):
-        name = "fake-limited-runtime"
-        display_name = "Fake Limited Runtime"
-        runtime_capabilities = RuntimeCapabilities(
-            path_modes=frozenset({"unrestricted"}),
-            tool_modes=frozenset({"all"}),
-        )
+    group = canonical_raw_config["groups"]["newsletter"]
+    group["runtime"] = {
+        "sandbox": {"mode": "restricted", "roots": ["C:/repo"]},
+        "tools": {"mode": "allowlist", "names": ["read"]},
+    }
+    agent = group["agents"][0]
+    agent["name"] = "builder"
+    agent["integration"] = "claude-code"
 
-    fake_integration = FakeLimitedIntegration()
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setitem(REGISTRY, fake_integration.name, fake_integration)
-    try:
-        group = canonical_raw_config["groups"]["newsletter"]
-        group["runtime"] = {
-            "sandbox": {"mode": "restricted", "roots": ["C:/repo"]},
-            "tools": {"mode": "allowlist", "names": ["read"]},
-        }
-        agent = group["agents"][0]
-        agent["name"] = "builder"
-        agent["integration"] = fake_integration.name
+    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
 
-        parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    with pytest.raises(ValidationFailed) as excinfo:
+        resolve_effective_policy(parsed.resolved, "newsletter", "builder")
 
-        with pytest.raises(ValidationFailed) as excinfo:
-            resolve_effective_policy(parsed.resolved, "newsletter", "builder")
-
-        assert [issue.code for issue in excinfo.value.issues] == [
-            "unsupported-path-policy",
-            "unsupported-tool-policy",
-        ]
-        assert [issue.scope for issue in excinfo.value.issues] == [
-            f"integrations.{fake_integration.name}",
-            f"integrations.{fake_integration.name}",
-        ]
-        assert [issue.field for issue in excinfo.value.issues] == [
-            "runtime.sandbox.mode",
-            "runtime.tools.mode",
-        ]
-    finally:
-        monkeypatch.undo()
+    assert [issue.code for issue in excinfo.value.issues] == [
+        "unsupported-path-policy",
+        "unsupported-tool-policy",
+    ]
+    assert [issue.scope for issue in excinfo.value.issues] == [
+        "integrations.claude-code",
+        "integrations.claude-code",
+    ]
+    assert [issue.field for issue in excinfo.value.issues] == [
+        "runtime.sandbox.mode",
+        "runtime.tools.mode",
+    ]
 
