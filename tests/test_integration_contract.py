@@ -107,12 +107,17 @@ def test_filechange_fields():
 def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, canonical_paths):
     from agency.configuration import ValidationFailed, parse_config_canonical
 
-    integration = REGISTRY["copilot"]
-    original_capabilities = integration.runtime_capabilities
-    integration.runtime_capabilities = RuntimeCapabilities(
-        path_modes=frozenset({"unrestricted"}),
-        tool_modes=frozenset({"all"}),
-    )
+    class FakeLimitedIntegration(BaseIntegration):
+        name = "fake-limited-runtime"
+        display_name = "Fake Limited Runtime"
+        runtime_capabilities = RuntimeCapabilities(
+            path_modes=frozenset({"unrestricted"}),
+            tool_modes=frozenset({"all"}),
+        )
+
+    fake_integration = FakeLimitedIntegration()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setitem(REGISTRY, fake_integration.name, fake_integration)
     try:
         group = canonical_raw_config["groups"]["newsletter"]
         group["runtime"] = {
@@ -121,7 +126,7 @@ def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, cano
         }
         agent = group["agents"][0]
         agent["name"] = "builder"
-        agent["integration"] = "copilot"
+        agent["integration"] = fake_integration.name
 
         parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
 
@@ -133,13 +138,13 @@ def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, cano
             "unsupported-tool-policy",
         ]
         assert [issue.scope for issue in excinfo.value.issues] == [
-            "integrations.copilot",
-            "integrations.copilot",
+            f"integrations.{fake_integration.name}",
+            f"integrations.{fake_integration.name}",
         ]
         assert [issue.field for issue in excinfo.value.issues] == [
             "runtime.sandbox.mode",
             "runtime.tools.mode",
         ]
     finally:
-        integration.runtime_capabilities = original_capabilities
+        monkeypatch.undo()
 
