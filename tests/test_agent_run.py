@@ -294,9 +294,33 @@ def test_prompts_page_marks_exact_schedule_target(tmp_path):
     resp = client.get("/test/prompts")
 
     assert resp.status_code == 200
-    assert 'id="schedule-product-0"' in resp.text
-    assert "scroll-mt-20" in resp.text
-    assert "target:ring-2" in resp.text
+    assert 'id="schedule-product-0"' not in resp.text
+    assert "scroll-mt-20" not in resp.text
+    assert "target:ring-2" not in resp.text
+
+
+def test_prompts_page_is_read_only_and_preserves_strict_canonical_config(tmp_path):
+    _setup_group(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    before = config_path.read_bytes()
+    client = TestClient(app)
+
+    response = client.get("/test/prompts")
+
+    assert response.status_code == 200
+    assert '/test/prompts/dispatch' not in response.text
+    assert 'id="dispatch-form"' not in response.text
+    assert 'Save Dispatch Config' not in response.text
+    assert config_path.read_bytes() == before
+
+
+def test_prompts_dispatch_post_returns_404(tmp_path):
+    _setup_group(tmp_path)
+    client = TestClient(app)
+
+    response = client.post("/test/prompts/dispatch", data={"assign_agent_routine_0": "product"})
+
+    assert response.status_code == 404
 
 
 @pytest.mark.parametrize(
