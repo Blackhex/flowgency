@@ -49,15 +49,15 @@
           {% endif %}
           {% if a.next_run and a.next_run_detail %}
           <span class="text-gray-300">·</span>
-          {% set prompt_names = a.prompts | map(attribute='name') | list %}
-          {% if a.next_run_detail.prompt in prompt_names and not a.next_run_detail.prompt.startswith('_') %}
+           {% set routine_ids = a.prompts | map(attribute='id') | list %}
+           {% if a.next_run_detail.routine_id in routine_ids and not a.next_run_detail.routine_id.startswith('_') %}
           <a href="/{{ group }}/prompts#schedule-{{ a.name | urlencode }}-{{ a.next_run_detail.rule_index }}"
           {% else %}
           <a href="/admin/orgs/{{ group }}/edit#rules-{{ a.name | urlencode }}"
           {% endif %}
              class="rounded-sm hover:text-indigo-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
-             title="Edit {{ a.next_run_detail.prompt }} schedule - {{ a.next_run.strftime('%Y-%m-%d %H:%M') }}"
-             aria-label="Edit schedule for {{ a.next_run_detail.prompt }}">{{ a.next_run | relative_future }}</a>
+             title="Edit {{ a.next_run_detail.routine_id }} schedule - {{ a.next_run.strftime('%Y-%m-%d %H:%M') }}"
+             aria-label="Edit schedule for {{ a.next_run_detail.routine_id }}">{{ a.next_run | relative_future }}</a>
           {% endif %}
         </span>
         {% endif %}
@@ -74,7 +74,7 @@
            class="truncate text-gray-600 hover:text-indigo-600">{{ p.name }}</a>
         <button type="button"
                 class="js-run-btn shrink-0 px-2 py-0.5 rounded-md border border-gray-200 text-gray-700 hover:border-indigo-300 hover:text-indigo-600"
-                data-agent="{{ a.name }}" data-prompt="{{ p.name }}">Run</button>
+             data-agent="{{ a.name }}" data-routine="{{ p.id or p.name }}">Run</button>
       </div>
       {% endfor %}
       {% if not a.prompts %}
@@ -138,10 +138,10 @@ document.addEventListener("click", async (e) => {
   const btn = e.target.closest(".js-run-btn");
   if (!btn) return;
   const agent = btn.dataset.agent;
-  const prompt = btn.dataset.prompt;
+  const routineId = btn.dataset.routine;
   const card = document.querySelector(`[data-agent-card="${agent}"]`);
   const body = new FormData();
-  body.append("prompt", prompt);
+  body.append("routine_id", routineId);
   const showErr = (msg) => {
     const row = btn.closest(".js-prompt-row");
     let err = row.querySelector(".js-run-err");

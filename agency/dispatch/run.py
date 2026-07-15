@@ -2,16 +2,14 @@
 
 import argparse
 import logging
-import os
 import re
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
-from agency.jobs import JobSpec, JobSubmissionError, JobValidationError, submit_job
+from agency.configuration.store import ConfigStore
+from agency.jobs import JobRequest, JobSubmissionError, JobValidationError, submit_job_request
+from agency.jobs.prompts import build_routine_task_input
 
 log = logging.getLogger("agency.dispatch")
 
@@ -34,40 +32,46 @@ def check_at_rule(target_time: str, now_epoch: float | None = None, interval: in
 
 def check_every_rule(marker_file: Path, interval_str: str) -> bool:
     """Check if enough time has elapsed since marker file mtime."""
-    match = re.fullmatch(r"(\d+)(m|h)", interval_str)
+    match = re.fullmatch(r"(\d+)(m|h|d)", interval_str)
     if not match:
         log.warning("Invalid every interval: %s", interval_str)
         return False
     val = int(match.group(1))
     unit = match.group(2)
-    seconds = val * 60 if unit == "m" else val * 3600
+    if unit == "m":
+        seconds = val * 60
+    elif unit == "h":
+        seconds = val * 3600
+    else:
+        seconds = val * 86400
     if not marker_file.exists():
         return True
     elapsed = time.time() - marker_file.stat().st_mtime
     return elapsed >= seconds
 
 
-def load_dispatch_config(config_path: str) -> dict:
-    """Load config.yaml."""
-    with open(config_path) as f:
-        return yaml.safe_load(f) or {}
+def _marker_safe(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip(".-") or "item"
 
 
-def run_dispatch_cycle(config: dict, config_path: Path | str, launcher=None) -> None:
+def load_dispatch_config(config_path: str):
+    """Load the strict canonical config snapshot."""
+    return ConfigStore(Path(config_path)).load()
+
+
+def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
     """Run one full dispatch cycle across all enabled groups."""
-    agency_cfg = config.get("agency", {})
-    dispatch_cfg = agency_cfg.get("dispatch", {})
-    interval = dispatch_cfg.get("interval", 15)
+    snapshot = config if hasattr(config, "config") else load_dispatch_config(str(config_path))
+    resolved = snapshot.config
+    interval = resolved.agency.dispatch.interval
 
-    groups = config.get("groups", {})
-    for group_key, g in groups.items():
-        d = g.get("dispatch", {})
-        if not d.get("enabled", False):
+    for group_key, group in resolved.groups.items():
+        if not group.dispatch.enabled:
             continue
 
         log.info("Processing group: %s", group_key)
-        group_path = Path(g["path"])
-        daily_limit = d.get("daily_limit", 20)
+        group_path = group.path
+        daily_limit = group.dispatch.daily_limit
 
         logs_root = group_path / "shared" / "logs"
         today = datetime.now().strftime("%Y-%m-%d")
@@ -80,27 +84,21 @@ def run_dispatch_cycle(config: dict, config_path: Path | str, launcher=None) -> 
             log.info("  SKIP: daily limit reached (%d/%d)", out_count, daily_limit)
             continue
 
-        dispatch_agents = d.get("agents", {})
-        for agent_name, rules in dispatch_agents.items():
-            if not rules:
-                continue
-            for rule in rules:
-                prompt = rule.get("prompt", "")
-                at_time = rule.get("at", "")
-                every_val = rule.get("every", "")
-                condition = rule.get("condition", "")
+        for agent_name, agent in group.agents.items():
+            for routine in agent.routines:
+                at_time = routine.schedule.at or ""
+                every_val = routine.schedule.every or ""
+                marker_id = _marker_safe(routine.id)
+                agent_marker = _marker_safe(agent_name)
 
-                if not prompt:
-                    log.warning("  WARNING: rule for %s missing 'prompt'", agent_name)
+                if getattr(routine, "condition", None):
+                    log.info(
+                        "  SKIP: %s/%s has condition '%s' (requires group dispatch script)",
+                        agent_name,
+                        routine.id,
+                        routine.condition,
+                    )
                     continue
-
-                # Skip condition rules
-                if condition:
-                    log.info("  SKIP: %s/%s has condition '%s' (requires group dispatch script)",
-                             agent_name, prompt, condition)
-                    continue
-
-                stem = prompt.removesuffix(".md")
 
                 # Re-check daily limit
                 out_count = len(list(log_dir.glob("*.out")))
@@ -110,40 +108,38 @@ def run_dispatch_cycle(config: dict, config_path: Path | str, launcher=None) -> 
 
                 should_run = False
                 if at_time:
-                    event_marker = log_dir / f".event-{agent_name}-{stem}"
+                    event_marker = log_dir / f".event-{agent_marker}-{marker_id}-{today}"
                     if event_marker.exists():
                         continue
                     if check_at_rule(at_time, interval=interval):
                         should_run = True
                 elif every_val:
-                    every_marker = logs_root / f".last-{agent_name}-{stem}"
+                    every_marker = logs_root / f".last-{agent_marker}-{marker_id}"
                     if check_every_rule(every_marker, every_val):
                         should_run = True
                 else:
-                    log.warning("  WARNING: rule for %s/%s has no 'at' or 'every'", agent_name, prompt)
+                    log.warning("  WARNING: rule for %s/%s has no 'at' or 'every'", agent_name, routine.id)
                     continue
 
                 if should_run:
-                    prompt_path = group_path / "shared" / "prompts" / prompt
                     try:
-                        prompt_content = prompt_path.read_text()
-                        spec = JobSpec.create(
-                            config_path=Path(config_path),
+                        request = JobRequest(
+                            config_path=snapshot.path,
                             group_key=group_key,
                             agent_name=agent_name,
                             trigger="scheduled_prompt",
-                            prompt_source={"type": "saved_prompt", "path": str(prompt_path)},
-                            prompt_content=prompt_content,
+                            task_input=build_routine_task_input(routine.id),
+                            routine_id=routine.id,
                         )
-                        submit_job(spec, launcher)
+                        submit_job_request(request, launcher)
                     except (TypeError, ValueError, JobValidationError, JobSubmissionError, OSError) as error:
-                        log.error("  ERROR: could not submit %s/%s: %s", agent_name, prompt, error)
+                        log.error("  ERROR: could not submit %s/%s: %s", agent_name, routine.id, error)
                         continue
                     # Touch markers
                     if at_time:
-                        (log_dir / f".event-{agent_name}-{stem}").touch()
+                        (log_dir / f".event-{agent_marker}-{marker_id}-{today}").touch()
                     elif every_val:
-                        (logs_root / f".last-{agent_name}-{stem}").touch()
+                        (logs_root / f".last-{agent_marker}-{marker_id}").touch()
 
 
 def main():

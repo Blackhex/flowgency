@@ -29,15 +29,17 @@ from agency.config import agent_can_write, normalize_agents, agent_names, get_ag
 from agency.integrations import get_integration, detect_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 from agency.jobs import (
+    JobRequest,
     JobSpec,
     JobSubmissionError,
     JobValidationError,
     active_jobs,
     reconcile_jobs,
     submit_job,
+    submit_job_request,
 )
 from agency.jobs.atomic import atomic_write_text
-from agency.jobs.prompts import build_decision_prompt
+from agency.jobs.prompts import build_decision_prompt, build_routine_task_input
 from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, question_option_labels, SKIP_EXECUTION_SUMMARY
 import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
@@ -790,57 +792,80 @@ def infer_agent_from_prompt(filename: str, agents: list[str]) -> str | None:
 
 
 def collect_prompts(g: dict) -> list[dict]:
-    """List prompt files with dispatch assignment info."""
+    """List prompt files with routine-backed dispatch assignment info."""
     prompts_dir = g["shared"] / "prompts"
-    if not prompts_dir.exists():
-        return []
-
     agents = g["agents"]
 
-    # Build prompt-centric dispatch map from config
+    # Build prompt-centric dispatch map from routine ids where prompt slugs still exist.
     group_cfg = GROUPS.get(g["key"], {})
-    dispatch_agents = group_cfg.get("dispatch", {}).get("agents", {})
-    # Invert: {prompt_filename: [{agent, type, value}, ...]}
     prompt_assignments: dict[str, list[dict]] = {}
-    for agent_name, rules in dispatch_agents.items():
-        for rule_index, rule in enumerate(rules):
-            prompt_file = rule.get("prompt", "")
-            if not prompt_file:
+    prompt_items: dict[str, dict] = {}
+    for agent_entry in group_cfg.get("_agents_normalized", []):
+        if not isinstance(agent_entry, dict):
+            continue
+        agent_name = agent_entry.get("name", "")
+        for rule_index, routine in enumerate(agent_entry.get("routines", []) or []):
+            if not isinstance(routine, dict):
                 continue
-            if prompt_file not in prompt_assignments:
-                prompt_assignments[prompt_file] = []
+            prompt_file = f"{routine.get('id', '')}.md"
+            if not prompt_file or prompt_file == ".md":
+                continue
             entry = {
                 "agent": agent_name,
-                "condition": rule.get("condition", ""),
+                "condition": routine.get("condition", ""),
                 "rule_index": rule_index,
+                "routine_id": routine.get("id", ""),
             }
-            if rule.get("at"):
+            schedule = routine.get("schedule") or {}
+            if schedule.get("at"):
                 entry["type"] = "at"
-                entry["value"] = rule["at"]
-            elif rule.get("every"):
+                entry["value"] = schedule["at"]
+            elif schedule.get("every"):
                 entry["type"] = "every"
-                entry["value"] = rule["every"]
+                entry["value"] = schedule["every"]
             else:
                 continue
-            prompt_assignments[prompt_file].append(entry)
+            prompt_assignments.setdefault(prompt_file, []).append(entry)
+            prompt_items.setdefault(
+                prompt_file,
+                {
+                    "name": prompt_file,
+                    "path": str((prompts_dir / prompt_file) if prompts_dir.exists() else prompt_file),
+                    "slug": routine.get("id", ""),
+                    "id": routine.get("id", ""),
+                    "assignments": [],
+                    "inferred_agent": agent_name,
+                },
+            )
+
+    if prompts_dir.exists():
+        for f in sorted(prompts_dir.glob("*.md")):
+            prompt_items.setdefault(
+                f.name,
+                {
+                    "name": f.name,
+                    "path": str(f),
+                    "slug": f.stem,
+                    "id": f.stem,
+                    "assignments": [],
+                    "inferred_agent": infer_agent_from_prompt(f.name, agents),
+                },
+            )
 
     items = []
-    for f in sorted(prompts_dir.glob("*.md")):
-        assignments = prompt_assignments.get(f.name, [])
-        inferred_agent = infer_agent_from_prompt(f.name, agents)
+    for name in sorted(prompt_items):
+        item = dict(prompt_items[name])
+        assignments = prompt_assignments.get(name, [])
+        inferred_agent = item.get("inferred_agent") or infer_agent_from_prompt(name, agents)
 
         # If no explicit assignments but we can infer the agent, pre-populate
-        # with an unscheduled placeholder so the UI shows the agent association
+        # with an unscheduled placeholder so the UI shows the agent association.
         if not assignments and inferred_agent:
-            assignments = [{"agent": inferred_agent, "type": "", "value": ""}]
+            assignments = [{"agent": inferred_agent, "type": "", "value": "", "routine_id": item.get("id", "")}]
 
-        items.append({
-            "name": f.name,
-            "path": str(f),
-            "slug": f.stem,
-            "assignments": assignments,
-            "inferred_agent": inferred_agent,
-        })
+        item["assignments"] = assignments
+        item["inferred_agent"] = inferred_agent
+        items.append(item)
     return items
 
 
@@ -1064,7 +1089,7 @@ def compute_next_run_detail(
     """Return the soonest scheduled run with its originating rule identity."""
     if not dispatch_cfg.get("enabled", False):
         return None
-    rules = dispatch_cfg.get("agents", {}).get(agent_name, [])
+    rules = dispatch_cfg.get("routines", {}).get(agent_name, [])
     if not isinstance(rules, list):
         return None
 
@@ -1075,8 +1100,8 @@ def compute_next_run_detail(
     for rule_index, rule in enumerate(rules):
         if not isinstance(rule, dict):
             continue
-        prompt = rule.get("prompt", "")
-        if not prompt or rule.get("condition"):
+        routine_id = rule.get("id", "")
+        if not routine_id or rule.get("condition"):
             continue
 
         at_time = rule.get("at", "")
@@ -1092,13 +1117,13 @@ def compute_next_run_detail(
             if target <= now:
                 target += timedelta(days=1)
         elif every_val:
-            match = re.fullmatch(r"(\d+)(m|h)", every_val)
+            match = re.fullmatch(r"(\d+)(m|h|d)", every_val)
             if not match:
                 continue
             value = int(match.group(1))
-            seconds = value * 60 if match.group(2) == "m" else value * 3600
-            stem = prompt.removesuffix(".md")
-            marker = logs_root / f".last-{agent_name}-{stem}"
+            unit = match.group(2)
+            seconds = value * 60 if unit == "m" else value * 3600 if unit == "h" else value * 86400
+            marker = logs_root / f".last-{agent_name}-{routine_id}"
             target = (
                 now
                 if not marker.exists()
@@ -1110,7 +1135,7 @@ def compute_next_run_detail(
 
         candidates.append({
             "when": target,
-            "prompt": prompt,
+            "routine_id": routine_id,
             "rule_index": rule_index,
         })
 
@@ -2431,7 +2456,22 @@ async def agents_list(request: Request, group: str):
     agents, subagents = collect_agents_with_identity(g)
     prompts = collect_prompts(g)
     for a in agents:
-        a["prompts"] = prompts_for_agent(prompts, a["name"])
+        assigned = prompts_for_agent(prompts, a["name"])
+        if assigned:
+            a["prompts"] = assigned
+        else:
+            a["prompts"] = [
+                {
+                    "name": f"{routine.get('id')}.md",
+                    "slug": routine.get("id"),
+                    "id": routine.get("id"),
+                    "assignments": [{"agent": a["name"], "routine_id": routine.get("id")}],
+                }
+                for agent_entry in g.get("_agents_normalized", [])
+                if isinstance(agent_entry, dict) and agent_entry.get("name") == a["name"]
+                for routine in agent_entry.get("routines", []) or []
+                if isinstance(routine, dict) and routine.get("id")
+            ]
     return templates.TemplateResponse(request, "agents.html", {
         "request": request,
         **group_context(g),
@@ -2460,7 +2500,7 @@ async def agent_profile(request: Request, group: str, agent: str):
     # Get dispatch schedule for this agent
     group_cfg = GROUPS.get(g["key"], {})
     dispatch_cfg = group_cfg.get("dispatch", {})
-    agent_schedule = dispatch_cfg.get("agents", {}).get(agent, [])
+    agent_schedule = dispatch_cfg.get("routines", {}).get(agent, [])
     dispatch_enabled = dispatch_cfg.get("enabled", False)
     agent_running = is_agent_running(g, agent, dispatch_cfg.get("timeout", 1800))
     agent_next_run = compute_next_run(g, agent, dispatch_cfg)
@@ -2592,23 +2632,43 @@ async def agent_run(request: Request, group: str, agent: str):
     resolve_agent_dir(g, agent)
 
     form = await request.form()
-    prompt = (form.get("prompt") or "").strip()
-    if not prompt or "/" in prompt or ".." in prompt:
-        raise HTTPException(status_code=400, detail="Invalid prompt")
-    prompt_path = g["shared"] / "prompts" / prompt
-    if not prompt_path.is_file():
-        raise HTTPException(status_code=404, detail="Prompt not found")
+    routine_id = str(form.get("routine_id") or "").strip()
+    if not routine_id or "/" in routine_id or ".." in routine_id:
+        raise HTTPException(status_code=400, detail="Invalid routine")
+
+    config = load_config()
+    agents = config.get("groups", {}).get(group, {}).get("agents", [])
+    routine = None
+    for agent_entry in agents:
+        if isinstance(agent_entry, dict) and agent_entry.get("name") == agent:
+            for candidate in agent_entry.get("routines", []) or []:
+                if isinstance(candidate, dict) and candidate.get("id") == routine_id:
+                    routine = candidate
+                    break
+            break
+    if routine is None:
+        raise HTTPException(status_code=404, detail="Routine not found")
+
+    memory_scope = str(form.get("memory_scope") or "").strip()
+    memory_override = None
+    if memory_scope:
+        if memory_scope == "channel":
+            raise HTTPException(status_code=400, detail="Channel memory override requires a channel")
+        if memory_scope not in {"run", "routine", "agent", "group"}:
+            raise HTTPException(status_code=400, detail="Invalid memory override")
+        memory_override = {"scope": memory_scope}
 
     try:
-        spec = JobSpec.create(
+        request_obj = JobRequest(
             config_path=CONFIG_PATH,
             group_key=group,
             agent_name=agent,
             trigger="manual_prompt",
-            prompt_source={"type": "saved_prompt", "path": str(prompt_path)},
-            prompt_content=prompt_path.read_text(),
+            task_input=build_routine_task_input(routine_id),
+            routine_id=routine_id,
+            memory_override=memory_override,
         )
-        handle = submit_job(spec)
+        handle = submit_job_request(request_obj)
     except (TypeError, ValueError, JobValidationError, JobSubmissionError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return JSONResponse({"status": "started", "job_id": handle.job_id}, status_code=202)
@@ -2921,26 +2981,25 @@ async def proposal_decide(request: Request, group: str, slug: str):
 
     # 4. Determine execution vs skip
     if should_execute_decision(questions, answers, decision_note):
-        spec = JobSpec.create(
+        request_obj = JobRequest(
             config_path=CONFIG_PATH,
             group_key=group,
             agent_name=execution_agent,
             trigger="decision",
-            prompt_source={"type": "decision", "proposal": f"{slug}.md"},
-            prompt_content=build_decision_prompt(proposal_body, answers, decision_note),
-            decision_context={
+            task_input=build_decision_prompt(proposal_body, answers, decision_note),
+            trigger_context={
                 "decision_path": str(decision_path.resolve()),
                 "proposal_path": str(cpath.resolve()),
             },
         )
         meta["execution_status"] = "pending"
-        meta["execution_job_id"] = spec.job_id
+        meta["execution_job_id"] = request_obj.job_id
 
         frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
         atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
 
         try:
-            submit_job(spec)
+            submit_job_request(request_obj)
         except JobSubmissionError as error:
             decision_path.unlink(missing_ok=True)
             return render_proposal_detail(
@@ -3094,15 +3153,13 @@ async def decision_retry(request: Request, group: str, slug: str):
             status_code=400,
         )
 
-    spec = JobSpec.create(
+    request_obj = JobRequest(
         config_path=CONFIG_PATH,
         group_key=group,
         agent_name=execution_agent,
         trigger="decision_retry",
-        prompt_source={"type": "decision_retry", "proposal": f"{proposal_slug}.md"},
-        prompt_content=build_decision_prompt(proposal_body, meta.get("answers", {}), meta.get("decision_note", "")),
-
-        decision_context={
+        task_input=build_decision_prompt(proposal_body, meta.get("answers", {}), meta.get("decision_note", "")),
+        trigger_context={
             "decision_path": str(decision_path.resolve()),
             "proposal_path": str(proposal_path.resolve()),
         },
@@ -3119,7 +3176,7 @@ async def decision_retry(request: Request, group: str, slug: str):
     updated_meta.update({
         "execution_status": "pending",
         "execution_agent": execution_agent,
-        "execution_job_id": spec.job_id,
+        "execution_job_id": request_obj.job_id,
         "execution_job_history": history,
     })
 
@@ -3127,7 +3184,7 @@ async def decision_retry(request: Request, group: str, slug: str):
     atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n\n{body}\n")
 
     try:
-        submit_job(spec)
+        submit_job_request(request_obj)
     except JobSubmissionError as error:
         atomic_write_text(decision_path, original_text)
         return render_decision_detail(

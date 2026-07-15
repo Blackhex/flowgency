@@ -127,13 +127,13 @@ def test_agent_last_run_stats_each_candidate_once(tmp_path, monkeypatch):
 
 def test_next_run_disabled(tmp_path):
     g = _group_with_logs(tmp_path)
-    cfg = {"enabled": False, "agents": {"product": [{"prompt": "r.md", "every": "6h"}]}}
+    cfg = {"enabled": False, "routines": {"product": [{"id": "r", "every": "6h"}]}}
     assert compute_next_run(g, "product", cfg) is None
 
 
 def test_next_run_no_rules(tmp_path):
     g = _group_with_logs(tmp_path)
-    cfg = {"enabled": True, "agents": {}}
+    cfg = {"enabled": True, "routines": {}}
     assert compute_next_run(g, "product", cfg) is None
 
 
@@ -147,7 +147,7 @@ def test_next_run_at_future(tmp_path):
             return fixed_now
 
     future = (fixed_now + timedelta(hours=2)).strftime("%H:%M")
-    cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "at": future}]}}
+    cfg = {"enabled": True, "routines": {"product": [{"id": "r", "at": future}]}}
     with patch.object(app_module, "datetime", _Frozen):
         result = compute_next_run(g, "product", cfg)
     assert result is not None
@@ -165,7 +165,7 @@ def test_next_run_at_past_rolls_to_tomorrow(tmp_path):
             return fixed_now
 
     past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
-    cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "at": past}]}}
+    cfg = {"enabled": True, "routines": {"product": [{"id": "r", "at": past}]}}
     with patch.object(app_module, "datetime", _Frozen):
         result = compute_next_run(g, "product", cfg)
     assert result is not None
@@ -174,7 +174,7 @@ def test_next_run_at_past_rolls_to_tomorrow(tmp_path):
 
 def test_next_run_every_no_marker_due_now(tmp_path):
     g = _group_with_logs(tmp_path)
-    cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "every": "6h"}]}}
+    cfg = {"enabled": True, "routines": {"product": [{"id": "r", "every": "6h"}]}}
     before = datetime.now()
     result = compute_next_run(g, "product", cfg)
     assert result is not None
@@ -187,7 +187,7 @@ def test_next_run_every_with_marker(tmp_path):
     marker.touch()
     two_hours_ago = time.time() - 2 * 3600
     os.utime(marker, (two_hours_ago, two_hours_ago))
-    cfg = {"enabled": True, "agents": {"product": [{"prompt": "r.md", "every": "6h"}]}}
+    cfg = {"enabled": True, "routines": {"product": [{"id": "r", "every": "6h"}]}}
     result = compute_next_run(g, "product", cfg)
     # marker + 6h => ~4h from now
     assert result is not None
@@ -197,8 +197,8 @@ def test_next_run_every_with_marker(tmp_path):
 
 def test_next_run_skips_condition_rule(tmp_path):
     g = _group_with_logs(tmp_path)
-    cfg = {"enabled": True, "agents": {"product": [
-        {"prompt": "gate.md", "at": "06:00", "condition": "pre-send"},
+    cfg = {"enabled": True, "routines": {"product": [
+        {"id": "gate", "at": "06:00", "condition": "pre-send"},
     ]}}
     assert compute_next_run(g, "product", cfg) is None
 
@@ -207,9 +207,9 @@ def test_next_run_returns_soonest(tmp_path):
     g = _group_with_logs(tmp_path)
     soon = (datetime.now() + timedelta(minutes=30)).strftime("%H:%M")
     later = (datetime.now() + timedelta(hours=5)).strftime("%H:%M")
-    cfg = {"enabled": True, "agents": {"product": [
-        {"prompt": "a.md", "at": later},
-        {"prompt": "b.md", "at": soon},
+    cfg = {"enabled": True, "routines": {"product": [
+        {"id": "a", "at": later},
+        {"id": "b", "at": soon},
     ]}}
     result = compute_next_run(g, "product", cfg)
     assert result.strftime("%H:%M") == soon
@@ -224,9 +224,9 @@ def test_next_run_detail_identifies_winning_rule(tmp_path):
         def now(cls, tz=None):
             return fixed_now
 
-    cfg = {"enabled": True, "agents": {"product": [
-        {"prompt": "later.md", "at": "17:00"},
-        {"prompt": "soon.md", "at": "12:30"},
+    cfg = {"enabled": True, "routines": {"product": [
+        {"id": "later", "at": "17:00"},
+        {"id": "soon", "at": "12:30"},
     ]}}
 
     with patch.object(app_module, "datetime", _Frozen):
@@ -235,7 +235,7 @@ def test_next_run_detail_identifies_winning_rule(tmp_path):
 
     assert detail == {
         "when": fixed_now + timedelta(minutes=30),
-        "prompt": "soon.md",
+        "routine_id": "soon",
         "rule_index": 1,
     }
     assert compatible_value == detail["when"]
@@ -250,28 +250,33 @@ def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
         def now(cls, tz=None):
             return fixed_now
 
-    cfg = {"enabled": True, "agents": {"product": [
-        {"prompt": "first.md", "at": "13:00"},
-        {"prompt": "second.md", "at": "13:00"},
+    cfg = {"enabled": True, "routines": {"product": [
+        {"id": "first", "at": "13:00"},
+        {"id": "second", "at": "13:00"},
     ]}}
 
     with patch.object(app_module, "datetime", _Frozen):
         detail = compute_next_run_detail(g, "product", cfg)
 
-    assert detail["prompt"] == "first.md"
+    assert detail["routine_id"] == "first"
     assert detail["rule_index"] == 0
 
 
 def test_collect_prompts_preserves_original_agent_rule_index(tmp_path):
     g = _group_with_logs(tmp_path)
     g["agents"] = ["product"]
+    g["_agents_normalized"] = [{
+        "name": "product",
+        "integration": "claude-code",
+        "routines": [
+            {"id": "missing", "skill": "missing", "schedule": {"at": "08:00"}},
+            {"id": "routine", "skill": "routine", "schedule": {"at": "09:00"}},
+        ],
+    }]
     prompts_dir = g["shared"] / "prompts"
     prompts_dir.mkdir()
     (prompts_dir / "routine.md").write_text("# Routine\n")
-    groups_cfg = {"grp": {"dispatch": {"agents": {"product": [
-        {"prompt": "missing.md", "at": "08:00"},
-        {"prompt": "routine.md", "at": "09:00"},
-    ]}}}}
+    groups_cfg = {"grp": {"_agents_normalized": g["_agents_normalized"]}}
 
     with patch.object(app_module, "GROUPS", groups_cfg):
         prompt = next(
@@ -283,6 +288,7 @@ def test_collect_prompts_preserves_original_agent_rule_index(tmp_path):
         "agent": "product",
         "condition": "",
         "rule_index": 1,
+        "routine_id": "routine",
         "type": "at",
         "value": "09:00",
     }]
@@ -347,13 +353,22 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
         "key": "grp", "name": "Grp", "path": group_path,
         "agents": ["product"],
         "agents_full": [{"name": "product", "integration": "claude-code"}],
+        "_agents_normalized": [{
+            "name": "product",
+            "integration": "claude-code",
+            "routines": [{"id": "r", "skill": "r", "schedule": {"every": "6h"}}],
+        }],
         "shared": shared,
     }
 
     _write_job(group_path, "running")
 
-    groups_cfg = {"grp": {"dispatch": {"enabled": True, "agents": {
-        "product": [{"prompt": "r.md", "every": "6h"}]}}}}
+    groups_cfg = {"grp": {
+        "dispatch": {"enabled": True, "routines": {
+            "product": [{"id": "r", "every": "6h"}]
+        }},
+        "_agents_normalized": g["_agents_normalized"],
+    }}
 
     with patch.object(app_module, "GROUPS", groups_cfg):
         agents, _subagents = app_module.collect_agents_with_identity(g)
@@ -363,6 +378,6 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
     assert product["last_run"]["path"] == str(stdout_path.resolve())
     assert product["last_seen"] == product["last_run"]["at"]
     assert product["next_run"] == product["next_run_detail"]["when"]
-    assert product["next_run_detail"]["prompt"] == "r.md"
+    assert product["next_run_detail"]["routine_id"] == "r"
     assert product["next_run_detail"]["rule_index"] == 0
 

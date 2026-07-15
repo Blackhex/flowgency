@@ -1,7 +1,11 @@
-import pytest
 import os
 import time
 from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
 from agency.dispatch.run import check_at_rule, check_every_rule, run_dispatch_cycle
 from agency.jobs import JobSubmissionError
 
@@ -52,104 +56,186 @@ def test_check_every_rule_minutes(tmp_path):
 
 
 def _make_group(tmp_path):
-    """Create a group with one agent dir and one prompt; return (group_path, log_dir)."""
+    """Create a strict-canonical group and config path; return (group_path, config_path, log_dir)."""
     group_path = tmp_path / "grp"
     agent_dir = group_path / "product"
     agent_dir.mkdir(parents=True)
-    (agent_dir / "CLAUDE.md").write_text("# Product\n")
-    prompts = group_path / "shared" / "prompts"
-    prompts.mkdir(parents=True)
-    (prompts / "routine.md").write_text("do the thing")
+    (agent_dir / "AGENTS.md").write_text("# Product\n", encoding="utf-8")
     log_dir = group_path / "shared" / "logs" / "2026-07-03"
     log_dir.mkdir(parents=True)
-    return group_path, agent_dir, log_dir
+    return group_path, tmp_path / "config.yaml", log_dir
 
 
-def _enabled_config(group_path):
+def _write_canonical_config(
+    config_path: Path,
+    group_path: Path,
+    *,
+    routines: list[dict],
+    enabled: bool = True,
+    daily_limit: int = 20,
+) -> None:
+    routine_yaml = "".join(
+        (
+            "          - id: {id}\n"
+            "            skill: {skill}\n"
+            "            schedule:\n"
+        ).format(**routine)
+        + (
+            f"              at: '{routine['schedule']['at']}'\n"
+            if "at" in routine["schedule"]
+            else f"              every: {routine['schedule']['every']}\n"
+        )
+        + (
+            f"            memory:\n              scope: {routine['memory']['scope']}\n"
+            if routine.get("memory")
+            else ""
+        )
+        + (
+            f"            condition: {routine['condition']}\n"
+            if routine.get("condition")
+            else ""
+        )
+        for routine in routines
+    )
+    config_path.write_text(
+        "schema_version: 2\n"
+        "agency:\n"
+        "  title: Agency\n"
+        "  default_group: test\n"
+        "  ai_backend: claude-code\n"
+        "  agent_library: agent-library\n"
+        "  compilation_cache: compiled-agents\n"
+        "  memory_store: memory\n"
+        "  dispatch:\n"
+        "    interval: 15\n"
+        "groups:\n"
+        "  test:\n"
+        "    name: Test\n"
+        f"    path: {group_path.as_posix()}\n"
+        "    default_integration: copilot\n"
+        "    dispatch:\n"
+        f"      enabled: {str(enabled).lower()}\n"
+        f"      daily_limit: {daily_limit}\n"
+        "    agents:\n"
+        "      - name: product\n"
+        "        blueprint: builder-blueprint\n"
+        "        integration: copilot\n"
+        "        default_memory:\n"
+        "          scope: agent\n"
+        "        routines:\n"
+        f"{routine_yaml}",
+        encoding="utf-8",
+    )
+
+
+def _request_summary(request):
     return {
-        "agency": {"dispatch": {"interval": 15}},
-        "groups": {
-            "test": {
-                "path": str(group_path),
-                "agents": ["product"],
-                "dispatch": {
-                    "enabled": True,
-                    "agents": {"product": [{"prompt": "routine.md", "every": "1h"}]},
-                },
-            }
-        },
+        "group_key": request.group_key,
+        "agent_name": request.agent_name,
+        "trigger": request.trigger,
+        "routine_id": request.routine_id,
+        "task_input": request.task_input,
+        "memory_override": request.memory_override,
+        "timeout_override": request.timeout_override,
     }
 
 
-def test_due_schedule_submits_snapshot_then_touches_marker(tmp_path, monkeypatch):
-    group_path, _, _ = _make_group(tmp_path)
-    config_path = tmp_path / "config.yaml"
-    config = _enabled_config(group_path)
+def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monkeypatch):
+    group_path, config_path, _ = _make_group(tmp_path)
+    _write_canonical_config(
+        config_path,
+        group_path,
+        routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}],
+    )
     captured = []
 
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job",
-        lambda spec, launcher=None: captured.append(spec) or object(),
+        "agency.dispatch.run.submit_job_request",
+        lambda request, launcher=None: captured.append(request) or SimpleNamespace(job_id=request.job_id),
     )
 
-    run_dispatch_cycle(config, config_path)
+    run_dispatch_cycle({}, config_path)
 
-    assert captured[0].trigger == "scheduled_prompt"
-    assert captured[0].prompt_content == "do the thing"
-    assert captured[0].timeout_override is None
-    assert (group_path / "shared" / "logs" / ".last-product-routine").exists()
+    assert _request_summary(captured[0]) == {
+        "group_key": "test",
+        "agent_name": "product",
+        "trigger": "scheduled_prompt",
+        "routine_id": "daily-review",
+        "task_input": "Run routine 'daily-review'.",
+        "memory_override": None,
+        "timeout_override": None,
+    }
+    assert (group_path / "shared" / "logs" / ".last-product-daily-review").exists()
 
 
 def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypatch):
-    group_path, _, _ = _make_group(tmp_path)
-    config = _enabled_config(group_path)
+    group_path, config_path, _ = _make_group(tmp_path)
+    _write_canonical_config(
+        config_path,
+        group_path,
+        routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}],
+    )
 
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job",
+        "agency.dispatch.run.submit_job_request",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             JobSubmissionError("no", tmp_path / "job")
         ),
     )
 
-    run_dispatch_cycle(config, tmp_path / "config.yaml")
+    run_dispatch_cycle({}, config_path)
 
-    assert not (group_path / "shared" / "logs" / ".last-product-routine").exists()
+    assert not (group_path / "shared" / "logs" / ".last-product-daily-review").exists()
 
 
-def test_schedule_does_not_touch_marker_when_spec_validation_fails(tmp_path, monkeypatch):
-    group_path, _, _ = _make_group(tmp_path)
-    (group_path / "shared" / "prompts" / "routine.md").write_text("\n")
-    config = _enabled_config(group_path)
+def test_schedule_skips_condition_rules(tmp_path, monkeypatch):
+    group_path, config_path, _ = _make_group(tmp_path)
+    _write_canonical_config(
+        config_path,
+        group_path,
+        routines=[
+            {
+                "id": "daily-review",
+                "skill": "daily-review",
+                "schedule": {"every": "1h"},
+                "condition": "pre-send",
+            }
+        ],
+    )
     submit_calls = []
 
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job",
-        lambda spec, launcher=None: submit_calls.append(spec) or object(),
+        "agency.dispatch.run.submit_job_request",
+        lambda request, launcher=None: submit_calls.append(request) or object(),
     )
 
-    run_dispatch_cycle(config, tmp_path / "config.yaml")
+    run_dispatch_cycle({}, config_path)
 
     assert submit_calls == []
-    assert not (group_path / "shared" / "logs" / ".last-product-routine").exists()
+    assert not (group_path / "shared" / "logs" / ".last-product-daily-review").exists()
+
+
+def test_check_every_rule_days(tmp_path):
+    marker = tmp_path / ".last-test"
+    marker.write_text("")
+    old_time = time.time() - (2 * 24 * 3600)
+    os.utime(marker, (old_time, old_time))
+    assert check_every_rule(marker, "1d") is True
 
 
 def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, monkeypatch):
-    first_path, _, _ = _make_group(tmp_path / "first")
-    second_path, _, _ = _make_group(tmp_path / "second")
-    config = {
-        "agency": {"dispatch": {"interval": 15}},
-        "groups": {
-            "first": _enabled_config(first_path)["groups"]["test"],
-            "second": _enabled_config(second_path)["groups"]["test"],
-        },
-    }
+    first_path, first_config, _ = _make_group(tmp_path / "first")
+    second_path, second_config, _ = _make_group(tmp_path / "second")
+    _write_canonical_config(first_config, first_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    _write_canonical_config(second_config, second_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job",
-        lambda spec, launcher=None: submitted.append((spec.group_key, spec.agent_name)),
+        "agency.dispatch.run.submit_job_request",
+        lambda request, launcher=None: submitted.append((request.group_key, request.agent_name)),
     )
-    run_dispatch_cycle(config, tmp_path / "config.yaml")
-    assert submitted == [("first", "product"), ("second", "product")]
+    run_dispatch_cycle({}, first_config)
+    run_dispatch_cycle({}, second_config)
+    assert submitted == [("test", "product"), ("test", "product")]
 
 
 def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypatch):
@@ -157,7 +243,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
 
     Uses fixed datetime to prevent rare midnight-crossing flakes.
     """
-    group_path, _, log_dir = _make_group(tmp_path)
+    group_path, config_path, log_dir = _make_group(tmp_path)
 
     # Fixed time: 2026-07-03 09:15:00 (within window of 09:00 at rule)
     fixed_dt = datetime(2026, 7, 3, 9, 15, 0)
@@ -178,40 +264,35 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
 
     monkeypatch.setattr("agency.dispatch.run.datetime", MockDatetime)
 
-    config = _enabled_config(group_path)
-    config["groups"]["test"]["dispatch"]["agents"]["product"] = [
-        {"prompt": "routine.md", "at": "09:00"},
-    ]
+    _write_canonical_config(
+        config_path,
+        group_path,
+        routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"at": "09:00"}}],
+    )
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job",
-        lambda spec, launcher=None: submitted.append(spec),
+        "agency.dispatch.run.submit_job_request",
+        lambda request, launcher=None: submitted.append(request),
     )
-    run_dispatch_cycle(config, tmp_path / "config.yaml")
-    run_dispatch_cycle(config, tmp_path / "config.yaml")
+    run_dispatch_cycle({}, config_path)
+    run_dispatch_cycle({}, config_path)
     assert len(submitted) == 1
 
     # Verify the event marker was created in the correct date subdirectory
-    event_marker = log_dir / ".event-product-routine"
+    event_marker = log_dir / ".event-product-daily-review-2026-07-03"
     assert event_marker.exists()
 
 
 def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
-    enabled_path, _, _ = _make_group(tmp_path / "enabled")
-    disabled_path, _, _ = _make_group(tmp_path / "disabled")
-    disabled_group = _enabled_config(disabled_path)["groups"]["test"]
-    disabled_group["dispatch"]["enabled"] = False
-    config = {
-        "agency": {"dispatch": {"interval": 15}},
-        "groups": {
-            "enabled": _enabled_config(enabled_path)["groups"]["test"],
-            "disabled": disabled_group,
-        },
-    }
+    enabled_path, enabled_config, _ = _make_group(tmp_path / "enabled")
+    disabled_path, disabled_config, _ = _make_group(tmp_path / "disabled")
+    _write_canonical_config(enabled_config, enabled_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    _write_canonical_config(disabled_config, disabled_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}], enabled=False)
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job",
-        lambda spec, launcher=None: submitted.append(spec.group_key),
+        "agency.dispatch.run.submit_job_request",
+        lambda request, launcher=None: submitted.append(request.group_key),
     )
-    run_dispatch_cycle(config, tmp_path / "config.yaml")
-    assert submitted == ["enabled"]
+    run_dispatch_cycle({}, enabled_config)
+    run_dispatch_cycle({}, disabled_config)
+    assert submitted == ["test"]

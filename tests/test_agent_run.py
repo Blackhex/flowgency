@@ -8,6 +8,7 @@ import pytest
 
 import agency.app as app_mod
 from agency.app import app, is_agent_running
+from agency.jobs import JobRequest
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.store import job_path, write_job
 
@@ -22,6 +23,39 @@ def _setup_group(tmp_path: Path) -> Path:
     (prompts / "other-routine.md").write_text("# Other routine\n")
     (prompts / "_observation-system-steps.md").write_text("# System\n")
     (group_path / "shared" / "logs").mkdir(parents=True)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "schema_version: 2\n"
+        "agency:\n"
+        "  title: Agency\n"
+        "  default_group: test\n"
+        "  ai_backend: claude-code\n"
+        "  agent_library: agent-library\n"
+        "  compilation_cache: compiled-agents\n"
+        "  memory_store: memory\n"
+        "groups:\n"
+        "  test:\n"
+        "    name: Test\n"
+        f"    path: {group_path.as_posix()}\n"
+        "    default_integration: script\n"
+        "    agents:\n"
+        "      - name: product\n"
+        "        blueprint: builder-blueprint\n"
+        "        integration: script\n"
+        "        routines:\n"
+        "          - id: daily-review\n"
+        "            skill: daily-review\n"
+        "            schedule:\n"
+        "              every: 6h\n"
+        "            memory:\n"
+        "              scope: routine\n"
+        "          - id: product-routine\n"
+        "            skill: product-routine\n"
+        "            schedule:\n"
+        "              every: 6h\n",
+        encoding="utf-8",
+    )
+    app_mod.CONFIG_PATH = config_path
     app_mod.CONFIG = {"groups": {"test": {"name": "Test", "path": str(group_path)}}}
     app_mod.GROUPS = {
         "test": {
@@ -30,20 +64,36 @@ def _setup_group(tmp_path: Path) -> Path:
             "path": group_path,
             "shared": group_path / "shared",
             "agents": ["product"],
-            "agents_full": [{"name": "product", "integration": "script"}],
-            "_agents_normalized": [{"name": "product", "integration": "script"}],
+            "agents_full": [{
+                "name": "product",
+                "integration": "script",
+                "blueprint": "builder-blueprint",
+                "routines": [
+                    {"id": "daily-review", "skill": "daily-review", "schedule": {"every": "6h"}, "memory": {"scope": "routine"}},
+                    {"id": "product-routine", "skill": "product-routine", "schedule": {"every": "6h"}},
+                ],
+            }],
+            "_agents_normalized": [{
+                "name": "product",
+                "integration": "script",
+                "blueprint": "builder-blueprint",
+                "routines": [
+                    {"id": "daily-review", "skill": "daily-review", "schedule": {"every": "6h"}, "memory": {"scope": "routine"}},
+                    {"id": "product-routine", "skill": "product-routine", "schedule": {"every": "6h"}},
+                ],
+            }],
             "dispatch": {"timeout": 1800},
         }
     }
     return group_path
 
 
-def _configure_schedule(prompt: str) -> None:
+def _configure_schedule(routine_id: str) -> None:
     app_mod.GROUPS["test"]["dispatch"] = {
         "enabled": True,
         "timeout": 1800,
-        "agents": {
-            "product": [{"prompt": prompt, "every": "6h"}],
+        "routines": {
+            "product": [{"id": routine_id, "every": "6h"}],
         },
     }
 
@@ -59,38 +109,40 @@ def _write_stdout(group_path: Path) -> Path:
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     _setup_group(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: calls.append(spec) or SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"prompt": "routine.md"})
+    resp = client.post("/test/agents/product/run", data={"routine_id": "daily-review"})
 
     assert resp.status_code == 202
     assert resp.json() == {"status": "started", "job_id": "job-1"}
     assert len(calls) == 1
-    spec = calls[0]
-    assert spec.trigger == "manual_prompt"
-    assert spec.group_key == "test"
-    assert spec.agent_name == "product"
-    assert spec.prompt_content == "# Routine\n"
-    assert spec.timeout_override is None
+    request = calls[0]
+    assert isinstance(request, JobRequest)
+    assert request.trigger == "manual_prompt"
+    assert request.group_key == "test"
+    assert request.agent_name == "product"
+    assert request.routine_id == "daily-review"
+    assert request.task_input == "Run routine 'daily-review'."
+    assert request.timeout_override is None
 
 
-def test_run_unknown_prompt_404(tmp_path, monkeypatch):
+def test_run_unknown_routine_404(tmp_path, monkeypatch):
     _setup_group(tmp_path)
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"prompt": "nope.md"})
+    resp = client.post("/test/agents/product/run", data={"routine_id": "nope"})
 
     assert resp.status_code == 404
 
 
-def test_run_path_traversal_400(tmp_path, monkeypatch):
+def test_run_invalid_routine_id_400(tmp_path, monkeypatch):
     _setup_group(tmp_path)
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"prompt": "../secret.md"})
+    resp = client.post("/test/agents/product/run", data={"routine_id": "../secret"})
 
     assert resp.status_code == 400
 
@@ -98,11 +150,11 @@ def test_run_path_traversal_400(tmp_path, monkeypatch):
 def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
     _setup_group(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: calls.append(spec) or SimpleNamespace(job_id=f"job-{len(calls)}"))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id=f"job-{len(calls)}"))
     client = TestClient(app)
 
-    assert client.post("/test/agents/product/run", data={"prompt": "routine.md"}).status_code == 202
-    assert client.post("/test/agents/product/run", data={"prompt": "routine.md"}).status_code == 202
+    assert client.post("/test/agents/product/run", data={"routine_id": "daily-review"}).status_code == 202
+    assert client.post("/test/agents/product/run", data={"routine_id": "daily-review"}).status_code == 202
     assert len(calls) == 2
 
 
@@ -124,16 +176,26 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
     assert is_agent_running(app_mod.GROUPS["test"], "product") is True
 
 
-def test_run_returns_400_when_prompt_snapshot_fails_spec_validation(tmp_path, monkeypatch):
-    group_path = _setup_group(tmp_path)
-    (group_path / "shared" / "prompts" / "routine.md").write_text("\n")
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id="job-1"))
+def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):
+    _setup_group(tmp_path)
+    calls = []
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"prompt": "routine.md"})
+    resp = client.post("/test/agents/product/run", data={"routine_id": "daily-review", "memory_scope": "routine"})
+
+    assert resp.status_code == 202
+    assert calls[0].memory_override == {"scope": "routine"}
+
+
+def test_run_rejects_invalid_selector_override_for_routine(tmp_path, monkeypatch):
+    _setup_group(tmp_path)
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
+    client = TestClient(app)
+
+    resp = client.post("/test/agents/product/run", data={"routine_id": "daily-review", "memory_scope": "channel"})
 
     assert resp.status_code == 400
-    assert "Prompt content must not be blank" in resp.json()["detail"]
 
 
 def test_agents_page_lists_prompts_with_run(tmp_path):
@@ -143,8 +205,7 @@ def test_agents_page_lists_prompts_with_run(tmp_path):
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    # Prompt inferred to this agent by filename prefix is shown, with a Run button.
-    assert 'data-prompt="product-routine.md"' in resp.text
+    assert 'data-routine="product-routine"' in resp.text
     assert "/test/prompts/" in resp.text
 
 
@@ -164,7 +225,7 @@ def test_agents_page_excludes_unrelated_and_system_prompts(tmp_path):
 def test_agents_page_links_last_stdout_and_next_schedule(tmp_path):
     group_path = _setup_group(tmp_path)
     stdout_path = _write_stdout(group_path)
-    _configure_schedule("product-routine.md")
+    _configure_schedule("product-routine")
     client = TestClient(app)
 
     resp = client.get("/test/agents")
@@ -174,12 +235,12 @@ def test_agents_page_links_last_stdout_and_next_schedule(tmp_path):
     assert f'href="/test/logs/view?path={encoded_path}"' in resp.text
     assert 'href="/test/prompts#schedule-product-0"' in resp.text
     assert "last run stdout log" in resp.text
-    assert 'aria-label="Edit schedule for product-routine.md"' in resp.text
+    assert 'aria-label="Edit schedule for product-routine"' in resp.text
 
 
 def test_prompts_page_marks_exact_schedule_target(tmp_path):
     _setup_group(tmp_path)
-    _configure_schedule("product-routine.md")
+    _configure_schedule("product-routine")
     client = TestClient(app)
 
     resp = client.get("/test/prompts")
@@ -192,7 +253,7 @@ def test_prompts_page_marks_exact_schedule_target(tmp_path):
 
 @pytest.mark.parametrize(
     "prompt",
-    ["missing.md", "_observation-system-steps.md"],
+    ["missing", "_observation-system-steps"],
 )
 def test_agents_page_uses_group_settings_for_uneditable_schedule(
     tmp_path,
@@ -228,7 +289,7 @@ def test_agents_page_keeps_superseded_activity_unlinked(tmp_path):
 def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
     group_path = _setup_group(tmp_path)
     stdout_path = _write_stdout(group_path)
-    _configure_schedule("product-routine.md")
+    _configure_schedule("product-routine")
     monkeypatch.setattr(app_mod, "is_agent_running", lambda *args, **kwargs: True)
     client = TestClient(app)
 

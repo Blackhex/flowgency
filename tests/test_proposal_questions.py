@@ -155,6 +155,36 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         },
         {"name": "sdk-agent", "integration": "sdk"},
     ]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "schema_version: 2\n"
+        "agency:\n"
+        "  title: Agency\n"
+        "  default_group: test\n"
+        "  ai_backend: claude-code\n"
+        "  agent_library: agent-library\n"
+        "  compilation_cache: compiled-agents\n"
+        "  memory_store: memory\n"
+        "groups:\n"
+        "  test:\n"
+        "    name: Test\n"
+        f"    path: {group.as_posix()}\n"
+        "    default_integration: script\n"
+        "    agents:\n"
+        "      - name: product\n"
+        "        blueprint: product-blueprint\n"
+        "        integration: script\n"
+        "      - name: engineer\n"
+        "        blueprint: engineer-blueprint\n"
+        "        integration: script\n"
+        "        capabilities:\n"
+        "          write: true\n"
+        "      - name: sdk-agent\n"
+        "        blueprint: sdk-blueprint\n"
+        "        integration: sdk\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     monkeypatch.setattr(app_mod, "CONFIG", {"groups": {"test": {"path": str(group), "agents": agents}}})
     monkeypatch.setattr(app_mod, "GROUPS", {"test": {
         "key": "test", "name": "Test", "path": group,

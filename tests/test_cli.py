@@ -293,7 +293,7 @@ def test_cmd_decide_collects_decline_open_answer_and_note(tmp_path, monkeypatch)
     responses = iter(["", "d", "Use the alternate", "Overall note"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
     submitted = []
-    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr(cli, "submit_job_request", lambda request: submitted.append(request))
     cli.cmd_decide(args)
     meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
     assert meta["answers"] == {"approve": "declined", "detail": "Use the alternate"}
@@ -301,7 +301,7 @@ def test_cmd_decide_collects_decline_open_answer_and_note(tmp_path, monkeypatch)
     assert meta["execution_agent"] == "builder"
     assert meta["execution_status"] == "pending"
     assert meta["execution_job_id"] == submitted[0].job_id
-    assert "Overall note" in submitted[0].prompt_content
+    assert "Overall note" in submitted[0].task_input
 
 
 def test_cmd_decide_deduplicates_multi_choice_answers(tmp_path, monkeypatch):
@@ -321,7 +321,7 @@ def test_cmd_decide_deduplicates_multi_choice_answers(tmp_path, monkeypatch):
     responses = iter(["", "1,1,2", ""])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
     submitted = []
-    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr(cli, "submit_job_request", lambda request: submitted.append(request))
     cli.cmd_decide(args)
     meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
     assert meta["answers"] == {"targets": ["Alpha", "Beta"]}
@@ -334,7 +334,7 @@ def test_cmd_decide_all_declined_without_guidance_skips_job(tmp_path, monkeypatc
     responses = iter(["", "d", ""])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
     submitted = []
-    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr(cli, "submit_job_request", lambda request: submitted.append(request))
     cli.cmd_decide(args)
     meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
     assert meta["execution_status"] == "skipped"
@@ -347,7 +347,7 @@ def test_cmd_decide_submission_failure_removes_decision_and_preserves_proposal(t
     args, decision_path, proposal_path = setup_cli_proposal(tmp_path, monkeypatch)
     responses = iter(["", "a", ""])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
-    monkeypatch.setattr(cli, "submit_job", lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)))
+    monkeypatch.setattr(cli, "submit_job_request", lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)))
     with pytest.raises(SystemExit) as error:
         cli.cmd_decide(args)
     assert error.value.code == 1
@@ -373,7 +373,7 @@ def test_cmd_decide_invalid_then_valid_boolean_completes(tmp_path, monkeypatch, 
     responses = iter(["", "x", "a", ""])  # executor default, invalid boolean, valid boolean, empty note
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
     submitted = []
-    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr(cli, "submit_job_request", lambda request: submitted.append(request))
     cli.cmd_decide(args)
     # Should have printed feedback for the invalid input
     out = capsys.readouterr().out
@@ -403,7 +403,7 @@ def test_cmd_decide_invalid_multi_choice_reprompts(tmp_path, monkeypatch, capsys
     responses = iter(["", "99", "1", ""])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
     submitted = []
-    monkeypatch.setattr(cli, "submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr(cli, "submit_job_request", lambda request: submitted.append(request))
     cli.cmd_decide(args)
     meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
     assert meta["answers"]["targets"] == ["Alpha"]

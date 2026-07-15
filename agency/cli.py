@@ -19,8 +19,7 @@ from agency.app import (
 )
 from agency.config import load_config_path, save_config_path
 from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status
-from agency.jobs import JobSpec, JobSubmissionError, submit_job
-submit_job = submit_job
+from agency.jobs import JobRequest, JobSubmissionError, submit_job_request
 
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
@@ -416,27 +415,26 @@ def _cmd_decide_inner(args):
     decision_path = decisions_dir / f"{slug}.md"
 
     if should_execute_decision(questions, answers, decision_note):
-        spec = JobSpec.create(
+        request_obj = JobRequest(
             config_path=CONFIG_PATH,
             group_key=args.group,
             agent_name=execution_agent,
             trigger="decision",
-            prompt_source={"type": "decision", "proposal": f"{slug}.md"},
-            prompt_content=build_decision_prompt(proposal_body, answers, decision_note),
-            decision_context={
+            task_input=build_decision_prompt(proposal_body, answers, decision_note),
+            trigger_context={
                 "decision_path": str(decision_path.resolve()),
                 "proposal_path": str(proposal_path.resolve()),
             },
         )
         dec_meta["execution_status"] = "pending"
-        dec_meta["execution_job_id"] = spec.job_id
+        dec_meta["execution_job_id"] = request_obj.job_id
         dec_meta["execution_job_history"] = []
 
         frontmatter = yaml.dump(dec_meta, default_flow_style=False, sort_keys=False).strip()
         atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
 
         try:
-            submit_job(spec)
+            submit_job_request(request_obj)
         except JobSubmissionError as error:
             decision_path.unlink(missing_ok=True)
             print(f"Error: {error}", file=sys.stderr)

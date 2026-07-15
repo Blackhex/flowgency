@@ -10,7 +10,7 @@ import agency.app as app_mod
 from agency.config import SandboxSpec
 from agency.integrations import FileChange, RunResult
 from agency.integrations.models import IntegrationRunRequest
-from agency.jobs import JobSubmissionError
+from agency.jobs import JobRequest, JobSubmissionError
 from agency.jobs.execution import execute_job
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.store import write_job
@@ -187,15 +187,18 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
 def test_decide_submits_embedded_snapshot_and_persists_job_id(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     captured = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec) or SimpleNamespace(job_id=spec.job_id))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "approved", "execution_agent": "engineer"},
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert "approved" in captured[0].prompt_content
-    assert "Proposal body" in captured[0].prompt_content
+    assert isinstance(captured[0], JobRequest)
+    assert captured[0].routine_id is None
+    assert captured[0].memory_override is None
+    assert "approved" in captured[0].task_input
+    assert "Proposal body" in captured[0].task_input
     metadata, _ = app_mod.parse_frontmatter(decision_path.read_text())
     assert metadata["execution_agent"] == "engineer"
     assert metadata["execution_job_id"] == captured[0].job_id
@@ -210,7 +213,7 @@ def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monk
         "execution_job_history: []\n---\n"
     )
     captured = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec) or SimpleNamespace(job_id=spec.job_id))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
     response = client.post(
         "/test/decisions/change/retry",
         data={"execution_agent": "engineer"}, follow_redirects=False,
@@ -219,11 +222,13 @@ def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monk
     assert response.status_code == 303
     assert metadata["execution_job_history"] == ["old-job"]
     assert metadata["execution_job_id"] == captured[0].job_id
+    assert captured[0].routine_id is None
+    assert captured[0].memory_override is None
 
 
 def test_launch_failure_rolls_back_new_decision(tmp_path, monkeypatch):
     client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "approved", "execution_agent": "engineer"},
@@ -243,8 +248,8 @@ def test_retry_launch_failure_restores_original_decision_text(tmp_path, monkeypa
     )
     decision_path.write_text(original_text)
     monkeypatch.setattr(
-        "agency.app.submit_job",
-        lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
+        "agency.app.submit_job_request",
+        lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
     )
     response = client.post(
         "/test/decisions/change/retry",
@@ -274,7 +279,7 @@ def test_decide_creates_decision_via_atomic_replace(tmp_path, monkeypatch):
     """Decision creation must write via a same-directory temp file + os.replace,
     not a plain write_text, so a crash mid-write never leaves a truncated file."""
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id=spec.job_id))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id=request.job_id))
     calls = _spy_os_replace(monkeypatch)
 
     response = client.post(
@@ -298,7 +303,7 @@ def test_retry_updates_decision_via_atomic_replace(tmp_path, monkeypatch):
         "execution_agent: engineer\nexecution_job_id: old-job\n"
         "execution_job_history: []\n---\n"
     )
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: SimpleNamespace(job_id=spec.job_id))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id=request.job_id))
     calls = _spy_os_replace(monkeypatch)
 
     response = client.post(
@@ -323,8 +328,8 @@ def test_retry_launch_failure_restores_decision_via_atomic_replace(tmp_path, mon
     )
     decision_path.write_text(original_text)
     monkeypatch.setattr(
-        "agency.app.submit_job",
-        lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
+        "agency.app.submit_job_request",
+        lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
     )
     calls = _spy_os_replace(monkeypatch)
 
@@ -376,8 +381,8 @@ def test_retry_launch_failure_rerenders_decision_detail_with_error(tmp_path, mon
     )
     decision_path.write_text(original_text)
     monkeypatch.setattr(
-        "agency.app.submit_job",
-        lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
+        "agency.app.submit_job_request",
+        lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
     )
 
     response = client.post(
@@ -394,7 +399,7 @@ def test_retry_launch_failure_rerenders_decision_detail_with_error(tmp_path, mon
 def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     submitted = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: submitted.append(request))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "declined", "execution_agent": "engineer"},
@@ -411,7 +416,7 @@ def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_
 def test_declined_with_note_submits_job_and_persists_note(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     captured = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "declined", "decision_note": "Implement the alternate path", "execution_agent": "engineer"},
@@ -420,7 +425,7 @@ def test_declined_with_note_submits_job_and_persists_note(tmp_path, monkeypatch)
     meta, _ = app_mod.parse_frontmatter(decision_path.read_text())
     assert response.status_code == 303
     assert meta["decision_note"] == "Implement the alternate path"
-    assert "Implement the alternate path" in captured[0].prompt_content
+    assert "Implement the alternate path" in captured[0].task_input
 
 
 def test_launch_failure_preserves_submitted_answers_and_note_in_rerender(tmp_path, monkeypatch):
@@ -428,8 +433,8 @@ def test_launch_failure_preserves_submitted_answers_and_note_in_rerender(tmp_pat
     (radio pre-selected) and the decision note so all user input survives."""
     client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "agency.app.submit_job",
-        lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)),
+        "agency.app.submit_job_request",
+        lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)),
     )
     response = client.post(
         "/test/proposals/change/decide",
@@ -455,10 +460,10 @@ def test_retry_prompt_keeps_decision_note(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: approved\ndecision_note: Keep rollback\nexecution_status: failed\nexecution_agent: engineer\n---\n")
     captured = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request))
     response = client.post("/test/decisions/change/retry", data={"execution_agent": "engineer"}, follow_redirects=False)
     assert response.status_code == 303
-    assert "Keep rollback" in captured[0].prompt_content
+    assert "Keep rollback" in captured[0].task_input
 
 
 # ── Finding 2: server-side retry status enforcement ──────────────────────────
@@ -471,7 +476,7 @@ def test_retry_blocked_for_non_failed_status(tmp_path, monkeypatch, bad_status):
     original = f"---\nproposal: change.md\nexecution_status: {bad_status}\nexecution_agent: engineer\n---\n"
     decision_path.write_text(original)
     submitted = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: submitted.append(request))
     response = client.post("/test/decisions/change/retry", data={"execution_agent": "engineer"})
     assert response.status_code == 400, f"expected 400 for status={bad_status}, got {response.status_code}"
     assert submitted == [], f"submit_job must not be called for status={bad_status}"
