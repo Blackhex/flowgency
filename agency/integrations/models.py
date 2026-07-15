@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 PathPolicyMode = Literal["restricted", "unrestricted"]
@@ -26,3 +26,22 @@ class EffectiveRuntimePolicy:
 class RuntimeCapabilities:
     path_modes: frozenset[PathPolicyMode] = frozenset()
     tool_modes: frozenset[ToolPolicyMode] = frozenset()
+
+
+@dataclass(frozen=True)
+class ProjectorCapabilities:
+    instruction_target: PurePosixPath
+    skills_target: PurePosixPath
+    discovers_skills: bool
+    activates_selected_skill: bool
+
+
+@dataclass(frozen=True)
+class IntegrationRunRequest:
+    workspace_dir: Path
+    launch_dir: Path
+    task_file: Path
+    timeout: int
+    runtime_policy: EffectiveRuntimePolicy
+    skill: str | None
+    skill_arguments: tuple[str, ...] = ()

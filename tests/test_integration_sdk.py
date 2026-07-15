@@ -1,5 +1,6 @@
 import pytest
 from agency.integrations.agency.sdk import SdkIntegration
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
 
 
 @pytest.fixture
@@ -22,6 +23,46 @@ def test_detect_without_agent_md(integration, tmp_agent_dir):
 def test_run_returns_error(integration, tmp_agent_dir, tmp_path):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Do something")
-    result = integration.run(tmp_agent_dir, prompt, 60)
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_agent_dir,
+        launch_dir=tmp_agent_dir,
+        task_file=prompt,
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill=None,
+        skill_arguments=(),
+    )
+    result = integration.run(request)
     assert result.exit_code != 0
     assert "externally managed" in result.stderr.lower()
+
+
+def test_validate_run_rejects_execution(tmp_path):
+    integration = SdkIntegration()
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_path / "workspace",
+        launch_dir=tmp_path / "runtime",
+        task_file=tmp_path / "runtime" / "task.md",
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill=None,
+        skill_arguments=(),
+    )
+
+    issues = integration.validate_run(request)
+
+    assert [issue.code for issue in issues] == [
+        "unsupported-path-policy",
+        "unsupported-tool-policy",
+        "integration-not-executable",
+    ]

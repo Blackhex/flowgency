@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
+
 from .atomic import atomic_write_text
 from .changes import capture_base_sha, capture_git_changes
 from .context import resolve_job_context
@@ -14,6 +16,24 @@ from .models import JobRecord
 from .store import read_job, transition_job
 
 logger = logging.getLogger(__name__)
+
+
+def _fallback_runtime_policy(context, timeout: int) -> EffectiveRuntimePolicy:
+    sandbox = getattr(context, "sandbox_root", None)
+    if sandbox and getattr(sandbox, "roots", ()):
+        sandbox_mode = "restricted"
+        sandbox_roots = tuple(sandbox.roots)
+    else:
+        sandbox_mode = "unrestricted"
+        sandbox_roots = ()
+    allowed_tools = tuple(getattr(sandbox, "allowed_tools", ()) or ()) if sandbox else ()
+    tool_mode = "allowlist" if allowed_tools else "all"
+    return EffectiveRuntimePolicy(
+        timeout=timeout,
+        sandbox_mode=sandbox_mode,
+        sandbox_roots=sandbox_roots,
+        tools=ResolvedToolPolicy(tool_mode, allowed_tools),
+    )
 
 
 def _read_frontmatter(path: Path) -> tuple[dict, str]:
@@ -85,6 +105,7 @@ def execute_job(job_path: Path) -> JobRecord:
     base_sha = None
     try:
         context = resolve_job_context(record.spec)
+        runtime_policy = _fallback_runtime_policy(context, context.timeout)
         # The capture must be tied to the one root the job actually ran in: prefer
         # the sandbox root the integration executes against, falling back to the
         # agent directory. Both selection and rev-parse are best-effort.
@@ -103,12 +124,18 @@ def execute_job(job_path: Path) -> JobRecord:
         stdout_path = log_dir / f"{stem}.out"
         stderr_path = log_dir / f"{stem}.err"
         prompt_path.write_text(record.spec.prompt_content, encoding="utf-8")
-        result = context.integration.run(
-            context.agent_dir,
-            prompt_path,
-            context.timeout,
-            sandbox_root=context.sandbox_root,
+        launch_dir = context.agent_dir / ".agency-runtime"
+        launch_dir.mkdir(parents=True, exist_ok=True)
+        request = IntegrationRunRequest(
+            workspace_dir=context.agent_dir,
+            launch_dir=launch_dir,
+            task_file=prompt_path,
+            timeout=context.timeout,
+            runtime_policy=runtime_policy,
+            skill=None,
+            skill_arguments=(),
         )
+        result = context.integration.run(request)
         stdout_path.write_text(result.stdout, encoding="utf-8")
         persisted_stderr_path = None
         if result.stderr:

@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 from agency.integrations.agency.claude_code import ClaudeCodeIntegration
 from agency.integrations import AgentIdentity
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
 
 
 @pytest.fixture
@@ -72,3 +73,28 @@ def test_write_identity_preserves_extra_frontmatter(integration, tmp_agent_dir):
     assert "display_name: New" in content
     assert "custom_field: keep_me" in content
     assert "New body." in content
+
+
+def test_validate_run_rejects_skill_activation_until_cli_contract_is_verified(integration, tmp_path):
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_path / "workspace",
+        launch_dir=tmp_path / "launch",
+        task_file=tmp_path / "launch" / "task.md",
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill="daily-review",
+        skill_arguments=("newsletter",),
+    )
+
+    issues = integration.validate_run(request)
+
+    assert [issue.code for issue in issues] == [
+        "unsupported-path-policy",
+        "unsupported-tool-policy",
+        "unsupported-skill-activation",
+    ]

@@ -6,10 +6,12 @@ from pathlib import Path
 
 import yaml
 
+from agency.configuration.issues import ValidationIssue
 from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     parse_identity_frontmatter as _parse_frontmatter,
 )
+from agency.integrations.models import IntegrationRunRequest
 
 
 class ScriptIntegration(BaseIntegration):
@@ -18,6 +20,7 @@ class ScriptIntegration(BaseIntegration):
     supports_execution = True
     supports_ai_backend = False
     detect_priority = 1000  # Never auto-detects
+    projector = BaseIntegration._default_projector("agent.md")
 
     def __init__(self, integration_config: dict | None = None):
         self._config = integration_config or {}
@@ -65,23 +68,40 @@ class ScriptIntegration(BaseIntegration):
             errors.append("'command' is required for the script integration")
         return errors
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: Path | None = None) -> RunResult:
+    def validate_run(self, request: IntegrationRunRequest):
+        issues = list(super().validate_run(request))
+        command = self._config.get("command", "")
+        required = ("{runtime_dir}", "{workspace_dir}", "{skill}")
+        if request.skill is not None and not all(token in command for token in required):
+            issues.append(
+                ValidationIssue(
+                    code="script-missing-runtime-placeholders",
+                    scope="integrations.script",
+                    field="integration_config.command",
+                    message="Script integration requires runtime_dir, workspace_dir, and skill placeholders for routine skill activation.",
+                    corrective_hint="Add {runtime_dir}, {workspace_dir}, and {skill} placeholders or run without a routine skill.",
+                )
+            )
+        return tuple(issues)
+
+    def run(self, request: IntegrationRunRequest) -> RunResult:
         errors = self.validate_config(self._config)
         if errors:
             raise IntegrationError("; ".join(errors))
         command = self._config.get("command", "")
         if not command:
             raise IntegrationError("No command configured for script integration")
-        # Expand placeholders
-        command = command.replace("{prompt_file}", str(prompt_file))
-        command = command.replace("{agent_dir}", str(agent_dir))
+        command = command.replace("{prompt_file}", str(request.task_file))
+        command = command.replace("{agent_dir}", str(request.workspace_dir))
+        command = command.replace("{runtime_dir}", str(request.launch_dir))
+        command = command.replace("{workspace_dir}", str(request.workspace_dir))
+        command = command.replace("{skill}", request.skill or "")
         start = time.monotonic()
         try:
             result = subprocess.run(
                 command, shell=True,
-                capture_output=True, text=True, timeout=timeout,
-                cwd=str(agent_dir),
+                capture_output=True, text=True, timeout=request.timeout,
+                cwd=str(request.launch_dir),
             )
             return RunResult(
                 exit_code=result.returncode, stdout=result.stdout,

@@ -6,6 +6,7 @@ import os
 import yaml
 
 from agency.integrations import FileChange, RunResult
+from agency.integrations.models import IntegrationRunRequest
 from agency.jobs.execution import execute_job
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.reconciliation import worker_alive
@@ -41,9 +42,9 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
         supports_execution = True
         name = "fake"
 
-        def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
+        def run(self, request: IntegrationRunRequest):
             seen["running"] = read_job(path).status
-            seen["prompt"] = prompt_file.read_text()
+            seen["prompt"] = request.task_file.read_text()
             return RunResult(
                 0,
                 "done",
@@ -91,7 +92,7 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
         lambda ignored: SimpleNamespace(
             agent_dir=agent_dir,
             integration=SimpleNamespace(
-                run=lambda *args, **kwargs: RunResult(0, "done", "", 0.1)
+                run=lambda request: RunResult(0, "done", "", 0.1)
             ),
             timeout=30,
             sandbox_root=None,
@@ -113,7 +114,7 @@ def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
         sandbox_root=None,
         group_path=tmp_path / "group",
         integration=SimpleNamespace(
-            run=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+            run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
         ),
     )
     monkeypatch.setattr(
@@ -150,7 +151,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
             sandbox_root=None,
             group_path=tmp_path / "group",
             integration=SimpleNamespace(
-                run=lambda *args, **kwargs: RunResult(0, "done", "", 0.1)
+                run=lambda request: RunResult(0, "done", "", 0.1)
             ),
         ),
     )
@@ -173,7 +174,7 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
             sandbox_root=None,
             group_path=tmp_path / "group",
             integration=SimpleNamespace(
-                run=lambda *args, **kwargs: RunResult(124, "partial", "timeout", 30.0)
+                run=lambda request: RunResult(124, "partial", "timeout", 30.0)
             ),
         ),
     )
@@ -200,7 +201,7 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
             timeout=30,
             sandbox_root=None,
             group_path=tmp_path / "group",
-            integration=SimpleNamespace(run=lambda *args, **kwargs: superseded_result),
+            integration=SimpleNamespace(run=lambda request: superseded_result),
         ),
     )
 
@@ -228,7 +229,7 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
             sandbox_root=None,
             group_path=tmp_path / "group",
             integration=SimpleNamespace(
-                run=lambda *args, **kwargs: RunResult(0, "done", "", 0.1)
+                run=lambda request: RunResult(0, "done", "", 0.1)
             ),
         ),
     )
@@ -259,7 +260,7 @@ def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeyp
             sandbox_root=None,
             group_path=tmp_path / "group",
             integration=SimpleNamespace(
-                run=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+                run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
             ),
         ),
     )
@@ -286,7 +287,7 @@ def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkey
         supports_execution = True
         name = "fake"
 
-        def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
+        def run(self, request: IntegrationRunRequest):
             running = read_job(path)
             captured["status"] = running.status
             captured["pid"] = running.worker_pid

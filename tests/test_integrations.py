@@ -108,9 +108,9 @@ def test_base_integration_supports_sandbox_defaults_false():
     assert BaseIntegration.supports_sandbox is False
 
 
-def test_base_run_accepts_sandbox_root_kwarg():
+def test_base_run_accepts_typed_request():
     sig = inspect.signature(BaseIntegration.run)
-    param = sig.parameters.get("sandbox_root")
-    assert param is not None
-    assert param.kind is inspect.Parameter.KEYWORD_ONLY
-    assert param.default is None
+    params = list(sig.parameters.values())
+    assert len(params) == 2
+    assert params[0].name == "self"
+    assert params[1].name == "request"

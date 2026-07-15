@@ -7,6 +7,7 @@ from pathlib import Path
 from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
 )
+from agency.integrations.models import IntegrationRunRequest
 
 
 class PiIntegration(BaseIntegration):
@@ -15,6 +16,7 @@ class PiIntegration(BaseIntegration):
     supports_execution = True
     supports_ai_backend = False
     detect_priority = 8
+    projector = BaseIntegration._default_projector("AGENTS.md")
 
     def identity_filename(self) -> str:
         return "AGENTS.md"
@@ -28,16 +30,15 @@ class PiIntegration(BaseIntegration):
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
         self._write_sidecar_identity(agent_dir, agent_dir / "AGENTS.md", identity)
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: Path | None = None) -> RunResult:
-        prompt_text = prompt_file.read_text()
+    def run(self, request: IntegrationRunRequest) -> RunResult:
+        prompt_text = request.task_file.read_text()
         cmd = self._find_cmd()
         start = time.monotonic()
         try:
             result = subprocess.run(
                 [cmd, "-p", prompt_text],
-                capture_output=True, text=True, timeout=timeout,
-                cwd=str(agent_dir),
+                capture_output=True, text=True, timeout=request.timeout,
+                cwd=str(request.launch_dir),
             )
             duration = time.monotonic() - start
             return RunResult(

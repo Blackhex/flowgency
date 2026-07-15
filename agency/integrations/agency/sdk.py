@@ -8,6 +8,7 @@ from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, _register,
     parse_identity_frontmatter as _parse_frontmatter,
 )
+from agency.integrations.models import IntegrationRunRequest
 
 
 class SdkIntegration(BaseIntegration):
@@ -16,6 +17,7 @@ class SdkIntegration(BaseIntegration):
     supports_execution = False
     supports_ai_backend = False
     detect_priority = 999  # Last resort
+    projector = BaseIntegration._default_projector("agent.md")
 
     def identity_filename(self) -> str:
         return "agent.md"
@@ -50,8 +52,7 @@ class SdkIntegration(BaseIntegration):
         else:
             path.write_text(identity.body)
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: Path | None = None) -> RunResult:
+    def run(self, request: IntegrationRunRequest) -> RunResult:
         return RunResult(
             exit_code=1,
             stdout="",

@@ -1,6 +1,7 @@
 import pytest
 from agency.integrations.agency.script import ScriptIntegration
 from agency.integrations import AgentIdentity
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
 
 
 @pytest.fixture
@@ -36,6 +37,33 @@ def test_validate_config_valid(integration):
     errors = integration.validate_config({"command": "echo {prompt_file}"})
     assert errors == []
 
+
+def test_validate_run_requires_runtime_placeholders(tmp_path):
+    integration = ScriptIntegration({"command": "echo {prompt_file}"})
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_path / "workspace",
+        launch_dir=tmp_path / "runtime",
+        task_file=tmp_path / "runtime" / "task.md",
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill="daily-review",
+        skill_arguments=(),
+    )
+
+    issues = integration.validate_run(request)
+
+    assert [issue.code for issue in issues] == [
+        "unsupported-path-policy",
+        "unsupported-tool-policy",
+        "unsupported-skill-activation",
+        "script-missing-runtime-placeholders",
+    ]
+
 def test_with_config(integration):
     configured = integration.with_config({"command": "echo hello"})
     assert configured._config["command"] == "echo hello"
@@ -45,6 +73,20 @@ def test_run_with_config(tmp_agent_dir, tmp_path):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Do something")
     configured = ScriptIntegration({"command": "echo ran-{prompt_file}"})
-    result = configured.run(tmp_agent_dir, prompt, 60)
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_agent_dir,
+        launch_dir=tmp_agent_dir,
+        task_file=prompt,
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill=None,
+        skill_arguments=(),
+    )
+    result = configured.run(request)
     assert result.exit_code == 0
     assert "ran-" in result.stdout

@@ -9,6 +9,7 @@ from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     read_sidecar, write_sidecar,
 )
+from agency.integrations.models import IntegrationRunRequest
 
 
 class AiderIntegration(BaseIntegration):
@@ -17,6 +18,7 @@ class AiderIntegration(BaseIntegration):
     supports_execution = True
     supports_ai_backend = False
     detect_priority = 10
+    projector = BaseIntegration._default_projector("CONVENTIONS.md")
 
     def identity_filename(self) -> str:
         return "CONVENTIONS.md"
@@ -30,15 +32,14 @@ class AiderIntegration(BaseIntegration):
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
         self._write_sidecar_identity(agent_dir, agent_dir / "CONVENTIONS.md", identity)
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: Path | None = None) -> RunResult:
+    def run(self, request: IntegrationRunRequest) -> RunResult:
         cmd = self._find_cmd()
         start = time.monotonic()
         try:
             result = subprocess.run(
-                [cmd, "--message-file", str(prompt_file)],
-                capture_output=True, text=True, timeout=timeout,
-                cwd=str(agent_dir),
+                [cmd, "--message-file", str(request.task_file)],
+                capture_output=True, text=True, timeout=request.timeout,
+                cwd=str(request.launch_dir),
             )
             duration = time.monotonic() - start
             return RunResult(

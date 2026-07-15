@@ -7,10 +7,12 @@ from pathlib import Path
 
 import yaml
 
+from agency.blueprints.projectors import get_projector
 from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     parse_identity_frontmatter,
 )
+from agency.integrations.models import IntegrationRunRequest
 
 # Keep backward-compat alias for any external importers
 _parse_frontmatter = parse_identity_frontmatter
@@ -22,6 +24,7 @@ class ClaudeCodeIntegration(BaseIntegration):
     supports_execution = True
     supports_ai_backend = True
     detect_priority = 10
+    projector = get_projector("claude-code")
 
     def identity_filename(self) -> str:
         return "CLAUDE.md"
@@ -65,16 +68,15 @@ class ClaudeCodeIntegration(BaseIntegration):
         else:
             path.write_text(identity.body)
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: Path | None = None) -> RunResult:
-        prompt_text = prompt_file.read_text()
+    def run(self, request: IntegrationRunRequest) -> RunResult:
+        prompt_text = request.task_file.read_text()
         cmd = self._find_cmd()
         start = time.monotonic()
         try:
             result = subprocess.run(
                 [cmd, "--dangerously-skip-permissions", "-p", prompt_text],
-                capture_output=True, text=True, timeout=timeout,
-                cwd=str(agent_dir),
+                capture_output=True, text=True, timeout=request.timeout,
+                cwd=str(request.launch_dir),
             )
             duration = time.monotonic() - start
             return RunResult(

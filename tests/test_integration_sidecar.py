@@ -8,6 +8,7 @@ from agency.integrations.agency.goose import GooseIntegration
 from agency.integrations.agency.opencode import OpenCodeIntegration
 from agency.integrations.agency.pi import PiIntegration
 from agency.integrations.agency.copilot import CopilotIntegration
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
 
 
 class TestCodex:
@@ -61,6 +62,30 @@ class TestGemini:
     def test_metadata(self, integration):
         assert integration.name == "gemini"
         assert integration.identity_filename() == "GEMINI.md"
+
+    def test_validate_run_rejects_skill_activation_until_cli_contract_is_verified(self, integration, tmp_path):
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_path / "workspace",
+            launch_dir=tmp_path / "launch",
+            task_file=tmp_path / "launch" / "task.md",
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill="daily-review",
+            skill_arguments=(),
+        )
+
+        issues = integration.validate_run(request)
+
+        assert [issue.code for issue in issues] == [
+            "unsupported-path-policy",
+            "unsupported-tool-policy",
+            "unsupported-skill-activation",
+        ]
 
     def test_detect(self, integration, tmp_agent_dir):
         (tmp_agent_dir / "GEMINI.md").write_text("# Agent\n")
@@ -426,13 +451,28 @@ class TestCopilot:
         monkeypatch.setattr(mod.subprocess, "run", fake_run)
         prompt_file = tmp_agent_dir / "prompt.md"
         prompt_file.write_text("Do the thing")
-        result = integration.run(tmp_agent_dir, prompt_file, timeout=30)
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt_file,
+            timeout=30,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=30,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+        result = integration.run(request)
         assert result.exit_code == 0
         assert captured["cmd"][1] == "-p"
         assert "Do the thing" in captured["cmd"]
         assert "--autopilot" in captured["cmd"]
         assert "--experimental" in captured["cmd"]
-        assert captured["cwd"] == str(tmp_agent_dir)
+        assert "--no-custom-instructions" not in captured["cmd"]
+        assert captured["cwd"] == str(request.launch_dir)
 
     def test_prompt_returns_stdout(self, integration, monkeypatch):
         import agency.integrations.agency.copilot as mod
@@ -477,7 +517,21 @@ class TestCopilot:
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
-        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60)
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+        CopilotIntegration().run(request)
 
         args = captured["args"]
         # Unrestricted mode: both axes blanket-approved, --autopilot present.
@@ -487,7 +541,7 @@ class TestCopilot:
         assert "--add-dir" not in args
         assert "--allow-tool" not in args
         # Unrestricted mode runs from the agent dir
-        assert captured["cwd"] == str(tmp_agent_dir)
+        assert captured["cwd"] == str(request.launch_dir)
 
     def test_copilot_run_none_and_empty_spec_equivalent(self, tmp_agent_dir, monkeypatch):
         import agency.integrations.agency.copilot as copilot_mod
@@ -509,8 +563,23 @@ class TestCopilot:
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
-        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=None)
-        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=SandboxSpec())
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+
+        CopilotIntegration().run(request)
+        CopilotIntegration().run(request)
 
         # None and an empty SandboxSpec produce identical unrestricted argv/cwd.
         assert results[0] == results[1]
@@ -518,7 +587,7 @@ class TestCopilot:
         assert "--allow-all-paths" in args
         assert "--allow-all-tools" in args
         assert "--autopilot" in args
-        assert cwd == str(tmp_agent_dir)
+        assert cwd == str(request.launch_dir)
 
     def test_copilot_run_roots_only_blanket_tools(self, tmp_agent_dir, monkeypatch):
         import agency.integrations.agency.copilot as copilot_mod
@@ -543,14 +612,27 @@ class TestCopilot:
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
-        spec = SandboxSpec(roots=(root,), allowed_tools=())
-        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=spec)
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="restricted",
+                sandbox_roots=(root,),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+        CopilotIntegration().run(request)
 
         args = captured["args"]
         # roots set => --add-dir per root, cwd anchored at first root.
         assert "--add-dir" in args
         assert str(root) in args
-        assert captured["cwd"] == str(root)
+        assert captured["cwd"] == str(request.launch_dir)
         assert "--allow-all-paths" not in args
         # tools empty => blanket tools + --autopilot.
         assert "--allow-all-tools" in args
@@ -583,15 +665,28 @@ class TestCopilot:
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
-        spec = SandboxSpec(roots=(r1, r2), allowed_tools=("shell", "write"))
-        CopilotIntegration().run(tmp_agent_dir, prompt, timeout=60, sandbox_root=spec)
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="restricted",
+                sandbox_roots=(r1, r2),
+                tools=ResolvedToolPolicy("allowlist", ("shell", "write")),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+        CopilotIntegration().run(request)
 
         args = captured["args"]
         # Every root added explicitly; cwd anchored at the first root.
         assert "--add-dir" in args
         assert str(r1) in args
         assert str(r2) in args
-        assert captured["cwd"] == str(r1)
+        assert captured["cwd"] == str(request.launch_dir)
         # Every tool granted explicitly.
         assert "--allow-tool" in args
         assert "shell" in args
@@ -717,7 +812,21 @@ class TestCopilot:
         monkeypatch.setattr(mod.subprocess, "run", fake_run)
         prompt_file = tmp_agent_dir / "prompt.md"
         prompt_file.write_text("Do the thing")
-        result = integration.run(tmp_agent_dir, prompt_file, timeout=30)
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt_file,
+            timeout=30,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=30,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+        result = integration.run(request)
 
         assert "--output-format" in captured["cmd"]
         assert "json" in captured["cmd"]
@@ -748,7 +857,21 @@ class TestCopilot:
         prompt_file = tmp_agent_dir / "prompt.md"
         prompt_file.write_text("Do the thing")
 
-        result = integration.run(tmp_agent_dir, prompt_file, timeout=30)
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt_file,
+            timeout=30,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=30,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+        result = integration.run(request)
 
         assert result.exit_code == 124
         assert result.stdout == "Implemented the first part."
@@ -856,7 +979,21 @@ class TestCopilot:
         prompt_file = tmp_agent_dir / "prompt.md"
         prompt_file.write_text("Do the thing")
 
-        result = integration.run(tmp_agent_dir, prompt_file, timeout=30)
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt_file,
+            timeout=30,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=30,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+        result = integration.run(request)
 
         assert "AI Credits 5 (1s)" in result.stderr
         assert "Tokens     \u2191 60" in result.stderr

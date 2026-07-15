@@ -8,11 +8,11 @@ import sys
 import time
 from pathlib import Path
 
-from agency.config import SandboxSpec
+from agency.blueprints.projectors import get_projector
 from agency.integrations import (
     BaseIntegration, RunResult, FileChange, AgentIdentity, IntegrationError, _register,
 )
-from agency.integrations.models import RuntimeCapabilities
+from agency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
 
 
 class CopilotIntegration(BaseIntegration):
@@ -22,6 +22,7 @@ class CopilotIntegration(BaseIntegration):
     supports_ai_backend = True
     supports_sandbox = True
     detect_priority = 7
+    projector = get_projector("copilot")
     runtime_capabilities = RuntimeCapabilities(
         path_modes=frozenset({"restricted", "unrestricted"}),
         tool_modes=frozenset({"all", "allowlist"}),
@@ -235,23 +236,15 @@ class CopilotIntegration(BaseIntegration):
         except (ValueError, OSError):
             return path
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: "SandboxSpec | None" = None) -> RunResult:
-        prompt_text = prompt_file.read_text()
+    def run(self, request: IntegrationRunRequest) -> RunResult:
+        prompt_text = request.task_file.read_text()
         cmd = self._resolve_real_cmd(self._find_cmd())
 
-        # Least-privilege builder. `roots` empty => --allow-all-paths; `tools`
-        # empty => blanket --allow-all-tools. --autopilot is emitted ONLY with
-        # blanket tools: it is incompatible with explicit --allow-tool grants,
-        # which under autopilot perform a permission round-trip that fails
-        # closed mid-session (github/copilot-cli#2971). Explicit grants were
-        # validated denial-free by a real-session probe on 2026-07-09.
-        spec = sandbox_root or SandboxSpec()
-        roots, tools = spec.roots, spec.allowed_tools
+        roots = request.runtime_policy.sandbox_roots
+        tools = request.runtime_policy.tools
 
         cmd_args = [
             cmd, "-p", prompt_text,
-            "--no-custom-instructions",
             "--no-ask-user",
             "--no-color",
             "--experimental",
@@ -261,13 +254,11 @@ class CopilotIntegration(BaseIntegration):
         if roots:
             for p in roots:
                 cmd_args += ["--add-dir", str(p)]
-            work_dir = str(roots[0])
         else:
             cmd_args += ["--allow-all-paths"]
-            work_dir = str(agent_dir)
 
-        if tools:
-            for t in tools:
+        if tools.mode == "allowlist":
+            for t in tools.names:
                 cmd_args += ["--allow-tool", t]
         else:
             cmd_args += ["--allow-all-tools", "--autopilot"]
@@ -288,13 +279,13 @@ class CopilotIntegration(BaseIntegration):
         try:
             result = subprocess.run(
                 cmd_args,
-                capture_output=True, text=True, timeout=timeout,
-                cwd=work_dir,
+                capture_output=True, text=True, timeout=request.timeout,
+                cwd=str(request.launch_dir),
                 stdin=subprocess.DEVNULL,
                 creationflags=creationflags,
             )
             duration = time.monotonic() - start
-            parse_root = roots[0] if roots else agent_dir
+            parse_root = request.workspace_dir
             parsed_text, changed_files = self._parse_jsonl_output(result.stdout, parse_root)
             usage_summary = self._usage_summary(result.stdout)
             stderr = result.stderr
@@ -319,9 +310,9 @@ class CopilotIntegration(BaseIntegration):
                 partial_stdout = partial_stdout.decode(errors="replace")
             if isinstance(partial_stderr, bytes):
                 partial_stderr = partial_stderr.decode(errors="replace")
-            parse_root = roots[0] if roots else agent_dir
+            parse_root = request.workspace_dir
             parsed_text, changed_files = self._parse_jsonl_output(partial_stdout, parse_root)
-            timeout_message = f"Timed out after {timeout} seconds."
+            timeout_message = f"Timed out after {request.timeout} seconds."
             stderr = (
                 f"{partial_stderr.rstrip()}\n{timeout_message}"
                 if partial_stderr

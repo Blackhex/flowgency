@@ -7,7 +7,13 @@ import pytest
 from agency.configuration.issues import ValidationIssue
 from agency.configuration.effective import resolve_effective_policy
 from agency.integrations import REGISTRY, AgentIdentity, BaseIntegration, FileChange, RunResult
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy, RuntimeCapabilities
+from agency.integrations.models import (
+    EffectiveRuntimePolicy,
+    IntegrationRunRequest,
+    ProjectorCapabilities,
+    ResolvedToolPolicy,
+    RuntimeCapabilities,
+)
 
 
 def all_integration_names():
@@ -59,6 +65,27 @@ class TestIntegrationContract:
     def test_runtime_capabilities_declared(self, integration):
         assert isinstance(integration.runtime_capabilities, RuntimeCapabilities)
 
+    def test_projector_capabilities_declared(self, integration):
+        assert isinstance(integration.projector.capabilities, ProjectorCapabilities)
+
+    def test_validate_run_returns_validation_issues(self, integration, tmp_path):
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_path / "workspace",
+            launch_dir=tmp_path / "launch",
+            task_file=tmp_path / "task.md",
+            timeout=1800,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=1800,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+        result = integration.validate_run(request)
+        assert all(isinstance(issue, ValidationIssue) for issue in result)
+
     def test_validate_runtime_policy_returns_validation_issues(self, integration):
         result = integration.validate_runtime_policy(
             EffectiveRuntimePolicy(
@@ -82,23 +109,57 @@ def test_registry_runtime_capabilities_surface_is_fail_closed():
 
 
 def test_all_execution_integrations_run_accepts_sandbox_root():
-    """Every execution-capable integration.run must accept the sandbox_root kwarg.
+    """Every execution-capable integration.run must accept IntegrationRunRequest.
 
-    Both call sites (dispatch, decision execution) pass sandbox_root
-    unconditionally, so an override missing it raises TypeError at runtime.
+    The worker now calls typed run(request), so every execution-capable
+    integration must expose that single-argument contract.
     """
     offenders = []
     for name, integration in REGISTRY.items():
         if not getattr(integration, "supports_execution", False):
             continue
         sig = inspect.signature(integration.run)
-        param = sig.parameters.get("sandbox_root")
-        accepts_var_kw = any(
-            p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
-        if param is None and not accepts_var_kw:
+        params = list(sig.parameters.values())
+        if len(params) != 1:
             offenders.append(name)
-    assert offenders == [], f"integrations missing sandbox_root kwarg: {offenders}"
+            continue
+        if params[0].annotation is inspect._empty:
+            offenders.append(name)
+    assert offenders == [], f"integrations missing typed run(request) contract: {offenders}"
+
+
+def test_registry_projector_skill_support_is_fail_closed_except_verified_integrations():
+    expected = {
+        "copilot": (True, True),
+        "claude-code": (False, False),
+        "gemini": (False, False),
+    }
+    for name, integration in REGISTRY.items():
+        caps = integration.projector.capabilities
+        if name in expected:
+            assert (caps.discovers_skills, caps.activates_selected_skill) == expected[name]
+        else:
+            assert caps.discovers_skills is False
+            assert caps.activates_selected_skill is False
+
+
+def test_decision_run_allows_null_skill():
+    integration = REGISTRY["copilot"]
+    request = IntegrationRunRequest(
+        workspace_dir=Path("workspace"),
+        launch_dir=Path("launch"),
+        task_file=Path("launch/task.md"),
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill=None,
+        skill_arguments=(),
+    )
+    assert integration.validate_run(request) == ()
 
 
 def test_runresult_changed_files_defaults_empty():

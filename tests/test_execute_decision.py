@@ -9,6 +9,7 @@ import yaml
 import agency.app as app_mod
 from agency.config import SandboxSpec
 from agency.integrations import FileChange, RunResult
+from agency.integrations.models import IntegrationRunRequest
 from agency.jobs import JobSubmissionError
 from agency.jobs.execution import execute_job
 from agency.jobs.models import JobRecord, JobSpec
@@ -56,9 +57,9 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
         supports_execution = True
         name = "copilot"
 
-        def run(self, agent_dir, prompt_file, timeout, *, sandbox_root=None):
-            seen["sandbox_root"] = sandbox_root
-            seen["prompt"] = prompt_file.read_text(encoding="utf-8")
+        def run(self, request: IntegrationRunRequest):
+            seen["sandbox_root"] = request.runtime_policy.sandbox_roots
+            seen["prompt"] = request.task_file.read_text(encoding="utf-8")
             meta = _read_meta(decision)
             seen["executed_by"] = meta.get("executed_by")
             seen["execution_status"] = meta.get("execution_status")
@@ -83,7 +84,7 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
     execute_job(group_path / "shared" / "jobs" / f"{spec.job_id}.yaml")
 
     meta = _read_meta(decision)
-    assert seen["sandbox_root"] == SandboxSpec(roots=(repo,), allowed_tools=())
+    assert seen["sandbox_root"] == (repo,)
     assert seen["prompt"] == "Immutable instructions"
     assert seen["executed_by"] == "worker"
     assert seen["execution_status"] == "running"
@@ -106,7 +107,7 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(
-            run=lambda *args, **kwargs: RunResult(
+            run=lambda request: RunResult(
                 exit_code=0,
                 stdout="no changes made",
                 stderr="",
@@ -134,7 +135,7 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(
-            run=lambda *args, **kwargs: RunResult(
+            run=lambda request: RunResult(
                 exit_code=3,
                 stdout="",
                 stderr="error",

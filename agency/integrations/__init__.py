@@ -2,13 +2,18 @@
 
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import yaml
 
 from agency.configuration.issues import ValidationIssue
-from agency.integrations.models import EffectiveRuntimePolicy, RuntimeCapabilities
+from agency.integrations.models import (
+    EffectiveRuntimePolicy,
+    IntegrationRunRequest,
+    ProjectorCapabilities,
+    RuntimeCapabilities,
+)
 
 if TYPE_CHECKING:
     from agency.config import SandboxSpec
@@ -74,19 +79,10 @@ class BaseIntegration:
     supports_sandbox: bool = False
     detect_priority: int = 100
     runtime_capabilities: RuntimeCapabilities = RuntimeCapabilities()
+    projector = None
 
-    def run(self, agent_dir: Path, prompt_file: Path, timeout: int,
-            *, sandbox_root: "SandboxSpec | None" = None) -> RunResult:
-        """Execute an agent with a prompt.
-
-        prompt_file is always a Path to the prompt file on disk. The integration
-        is responsible for deciding how to pass it to the tool.
-
-        sandbox_root, when provided, is a SandboxSpec declaring the allowed
-        filesystem roots and tools for the run. Only sandbox-aware integrations
-        (currently copilot) consume it; the rest bind and ignore this opaque
-        value.
-        """
+    def run(self, request: IntegrationRunRequest) -> RunResult:
+        """Execute an agent with a typed immutable run request."""
         raise NotImplementedError
 
     def identity_filename(self) -> str:
@@ -168,6 +164,62 @@ class BaseIntegration:
                 )
             )
         return tuple(issues)
+
+    def validate_run(self, request: IntegrationRunRequest) -> tuple[ValidationIssue, ...]:
+        issues = list(self.validate_runtime_policy(request.runtime_policy))
+        if not self.supports_execution:
+            issues.append(
+                ValidationIssue(
+                    code="integration-not-executable",
+                    scope=f"integrations.{self.name}",
+                    field="runtime.execution",
+                    message=f"Integration '{self.name}' does not support runtime execution.",
+                    corrective_hint="Choose an executable integration before scheduling or launching a run.",
+                )
+            )
+            return tuple(issues)
+        projector = self.projector
+        if projector is None:
+            issues.append(
+                ValidationIssue(
+                    code="missing-runtime-projector",
+                    scope=f"integrations.{self.name}",
+                    field="runtime.projector",
+                    message=f"Integration '{self.name}' has no runtime projector.",
+                    corrective_hint="Attach a runtime projector before executing this integration.",
+                )
+            )
+            return tuple(issues)
+        if request.skill is not None:
+            caps = projector.capabilities
+            if not (caps.discovers_skills and caps.activates_selected_skill):
+                issues.append(
+                    ValidationIssue(
+                        code="unsupported-skill-activation",
+                        scope=f"integrations.{self.name}",
+                        field="runtime.skill",
+                        message=(
+                            f"Integration '{self.name}' cannot reliably discover and activate routine skills "
+                            "with the current CLI contract."
+                        ),
+                        corrective_hint="Use a verified skill-compatible integration or run without a routine skill.",
+                    )
+                )
+        return tuple(issues)
+
+    @staticmethod
+    def _default_projector(instruction_name: str) -> "RuntimeProjector":
+        from agency.blueprints.projectors import StaticRuntimeProjector
+
+        return StaticRuntimeProjector(
+            version="v1",
+            capabilities=ProjectorCapabilities(
+                instruction_target=PurePosixPath(instruction_name),
+                skills_target=PurePosixPath(".agents/skills"),
+                discovers_skills=False,
+                activates_selected_skill=False,
+            ),
+        )
 
     def _write_sidecar_identity(self, agent_dir: Path, identity_file: Path, identity: AgentIdentity) -> None:
         """Write identity for sidecar-based integrations (body to identity file, meta to sidecar)."""
