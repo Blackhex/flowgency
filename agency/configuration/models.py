@@ -488,18 +488,22 @@ def _validate_memory_selector(
 
 
 def _validate_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
+    return _validate_runtime_with_roots(runtime, scope, root_field="additional_roots")
+
+
+def _validate_runtime_with_roots(runtime: Any, scope: str, root_field: str) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if not _is_mapping(runtime):
         return issues
     sandbox = runtime.get("sandbox") or {}
     if not _is_mapping(sandbox):
         return issues
-    if sandbox.get("mode") == "unrestricted" and (sandbox.get("additional_roots") or sandbox.get("additions")):
+    if sandbox.get("mode") == "unrestricted" and sandbox.get(root_field):
         issues.append(
             _build_issue(
                 code="sandbox-contradiction",
                 scope=scope,
-                field="runtime.sandbox.additional_roots",
+                field=f"runtime.sandbox.{root_field}",
                 message="Unrestricted sandbox cannot add roots.",
                 hint="Remove additional roots or switch to restricted mode.",
             )
@@ -511,7 +515,21 @@ def _validate_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
         names = tools.get("names") or []
         if not _is_list(names):
             return issues
-        if not names:
+        trimmed_names = []
+        for index, name in enumerate(names):
+            if not isinstance(name, str) or not name.strip():
+                issues.append(
+                    _build_issue(
+                        code="invalid-allowlist-name",
+                        scope=scope,
+                        field=f"runtime.tools.names[{index}]",
+                        message="Allowlist names must be non-empty trimmed strings.",
+                        hint="Remove blank entries and keep each allowlist name as a trimmed string.",
+                    )
+                )
+                continue
+            trimmed_names.append(name.strip())
+        if not trimmed_names:
             issues.append(
                 _build_issue(
                     code="empty-allowlist",
@@ -521,18 +539,6 @@ def _validate_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
                     hint="Add one or more tool names to the allowlist.",
                 )
             )
-        else:
-            for index, name in enumerate(names):
-                if not isinstance(name, str) or not name.strip():
-                    issues.append(
-                        _build_issue(
-                            code="invalid-allowlist-name",
-                            scope=scope,
-                            field=f"runtime.tools.names[{index}]",
-                            message="Allowlist names must be non-empty trimmed strings.",
-                            hint="Remove blank entries and keep each allowlist name as a trimmed string.",
-                        )
-                    )
     return issues
 
 
@@ -621,6 +627,16 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
             issues.append(identifier_issue)
         if not _is_mapping(group):
             continue
+        if not str(group.get("default_integration", "")).strip():
+            issues.append(
+                _build_issue(
+                    code="missing-default-integration",
+                    scope=f"groups.{group_name}",
+                    field="default_integration",
+                    message="Group default integration is required.",
+                    hint="Set group.default_integration to a non-empty integration name.",
+                )
+            )
         if not str(group.get("path", "")).strip():
             issues.append(
                 _build_issue(
@@ -631,6 +647,8 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     hint="Set group.path relative to config.yaml.",
                 )
             )
+        runtime = group.get("runtime") or {}
+        issues.extend(_validate_runtime_with_roots(runtime, f"groups.{group_name}", root_field="roots"))
         agents = group.get("agents") if _is_list(group.get("agents")) else []
         seen_agents: set[str] = set()
         for index, agent in enumerate(agents):

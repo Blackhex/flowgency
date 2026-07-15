@@ -259,6 +259,67 @@ Result:
 ...FF.FF....FFF...
 ```
 
+## Review Fix 9
+
+### RED
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests/test_config_canonical.py -q
+```
+
+Result:
+
+```text
+5 focused regressions failed before the validator patch: missing-or-blank group default_integration, invalid group allowlist, and group sandbox contradictions were not being enforced at the group runtime scope.
+```
+
+### GREEN
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests/test_config_canonical.py -q
+```
+
+Result:
+
+```text
+91 passed in 0.69s
+```
+
+### Full Suite
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Result:
+
+```text
+704 passed, 1 skipped in 28.14s
+```
+
+### Files Changed
+
+- [agency/configuration/models.py](agency/configuration/models.py)
+- [tests/test_config_canonical.py](tests/test_config_canonical.py)
+- [.superpowers/sdd/task-2-report.md](.superpowers/sdd/task-2-report.md)
+
+### Self-Review
+
+- Group `default_integration` now fails explicitly when missing or blank, while registry membership remains deferred to Task 4.
+- Group sandbox validation now uses `roots` for the group scope and `additional_roots` for the agent scope, preserving the ownership split.
+- Allowlist validation now rejects blank names and empty trimmed results through the same shared pipeline used by parse and validate.
+- Parse/validate parity was confirmed by the focused canonical run and then the full suite.
+
+### Concerns
+
+- The new `missing-default-integration` issue is semantic-only; registry membership and any UI safeguards remain separate work.
+
 ### GREEN
 
 Command:
