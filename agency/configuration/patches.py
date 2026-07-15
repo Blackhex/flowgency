@@ -92,6 +92,15 @@ def _tool_mapping(policy: ToolPolicy | None) -> dict[str, Any]:
     return mapping
 
 
+def _merge_mapping(target: dict[str, Any], updates: dict[str, Any]) -> None:
+    target.update(updates)
+
+
+def _clear_known_keys(mapping: dict[str, Any], keys: tuple[str, ...]) -> None:
+    for key in keys:
+        mapping.pop(key, None)
+
+
 def patch_agency_settings(
     store: ConfigStore,
     expected_revision: str,
@@ -189,12 +198,21 @@ def patch_agent_profile(
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
         agent = _agent(_group(raw, group_id), agent_id)
-        agent["identity"] = {
-            "display_name": patch.display_name,
-            "title": patch.title,
-            "emoji": patch.emoji,
-        }
-        agent["capabilities"] = {"write": patch.can_write}
+        identity = agent.setdefault("identity", {})
+        if not isinstance(identity, dict):
+            raise TypeError(f"groups.{group_id}.agents.{agent_id}.identity must be a mapping")
+        _merge_mapping(
+            identity,
+            {
+                "display_name": patch.display_name,
+                "title": patch.title,
+                "emoji": patch.emoji,
+            },
+        )
+        capabilities = agent.setdefault("capabilities", {})
+        if not isinstance(capabilities, dict):
+            raise TypeError(f"groups.{group_id}.agents.{agent_id}.capabilities must be a mapping")
+        _merge_mapping(capabilities, {"write": patch.can_write})
 
     return store.patch(expected_revision, apply)
 
@@ -208,15 +226,37 @@ def patch_agent_runtime(
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
         agent = _agent(_group(raw, group_id), agent_id)
-        runtime: dict[str, Any] = {
-            "sandbox": {
-                "additional_roots": list(patch.additional_roots),
-            },
-            "tools": _tool_mapping(patch.tools),
-        }
-        if patch.timeout is not None:
+        runtime = agent.setdefault("runtime", {})
+        if not isinstance(runtime, dict):
+            raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime must be a mapping")
+        if patch.timeout is None:
+            _clear_known_keys(runtime, ("timeout",))
+        else:
             runtime["timeout"] = patch.timeout
-        agent["runtime"] = runtime
+
+        sandbox = runtime.setdefault("sandbox", {})
+        if not isinstance(sandbox, dict):
+            raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.sandbox must be a mapping")
+        _merge_mapping(sandbox, {"additional_roots": list(patch.additional_roots)})
+        if patch.additional_roots:
+            pass
+
+        tools = runtime.setdefault("tools", {})
+        if not isinstance(tools, dict):
+            raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.tools must be a mapping")
+        if patch.tools is None:
+            _clear_known_keys(tools, ("mode", "names"))
+            tools.pop("mode", None)
+            tools.pop("names", None)
+        else:
+            _merge_mapping(tools, _tool_mapping(patch.tools))
+            if patch.tools.mode != "allowlist":
+                tools.pop("names", None)
+
+        if patch.additional_roots:
+            sandbox["additional_roots"] = list(patch.additional_roots)
+        else:
+            _clear_known_keys(sandbox, ("additional_roots",))
 
     return store.patch(expected_revision, apply)
 
