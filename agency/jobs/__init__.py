@@ -1,4 +1,5 @@
 from .context import JobValidationError
+from .launch_view import create_launch_view
 from .launcher import (
     DetachedProcessLauncher,
     JobLauncher,
@@ -15,6 +16,7 @@ __all__ = [
     "DetachedProcessLauncher",
     "SystemdRunLauncher",
     "active_jobs",
+    "create_launch_view",
     "default_launcher",
     "JobHandle",
     "JobLauncher",
