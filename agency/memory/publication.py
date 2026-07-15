@@ -23,6 +23,8 @@ from .store import (
     _replace_canonical_files,
     _safe_rmtree,
     _store_root,
+    _validate_job_id,
+    _validate_memory_hash,
     _validate_resolved_memory,
     memory_content_revision,
 )
@@ -30,6 +32,24 @@ from .store import (
 
 class MemoryPublicationError(RuntimeError):
     pass
+
+
+class MemoryPublicationConflictError(MemoryPublicationError):
+    def __init__(
+        self,
+        *,
+        reason: str,
+        expected_revision: str,
+        current_revision: str,
+    ) -> None:
+        message = (
+            f"stale-stage publication conflict: {reason} "
+            f"(expected {expected_revision}, found {current_revision})"
+        )
+        super().__init__(message)
+        self.reason = reason
+        self.expected_revision = expected_revision
+        self.current_revision = current_revision
 
 
 class PublicationCrash(RuntimeError):
@@ -50,7 +70,15 @@ def prepare_publication(
 ) -> PreparedPublication:
     try:
         _validate_resolved_memory(stage.resolved)
+        _validate_job_path(job_path, stage.job_id)
         old_files = _read_canonical_files(_canonical_directory(stage.resolved))
+        old_revision = memory_content_revision(old_files)
+        if old_revision != stage.base_revision:
+            raise MemoryPublicationConflictError(
+                reason="base revision changed before prepare",
+                expected_revision=stage.base_revision,
+                current_revision=old_revision,
+            )
         new_files = _read_canonical_files(stage.directory)
         if not new_files:
             raise MemoryPublicationError(
@@ -62,7 +90,7 @@ def prepare_publication(
             job_path=Path(job_path),
             selector=stage.resolved.selector.model_dump(exclude_none=True),
             memory_hash=stage.resolved.memory_hash,
-            old_revision=memory_content_revision(old_files),
+            old_revision=old_revision,
             new_revision=memory_content_revision(new_files),
             old_files=old_files,
             new_files=new_files,
@@ -90,6 +118,7 @@ def apply_publication(
     *,
     crash_at: str | None = None,
     fail_after_publish: bool = False,
+    retain_failed_stage_artifacts: bool = False,
 ) -> AppliedPublication:
     try:
         with exclusive_lock(_lock_path(prepared.stage.resolved), wait=True):
@@ -97,9 +126,11 @@ def apply_publication(
                 _canonical_directory(prepared.stage.resolved)
             )
             current_revision = memory_content_revision(current_files)
-            if current_revision != prepared.old_revision:
-                raise MemoryPublicationError(
-                    "memory changed before publication"
+            if current_revision != prepared.stage.base_revision:
+                raise MemoryPublicationConflictError(
+                    reason="base revision changed before apply",
+                    expected_revision=prepared.stage.base_revision,
+                    current_revision=current_revision,
                 )
 
             _write_journal(prepared, phase="prepared")
@@ -136,10 +167,16 @@ def apply_publication(
                 published_at=_now_iso(),
                 diff_artifact=None,
             )
+    except MemoryPublicationConflictError:
+        raise
     except PublicationCrash:
         raise
     except Exception as error:
-        _rollback_failed_publication(prepared, error)
+        _rollback_failed_publication(
+            prepared,
+            error,
+            retain_failed_stage_artifacts=retain_failed_stage_artifacts,
+        )
         raise MemoryPublicationError(str(error)) from error
 
 
@@ -164,18 +201,21 @@ def finalize_publication(
 def _rollback_failed_publication(
     prepared: PreparedPublication,
     error: Exception,
+    *,
+    retain_failed_stage_artifacts: bool,
 ) -> None:
     with exclusive_lock(_lock_path(prepared.stage.resolved), wait=True):
         _replace_canonical_files(
             _canonical_directory(prepared.stage.resolved),
             prepared.old_files,
         )
-    retain_failed_stage(
-        group_path=_group_path(prepared.job_path),
-        job_id=prepared.stage.job_id,
-        stage_directory=prepared.stage.directory,
-        diff_bytes=prepared.diff_bytes,
-    )
+    if retain_failed_stage_artifacts:
+        retain_failed_stage(
+            group_path=_group_path(prepared.job_path),
+            job_id=prepared.stage.job_id,
+            stage_directory=prepared.stage.directory,
+            diff_bytes=prepared.diff_bytes,
+        )
     _mark_failed(
         prepared.job_path,
         summary=f"Memory publication failed: {error}",
@@ -187,33 +227,45 @@ def _group_path(job_path: Path) -> Path:
     return Path(job_path).parent.parent.parent
 
 
+def _validate_job_path(job_path: Path, expected_job_id: str) -> Path:
+    safe_job_id = _validate_job_id(expected_job_id)
+    candidate = Path(job_path)
+    if candidate.name != f"{safe_job_id}.yaml":
+        raise MemoryPublicationError("job path must match the staged job id")
+    return candidate
+
+
 def _journal_path(store_root: Path, memory_hash: str, job_id: str) -> Path:
+    _validate_memory_hash(memory_hash)
+    safe_job_id = _validate_job_id(job_id)
     journal_root = _ensure_infrastructure_directory(
         store_root,
         [".journals", memory_hash],
         label="journal",
     )
-    return journal_root / f"{job_id}.yaml"
+    return journal_root / f"{safe_job_id}.yaml"
 
 
 def _backup_path(store_root: Path, memory_hash: str, job_id: str) -> Path:
+    _validate_memory_hash(memory_hash)
+    safe_job_id = _validate_job_id(job_id)
     backup_root = _ensure_infrastructure_directory(
         store_root,
         [".publication-backups", memory_hash],
         label="backup",
     )
-    return backup_root / job_id
+    return backup_root / safe_job_id
 
 
 def _write_journal(prepared: PreparedPublication, *, phase: str) -> None:
     payload = {
+        "job_id": prepared.stage.job_id,
         "selector": prepared.selector,
         "memory_hash": prepared.memory_hash,
         "old_revision": prepared.old_revision,
         "new_revision": prepared.new_revision,
-        "stage_path": str(prepared.stage.directory.resolve()),
-        "backup_path": str(prepared.backup_path.resolve()),
-        "job_path": str(prepared.job_path.resolve()),
+        "stage_directory": prepared.stage.directory.name,
+        "backup_directory": prepared.backup_path.name,
         "phase": phase,
         "no_change": prepared.no_change,
     }

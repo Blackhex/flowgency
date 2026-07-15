@@ -117,3 +117,33 @@ def test_publication_failure_restores_old_canonical_and_fails_job(
         "notes.md": b"stable\n",
     }
     assert read_job(job_path).status == "failed"
+
+
+def test_prepare_and_apply_reject_stale_stage_without_touching_canonical(
+    publication_fixture,
+):
+    stage = publication_fixture["stage"]
+    store = publication_fixture["store"]
+    job_path = publication_fixture["job_path"]
+
+    (stage.directory / "memory.md").write_bytes(b"from-stage\n")
+    prepared = prepare_publication(stage, job_path=job_path)
+
+    store.try_save(
+        stage.resolved,
+        stage.base_revision,
+        {"memory.md": b"from-canonical\n", "notes.md": b"stable\n"},
+    )
+
+    with pytest.raises(MemoryPublicationError, match="stale|conflict"):
+        prepare_publication(stage, job_path=job_path)
+
+    with pytest.raises(MemoryPublicationError, match="stale|conflict"):
+        apply_publication(prepared)
+
+    assert store.read(stage.resolved).files == {
+        "memory.md": b"from-canonical\n",
+        "notes.md": b"stable\n",
+    }
+    assert not prepared.journal_path.exists()
+    assert read_job(job_path).status == "running"

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import hashlib
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -22,6 +23,7 @@ from .models import (
 
 
 _REVISION_DOMAIN = b"agency-memory-content:v1\0"
+_LOWER_HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 _WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -178,9 +180,7 @@ def _validate_resolved_memory(
     *,
     expected_root: Path | None = None,
 ) -> None:
-    if len(resolved.memory_hash) != 64:
-        raise ValueError("memory hash must be 64 hex characters")
-    int(resolved.memory_hash, 16)
+    _validate_memory_hash(resolved.memory_hash)
     root = (
         expected_root.resolve()
         if expected_root is not None
@@ -195,6 +195,14 @@ def _validate_resolved_memory(
         raise MemoryStoreError(
             "memory directory name must match the resolved hash"
         )
+
+
+def _validate_memory_hash(memory_hash: str) -> str:
+    if not isinstance(memory_hash, str):
+        raise TypeError("memory hash must be a string")
+    if not _LOWER_HEX_64_RE.fullmatch(memory_hash):
+        raise ValueError("memory hash must be exactly 64 lowercase hex characters")
+    return memory_hash
 
 
 def _read_canonical_files(directory: Path) -> dict[str, bytes]:

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agency.configuration.models import MemorySelector
 from agency.jobs.models import JobRecord, JobSpec
@@ -102,3 +103,118 @@ def test_recovery_is_noop_without_publication_journals(tmp_path):
         ).recovered
         == 0
     )
+
+
+def test_recovery_rejects_corrupted_absolute_paths_without_touching_sentinel(
+    recovery_fixture,
+):
+    recovery_fixture.crash_at("backed_up")
+    sentinel = recovery_fixture.group_path / "sentinel.txt"
+    sentinel.write_text("do-not-touch", encoding="utf-8")
+    journal_path = next(
+        (recovery_fixture.store_root / ".journals").glob("*/*.yaml")
+    )
+    payload = yaml.safe_load(journal_path.read_text(encoding="utf-8"))
+    payload["job_path"] = str(sentinel)
+    payload["stage_path"] = str(sentinel)
+    payload["backup_path"] = str(sentinel)
+    journal_path.write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="journal|unsafe|invalid|job"):
+        recover_publications(
+            recovery_fixture.store_root,
+            recovery_fixture.job_store,
+        )
+
+    assert sentinel.read_text(encoding="utf-8") == "do-not-touch"
+    assert sentinel.exists()
+    assert not journal_path.exists()
+    assert list(
+        (recovery_fixture.store_root / ".journals" / "_quarantine").glob(
+            "*/*.yaml"
+        )
+    )
+    assert read_job(recovery_fixture.job_path).status == "running"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("memory_hash", "not-a-hash"),
+        ("job_id", "bad/job"),
+    ],
+)
+def test_recovery_rejects_mismatched_journal_identity(
+    recovery_fixture,
+    field,
+    value,
+):
+    recovery_fixture.crash_at("prepared")
+    journal_path = next(
+        (recovery_fixture.store_root / ".journals").glob("*/*.yaml")
+    )
+    payload = yaml.safe_load(journal_path.read_text(encoding="utf-8"))
+    payload[field] = value
+    journal_path.write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="journal|hash|job"):
+        recover_publications(
+            recovery_fixture.store_root,
+            recovery_fixture.job_store,
+        )
+
+    assert not journal_path.exists()
+    assert list(
+        (recovery_fixture.store_root / ".journals" / "_quarantine").glob(
+            "*/*.yaml"
+        )
+    )
+    assert read_job(recovery_fixture.job_path).status == "running"
+
+
+def test_recovery_rejects_journal_filename_mismatch(recovery_fixture):
+    recovery_fixture.crash_at("published")
+    journal_path = next(
+        (recovery_fixture.store_root / ".journals").glob("*/*.yaml")
+    )
+    mismatched = journal_path.with_name("otherjob.yaml")
+    journal_path.rename(mismatched)
+
+    with pytest.raises(ValueError, match="journal|filename|job"):
+        recover_publications(
+            recovery_fixture.store_root,
+            recovery_fixture.job_store,
+        )
+
+    assert not mismatched.exists()
+    assert list(
+        (recovery_fixture.store_root / ".journals" / "_quarantine").glob(
+            "*/*.yaml"
+        )
+    )
+    assert read_job(recovery_fixture.job_path).status == "running"
+
+
+def test_recovery_is_idempotent_for_valid_old_and_new_journals(
+    recovery_fixture,
+):
+    recovery_fixture.crash_at("published")
+
+    first = recover_publications(
+        recovery_fixture.store_root,
+        recovery_fixture.job_store,
+    )
+    second = recover_publications(
+        recovery_fixture.store_root,
+        recovery_fixture.job_store,
+    )
+
+    assert first.recovered == 1
+    assert second.recovered == 0
+    assert read_job(recovery_fixture.job_path).status == "complete"
