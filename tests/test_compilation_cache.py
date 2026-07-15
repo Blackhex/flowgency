@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import json
 from pathlib import Path, PurePosixPath
 
@@ -207,6 +208,115 @@ def test_create_launch_view_copies_runtime_tree_and_is_private(
         artifact.runtime_path.joinpath("AGENTS.md").read_bytes()
         == inspection.snapshot.file("AGENTS.md").content
     )
+
+
+@pytest.mark.parametrize(
+    ("destination_factory", "expected_fragment"),
+    [
+        (
+            lambda artifact, tmp_path: artifact.runtime_path,
+            "overlap",
+        ),
+        (
+            lambda artifact, tmp_path: artifact.entry_path,
+            "overlap",
+        ),
+        (
+            lambda artifact, tmp_path: artifact.entry_path.parent,
+            "overlap",
+        ),
+        (
+            lambda artifact, tmp_path: artifact.runtime_path / "nested-launch",
+            "overlap",
+        ),
+    ],
+)
+def test_create_launch_view_rejects_overlapping_destinations_without_mutating_cache(
+    cache,
+    inspection,
+    tmp_path: Path,
+    destination_factory,
+    expected_fragment: str,
+):
+    from agency.jobs.launch_view import create_launch_view
+
+    artifact = cache.ensure_compiled("copilot", inspection)
+    cache_bytes_before = {
+        path.relative_to(artifact.entry_path): path.read_bytes()
+        for path in artifact.entry_path.rglob("*")
+        if path.is_file()
+    }
+    destination = destination_factory(artifact, tmp_path)
+
+    with pytest.raises(ValueError, match=expected_fragment):
+        create_launch_view(artifact, destination)
+
+    cache_bytes_after = {
+        path.relative_to(artifact.entry_path): path.read_bytes()
+        for path in artifact.entry_path.rglob("*")
+        if path.is_file()
+    }
+    assert cache_bytes_after == cache_bytes_before
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        "",
+        ".",
+        "..",
+        "nested/job",
+        "nested\\job",
+        "/absolute",
+        "\\absolute",
+        "C:\\absolute",
+        "job.",
+        "job ",
+        "CON",
+        "nul.txt",
+    ],
+)
+def test_pin_and_release_reject_unsafe_job_ids(
+    cache,
+    inspection,
+    job_id: str,
+):
+    artifact = cache.ensure_compiled("copilot", inspection)
+
+    with pytest.raises(ValueError, match="job_id"):
+        cache.pin(artifact, job_id)
+
+    with pytest.raises(ValueError, match="job_id"):
+        cache.release(artifact, job_id)
+
+
+def test_active_pins_ignores_unexpected_entries(cache, inspection):
+    from agency.blueprints.cache import active_pins
+
+    artifact = cache.ensure_compiled("copilot", inspection)
+    pins_dir = (
+        cache.root
+        / "_pins"
+        / f"copilot--v-test--{inspection.snapshot.digest}"
+    )
+    pins_dir.mkdir(parents=True, exist_ok=True)
+    (pins_dir / "job-123").write_text("", encoding="utf-8")
+    (pins_dir / "job-456").write_text("", encoding="utf-8")
+    (pins_dir / "nested").mkdir()
+    (pins_dir / "nested" / "job-999").write_text("", encoding="utf-8")
+
+    link = pins_dir / "job-link"
+    try:
+        os.symlink(pins_dir / "job-123", link)
+    except (AttributeError, NotImplementedError, OSError):
+        link = None
+
+    active = active_pins(cache.root, artifact.ref)
+
+    assert active == ("job-123", "job-456")
+    assert "job-999" not in active
+    if link is not None:
+        assert "job-link" not in active
 
 
 def test_validate_artifact_rejects_symlink_or_special_files(cache, inspection):

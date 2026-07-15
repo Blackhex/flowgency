@@ -67,6 +67,16 @@ def _quarantine_root(root: Path) -> Path:
     return root / "_quarantine"
 
 
+_WINDOWS_RESERVED_FILENAMES = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{index}" for index in range(1, 10)),
+    *(f"lpt{index}" for index in range(1, 10)),
+}
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -83,6 +93,24 @@ def _is_reparse_point(file_stat: os.stat_result) -> bool:
     attributes = getattr(file_stat, "st_file_attributes", 0)
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
     return bool(attributes & reparse_flag)
+
+
+def _validate_job_id(job_id: str) -> str:
+    if not isinstance(job_id, str) or not job_id:
+        raise ValueError("job_id must be a non-empty safe filename segment")
+    if job_id in {".", ".."}:
+        raise ValueError("job_id must be a non-empty safe filename segment")
+    if job_id[-1] in {".", " "}:
+        raise ValueError("job_id must be a non-empty safe filename segment")
+    candidate = Path(job_id)
+    if candidate.name != job_id or candidate.anchor:
+        raise ValueError("job_id must be a non-empty safe filename segment")
+    if any(sep and sep in job_id for sep in (os.sep, os.altsep)):
+        raise ValueError("job_id must be a non-empty safe filename segment")
+    stem = job_id.split(".", 1)[0].rstrip(" .").casefold()
+    if stem in _WINDOWS_RESERVED_FILENAMES:
+        raise ValueError("job_id must be a non-empty safe filename segment")
+    return job_id
 
 
 def _validate_runtime_inventory(runtime_path: Path) -> list[dict[str, Any]]:
@@ -259,15 +287,15 @@ def ensure_compiled(
 
 
 def pin_artifact(root: Path, ref: CacheRef, job_id: str) -> Path:
-    if not isinstance(job_id, str) or not job_id.strip():
-        raise ValueError("job_id must be a non-empty string")
-    pin_path = _pins_dir(Path(root).resolve(), ref) / job_id
+    safe_job_id = _validate_job_id(job_id)
+    pin_path = _pins_dir(Path(root).resolve(), ref) / safe_job_id
     atomic_write_text(pin_path, "")
     return pin_path
 
 
 def release_pin(root: Path, ref: CacheRef, job_id: str) -> None:
-    pin_path = _pins_dir(Path(root).resolve(), ref) / job_id
+    safe_job_id = _validate_job_id(job_id)
+    pin_path = _pins_dir(Path(root).resolve(), ref) / safe_job_id
     try:
         pin_path.unlink()
     except FileNotFoundError:
@@ -282,9 +310,21 @@ def active_pins(root: Path, ref: CacheRef) -> tuple[str, ...]:
     pins_dir = _pins_dir(Path(root).resolve(), ref)
     if not pins_dir.exists():
         return ()
-    return tuple(
-        sorted(item.name for item in pins_dir.iterdir() if item.is_file())
-    )
+    active: list[str] = []
+    for item in pins_dir.iterdir():
+        try:
+            item_stat = item.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if _is_reparse_point(item_stat):
+            continue
+        if not stat.S_ISREG(item_stat.st_mode):
+            continue
+        try:
+            active.append(_validate_job_id(item.name))
+        except ValueError:
+            continue
+    return tuple(sorted(active))
 
 
 class CompilationCache:

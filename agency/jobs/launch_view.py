@@ -14,13 +14,34 @@ def _is_reparse_point(file_stat: os.stat_result) -> bool:
     return bool(attributes & reparse_flag)
 
 
-def create_launch_view(artifact: CompiledArtifact, destination: Path) -> Path:
-    destination = Path(destination).resolve()
-    runtime = artifact.runtime_path.resolve()
-    if destination == runtime:
+def _is_relative_to(path: Path, other: Path) -> bool:
+    try:
+        path.relative_to(other)
+        return True
+    except ValueError:
+        return False
+
+
+def _overlaps(path: Path, other: Path) -> bool:
+    return _is_relative_to(path, other) or _is_relative_to(other, path)
+
+
+def _validate_destination(artifact: CompiledArtifact, destination: Path) -> Path:
+    resolved_destination = Path(destination).resolve()
+    overlap_roots = (
+        artifact.entry_path.resolve(),
+        artifact.runtime_path.resolve(),
+    )
+    if any(_overlaps(resolved_destination, root) for root in overlap_roots):
         raise ValueError(
-            "Launch view destination must not be the cache runtime path"
+            "Launch view destination must not overlap the cache artifact"
         )
+    return resolved_destination
+
+
+def create_launch_view(artifact: CompiledArtifact, destination: Path) -> Path:
+    destination = _validate_destination(artifact, destination)
+    runtime = artifact.runtime_path.resolve()
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
