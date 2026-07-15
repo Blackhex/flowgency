@@ -68,6 +68,67 @@ Result:
 
 - The canonical parser currently resolves and validates the strict typed shape, but Task 3 still needs to preserve raw YAML round-trip behavior in the config store.
 
+## Review Fix 8
+
+### RED
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests/test_config_canonical.py -v
+```
+
+Result:
+
+```text
+85 collected, new identifier-contract regressions failed before implementation. The failures covered missing validation for memory channel keys plus parse/validate parity gaps for invalid group identifiers, invalid channel identifiers, invalid blueprint identifiers, and missing default-group references.
+```
+
+### GREEN
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests/test_config_canonical.py -v
+```
+
+Result:
+
+```text
+85 passed in 0.63s
+```
+
+### Full Suite
+
+Command:
+
+```powershell
+Set-Location 'C:\Projects\christag-agency\.worktrees\unified-agent-configuration'; & .\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Result:
+
+```text
+698 passed, 1 skipped in 27.13s
+```
+
+### Files Changed
+
+- [agency/configuration/models.py](agency/configuration/models.py)
+- [tests/test_config_canonical.py](tests/test_config_canonical.py)
+- [.superpowers/sdd/task-2-report.md](.superpowers/sdd/task-2-report.md)
+
+### Self-Review
+
+- The shared identifier pipeline now enforces the Task 2 lowercase slug contract across group keys, memory channel keys, agent names, routine ids, blueprint references, and `agency.default_group`.
+- `agency.default_group` remains optional when blank, but a nonblank value must now be both syntactically valid and a declared group reference.
+- The fix stayed within semantic validation only: no integration registry membership checks, no filesystem existence checks, and no migration behavior were added.
+- The new tests prove parse/validate parity for the added invalid identifier and cross-reference cases, and retain valid hyphenated identifiers as accepted examples.
+
+### Concerns
+
+- This tightens identifier syntax to lowercase hyphenated slugs in the canonical validator. Any external unpublished configs that relied on uppercase or underscore identifiers will now fail validation, which matches the approved Task 2 model but may need explicit migration handling in later tasks if such configs exist.
+
 ## Review Fix 7
 
 ### RED

@@ -125,6 +125,83 @@ def test_rejects_missing_or_blank_blueprint(canonical_raw_config, canonical_path
     assert any(issue.code == "missing-blueprint" for issue in excinfo.value.issues)
 
 
+@pytest.mark.parametrize(
+    ("blueprint_value", "expected_code"),
+    [
+        ("bad blueprint", "invalid-blueprint-name"),
+        ("Blueprint", "invalid-blueprint-name"),
+        ("builder-blueprint", None),
+    ],
+)
+def test_validates_blueprint_identifiers(canonical_raw_config, canonical_paths, blueprint_value, expected_code):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["blueprint"] = blueprint_value
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    if expected_code is None:
+        assert not any(issue.code == "invalid-blueprint-name" for issue in issues)
+        parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+        assert parsed.groups["newsletter"].agents["builder"].blueprint == blueprint_value
+        return
+
+    assert any(issue.code == expected_code and issue.field == "blueprint" for issue in issues)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == expected_code and issue.field == "blueprint" for issue in excinfo.value.issues)
+
+
+@pytest.mark.parametrize(
+    ("default_group", "expected_code"),
+    [
+        ("bad group", "invalid-group-name"),
+        ("missing-group", "missing-default-group"),
+        ("newsletter-team", None),
+    ],
+)
+def test_validates_default_group_identifier_and_reference(
+    canonical_raw_config, canonical_paths, default_group, expected_code
+):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    if default_group == "newsletter-team":
+        group_config = canonical_raw_config["groups"].pop("newsletter")
+        canonical_raw_config["groups"][default_group] = group_config
+    canonical_raw_config["agency"]["default_group"] = default_group
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    if expected_code is None:
+        assert not any(issue.code in {"invalid-group-name", "missing-default-group"} for issue in issues)
+        parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+        assert parsed.agency.default_group == default_group
+        return
+
+    assert any(issue.code == expected_code and issue.field == "agency.default_group" for issue in issues)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(
+        issue.code == expected_code and issue.field == "agency.default_group" for issue in excinfo.value.issues
+    )
+
+
+def test_allows_omitted_default_group(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    canonical_raw_config["agency"]["default_group"] = ""
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert not any(issue.field == "agency.default_group" for issue in issues)
+    assert parsed.agency.default_group == ""
+
+
 def test_rejects_superseded_schema_version(canonical_raw_config, canonical_paths):
     from agency.configuration.models import validate_config_canonical
 
@@ -189,6 +266,71 @@ def test_rejects_duplicate_agent_names(canonical_raw_config, canonical_paths):
     )
     issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
     assert any(issue.code == "duplicate-agent-name" for issue in issues)
+
+
+@pytest.mark.parametrize(
+    ("group_key", "expected_code"),
+    [
+        ("bad group", "invalid-group-name"),
+        ("Newsletter", "invalid-group-name"),
+        ("newsletter-team", None),
+    ],
+)
+def test_validates_group_keys_as_stable_identifiers(canonical_raw_config, canonical_paths, group_key, expected_code):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    group_config = canonical_raw_config["groups"].pop("newsletter")
+    canonical_raw_config["groups"][group_key] = group_config
+    if canonical_raw_config["agency"].get("default_group") == "newsletter":
+        canonical_raw_config["agency"]["default_group"] = group_key
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    if expected_code is None:
+        assert not any(issue.code == "invalid-group-name" for issue in issues)
+        parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+        assert group_key in parsed.groups
+        return
+
+    assert any(issue.code == expected_code and issue.field == "group" for issue in issues)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == expected_code and issue.field == "group" for issue in excinfo.value.issues)
+
+
+@pytest.mark.parametrize(
+    ("channel_key", "expected_code"),
+    [
+        ("ops channel", "invalid-channel-name"),
+        ("Ops", "invalid-channel-name"),
+        ("ops-channel", None),
+    ],
+)
+def test_validates_memory_channel_keys_as_stable_identifiers(canonical_raw_config, canonical_paths, channel_key, expected_code):
+    from agency.configuration.models import parse_config_canonical, validate_config_canonical
+
+    canonical_raw_config["memory"]["channels"] = {channel_key: {"display_name": "Ops"}}
+    canonical_raw_config["groups"]["newsletter"]["agents"][0]["default_memory"] = {
+        "scope": "channel",
+        "channel": channel_key,
+    }
+
+    issues = validate_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    if expected_code is None:
+        assert not any(issue.code == "invalid-channel-name" for issue in issues)
+        parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+        assert channel_key in parsed.memory.channels
+        return
+
+    assert any(issue.code == expected_code and issue.field == "channel" for issue in issues)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+
+    assert any(issue.code == expected_code and issue.field == "channel" for issue in excinfo.value.issues)
 
 
 def test_rejects_duplicate_routine_names(canonical_raw_config, canonical_paths):
@@ -348,6 +490,22 @@ def test_preserves_supported_workspace_fields(canonical_raw_config, canonical_pa
         pytest.param(
             lambda raw: raw["groups"]["newsletter"]["agents"][0].update({"name": "bad name"}),
             id="invalid-agent-identifier",
+        ),
+        pytest.param(
+            lambda raw: raw["groups"].update({"bad group": raw["groups"].pop("newsletter")}),
+            id="invalid-group-identifier",
+        ),
+        pytest.param(
+            lambda raw: raw["memory"].update({"channels": {"bad channel": {"display_name": "Ops"}}}),
+            id="invalid-channel-identifier",
+        ),
+        pytest.param(
+            lambda raw: raw["groups"]["newsletter"]["agents"][0].update({"blueprint": "bad blueprint"}),
+            id="invalid-blueprint-identifier",
+        ),
+        pytest.param(
+            lambda raw: raw["agency"].update({"default_group": "missing-group"}),
+            id="missing-default-group-reference",
         ),
         pytest.param(
             lambda raw: raw["groups"]["newsletter"]["agents"][0]["default_memory"].update(

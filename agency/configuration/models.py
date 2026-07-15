@@ -14,7 +14,7 @@ ToolMode = Literal["all", "allowlist", "none"]
 SandboxMode = Literal["restricted", "unrestricted"]
 ScheduleKind = Literal["at", "every"]
 
-_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
+_IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
 
 class AgencyDispatch(BaseModel):
@@ -421,7 +421,7 @@ def _validate_identifier(kind: str, value: str, scope: str) -> ValidationIssue |
             scope=scope,
             field=kind,
             message=f"Invalid {kind} identifier: {value}",
-            hint="Use a stable identifier starting with a letter or digit and containing only letters, digits, hyphens, or underscores.",
+            hint="Use a lowercase stable slug containing only letters, digits, and single hyphen separators.",
         )
     return None
 
@@ -548,6 +548,47 @@ def _validate_blueprint(agent: Any, scope: str) -> ValidationIssue | None:
             message="Blueprint is required.",
             hint="Set blueprint to a non-empty identifier for the agent instance.",
         )
+    return _validate_identifier("blueprint", blueprint, scope)
+
+
+def _validate_default_group(default_group: Any, groups: Mapping[str, Any]) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if default_group is None or default_group == "":
+        return issues
+    if not isinstance(default_group, str):
+        issues.append(
+            _build_issue(
+                code="invalid-group-name",
+                scope="agency",
+                field="agency.default_group",
+                message=f"Invalid group identifier: {default_group}",
+                hint="Use a lowercase stable slug containing only letters, digits, and single hyphen separators.",
+            )
+        )
+        return issues
+    identifier_issue = _validate_identifier("group", default_group, "agency")
+    if identifier_issue is not None:
+        issues.append(
+            ValidationIssue(
+                code=identifier_issue.code,
+                scope=identifier_issue.scope,
+                field="agency.default_group",
+                message=identifier_issue.message,
+                corrective_hint=identifier_issue.corrective_hint,
+            )
+        )
+        return issues
+    if default_group not in groups:
+        issues.append(
+            _build_issue(
+                code="missing-default-group",
+                scope="agency",
+                field="agency.default_group",
+                message=f"Default group is not declared: {default_group}",
+                hint="Set agency.default_group to a declared group key or leave it blank when omission is intended.",
+            )
+        )
+    return issues
     return None
 
 
@@ -557,6 +598,10 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
     memory = raw.get("memory") if _is_mapping(raw.get("memory")) else {}
     channels = memory.get("channels") if _is_mapping(memory.get("channels")) else {}
     declared_channels = set(channels)
+    for channel_name in channels:
+        identifier_issue = _validate_identifier("channel", channel_name, f"memory.channels.{channel_name}")
+        if identifier_issue:
+            issues.append(identifier_issue)
     for field_name in ("agent_library", "compilation_cache", "memory_store"):
         if not str(agency.get(field_name, "")).strip():
             issues.append(
@@ -569,7 +614,11 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 )
             )
     groups = raw.get("groups") if _is_mapping(raw.get("groups")) else {}
+    issues.extend(_validate_default_group(agency.get("default_group", ""), groups))
     for group_name, group in groups.items():
+        identifier_issue = _validate_identifier("group", group_name, f"groups.{group_name}")
+        if identifier_issue:
+            issues.append(identifier_issue)
         if not _is_mapping(group):
             continue
         if not str(group.get("path", "")).strip():
