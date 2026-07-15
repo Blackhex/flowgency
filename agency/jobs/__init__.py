@@ -16,10 +16,15 @@ from .models import (
     MemoryBinding,
     RuntimePolicySnapshot,
 )
-from .reconciliation import reconcile_jobs
 from .resolution import JobValidationError, resolve_job_request
 from .store import active_jobs, cancel_job
 from .submission import JobSubmissionError, submit_job, submit_job_request
+
+
+def reconcile_jobs(groups: dict):
+    from .reconciliation import reconcile_jobs as _reconcile_jobs
+
+    return _reconcile_jobs(groups)
 
 __all__ = [
     "DetachedProcessLauncher",

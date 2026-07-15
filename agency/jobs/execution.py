@@ -1,23 +1,175 @@
 """Worker-side execution flow for durable agent jobs."""
 
+import difflib
 import logging
 import os
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
 
+from agency.blueprints.cache import release_pin
+from agency.configuration.models import MemorySelector
+from agency.fs.locks import LockCancelledError, exclusive_lock
 from agency.integrations import get_integration
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
+from agency.integrations.models import (
+    EffectiveRuntimePolicy,
+    IntegrationRunRequest,
+    ResolvedToolPolicy,
+)
+from agency.memory.models import ResolvedMemory
+from agency.memory.publication import (
+    MemoryPublicationError,
+    apply_publication,
+    finalize_publication,
+    prepare_publication,
+)
+from agency.memory.store import ensure_memory, stage_memory
 
 from .atomic import atomic_write_text
+from .artifacts import JobArtifact, retain_failed_stage
 from .changes import capture_base_sha, capture_git_changes
 from .launch_view import create_launch_view
 from .models import JobRecord
-from .store import read_job, transition_job
+from .store import (
+    InvalidJobTransition,
+    read_job,
+    transition_job,
+    write_job,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _resolved_memory(spec) -> ResolvedMemory:
+    selector_payload = dict(spec.memory.selector)
+    return ResolvedMemory(
+        selector=MemorySelector(
+            scope=selector_payload["scope"],
+            channel=selector_payload.get("channel"),
+        ),
+        canonical_json=spec.memory.canonical_json,
+        memory_hash=spec.memory.memory_hash,
+        directory=Path(spec.memory.path),
+    )
+
+
+def _jobs_dir(job_path: Path) -> Path:
+    return Path(job_path).resolve().parent
+
+
+def _selector_lock_path(resolved: ResolvedMemory) -> Path:
+    return (
+        resolved.directory.parent
+        / ".selectors"
+        / f"{resolved.memory_hash}.lock"
+    )
+
+
+def _mark_cancelled_if_waiting(job_path: Path) -> JobRecord:
+    record = read_job(job_path)
+    if record.status == "cancelled":
+        return record
+    raise InvalidJobTransition(
+        f"Expected cancelled job, found {record.status!r}"
+    )
+
+
+def _read_stage_files(stage_dir: Path) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    for item in sorted(
+        stage_dir.iterdir(), key=lambda path: path.name.casefold()
+    ):
+        if item.is_file():
+            files[item.name] = item.read_bytes()
+    return files
+
+
+def _failed_memory_artifacts(
+    job_path: Path,
+    stage_dir: Path,
+    old_files: dict[str, bytes],
+) -> list[dict[str, object]]:
+    diff_lines = []
+    current_files = _read_stage_files(stage_dir)
+    for name in sorted(set(old_files) | set(current_files)):
+        old_text = old_files.get(name, b"").decode(
+            "utf-8", errors="replace"
+        ).splitlines(keepends=True)
+        new_text = current_files.get(name, b"").decode(
+            "utf-8", errors="replace"
+        ).splitlines(keepends=True)
+        diff_lines.extend(
+            difflib.unified_diff(
+                old_text,
+                new_text,
+                fromfile=f"canonical/{name}",
+                tofile=f"stage/{name}",
+            )
+        )
+    artifacts = retain_failed_stage(
+        job_store=_jobs_dir(job_path),
+        job_id=read_job(job_path).spec.job_id,
+        stage_directory=stage_dir,
+        diff_bytes="".join(diff_lines).encode("utf-8"),
+    )
+    return [artifact.to_dict() for artifact in artifacts]
+
+
+def _retained_failed_artifacts(job_path: Path) -> list[dict[str, object]]:
+    job_id = read_job(job_path).spec.job_id
+    root = _jobs_dir(job_path) / "artifacts" / job_id
+    if not root.exists():
+        return []
+    artifacts: list[dict[str, object]] = []
+    for item in sorted(root.iterdir(), key=lambda path: path.name.casefold()):
+        if item.is_file():
+            artifacts.append(
+                JobArtifact(
+                    name=item.name,
+                    path=str(item.resolve()),
+                    size=item.stat().st_size,
+                ).to_dict()
+            )
+    return artifacts
+
+
+def _terminalize_failure(
+    job_path: Path,
+    *,
+    summary: str,
+    started_at: str | None,
+    stdout_path: str | None = None,
+    stderr_path: str | None = None,
+    exit_code: int | None = None,
+    duration_seconds: float | None = None,
+    changed_files: list[dict[str, object]] | None = None,
+    base_sha: str | None = None,
+    memory_publication: dict[str, object] | None = None,
+) -> JobRecord:
+    record = read_job(job_path)
+    if record.status == "cancelled":
+        return record
+    expected = record.status
+    if expected not in {"running", "waiting_for_memory"}:
+        return record
+    return transition_job(
+        job_path,
+        expected,
+        "failed",
+        completed_at=datetime.now(timezone.utc).isoformat(),
+        started_at=started_at,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        exit_code=exit_code,
+        duration_seconds=duration_seconds,
+        changed_files=changed_files or [],
+        execution_summary=summary,
+        base_sha=base_sha,
+        memory_publication=memory_publication,
+    )
 
 
 def _fallback_runtime_policy(context, timeout: int) -> EffectiveRuntimePolicy:
@@ -28,7 +180,11 @@ def _fallback_runtime_policy(context, timeout: int) -> EffectiveRuntimePolicy:
     else:
         sandbox_mode = "unrestricted"
         sandbox_roots = ()
-    allowed_tools = tuple(getattr(sandbox, "allowed_tools", ()) or ()) if sandbox else ()
+    allowed_tools = (
+        tuple(getattr(sandbox, "allowed_tools", ()) or ())
+        if sandbox
+        else ()
+    )
     tool_mode = "allowlist" if allowed_tools else "all"
     return EffectiveRuntimePolicy(
         timeout=timeout,
@@ -99,28 +255,18 @@ def project_decision(record: JobRecord) -> None:
 
 def execute_job(job_path: Path) -> JobRecord:
     record = read_job(job_path)
-    started = datetime.now(timezone.utc)
     record = transition_job(
         job_path,
         "queued",
-        "running",
+        "waiting_for_memory",
         worker_pid=os.getpid(),
-        started_at=started.isoformat(),
     )
-
-    # Decision projection is best-effort metadata sync and must not block
-    # durable job terminalization when decision files are missing/corrupt.
-    try:
-        project_decision(record)
-    except Exception as error:
-        logger.warning(
-            "Failed to project running status for job %s to its decision: %s",
-            record.spec.job_id,
-            error,
-        )
 
     prompt_path = Path(job_path).with_suffix(".prompt")
     base_sha = None
+    started = None
+    launch_view = None
+    final = record
     try:
         spec = record.spec
         context = resolve_job_context(spec)
@@ -131,98 +277,220 @@ def execute_job(job_path: Path) -> JobRecord:
         artifact = spec.blueprint.to_artifact()
         launch_dir = Path(job_path).with_suffix("") / "launch"
         launch_view = getattr(context, "launch_dir", None)
-        if launch_view is None:
-            launch_view = create_launch_view(artifact, launch_dir)
-        # The capture must be tied to the one root the job actually ran in: prefer
-        # the sandbox root the integration executes against, then the persisted
-        # runtime policy root, then the durable workspace root.
-        git_root = None
-        if getattr(context, "sandbox_root", None) and getattr(context.sandbox_root, "roots", ()):
-            git_root = Path(context.sandbox_root.roots[0])
-        elif runtime_policy.sandbox_roots:
-            git_root = Path(runtime_policy.sandbox_roots[0])
-        elif getattr(context, "workspace_dir", None):
-            git_root = Path(context.workspace_dir)
-        # Record HEAD before the run so committed work is visible afterwards. A
-        # fleet whose agents must commit every atomic change leaves a clean tree,
-        # so working-tree-only would miss the rule and capture only the exception.
-        base_sha = capture_base_sha(git_root)
-        log_dir = Path(context.group_path) / "shared" / "logs" / started.strftime("%Y-%m-%d")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        stem = f"{record.spec.agent_name}-{record.spec.trigger}-{record.spec.job_id}"
-        stdout_path = log_dir / f"{stem}.out"
-        stderr_path = log_dir / f"{stem}.err"
-        prompt_path.write_text(record.spec.task_input, encoding="utf-8")
-        request = IntegrationRunRequest(
-            workspace_dir=Path(spec.workspace_dir),
-            launch_dir=launch_view,
-            task_file=prompt_path,
-            timeout=getattr(context, "timeout", spec.runtime_policy.timeout),
-            runtime_policy=runtime_policy,
-            skill=spec.skill,
-            skill_arguments=spec.skill_arguments,
-            enforce_validation=True,
-        )
-        result = integration.run(request)
-        stdout_path.write_text(result.stdout, encoding="utf-8")
-        persisted_stderr_path = None
-        if result.stderr:
-            stderr_path.write_text(result.stderr, encoding="utf-8")
-            persisted_stderr_path = str(stderr_path.resolve())
-        native_changes = list(getattr(result, "changed_files", []))
-        # Native per-file edits (currently only Copilot) win when present. For
-        # every other integration, fall back to a git diff of the sandbox root —
-        # unioning the working tree with the committed range base_sha..HEAD — so
-        # outcome visibility is integration-agnostic, not Copilot-only.
-        if not native_changes:
-            native_changes = capture_git_changes(git_root, base_sha)
-        changes = [
-            {
-                "path": item.path,
-                "status": item.status,
-                "lines_added": item.lines_added,
-                "lines_removed": item.lines_removed,
-            }
-            for item in native_changes
-        ]
-        status = "complete" if result.exit_code == 0 else "failed"
-        if status == "complete":
-            if changes:
-                noun = "file" if len(changes) == 1 else "files"
-                summary = (
-                    f"Agent completed execution; captured "
-                    f"{len(changes)} changed {noun}."
+        resolved_memory = _resolved_memory(spec)
+
+        def cancelled() -> bool:
+            return read_job(job_path).status == "cancelled"
+
+        selector_lock = _selector_lock_path(resolved_memory)
+        try:
+            with exclusive_lock(selector_lock, wait=True, cancelled=cancelled):
+                if cancelled():
+                    final = _mark_cancelled_if_waiting(job_path)
+                    return final
+                snapshot = ensure_memory(resolved_memory)
+                stage = stage_memory(resolved_memory, job_id=spec.job_id)
+                canonical_files = dict(snapshot.files)
+                if launch_view is None:
+                    launch_view = create_launch_view(artifact, launch_dir)
+                started = datetime.now(timezone.utc)
+                record = transition_job(
+                    job_path,
+                    "waiting_for_memory",
+                    "running",
+                    worker_pid=os.getpid(),
+                    started_at=started.isoformat(),
                 )
-            else:
-                summary = "Agent completed execution (inferred from exit code)."
-        elif result.exit_code == 124:
-            summary = f"Agent timed out after {getattr(context, 'timeout', spec.runtime_policy.timeout)} seconds."
-        else:
-            summary = f"Agent exited with code {result.exit_code}."
-        final = transition_job(
-            job_path,
-            "running",
-            status,
-            completed_at=datetime.now(timezone.utc).isoformat(),
-            stdout_path=str(stdout_path.resolve()),
-            stderr_path=persisted_stderr_path,
-            exit_code=result.exit_code,
-            duration_seconds=result.duration_seconds,
-            changed_files=changes,
-            execution_summary=summary,
-            base_sha=base_sha,
-        )
+
+                try:
+                    project_decision(record)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to project running status for job %s to its "
+                        "decision: %s",
+                        record.spec.job_id,
+                        error,
+                    )
+
+                # Tie change capture to the root the job actually ran in.
+                git_root = None
+                if (
+                    getattr(context, "sandbox_root", None)
+                    and getattr(context.sandbox_root, "roots", ())
+                ):
+                    git_root = Path(context.sandbox_root.roots[0])
+                elif runtime_policy.sandbox_roots:
+                    git_root = Path(runtime_policy.sandbox_roots[0])
+                elif getattr(context, "workspace_dir", None):
+                    git_root = Path(context.workspace_dir)
+                base_sha = capture_base_sha(git_root)
+                log_dir = (
+                    Path(context.group_path)
+                    / "shared"
+                    / "logs"
+                    / started.strftime("%Y-%m-%d")
+                )
+                log_dir.mkdir(parents=True, exist_ok=True)
+                stem = (
+                    f"{record.spec.agent_name}-{record.spec.trigger}-"
+                    f"{record.spec.job_id}"
+                )
+                stdout_path = log_dir / f"{stem}.out"
+                stderr_path = log_dir / f"{stem}.err"
+                prompt_path.write_text(
+                    record.spec.task_input, encoding="utf-8"
+                )
+                request = IntegrationRunRequest(
+                    workspace_dir=Path(spec.workspace_dir),
+                    launch_dir=launch_view,
+                    task_file=prompt_path,
+                    timeout=getattr(
+                        context,
+                        "timeout",
+                        spec.runtime_policy.timeout,
+                    ),
+                    runtime_policy=runtime_policy,
+                    skill=spec.skill,
+                    skill_arguments=spec.skill_arguments,
+                    enforce_validation=True,
+                    memory_working_dir=stage.directory,
+                )
+                result = integration.run(request)
+                stdout_path.write_text(result.stdout, encoding="utf-8")
+                persisted_stderr_path = None
+                if result.stderr:
+                    stderr_path.write_text(result.stderr, encoding="utf-8")
+                    persisted_stderr_path = str(stderr_path.resolve())
+                native_changes = list(getattr(result, "changed_files", []))
+                if not native_changes:
+                    native_changes = capture_git_changes(git_root, base_sha)
+                changes = [
+                    {
+                        "path": item.path,
+                        "status": item.status,
+                        "lines_added": item.lines_added,
+                        "lines_removed": item.lines_removed,
+                    }
+                    for item in native_changes
+                ]
+
+                if result.exit_code != 0:
+                    if result.exit_code == 124:
+                        timeout_seconds = getattr(
+                            context,
+                            "timeout",
+                            spec.runtime_policy.timeout,
+                        )
+                        summary = (
+                            "Agent timed out after "
+                            f"{timeout_seconds} "
+                            "seconds."
+                        )
+                    else:
+                        summary = f"Agent exited with code {result.exit_code}."
+                    final = _terminalize_failure(
+                        job_path,
+                        summary=summary,
+                        started_at=started.isoformat(),
+                        stdout_path=str(stdout_path.resolve()),
+                        stderr_path=persisted_stderr_path,
+                        exit_code=result.exit_code,
+                        duration_seconds=result.duration_seconds,
+                        changed_files=changes,
+                        base_sha=base_sha,
+                        memory_publication={
+                            "failed_artifacts": _failed_memory_artifacts(
+                                job_path,
+                                stage.directory,
+                                canonical_files,
+                            )
+                        },
+                    )
+                else:
+                    try:
+                        prepared = prepare_publication(
+                            stage,
+                            job_store=_jobs_dir(job_path),
+                            job_path=job_path,
+                        )
+                        finalize_publication(
+                            apply_publication(
+                                prepared,
+                                retain_failed_stage_artifacts=True,
+                            )
+                        )
+                        summary = (
+                            f"Agent completed execution; captured "
+                            f"{len(changes)} changed "
+                            f"{'file' if len(changes) == 1 else 'files'}."
+                            if changes
+                            else (
+                                "Agent completed execution "
+                                "(inferred from exit code)."
+                            )
+                        )
+                        final = read_job(job_path)
+                        if final.status == "complete":
+                            final = replace(
+                                final,
+                                started_at=started.isoformat(),
+                                stdout_path=str(stdout_path.resolve()),
+                                stderr_path=persisted_stderr_path,
+                                exit_code=result.exit_code,
+                                duration_seconds=result.duration_seconds,
+                                changed_files=changes,
+                                execution_summary=summary,
+                                base_sha=base_sha,
+                            )
+                            write_job(job_path, final)
+                    except MemoryPublicationError as error:
+                        current = read_job(job_path)
+                        artifacts = _retained_failed_artifacts(job_path)
+                        if current.status == "failed":
+                            final = replace(
+                                current,
+                                memory_publication={
+                                    "failed_artifacts": artifacts,
+                                },
+                            )
+                            write_job(job_path, final)
+                        else:
+                            final = _terminalize_failure(
+                                job_path,
+                                summary=(
+                                    f"Memory publication failed: {error}"
+                                ),
+                                started_at=started.isoformat(),
+                                stdout_path=str(stdout_path.resolve()),
+                                stderr_path=persisted_stderr_path,
+                                exit_code=result.exit_code,
+                                duration_seconds=result.duration_seconds,
+                                changed_files=changes,
+                                base_sha=base_sha,
+                                memory_publication={
+                                    "failed_artifacts": artifacts,
+                                },
+                            )
+        except LockCancelledError:
+            final = _mark_cancelled_if_waiting(job_path)
+            return final
     except Exception as error:
-        final = transition_job(
+        final = _terminalize_failure(
             job_path,
-            "running",
-            "failed",
-            completed_at=datetime.now(timezone.utc).isoformat(),
-            execution_summary=f"Execution error: {error}",
+            summary=f"Execution error: {error}",
+            started_at=None if started is None else started.isoformat(),
             base_sha=base_sha,
         )
     finally:
         prompt_path.unlink(missing_ok=True)
+        try:
+            release_pin(
+                record.spec.blueprint.cache_root,
+                record.spec.blueprint.cache_ref,
+                record.spec.job_id,
+            )
+        except Exception:
+            pass
 
     # Keep terminalization authoritative even if projection fails.
     try:

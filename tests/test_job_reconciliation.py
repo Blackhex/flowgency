@@ -5,6 +5,7 @@ import yaml
 
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.reconciliation import reconcile_jobs, worker_alive
+from agency.memory.recovery import recover_publications
 from agency.jobs.store import job_path, read_job, write_job
 
 
@@ -115,6 +116,90 @@ def test_reconcile_leaves_uncertain_worker_running(tmp_path, monkeypatch):
     result = reconcile_jobs({"test": {"path": str(group)}})
     assert result.left_running == 1
     assert read_job(path).status == "running"
+
+
+def test_reconcile_fails_dead_waiting_worker(tmp_path, monkeypatch):
+    group, _, path = running_decision_job(tmp_path)
+    record = read_job(path)
+    write_job(
+        path,
+        replace(record, status="waiting_for_memory", worker_pid=999999),
+    )
+
+    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+
+    result = reconcile_jobs({"test": {"path": str(group)}})
+
+    assert result.failed == 1
+    reconciled = read_job(path)
+    assert reconciled.status == "failed"
+    assert "999999" in (reconciled.execution_summary or "")
+
+
+def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_path, monkeypatch):
+    from agency.configuration.models import MemorySelector
+    from agency.jobs.models import JobSpec
+    from agency.memory import MemoryStore, resolve_memory_selector
+    from agency.memory.publication import apply_publication, prepare_publication
+
+    group = tmp_path / "group"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+    memory_binding = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="placeholder",
+        group_key="test",
+        agent_name="product",
+        routine_id=None,
+        channels={},
+        store_root=tmp_path / "memory-store",
+    )
+    spec = JobSpec.create(
+        config_path=config_path,
+        group_key="test",
+        agent_name="product",
+        trigger="manual_prompt",
+        memory={
+            "selector": {"scope": "agent"},
+            "canonical_json": memory_binding.canonical_json,
+            "memory_hash": memory_binding.memory_hash,
+            "path": str(memory_binding.directory.resolve()),
+        },
+        prompt_source={"type": "saved_prompt", "path": "shared/prompts/routine.md"},
+        prompt_content="run",
+        group_path=group,
+    )
+    path = job_path(group, spec.job_id)
+    write_job(path, replace(JobRecord.from_spec(spec), status="running", worker_pid=999999))
+
+    store_root = tmp_path / "memory-store"
+    store = MemoryStore(store_root)
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id=spec.job_id,
+        group_key="test",
+        agent_name="product",
+        routine_id=None,
+        channels={},
+        store_root=store_root,
+    )
+    seeded = store.ensure(resolved)
+    store.try_save(resolved, seeded.revision, {"memory.md": b"old\n"})
+    stage = store.stage(resolved, job_id=spec.job_id)
+    (stage.directory / "memory.md").write_bytes(b"new\n")
+    prepared = prepare_publication(stage, job_store=group / "shared" / "jobs")
+    try:
+        apply_publication(prepared, crash_at="published")
+    except Exception:
+        pass
+
+    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+
+    result = reconcile_jobs({"test": {"path": str(group)}})
+
+    assert result.failed == 0
+    assert read_job(path).status == "complete"
+    assert read_job(path).memory_publication is not None
 
 
 def test_superseded_running_decision_without_job_id_is_not_failed(tmp_path):

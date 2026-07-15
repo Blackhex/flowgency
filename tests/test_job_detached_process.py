@@ -101,11 +101,12 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     record_path = group_path / "shared" / "jobs" / f"{job_id}.yaml"
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and (
-        not record_path.exists() or read_job(record_path).status == "queued"
+        not record_path.exists()
+        or read_job(record_path).status in {"queued", "waiting_for_memory"}
     ):
         time.sleep(0.05)
     running = read_job(record_path)
-    assert running.status == "running"
+    assert running.status in {"waiting_for_memory", "running"}
     assert running.worker_pid != submitter_pid
     assert not sentinel.exists()
 

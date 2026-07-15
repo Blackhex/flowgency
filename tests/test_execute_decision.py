@@ -14,6 +14,8 @@ from agency.jobs import JobSubmissionError
 from agency.jobs.execution import execute_job
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.store import write_job
+from agency.memory.selectors import resolve_memory_selector
+from agency.configuration.models import MemorySelector
 from test_proposal_questions import _setup_decision_group
 
 
@@ -21,11 +23,39 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
     group_path = tmp_path / "agents"
     decision_path = group_path / "shared" / "decisions" / decision_name
     decision_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+    cache_path = tmp_path / ".compat-cache" / "script" / "v1" / "unresolved"
+    runtime_path = cache_path / "runtime"
+    runtime_path.mkdir(parents=True, exist_ok=True)
+    (runtime_path / "agent.md").write_text("run\n", encoding="utf-8")
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="run"),
+        job_id="placeholder",
+        group_key="grp",
+        agent_name="worker",
+        routine_id=None,
+        channels={},
+        store_root=tmp_path / ".compat-memory-root",
+    )
     spec = JobSpec.create(
-        config_path=tmp_path / "config.yaml",
+        config_path=config_path,
         group_key="grp",
         agent_name="worker",
         trigger="decision",
+        blueprint={
+            "key": "compat-unresolved",
+            "source_digest": "compat-unresolved",
+            "integration": "script",
+            "projector_version": "v1",
+            "cache_path": str(cache_path.resolve()),
+        },
+        memory={
+            "selector": {"scope": "run"},
+            "canonical_json": resolved.canonical_json,
+            "memory_hash": resolved.memory_hash,
+            "path": str(resolved.directory.resolve()),
+        },
         prompt_source={"type": "decision"},
         prompt_content="Immutable instructions",
         decision_context={

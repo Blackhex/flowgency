@@ -1,4 +1,6 @@
 from pathlib import Path
+import threading
+import time
 from types import SimpleNamespace
 
 import os
@@ -7,19 +9,55 @@ import yaml
 
 from agency.integrations import FileChange, RunResult
 from agency.integrations.models import IntegrationRunRequest
+from agency.jobs.artifacts import JobArtifact
+from agency.jobs.execution import _selector_lock_path
 from agency.jobs.execution import execute_job
 from agency.jobs.models import JobRecord, JobSpec
+from agency.jobs.store import cancel_job
 from agency.jobs.reconciliation import worker_alive
 from agency.jobs.store import read_job, write_job
 from agency.jobs.worker import main as worker_main
+from agency.memory import MemoryStore
+from agency.memory.selectors import resolve_memory_selector
+from agency.configuration.models import MemorySelector
+from agency.blueprints.cache import active_pins, pin_artifact
+from agency.fs.locks import exclusive_lock
 
 
 def queued_job(tmp_path: Path, *, decision_context=None):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+    cache_path = tmp_path / ".compat-cache" / "script" / "v1" / "unresolved"
+    runtime_path = cache_path / "runtime"
+    runtime_path.mkdir(parents=True, exist_ok=True)
+    (runtime_path / "agent.md").write_text("run\n", encoding="utf-8")
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="run"),
+        job_id="placeholder",
+        group_key="test",
+        agent_name="product",
+        routine_id=None,
+        channels={},
+        store_root=tmp_path / ".compat-memory-root",
+    )
     spec = JobSpec.create(
-        config_path=tmp_path / "config.yaml",
+        config_path=config_path,
         group_key="test",
         agent_name="product",
         trigger="decision" if decision_context else "manual_prompt",
+        blueprint={
+            "key": "compat-unresolved",
+            "source_digest": "compat-unresolved",
+            "integration": "script",
+            "projector_version": "v1",
+            "cache_path": str(cache_path.resolve()),
+        },
+        memory={
+            "selector": {"scope": "run"},
+            "canonical_json": resolved.canonical_json,
+            "memory_hash": resolved.memory_hash,
+            "path": str(resolved.directory.resolve()),
+        },
         prompt_source={"type": "decision" if decision_context else "saved_prompt"},
         prompt_content="Immutable instructions",
         decision_context=decision_context,
@@ -27,6 +65,233 @@ def queued_job(tmp_path: Path, *, decision_context=None):
     path = tmp_path / "group" / "shared" / "jobs" / f"{spec.job_id}.yaml"
     write_job(path, JobRecord.from_spec(spec))
     return path, spec
+
+
+def memory_bound_job(tmp_path: Path):
+    group_path = tmp_path / "group"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+    cache_path = tmp_path / "compiled-agents" / "script" / "v1" / "digest"
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="placeholder",
+        group_key="test",
+        agent_name="product",
+        routine_id="daily-review",
+        channels={},
+        store_root=tmp_path / "memory-store",
+    )
+    spec = JobSpec.create(
+        config_path=config_path,
+        group_key="test",
+        agent_name="product",
+        trigger="manual_prompt",
+        integration_name="script",
+        integration_config={"command": "echo ok"},
+        config_revision="cfg-1",
+        blueprint={
+            "key": "builder-blueprint",
+            "source_digest": "digest",
+            "integration": "script",
+            "projector_version": "v1",
+            "cache_path": str(cache_path.resolve()),
+        },
+        runtime_policy={
+            "timeout": 30,
+            "sandbox_mode": "unrestricted",
+            "sandbox_roots": (),
+            "tool_mode": "all",
+            "tool_names": (),
+        },
+        memory={
+            "selector": {"scope": "agent"},
+            "canonical_json": resolved.canonical_json,
+            "memory_hash": resolved.memory_hash,
+            "path": str(resolved.directory.resolve()),
+        },
+        routine_id="daily-review",
+        skill="daily-review",
+        task_input="Immutable instructions",
+        group_path=group_path,
+        prompt_source={"type": "saved_prompt", "path": "shared/prompts/routine.md"},
+    )
+    path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    write_job(path, JobRecord.from_spec(spec))
+    return path, spec
+
+
+class MemoryJobFixture:
+    def __init__(self, tmp_path: Path):
+        self.tmp_path = tmp_path
+        self.job_path, self.spec = memory_bound_job(tmp_path)
+        self.group_path = Path(self.spec.group_path)
+        self.memory_root = tmp_path / "memory-store"
+        self.store = MemoryStore(self.memory_root)
+        self.resolved = resolve_memory_selector(
+            MemorySelector(scope="agent"),
+            job_id=self.spec.job_id,
+            group_key=self.spec.group_key,
+            agent_name=self.spec.agent_name,
+            routine_id=self.spec.routine_id,
+            channels={},
+            store_root=self.memory_root,
+        )
+        seeded = self.store.ensure(self.resolved)
+        self.store.try_save(self.resolved, seeded.revision, {"memory.md": b"old"})
+
+    def read(self):
+        return read_job(self.job_path)
+
+
+def test_execute_job_waits_for_memory_before_starting_run(tmp_path, monkeypatch):
+    fixture = MemoryJobFixture(tmp_path)
+    seen = {}
+    finished = threading.Event()
+    held_lock = _selector_lock_path(fixture.resolved)
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            seen["started_at"] = read_job(fixture.job_path).started_at
+            seen["status"] = read_job(fixture.job_path).status
+            finished.set()
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_dir=fixture.group_path,
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        group_path=fixture.group_path,
+    )
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    with exclusive_lock(held_lock, wait=True):
+        worker = threading.Thread(target=execute_job, args=(fixture.job_path,))
+        worker.start()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if fixture.read().status == "waiting_for_memory":
+                break
+            time.sleep(0.02)
+        record = fixture.read()
+        assert record.status == "waiting_for_memory"
+        assert record.started_at is None
+        assert not finished.is_set()
+
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert seen == {
+        "started_at": read_job(fixture.job_path).started_at,
+        "status": "running",
+    }
+    assert read_job(fixture.job_path).status == "complete"
+
+
+def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_path, monkeypatch):
+    fixture = MemoryJobFixture(tmp_path)
+    held_lock = _selector_lock_path(fixture.resolved)
+    called = {"run": 0}
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            called["run"] += 1
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_dir=fixture.group_path,
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        group_path=fixture.group_path,
+    )
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    with exclusive_lock(held_lock, wait=True):
+        worker = threading.Thread(target=execute_job, args=(fixture.job_path,))
+        worker.start()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if fixture.read().status == "waiting_for_memory":
+                break
+            time.sleep(0.02)
+        assert cancel_job(fixture.job_path).status == "cancelled"
+
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    record = read_job(fixture.job_path)
+    assert record.status == "cancelled"
+    assert record.started_at is None
+    assert called["run"] == 0
+
+
+def test_execute_job_failed_run_keeps_canonical_memory_and_retains_stage(tmp_path, monkeypatch):
+    fixture = MemoryJobFixture(tmp_path)
+    seen = {}
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            seen["memory_working_dir"] = request.memory_working_dir
+            assert request.memory_working_dir is not None
+            Path(request.memory_working_dir, "memory.md").write_text("new", encoding="utf-8")
+            return RunResult(1, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_dir=fixture.group_path,
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        group_path=fixture.group_path,
+    )
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    result = execute_job(fixture.job_path)
+
+    assert result.status == "failed"
+    assert fixture.store.read(fixture.resolved).files == {"memory.md": b"old"}
+    assert any(
+        JobArtifact(**artifact).name == "memory.diff"
+        for artifact in (result.memory_publication or {}).get("failed_artifacts", [])
+    )
+    assert seen["memory_working_dir"]
+
+
+def test_execute_job_releases_cache_pin_after_terminal_state(tmp_path, monkeypatch):
+    fixture = MemoryJobFixture(tmp_path)
+    artifact = fixture.spec.blueprint.to_artifact()
+    artifact.runtime_path.mkdir(parents=True, exist_ok=True)
+    (artifact.runtime_path / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
+    pin_artifact(fixture.spec.blueprint.cache_root, artifact.ref, fixture.spec.job_id)
+
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            workspace_dir=fixture.group_path,
+            integration=SimpleNamespace(run=lambda request: RunResult(0, "done", "", 0.1)),
+            timeout=30,
+            sandbox_root=None,
+            group_path=fixture.group_path,
+        ),
+    )
+
+    result = execute_job(fixture.job_path)
+
+    assert result.status == "complete"
+    assert active_pins(fixture.spec.blueprint.cache_root, artifact.ref) == ()
 
 
 def read_metadata(path: Path) -> dict:

@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from .execution import project_decision
+from agency.memory.recovery import recover_publications
 from .store import InvalidJobTransition, read_job, transition_job
 
 
@@ -59,7 +60,27 @@ def reconcile_jobs(groups: dict) -> ReconciliationResult:
         group_path = group.get("path")
         if not group_path:
             continue
-        for path in (Path(group_path) / "shared" / "jobs").glob("*.yaml"):
+        jobs_dir = Path(group_path) / "shared" / "jobs"
+        records: list[tuple[Path, object]] = []
+        memory_roots: set[Path] = set()
+        for path in jobs_dir.glob("*.yaml"):
+            try:
+                record = read_job(path)
+            except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
+                logger.warning("Ignoring malformed job record %s: %s", path, error)
+                continue
+            records.append((path, record))
+            memory_roots.add(Path(record.spec.memory.path).parent)
+        for root in sorted(memory_roots):
+            try:
+                recover_publications(root, jobs_dir)
+            except Exception as error:
+                logger.warning(
+                    "Failed to recover memory publications for %s: %s",
+                    group_path,
+                    error,
+                )
+        for path, _ in records:
             try:
                 record = read_job(path)
             except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
@@ -75,7 +96,7 @@ def reconcile_jobs(groups: dict) -> ReconciliationResult:
                         error,
                     )
                 continue
-            if record.status != "running":
+            if record.status not in {"running", "waiting_for_memory"}:
                 continue
             if worker_alive(record.worker_pid) is not False:
                 left_running += 1
@@ -85,7 +106,7 @@ def reconcile_jobs(groups: dict) -> ReconciliationResult:
             try:
                 record = transition_job(
                     path,
-                    "running",
+                    record.status,
                     "failed",
                     completed_at=datetime.now(timezone.utc).isoformat(),
                     execution_summary=summary,

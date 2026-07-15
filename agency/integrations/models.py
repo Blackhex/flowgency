@@ -40,3 +40,4 @@ class IntegrationRunRequest:
     skill: str | None
     skill_arguments: tuple[str, ...] = ()
     enforce_validation: bool = True
+    memory_working_dir: Path | None = None
