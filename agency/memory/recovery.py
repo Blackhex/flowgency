@@ -67,12 +67,13 @@ def recover_publications(store_root: Path, job_store: Path) -> RecoveryResult:
         except Exception:
             _quarantine_journal(store_root, journal_path)
             raise
+        phase = str(payload.get("phase") or "")
         current_revision = memory_content_revision(
             _read_canonical_files(
                 _canonical_directory(prepared.stage.resolved)
             )
         )
-        if current_revision == prepared.new_revision:
+        if phase == "published" and current_revision == prepared.new_revision:
             receipt = MemoryPublicationReceipt(
                 selector=prepared.selector,
                 memory_hash=prepared.memory_hash,

@@ -4,6 +4,7 @@ import time
 from types import SimpleNamespace
 
 import os
+import subprocess
 
 import yaml
 
@@ -118,6 +119,25 @@ def memory_bound_job(tmp_path: Path):
     path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
     write_job(path, JobRecord.from_spec(spec))
     return path, spec
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _init_repo(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test")
+    (root / "tracked.txt").write_text("line1\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "initial")
 
 
 class MemoryJobFixture:
@@ -291,6 +311,93 @@ def test_execute_job_releases_cache_pin_after_terminal_state(tmp_path, monkeypat
     result = execute_job(fixture.job_path)
 
     assert result.status == "complete"
+    assert active_pins(fixture.spec.blueprint.cache_root, artifact.ref) == ()
+
+
+def test_execute_job_persists_execution_evidence_when_publication_failure_pre_fails_job(
+    tmp_path,
+    monkeypatch,
+):
+    _init_repo(tmp_path / "group")
+    fixture = MemoryJobFixture(tmp_path)
+    artifact = fixture.spec.blueprint.to_artifact()
+    artifact.runtime_path.mkdir(parents=True, exist_ok=True)
+    (artifact.runtime_path / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
+    pin_artifact(
+        fixture.spec.blueprint.cache_root,
+        artifact.ref,
+        fixture.spec.job_id,
+    )
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            Path(request.memory_working_dir, "memory.md").write_text(
+                "new",
+                encoding="utf-8",
+            )
+            return RunResult(
+                0,
+                "done",
+                "warn",
+                1.5,
+                [FileChange("a.py", "modified", 2, 1)],
+            )
+
+    context = SimpleNamespace(
+        workspace_dir=fixture.group_path,
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        group_path=fixture.group_path,
+    )
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: context,
+    )
+
+    from agency.memory.publication import MemoryPublicationError
+
+    def fail_after_task9_terminalization(prepared, **kwargs):
+        from agency.jobs.store import transition_job
+
+        transition_job(
+            fixture.job_path,
+            "running",
+            "failed",
+            completed_at="2026-07-15T12:00:00+00:00",
+            execution_summary="Memory publication failed: simulated",
+        )
+        raise MemoryPublicationError("simulated")
+
+    monkeypatch.setattr(
+        "agency.jobs.execution.apply_publication",
+        fail_after_task9_terminalization,
+    )
+
+    result = execute_job(fixture.job_path)
+
+    assert result.status == "failed"
+    assert result.stdout_path is not None
+    assert Path(result.stdout_path).read_text(encoding="utf-8") == "done"
+    assert result.stderr_path is not None
+    assert Path(result.stderr_path).read_text(encoding="utf-8") == "warn"
+    assert result.exit_code == 0
+    assert result.duration_seconds == 1.5
+    assert result.changed_files == [
+        {
+            "path": "a.py",
+            "status": "modified",
+            "lines_added": 2,
+            "lines_removed": 1,
+        }
+    ]
+    assert result.base_sha is not None
+    assert result.completed_at == "2026-07-15T12:00:00+00:00"
+    assert result.memory_publication is not None
+    assert result.memory_publication.get("failed_artifacts")
     assert active_pins(fixture.spec.blueprint.cache_root, artifact.ref) == ()
 
 

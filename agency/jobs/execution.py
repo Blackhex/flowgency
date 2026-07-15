@@ -172,6 +172,53 @@ def _terminalize_failure(
     )
 
 
+def _merge_failed_terminal_metadata(
+    job_path: Path,
+    *,
+    summary: str | None,
+    started_at: str | None,
+    stdout_path: str | None = None,
+    stderr_path: str | None = None,
+    exit_code: int | None = None,
+    duration_seconds: float | None = None,
+    changed_files: list[dict[str, object]] | None = None,
+    base_sha: str | None = None,
+    memory_publication: dict[str, object] | None = None,
+) -> JobRecord:
+    current = read_job(job_path)
+    if current.status != "failed":
+        return current
+
+    merged_memory_publication = dict(current.memory_publication or {})
+    if memory_publication:
+        merged_memory_publication.update(memory_publication)
+
+    merged_changed_files = (
+        current.changed_files
+        if current.changed_files
+        else (changed_files or [])
+    )
+
+    updated = replace(
+        current,
+        started_at=current.started_at or started_at,
+        stdout_path=current.stdout_path or stdout_path,
+        stderr_path=current.stderr_path or stderr_path,
+        exit_code=current.exit_code if current.exit_code is not None else exit_code,
+        duration_seconds=(
+            current.duration_seconds
+            if current.duration_seconds is not None
+            else duration_seconds
+        ),
+        changed_files=merged_changed_files,
+        execution_summary=current.execution_summary or summary,
+        base_sha=current.base_sha or base_sha,
+        memory_publication=(merged_memory_publication or None),
+    )
+    write_job(job_path, updated)
+    return updated
+
+
 def _fallback_runtime_policy(context, timeout: int) -> EffectiveRuntimePolicy:
     sandbox = getattr(context, "sandbox_root", None)
     if sandbox and getattr(sandbox, "roots", ()):
@@ -446,14 +493,27 @@ def execute_job(job_path: Path) -> JobRecord:
                     except MemoryPublicationError as error:
                         current = read_job(job_path)
                         artifacts = _retained_failed_artifacts(job_path)
+                        if not artifacts:
+                            artifacts = _failed_memory_artifacts(
+                                job_path,
+                                stage.directory,
+                                canonical_files,
+                            )
                         if current.status == "failed":
-                            final = replace(
-                                current,
+                            final = _merge_failed_terminal_metadata(
+                                job_path,
+                                summary=f"Memory publication failed: {error}",
+                                started_at=started.isoformat(),
+                                stdout_path=str(stdout_path.resolve()),
+                                stderr_path=persisted_stderr_path,
+                                exit_code=result.exit_code,
+                                duration_seconds=result.duration_seconds,
+                                changed_files=changes,
+                                base_sha=base_sha,
                                 memory_publication={
                                     "failed_artifacts": artifacts,
                                 },
                             )
-                            write_job(job_path, final)
                         else:
                             final = _terminalize_failure(
                                 job_path,

@@ -8,12 +8,21 @@ from pathlib import Path
 
 import yaml
 
+from agency.blueprints.cache import release_pin
 from .execution import project_decision
 from agency.memory.recovery import recover_publications
 from .store import InvalidJobTransition, read_job, transition_job
 
 
 logger = logging.getLogger(__name__)
+
+
+def _release_job_pin(record) -> None:
+    release_pin(
+        record.spec.blueprint.cache_root,
+        record.spec.blueprint.cache_ref,
+        record.spec.job_id,
+    )
 
 
 @dataclass(frozen=True)
@@ -88,6 +97,10 @@ def reconcile_jobs(groups: dict) -> ReconciliationResult:
                 continue
             if record.status in {"complete", "failed"}:
                 try:
+                    _release_job_pin(record)
+                except Exception:
+                    pass
+                try:
                     project_decision(record)
                 except Exception as error:
                     logger.warning(
@@ -114,6 +127,10 @@ def reconcile_jobs(groups: dict) -> ReconciliationResult:
             except InvalidJobTransition:
                 continue
             failed += 1
+            try:
+                _release_job_pin(record)
+            except Exception:
+                pass
             try:
                 project_decision(record)
             except Exception as error:

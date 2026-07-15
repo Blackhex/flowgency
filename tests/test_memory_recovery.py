@@ -218,3 +218,55 @@ def test_recovery_is_idempotent_for_valid_old_and_new_journals(
     assert first.recovered == 1
     assert second.recovered == 0
     assert read_job(recovery_fixture.job_path).status == "complete"
+
+
+def test_recovery_does_not_complete_prepared_journal_with_matching_new_revision(
+    recovery_fixture,
+):
+    recovery_fixture.crash_at("prepared")
+    new_files = {
+        item.name: item.read_bytes()
+        for item in recovery_fixture.stage.directory.iterdir()
+        if item.is_file()
+    }
+    recovery_fixture.store.try_save(
+        recovery_fixture.resolved,
+        recovery_fixture.store.read(recovery_fixture.resolved).revision,
+        new_files,
+    )
+
+    result = recover_publications(
+        recovery_fixture.store_root,
+        recovery_fixture.job_store,
+    )
+
+    assert result.recovered == 0
+    assert read_job(recovery_fixture.job_path).status == "running"
+
+
+def test_recovery_does_not_complete_backed_up_journal_with_matching_new_revision(
+    recovery_fixture,
+):
+    recovery_fixture.crash_at("backed_up")
+
+    result = recover_publications(
+        recovery_fixture.store_root,
+        recovery_fixture.job_store,
+    )
+
+    assert result.recovered == 1
+    assert read_job(recovery_fixture.job_path).status == "failed"
+
+
+def test_recovery_completes_published_journal_with_matching_new_revision(
+    recovery_fixture,
+):
+    recovery_fixture.crash_at("published")
+
+    result = recover_publications(
+        recovery_fixture.store_root,
+        recovery_fixture.job_store,
+    )
+
+    assert result.recovered == 1
+    assert read_job(recovery_fixture.job_path).status == "complete"

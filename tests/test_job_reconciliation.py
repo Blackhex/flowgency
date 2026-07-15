@@ -3,6 +3,7 @@ from pathlib import Path
 
 import yaml
 
+from agency.blueprints.cache import active_pins, pin_artifact
 from agency.jobs.models import JobRecord, JobSpec
 from agency.jobs.reconciliation import reconcile_jobs, worker_alive
 from agency.memory.recovery import recover_publications
@@ -55,6 +56,63 @@ def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
     assert record.completed_at is not None
     assert record.execution_summary == "Worker process (PID 999999) was not found."
     assert "execution_status: failed" in decision.read_text()
+
+
+def test_reconcile_releases_pin_for_dead_waiting_worker(tmp_path, monkeypatch):
+    group, _, path = running_decision_job(tmp_path)
+    record = read_job(path)
+    artifact = record.spec.blueprint.to_artifact()
+    artifact.runtime_path.mkdir(parents=True, exist_ok=True)
+    (artifact.runtime_path / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
+    pin_artifact(record.spec.blueprint.cache_root, artifact.ref, record.spec.job_id)
+    write_job(
+        path,
+        replace(record, status="waiting_for_memory", worker_pid=999999),
+    )
+
+    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+
+    result = reconcile_jobs({"test": {"path": str(group)}})
+
+    assert result.failed == 1
+    assert active_pins(record.spec.blueprint.cache_root, artifact.ref) == ()
+
+
+def test_reconcile_releases_pin_for_dead_running_worker_but_keeps_live_pin(
+    tmp_path,
+    monkeypatch,
+):
+    dead_group, _, dead_path = running_decision_job(tmp_path / "dead")
+    live_group, _, live_path = running_decision_job(tmp_path / "live", pid=123456)
+    dead_record = read_job(dead_path)
+    live_record = read_job(live_path)
+    dead_artifact = dead_record.spec.blueprint.to_artifact()
+    live_artifact = live_record.spec.blueprint.to_artifact()
+    dead_artifact.runtime_path.mkdir(parents=True, exist_ok=True)
+    live_artifact.runtime_path.mkdir(parents=True, exist_ok=True)
+    (dead_artifact.runtime_path / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
+    (live_artifact.runtime_path / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
+    pin_artifact(dead_record.spec.blueprint.cache_root, dead_artifact.ref, dead_record.spec.job_id)
+    pin_artifact(live_record.spec.blueprint.cache_root, live_artifact.ref, live_record.spec.job_id)
+
+    monkeypatch.setattr(
+        "agency.jobs.reconciliation.worker_alive",
+        lambda pid: False if pid == 999999 else True,
+    )
+
+    result = reconcile_jobs(
+        {
+            "dead": {"path": str(dead_group)},
+            "live": {"path": str(live_group)},
+        }
+    )
+
+    assert result.failed == 1
+    assert result.left_running == 1
+    assert active_pins(dead_record.spec.blueprint.cache_root, dead_artifact.ref) == ()
+    assert active_pins(live_record.spec.blueprint.cache_root, live_artifact.ref) == (
+        live_record.spec.job_id,
+    )
 
 
 def test_reconcile_projects_terminal_job_to_stale_decision(tmp_path):
