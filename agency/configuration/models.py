@@ -50,7 +50,7 @@ class MemorySelector(BaseModel):
 
 
 class GroupRuntimeSandbox(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
     mode: SandboxMode = "unrestricted"
     roots: tuple[Path, ...] = ()
 
@@ -551,6 +551,16 @@ def _validate_group_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     sandbox = runtime.get("sandbox") or {}
     if not _is_mapping(sandbox):
         return issues
+    if sandbox.get("additional_roots"):
+        issues.append(
+            _build_issue(
+                code="invalid-config",
+                scope=scope,
+                field=f"{scope}.runtime.sandbox.additional_roots",
+                message="Group runtime sandbox does not support additional_roots.",
+                hint="Remove runtime.sandbox.additional_roots and use runtime.sandbox.roots for group-owned sandbox roots.",
+            )
+        )
     if sandbox.get("mode") == "unrestricted" and sandbox.get("roots"):
         issues.append(
             _build_issue(

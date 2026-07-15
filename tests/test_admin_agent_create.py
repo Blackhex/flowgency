@@ -1,69 +1,97 @@
-import asyncio
+from copy import deepcopy
 
-import pytest
+import yaml
+from fastapi.testclient import TestClient
 
 import agency.app as app_mod
-from agency.integrations import detect_integration
+from agency.configuration import ConfigStore
 
 
-class FakeRequest:
-    def __init__(self, form):
-        self._form = form
+def _write_blueprint(root, key, title):
+    blueprint = root / key
+    skill = blueprint / ".agents" / "skills" / "daily-review"
+    skill.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
 
-    async def form(self):
-        return self._form
 
-
-def _run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
-
-
-@pytest.fixture
-def copilot_group(tmp_path, monkeypatch):
+def _seed_client(monkeypatch, tmp_path, canonical_raw_config):
+    raw = deepcopy(canonical_raw_config)
     config_path = tmp_path / "config.yaml"
-    agents_dir = tmp_path / "agents"
-    agents_dir.mkdir()
+    group_root = tmp_path / "agents"
+    library_root = tmp_path / "library"
+    cache_root = tmp_path / "cache"
+    memory_root = tmp_path / "memory"
+    group_root.mkdir()
+    _write_blueprint(library_root, "advisor", "Advisor")
+    raw["agency"]["agent_library"] = str(library_root)
+    raw["agency"]["compilation_cache"] = str(cache_root)
+    raw["agency"]["memory_store"] = str(memory_root)
+    raw["groups"] = {
+        "grp": {
+            "name": "Group",
+            "path": str(group_root),
+            "default_integration": "copilot",
+            "agents": [],
+            "workspaces": [],
+        }
+    }
+    raw["agency"]["default_group"] = "grp"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.save_config({
-        "agency": {"title": "Agency", "default_group": "grp"},
-        "groups": {
-            "grp": {
-                "name": "Group",
-                "path": str(agents_dir),
-                "default_integration": "copilot",
-                "agents": [],
-            }
-        },
-    })
     app_mod.reload_groups()
-    return agents_dir
+    return TestClient(app_mod.app), config_path, group_root
 
 
-def test_admin_create_prepares_copilot_agent_dir(copilot_group):
-    _run(app_mod.admin_agent_create(FakeRequest({"name": "reviewer"}), "grp"))
-
-    agent_dir = copilot_group / "reviewer"
-    assert (agent_dir / "AGENTS.md").is_file()
-    assert (agent_dir / ".copilot").is_dir()
-    assert detect_integration(agent_dir).name == "copilot"
+def _revision(config_path):
+    return ConfigStore(config_path).load().revision
 
 
-def test_admin_create_propagates_prepare_error_without_partial_files(
-    copilot_group, monkeypatch
-):
-    integration = app_mod.get_integration("copilot")
-    error = PermissionError("marker creation denied")
+def test_roster_create_adds_config_instance_without_scaffolding(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_client(monkeypatch, tmp_path, canonical_raw_config)
+    revision = _revision(config_path)
 
-    def fail_preparation(agent_dir):
-        raise error
+    response = client.post(
+        "/grp/agents/create",
+        data={
+            "revision": revision,
+            "name": "reviewer",
+            "blueprint": "advisor",
+            "integration": "copilot",
+            "display_name": "Reviewer",
+        },
+        follow_redirects=False,
+    )
 
-    monkeypatch.setattr(integration, "prepare_agent_dir", fail_preparation)
+    assert response.status_code == 303
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    created = saved["groups"]["grp"]["agents"][0]
+    assert created["name"] == "reviewer"
+    assert created["blueprint"] == "advisor"
+    assert created["integration"] == "copilot"
+    assert created["identity"]["display_name"] == "Reviewer"
+    assert not (group_root / "reviewer").exists()
 
-    with pytest.raises(PermissionError) as exc_info:
-        _run(app_mod.admin_agent_create(FakeRequest({"name": "reviewer"}), "grp"))
 
-    agent_dir = copilot_group / "reviewer"
-    assert exc_info.value is error
-    assert not (agent_dir / "AGENTS.md").exists()
-    assert not (agent_dir / ".agency-meta.yaml").exists()
-    assert not (agent_dir / "memory.md").exists()
+def test_roster_create_rejects_invalid_blueprint_without_partial_files(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_client(monkeypatch, tmp_path, canonical_raw_config)
+    revision = _revision(config_path)
+
+    response = client.post(
+        "/grp/agents/create",
+        data={
+            "revision": revision,
+            "name": "reviewer",
+            "blueprint": "missing-blueprint",
+            "integration": "copilot",
+            "display_name": "Reviewer",
+        },
+    )
+
+    assert response.status_code == 409
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["groups"]["grp"]["agents"] == []
+    assert not (group_root / "reviewer").exists()

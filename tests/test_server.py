@@ -237,35 +237,77 @@ def test_setup_post_invalid_and_empty_agent_paths_render_errors(tmp_path, monkey
     client = TestClient(app_mod.app)
 
     invalid_response = client.post("/setup", data={"path": str(tmp_path / "missing")})
-    empty_dir = tmp_path / "empty-agents"
-    empty_dir.mkdir()
-    empty_response = client.post("/setup", data={"path": str(empty_dir)})
+    empty_response = client.post(
+        "/setup",
+        data={
+            "group_key": "newsletter",
+            "group_name": "Newsletter",
+            "path": str(tmp_path / "workspace"),
+            "agent_library": str(tmp_path / "library"),
+            "compilation_cache": str(tmp_path / "cache"),
+            "memory_store": str(tmp_path / "memory"),
+            "workspace_name": "Main Workspace",
+            "workspace_type": "tmux",
+            "workspace_config": "not-json",
+        },
+    )
 
     assert invalid_response.status_code == 200
-    assert "doesn't exist or isn't a directory" in invalid_response.text
+    assert "All setup fields are required for strict canonical configuration." in invalid_response.text
     assert empty_response.status_code == 200
-    assert "No agents found at this path" in empty_response.text
+    assert "Workspace config must be a JSON object." in empty_response.text
 
 
 def test_setup_post_valid_path_creates_group_and_redirects(tmp_path, monkeypatch):
     config_path = _configure_existing_config(tmp_path, monkeypatch)
     monkeypatch.setattr(app_mod, "GROUPS", {})
-    agents_root = tmp_path / "newsletter-agents"
-    agent_dir = agents_root / "product"
-    agent_dir.mkdir(parents=True)
-    (agent_dir / "CLAUDE.md").write_text("# Product\n", encoding="utf-8")
+    group_path = tmp_path / "newsletter-agents"
     client = TestClient(app_mod.app)
 
-    response = client.post("/setup", data={"path": str(agents_root)}, follow_redirects=False)
+    response = client.post(
+        "/setup",
+        data={
+            "group_key": "newsletter",
+            "group_name": "Newsletter",
+            "path": str(group_path),
+            "agent_library": str(tmp_path / "library"),
+            "compilation_cache": str(tmp_path / "cache"),
+            "memory_store": str(tmp_path / "memory"),
+            "workspace_name": "Terminal Grid",
+            "workspace_type": "tmux",
+            "workspace_config": '{"script_path": "tmux-agents.sh"}',
+        },
+        follow_redirects=False,
+    )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/setup/complete/newsletter-agents"
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert config["agency"]["default_group"] == "newsletter-agents"
-    assert config["groups"]["newsletter-agents"] == {
-        "name": "Newsletter Agents",
-        "path": str(agents_root),
-        "agents": ["product"],
+    assert response.headers["location"] == "/newsletter/agents"
+    assert yaml.safe_load(config_path.read_text(encoding="utf-8")) == {
+        "schema_version": 2,
+        "agency": {
+            "title": "Agency",
+            "default_group": "newsletter",
+            "ai_backend": "claude-code",
+            "agent_library": str(tmp_path / "library"),
+            "compilation_cache": str(tmp_path / "cache"),
+            "memory_store": str(tmp_path / "memory"),
+        },
+        "memory": {"channels": {}},
+        "groups": {
+            "newsletter": {
+                "name": "Newsletter",
+                "path": str(group_path),
+                "default_integration": "claude-code",
+                "dispatch": {"enabled": False, "daily_limit": 20},
+                "workspaces": [
+                    {
+                        "name": "Terminal Grid",
+                        "type": "tmux",
+                        "config": {"script_path": "tmux-agents.sh"},
+                    }
+                ],
+                "agents": [],
+            }
+        },
     }
-    assert (agents_root / "shared" / "observations").is_dir()
-    assert (agents_root / "shared" / "prompts").is_dir()
+    assert not group_path.exists()

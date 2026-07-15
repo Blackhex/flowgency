@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ 'New Group' if mode == 'create' else 'Edit ' + org_name }} — {{ agency_title }}{% endblock %}
 {% block content %}
-<div class="max-w-3xl">
-
+<div class="max-w-4xl">
   <div class="mb-6">
     <a href="/admin/groups" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to Groups</a>
   </div>
@@ -17,11 +16,15 @@
   </div>
   {% endif %}
 
-  <!-- Group Settings -->
   <form method="post" action="{% if mode == 'create' %}/admin/orgs/create{% else %}/admin/orgs/{{ org_key }}/save{% endif %}"
-        class="bg-white rounded-xl border border-gray-200 p-6 space-y-5 mb-8">
+        class="bg-white rounded-xl border border-gray-200 p-6 space-y-6 mb-8">
+    {% if mode != 'create' %}
+    <input type="hidden" name="revision" value="{{ revision }}">
+    {% endif %}
 
-    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Group Settings</h2>
+    <div>
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Group Settings</h2>
+    </div>
 
     {% if mode == 'create' %}
     <div>
@@ -29,157 +32,109 @@
       <input type="text" name="key" id="key" value="{{ org_key }}" required
              placeholder="e.g. my-project, research-team"
              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-      <p class="mt-1 text-xs text-gray-400">URL-safe identifier. Lowercase, hyphens okay.</p>
     </div>
     {% endif %}
 
-    <div>
-      <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-      <input type="text" name="name" id="name" value="{{ org_name }}" required
-             placeholder="e.g. Newsletter Agents"
-             class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-    </div>
-
-    <div>
-      <label for="path" class="block text-sm font-medium text-gray-700 mb-1">Path</label>
-      <input type="text" name="path" id="path" value="{{ org_path }}" required
-             placeholder="/path/to/your/agents"
-             class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-      <p class="mt-1 text-xs text-gray-400">Filesystem path to the agents directory.</p>
-    </div>
-
-    <div>
-      <label for="sandbox_root" class="block text-sm font-medium text-gray-700 mb-1">Sandbox roots <span class="text-gray-400 font-normal">(optional)</span></label>
-      <textarea name="sandbox_root" id="sandbox_root" rows="3"
-                placeholder="/path/to/repository/root&#10;/another/allowed/root"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">{{ sandbox_root_text|default('') }}</textarea>
-      <p class="mt-1 text-xs text-gray-400">Directories the agent may read and write at runtime — one path per line. The first line is the working directory (relative writes land there). Leave empty to give agents full filesystem access. Does not affect the dashboard's file browsers.</p>
-      {% if sandbox_root_text and default_integration_supports_sandbox is defined and not default_integration_supports_sandbox %}
-      <p class="mt-1 text-xs text-amber-600">The selected default runtime does not support sandboxing — this setting will have no effect for it.</p>
-      {% endif %}
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-gray-700 mb-1">Allowed tools <span class="text-gray-400 font-normal">(optional)</span></label>
-      <div class="flex flex-wrap gap-x-4 gap-y-2">
-        {% for t in known_tools|default(['shell', 'write']) %}
-        <label class="inline-flex items-center gap-2 text-sm font-mono">
-          <input type="checkbox" name="allowed_tools" value="{{ t }}"
-                 {% if t in allowed_tools|default([]) %}checked{% endif %}
-                 class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-          {{ t }}
-        </label>
-        {% endfor %}
+    <div class="grid gap-4 md:grid-cols-2">
+      <div>
+        <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+        <input type="text" name="name" id="name" value="{{ org_name }}" required
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
       </div>
-      <p class="mt-1 text-xs text-gray-400">Tools the agent may use at runtime. Leave all unchecked to grant every tool. Read and search are always available.</p>
-    </div>
-
-    <!-- Hidden agents field — kept in sync by JS from the agent roster below -->
-    <input type="hidden" name="agents" id="agents-hidden" value="{{ org_agents }}">
-
-    <div>
-      <label class="block text-sm font-medium text-gray-700 mb-1">Workspaces</label>
-      <p class="text-xs text-gray-400 mb-3">Define how you interact with this agent group at runtime.</p>
-      <input type="hidden" name="workspaces_json" id="workspaces-hidden"
-             value="{{ org_workspaces_json|default('[]') }}">
-
-      <div id="workspaces-list" class="space-y-3 mb-3">
+      <div>
+        <label for="path" class="block text-sm font-medium text-gray-700 mb-1">Path</label>
+        <input type="text" name="path" id="path" value="{{ org_path }}" required
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
       </div>
-
-      <button type="button" onclick="addWorkspace()"
-              class="px-3 py-1 text-sm border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 text-gray-500">
-        + Add Workspace
-      </button>
     </div>
 
-    <script>
-    const WORKSPACE_TYPES = {{ workspace_types_json | safe }};
-
-    function addWorkspace(data) {
-      data = data || {name: '', type: 'tmux', config: {}};
-      const list = document.getElementById('workspaces-list');
-      const div = document.createElement('div');
-      div.className = 'bg-gray-50 rounded-lg border border-gray-200 p-3';
-
-      const typeOpts = WORKSPACE_TYPES.map(function(t) {
-        const selected = t.name === data.type ? ' selected' : '';
-        return '<option value="' + t.name + '"' + selected + '>' + t.display_name + '</option>';
-      }).join('');
-
-      const row = document.createElement('div');
-      row.className = 'flex gap-3 mb-2';
-
-      const nameInput = document.createElement('input');
-      nameInput.type = 'text';
-      nameInput.placeholder = 'Workspace name';
-      nameInput.value = data.name || '';
-      nameInput.setAttribute('onchange', 'syncWorkspaces()');
-      nameInput.setAttribute('data-field', 'name');
-      nameInput.className = 'flex-1 px-2 py-1 text-sm border border-gray-300 rounded';
-
-      const typeSelect = document.createElement('select');
-      typeSelect.setAttribute('onchange', 'syncWorkspaces()');
-      typeSelect.setAttribute('data-field', 'type');
-      typeSelect.className = 'px-2 py-1 text-sm border border-gray-300 rounded';
-      WORKSPACE_TYPES.forEach(function(t) {
-        const opt = document.createElement('option');
-        opt.value = t.name;
-        opt.textContent = t.display_name;
-        if (t.name === data.type) opt.selected = true;
-        typeSelect.appendChild(opt);
-      });
-
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'px-2 py-1 text-sm text-red-600 hover:bg-red-50 rounded';
-      removeBtn.textContent = '\u00d7';
-      removeBtn.onclick = function() { div.remove(); syncWorkspaces(); };
-
-      row.appendChild(nameInput);
-      row.appendChild(typeSelect);
-      row.appendChild(removeBtn);
-
-      const textarea = document.createElement('textarea');
-      textarea.placeholder = 'Config (JSON)';
-      textarea.rows = 2;
-      textarea.setAttribute('onchange', 'syncWorkspaces()');
-      textarea.setAttribute('data-field', 'config');
-      textarea.className = 'w-full px-2 py-1 text-xs font-mono border border-gray-300 rounded';
-      textarea.textContent = JSON.stringify(data.config || {}, null, 2);
-
-      div.appendChild(row);
-      div.appendChild(textarea);
-      list.appendChild(div);
-    }
-
-    function syncWorkspaces() {
-      const list = document.getElementById('workspaces-list');
-      const workspaces = [];
-      for (const div of list.children) {
-        const name = div.querySelector('[data-field="name"]').value;
-        const type = div.querySelector('[data-field="type"]').value;
-        let config = {};
-        try { config = JSON.parse(div.querySelector('[data-field="config"]').value); } catch(e) {}
-        workspaces.push({name: name, type: type, config: config});
-      }
-      document.getElementById('workspaces-hidden').value = JSON.stringify(workspaces);
-    }
-
-    try {
-      var initial = JSON.parse(document.getElementById('workspaces-hidden').value || '[]');
-      initial.forEach(function(ws) { addWorkspace(ws); });
-    } catch(e) {}
-    </script>
-
-    {% if all_integrations %}
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">Default Integration</label>
       <select name="default_integration" class="w-full max-w-sm px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-        {% for key, name in all_integrations.items() %}
-        <option value="{{ key }}" {% if key == default_integration %}selected{% endif %}>{{ name }}</option>
+        {% for key in ['claude-code', 'copilot', 'codex', 'gemini', 'aider', 'goose', 'script', 'sdk'] %}
+        <option value="{{ key }}" {% if key == default_integration %}selected{% endif %}>{{ key }}</option>
         {% endfor %}
       </select>
-      <p class="mt-1 text-xs text-gray-400">Default LLM tool for agents in this group.</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Workspaces</label>
+      <input type="hidden" name="workspaces_json" id="workspaces-hidden" value="{{ org_workspaces_json|default('[]') }}">
+      <div class="text-xs text-gray-400">Existing workspace payload is preserved unless you replace it externally.</div>
+    </div>
+
+    {% if mode != 'create' %}
+    <div class="rounded-xl border border-gray-200 bg-gray-50 p-5 space-y-4">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Runtime defaults</h2>
+        <p class="mt-1 text-sm text-gray-500">These defaults apply to new agent instances in this group.</p>
+      </div>
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="runtime_timeout" class="block text-sm font-medium text-gray-700 mb-1">Timeout (seconds)</label>
+          <input type="number" name="runtime_timeout" id="runtime_timeout" value="{{ runtime_timeout }}"
+                 min="60" step="60"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+        </div>
+        <div>
+          <label for="sandbox_mode" class="block text-sm font-medium text-gray-700 mb-1">Sandbox Mode</label>
+          <select name="sandbox_mode" id="sandbox_mode"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+            <option value="unrestricted" {% if sandbox_mode == 'unrestricted' %}selected{% endif %}>unrestricted</option>
+            <option value="restricted" {% if sandbox_mode == 'restricted' %}selected{% endif %}>restricted</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label for="sandbox_roots" class="block text-sm font-medium text-gray-700 mb-1">Sandbox Roots</label>
+        <textarea name="sandbox_roots" id="sandbox_roots" rows="3"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">{{ sandbox_roots }}</textarea>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label for="tool_mode" class="block text-sm font-medium text-gray-700 mb-1">Tool Mode</label>
+          <select name="tool_mode" id="tool_mode"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+            <option value="all" {% if tool_mode == 'all' %}selected{% endif %}>all</option>
+            <option value="allowlist" {% if tool_mode == 'allowlist' %}selected{% endif %}>allowlist</option>
+            <option value="none" {% if tool_mode == 'none' %}selected{% endif %}>none</option>
+          </select>
+        </div>
+        <div>
+          <label for="tool_names" class="block text-sm font-medium text-gray-700 mb-1">Allowlist Names</label>
+          <textarea name="tool_names" id="tool_names" rows="3"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">{{ tool_names }}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-gray-200 bg-gray-50 p-5 space-y-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Dispatch</h2>
+          <p class="mt-1 text-sm text-gray-500">This page owns only group dispatch enablement and daily limit.</p>
+        </div>
+        <a href="{{ manage_agents_href }}" class="px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Manage agents ({{ agent_count }})</a>
+      </div>
+      <div class="grid gap-4 md:grid-cols-2">
+        <label class="flex items-center gap-2 text-sm text-gray-700">
+          <input type="checkbox" name="dispatch_enabled" {% if dispatch_enabled %}checked{% endif %}
+                 class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+          Dispatch enabled
+        </label>
+        <div>
+          <label for="daily_limit" class="block text-sm font-medium text-gray-700 mb-1">Daily Limit</label>
+          <input type="number" name="daily_limit" id="daily_limit" value="{{ dispatch_daily_limit }}"
+                 min="1" max="100"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5 text-sm text-gray-600">
+      Agent roster management moved to the group roster page. Per-agent schedules, identity edits, and profile tabs are intentionally out of scope for this cutover.
     </div>
     {% endif %}
 
@@ -192,297 +147,5 @@
       </a>
     </div>
   </form>
-
-  {% if mode == 'edit' %}
-  <!-- Dispatch Schedule -->
-  <form method="post" action="/admin/orgs/{{ org_key }}/dispatch"
-        class="bg-white rounded-xl border border-gray-200 p-6 space-y-5 mb-8">
-
-    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Dispatch Schedule</h2>
-
-    {% if not dispatcher_active %}
-    <div class="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-      Enabled schedules will not run until the global dispatcher is active.
-    </div>
-    {% endif %}
-
-    <div class="flex flex-wrap items-center gap-6">
-      <label class="flex items-center gap-2 text-sm text-gray-700">
-        <input type="checkbox" name="enabled" {% if dispatch_enabled %}checked{% endif %}
-               class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-        Enabled
-      </label>
-
-      <div class="flex items-center gap-2">
-        <label for="dispatch-timeout" class="text-sm text-gray-700">Timeout (s)</label>
-        <input type="number" name="timeout" id="dispatch-timeout" value="{{ dispatch_timeout }}"
-               min="60" max="1800" step="60"
-               class="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-      </div>
-
-      <div class="flex items-center gap-2">
-        <label for="dispatch-daily-limit" class="text-sm text-gray-700">Daily limit</label>
-        <input type="number" name="daily_limit" id="dispatch-daily-limit" value="{{ dispatch_daily_limit }}"
-               min="1" max="100"
-               class="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-      </div>
-    </div>
-
-    <!-- Per-agent schedule rules -->
-    {% for agent in org_agents.split('\n') %}
-    {% if agent.strip() %}
-    {% set agent_name = agent.strip() %}
-    <div class="border border-gray-100 rounded-lg p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-semibold text-gray-800">{{ agent_name }}</h3>
-        <button type="button" onclick="addRule('{{ agent_name }}')"
-                class="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100 transition-colors">
-          + Add rule
-        </button>
-      </div>
-      <div id="rules-{{ agent_name }}" class="space-y-2">
-        {% for rule in dispatch_agents.get(agent_name, []) %}
-        <div class="grid grid-cols-2 sm:flex sm:items-center gap-2">
-          <select name="rule_type_{{ agent_name }}_{{ loop.index0 }}"
-                  class="w-full sm:w-auto px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-            <option value="at" {% if rule.get('at') %}selected{% endif %}>at</option>
-            <option value="every" {% if rule.get('every') %}selected{% endif %}>every</option>
-          </select>
-          <input type="text" name="rule_value_{{ agent_name }}_{{ loop.index0 }}"
-                 value="{{ rule.get('at', rule.get('every', '')) }}" placeholder="09:00 or 6h"
-                 class="w-full sm:w-32 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-          <select name="rule_prompt_{{ agent_name }}_{{ loop.index0 }}"
-                  class="col-span-2 sm:col-span-1 sm:flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-            <option value="">-- prompt --</option>
-            {% for p in available_prompts %}
-            <option value="{{ p }}" {% if p == rule.get('prompt') %}selected{% endif %}>{{ p }}</option>
-            {% endfor %}
-          </select>
-          <button type="button" onclick="this.parentElement.remove()"
-                  class="w-full sm:w-auto px-2 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100 transition-colors">
-            Remove
-          </button>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-    {% endfor %}
-
-    <div class="pt-2">
-      <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
-        Save Dispatch Config
-      </button>
-    </div>
-  </form>
-  {% endif %}
-
-  {% if mode == 'edit' %}
-  <!-- Agent Roster -->
-  <div class="mb-8">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-bold text-gray-900">Agent Roster</h2>
-      <div class="flex items-center gap-2">
-        <button type="button" onclick="autodetectAgents()"
-                class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-          Auto-detect
-        </button>
-        <button type="button" onclick="document.getElementById('add-agent-panel').classList.toggle('hidden')"
-                class="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">
-          + Add Agent
-        </button>
-      </div>
-    </div>
-
-    <!-- Add Agent Panel (hidden by default) -->
-    <div id="add-agent-panel" class="hidden mb-4">
-      <form method="post" action="/admin/orgs/{{ org_key }}/agents/create"
-            class="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-end gap-3">
-        <div class="flex-1">
-          <label for="new-agent-name" class="block text-sm font-medium text-indigo-800 mb-1">Agent Name</label>
-          <input type="text" name="name" id="new-agent-name" required
-                 placeholder="e.g. researcher, analyst"
-                 pattern="[a-z0-9\-]+"
-                 class="w-full px-3 py-2 border border-indigo-300 rounded-lg text-sm font-mono bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-          <p class="mt-1 text-xs text-indigo-400">Lowercase, hyphens okay. Creates directory + scaffold files.</p>
-        </div>
-        <button type="submit"
-                class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors shrink-0">
-          Create Agent
-        </button>
-        <button type="button" onclick="document.getElementById('add-agent-panel').classList.add('hidden')"
-                class="px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 shrink-0">
-          Cancel
-        </button>
-      </form>
-    </div>
-
-    {% if agent_infos %}
-    <div class="space-y-2">
-      {% for ai in agent_infos %}
-      <div class="bg-white rounded-xl border border-gray-200 px-5 py-3.5 flex items-center justify-between group hover:border-gray-300 transition-colors">
-        <div class="flex items-center gap-4 min-w-0">
-          <!-- Status dot -->
-          {% if ai.dir_exists and ai.has_definition %}
-          <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" title="Healthy — directory and definition present"></div>
-          {% elif ai.dir_exists %}
-          <div class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" title="Directory exists but no definition"></div>
-          {% else %}
-          <div class="w-2.5 h-2.5 rounded-full bg-red-400 shrink-0" title="Directory missing"></div>
-          {% endif %}
-
-          <!-- Agent name -->
-          <a href="/admin/orgs/{{ org_key }}/agents/{{ ai.name }}"
-             class="text-sm font-semibold text-gray-900 hover:text-indigo-600 transition-colors truncate">
-            {{ ai.name }}
-          </a>
-
-          <!-- File indicators -->
-          <div class="flex items-center gap-2 text-xs text-gray-400 shrink-0">
-            {% if ai.has_definition %}
-            <span class="inline-flex items-center gap-0.5 text-emerald-600" title="Definition present">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-              role
-            </span>
-            {% endif %}
-            {% if ai.has_memory %}
-            <span class="inline-flex items-center gap-0.5 text-blue-500" title="memory.md present">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
-              mem
-            </span>
-            {% endif %}
-            {% if ai.has_mcp %}
-            <span class="inline-flex items-center gap-0.5 text-violet-500" title=".mcp.json present">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-              mcp
-            </span>
-            {% endif %}
-            {% if not ai.dir_exists %}
-            <span class="text-red-500 font-medium">no directory</span>
-            {% endif %}
-          </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-3">
-          <a href="/admin/orgs/{{ org_key }}/agents/{{ ai.name }}"
-             class="px-2.5 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors">
-            Manage
-          </a>
-          <form method="post" action="/admin/orgs/{{ org_key }}/agents/{{ ai.name }}/delete" class="inline"
-                onsubmit="return confirm('Remove agent \'{{ ai.name }}\' from this group?')">
-            <input type="hidden" name="delete_files" value="">
-            <button type="submit"
-                    class="px-2.5 py-1 text-xs font-medium text-red-600 bg-red-50 rounded-md hover:bg-red-100 transition-colors">
-              Remove
-            </button>
-          </form>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-
-    <p class="mt-3 text-xs text-gray-400">{{ agent_infos|length }} agent{{ 's' if agent_infos|length != 1 else '' }} in group. Hover a row for actions.</p>
-
-    {% else %}
-    <div class="bg-white rounded-xl border border-gray-200 border-dashed p-8 text-center">
-      <p class="text-sm text-gray-500 mb-3">No agents in this group yet.</p>
-      <button type="button" onclick="document.getElementById('add-agent-panel').classList.remove('hidden')"
-              class="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
-        Add Your First Agent
-      </button>
-      <div class="mt-4 pt-4 border-t border-gray-100">
-        <p class="text-xs text-gray-400">
-          Or use the <code class="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">/agency-setup</code> Claude Code skill
-          to auto-generate a full agent team with roles, dispatch prompts, and workspaces.
-          <a href="https://github.com/your-repo/agency#add-on-agency-setup-skill" class="text-indigo-500 hover:text-indigo-700">Learn more</a>
-        </p>
-      </div>
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-
 </div>
-
-{% if mode == 'edit' %}
-<script>
-function autodetectAgents() {
-  const form = document.createElement('form');
-  form.method = 'POST';
-  form.action = '/admin/orgs/{{ org_key }}/autodetect';
-  document.body.appendChild(form);
-  form.submit();
-}
-
-var availablePrompts = {{ available_prompts | tojson }};
-var ruleCounters = {};
-
-// Initialize counters from existing rules
-document.querySelectorAll('[id^="rules-"]').forEach(function(container) {
-  var agent = container.id.replace('rules-', '');
-  ruleCounters[agent] = container.children.length;
-});
-
-function addRule(agent) {
-  if (!(agent in ruleCounters)) {
-    ruleCounters[agent] = 0;
-  }
-  var idx = ruleCounters[agent];
-  ruleCounters[agent]++;
-
-  var container = document.getElementById('rules-' + agent);
-  if (!container) return;
-
-  var row = document.createElement('div');
-  row.className = 'grid grid-cols-2 sm:flex sm:items-center gap-2';
-
-  var typeSelect = document.createElement('select');
-  typeSelect.name = 'rule_type_' + agent + '_' + idx;
-  typeSelect.className = 'w-full sm:w-auto px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
-  var optAt = document.createElement('option');
-  optAt.value = 'at';
-  optAt.textContent = 'at';
-  var optEvery = document.createElement('option');
-  optEvery.value = 'every';
-  optEvery.textContent = 'every';
-  typeSelect.appendChild(optAt);
-  typeSelect.appendChild(optEvery);
-
-  var valueInput = document.createElement('input');
-  valueInput.type = 'text';
-  valueInput.name = 'rule_value_' + agent + '_' + idx;
-  valueInput.placeholder = '09:00 or 6h';
-  valueInput.className = 'w-full sm:w-32 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
-
-  var promptSelect = document.createElement('select');
-  promptSelect.name = 'rule_prompt_' + agent + '_' + idx;
-  promptSelect.className = 'col-span-2 sm:col-span-1 sm:flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
-  var defaultOpt = document.createElement('option');
-  defaultOpt.value = '';
-  defaultOpt.textContent = '-- prompt --';
-  promptSelect.appendChild(defaultOpt);
-  for (var i = 0; i < availablePrompts.length; i++) {
-    var opt = document.createElement('option');
-    opt.value = availablePrompts[i];
-    opt.textContent = availablePrompts[i];
-    promptSelect.appendChild(opt);
-  }
-
-  var removeBtn = document.createElement('button');
-  removeBtn.type = 'button';
-  removeBtn.className = 'w-full sm:w-auto px-2 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100 transition-colors';
-  removeBtn.textContent = 'Remove';
-  removeBtn.addEventListener('click', function() {
-    row.remove();
-  });
-
-  row.appendChild(typeSelect);
-  row.appendChild(valueInput);
-  row.appendChild(promptSelect);
-  row.appendChild(removeBtn);
-  container.appendChild(row);
-}
-</script>
-{% endif %}
 {% endblock %}

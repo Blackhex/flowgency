@@ -1,13 +1,14 @@
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 import pytest
+import yaml
 
 import agency.app as app_mod
 from agency.app import app, is_agent_running
+from agency.configuration import ConfigStore
 from agency.jobs import JobRequest
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import job_path, write_job
@@ -15,7 +16,9 @@ from agency.jobs.store import job_path, write_job
 
 def _setup_group(tmp_path: Path) -> Path:
     group_path = tmp_path / "grp"
-    (group_path / "product").mkdir(parents=True)
+    library_root = tmp_path / "agent-library"
+    cache_root = tmp_path / "compiled-agents"
+    memory_root = tmp_path / "memory"
     prompts = group_path / "shared" / "prompts"
     prompts.mkdir(parents=True)
     (prompts / "routine.md").write_text("# Routine\n")
@@ -23,6 +26,13 @@ def _setup_group(tmp_path: Path) -> Path:
     (prompts / "other-routine.md").write_text("# Other routine\n")
     (prompts / "_observation-system-steps.md").write_text("# System\n")
     (group_path / "shared" / "logs").mkdir(parents=True)
+    skill = library_root / "builder-blueprint" / ".agents" / "skills" / "daily-review"
+    skill.mkdir(parents=True, exist_ok=True)
+    (library_root / "builder-blueprint" / "AGENTS.md").write_text("# Builder\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "schema_version: 2\n"
@@ -30,9 +40,9 @@ def _setup_group(tmp_path: Path) -> Path:
         "  title: Agency\n"
         "  default_group: test\n"
         "  ai_backend: claude-code\n"
-        "  agent_library: agent-library\n"
-        "  compilation_cache: compiled-agents\n"
-        "  memory_store: memory\n"
+        f"  agent_library: {library_root.as_posix()}\n"
+        f"  compilation_cache: {cache_root.as_posix()}\n"
+        f"  memory_store: {memory_root.as_posix()}\n"
         "groups:\n"
         "  test:\n"
         "    name: Test\n"
@@ -59,58 +69,28 @@ def _setup_group(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     app_mod.CONFIG_PATH = config_path
-    app_mod.CONFIG = {"groups": {"test": {"name": "Test", "path": str(group_path)}}}
-    app_mod.GROUPS = {
-        "test": {
-            "key": "test",
-            "name": "Test",
-            "path": group_path,
-            "shared": group_path / "shared",
-            "agents": ["product"],
-            "agents_full": [{
-                "name": "product",
-                "integration": "script",
-                "blueprint": "builder-blueprint",
-                "routines": [
-                    {"id": "daily-review", "skill": "daily-review", "arguments": ["--mode=review", "literal value"], "schedule": {"every": "6h"}, "memory": {"scope": "routine"}},
-                    {"id": "product-routine", "skill": "product-routine", "schedule": {"every": "6h"}},
-                ],
-            }],
-            "_agents_normalized": [{
-                "name": "product",
-                "integration": "script",
-                "blueprint": "builder-blueprint",
-                "routines": [
-                    {"id": "daily-review", "skill": "daily-review", "arguments": ["--mode=review", "literal value"], "schedule": {"every": "6h"}, "memory": {"scope": "routine"}},
-                    {"id": "product-routine", "skill": "product-routine", "schedule": {"every": "6h"}},
-                ],
-            }],
-            "dispatch": {"timeout": 1800},
-        }
-    }
+    app_mod.reload_groups()
     return group_path
 
 
 def _configure_schedule(routine_id: str) -> None:
-    app_mod.GROUPS["test"]["dispatch"] = {
-        "enabled": True,
-        "timeout": 1800,
-        "routines": {
-            "product": [{"id": routine_id, "every": "6h"}],
-        },
-    }
-
-
-def _write_stdout(group_path: Path) -> Path:
-    day = group_path / "shared" / "logs" / "2026-07-11"
-    day.mkdir()
-    stdout_path = day / "product-manual_prompt-job-1.out"
-    stdout_path.write_text("")
-    return stdout_path
+    config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
+    for agent in config["groups"]["test"]["agents"]:
+        if agent["name"] != "product":
+            continue
+        for routine in agent.get("routines", []):
+            if routine["id"] == routine_id:
+                routine["schedule"] = {"every": "6h"}
+        break
+    app_mod.CONFIG_PATH.write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
+    app_mod.reload_groups()
 
 
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    group_path = _setup_group(tmp_path)
     calls = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
@@ -128,6 +108,7 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     assert request.routine_id == "daily-review"
     assert request.task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
     assert request.timeout_override is None
+    assert not (group_path / "product").exists()
 
 
 def test_run_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
@@ -253,8 +234,10 @@ def test_agents_page_lists_prompts_with_run(tmp_path):
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    assert 'data-routine="product-routine"' in resp.text
-    assert "/test/prompts/" in resp.text
+    assert "Instances assigned to Test" in resp.text
+    assert "Blueprint: builder-blueprint" in resp.text
+    assert "product-routine" not in resp.text
+    assert "/test/prompts/" not in resp.text
 
 
 def test_agents_page_excludes_unrelated_and_system_prompts(tmp_path):
@@ -264,26 +247,23 @@ def test_agents_page_excludes_unrelated_and_system_prompts(tmp_path):
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    # System prompts and prompts belonging to other agents are not listed.
     assert 'data-prompt="_observation-system-steps.md"' not in resp.text
     assert 'data-prompt="other-routine.md"' not in resp.text
     assert 'data-prompt="routine.md"' not in resp.text
+    assert "Move" in resp.text
+    assert "Remove" in resp.text
 
 
-def test_agents_page_links_last_stdout_and_next_schedule(tmp_path):
-    group_path = _setup_group(tmp_path)
-    stdout_path = _write_stdout(group_path)
-    _configure_schedule("product-routine")
+def test_agents_page_shows_config_only_roster_without_activity_links(tmp_path):
+    _setup_group(tmp_path)
     client = TestClient(app)
 
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    encoded_path = quote(str(stdout_path.resolve()), safe="/")
-    assert f'href="/test/logs/view?path={encoded_path}"' in resp.text
-    assert 'href="/test/prompts#schedule-product-0"' in resp.text
-    assert "last run stdout log" in resp.text
-    assert 'aria-label="Edit schedule for product-routine"' in resp.text
+    assert "/test/logs/view?path=" not in resp.text
+    assert "/test/prompts#schedule-" not in resp.text
+    assert "last run stdout log" not in resp.text
 
 
 def test_prompts_page_marks_exact_schedule_target(tmp_path):
@@ -359,22 +339,21 @@ def test_exact_dispatch_slug_does_not_resolve_to_generic_prompt_routes(tmp_path)
     "prompt",
     ["missing", "_observation-system-steps"],
 )
-def test_agents_page_uses_group_settings_for_uneditable_schedule(
+def test_agents_page_does_not_render_superseded_schedule_links(
     tmp_path,
     prompt,
 ):
     _setup_group(tmp_path)
-    _configure_schedule(prompt)
     client = TestClient(app)
 
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    assert 'href="/admin/orgs/test/edit#rules-product"' in resp.text
+    assert 'href="/admin/orgs/test/edit#rules-product"' not in resp.text
     assert 'href="/test/prompts#schedule-product-0"' not in resp.text
 
 
-def test_agents_page_keeps_superseded_activity_unlinked(tmp_path):
+def test_agents_page_keeps_roster_layout_when_logs_exist(tmp_path):
     group_path = _setup_group(tmp_path)
     day = group_path / "shared" / "logs" / "2026-07-11"
     day.mkdir()
@@ -384,23 +363,62 @@ def test_agents_page_keeps_superseded_activity_unlinked(tmp_path):
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    assert "Just now" in resp.text
+    assert "product" in resp.text
     assert "/test/logs/view?path=" not in resp.text
     assert "/test/prompts#schedule-" not in resp.text
     assert "last run stdout log" not in resp.text
 
 
 def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
-    group_path = _setup_group(tmp_path)
-    stdout_path = _write_stdout(group_path)
-    _configure_schedule("product-routine")
+    _setup_group(tmp_path)
     monkeypatch.setattr(app_mod, "is_agent_running", lambda *args, **kwargs: True)
+    spec = JobSpec(
+        schema_version=2,
+        job_id="job-running",
+        config_path=str((tmp_path / "config.yaml").resolve()),
+        config_revision=ConfigStore(tmp_path / "config.yaml").load().revision,
+        group_key="test",
+        group_path=str((tmp_path / "grp").resolve()),
+        agent_name="product",
+        workspace_dir=str((tmp_path / "grp").resolve()),
+        trigger="manual_prompt",
+        integration_name="script",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="builder-blueprint",
+            source_digest="digest-1",
+            integration="script",
+            projector_version="v1",
+            cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
+        ),
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=(),
+        task_input="# Routine\n",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "agent", "version": 1, "group": "test", "agent": "product"},
+            canonical_json='{"agent":"product","group":"test","scope":"agent","version":1}',
+            memory_hash="memory-hash-1",
+            path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
+        ),
+        trigger_context=None,
+        prompt_source={"type": "prompt", "path": "routine.md"},
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
+    )
+    write_job(job_path(tmp_path / "grp", spec.job_id), JobRecord.from_spec(spec))
     client = TestClient(app)
 
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
     assert "Running" in resp.text
-    encoded_path = quote(str(stdout_path.resolve()), safe="/")
-    assert f"/test/logs/view?path={encoded_path}" not in resp.text
+    assert "/test/logs/view?path=" not in resp.text
     assert "/test/prompts#schedule-product-0" not in resp.text

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import markdown
 import yaml
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -43,6 +43,8 @@ from agency.proposals import validate_proposal_schema, validate_answers, should_
 import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
 from starlette.convertors import Convertor, register_url_convertor
+from agency.web import AgencyServices, build_services, get_services
+from agency.web.routes import admin_groups_router, agents_router
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -343,6 +345,7 @@ def install_dispatch(interval: int | None = None, replace: bool = False) -> str 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.services = build_services(CONFIG_PATH)
     reconcile_jobs(GROUPS)
     yield
 
@@ -350,6 +353,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agency Dashboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+app.state.templates = templates
+app.state.theme_css_getter = get_theme_css
+app.state.workspace_types_json_getter = _workspace_types_json
+app.state.reload_groups = reload_groups
+app.state.build_services = build_services
+app.state.get_config_path = lambda: CONFIG_PATH
 
 md = markdown.Markdown(extensions=["tables", "fenced_code", "meta", "nl2br"])
 
@@ -1229,6 +1238,9 @@ def integration_badge_filter(name: str) -> Markup:
 
 templates.env.filters["integration_badge"] = integration_badge_filter
 
+app.include_router(admin_groups_router)
+app.include_router(agents_router)
+
 
 def agent_health_status(last_seen: datetime | None) -> str:
     """Return health status based on last seen time. green/amber/red."""
@@ -1407,112 +1419,6 @@ async def root(request: Request):
     if first:
         return RedirectResponse(f"/{first}/", status_code=303)
     return RedirectResponse("/setup", status_code=303)
-
-
-# ── Setup Routes ─────────────────────────────────────────────────────────────
-
-
-@app.get("/setup", response_class=HTMLResponse)
-async def setup_page(request: Request):
-    """First-run wizard page."""
-    if GROUPS:
-        return RedirectResponse("/", status_code=303)
-    suggestion = str(Path.home() / "agents")
-    return templates.TemplateResponse(request, "setup.html", {
-        "request": request,
-        "agency_title": get_agency_config().get("title", "Agency"),
-        "suggestion": suggestion,
-        "error": "",
-        "path_value": "",
-    })
-
-
-@app.post("/setup", response_class=HTMLResponse)
-async def setup_process(request: Request):
-    """Process first-run setup: scan path, create group, initialize, redirect."""
-    if GROUPS:
-        return RedirectResponse("/", status_code=303)
-
-    form = await request.form()
-    path_str = form.get("path", "").strip()
-    suggestion = str(Path.home() / "agents")
-    agency_title = get_agency_config().get("title", "Agency")
-
-    # Expand ~ and validate
-    path = Path(path_str).expanduser()
-    if not path.is_dir():
-        return templates.TemplateResponse(request, "setup.html", {
-            "request": request,
-            "agency_title": agency_title,
-            "suggestion": suggestion,
-            "error": "That path doesn't exist or isn't a directory. Check the path and try again.",
-            "path_value": path_str,
-        })
-
-    # Scan for agents
-    detected = []
-    for d in sorted(path.iterdir()):
-        if d.is_dir() and d.name not in ("shared", "_subagents") and not d.name.startswith("."):
-            if detect_integration(d):
-                detected.append(d.name)
-
-    if not detected:
-        return templates.TemplateResponse(request, "setup.html", {
-            "request": request,
-            "agency_title": agency_title,
-            "suggestion": suggestion,
-            "error": 'No agents found at this path. Agency looks for subdirectories containing an agent definition file (CLAUDE.md, AGENTS.md, GEMINI.md, etc.). <a href="/admin/" class="underline">Set up manually in Settings</a>.',
-            "path_value": path_str,
-        })
-
-    # Derive group key (deduplicate)
-    base_key = path.name.lower().replace(" ", "-")
-    key = base_key
-    config = load_config()
-    counter = 2
-    while key in config.get("groups", {}):
-        key = f"{base_key}-{counter}"
-        counter += 1
-
-    name = path.name.replace("-", " ").title()
-
-    if "groups" not in config:
-        config["groups"] = {}
-    config["groups"][key] = {
-        "name": name,
-        "path": str(path),
-        "agents": detected,
-    }
-    if "agency" not in config:
-        config["agency"] = {}
-    config["agency"]["default_group"] = key
-
-    save_config(config)
-    reload_groups()
-
-    # Initialize shared folder structure
-    shared = path / "shared"
-    for subdir in ["observations", "proposals", "decisions", "prompts", "logs"]:
-        (shared / subdir).mkdir(parents=True, exist_ok=True)
-    memory_path = shared / "memory.md"
-    if not memory_path.exists():
-        memory_path.write_text(f"# {name} — Shared Memory\n\nCollective knowledge and decisions.\n")
-
-    # Copy _observation-system-steps.md from an existing group if available
-    observation_steps_target = shared / "prompts" / "_observation-system-steps.md"
-    if not observation_steps_target.exists():
-        for other_key, other_g in config.get("groups", {}).items():
-            if other_key == key:
-                continue
-            source = Path(other_g["path"]) / "shared" / "prompts" / "_observation-system-steps.md"
-            if source.exists():
-                shutil.copy2(source, observation_steps_target)
-                break
-
-    for agent in detected:
-        (path / agent).mkdir(exist_ok=True)
-
-    return RedirectResponse(f"/setup/complete/{key}", status_code=303)
 
 
 @app.get("/setup/complete/{group}", response_class=HTMLResponse)
@@ -1814,285 +1720,6 @@ async def admin_org_new(request: Request):
     })
 
 
-@app.post("/admin/orgs/create", response_class=HTMLResponse)
-async def admin_org_create(request: Request):
-    """Create a new org."""
-    form = await request.form()
-    key = form.get("key", "").strip().lower().replace(" ", "-")
-    name = form.get("name", "").strip()
-    path = form.get("path", "").strip()
-    agents_raw = form.get("agents", "").strip()
-    agents = [a.strip() for a in agents_raw.splitlines() if a.strip()]
-    workspaces_json = form.get("workspaces_json", "[]")
-    try:
-        ws_list = json_module.loads(workspaces_json)
-    except (json_module.JSONDecodeError, TypeError):
-        ws_list = []
-
-    if not key or not name or not path:
-        agency = get_agency_config()
-        config = load_config()
-        return templates.TemplateResponse(request, "admin_org_edit.html", {
-            "request": request,
-            "agency_title": agency.get("title", "Agency"),
-            "admin_active": True,
-            "active": "admin",
-            "admin_page": "groups",
-            "theme_css": get_theme_css(),
-            "groups": {k: v["name"] for k, v in config.get("groups", {}).items()},
-            "mode": "create",
-            "org_key": key,
-            "org_name": name,
-            "org_path": path,
-            "org_agents": agents_raw,
-            "org_workspaces_json": json_module.dumps(ws_list),
-            "workspace_types_json": _workspace_types_json(),
-            "agent_infos": [],
-            "warning": "Key, name, and path are required.",
-        })
-
-    config = load_config()
-    if "groups" not in config:
-        config["groups"] = {}
-
-    warning = ""
-    if not Path(path).exists():
-        warning = f"Warning: Path {path} does not exist on disk. You can create it later via Initialize."
-
-    group_cfg = {
-        "name": name,
-        "path": path,
-        "agents": agents,
-    }
-    if ws_list:
-        group_cfg["workspaces"] = ws_list
-    
-    sandbox_root = _parse_sandbox_roots(form.get("sandbox_root", ""))
-    if sandbox_root:
-        group_cfg["sandbox_root"] = sandbox_root
-    allowed_tools = [t.strip() for t in form.getlist("allowed_tools") if t.strip()]
-    if allowed_tools:
-        group_cfg["allowed_tools"] = allowed_tools
-    
-    config["groups"][key] = group_cfg
-
-    save_config(config)
-    reload_groups()
-
-    if warning:
-        agency = get_agency_config()
-        return templates.TemplateResponse(request, "admin_org_edit.html", {
-            "request": request,
-            "agency_title": agency.get("title", "Agency"),
-            "admin_active": True,
-            "active": "admin",
-            "theme_css": get_theme_css(),
-            "groups": {k: v["name"] for k, v in config.get("groups", {}).items()},
-            "mode": "edit",
-            "org_key": key,
-            "org_name": name,
-            "org_path": path,
-            "org_agents": "\n".join(agents),
-            "org_workspaces_json": json_module.dumps(ws_list),
-            "workspace_types_json": _workspace_types_json(),
-            "agent_infos": [get_agent_info(Path(path), a) for a in agents] if Path(path).exists() else [],
-            "warning": warning + " Org saved successfully.",
-        })
-
-    return RedirectResponse("/admin/groups", status_code=303)
-
-
-@app.get("/admin/orgs/{org}/edit", response_class=HTMLResponse)
-async def admin_org_edit(request: Request, org: str):
-    """Edit org form."""
-    config = load_config()
-    groups = config.get("groups", {})
-    if org not in groups:
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    g = groups[org]
-    agency = get_agency_config()
-    base = Path(g["path"])
-
-    # Build rich agent info
-    grp_full = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
-    _agent_names = [a if isinstance(a, str) else a.get("name", "") for a in g.get("agents", []) if a]
-    agent_infos = [get_agent_info(base, a, agent_dir=get_agent_dir(grp_full, a)) for a in _agent_names]
-
-    # Dispatch config for this group
-    dispatch_cfg = g.get("dispatch", {})
-    prompts = []
-    prompts_dir = Path(g["path"]) / "shared" / "prompts"
-    if prompts_dir.exists():
-        prompts = sorted(f.name for f in prompts_dir.glob("*.md"))
-
-    return templates.TemplateResponse(request, "admin_org_edit.html", {
-        "request": request,
-        "agency_title": agency.get("title", "Agency"),
-        "admin_active": True,
-        "active": "admin",
-        "admin_page": "groups",
-        "theme_css": get_theme_css(),
-        "groups": {k: v["name"] for k, v in groups.items()},
-        "mode": "edit",
-        "org_key": org,
-        "org_name": g["name"],
-        "org_path": g["path"],
-        "org_agents": "\n".join(_agent_names),
-        "org_workspaces_json": json_module.dumps(g.get("workspaces", [])),
-        "workspace_types_json": _workspace_types_json(),
-        "agent_infos": agent_infos,
-        "dispatch_enabled": dispatch_cfg.get("enabled", False),
-        "dispatch_timeout": dispatch_cfg.get("timeout", 1800),
-        "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
-        "dispatch_agents": dispatch_cfg.get("agents", {}),
-        "dispatcher_active": get_dispatch_status()["state"] == "active",
-        "available_prompts": prompts,
-        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
-        "default_integration": g.get("default_integration", "claude-code"),
-        "sandbox_root_text": _sandbox_root_text(g.get("sandbox_root")),
-        "allowed_tools": g.get("allowed_tools", []),
-        "known_tools": ["shell", "write"],
-        "default_integration_supports_sandbox": (
-            REGISTRY.get(g.get("default_integration", "claude-code")).supports_sandbox
-            if REGISTRY.get(g.get("default_integration", "claude-code")) else False
-        ),
-        "warning": "",
-    })
-
-
-@app.post("/admin/orgs/{org}/save", response_class=HTMLResponse)
-async def admin_org_save(request: Request, org: str):
-    """Save org changes."""
-    form = await request.form()
-    name = form.get("name", "").strip()
-    path = form.get("path", "").strip()
-    agents_raw = form.get("agents", "").strip()
-    agents = [a.strip() for a in agents_raw.splitlines() if a.strip()]
-    workspaces_json = form.get("workspaces_json", "[]")
-    try:
-        ws_list = json_module.loads(workspaces_json)
-    except (json_module.JSONDecodeError, TypeError):
-        ws_list = []
-
-    config = load_config()
-    if org not in config.get("groups", {}):
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    warning = ""
-    if path and not Path(path).exists():
-        warning = f"Warning: Path {path} does not exist on disk."
-
-    config["groups"][org]["name"] = name or config["groups"][org]["name"]
-    if path:
-        config["groups"][org]["path"] = path
-    existing_agents = config["groups"][org].get("agents", [])
-    merged_agents = []
-    for agent_name in agents:
-        _, existing = find_agent_in_config(existing_agents, agent_name)
-        merged_agents.append(existing if isinstance(existing, dict) else agent_name)
-    config["groups"][org]["agents"] = merged_agents
-    if ws_list:
-        config["groups"][org]["workspaces"] = ws_list
-    elif "workspaces" in config["groups"].get(org, {}):
-        del config["groups"][org]["workspaces"]
-    config["groups"][org].pop("tmux_config", None)
-
-    default_integration = form.get("default_integration", "claude-code")
-    config["groups"][org]["default_integration"] = default_integration
-
-    sandbox_root = _parse_sandbox_roots(form.get("sandbox_root", ""))
-    if sandbox_root:
-        config["groups"][org]["sandbox_root"] = sandbox_root
-    else:
-        config["groups"][org].pop("sandbox_root", None)
-
-    allowed_tools = [t.strip() for t in form.getlist("allowed_tools") if t.strip()]
-    if allowed_tools:
-        config["groups"][org]["allowed_tools"] = allowed_tools
-    else:
-        config["groups"][org].pop("allowed_tools", None)
-
-    save_config(config)
-    reload_groups()
-
-    if warning:
-        agency = get_agency_config()
-        return templates.TemplateResponse(request, "admin_org_edit.html", {
-            "request": request,
-            "agency_title": agency.get("title", "Agency"),
-            "admin_active": True,
-            "active": "admin",
-            "theme_css": get_theme_css(),
-            "groups": {k: v["name"] for k, v in config.get("groups", {}).items()},
-            "mode": "edit",
-            "org_key": org,
-            "org_name": config["groups"][org]["name"],
-            "org_path": config["groups"][org]["path"],
-            "org_agents": "\n".join(agents),
-            "org_workspaces_json": json_module.dumps(ws_list),
-            "workspace_types_json": _workspace_types_json(),
-            "agent_infos": [get_agent_info(Path(config["groups"][org]["path"]), a) for a in agents],
-            "dispatch_enabled": config["groups"][org].get("dispatch", {}).get("enabled", False),
-            "dispatch_timeout": config["groups"][org].get("dispatch", {}).get("timeout", 1800),
-            "dispatch_daily_limit": config["groups"][org].get("dispatch", {}).get("daily_limit", 20),
-            "dispatch_agents": config["groups"][org].get("dispatch", {}).get("agents", {}),
-            "dispatcher_active": get_dispatch_status()["state"] == "active",
-            "available_prompts": sorted(f.name for f in (Path(path) / "shared" / "prompts").glob("*.md")) if (Path(path) / "shared" / "prompts").exists() else [],
-            "warning": warning + " Changes saved.",
-        })
-
-    return RedirectResponse("/admin/", status_code=303)
-
-
-@app.post("/admin/orgs/{org}/dispatch", response_class=HTMLResponse)
-async def admin_org_dispatch_save(request: Request, org: str):
-    """Save dispatch config for an org."""
-    config = load_config()
-    if org not in config.get("groups", {}):
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    form = await request.form()
-    enabled = form.get("enabled") == "on"
-    timeout = int(form.get("timeout", 1800))
-    daily_limit = int(form.get("daily_limit", 20))
-
-    g = config["groups"][org]
-    agents_list = g.get("agents", [])
-
-    agents_dispatch = {}
-    for agent in agents_list:
-        rules = []
-        idx = 0
-        while True:
-            rule_type = form.get(f"rule_type_{agent}_{idx}")
-            if rule_type is None:
-                break
-            rule_value = form.get(f"rule_value_{agent}_{idx}", "").strip()
-            rule_prompt = form.get(f"rule_prompt_{agent}_{idx}", "").strip()
-            if rule_value and rule_prompt:
-                rule = {"prompt": rule_prompt}
-                if rule_type == "at":
-                    rule["at"] = rule_value
-                else:
-                    rule["every"] = rule_value
-                rules.append(rule)
-            idx += 1
-        if rules:
-            agents_dispatch[agent] = rules
-
-    config["groups"][org]["dispatch"] = {
-        "enabled": enabled,
-        "timeout": timeout,
-        "daily_limit": daily_limit,
-        "agents": agents_dispatch,
-    }
-
-    save_config(config)
-    reload_groups()
-    return RedirectResponse(f"/admin/orgs/{org}/edit", status_code=303)
-
-
 @app.post("/admin/orgs/{org}/delete", response_class=HTMLResponse)
 async def admin_org_delete(request: Request, org: str):
     """Remove org from config (does not delete files on disk)."""
@@ -2114,551 +1741,32 @@ async def admin_org_delete(request: Request, org: str):
     return RedirectResponse("/admin/groups", status_code=303)
 
 
-@app.post("/admin/orgs/{org}/initialize", response_class=HTMLResponse)
-async def admin_org_initialize(request: Request, org: str):
-    """Create the folder structure for an org. Idempotent."""
-    config = load_config()
-    if org not in config.get("groups", {}):
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    g = config["groups"][org]
-    base = Path(g["path"])
-
-    # Create base dir if needed
-    base.mkdir(parents=True, exist_ok=True)
-
-    # Create shared structure
-    shared = base / "shared"
-    for subdir in ["observations", "proposals", "decisions", "prompts", "logs"]:
-        (shared / subdir).mkdir(parents=True, exist_ok=True)
-
-    # Create shared memory.md if it doesn't exist
-    memory_path = shared / "memory.md"
-    if not memory_path.exists():
-        memory_path.write_text(f"# {g['name']} — Shared Memory\n\nCollective knowledge and decisions.\n")
-
-    # Copy _observation-system-steps.md from an existing group if available
-    observation_steps_target = shared / "prompts" / "_observation-system-steps.md"
-    if not observation_steps_target.exists():
-        # Try to find an existing one to copy
-        for other_key, other_g in config.get("groups", {}).items():
-            if other_key == org:
-                continue
-            source = Path(other_g["path"]) / "shared" / "prompts" / "_observation-system-steps.md"
-            if source.exists():
-                shutil.copy2(source, observation_steps_target)
-                break
-
-    # Create agent directories (skip shared agents with external paths)
-    raw_agents = g.get("agents", [])
-    for agent in raw_agents:
-        name = agent if isinstance(agent, str) else agent.get("name", "")
-        if name and not is_shared_agent(raw_agents, name):
-            (base / name).mkdir(exist_ok=True)
-
-    return RedirectResponse("/admin/groups", status_code=303)
-
-
-@app.post("/admin/orgs/{org}/autodetect", response_class=HTMLResponse)
-async def admin_org_autodetect(request: Request, org: str):
-    """Auto-detect agents by scanning for directories with recognized definition files."""
-    config = load_config()
-    if org not in config.get("groups", {}):
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    g = config["groups"][org]
-    base = Path(g["path"])
-    agency = get_agency_config()
-
-    detected = []
-    if base.exists():
-        for d in sorted(base.iterdir()):
-            if d.is_dir() and d.name != "shared" and not d.name.startswith("."):
-                if detect_integration(d):
-                    detected.append(d.name)
-
-    # Update config with detected agents
-    raw_agents = detected if detected else g.get("agents", [])
-    if detected:
-        config["groups"][org]["agents"] = detected
-        save_config(config)
-        reload_groups()
-
-    grp_full = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
-    _agent_names = [a if isinstance(a, str) else a.get("name", "") for a in raw_agents if a]
-    agent_infos = [get_agent_info(base, a, agent_dir=get_agent_dir(grp_full, a)) for a in _agent_names]
-
-    # Gather dispatch + prompt context (same as admin_org_edit)
-    dispatch_cfg = g.get("dispatch", {})
-    prompts = []
-    prompts_dir = Path(g["path"]) / "shared" / "prompts"
-    if prompts_dir.exists():
-        prompts = sorted(f.name for f in prompts_dir.glob("*.md"))
-
-    return templates.TemplateResponse(request, "admin_org_edit.html", {
-        "request": request,
-        "agency_title": agency.get("title", "Agency"),
-        "admin_active": True,
-        "active": "admin",
-        "admin_page": "groups",
-        "theme_css": get_theme_css(),
-        "groups": {k: v["name"] for k, v in config.get("groups", {}).items()},
-        "mode": "edit",
-        "org_key": org,
-        "org_name": g["name"],
-        "org_path": g["path"],
-        "org_workspaces_json": json_module.dumps(g.get("workspaces", [])),
-        "workspace_types_json": _workspace_types_json(),
-        "org_agents": "\n".join(_agent_names),
-        "agent_infos": agent_infos,
-        "dispatch_enabled": dispatch_cfg.get("enabled", False),
-        "dispatch_timeout": dispatch_cfg.get("timeout", 1800),
-        "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
-        "dispatch_agents": dispatch_cfg.get("agents", {}),
-        "dispatcher_active": get_dispatch_status()["state"] == "active",
-        "available_prompts": prompts,
-        "all_integrations": {name: i.display_name for name, i in REGISTRY.items()},
-        "default_integration": g.get("default_integration", "claude-code"),
-        "warning": f"Auto-detected {len(detected)} agents." if detected else "No agents with recognized definition files found in path.",
-    })
-
-
-# ── Agent CRUD Routes ────────────────────────────────────────────────────────
-
-
-def get_agent_info(base: Path, agent_name: str, agent_dir: Path | None = None) -> dict:
-    """Gather filesystem info about an individual agent."""
-    if agent_dir is None:
-        agent_dir = base / agent_name
-    info = {
-        "name": agent_name,
-        "dir_exists": agent_dir.is_dir(),
-        "has_definition": any(
-            (agent_dir / i.identity_filename()).exists()
-            for i in REGISTRY.values()
-        ) if agent_dir.is_dir() else False,
-        "has_memory": (agent_dir / "memory.md").exists(),
-        "has_mcp": (agent_dir / ".mcp.json").exists(),
-        "files": [],
-    }
-    if agent_dir.is_dir():
-        info["files"] = sorted(f.name for f in agent_dir.iterdir() if f.is_file())
-    return info
-
-
-@app.get("/admin/orgs/{org}/agents/{agent}", response_class=HTMLResponse)
-async def admin_agent_detail(request: Request, org: str, agent: str):
-    """View/edit an individual agent."""
-    config = load_config()
-    groups = config.get("groups", {})
-    if org not in groups:
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    g = groups[org]
-    base = Path(g["path"])
-    agency = get_agency_config()
-
-    idx, _ = find_agent_in_config(g.get("agents", []), agent)
-    if idx < 0:
-        raise HTTPException(404, f"Agent '{agent}' not in group '{org}'")
-
-    grp_full = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
-    agent_dir = get_agent_dir(grp_full, agent)
-    agent_info = get_agent_info(base, agent, agent_dir=agent_dir)
-
-    # Read editable files
-    definition_content = ""
-    memory_md = ""
-    if agent_dir.is_dir():
-        agent_integration = get_agent_integration(grp_full, agent)
-        identity_path = agent_dir / agent_integration.identity_filename()
-        if identity_path.exists():
-            definition_content = identity_path.read_text()
-        memory_path = agent_dir / "memory.md"
-        if memory_path.exists():
-            memory_md = memory_path.read_text()
-
-    return templates.TemplateResponse(request, "admin_agent_detail.html", {
-        "request": request,
-        "agency_title": agency.get("title", "Agency"),
-        "admin_active": True,
-        "active": "admin",
-        "admin_page": "groups",
-        "groups": {k: v["name"] for k, v in groups.items()},
-        "org_key": org,
-        "org_name": g["name"],
-        "agent": agent_info,
-        "claude_md": definition_content,
-        "definition_content": definition_content,
-        "memory_md": memory_md,
-        "warning": "",
-    })
-
-
-@app.post("/admin/orgs/{org}/agents/{agent}/save", response_class=HTMLResponse)
-async def admin_agent_save(request: Request, org: str, agent: str):
-    """Save agent definition file and/or memory.md."""
-    config = load_config()
-    groups = config.get("groups", {})
-    if org not in groups:
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    g = groups[org]
-    base = Path(g["path"])
-    grp_full = {"path": base, "agents_full": GROUPS.get(org, {}).get("_agents_normalized", [])}
-    agent_dir = get_agent_dir(grp_full, agent)
-
-    # Security: validate path is within allowed roots
-    validate_file_access(agent_dir, base, allowed_roots=get_allowed_roots(grp_full))
-
-    form = await request.form()
-    file_type = form.get("file_type", "claude_md")
-    content = form.get("content", "")
-
-    # Create agent dir if it doesn't exist
-    agent_dir.mkdir(parents=True, exist_ok=True)
-
-    if file_type == "claude_md" or file_type == "definition":
-        # Detect integration from existing files, fall back to config
-        agent_int = get_agent_integration(grp_full, agent)
-        save_agent_definition(agent_dir, content, agent_int)
-    elif file_type == "memory_md":
-        (agent_dir / "memory.md").write_text(content)
-
-    # Persist per-agent integration if submitted
-    integration = form.get("integration", "")
-    if integration:
-        config = load_config()
-        agents = config["groups"][org].get("agents", [])
-        for i, a in enumerate(agents):
-            name = a if isinstance(a, str) else a.get("name", "")
-            if name == agent:
-                default_int = config["groups"][org].get("default_integration", "claude-code")
-                if integration != default_int:
-                    agents[i] = {"name": agent, "integration": integration}
-                else:
-                    agents[i] = agent  # Use shorthand if matches default
-                break
-        config["groups"][org]["agents"] = agents
-        save_config(config)
-        reload_groups()
-
-    return RedirectResponse(f"/admin/orgs/{org}/agents/{agent}", status_code=303)
-
-
-@app.post("/admin/orgs/{org}/agents/create", response_class=HTMLResponse)
-async def admin_agent_create(request: Request, org: str):
-    """Add a new agent to a group."""
-    config = load_config()
-    if org not in config.get("groups", {}):
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    form = await request.form()
-    agent_name = form.get("name", "").strip().lower().replace(" ", "-")
-    agent_name = re.sub(r"[^a-z0-9\-]", "", agent_name)
-
-    if not agent_name:
-        return RedirectResponse(f"/admin/orgs/{org}/edit", status_code=303)
-
-    g = config["groups"][org]
-    agents = g.get("agents", [])
-
-    idx, _ = find_agent_in_config(agents, agent_name)
-    if idx < 0:
-        agents.append(agent_name)
-        config["groups"][org]["agents"] = agents
-        save_config(config)
-        reload_groups()
-
-    # Create directory + scaffold
-    base = Path(g["path"])
-    agent_dir = base / agent_name
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    # Use group's default integration to determine identity file
-    default_int = g.get("default_integration", "claude-code")
-    integration = get_integration(default_int)
-    integration.prepare_agent_dir(agent_dir)
-    identity_file = agent_dir / integration.identity_filename()
-    if not identity_file.exists():
-        identity_file.write_text(f"# {agent_name.replace('-', ' ').title()} Agent\n\nRole definition goes here.\n")
-    memory_path = agent_dir / "memory.md"
-    if not memory_path.exists():
-        memory_path.write_text(f"# {agent_name.replace('-', ' ').title()} Memory\n\n")
-
-    return RedirectResponse(f"/admin/orgs/{org}/edit", status_code=303)
-
-
-@app.post("/admin/orgs/{org}/agents/{agent}/rename", response_class=HTMLResponse)
-async def admin_agent_rename(request: Request, org: str, agent: str):
-    """Rename an agent (config + directory)."""
-    config = load_config()
-    if org not in config.get("groups", {}):
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    form = await request.form()
-    new_name = form.get("new_name", "").strip().lower().replace(" ", "-")
-    new_name = re.sub(r"[^a-z0-9\-]", "", new_name)
-
-    if not new_name or new_name == agent:
-        return RedirectResponse(f"/admin/orgs/{org}/agents/{agent}", status_code=303)
-
-    g = config["groups"][org]
-    agents = g.get("agents", [])
-    base = Path(g["path"])
-
-    # Update config
-    idx, entry = find_agent_in_config(agents, agent)
-    if idx >= 0:
-        if isinstance(entry, dict):
-            agents[idx] = {**entry, "name": new_name}
-        else:
-            agents[idx] = new_name
-        config["groups"][org]["agents"] = agents
-        save_config(config)
-        reload_groups()
-
-    # Skip directory rename for shared agents (external path)
-    if not is_shared_agent(agents, new_name):
-        old_dir = base / agent
-        new_dir = base / new_name
-        if old_dir.is_dir() and not new_dir.exists():
-            old_dir.rename(new_dir)
-
-    return RedirectResponse(f"/admin/orgs/{org}/agents/{new_name}", status_code=303)
-
-
-@app.post("/admin/orgs/{org}/agents/{agent}/delete", response_class=HTMLResponse)
-async def admin_agent_delete(request: Request, org: str, agent: str):
-    """Remove an agent from config. Optionally delete directory."""
-    config = load_config()
-    if org not in config.get("groups", {}):
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    form = await request.form()
-    delete_files = form.get("delete_files", "") == "true"
-
-    g = config["groups"][org]
-    agents = g.get("agents", [])
-
-    # Remove from config
-    shared = is_shared_agent(agents, agent)
-    idx, _ = find_agent_in_config(agents, agent)
-    if idx >= 0:
-        agents.pop(idx)
-        config["groups"][org]["agents"] = agents
-        save_config(config)
-        reload_groups()
-
-    # Optionally delete directory (skip shared agents — external path)
-    if delete_files and not shared:
-        agent_dir = Path(g["path"]) / agent
-        validate_file_access(agent_dir, Path(g["path"]))
-        if agent_dir.is_dir():
-            shutil.rmtree(agent_dir)
-
-    return RedirectResponse(f"/admin/orgs/{org}/edit", status_code=303)
-
-
-# ── Group Routes ──────────────────────────────────────────────────────────────
-
-
-@app.get("/{group}/agents", response_class=HTMLResponse)
-async def agents_list(request: Request, group: str):
-    """List all agents with identity and health info."""
-    g = get_group(group)
-    agents, subagents = collect_agents_with_identity(g)
-    prompts = collect_prompts(g)
-    for a in agents:
-        assigned = prompts_for_agent(prompts, a["name"])
-        if assigned:
-            a["prompts"] = assigned
-        else:
-            a["prompts"] = [
-                {
-                    "name": f"{routine.get('id')}.md",
-                    "slug": routine.get("id"),
-                    "id": routine.get("id"),
-                    "assignments": [{"agent": a["name"], "routine_id": routine.get("id")}],
-                }
-                for agent_entry in g.get("_agents_normalized", [])
-                if isinstance(agent_entry, dict) and agent_entry.get("name") == a["name"]
-                for routine in agent_entry.get("routines", []) or []
-                if isinstance(routine, dict) and routine.get("id")
-            ]
-    return templates.TemplateResponse(request, "agents.html", {
-        "request": request,
-        **group_context(g),
-        "agents": agents,
-        "subagents": subagents,
-        "prompts": prompts,
-    })
-
-
-@app.get("/{group}/agents/{agent}", response_class=HTMLResponse)
-async def agent_profile(request: Request, group: str, agent: str):
-    """View an agent's profile with identity, logs, observations, and memory."""
-    g = get_group(group)
-    agent_dir = resolve_agent_dir(g, agent)
-    agent_int = get_agent_integration(g, agent)
-    identity = parse_agent_identity(agent_dir, agent_int)
-    is_subagent = (g["path"] / "_subagents" / agent).is_dir() or identity["frontmatter"].get("subagent", False)
-    last_seen = get_agent_last_seen(g, agent)
-    all_observations = list_observations(g)
-    agent_observations = [c for c in all_observations if c.get("agent") == agent]
-    timeline = build_agent_timeline(g, agent, agent_observations=agent_observations)
-    has_headshot = find_headshot(agent_dir) is not None
-    has_memory = (agent_dir / "memory.md").exists()
-    memory_path = str(agent_dir / "memory.md") if has_memory else ""
-
-    # Get dispatch schedule for this agent
-    group_cfg = GROUPS.get(g["key"], {})
-    dispatch_cfg = group_cfg.get("dispatch", {})
-    agent_schedule = dispatch_cfg.get("routines", {}).get(agent, [])
-    dispatch_enabled = dispatch_cfg.get("enabled", False)
-    agent_running = is_agent_running(g, agent, dispatch_cfg.get("timeout", 1800))
-    agent_next_run = compute_next_run(g, agent, dispatch_cfg)
-
-    return templates.TemplateResponse(request, "agent_profile.html", {
-        "request": request,
-        **group_context(g),
-        "agent": agent,
-        "identity": identity,
-        "is_subagent": is_subagent,
-        "last_seen": last_seen,
-        "timeline": timeline,
-        "has_headshot": has_headshot,
-        "has_memory": has_memory,
-        "memory_path": memory_path,
-        "agent_schedule": agent_schedule,
-        "dispatch_enabled": dispatch_enabled,
-        "agent_running": agent_running,
-        "agent_next_run": agent_next_run,
-        "agent_integration": agent_int.name,
-    })
-
-
-@app.post("/{group}/agents/{agent}/identity", response_class=HTMLResponse)
-async def agent_save_identity(request: Request, group: str, agent: str):
-    """Save identity fields via detected integration."""
-    g = get_group(group)
-    agent_dir = resolve_agent_dir(g, agent)
-    agent_int = get_agent_integration(g, agent)
-    form = await request.form()
-    fields = {
-        "display_name": form.get("display_name", "").strip(),
-        "title": form.get("title", "").strip(),
-        "emoji": form.get("emoji", "").strip(),
-    }
-    save_agent_identity(agent_dir, fields, integration=agent_int)
-    return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
-
-
-@app.post("/{group}/agents/{agent}/definition", response_class=HTMLResponse)
-async def agent_save_definition(request: Request, group: str, agent: str):
-    """Save agent definition body preserving frontmatter."""
-    g = get_group(group)
-    agent_dir = resolve_agent_dir(g, agent)
-    agent_int = get_agent_integration(g, agent)
-    form = await request.form()
-    body = form.get("body", "")
-    save_agent_definition(agent_dir, body, integration=agent_int)
-    return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
-
-
-@app.post("/{group}/agents/{agent}/upload-headshot", response_class=HTMLResponse)
-async def agent_upload_headshot(request: Request, group: str, agent: str):
-    """Upload a headshot image for an agent."""
-    g = get_group(group)
-    agent_dir = resolve_agent_dir(g, agent)
-    form = await request.form()
-    upload = form.get("headshot")
-    if not upload or not hasattr(upload, 'filename') or not upload.filename:
-        return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
-    ext = Path(upload.filename).suffix.lower().lstrip(".")
-    if ext not in ("png", "jpg", "jpeg", "webp"):
-        raise HTTPException(400, "Invalid image format. Use PNG, JPG, or WebP.")
-    content = await upload.read()
-    if len(content) > 2 * 1024 * 1024:
-        raise HTTPException(400, "Image too large. Maximum 2MB.")
-    # Remove any existing headshots
-    for old_ext in ("png", "jpg", "jpeg", "webp"):
-        old = agent_dir / f"headshot.{old_ext}"
-        if old.exists():
-            old.unlink()
-    (agent_dir / f"headshot.{ext}").write_bytes(content)
-    return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
-
-
-@app.get("/{group}/agents/{agent}/headshot")
-async def agent_headshot(group: str, agent: str):
-    """Serve an agent's headshot image."""
-    g = get_group(group)
-    agent_dir = resolve_agent_dir(g, agent)
-    headshot = find_headshot(agent_dir)
-    if not headshot:
-        raise HTTPException(404, "No headshot")
-    return FileResponse(headshot)
-
-
-@app.post("/{group}/agents/{agent}/toggle-subagent", response_class=HTMLResponse)
-async def agent_toggle_subagent(request: Request, group: str, agent: str):
-    """Toggle an agent between regular and subagent status."""
-    g = get_group(group)
-    if "/" in agent or ".." in agent:
-        raise HTTPException(400, "Invalid agent name")
-    root_dir = get_agent_dir(g, agent)
-    sub_dir = g["path"] / "_subagents" / agent
-    is_currently_subagent = sub_dir.is_dir()
-
-    config = load_config()
-    group_config = config["groups"][g["key"]]
-
-    if is_currently_subagent:
-        if root_dir.exists():
-            raise HTTPException(409, f"Cannot move: {root_dir} already exists")
-        shutil.move(str(sub_dir), str(root_dir))
-        agents = group_config.get("agents", [])
-        idx, _ = find_agent_in_config(agents, agent)
-        if idx < 0:
-            group_config.setdefault("agents", []).append(agent)
-    else:
-        if not root_dir.is_dir():
-            raise HTTPException(404, f"Agent directory not found: {agent}")
-        if sub_dir.exists():
-            raise HTTPException(409, f"Cannot move: {sub_dir} already exists")
-        (g["path"] / "_subagents").mkdir(exist_ok=True)
-        shutil.move(str(root_dir), str(sub_dir))
-        agents = group_config.get("agents", [])
-        idx, _ = find_agent_in_config(agents, agent)
-        if idx >= 0:
-            agents.pop(idx)
-            group_config["agents"] = agents
-
-    save_config(config)
-    reload_groups()
-    return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
-
-
 @app.post("/{group}/agents/{agent}/run")
-async def agent_run(request: Request, group: str, agent: str):
-    g = get_group(group)
-    resolve_agent_dir(g, agent)
+async def agent_run(
+    request: Request,
+    group: str,
+    agent: str,
+    services: AgencyServices = Depends(get_services),
+):
+    snapshot = services.config_store.load()
+    try:
+        group_config = snapshot.config.groups[group]
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown group: {group}") from exc
+    try:
+        instance = group_config.agents[agent]
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {agent}") from exc
 
     form = await request.form()
     routine_id = str(form.get("routine_id") or "").strip()
     if not routine_id or "/" in routine_id or ".." in routine_id:
         raise HTTPException(status_code=400, detail="Invalid routine")
 
-    config = load_config()
-    agents = config.get("groups", {}).get(group, {}).get("agents", [])
-    routine = None
-    for agent_entry in agents:
-        if isinstance(agent_entry, dict) and agent_entry.get("name") == agent:
-            for candidate in agent_entry.get("routines", []) or []:
-                if isinstance(candidate, dict) and candidate.get("id") == routine_id:
-                    routine = candidate
-                    break
-            break
+    routine = next(
+        (candidate for candidate in instance.routines if candidate.id == routine_id),
+        None,
+    )
     if routine is None:
         raise HTTPException(status_code=404, detail="Routine not found")
 
@@ -2673,13 +1781,13 @@ async def agent_run(request: Request, group: str, agent: str):
 
     try:
         request_obj = JobRequest(
-            config_path=CONFIG_PATH,
+            config_path=services.config_path,
             group_key=group,
             agent_name=agent,
             trigger="manual_prompt",
             task_input=build_routine_task_input(
                 routine_id,
-                tuple(routine.get("arguments") or ()),
+                tuple(routine.arguments or ()),
             ),
             routine_id=routine_id,
             memory_override=memory_override,

@@ -6,6 +6,17 @@ from fastapi.testclient import TestClient
 import agency.app as app_mod
 
 
+def _write_blueprint(root: Path, key: str, title: str) -> None:
+    blueprint = root / key
+    skill = blueprint / ".agents" / "skills" / "daily-review"
+    skill.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
+
+
 def _status(state="inactive", installed=False, conflict=False, mismatches=None):
     return {
         "state": state,
@@ -25,27 +36,47 @@ def _status(state="inactive", installed=False, conflict=False, mismatches=None):
 
 def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     group_path = tmp_path / "agents"
+    library_root = tmp_path / "agent-library"
+    cache_root = tmp_path / "compiled-agents"
+    memory_root = tmp_path / "memory-store"
     (group_path / "shared" / "prompts").mkdir(parents=True)
     (group_path / "shared" / "prompts" / "routine.md").write_text("# Routine\n", encoding="utf-8")
-    (group_path / "product").mkdir()
+    _write_blueprint(library_root, "advisor", "Advisor")
     config_path = tmp_path / "config.yaml"
     config = {
+        "schema_version": 2,
         "agency": {
             "title": "Agency",
             "default_group": "test",
-            "dispatch": {"installed": True, "interval": 15},
+            "ai_backend": "copilot",
+            "agent_library": str(library_root),
+            "compilation_cache": str(cache_root),
+            "memory_store": str(memory_root),
+            "dispatch": {"interval": 15},
         },
+        "memory": {"channels": {}},
         "groups": {
             "test": {
                 "name": "Test Agents",
                 "path": str(group_path),
-                "agents": ["product"],
+                "default_integration": "copilot",
+                "runtime": {
+                    "timeout": 1800,
+                    "sandbox": {"mode": "restricted", "roots": [str(group_path / "shared")]},
+                    "tools": {"mode": "allowlist", "names": ["shell"]},
+                },
+                "agents": [
+                    {
+                        "name": "product",
+                        "blueprint": "advisor",
+                        "integration": "copilot",
+                    }
+                ],
                 "dispatch": {
                     "enabled": True,
-                    "timeout": 300,
                     "daily_limit": 15,
-                    "agents": {"product": [{"prompt": "routine.md", "at": "07:00"}]},
                 },
+                "workspaces": [],
             },
         },
     }
@@ -58,6 +89,12 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
 
 def test_dispatch_status_ignores_persisted_installed_flag(tmp_path, monkeypatch):
     _configure_admin(tmp_path, monkeypatch, _status())
+    config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
+    config["agency"]["dispatch"]["installed"] = True
+    app_mod.CONFIG_PATH.write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
     status = app_mod.get_dispatch_status()
     assert status["installed"] is False
     assert status["state"] == "inactive"
@@ -75,9 +112,12 @@ def test_group_schedule_controls_remain_visible_when_dispatcher_inactive(tmp_pat
     client = _configure_admin(tmp_path, monkeypatch, _status())
     response = client.get("/admin/orgs/test/edit")
     assert response.status_code == 200
-    assert "Dispatch Schedule" in response.text
-    assert "will not run until the global dispatcher is active" in response.text
-    assert "Save Dispatch Config" in response.text
+    assert "Runtime defaults" in response.text
+    assert "Dispatch enabled" in response.text
+    assert "Daily Limit" in response.text
+    assert "Dispatch Schedule" not in response.text
+    assert "Save Dispatch Config" not in response.text
+    assert "Manage agents (1)" in response.text
 
 
 def test_dispatch_page_uses_platform_neutral_inactive_copy(tmp_path, monkeypatch):
@@ -202,19 +242,14 @@ def test_admin_groups_card_layout_stacks_on_mobile(tmp_path, monkeypatch):
 
 
 def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monkeypatch):
-    """Static schedule rules and dynamic addRule() must use identical mobile-responsive classes."""
+    """Group settings no longer render the superseded per-agent schedule rule editor."""
     client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
     response = client.get("/admin/orgs/test/edit")
     assert response.status_code == 200
-    # Static Jinja rule row must use grid on mobile, flex at sm
-    assert 'class="grid grid-cols-2 sm:flex sm:items-center gap-2"' in response.text
-    # JavaScript addRule must set the same className
-    assert "row.className = 'grid grid-cols-2 sm:flex sm:items-center gap-2'" in response.text
-    # Type select, value input, prompt select must have responsive width classes
-    assert 'class="w-full sm:w-auto px-2 py-1.5' in response.text  # type/value
-    assert 'class="col-span-2 sm:col-span-1 sm:flex-1 px-2 py-1.5' in response.text  # prompt
-    # Remove button must be full-width on mobile, auto at sm
-    assert 'class="w-full sm:w-auto px-2 py-1.5 text-xs font-medium text-red-600' in response.text
+    assert "Dispatch Schedule" not in response.text
+    assert "Save Dispatch Config" not in response.text
+    assert "Agent roster management moved to the group roster page" in response.text
+    assert 'href="/test/agents"' in response.text
 
 
 def test_admin_org_edit_preserves_selected_theme(tmp_path, monkeypatch):

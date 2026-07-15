@@ -4,164 +4,86 @@
 {% block title %}Agents - {{ group_name }}{% endblock %}
 
 {% block content %}
-<div class="flex items-baseline justify-between mb-6">
-  <h1 class="text-2xl font-bold text-gray-900">Agents</h1>
-  <span class="text-sm text-gray-500">{{ agents|length }} agent{{ 's' if agents|length != 1 else '' }}</span>
+<div class="flex items-baseline justify-between mb-6 gap-4 flex-wrap">
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900">Instances assigned to {{ group_name }}</h1>
+    <p class="text-sm text-gray-500 mt-1">This roster is sourced from config records only.</p>
+  </div>
+  <span class="text-sm text-gray-500">{{ instances|length }} instance{{ 's' if instances|length != 1 else '' }}</span>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-  {% for a in agents %}
-  <div class="block bg-white rounded-xl border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-sm transition-all" data-agent-card="{{ a.name }}">
-    <a href="/{{ group }}/agents/{{ a.name }}" class="block">
-      <div class="flex items-center gap-3 mb-3">
-        <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
-          {% if a.has_headshot %}
-          <img src="/{{ group }}/agents/{{ a.name }}/headshot" class="w-full h-full object-cover" alt="">
-          {% elif a.emoji %}
-          <span class="text-lg">{{ a.emoji }}</span>
-          {% else %}
-          <span class="text-sm font-bold text-gray-400">{{ a.display_name[0]|upper }}</span>
-          {% endif %}
-        </div>
-        <div class="min-w-0">
-          <div class="font-semibold text-gray-900 truncate">{{ a.display_name }}</div>
-          {% if a.title %}
-          <div class="text-xs text-gray-500 truncate">{{ a.title }}</div>
-          {% endif %}
-        </div>
-      </div>
-    </a>
-    <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
-      <span class="flex items-center gap-1.5">
-        {% if a.running %}
-        <span class="js-status-dot inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse"></span>
-        <span class="js-status-label">Running</span>
-        {% else %}
-        <span class="js-status-dot inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
-        <span class="js-status-label flex items-center gap-1.5">
-          {% if a.last_run %}
-          <a href="/{{ group }}/logs/view?path={{ a.last_run.path | urlencode }}"
-             class="rounded-sm hover:text-indigo-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
-             title="Open stdout from {{ a.last_run.at.strftime('%Y-%m-%d %H:%M') }}"
-             aria-label="Open {{ a.display_name }} last run stdout log">{{ a.last_run.at | relative_time }}</a>
-          {% else %}
-          <span title="{{ a.last_seen.strftime('%Y-%m-%d %H:%M') if a.last_seen else 'No activity' }}">{{ a.last_seen | relative_time }}</span>
-          {% endif %}
-          {% if a.next_run and a.next_run_detail %}
-          <span class="text-gray-300">·</span>
-           {% set routine_ids = a.prompts | map(attribute='id') | list %}
-           {% if a.next_run_detail.routine_id in routine_ids and not a.next_run_detail.routine_id.startswith('_') %}
-          <a href="/{{ group }}/prompts#schedule-{{ a.name | urlencode }}-{{ a.next_run_detail.rule_index }}"
-          {% else %}
-          <a href="/admin/orgs/{{ group }}/edit#rules-{{ a.name | urlencode }}"
-          {% endif %}
-             class="rounded-sm hover:text-indigo-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
-             title="Edit {{ a.next_run_detail.routine_id }} schedule - {{ a.next_run.strftime('%Y-%m-%d %H:%M') }}"
-             aria-label="Edit schedule for {{ a.next_run_detail.routine_id }}">{{ a.next_run | relative_future }}</a>
-          {% endif %}
-        </span>
-        {% endif %}
-      </span>
-      {% if a.integration %}{{ a.integration | integration_badge }}{% endif %}
-      {% if a.open_observations > 0 %}
-      <span class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">{{ a.open_observations }} open</span>
-      {% endif %}
-    </div>
-    <div class="mt-3 max-h-40 overflow-y-auto border-t border-gray-100 pt-2 space-y-1">
-      {% for p in a.prompts %}
-      <div class="flex items-center justify-between gap-2 text-xs js-prompt-row">
-        <a href="/{{ group }}/prompts/{{ p.slug }}"
-           class="truncate text-gray-600 hover:text-indigo-600">{{ p.name }}</a>
-        <button type="button"
-                class="js-run-btn shrink-0 px-2 py-0.5 rounded-md border border-gray-200 text-gray-700 hover:border-indigo-300 hover:text-indigo-600"
-             data-agent="{{ a.name }}" data-routine="{{ p.id or p.name }}">Run</button>
-      </div>
+{% if warning %}
+<div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{{ warning }}</div>
+{% endif %}
+
+<div class="bg-white rounded-xl border border-gray-200 p-5 mb-8">
+  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Create Instance</h2>
+  <form method="post" action="/{{ group }}/agents/create" class="grid gap-4 md:grid-cols-4">
+    <input type="hidden" name="revision" value="{{ config_revision }}">
+    <input type="text" name="name" placeholder="instance name" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">
+    <select name="blueprint" class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-mono">
+      {% for blueprint in available_blueprints %}
+      <option value="{{ blueprint }}">{{ blueprint }}</option>
       {% endfor %}
-      {% if not a.prompts %}
-      <div class="text-xs text-gray-400">No prompts</div>
-      {% endif %}
+    </select>
+    <select name="integration" class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+      {% for integration in available_integrations %}
+      <option value="{{ integration }}">{{ integration }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="display_name" placeholder="Display name" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+    <div class="md:col-span-4 flex justify-end">
+      <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add Instance</button>
+    </div>
+  </form>
+</div>
+
+<div class="space-y-4 mb-8">
+  {% for instance in instances %}
+  <div class="bg-white rounded-xl border border-gray-200 p-5">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div class="min-w-0">
+        <div class="flex items-center gap-3 flex-wrap">
+          <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-lg shrink-0">
+            {% if instance.emoji %}{{ instance.emoji }}{% else %}{{ instance.display_name[0]|upper }}{% endif %}
+          </div>
+          <div>
+            <div class="font-semibold text-gray-900">{{ instance.display_name }}</div>
+            <div class="text-xs text-gray-500 font-mono">{{ instance.name }}</div>
+          </div>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">Blueprint: {{ instance.blueprint }}</span>
+          {{ instance.integration | integration_badge }}
+          {% if instance.job_status %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">{{ instance.job_status }}</span>
+          {% endif %}
+        </div>
+        {% if instance.title %}
+        <div class="mt-2 text-sm text-gray-600">{{ instance.title }}</div>
+        {% endif %}
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <a href="{{ instance.profile_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Configure</a>
+        <form method="post" action="{{ instance.move_href }}" class="flex gap-2 items-center flex-wrap">
+          <input type="hidden" name="revision" value="{{ config_revision }}">
+          <input type="text" name="target_group" placeholder="target group" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono w-32">
+          <select name="memory_mode" class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+            <option value="empty">empty</option>
+            <option value="copy">copy</option>
+          </select>
+          <button type="submit" class="px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Move</button>
+        </form>
+        <form method="post" action="{{ instance.remove_href }}">
+          <input type="hidden" name="revision" value="{{ config_revision }}">
+          <input type="hidden" name="confirm" value="true">
+          <button type="submit" class="px-3 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors">Remove</button>
+        </form>
+      </div>
     </div>
   </div>
   {% endfor %}
 </div>
 
-{% if not agents %}
-<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500 mb-8">No agents configured.</div>
+{% if not instances %}
+<div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500 mb-8">No instances configured yet.</div>
 {% endif %}
-
-{% if subagents %}
-<details class="mb-8">
-  <summary class="cursor-pointer text-sm font-semibold text-gray-500 hover:text-gray-700 mb-3">
-    Subagents ({{ subagents|length }})
-  </summary>
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
-    {% for a in subagents %}
-    <a href="/{{ group }}/agents/{{ a.name }}" class="block bg-gray-50 rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
-      <div class="flex items-center gap-2.5 mb-2">
-        <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
-          {% if a.has_headshot %}
-          <img src="/{{ group }}/agents/{{ a.name }}/headshot" class="w-full h-full object-cover" alt="">
-          {% elif a.emoji %}
-          <span class="text-sm">{{ a.emoji }}</span>
-          {% else %}
-          <span class="text-xs font-bold text-gray-400">{{ a.display_name[0]|upper }}</span>
-          {% endif %}
-        </div>
-        <div class="min-w-0">
-          <div class="text-sm font-medium text-gray-700 truncate">{{ a.display_name }}</div>
-          {% if a.title %}
-          <div class="text-xs text-gray-400 truncate">{{ a.title }}</div>
-          {% endif %}
-        </div>
-      </div>
-      <div class="flex items-center gap-2 text-xs text-gray-400">
-        <span class="inline-block px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500 text-xs font-medium">subagent</span>
-        <span class="flex items-center gap-1.5" title="{{ a.last_seen.strftime('%Y-%m-%d %H:%M') if a.last_seen else 'No activity' }}">
-          {% if a.running %}
-          <span class="inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse"></span>
-          Running
-          {% else %}
-          <span class="inline-block w-2 h-2 rounded-full shrink-0 {% if a.health == 'green' %}bg-emerald-400{% elif a.health == 'amber' %}bg-amber-400{% else %}bg-red-400{% endif %}"></span>
-          {{ a.last_seen | relative_time }}
-          {% if a.next_run %}<span class="text-gray-300">·</span> {{ a.next_run | relative_future }}{% endif %}
-          {% endif %}
-        </span>
-      </div>
-    </a>
-    {% endfor %}
-  </div>
-</details>
-{% endif %}
-
-<script>
-document.addEventListener("click", async (e) => {
-  const btn = e.target.closest(".js-run-btn");
-  if (!btn) return;
-  const agent = btn.dataset.agent;
-  const routineId = btn.dataset.routine;
-  const card = document.querySelector(`[data-agent-card="${agent}"]`);
-  const body = new FormData();
-  body.append("routine_id", routineId);
-  const showErr = (msg) => {
-    const row = btn.closest(".js-prompt-row");
-    let err = row.querySelector(".js-run-err");
-    if (!err) { err = document.createElement("span"); err.className = "js-run-err text-red-500"; row.appendChild(err); }
-    err.textContent = msg;
-  };
-  try {
-    const resp = await fetch(`/{{ group }}/agents/${agent}/run`, {method: "POST", body});
-    if (resp.status === 202) {
-      const dot = card.querySelector(".js-status-dot");
-      const label = card.querySelector(".js-status-label");
-      if (dot) dot.className = "js-status-dot inline-block w-2 h-2 rounded-full shrink-0 bg-emerald-400 animate-pulse";
-      if (label) label.textContent = "Running";
-      card.querySelectorAll(".js-run-btn").forEach((b) => { b.disabled = true; b.classList.add("opacity-40"); });
-    } else {
-      showErr(resp.status === 409 ? "Busy" : "Error");
-    }
-  } catch (_) {
-    showErr("Error");
-  }
-});
-</script>
 {% endblock %}

@@ -347,13 +347,15 @@ class InstanceService:
         self,
         group_id: str,
         request: AgentInstanceCreate,
+        expected_revision: str | None = None,
     ) -> InstanceMutationResult:
         self.library.inspect(request.blueprint)
         _validate_integration(request.integration)
-        snapshot = self.config_store.load()
+        if expected_revision is None:
+            expected_revision = self.config_store.load().revision
         updated = create_instance(
             self.config_store,
-            snapshot.revision,
+            expected_revision,
             group_id,
             request.to_model(),
         )
@@ -362,9 +364,16 @@ class InstanceService:
             instance=updated.config.groups[group_id].agents[request.name],
         )
 
-    def remove(self, group_id: str, agent_id: str) -> RemoveInstanceResult:
+    def remove(
+        self,
+        group_id: str,
+        agent_id: str,
+        expected_revision: str | None = None,
+    ) -> RemoveInstanceResult:
         snapshot = self.config_store.load()
         agent = get_instance(snapshot, group_id, agent_id)
+        if expected_revision is None:
+            expected_revision = snapshot.revision
         orphaned = _resolve_owned_memories(
             snapshot,
             self.memory_store,
@@ -373,7 +382,7 @@ class InstanceService:
         )
         updated = remove_instance(
             self.config_store,
-            snapshot.revision,
+            expected_revision,
             group_id,
             agent_id,
         )
@@ -388,8 +397,15 @@ class InstanceService:
         agent_id: str,
         target_group: str,
         memory_mode: MemoryMode,
+        expected_revision: str | None = None,
     ) -> MovePreview:
         snapshot = self.config_store.load()
+        if expected_revision is None:
+            expected_revision = snapshot.revision
+        if snapshot.revision != expected_revision:
+            raise ConfigConflictError(
+                "config.yaml changed; reload before previewing move"
+            )
         return preview_move(
             snapshot,
             self.memory_store,

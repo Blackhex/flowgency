@@ -29,8 +29,7 @@
   </script>
 </head>
 <body class="h-full bg-agency-950 font-sans flex items-center justify-center p-4">
-  <div class="w-full max-w-lg">
-    <!-- Logo -->
+  <div class="w-full max-w-4xl">
     <div class="flex items-end justify-center gap-3 mb-8">
       <div class="w-10 h-10 rounded-xl bg-agency-600 flex items-center justify-center">
         <svg class="w-6 h-6" viewBox="0 0 80 80" fill="none">
@@ -49,29 +48,92 @@
       <span class="text-2xl font-bold text-white tracking-tight">{{ agency_title }}</span>
     </div>
 
-    <!-- Card -->
     <div class="bg-white rounded-2xl shadow-xl p-8">
-      <h1 class="text-xl font-bold text-gray-900 mb-2">Welcome</h1>
-      <p class="text-sm text-gray-500 mb-6">Point Agency at a directory of agents to get started.</p>
+      <h1 class="text-xl font-bold text-gray-900 mb-2">Strict canonical setup</h1>
+      <p class="text-sm text-gray-500 mb-6">Create the control-plane config first. Agent instances are added later from the roster page.</p>
 
       {% if error %}
       <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{{ error | safe }}</div>
       {% endif %}
 
-      <form method="POST" action="/setup">
-        <div class="mb-4">
-          <label for="path" class="block text-sm font-medium text-gray-700 mb-1.5">Agent Directory Path</label>
+      {% if issues %}
+      <div class="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+        <div class="text-sm font-semibold text-amber-900">Startup diagnostics</div>
+        {% for issue in issues %}
+        <div class="text-sm text-amber-900">
+          <div class="font-mono text-xs text-amber-800">{{ issue.field }}</div>
+          <div>{{ issue.message }}</div>
+          {% if issue.corrective_hint %}
+          <div class="text-xs text-amber-700">{{ issue.corrective_hint }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <form method="POST" action="/setup" class="space-y-5">
+        <div class="grid gap-4 md:grid-cols-2">
+          <div>
+            <label for="group_key" class="block text-sm font-medium text-gray-700 mb-1.5">Group Key</label>
+            <input type="text" name="group_key" id="group_key" value="{{ group_key }}"
+                   placeholder="newsletter"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          </div>
+          <div>
+            <label for="group_name" class="block text-sm font-medium text-gray-700 mb-1.5">Group Name</label>
+            <input type="text" name="group_name" id="group_name" value="{{ group_name }}"
+                   placeholder="Newsletter"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          </div>
+        </div>
+
+        <div>
+          <label for="path" class="block text-sm font-medium text-gray-700 mb-1.5">Group Workspace Path</label>
           <input type="text" name="path" id="path" value="{{ path_value }}"
-                 placeholder="/path/to/your/agents"
+                 placeholder="/path/to/group/workspace"
                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
         </div>
 
-        <div class="mb-6">
-          <span class="text-xs text-gray-400">Suggestion:</span>
-          <button type="button" onclick="document.getElementById('path').value='{{ suggestion }}'"
-                  class="ml-1 text-xs font-mono text-agency-600 hover:text-agency-800 bg-agency-50 px-2 py-0.5 rounded hover:bg-agency-100 transition-colors">
-            {{ suggestion }}
-          </button>
+        <div class="grid gap-4 md:grid-cols-3">
+          <div>
+            <label for="agent_library" class="block text-sm font-medium text-gray-700 mb-1.5">agent_library</label>
+            <input type="text" name="agent_library" id="agent_library" value="{{ agent_library_value }}"
+                   placeholder="/path/to/agent-library"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          </div>
+          <div>
+            <label for="compilation_cache" class="block text-sm font-medium text-gray-700 mb-1.5">compilation_cache</label>
+            <input type="text" name="compilation_cache" id="compilation_cache" value="{{ compilation_cache_value }}"
+                   placeholder="/path/to/compiled-agents"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          </div>
+          <div>
+            <label for="memory_store" class="block text-sm font-medium text-gray-700 mb-1.5">memory_store</label>
+            <input type="text" name="memory_store" id="memory_store" value="{{ memory_store_value }}"
+                   placeholder="/path/to/memory-store"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          </div>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-3">
+          <div>
+            <label for="workspace_name" class="block text-sm font-medium text-gray-700 mb-1.5">Workspace Name</label>
+            <input type="text" name="workspace_name" id="workspace_name" value="{{ workspace_name }}"
+                   placeholder="Terminal Grid"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          </div>
+          <div>
+            <label for="workspace_type" class="block text-sm font-medium text-gray-700 mb-1.5">Workspace Type</label>
+            <input type="text" name="workspace_type" id="workspace_type" value="{{ workspace_type }}"
+                   placeholder="tmux"
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          </div>
+          <div>
+            <label for="workspace_config" class="block text-sm font-medium text-gray-700 mb-1.5">Workspace Config JSON</label>
+            <input type="text" name="workspace_config" id="workspace_config" value="{{ workspace_config }}"
+                   placeholder='{"script_path":"tmux-agents.sh"}'
+                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          </div>
         </div>
 
         <button type="submit"
@@ -79,18 +141,6 @@
           Set Up
         </button>
       </form>
-    </div>
-
-    <p class="text-center text-xs text-gray-500 mt-4">
-      <a href="/admin/" class="text-gray-400 hover:text-gray-300">Skip to manual setup</a>
-    </p>
-
-    <div class="mt-6 bg-agency-900/50 border border-agency-800 rounded-xl p-4 text-center">
-      <p class="text-xs text-gray-400">
-        <span class="text-agency-200 font-medium">Don't have agents yet?</span>
-        Run <code class="font-mono bg-agency-800 text-agency-200 px-1.5 py-0.5 rounded text-[11px]">/agency-setup</code>
-        from any project to auto-generate a full agent team with roles, dispatch, and workspaces.
-      </p>
     </div>
   </div>
 </body>

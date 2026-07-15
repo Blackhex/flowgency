@@ -160,6 +160,72 @@ def test_patch_group_settings_preserves_unowned_group_fields(config_store):
     )
 
 
+def test_patch_group_settings_state_preserves_extension_keys(config_store):
+    from agency.configuration.patches import (
+        GroupSettingsStatePatch,
+        patch_group_settings_state,
+    )
+
+    snapshot = config_store.load()
+    snapshot.raw["groups"]["newsletter"]["group_extension"] = {"theme": "sunset"}
+    snapshot.raw["groups"]["newsletter"]["runtime"] = {
+        "timeout": 1200,
+        "runtime_extension": {"preserve": True},
+        "sandbox": {"mode": "restricted", "roots": ["superseded"], "sandbox_extension": {"preserve": True}},
+        "tools": {"mode": "allowlist", "names": ["shell"], "tools_extension": {"preserve": True}},
+    }
+    snapshot.raw["groups"]["newsletter"]["dispatch"] = {
+        "enabled": False,
+        "daily_limit": 7,
+    }
+    snapshot.raw["groups"]["newsletter"]["workspaces"] = [
+        {
+            "name": "Terminal Grid",
+            "type": "tmux",
+            "config": {"script_path": "tmux-agents.sh"},
+            "workspace_extension": {"preserve": True},
+        }
+    ]
+    snapshot.path.write_text(
+        yaml.safe_dump(snapshot.raw, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    refreshed = config_store.load()
+    updated = patch_group_settings_state(
+        config_store,
+        refreshed.revision,
+        "newsletter",
+        GroupSettingsStatePatch(
+            name="Editorial",
+            path=str(refreshed.path.parent / "agents" / "editorial"),
+            default_integration="copilot",
+            runtime_timeout=2400,
+            sandbox_mode="restricted",
+            sandbox_roots=("repo",),
+            tool_mode="allowlist",
+            tool_names=("shell", "write"),
+            dispatch_enabled=True,
+            dispatch_daily_limit=12,
+            workspaces=(
+                {
+                    "name": "Primary",
+                    "type": "tmux",
+                    "config": {"script_path": "primary.sh"},
+                    "workspace_extension": {"preserve": True},
+                },
+            ),
+        ),
+    )
+
+    group = updated.raw["groups"]["newsletter"]
+    assert group["group_extension"] == {"theme": "sunset"}
+    assert group["runtime"]["runtime_extension"] == {"preserve": True}
+    assert group["runtime"]["sandbox"]["sandbox_extension"] == {"preserve": True}
+    assert group["runtime"]["tools"]["tools_extension"] == {"preserve": True}
+    assert group["workspaces"][0]["workspace_extension"] == {"preserve": True}
+
+
 def test_create_group_requires_absent_group_and_preserves_other_top_level_fields(
     config_store,
 ):

@@ -40,6 +40,21 @@ class GroupDispatchPatch:
 
 
 @dataclass(frozen=True)
+class GroupSettingsStatePatch:
+    name: str
+    path: str
+    default_integration: str
+    runtime_timeout: int
+    sandbox_mode: Literal["restricted", "unrestricted"]
+    sandbox_roots: tuple[str, ...] = ()
+    tool_mode: ToolMode = "all"
+    tool_names: tuple[str, ...] = ()
+    dispatch_enabled: bool = False
+    dispatch_daily_limit: int = 20
+    workspaces: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
 class AgentProfilePatch:
     display_name: str
     title: str
@@ -167,6 +182,50 @@ def patch_group_dispatch(
             "enabled": patch.enabled,
             "daily_limit": patch.daily_limit,
         }
+
+    return store.patch(expected_revision, apply)
+
+
+def patch_group_settings_state(
+    store: ConfigStore,
+    expected_revision: str,
+    group_id: str,
+    patch: GroupSettingsStatePatch,
+) -> ConfigSnapshot:
+    def apply(raw: dict[str, Any]) -> None:
+        group = _group(raw, group_id)
+        group["name"] = patch.name
+        group["path"] = patch.path
+        group["default_integration"] = patch.default_integration
+
+        runtime = group.setdefault("runtime", {})
+        if not isinstance(runtime, dict):
+            raise TypeError(f"groups.{group_id}.runtime must be a mapping")
+        runtime["timeout"] = patch.runtime_timeout
+
+        sandbox = runtime.setdefault("sandbox", {})
+        if not isinstance(sandbox, dict):
+            raise TypeError(
+                f"groups.{group_id}.runtime.sandbox must be a mapping"
+            )
+        sandbox["mode"] = patch.sandbox_mode
+        sandbox["roots"] = list(patch.sandbox_roots)
+
+        tools = runtime.setdefault("tools", {})
+        if not isinstance(tools, dict):
+            raise TypeError(
+                f"groups.{group_id}.runtime.tools must be a mapping"
+            )
+        tools["mode"] = patch.tool_mode
+        tools["names"] = list(patch.tool_names)
+
+        dispatch = group.setdefault("dispatch", {})
+        if not isinstance(dispatch, dict):
+            raise TypeError(f"groups.{group_id}.dispatch must be a mapping")
+        dispatch["enabled"] = patch.dispatch_enabled
+        dispatch["daily_limit"] = patch.dispatch_daily_limit
+
+        group["workspaces"] = deepcopy(list(patch.workspaces))
 
     return store.patch(expected_revision, apply)
 
