@@ -121,6 +121,65 @@ def test_inspect_blueprint_requires_skill_description(tmp_path):
         inspect_blueprint(root, "advisor")
 
 
+def test_inspect_blueprint_accepts_1024_character_skill_description(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    (blueprint / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_bytes(b"# Advisor\n")
+    _write_skill(
+        blueprint / ".agents" / "skills" / "daily-review",
+        "daily-review",
+        description="a" * 1024,
+    )
+
+    inspection = inspect_blueprint(root, "advisor")
+
+    assert inspection.skills == ("daily-review",)
+
+
+def test_inspect_blueprint_rejects_1025_character_skill_description(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    (blueprint / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_bytes(b"# Advisor\n")
+    _write_skill(
+        blueprint / ".agents" / "skills" / "daily-review",
+        "daily-review",
+        description="a" * 1025,
+    )
+
+    with pytest.raises(AssetValidationError) as excinfo:
+        inspect_blueprint(root, "advisor")
+
+    issue = excinfo.value.issues[0]
+    assert issue.code == "description-too-long"
+    assert issue.field == ".agents/skills/daily-review/SKILL.md"
+    assert issue.corrective_hint == "Shorten the skill description to 1024 characters or fewer."
+
+
+def test_inspect_blueprint_rejects_whitespace_only_skill_description(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    (blueprint / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_bytes(b"# Advisor\n")
+    _write_skill(blueprint / ".agents" / "skills" / "daily-review", "daily-review", description="   ")
+
+    with pytest.raises(AssetValidationError):
+        inspect_blueprint(root, "advisor")
+
+
+def test_inspect_blueprint_rejects_non_string_skill_description(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    skill_dir = blueprint / ".agents" / "skills" / "daily-review"
+    skill_dir.mkdir(parents=True)
+    (blueprint / "AGENTS.md").write_bytes(b"# Advisor\n")
+    (skill_dir / "SKILL.md").write_text("---\nname: daily-review\ndescription: 123\n---\n\nRun the review.\n", encoding="utf-8")
+
+    with pytest.raises(AssetValidationError):
+        inspect_blueprint(root, "advisor")
+
+
 def test_inspect_blueprint_requires_utf8_skill_markdown(tmp_path):
     root = tmp_path / "library"
     blueprint = root / "advisor"

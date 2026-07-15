@@ -63,8 +63,12 @@ def _parse_skill(snapshot, skill_name: str) -> None:
         _raise(skill_path, f"Skill name must be a lowercase stable slug: {skill_path}.", "Set frontmatter name to the exact skill directory slug.", code="invalid-skill-name")
     if name != skill_name:
         _raise(skill_path, f"Skill name must exactly match its directory: {skill_path}.", "Rename the directory or the frontmatter name so they match exactly.", code="skill-name-mismatch")
-    if not isinstance(description, str) or not description.strip():
+    if not isinstance(description, str):
         _raise(skill_path, f"Skill description is required: {skill_path}.", "Set a non-empty human description in SKILL.md frontmatter.", code="missing-skill-description")
+    if not description.strip():
+        _raise(skill_path, f"Skill description is required: {skill_path}.", "Set a non-empty human description in SKILL.md frontmatter.", code="missing-skill-description")
+    if len(description) > 1024:
+        _raise(skill_path, f"Skill description must be at most 1024 characters: {skill_path}.", "Shorten the skill description to 1024 characters or fewer.", code="description-too-long")
 
 
 def _load_agents_md(snapshot) -> str:
