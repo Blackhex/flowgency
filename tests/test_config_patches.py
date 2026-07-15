@@ -254,6 +254,55 @@ def test_create_group_requires_absent_group_and_preserves_other_top_level_fields
     assert updated.raw["groups"]["research"]["name"] == "Research"
 
 
+def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_store, monkeypatch):
+    from agency.configuration.patches import GroupCreateStatePatch, create_group_state
+
+    snapshot = config_store.load()
+    calls = 0
+    original_patch = config_store.patch
+
+    def patched_patch(expected_revision, patcher):
+        nonlocal calls
+        calls += 1
+
+        def failing(raw):
+            patcher(raw)
+            raise RuntimeError("boom")
+
+        return original_patch(expected_revision, failing)
+
+    monkeypatch.setattr(config_store, "patch", patched_patch)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        create_group_state(
+            config_store,
+            snapshot.revision,
+            "research",
+            GroupCreateStatePatch(
+                name="Research",
+                path=str(snapshot.path.parent / "agents" / "research"),
+                default_integration="copilot",
+                runtime_timeout=2400,
+                sandbox_mode="restricted",
+                sandbox_roots=("repo", "cowork"),
+                tool_mode="allowlist",
+                tool_names=("shell", "write"),
+                dispatch_enabled=True,
+                dispatch_daily_limit=12,
+                workspaces=(
+                    {
+                        "name": "Primary",
+                        "type": "tmux",
+                        "config": {"script_path": "primary.sh"},
+                    },
+                ),
+            ),
+        )
+
+    assert calls == 1
+    assert "research" not in config_store.load().raw["groups"]
+
+
 def test_patch_memory_channels_replaces_owned_subtree_only(config_store):
     from agency.configuration.patches import patch_memory_channels
 

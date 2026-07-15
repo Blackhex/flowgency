@@ -263,10 +263,12 @@ def test_setup_post_valid_path_creates_group_and_redirects(tmp_path, monkeypatch
     monkeypatch.setattr(app_mod, "GROUPS", {})
     group_path = tmp_path / "newsletter-agents"
     client = TestClient(app_mod.app)
+    expected_revision = app_mod.build_services(config_path).config_store.inspect().revision
 
     response = client.post(
         "/setup",
         data={
+            "expected_revision": expected_revision,
             "group_key": "newsletter",
             "group_name": "Newsletter",
             "path": str(group_path),

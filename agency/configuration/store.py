@@ -15,6 +15,9 @@ from agency.fs.locks import exclusive_lock
 from .models import AgencyConfigcanonical, parse_config_canonical
 
 
+ABSENT_REVISION = "absent"
+
+
 def config_revision(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -25,6 +28,14 @@ class ConfigSnapshot:
     revision: str
     raw: dict[str, Any]
     config: AgencyConfigcanonical
+
+
+@dataclass(frozen=True)
+class ConfigFileSnapshot:
+    path: Path
+    exists: bool
+    revision: str
+    payload: bytes | None
 
 
 class ConfigConflictError(RuntimeError):
@@ -56,6 +67,23 @@ class ConfigStore:
             payload = self.path.read_bytes()
         return self._snapshot(payload)
 
+    def inspect(self, *, wait_for_lock: bool = True) -> ConfigFileSnapshot:
+        with exclusive_lock(self.lock_path, wait=wait_for_lock):
+            if not self.path.exists():
+                return ConfigFileSnapshot(
+                    path=self.path,
+                    exists=False,
+                    revision=ABSENT_REVISION,
+                    payload=None,
+                )
+            payload = self.path.read_bytes()
+        return ConfigFileSnapshot(
+            path=self.path,
+            exists=True,
+            revision=config_revision(payload),
+            payload=payload,
+        )
+
     def create(self, raw: dict[str, Any]) -> ConfigSnapshot:
         with exclusive_lock(self.lock_path, wait=True):
             if self.path.exists():
@@ -63,6 +91,31 @@ class ConfigStore:
             payload = self._encode(raw)
             atomic_write_bytes(self.path, payload)
         return self._snapshot(payload)
+
+    def replace(
+        self,
+        expected_revision: str,
+        raw: dict[str, Any],
+    ) -> ConfigSnapshot:
+        with exclusive_lock(self.lock_path, wait=True):
+            original = self.path.read_bytes() if self.path.exists() else None
+            current_revision = (
+                config_revision(original)
+                if original is not None
+                else ABSENT_REVISION
+            )
+            if current_revision != expected_revision:
+                raise ConfigConflictError(
+                    "config.yaml changed; reload before saving"
+                )
+            updated = self._encode(raw)
+            current = self.path.read_bytes() if self.path.exists() else None
+            if current != original:
+                raise ConfigConflictError(
+                    "config.yaml changed outside the Agency lock"
+                )
+            atomic_write_bytes(self.path, updated)
+        return self._snapshot(updated)
 
     def patch(
         self,

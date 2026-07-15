@@ -55,6 +55,21 @@ class GroupSettingsStatePatch:
 
 
 @dataclass(frozen=True)
+class GroupCreateStatePatch:
+    name: str
+    path: str
+    default_integration: str
+    runtime_timeout: int
+    sandbox_mode: Literal["restricted", "unrestricted"]
+    sandbox_roots: tuple[str, ...] = ()
+    tool_mode: ToolMode = "all"
+    tool_names: tuple[str, ...] = ()
+    dispatch_enabled: bool = False
+    dispatch_daily_limit: int = 20
+    workspaces: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
 class AgentProfilePatch:
     display_name: str
     title: str
@@ -149,6 +164,42 @@ def create_group(
             "name": patch.name,
             "path": patch.path,
             "default_integration": patch.default_integration,
+            "agents": [],
+        }
+
+    return store.patch(expected_revision, apply)
+
+
+def create_group_state(
+    store: ConfigStore,
+    expected_revision: str,
+    group_id: str,
+    patch: GroupCreateStatePatch,
+) -> ConfigSnapshot:
+    def apply(raw: dict[str, Any]) -> None:
+        groups = _groups(raw)
+        if group_id in groups:
+            raise ValueError(f"Group already exists: {group_id}")
+        groups[group_id] = {
+            "name": patch.name,
+            "path": patch.path,
+            "default_integration": patch.default_integration,
+            "runtime": {
+                "timeout": patch.runtime_timeout,
+                "sandbox": {
+                    "mode": patch.sandbox_mode,
+                    "roots": list(patch.sandbox_roots),
+                },
+                "tools": {
+                    "mode": patch.tool_mode,
+                    "names": list(patch.tool_names),
+                },
+            },
+            "dispatch": {
+                "enabled": patch.dispatch_enabled,
+                "daily_limit": patch.dispatch_daily_limit,
+            },
+            "workspaces": deepcopy(list(patch.workspaces)),
             "agents": [],
         }
 

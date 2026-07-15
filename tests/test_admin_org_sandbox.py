@@ -347,6 +347,61 @@ def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch, ca
     }
 
 
+def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
+    tmp_path, monkeypatch, canonical_raw_config
+):
+    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+    (tmp_path / "new-agents").mkdir()
+    calls = 0
+    original_patch = ConfigStore.patch
+
+    def patched_patch(self, expected_revision, patcher):
+        nonlocal calls
+        if self.path == store.path:
+            calls += 1
+        return original_patch(self, expected_revision, patcher)
+
+    monkeypatch.setattr(ConfigStore, "patch", patched_patch)
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "key": "new",
+            "name": "New Group",
+            "path": str(tmp_path / "new-agents"),
+            "workspaces_json": '[{"name":"Primary","type":"tmux","config":{"script_path":"tmux-agents.sh"}}]',
+            "sandbox_root": f"{tmp_path / 'repo'}\n{tmp_path / 'cowork'}",
+            "allowed_tools": ["shell", "write"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert calls == 1
+
+    saved = store.load().raw["groups"]["new"]
+    assert saved["name"] == "New Group"
+    assert saved["path"] == str(tmp_path / "new-agents")
+    assert saved["default_integration"] == "claude-code"
+    assert saved["dispatch"] == {"enabled": False, "daily_limit": 20}
+    assert saved["runtime"]["sandbox"] == {
+        "mode": "restricted",
+        "roots": [str(tmp_path / "repo"), str(tmp_path / "cowork")],
+    }
+    assert saved["runtime"]["tools"] == {
+        "mode": "allowlist",
+        "names": ["shell", "write"],
+    }
+    assert saved["workspaces"] == [
+        {
+            "name": "Primary",
+            "type": "tmux",
+            "config": {"script_path": "tmux-agents.sh"},
+        }
+    ]
+    assert saved["agents"] == []
+
+
 def test_admin_org_save_invalid_workspaces_is_all_or_nothing(tmp_path, monkeypatch, canonical_raw_config):
     client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
     before = store.load()

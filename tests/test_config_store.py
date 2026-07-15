@@ -168,6 +168,50 @@ def test_patch_detects_external_uncoordinated_edit_before_replace(
     )
 
 
+def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
+    canonical_raw_config, canonical_paths
+):
+    from agency.configuration import ValidationFailed
+    from agency.configuration.store import ConfigStore
+
+    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    store = ConfigStore(path)
+    snapshot = store.load()
+    original = path.read_bytes()
+
+    with pytest.raises(ValidationFailed):
+        store.replace(
+            snapshot.revision,
+            {
+                "agency": {"title": "Agency"},
+                "groups": {},
+            },
+        )
+
+    assert path.read_bytes() == original
+
+
+def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
+    canonical_raw_config, canonical_paths
+):
+    from agency.configuration.store import ConfigConflictError, ConfigStore
+
+    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    store = ConfigStore(path)
+    first = store.load()
+
+    store.patch(
+        first.revision,
+        lambda raw: raw["agency"].update({"title": "Elsewhere"}),
+    )
+    newer = path.read_bytes()
+
+    with pytest.raises(ConfigConflictError):
+        store.replace(first.revision, canonical_raw_config)
+
+    assert path.read_bytes() == newer
+
+
 def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
     canonical_raw_config, canonical_paths
 ):

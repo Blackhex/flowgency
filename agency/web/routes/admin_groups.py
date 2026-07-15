@@ -6,11 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from agency.configuration import (
+    ABSENT_REVISION,
     ConfigConflictError,
-    GroupSettingsPatch,
+    GroupCreateStatePatch,
     GroupSettingsStatePatch,
     ValidationFailed,
-    create_group,
+    create_group_state,
     patch_group_settings_state,
     validate_config_canonical,
 )
@@ -80,6 +81,7 @@ def _setup_response(
     *,
     values=None,
     error="",
+    status_code: int = 200,
 ):
     values = values or {}
     return _templates(request).TemplateResponse(
@@ -99,7 +101,11 @@ def _setup_response(
             "workspace_name": values.get("workspace_name", ""),
             "workspace_type": values.get("workspace_type", "tmux"),
             "workspace_config": values.get("workspace_config", "{}"),
+            "expected_revision": values.get(
+                "expected_revision", ABSENT_REVISION
+            ),
         },
+        status_code=status_code,
     )
 
 
@@ -158,6 +164,7 @@ async def setup_page(
     request: Request,
     services: AgencyServices = Depends(get_services),
 ):
+    file_snapshot = services.config_store.inspect()
     if services.startup_error is None:
         try:
             snapshot = services.config_store.load()
@@ -165,7 +172,11 @@ async def setup_page(
                 return RedirectResponse("/", status_code=303)
         except Exception:
             pass
-    return _setup_response(request, services)
+    return _setup_response(
+        request,
+        services,
+        values={"expected_revision": file_snapshot.revision},
+    )
 
 
 @router.post("/setup", response_class=HTMLResponse)
@@ -175,6 +186,10 @@ async def setup_process(
 ):
     form = await request.form()
     values = {
+        "expected_revision": (
+            str(form.get("expected_revision", ABSENT_REVISION)).strip()
+            or ABSENT_REVISION
+        ),
         "group_key": str(form.get("group_key", "")).strip().lower(),
         "group_name": str(form.get("group_name", "")).strip(),
         "path": str(form.get("path", "")).strip(),
@@ -273,9 +288,17 @@ async def setup_process(
             },
         )
 
-    if services.config_path.exists():
-        services.config_path.unlink()
-    services.config_store.create(raw)
+    try:
+        services.config_store.replace(values["expected_revision"], raw)
+    except ConfigConflictError:
+        current = services.config_store.inspect()
+        return _setup_response(
+            request,
+            services,
+            values={**values, "expected_revision": current.revision},
+            error="Configuration changed. Reload before saving setup.",
+            status_code=409,
+        )
     request.app.state.services = request.app.state.build_services(
         services.config_path
     )
@@ -396,25 +419,36 @@ async def admin_org_create(
             },
         )
     snapshot = services.config_store.load()
-    updated = create_group(
-        services.config_store,
-        snapshot.revision,
-        key,
-        GroupSettingsPatch(
-            name=name,
-            path=path,
-            default_integration="claude-code",
-        ),
-    )
     roots = _split_lines(str(form.get("sandbox_root", "")))
     tools = [
         item.strip() for item in form.getlist("allowed_tools") if item.strip()
     ]
-    patch_group_settings_state(
+    workspaces_json = str(form.get("workspaces_json", "[]"))
+    try:
+        workspaces = json.loads(workspaces_json)
+        if not isinstance(workspaces, list):
+            raise TypeError
+    except (json.JSONDecodeError, TypeError):
+        return _templates(request).TemplateResponse(
+            request,
+            "admin_org_edit.html",
+            {
+                **_base_admin_context(request, snapshot),
+                "mode": "create",
+                "org_key": key,
+                "org_name": name,
+                "org_path": path,
+                "org_workspaces_json": workspaces_json,
+                "workspace_types_json": _workspace_types_json(request),
+                "warning": "Workspaces payload is invalid.",
+            },
+            status_code=409,
+        )
+    create_group_state(
         services.config_store,
-        updated.revision,
+        snapshot.revision,
         key,
-        GroupSettingsStatePatch(
+        GroupCreateStatePatch(
             name=name,
             path=path,
             default_integration="claude-code",
@@ -425,7 +459,7 @@ async def admin_org_create(
             tool_names=tuple(tools),
             dispatch_enabled=False,
             dispatch_daily_limit=20,
-            workspaces=(),
+            workspaces=tuple(workspaces),
         ),
     )
     request.app.state.reload_groups()
