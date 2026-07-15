@@ -18,6 +18,7 @@ from .store import (
     _canonical_directory,
     _ensure_child_directory,
     _ensure_infrastructure_directory,
+    _is_symlink_or_reparse,
     _lock_path,
     _read_canonical_files,
     _replace_canonical_files,
@@ -66,11 +67,17 @@ class AppliedPublication:
 def prepare_publication(
     stage: MemoryStage,
     *,
-    job_path: Path,
+    job_store: Path,
+    job_path: Path | None = None,
 ) -> PreparedPublication:
     try:
         _validate_resolved_memory(stage.resolved)
-        _validate_job_path(job_path, stage.job_id)
+        job_store = _validate_job_store(job_store)
+        canonical_job_path = _job_path(job_store, stage.job_id)
+        if job_path is not None and Path(job_path).resolve() != canonical_job_path.resolve():
+            raise MemoryPublicationError(
+                "job path must match the canonical file in job store"
+            )
         old_files = _read_canonical_files(_canonical_directory(stage.resolved))
         old_revision = memory_content_revision(old_files)
         if old_revision != stage.base_revision:
@@ -87,7 +94,8 @@ def prepare_publication(
         store_root = _store_root(stage.resolved)
         return PreparedPublication(
             stage=stage,
-            job_path=Path(job_path),
+            job_store=job_store,
+            job_path=canonical_job_path,
             selector=stage.resolved.selector.model_dump(exclude_none=True),
             memory_hash=stage.resolved.memory_hash,
             old_revision=old_revision,
@@ -181,7 +189,6 @@ def apply_publication(
 
 
 def finalize_publication(
-    job_path: Path,
     applied: AppliedPublication,
 ) -> MemoryPublicationReceipt:
     receipt = MemoryPublicationReceipt(
@@ -193,7 +200,7 @@ def finalize_publication(
         published_at=applied.published_at,
         no_change=applied.prepared.no_change,
     )
-    _mark_complete(Path(job_path), receipt)
+    _mark_complete(applied.prepared.job_path, receipt)
     _cleanup(prepared=applied.prepared)
     return receipt
 
@@ -211,27 +218,42 @@ def _rollback_failed_publication(
         )
     if retain_failed_stage_artifacts:
         retain_failed_stage(
-            group_path=_group_path(prepared.job_path),
+            job_store=prepared.job_store,
             job_id=prepared.stage.job_id,
             stage_directory=prepared.stage.directory,
             diff_bytes=prepared.diff_bytes,
         )
-    _mark_failed(
-        prepared.job_path,
-        summary=f"Memory publication failed: {error}",
-    )
+    _mark_failed(prepared.job_path, summary=f"Memory publication failed: {error}")
     _cleanup(prepared=prepared)
 
 
-def _group_path(job_path: Path) -> Path:
-    return Path(job_path).parent.parent.parent
+def _validate_job_store(job_store: Path) -> Path:
+    candidate = Path(job_store)
+    if _is_symlink_or_reparse(candidate):
+        raise MemoryPublicationError("job store is unsafe")
+    if candidate.name != "jobs" or candidate.parent.name != "shared":
+        raise MemoryPublicationError(
+            "job store must be the canonical shared/jobs directory"
+        )
+    resolved = candidate.resolve()
+    if resolved.name != "jobs" or resolved.parent.name != "shared":
+        raise MemoryPublicationError(
+            "job store must be the canonical shared/jobs directory"
+        )
+    if not resolved.is_dir():
+        raise MemoryPublicationError("job store must be an existing directory")
+    return resolved
 
 
-def _validate_job_path(job_path: Path, expected_job_id: str) -> Path:
+def _job_path(job_store: Path, expected_job_id: str) -> Path:
     safe_job_id = _validate_job_id(expected_job_id)
-    candidate = Path(job_path)
-    if candidate.name != f"{safe_job_id}.yaml":
-        raise MemoryPublicationError("job path must match the staged job id")
+    candidate = Path(job_store) / f"{safe_job_id}.yaml"
+    if _is_symlink_or_reparse(candidate):
+        raise MemoryPublicationError("job path is unsafe")
+    if candidate.parent.resolve() != Path(job_store).resolve():
+        raise MemoryPublicationError("job path escapes job store")
+    if not candidate.is_file():
+        raise MemoryPublicationError("job path must be a direct file in job store")
     return candidate
 
 

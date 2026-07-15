@@ -56,7 +56,7 @@ class RecoveryFixture:
         self.canonical_is_new = False
 
     def crash_at(self, phase: str) -> None:
-        prepared = prepare_publication(self.stage, job_path=self.job_path)
+        prepared = prepare_publication(self.stage, job_store=self.job_store)
         try:
             apply_publication(prepared, crash_at=phase)
         except Exception:

@@ -31,16 +31,16 @@ class JobArtifact:
 
 def retain_failed_stage(
     *,
-    group_path: Path,
+    job_store: Path,
     job_id: str,
     stage_directory: Path,
     diff_bytes: bytes | None,
 ) -> list[JobArtifact]:
+    job_store = _validate_job_store(job_store)
     safe_job_id = _validate_job_id(job_id)
     group_root = _ensure_actual_directory(
-        Path(group_path),
+        job_store.parent.parent,
         label="artifacts",
-        create=True,
     )
     shared_root = _ensure_child_directory(
         group_root,
@@ -88,6 +88,20 @@ def retain_failed_stage(
             )
         )
     return artifacts
+
+
+def _validate_job_store(job_store: Path) -> Path:
+    candidate = Path(job_store)
+    if _is_symlink_or_reparse(candidate):
+        raise ValueError("job store is unsafe")
+    if candidate.name != "jobs" or candidate.parent.name != "shared":
+        raise ValueError("job store must be the canonical shared/jobs directory")
+    resolved = candidate.resolve()
+    if resolved.name != "jobs" or resolved.parent.name != "shared":
+        raise ValueError("job store must be the canonical shared/jobs directory")
+    if not resolved.is_dir():
+        raise ValueError("job store must be an existing directory")
+    return resolved
 
 
 def _read_stage_files(directory: Path) -> dict[str, bytes]:

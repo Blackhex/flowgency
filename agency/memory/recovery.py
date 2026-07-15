@@ -158,6 +158,7 @@ def _prepared_from_payload(
             directory=stage_path,
             base_revision=str(payload["old_revision"]),
         ),
+        job_store=job_store,
         job_path=job_path,
         selector=selector_payload,
         memory_hash=memory_hash,

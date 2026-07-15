@@ -33,6 +33,7 @@ class MemoryStage:
 @dataclass(frozen=True)
 class PreparedPublication:
     stage: MemoryStage
+    job_store: Path
     job_path: Path
     selector: dict[str, object]
     memory_hash: str
