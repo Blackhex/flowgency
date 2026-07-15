@@ -65,7 +65,19 @@ def transition_job(
 
 
 def cancel_job(path: Path, *, expected: str = "queued") -> JobRecord:
-    return transition_job(path, expected, "cancelled")
+    with exclusive_lock(job_lock_path(path), wait=True):
+        record = read_job(path)
+        if record.status not in {"queued", "waiting_for_memory"}:
+            raise InvalidJobTransition(
+                "Only queued or waiting_for_memory jobs can be cancelled"
+            )
+        if expected != "queued" and record.status != expected:
+            raise InvalidJobTransition(
+                f"Expected job status {expected!r}, found {record.status!r}"
+            )
+        updated = replace(record, status="cancelled")
+        write_job(path, updated)
+        return updated
 
 
 def active_jobs(group_path: Path, agent_name: str | None = None) -> list[JobRecord]:

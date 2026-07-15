@@ -105,6 +105,9 @@ def test_registry_runtime_capabilities_surface_is_fail_closed():
         if name == "copilot":
             assert integration.runtime_capabilities.path_modes == frozenset({"restricted", "unrestricted"})
             assert integration.runtime_capabilities.tool_modes == frozenset({"all", "allowlist"})
+        elif name == "script":
+            assert integration.runtime_capabilities.path_modes == frozenset({"unrestricted"})
+            assert integration.runtime_capabilities.tool_modes == frozenset({"all"})
         else:
             assert integration.runtime_capabilities.path_modes == frozenset()
             assert integration.runtime_capabilities.tool_modes == frozenset()

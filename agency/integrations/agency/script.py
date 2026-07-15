@@ -11,6 +11,7 @@ from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     parse_identity_frontmatter as _parse_frontmatter,
 )
+from agency.integrations.models import RuntimeCapabilities
 from agency.integrations.models import IntegrationRunRequest
 
 
@@ -21,6 +22,10 @@ class ScriptIntegration(BaseIntegration):
     supports_ai_backend = False
     detect_priority = 1000  # Never auto-detects
     projector = BaseIntegration._default_projector("agent.md")
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"unrestricted"}),
+        tool_modes=frozenset({"all"}),
+    )
 
     def __init__(self, integration_config: dict | None = None):
         self._config = integration_config or {}

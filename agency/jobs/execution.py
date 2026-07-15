@@ -43,17 +43,15 @@ def resolve_job_context(spec):
     integration = get_integration(spec.integration_name)
     if hasattr(integration, "with_config") and spec.integration_config:
         integration = integration.with_config(spec.integration_config)
-    launch_dir = None
-    if spec.config_revision == "compat-submission-resolved":
-        launch_dir = Path(spec.agent_dir)
     return SimpleNamespace(
-        group_path=Path(spec.group_path),
-        agent_dir=Path(spec.agent_dir),
+        group_path=Path(spec.workspace_dir),
+        workspace_dir=Path(spec.workspace_dir),
+        agent_dir=Path(spec.workspace_dir),
         integration=integration,
         timeout=spec.runtime_policy.timeout,
         runtime_policy=runtime_policy,
         sandbox_root=None,
-        launch_dir=launch_dir,
+        launch_dir=None,
     )
 
 
@@ -144,6 +142,8 @@ def execute_job(job_path: Path) -> JobRecord:
             git_root = Path(context.sandbox_root.roots[0])
         elif runtime_policy.sandbox_roots:
             git_root = Path(runtime_policy.sandbox_roots[0])
+        elif getattr(context, "workspace_dir", None):
+            git_root = Path(context.workspace_dir)
         elif context.agent_dir:
             git_root = Path(context.agent_dir)
         # Record HEAD before the run so committed work is visible afterwards. A
@@ -157,16 +157,14 @@ def execute_job(job_path: Path) -> JobRecord:
         stderr_path = log_dir / f"{stem}.err"
         prompt_path.write_text(record.spec.task_input, encoding="utf-8")
         request = IntegrationRunRequest(
-            workspace_dir=Path(spec.agent_dir),
+            workspace_dir=Path(spec.workspace_dir),
             launch_dir=launch_view,
             task_file=prompt_path,
             timeout=getattr(context, "timeout", spec.runtime_policy.timeout),
             runtime_policy=runtime_policy,
-            skill=None if spec.config_revision == "compat-submission-resolved" else spec.skill,
-            skill_arguments=()
-            if spec.config_revision == "compat-submission-resolved"
-            else spec.skill_arguments,
-            enforce_validation=(spec.config_revision != "compat-submission-resolved"),
+            skill=spec.skill,
+            skill_arguments=spec.skill_arguments,
+            enforce_validation=True,
         )
         result = integration.run(request)
         stdout_path.write_text(result.stdout, encoding="utf-8")

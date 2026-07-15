@@ -157,6 +157,42 @@ def configured_spec(tmp_path: Path, *, agent="product") -> JobSpec:
     )
 
 
+def _compat_spec_without_resolved_snapshots(tmp_path: Path) -> JobSpec:
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
+    return JobSpec.create(
+        config_path=config,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        integration_name="copilot",
+        integration_config={"command": "echo ok"},
+        config_revision="compat-unresolved",
+        blueprint={
+            "key": "superseded",
+            "source_digest": "digest-1",
+            "integration": "copilot",
+            "projector_version": "v1",
+            "cache_path": "C:/cache/copilot/v1/digest-1",
+        },
+        runtime_policy={
+            "timeout": 1800,
+            "sandbox_mode": "restricted",
+            "sandbox_roots": (str((tmp_path / "repo").resolve()),),
+            "tool_mode": "allowlist",
+            "tool_names": ("shell", "write"),
+        },
+        memory={
+            "selector": {"scope": "run", "version": 1, "job": "placeholder"},
+            "canonical_json": '{"job":"placeholder","scope":"run","version":1}',
+            "memory_hash": "memory-hash-superseded",
+            "path": "C:/memory/memory-hash-superseded",
+        },
+        prompt_source={"type": "saved_prompt", "path": str((tmp_path / "agents" / "newsletter" / "shared" / "prompts" / "daily-review.md"))},
+        prompt_content="Run it",
+    )
+
+
 def test_submit_persists_then_launches(tmp_path):
     spec = configured_spec(tmp_path)
     launcher = Mock()
@@ -168,6 +204,21 @@ def test_submit_persists_then_launches(tmp_path):
     assert record.status == "queued"
     assert launcher.launch.call_args.args == (handle.path,)
     assert handle.worker_pid == 4321
+
+
+def test_submit_compat_spec_persists_validated_canonical_snapshot_without_bypass_marker(tmp_path):
+    spec = _compat_spec_without_resolved_snapshots(tmp_path)
+    launcher = Mock()
+    launcher.launch.return_value = LaunchResult(worker_pid=4321)
+
+    handle = submit_job(spec, launcher)
+
+    record = read_job(handle.path)
+    assert record.spec.config_revision not in {"compat-unresolved", "compat-submission-resolved"}
+    assert record.spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
+    assert record.spec.agent_dir == record.spec.workspace_dir
+    assert record.spec.skill == "daily-review"
+    assert record.spec.routine_id == "daily-review"
 
 
 def test_submit_marks_record_failed_when_launch_fails(tmp_path):
@@ -209,6 +260,31 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
     assert spec.integration_config == {"command": "echo first"}
     assert spec.blueprint.source_digest
     assert spec.memory.selector["scope"] == "agent"
+    assert spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
+    assert spec.agent_dir == spec.workspace_dir
+
+
+def test_resolve_job_request_snapshots_workspace_dir_despite_external_agent_path_inputs(tmp_path):
+    config = _write_config(tmp_path)
+    _write_blueprint(tmp_path / "agent-library")
+
+    spec = resolve_job_request(
+        JobRequest(
+            config_path=config,
+            group_key="newsletter",
+            agent_name="builder",
+            trigger="manual_prompt",
+            task_input="Run it",
+            routine_id="daily-review",
+        ),
+        config_store=ConfigStore(config),
+        library=BlueprintLibrary(tmp_path / "agent-library"),
+        cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+        integrations={"copilot": FakeIntegration()},
+    )
+
+    assert spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
+    assert spec.agent_dir == spec.workspace_dir
 
 
 def test_submit_releases_cache_pin_when_launch_fails(tmp_path):

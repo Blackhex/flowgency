@@ -1,12 +1,13 @@
-from dataclasses import replace
 from pathlib import Path
 
 from agency.blueprints.cache import active_pins
-from agency.config import get_agent_dir, get_sandbox_root, load_config_path, normalize_agents
-from agency.integrations import detect_integration, get_integration
+from agency.blueprints import BlueprintLibrary, CompilationCache
+from agency.configuration import ConfigStore
+from agency.integrations import REGISTRY
 
 from .launcher import JobLauncher, default_launcher
-from .models import BlueprintRef, JobHandle, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from .models import JobHandle, JobRecord, JobRequest, JobSpec
+from .resolution import resolve_job_request
 from .store import job_path, write_job
 
 
@@ -16,100 +17,69 @@ class JobSubmissionError(RuntimeError):
         self.job_path = job_path
 
 
+def _projector_registry() -> dict[str, object]:
+    return {
+        name: integration.projector
+        for name, integration in REGISTRY.items()
+        if integration.projector is not None
+    }
+
+
+def _resolve_request(request: JobRequest) -> JobSpec:
+    config_store = ConfigStore(Path(request.config_path))
+    snapshot = config_store.load()
+    config_dir = snapshot.path.resolve().parent
+    library_root = snapshot.config.agency.agent_library or (config_dir / "agent-library")
+    cache_root = snapshot.config.agency.compilation_cache or (config_dir / "compiled-agents")
+    return resolve_job_request(
+        request,
+        config_store=config_store,
+        library=BlueprintLibrary(Path(library_root)),
+        cache=CompilationCache(Path(cache_root), _projector_registry()),
+        integrations=REGISTRY,
+    )
+
+
 def _resolve_superseded_spec(spec: JobSpec) -> JobSpec:
     if spec.config_revision != "compat-unresolved":
         return spec
-
-    config = load_config_path(Path(spec.config_path))
-    raw_group = config.get("groups", {}).get(spec.group_key)
-    if raw_group is None:
-        return spec
-    group_path = Path(raw_group["path"]).resolve()
-    agents = normalize_agents(
-        raw_group.get("agents", []),
-        raw_group.get("default_integration", "claude-code"),
-    )
-    agent_config = next(
-        (agent for agent in agents if agent["name"] == spec.agent_name),
-        None,
-    )
-    if agent_config is None:
-        return spec
-    group = {**raw_group, "path": group_path, "agents_full": agents}
-    agent_dir = get_agent_dir(group, spec.agent_name).resolve()
-    integration = detect_integration(agent_dir) or get_integration(
-        agent_config.get(
-            "integration", raw_group.get("default_integration", "claude-code")
+    resolved = _resolve_request(
+        JobRequest(
+            config_path=Path(spec.config_path),
+            group_key=spec.group_key,
+            agent_name=spec.agent_name,
+            trigger=spec.trigger,
+            task_input=spec.task_input,
+            job_id=spec.job_id,
+            routine_id=spec.routine_id,
+            timeout_override=spec.timeout_override,
+            trigger_context=spec.trigger_context,
+            superseded_prompt_source=spec.prompt_source,
         )
     )
-    dispatch = raw_group.get("dispatch", {})
-    configured_timeout = dispatch.get("timeout", 1800)
-    agent_dispatch = dispatch.get("agents", {}).get(spec.agent_name, {})
-    if isinstance(agent_dispatch, dict):
-        configured_timeout = agent_dispatch.get("timeout", configured_timeout)
-    timeout = spec.timeout_override if spec.timeout_override is not None else configured_timeout
-
-    sandbox = get_sandbox_root(raw_group)
-    if sandbox and sandbox.roots:
-        sandbox_mode = "restricted"
-        sandbox_roots = tuple(str(Path(root).resolve()) for root in sandbox.roots)
-    else:
-        sandbox_mode = "unrestricted"
-        sandbox_roots = ()
-    allowed_tools = tuple(getattr(sandbox, "allowed_tools", ()) or ()) if sandbox else ()
-    tool_mode = "allowlist" if allowed_tools else "all"
-    routine_id = spec.routine_id
-    skill = spec.skill
-    if spec.trigger in {"manual_prompt", "scheduled_prompt"}:
-        if not routine_id:
-            prompt_source = spec.prompt_source or {}
-            prompt_path = prompt_source.get("path")
-            if isinstance(prompt_path, str) and prompt_path.strip():
-                routine_id = Path(prompt_path).stem.strip() or "superseded-routine"
-            else:
-                routine_id = "superseded-routine"
-        if not skill:
-            skill = routine_id
-
     return JobSpec(
-        schema_version=spec.schema_version,
-        job_id=spec.job_id,
-        config_path=spec.config_path,
-        config_revision="compat-submission-resolved",
-        group_key=spec.group_key,
-        group_path=str(group_path),
-        agent_name=spec.agent_name,
-        agent_dir=str(agent_dir),
-        trigger=spec.trigger,
-        integration_name=integration.name,
-        integration_config=dict(agent_config.get("integration_config") or {}),
-        blueprint=BlueprintRef(
-            key="compat-direct-agent-dir",
-            source_digest="compat-direct-agent-dir",
-            integration=integration.name,
-            projector_version="v0",
-            cache_path=str(agent_dir),
-        ),
-        routine_id=routine_id,
-        skill=skill,
-        skill_arguments=spec.skill_arguments,
-        task_input=spec.task_input,
-        runtime_policy=RuntimePolicySnapshot(
-            timeout=timeout,
-            sandbox_mode=sandbox_mode,
-            sandbox_roots=sandbox_roots,
-            tool_mode=tool_mode,
-            tool_names=allowed_tools,
-        ),
-        memory=MemoryBinding(
-            selector=spec.memory.selector,
-            canonical_json=spec.memory.canonical_json,
-            memory_hash=spec.memory.memory_hash,
-            path=spec.memory.path,
-        ),
-        trigger_context=spec.trigger_context,
-        prompt_source=spec.prompt_source,
-        timeout_override=spec.timeout_override,
+        schema_version=resolved.schema_version,
+        job_id=resolved.job_id,
+        config_path=resolved.config_path,
+        config_revision=resolved.config_revision,
+        group_key=resolved.group_key,
+        group_path=resolved.group_path,
+        agent_name=resolved.agent_name,
+        workspace_dir=resolved.workspace_dir,
+        agent_dir=resolved.agent_dir,
+        trigger=resolved.trigger,
+        integration_name=resolved.integration_name,
+        integration_config=resolved.integration_config,
+        blueprint=resolved.blueprint,
+        routine_id=resolved.routine_id,
+        skill=resolved.skill,
+        skill_arguments=resolved.skill_arguments,
+        task_input=resolved.task_input,
+        runtime_policy=resolved.runtime_policy,
+        memory=resolved.memory,
+        trigger_context=resolved.trigger_context,
+        prompt_source=resolved.prompt_source,
+        timeout_override=resolved.timeout_override,
         created_at=spec.created_at,
     )
 
@@ -117,32 +87,45 @@ def _resolve_superseded_spec(spec: JobSpec) -> JobSpec:
 def submit_job(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
     spec = _resolve_superseded_spec(spec)
     spec.validate()
-    group_path = Path(spec.group_path)
+    group_path = Path(spec.workspace_dir)
     artifact = spec.blueprint.to_artifact()
     path = job_path(group_path, spec.job_id)
     record = JobRecord.from_spec(spec)
-    pin_path = artifact.ref and Path()
-    try:
-        pin_path = active_pins(spec.blueprint.cache_root, artifact.ref)
-    except Exception:
-        pin_path = ()
     from agency.blueprints.cache import pin_artifact, release_pin
 
-    should_pin = spec.config_revision != "compat-submission-resolved"
-    if should_pin:
-        pin_artifact(spec.blueprint.cache_root, artifact.ref, spec.job_id)
+    try:
+        active_pins(spec.blueprint.cache_root, artifact.ref)
+    except Exception:
+        pass
+    pin_artifact(spec.blueprint.cache_root, artifact.ref, spec.job_id)
     selected_launcher = launcher or default_launcher()
     try:
         write_job(path, record)
         result = selected_launcher.launch(path)
     except Exception as error:
-        if should_pin:
-            release_pin(spec.blueprint.cache_root, artifact.ref, spec.job_id)
-        failed = replace(
-            record,
+        release_pin(spec.blueprint.cache_root, artifact.ref, spec.job_id)
+        failed = JobRecord(
+            spec=record.spec,
             status="failed",
+            worker_pid=record.worker_pid,
+            started_at=record.started_at,
+            completed_at=record.completed_at,
+            stdout_path=record.stdout_path,
+            stderr_path=record.stderr_path,
+            exit_code=record.exit_code,
+            duration_seconds=record.duration_seconds,
+            changed_files=record.changed_files,
             execution_summary=f"Launch error: {error}",
+            base_sha=record.base_sha,
+            memory_publication=record.memory_publication,
         )
         write_job(path, failed)
         raise JobSubmissionError(str(error), path) from error
     return JobHandle(spec.job_id, "queued", path, result.worker_pid)
+
+
+def submit_job_request(
+    request: JobRequest,
+    launcher: JobLauncher | None = None,
+) -> JobHandle:
+    return submit_job(_resolve_request(request), launcher)

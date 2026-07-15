@@ -159,6 +159,7 @@ class JobSpec:
     group_key: str
     group_path: str
     agent_name: str
+    workspace_dir: str
     agent_dir: str
     trigger: str
     integration_name: str
@@ -217,15 +218,17 @@ class JobSpec:
             prompt_source=prompt_source,
             decision_context=decision_context,
         )
-        resolved_agent_dir = Path(agent_dir) if agent_dir is not None else resolved_group_path / agent_name
+        resolved_workspace_dir = resolved_group_path.resolve(strict=False)
+        resolved_agent_dir = Path(agent_dir) if agent_dir is not None else resolved_workspace_dir
         spec = cls(
             schema_version=SCHEMA_VERSION,
             job_id=uuid4().hex,
             config_revision=config_revision or "compat-unresolved",
             config_path=str(config_path.resolve()),
             group_key=group_key,
-            group_path=str(resolved_group_path.resolve(strict=False)),
+            group_path=str(resolved_workspace_dir),
             agent_name=agent_name,
+            workspace_dir=str(resolved_workspace_dir),
             agent_dir=str(resolved_agent_dir.resolve(strict=False)),
             trigger=trigger,
             integration_name=integration_name or "script",
@@ -348,6 +351,7 @@ class JobSpec:
             "group_key": self.group_key,
             "group_path": self.group_path,
             "agent_name": self.agent_name,
+            "workspace_dir": self.workspace_dir,
             "agent_dir": self.agent_dir,
             "trigger": self.trigger,
             "integration_name": self.integration_name,
@@ -376,6 +380,8 @@ class JobSpec:
                 raise ValueError(
                     "decision jobs require routine_id and skill to be null"
                 )
+        if self.agent_dir != self.workspace_dir:
+            raise ValueError("agent_dir is deprecated and must match workspace_dir")
 
     @property
     def prompt_content(self) -> str:
@@ -384,6 +390,10 @@ class JobSpec:
     @property
     def decision_context(self) -> dict[str, Any] | None:
         return self.trigger_context
+
+    @property
+    def workspace_path(self) -> Path:
+        return Path(self.workspace_dir)
 
     def _is_compat_prompt_spec(self) -> bool:
         if self.schema_version != SCHEMA_VERSION:

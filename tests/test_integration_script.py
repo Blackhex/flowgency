@@ -59,8 +59,6 @@ def test_validate_run_requires_runtime_placeholders(tmp_path):
     issues = integration.validate_run(request)
 
     assert [issue.code for issue in issues] == [
-        "unsupported-path-policy",
-        "unsupported-tool-policy",
         "unsupported-skill-activation",
         "script-missing-runtime-placeholders",
     ]
@@ -117,7 +115,5 @@ def test_run_rejects_invalid_typed_request_before_script_launch(tmp_path):
         integration.run(request)
 
     assert [issue.code for issue in excinfo.value.issues] == [
-        "unsupported-path-policy",
-        "unsupported-tool-policy",
         "unsupported-skill-activation",
     ]

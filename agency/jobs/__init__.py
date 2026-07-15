@@ -19,7 +19,7 @@ from .models import (
 from .reconciliation import reconcile_jobs
 from .resolution import JobValidationError, resolve_job_request
 from .store import active_jobs, cancel_job
-from .submission import JobSubmissionError, submit_job
+from .submission import JobSubmissionError, submit_job, submit_job_request
 
 __all__ = [
     "DetachedProcessLauncher",
@@ -44,4 +44,5 @@ __all__ = [
     "retain_failed_stage",
     "RuntimePolicySnapshot",
     "submit_job",
+    "submit_job_request",
 ]

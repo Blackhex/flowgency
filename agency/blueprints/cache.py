@@ -221,7 +221,13 @@ def validate_artifact(
 
 def _publish_directory(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(source, destination)
+    try:
+        os.replace(source, destination)
+    except PermissionError:
+        if destination.exists():
+            raise
+        shutil.copytree(source, destination)
+        shutil.rmtree(source, ignore_errors=True)
 
 
 def _quarantine_artifact(root: Path, ref: CacheRef, entry_path: Path) -> None:

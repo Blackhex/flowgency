@@ -35,15 +35,45 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         "pathlib.Path(sys.argv[2]).write_text('done')\n"
     )
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(yaml.safe_dump({"groups": {"test": {
-        "name": "Test", "path": str(group_path),
-        "agents": [{
-            "name": "product", "integration": "script",
-            "integration_config": {
-                "command": _shell_command([sys.executable, helper, gate, sentinel]),
+    agent_library = tmp_path / "agent-library"
+    blueprint = agent_library / "product-blueprint"
+    skill = blueprint / ".agents" / "skills" / "run-product"
+    skill.mkdir(parents=True)
+    (blueprint / "AGENTS.md").write_text("# Product\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: run-product\ndescription: Run product work.\n---\n\nRun it.\n",
+        encoding="utf-8",
+    )
+    config_path.write_text(yaml.safe_dump({
+        "schema_version": 2,
+        "agency": {
+            "title": "Agency",
+            "default_group": "test",
+            "ai_backend": "claude-code",
+            "agent_library": str(agent_library),
+            "compilation_cache": str(tmp_path / "compiled-agents"),
+            "memory_store": str(tmp_path / "memory"),
+        },
+        "groups": {"test": {
+            "name": "Test",
+            "path": str(group_path),
+            "default_integration": "script",
+            "runtime": {
+                "timeout": 1800,
+                "sandbox": {"mode": "unrestricted", "roots": []},
+                "tools": {"mode": "all", "names": []},
             },
-        }],
-    }}}))
+            "agents": [{
+                "name": "product",
+                "blueprint": "product-blueprint",
+                "integration": "script",
+                "integration_config": {
+                    "command": _shell_command([sys.executable, helper, gate, sentinel]),
+                },
+                "routines": [],
+            }],
+        }},
+    }), encoding="utf-8")
     job_id_file = tmp_path / "job-id"
     parent_pid_file = tmp_path / "parent-pid"
     submitter_script = tmp_path / "submitter.py"
@@ -52,8 +82,8 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         "from agency.jobs import JobSpec, submit_job\n"
         "config, job_id_file, pid_file = map(pathlib.Path, sys.argv[1:])\n"
         "spec = JobSpec.create(config_path=config, group_key='test', "
-        "agent_name='product', trigger='manual_prompt', "
-        "prompt_source={'type': 'test'}, prompt_content='run')\n"
+        "agent_name='product', trigger='decision', "
+        "prompt_source={'type': 'decision'}, prompt_content='run')\n"
         "handle = submit_job(spec)\n"
         "job_id_file.write_text(handle.job_id)\n"
         "pid_file.write_text(str(os.getpid()))\n"

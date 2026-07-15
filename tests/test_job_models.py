@@ -13,6 +13,7 @@ from agency.jobs.models import (
 from agency.jobs.store import (
     InvalidJobTransition,
     active_jobs,
+    cancel_job,
     job_path,
     read_job,
     transition_job,
@@ -126,6 +127,13 @@ def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_p
             )
 
 
+def test_job_spec_exposes_workspace_dir_as_authoritative_path(tmp_path):
+    spec = make_spec(tmp_path)
+
+    assert spec.workspace_dir == spec.group_path
+    assert spec.agent_dir == spec.workspace_dir
+
+
 def test_decision_jobs_require_null_routine_and_skill(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
@@ -204,6 +212,33 @@ def test_active_jobs_includes_waiting_for_memory(tmp_path):
         "waiting_for_memory",
         "running",
     }
+
+
+def test_cancel_job_transitions_waiting_for_memory_without_expected_argument(tmp_path):
+    spec = make_spec(tmp_path)
+    path = job_path(tmp_path / "group", spec.job_id)
+    write_job(path, JobRecord.from_spec(spec))
+    transition_job(path, "queued", "waiting_for_memory")
+
+    cancelled = cancel_job(path)
+
+    assert cancelled.status == "cancelled"
+
+
+@pytest.mark.parametrize("status", ["running", "complete", "failed", "cancelled"])
+def test_cancel_job_rejects_running_and_terminal_states(tmp_path, status):
+    spec = make_spec(tmp_path)
+    path = job_path(tmp_path / "group", spec.job_id)
+    write_job(path, JobRecord.from_spec(spec))
+
+    if status == "complete":
+        transition_job(path, "queued", "running")
+        transition_job(path, "running", "complete")
+    elif status != "queued":
+        transition_job(path, "queued", status)
+
+    with pytest.raises(InvalidJobTransition):
+        cancel_job(path)
 
 
 def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):

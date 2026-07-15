@@ -20,6 +20,8 @@ from agency.app import (
 from agency.config import load_config_path, save_config_path
 from agency.dispatch.install import install_timer, uninstall_timer, get_timer_status
 from agency.jobs import JobSpec, JobSubmissionError, submit_job
+submit_job = submit_job
+
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
 from agency.proposals import (
