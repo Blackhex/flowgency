@@ -46,7 +46,6 @@ def resolve_job_context(spec):
     return SimpleNamespace(
         group_path=Path(spec.workspace_dir),
         workspace_dir=Path(spec.workspace_dir),
-        agent_dir=Path(spec.workspace_dir),
         integration=integration,
         timeout=spec.runtime_policy.timeout,
         runtime_policy=runtime_policy,
@@ -135,8 +134,8 @@ def execute_job(job_path: Path) -> JobRecord:
         if launch_view is None:
             launch_view = create_launch_view(artifact, launch_dir)
         # The capture must be tied to the one root the job actually ran in: prefer
-        # the sandbox root the integration executes against, falling back to the
-        # agent directory. Both selection and rev-parse are best-effort.
+        # the sandbox root the integration executes against, then the persisted
+        # runtime policy root, then the durable workspace root.
         git_root = None
         if getattr(context, "sandbox_root", None) and getattr(context.sandbox_root, "roots", ()):
             git_root = Path(context.sandbox_root.roots[0])
@@ -144,8 +143,6 @@ def execute_job(job_path: Path) -> JobRecord:
             git_root = Path(runtime_policy.sandbox_roots[0])
         elif getattr(context, "workspace_dir", None):
             git_root = Path(context.workspace_dir)
-        elif context.agent_dir:
-            git_root = Path(context.agent_dir)
         # Record HEAD before the run so committed work is visible afterwards. A
         # fleet whose agents must commit every atomic change leaves a clean tree,
         # so working-tree-only would miss the rule and capture only the exception.

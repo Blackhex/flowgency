@@ -185,7 +185,6 @@ def resolve_job_request(
         group_path=str(group.path.resolve()),
         agent_name=request.agent_name,
         workspace_dir=str(group.path.resolve()),
-        agent_dir=str(group.path.resolve()),
         trigger=request.trigger,
         integration_name=agent.integration,
         integration_config=dict(agent.integration_config),

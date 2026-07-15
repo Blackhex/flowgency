@@ -1,8 +1,12 @@
 from pathlib import Path
+import inspect
 
 import pytest
 import yaml
 
+import agency.jobs.execution as execution_module
+import agency.jobs.models as job_models_module
+import agency.jobs.store as store_module
 from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
@@ -131,7 +135,78 @@ def test_job_spec_exposes_workspace_dir_as_authoritative_path(tmp_path):
     spec = make_spec(tmp_path)
 
     assert spec.workspace_dir == spec.group_path
-    assert spec.agent_dir == spec.workspace_dir
+    assert spec.workspace_path == Path(spec.workspace_dir)
+
+
+def test_job_spec_serialization_omits_agent_dir_and_property_remains_compat_alias(tmp_path):
+    spec = make_spec(tmp_path)
+
+    payload = spec.to_dict()
+
+    assert "agent_dir" not in payload
+    assert spec.agent_dir == spec.workspace_path
+
+
+def test_job_spec_create_rejects_agent_dir_constructor_input(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("groups: {}\n", encoding="utf-8")
+
+    with pytest.raises(TypeError):
+        JobSpec.create(
+            config_path=config_path,
+            group_key="newsletter",
+            agent_name="product",
+            trigger="manual_prompt",
+            integration_name="copilot",
+            integration_config={},
+            config_revision="cfg-1",
+            blueprint=BlueprintRef(
+                key="writer",
+                source_digest="digest-1",
+                integration="copilot",
+                projector_version="v1",
+                cache_path="C:/cache/copilot/v1/digest-1",
+            ),
+            runtime_policy=RuntimePolicySnapshot(
+                timeout=1800,
+                sandbox_mode="restricted",
+                sandbox_roots=("C:/repo",),
+                tool_mode="allowlist",
+                tool_names=("shell",),
+            ),
+            memory=MemoryBinding(
+                selector={"scope": "run", "version": 1, "job": "placeholder"},
+                canonical_json='{"job":"placeholder","scope":"run","version":1}',
+                memory_hash="memory-hash-1",
+                path="C:/memory/memory-hash-1",
+            ),
+            routine_id="routine-1",
+            skill="daily-review",
+            skill_arguments=(),
+            task_input="run",
+            trigger_context={"source": "test"},
+            agent_dir=tmp_path / "agent",
+        )
+
+
+def test_job_spec_from_dict_ignores_superseded_agent_dir_when_workspace_matches(tmp_path):
+    spec = make_spec(tmp_path)
+    payload = spec.to_dict()
+    payload["agent_dir"] = payload["workspace_dir"]
+
+    restored = JobSpec.from_dict(payload)
+
+    assert restored.workspace_dir == spec.workspace_dir
+    assert restored.agent_dir == spec.workspace_path
+
+
+def test_job_spec_from_dict_rejects_superseded_agent_dir_mismatch(tmp_path):
+    spec = make_spec(tmp_path)
+    payload = spec.to_dict()
+    payload["agent_dir"] = str((tmp_path / "different").resolve())
+
+    with pytest.raises(ValueError, match="agent_dir is deprecated"):
+        JobSpec.from_dict(payload)
 
 
 def test_decision_jobs_require_null_routine_and_skill(tmp_path):
@@ -223,6 +298,19 @@ def test_cancel_job_transitions_waiting_for_memory_without_expected_argument(tmp
     cancelled = cancel_job(path)
 
     assert cancelled.status == "cancelled"
+
+
+def test_jobs_context_module_is_removed_from_live_package_surface():
+    assert not Path(execution_module.__file__).with_name("context.py").exists()
+    assert "jobs.context" not in inspect.getsource(execution_module)
+    assert "jobs.context" not in inspect.getsource(store_module)
+    assert "jobs.context" not in inspect.getsource(job_models_module)
+
+
+def test_cancel_job_signature_no_longer_accepts_expected_parameter():
+    signature = inspect.signature(cancel_job)
+
+    assert list(signature.parameters) == ["path"]
 
 
 @pytest.mark.parametrize("status", ["running", "complete", "failed", "cancelled"])

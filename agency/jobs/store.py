@@ -64,16 +64,12 @@ def transition_job(
         return updated
 
 
-def cancel_job(path: Path, *, expected: str = "queued") -> JobRecord:
+def cancel_job(path: Path) -> JobRecord:
     with exclusive_lock(job_lock_path(path), wait=True):
         record = read_job(path)
         if record.status not in {"queued", "waiting_for_memory"}:
             raise InvalidJobTransition(
                 "Only queued or waiting_for_memory jobs can be cancelled"
-            )
-        if expected != "queued" and record.status != expected:
-            raise InvalidJobTransition(
-                f"Expected job status {expected!r}, found {record.status!r}"
             )
         updated = replace(record, status="cancelled")
         write_job(path, updated)

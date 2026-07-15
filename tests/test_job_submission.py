@@ -216,7 +216,7 @@ def test_submit_compat_spec_persists_validated_canonical_snapshot_without_bypass
     record = read_job(handle.path)
     assert record.spec.config_revision not in {"compat-unresolved", "compat-submission-resolved"}
     assert record.spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
-    assert record.spec.agent_dir == record.spec.workspace_dir
+    assert record.spec.agent_dir == record.spec.workspace_path
     assert record.spec.skill == "daily-review"
     assert record.spec.routine_id == "daily-review"
 
@@ -261,7 +261,7 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
     assert spec.blueprint.source_digest
     assert spec.memory.selector["scope"] == "agent"
     assert spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
-    assert spec.agent_dir == spec.workspace_dir
+    assert spec.agent_dir == spec.workspace_path
 
 
 def test_resolve_job_request_snapshots_workspace_dir_despite_external_agent_path_inputs(tmp_path):
@@ -284,7 +284,7 @@ def test_resolve_job_request_snapshots_workspace_dir_despite_external_agent_path
     )
 
     assert spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
-    assert spec.agent_dir == spec.workspace_dir
+    assert spec.agent_dir == spec.workspace_path
 
 
 def test_submit_releases_cache_pin_when_launch_fails(tmp_path):

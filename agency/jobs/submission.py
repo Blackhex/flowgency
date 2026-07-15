@@ -66,7 +66,6 @@ def _resolve_superseded_spec(spec: JobSpec) -> JobSpec:
         group_path=resolved.group_path,
         agent_name=resolved.agent_name,
         workspace_dir=resolved.workspace_dir,
-        agent_dir=resolved.agent_dir,
         trigger=resolved.trigger,
         integration_name=resolved.integration_name,
         integration_config=resolved.integration_config,

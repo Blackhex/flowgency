@@ -160,7 +160,6 @@ class JobSpec:
     group_path: str
     agent_name: str
     workspace_dir: str
-    agent_dir: str
     trigger: str
     integration_name: str
     integration_config: dict[str, Any]
@@ -196,7 +195,6 @@ class JobSpec:
         task_input: str | None = None,
         trigger_context: dict[str, Any] | None = None,
         group_path: Path | str | None = None,
-        agent_dir: Path | str | None = None,
         prompt_source: dict[str, Any] | None = None,
         prompt_content: str | None = None,
         timeout_override: int | None = None,
@@ -219,7 +217,6 @@ class JobSpec:
             decision_context=decision_context,
         )
         resolved_workspace_dir = resolved_group_path.resolve(strict=False)
-        resolved_agent_dir = Path(agent_dir) if agent_dir is not None else resolved_workspace_dir
         spec = cls(
             schema_version=SCHEMA_VERSION,
             job_id=uuid4().hex,
@@ -229,7 +226,6 @@ class JobSpec:
             group_path=str(resolved_workspace_dir),
             agent_name=agent_name,
             workspace_dir=str(resolved_workspace_dir),
-            agent_dir=str(resolved_agent_dir.resolve(strict=False)),
             trigger=trigger,
             integration_name=integration_name or "script",
             integration_config=dict(integration_config or {}),
@@ -352,7 +348,6 @@ class JobSpec:
             "group_path": self.group_path,
             "agent_name": self.agent_name,
             "workspace_dir": self.workspace_dir,
-            "agent_dir": self.agent_dir,
             "trigger": self.trigger,
             "integration_name": self.integration_name,
             "task_input": self.task_input,
@@ -380,8 +375,51 @@ class JobSpec:
                 raise ValueError(
                     "decision jobs require routine_id and skill to be null"
                 )
-        if self.agent_dir != self.workspace_dir:
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "job_id": self.job_id,
+            "config_path": self.config_path,
+            "config_revision": self.config_revision,
+            "group_key": self.group_key,
+            "group_path": self.group_path,
+            "agent_name": self.agent_name,
+            "workspace_dir": self.workspace_dir,
+            "trigger": self.trigger,
+            "integration_name": self.integration_name,
+            "integration_config": dict(self.integration_config),
+            "blueprint": asdict(self.blueprint),
+            "routine_id": self.routine_id,
+            "skill": self.skill,
+            "skill_arguments": list(self.skill_arguments),
+            "task_input": self.task_input,
+            "runtime_policy": asdict(self.runtime_policy),
+            "memory": asdict(self.memory),
+            "trigger_context": self.trigger_context,
+            "prompt_source": self.prompt_source,
+            "timeout_override": self.timeout_override,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "JobSpec":
+        values = dict(data)
+        superseded_agent_dir = values.pop("agent_dir", None)
+        workspace_dir = values.get("workspace_dir")
+        if superseded_agent_dir is not None and superseded_agent_dir != workspace_dir:
             raise ValueError("agent_dir is deprecated and must match workspace_dir")
+        values["integration_config"] = dict(values.get("integration_config") or {})
+        values["blueprint"] = BlueprintRef(**values["blueprint"])
+        runtime_policy = dict(values["runtime_policy"])
+        runtime_policy["sandbox_roots"] = tuple(runtime_policy.get("sandbox_roots") or ())
+        runtime_policy["tool_names"] = tuple(runtime_policy.get("tool_names") or ())
+        values["runtime_policy"] = RuntimePolicySnapshot(**runtime_policy)
+        values["memory"] = MemoryBinding(**values["memory"])
+        values["skill_arguments"] = tuple(values.get("skill_arguments") or ())
+        spec = cls(**values)
+        spec.validate()
+        return spec
 
     @property
     def prompt_content(self) -> str:
@@ -394,6 +432,10 @@ class JobSpec:
     @property
     def workspace_path(self) -> Path:
         return Path(self.workspace_dir)
+
+    @property
+    def agent_dir(self) -> Path:
+        return self.workspace_path
 
     def _is_compat_prompt_spec(self) -> bool:
         if self.schema_version != SCHEMA_VERSION:
@@ -429,33 +471,13 @@ class JobRecord:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["spec"] = asdict(self.spec)
+        data["spec"] = self.spec.to_dict()
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "JobRecord":
         values = dict(data)
-        spec_values = dict(values.pop("spec"))
-        spec_values["integration_config"] = dict(
-            spec_values.get("integration_config") or {}
-        )
-        spec_values["blueprint"] = BlueprintRef(**spec_values["blueprint"])
-        runtime_policy = dict(spec_values["runtime_policy"])
-        runtime_policy["sandbox_roots"] = tuple(
-            runtime_policy.get("sandbox_roots") or ()
-        )
-        runtime_policy["tool_names"] = tuple(
-            runtime_policy.get("tool_names") or ()
-        )
-        spec_values["runtime_policy"] = RuntimePolicySnapshot(
-            **runtime_policy
-        )
-        spec_values["memory"] = MemoryBinding(**spec_values["memory"])
-        spec_values["skill_arguments"] = tuple(
-            spec_values.get("skill_arguments") or ()
-        )
-        spec = JobSpec(**spec_values)
-        spec.validate()
+        spec = JobSpec.from_dict(dict(values.pop("spec")))
         record = cls(spec=spec, **values)
         if record.status not in VALID_STATUSES:
             raise ValueError(f"Invalid job status: {record.status}")

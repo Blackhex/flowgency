@@ -45,6 +45,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
         def run(self, request: IntegrationRunRequest):
             seen["running"] = read_job(path).status
             seen["prompt"] = request.task_file.read_text()
+            seen["workspace_dir"] = request.workspace_dir
             return RunResult(
                 0,
                 "done",
@@ -54,20 +55,24 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
             )
 
     context = SimpleNamespace(
-        agent_dir=tmp_path / "group" / "product",
+        workspace_dir=tmp_path / "group",
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
         group_path=tmp_path / "group",
     )
-    context.agent_dir.mkdir(parents=True)
+    context.workspace_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     result = execute_job(path)
 
-    assert seen == {"running": "running", "prompt": "Immutable instructions"}
+    assert seen == {
+        "running": "running",
+        "prompt": "Immutable instructions",
+        "workspace_dir": tmp_path / "group",
+    }
     assert result.status == "complete"
     assert Path(result.stdout_path).read_text() == "done"
     assert Path(result.stderr_path).read_text() == "warning"
@@ -97,13 +102,13 @@ def test_execute_job_keeps_superseded_bridge_outside_typed_canonical_validation(
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
-        agent_dir=tmp_path / "group" / "product",
+        workspace_dir=tmp_path / "group",
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
         group_path=tmp_path / "group",
     )
-    context.agent_dir.mkdir(parents=True)
+    context.workspace_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
     )
@@ -116,12 +121,12 @@ def test_execute_job_keeps_superseded_bridge_outside_typed_canonical_validation(
 
 def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
     path, _ = queued_job(tmp_path)
-    agent_dir = tmp_path / "group" / "product"
-    agent_dir.mkdir(parents=True)
+    workspace_dir = tmp_path / "group"
+    workspace_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            agent_dir=agent_dir,
+            workspace_dir=workspace_dir,
             integration=SimpleNamespace(
                 run=lambda request: RunResult(0, "done", "", 0.1)
             ),
@@ -140,7 +145,7 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
 def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
     path, _ = queued_job(tmp_path)
     context = SimpleNamespace(
-        agent_dir=tmp_path,
+        workspace_dir=tmp_path / "group",
         timeout=30,
         sandbox_root=None,
         group_path=tmp_path / "group",
@@ -177,7 +182,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            agent_dir=tmp_path,
+            workspace_dir=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
             group_path=tmp_path / "group",
@@ -200,7 +205,7 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            agent_dir=tmp_path,
+            workspace_dir=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
             group_path=tmp_path / "group",
@@ -228,7 +233,7 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            agent_dir=tmp_path,
+            workspace_dir=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
             group_path=tmp_path / "group",
@@ -255,7 +260,7 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            agent_dir=tmp_path,
+            workspace_dir=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
             group_path=tmp_path / "group",
