@@ -42,3 +42,7 @@ class MemoryConflictError(RuntimeError):
         self.expected_revision = expected_revision
         self.current = current
         self.attempted_files = dict(attempted_files)
+
+
+class MemoryStoreError(ValueError):
+    pass

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import hashlib
+import os
 import shutil
 import stat
 import tempfile
@@ -15,6 +16,7 @@ from .models import (
     MemoryConflictError,
     MemorySnapshot,
     MemoryStage,
+    MemoryStoreError,
     ResolvedMemory,
 )
 
@@ -49,7 +51,7 @@ def read_memory(resolved: ResolvedMemory) -> MemorySnapshot:
     _validate_resolved_memory(resolved)
     lock_path = _lock_path(resolved)
     with exclusive_lock(lock_path, wait=True):
-        files = _read_canonical_files(resolved.directory)
+        files = _read_canonical_files(_canonical_directory(resolved))
         return MemorySnapshot(
             resolved=resolved,
             files=files,
@@ -61,14 +63,10 @@ def ensure_memory(resolved: ResolvedMemory) -> MemorySnapshot:
     _validate_resolved_memory(resolved)
     lock_path = _lock_path(resolved)
     with exclusive_lock(lock_path, wait=True):
-        resolved.directory.mkdir(parents=True, exist_ok=True)
-        if not resolved.directory.exists():
-            raise RuntimeError(
-                f"missing memory directory: {resolved.directory}"
-            )
-        if not any(resolved.directory.iterdir()):
-            atomic_write_bytes(resolved.directory / "memory.md", b"")
-        files = _read_canonical_files(resolved.directory)
+        directory = _ensure_canonical_directory(resolved)
+        if not any(directory.iterdir()):
+            atomic_write_bytes(directory / "memory.md", b"")
+        files = _read_canonical_files(directory)
         if not files:
             raise ValueError("memory must contain at least one markdown file")
     return MemorySnapshot(
@@ -80,15 +78,17 @@ def ensure_memory(resolved: ResolvedMemory) -> MemorySnapshot:
 
 def stage_memory(resolved: ResolvedMemory, *, job_id: str) -> MemoryStage:
     snapshot = ensure_memory(resolved)
-    root = _store_root(resolved)
-    stage_parent = root / ".staging" / resolved.memory_hash
     safe_job_id = _validate_job_id(job_id)
-    stage_root = (stage_parent / safe_job_id).resolve(strict=False)
-    if stage_root.parent != stage_parent.resolve():
-        raise ValueError("job id must stay within the staging directory")
+    stage_parent = _ensure_infrastructure_directory(
+        _store_root(resolved),
+        [".staging", resolved.memory_hash],
+        label="staging",
+    )
+    stage_root = stage_parent / safe_job_id
     if stage_root.exists():
-        shutil.rmtree(stage_root)
-    stage_root.mkdir(parents=True, exist_ok=True)
+        _ensure_actual_directory(stage_root, label="staging")
+        _safe_rmtree(stage_root, label="staging")
+    _ensure_child_directory(stage_parent, safe_job_id, label="staging")
     for name, payload in snapshot.files.items():
         atomic_write_bytes(stage_root / name, payload)
     return MemoryStage(
@@ -159,12 +159,18 @@ class MemoryStore:
 
 
 def _store_root(resolved: ResolvedMemory) -> Path:
-    return resolved.directory.parent.resolve()
+    return resolved.directory.parent
 
 
 def _lock_path(resolved: ResolvedMemory) -> Path:
-    root = _store_root(resolved)
-    return root / ".locks" / f"{resolved.memory_hash}.lock"
+    root = _ensure_infrastructure_directory(
+        _store_root(resolved),
+        [".locks"],
+        label="locks",
+    )
+    lock_path = root / f"{resolved.memory_hash}.lock"
+    _ensure_safe_leaf(lock_path, label="locks")
+    return lock_path
 
 
 def _validate_resolved_memory(
@@ -180,21 +186,22 @@ def _validate_resolved_memory(
         if expected_root is not None
         else _store_root(resolved)
     )
-    directory = resolved.directory.resolve(strict=False)
+    directory = resolved.directory
     if directory.parent != root:
-        raise ValueError(
+        raise MemoryStoreError(
             "memory directory must stay under the configured memory root"
         )
     if directory.name != resolved.memory_hash:
-        raise ValueError("memory directory name must match the resolved hash")
+        raise MemoryStoreError(
+            "memory directory name must match the resolved hash"
+        )
 
 
 def _read_canonical_files(directory: Path) -> dict[str, bytes]:
     directory = Path(directory)
     if not directory.exists():
         return {}
-    if not directory.is_dir():
-        raise ValueError(f"memory path is not a directory: {directory}")
+    _ensure_actual_directory(directory, label="memory")
 
     files: dict[str, bytes] = {}
     seen_casefold: dict[str, str] = {}
@@ -266,15 +273,22 @@ def _replace_canonical_files(
     directory: Path,
     files: Mapping[str, bytes],
 ) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
+    directory = _ensure_actual_directory(directory, label="memory")
     parent = directory.parent
-    staging_parent = parent / ".backups"
-    staging_parent.mkdir(parents=True, exist_ok=True)
-    temp_directory = Path(
-        tempfile.mkdtemp(prefix=f"{directory.name}.", dir=staging_parent)
+    staging_parent = _ensure_infrastructure_directory(
+        parent,
+        [".backups"],
+        label="backup",
     )
-    backup_directory = Path(
-        tempfile.mkdtemp(prefix=f"{directory.name}.", dir=staging_parent)
+    temp_directory = _create_verified_tempdir(
+        staging_parent,
+        prefix=f"{directory.name}.",
+        label="backup",
+    )
+    backup_directory = _create_verified_tempdir(
+        staging_parent,
+        prefix=f"{directory.name}.",
+        label="backup",
     )
     moved_new_files: list[Path] = []
     try:
@@ -287,7 +301,7 @@ def _replace_canonical_files(
             target = directory / entry.name
             moved_new_files.append(target)
             _install_path(entry, target)
-        shutil.rmtree(backup_directory)
+        _safe_rmtree(backup_directory, label="backup")
     except Exception as exc:
         rollback_error = _rollback_canonical_replace(
             directory,
@@ -304,7 +318,8 @@ def _replace_canonical_files(
             f"memory replacement failed and rolled back: {exc}"
         ) from exc
     finally:
-        shutil.rmtree(temp_directory, ignore_errors=True)
+        if temp_directory.exists():
+            _safe_rmtree(temp_directory, label="backup", ignore_missing=True)
 
 
 def _rollback_canonical_replace(
@@ -322,7 +337,7 @@ def _rollback_canonical_replace(
         if backup_directory.exists():
             for entry in backup_directory.iterdir():
                 _restore_path(entry, directory / entry.name)
-            shutil.rmtree(backup_directory)
+            _safe_rmtree(backup_directory, label="backup")
         return None
     except Exception as rollback_error:
         return rollback_error
@@ -361,23 +376,140 @@ def _validate_job_id(job_id: str) -> str:
         raise ValueError("job id must be one safe filename segment")
     normalized = unicodedata.normalize("NFKC", job_id)
     if normalized != job_id:
-        raise ValueError("job id must not be ambiguous under Unicode normalization")
+        raise ValueError(
+            "job id must not be ambiguous under Unicode normalization"
+        )
     if _normalized_key(job_id) != job_id:
-        raise ValueError("job id must not be ambiguous under case normalization")
+        raise ValueError(
+            "job id must not be ambiguous under case normalization"
+        )
     if path.stem.upper() in _WINDOWS_RESERVED_NAMES:
         raise ValueError("job id uses a reserved Windows basename")
     return job_id
 
 
+def _canonical_directory(resolved: ResolvedMemory) -> Path:
+    return _ensure_infrastructure_directory(
+        _store_root(resolved),
+        [resolved.memory_hash],
+        label="memory",
+    )
+
+
+def _ensure_canonical_directory(resolved: ResolvedMemory) -> Path:
+    return _canonical_directory(resolved)
+
+
+def _ensure_infrastructure_directory(
+    root: Path,
+    components: list[str],
+    *,
+    label: str,
+) -> Path:
+    current = _ensure_actual_directory(Path(root), label=label, create=True)
+    for component in components:
+        current = _ensure_child_directory(current, component, label=label)
+    return current
+
+
+def _ensure_child_directory(parent: Path, name: str, *, label: str) -> Path:
+    child = parent / name
+    try:
+        child.lstat()
+    except FileNotFoundError:
+        child.mkdir()
+    return _ensure_actual_directory(child, label=label)
+
+
+def _ensure_actual_directory(
+    path: Path,
+    *,
+    label: str,
+    create: bool = False,
+) -> Path:
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    try:
+        stat_result = path.lstat()
+    except FileNotFoundError as exc:
+        raise MemoryStoreError(
+            f"missing {label} directory: {path}"
+        ) from exc
+    if _stat_is_symlink_or_reparse(stat_result):
+        raise MemoryStoreError(f"unsafe {label} directory: {path}")
+    if not stat.S_ISDIR(stat_result.st_mode):
+        raise MemoryStoreError(f"{label} path is not a directory: {path}")
+    return path
+
+
+def _ensure_safe_leaf(path: Path, *, label: str) -> None:
+    try:
+        stat_result = path.lstat()
+    except FileNotFoundError:
+        return
+    if _stat_is_symlink_or_reparse(stat_result):
+        raise MemoryStoreError(f"unsafe {label} path: {path}")
+    if stat.S_ISDIR(stat_result.st_mode):
+        raise MemoryStoreError(f"unsafe {label} path: {path}")
+
+
+def _create_verified_tempdir(parent: Path, *, prefix: str, label: str) -> Path:
+    created = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
+    return _ensure_actual_directory(created, label=label)
+
+
+def _safe_rmtree(
+    path: Path,
+    *,
+    label: str,
+    ignore_missing: bool = False,
+) -> None:
+    try:
+        _ensure_actual_directory(path, label=label)
+    except MemoryStoreError:
+        if ignore_missing and not path.exists():
+            return
+        raise
+    except FileNotFoundError:
+        if ignore_missing:
+            return
+        raise
+    with os.scandir(path) as entries:
+        for entry in entries:
+            child = Path(entry.path)
+            if entry.is_symlink():
+                raise MemoryStoreError(f"unsafe {label} entry: {child}")
+            if _direntry_is_reparse(entry):
+                raise MemoryStoreError(f"unsafe {label} entry: {child}")
+            if entry.is_dir(follow_symlinks=False):
+                _safe_rmtree(child, label=label)
+            else:
+                child.unlink()
+    path.rmdir()
+
+
+def _direntry_is_reparse(entry: os.DirEntry[str]) -> bool:
+    try:
+        stat_result = entry.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return _stat_is_symlink_or_reparse(stat_result)
+
+
+def _stat_is_symlink_or_reparse(stat_result: os.stat_result) -> bool:
+    file_attributes = getattr(stat_result, "st_file_attributes", 0) or 0
+    return bool(
+        stat.S_ISLNK(stat_result.st_mode)
+        or (
+            file_attributes
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
+    )
+
+
 def _is_symlink_or_reparse(path: Path) -> bool:
-    if path.is_symlink():
-        return True
     try:
         stat_result = path.lstat()
     except FileNotFoundError:
         return False
-    file_attributes = getattr(stat_result, "st_file_attributes", 0)
-    return bool(
-        file_attributes
-        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    )
+    return _stat_is_symlink_or_reparse(stat_result)

@@ -2,6 +2,7 @@ from .models import (
     MemoryConflictError,
     MemorySnapshot,
     MemoryStage,
+    MemoryStoreError,
     ResolvedMemory,
 )
 from .selectors import resolve_memory_selector, select_effective_memory
@@ -18,6 +19,7 @@ __all__ = [
     "MemoryConflictError",
     "MemorySnapshot",
     "MemoryStage",
+    "MemoryStoreError",
     "MemoryStore",
     "ResolvedMemory",
     "ensure_memory",

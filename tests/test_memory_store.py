@@ -1,6 +1,6 @@
 from multiprocessing import Event, Process
 from pathlib import Path
-import shutil
+import stat
 
 import pytest
 
@@ -23,6 +23,30 @@ def _hold_memory_lock(lock_path: str, acquired: Event, release: Event) -> None:
     with exclusive_lock(Path(lock_path), wait=True):
         acquired.set()
         release.wait(5)
+
+
+def _make_hostile_infra_entry(path: Path, target: Path, monkeypatch) -> str:
+    try:
+        path.symlink_to(target, target_is_directory=True)
+        return "real-link"
+    except OSError:
+        original = Path.lstat
+        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+
+        class FakeStatResult:
+            def __init__(self, result):
+                self.st_mode = result.st_mode
+                self.st_file_attributes = reparse_flag
+
+        def fake_lstat(self):
+            result = original(self)
+            if self == path and reparse_flag:
+                return FakeStatResult(result)
+            return result
+
+        path.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(Path, "lstat", fake_lstat)
+        return "simulated-reparse"
 
 
 @pytest.fixture
@@ -224,6 +248,52 @@ def test_stage_rejects_unicode_normalization_ambiguous_job_id(
         memory_store.stage(resolved_memory, job_id="jo\u0301b")
 
 
+def test_stage_rejects_hostile_staging_symlink_and_preserves_sentinel(
+    memory_store,
+    resolved_memory,
+    monkeypatch,
+    tmp_path,
+):
+    memory_store.ensure(resolved_memory)
+    external = tmp_path / "external-staging"
+    external.mkdir()
+    sentinel = external / "sentinel.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    hostile = memory_store.root / ".staging"
+
+    mode = _make_hostile_infra_entry(hostile, external, monkeypatch)
+
+    with pytest.raises(ValueError, match="staging"):
+        memory_store.stage(resolved_memory, job_id="job-123")
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert mode in {"real-link", "simulated-reparse"}
+
+
+def test_stage_rejects_hostile_hash_directory_and_preserves_sentinel(
+    memory_store,
+    resolved_memory,
+    monkeypatch,
+    tmp_path,
+):
+    memory_store.ensure(resolved_memory)
+    external = tmp_path / "external-hash-staging"
+    external.mkdir()
+    sentinel = external / "sentinel.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    staging_root = memory_store.root / ".staging"
+    staging_root.mkdir(parents=True)
+    hostile = staging_root / resolved_memory.memory_hash
+
+    mode = _make_hostile_infra_entry(hostile, external, monkeypatch)
+
+    with pytest.raises(ValueError, match="staging"):
+        memory_store.stage(resolved_memory, job_id="job-123")
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert mode in {"real-link", "simulated-reparse"}
+
+
 def test_try_save_reports_nonblocking_busy_ui_save(
     memory_store,
     resolved_memory,
@@ -253,6 +323,32 @@ def test_try_save_reports_nonblocking_busy_ui_save(
         release.set()
         process.join(5)
         assert process.exitcode == 0
+
+
+def test_try_save_rejects_hostile_backups_symlink_and_preserves_sentinel(
+    memory_store,
+    resolved_memory,
+    monkeypatch,
+    tmp_path,
+):
+    seeded = memory_store.ensure(resolved_memory)
+    external = tmp_path / "external-backups"
+    external.mkdir()
+    sentinel = external / "sentinel.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    hostile = memory_store.root / ".backups"
+
+    mode = _make_hostile_infra_entry(hostile, external, monkeypatch)
+
+    with pytest.raises(ValueError, match="backup"):
+        memory_store.try_save(
+            resolved_memory,
+            seeded.revision,
+            {"memory.md": b"updated"},
+        )
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+    assert mode in {"real-link", "simulated-reparse"}
 
 
 def test_store_paths_stay_under_hash_directory(memory_store, resolved_memory):
@@ -305,7 +401,6 @@ def test_try_save_rolls_back_if_install_fails_after_evacuating_old_files(
     state = {"new_moves": 0}
 
     def fail_after_first_new_move(src, dst):
-        source = Path(src)
         target = Path(dst)
         result = real_move(src, dst)
         if target.parent == resolved_memory.directory:
@@ -314,7 +409,10 @@ def test_try_save_rolls_back_if_install_fails_after_evacuating_old_files(
                 raise OSError("install failed after first new file")
         return result
 
-    monkeypatch.setattr("agency.memory.store._install_path", fail_after_first_new_move)
+    monkeypatch.setattr(
+        "agency.memory.store._install_path",
+        fail_after_first_new_move,
+    )
 
     with pytest.raises(RuntimeError, match="rolled back"):
         memory_store.try_save(
@@ -327,7 +425,9 @@ def test_try_save_rolls_back_if_install_fails_after_evacuating_old_files(
 
     assert restored.files == original
     assert restored.revision == current.revision
-    assert sorted(item.name for item in resolved_memory.directory.iterdir()) == [
+    assert sorted(
+        item.name for item in resolved_memory.directory.iterdir()
+    ) == [
         "memory.md",
         "notes.md",
     ]
@@ -356,7 +456,10 @@ def test_try_save_rolls_back_if_install_fails_immediately_after_evacuation(
             raise OSError("install failed before any new file landed")
         return real_move(src, dst)
 
-    monkeypatch.setattr("agency.memory.store._install_path", fail_on_first_new_move)
+    monkeypatch.setattr(
+        "agency.memory.store._install_path",
+        fail_on_first_new_move,
+    )
 
     with pytest.raises(RuntimeError, match="rolled back"):
         memory_store.try_save(
@@ -390,7 +493,10 @@ def test_try_save_preserves_backup_if_rollback_recovery_fails(
 
     def fail_install(src, dst):
         target = Path(dst)
-        if target.parent == resolved_memory.directory and not state["new_failed"]:
+        if (
+            target.parent == resolved_memory.directory
+            and not state["new_failed"]
+        ):
             state["new_failed"] = True
             raise OSError("install failed")
         return real_install(src, dst)

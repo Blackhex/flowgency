@@ -121,3 +121,52 @@
 ### Concerns
 
 - The full suite still has one unrelated failure in `test_job_detached_process.py::test_detached_worker_survives_submitter_exit`; the selector fix does not touch that path.
+
+### Controller Verification
+
+- Reproduced the prior failing test alone with `.venv\Scripts\python.exe -m pytest tests/test_job_detached_process.py::test_detached_worker_survives_submitter_exit -v`: `1 passed in 4.98s`.
+- Reran the complete suite with `.venv\Scripts\python.exe -m pytest tests\ -q`: `897 passed, 3 skipped in 52.57s`.
+- The earlier queued-status failure was a timing flake; no job-launch code changed in Task 8.
+
+## Review Fix 3
+
+### RED
+
+- Command: `.venv\Scripts\python.exe -m pytest tests/test_memory_store.py -q`
+- Result: `3 failed, 33 passed in 5.09s`.
+- Failing cases:
+	- `test_stage_rejects_hostile_staging_symlink_and_preserves_sentinel`
+	- `test_stage_rejects_hostile_hash_directory_and_preserves_sentinel`
+	- `test_try_save_rejects_hostile_backups_symlink_and_preserves_sentinel`
+
+### Focused Validation
+
+- Command: `.venv\Scripts\python.exe -m pytest tests/test_memory_store.py -q`
+- Result: `36 passed in 3.27s`.
+- Command: `.venv\Scripts\python.exe -m pytest tests/test_memory_selectors.py tests/test_memory_store.py tests/test_config_canonical.py -q`
+- Result: `153 passed in 3.47s`.
+
+### Full Suite
+
+- Command: `.venv\Scripts\python.exe -m pytest tests/ -q`
+- Result: `900 passed, 3 skipped in 53.02s`.
+
+### Files
+
+- `agency/memory/__init__.py`
+- `agency/memory/models.py`
+- `agency/memory/store.py`
+- `tests/test_memory_store.py`
+- `.superpowers/sdd/task-8-report.md`
+
+### Self-Review
+
+- Added a central no-follow infrastructure-directory walker for memory-store internal paths so `.locks`, `.staging`, `.backups`, and per-hash staging directories are validated one path component at a time.
+- Revalidated freshly created infrastructure directories immediately with `lstat`-style checks and rejected symlink, junction, reparse-point, and non-directory entries before use.
+- Replaced destructive cleanup on staging and backup trees with a no-follow recursive remover that refuses to traverse hostile infrastructure entries.
+- Routed lock-path creation, canonical directory access, staging setup, and backup temp-directory creation through the same containment checks so hostile infrastructure entries fail closed before external targets are touched.
+- Added TDD coverage for hostile `.staging`, hostile per-hash staging, and hostile `.backups` directories targeting an external sentinel, with real-link coverage where available and a reparse-point simulation fallback where Windows link creation is unavailable.
+
+### Concerns
+
+- The lock helper still canonicalizes the final lock-file path with `resolve(strict=False)`. This fix blocks hostile `.locks` directories before the helper is called, so the remaining risk is confined to the final lock file leaf rather than infrastructure directory traversal.
