@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from agency.configuration.issues import ValidationIssue
+from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
@@ -206,6 +206,13 @@ class BaseIntegration:
                     )
                 )
         return tuple(issues)
+
+    def require_valid_run(self, request: IntegrationRunRequest) -> None:
+        if not request.enforce_validation:
+            return
+        issues = self.validate_run(request)
+        if issues:
+            raise ValidationFailed(issues)
 
     @staticmethod
     def _default_projector(instruction_name: str) -> "RuntimeProjector":

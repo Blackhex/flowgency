@@ -53,6 +53,7 @@ class SdkIntegration(BaseIntegration):
             path.write_text(identity.body)
 
     def run(self, request: IntegrationRunRequest) -> RunResult:
+        self.require_valid_run(request)
         return RunResult(
             exit_code=1,
             stdout="",

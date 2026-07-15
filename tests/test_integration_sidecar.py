@@ -1,4 +1,5 @@
 import pytest
+from agency.configuration import ValidationFailed
 from agency.config import SandboxSpec
 from agency.integrations import AgentIdentity, detect_integration
 from agency.integrations.agency.codex import CodexIntegration
@@ -473,6 +474,31 @@ class TestCopilot:
         assert "--experimental" in captured["cmd"]
         assert "--no-custom-instructions" not in captured["cmd"]
         assert captured["cwd"] == str(request.launch_dir)
+
+    def test_run_rejects_invalid_typed_request_before_reading_prompt(self, integration, tmp_agent_dir):
+        request = IntegrationRunRequest(
+            workspace_dir=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=tmp_agent_dir / "runtime" / "missing-task.md",
+            timeout=30,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=30,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+
+        request.launch_dir.mkdir(parents=True)
+        failure = ValidationFailed(())
+        integration.require_valid_run = lambda run_request: (_ for _ in ()).throw(failure)
+
+        with pytest.raises(ValidationFailed) as excinfo:
+            integration.run(request)
+
+        assert excinfo.value is failure
 
     def test_prompt_returns_stdout(self, integration, monkeypatch):
         import agency.integrations.agency.copilot as mod

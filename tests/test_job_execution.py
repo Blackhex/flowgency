@@ -83,6 +83,37 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     assert read_job(path) == result
 
 
+def test_execute_job_keeps_superseded_bridge_outside_typed_canonical_validation(tmp_path, monkeypatch):
+    path, _ = queued_job(tmp_path)
+    seen = {}
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            seen["skill"] = request.skill
+            seen["sandbox_mode"] = request.runtime_policy.sandbox_mode
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        agent_dir=tmp_path / "group" / "product",
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        group_path=tmp_path / "group",
+    )
+    context.agent_dir.mkdir(parents=True)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    result = execute_job(path)
+
+    assert result.status == "complete"
+    assert seen == {"skill": None, "sandbox_mode": "unrestricted"}
+
+
 def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
     path, _ = queued_job(tmp_path)
     agent_dir = tmp_path / "group" / "product"

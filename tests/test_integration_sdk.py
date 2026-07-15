@@ -1,4 +1,5 @@
 import pytest
+from agency.configuration import ValidationFailed
 from agency.integrations.agency.sdk import SdkIntegration
 from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
 
@@ -20,7 +21,7 @@ def test_detect_with_agent_md(integration, tmp_agent_dir):
 def test_detect_without_agent_md(integration, tmp_agent_dir):
     assert integration.detect(tmp_agent_dir) is False
 
-def test_run_returns_error(integration, tmp_agent_dir, tmp_path):
+def test_run_returns_error_for_superseded_bridge_request(integration, tmp_agent_dir, tmp_path):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Do something")
     request = IntegrationRunRequest(
@@ -36,6 +37,7 @@ def test_run_returns_error(integration, tmp_agent_dir, tmp_path):
         ),
         skill=None,
         skill_arguments=(),
+        enforce_validation=False,
     )
     result = integration.run(request)
     assert result.exit_code != 0
@@ -62,6 +64,33 @@ def test_validate_run_rejects_execution(tmp_path):
     issues = integration.validate_run(request)
 
     assert [issue.code for issue in issues] == [
+        "unsupported-path-policy",
+        "unsupported-tool-policy",
+        "integration-not-executable",
+    ]
+
+
+def test_run_raises_validation_failed_before_fabricating_result(tmp_path):
+    integration = SdkIntegration()
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_path / "workspace",
+        launch_dir=tmp_path / "runtime",
+        task_file=tmp_path / "runtime" / "missing-task.md",
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill=None,
+        skill_arguments=(),
+    )
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        integration.run(request)
+
+    assert [issue.code for issue in excinfo.value.issues] == [
         "unsupported-path-policy",
         "unsupported-tool-policy",
         "integration-not-executable",

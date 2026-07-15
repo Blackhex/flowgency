@@ -1,9 +1,11 @@
 """Contract tests: validate all registered integrations meet the BaseIntegration API."""
 import inspect
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from agency.configuration import ValidationFailed
 from agency.configuration.issues import ValidationIssue
 from agency.configuration.effective import resolve_effective_policy
 from agency.integrations import REGISTRY, AgentIdentity, BaseIntegration, FileChange, RunResult
@@ -160,6 +162,79 @@ def test_decision_run_allows_null_skill():
         skill_arguments=(),
     )
     assert integration.validate_run(request) == ()
+
+
+def test_execution_integrations_enforce_validate_run_before_subprocess_or_prompt_read(tmp_path, monkeypatch):
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_path / "workspace",
+        launch_dir=tmp_path / "launch",
+        task_file=tmp_path / "launch" / "task.md",
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill="daily-review",
+        skill_arguments=(),
+    )
+
+    request.launch_dir.mkdir(parents=True)
+
+    def fail_subprocess(*args, **kwargs):
+        raise AssertionError("subprocess.run should not be reached for invalid typed runs")
+
+    monkeypatch.setattr(subprocess, "run", fail_subprocess)
+
+    checked = []
+    expected_skip = {"copilot"}
+    for name, integration in REGISTRY.items():
+        if not integration.supports_execution:
+            continue
+        if name in expected_skip:
+            continue
+
+        with pytest.raises(ValidationFailed):
+            integration.run(request)
+        checked.append(name)
+
+    assert checked == [
+        "claude-code",
+        "codex",
+        "gemini",
+        "aider",
+        "goose",
+        "opencode",
+        "pi",
+        "script",
+    ]
+
+
+def test_non_executable_integrations_reject_before_any_result_is_fabricated(tmp_path):
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_path / "workspace",
+        launch_dir=tmp_path / "launch",
+        task_file=tmp_path / "launch" / "task.md",
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill=None,
+        skill_arguments=(),
+    )
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        REGISTRY["sdk"].run(request)
+
+    assert [issue.code for issue in excinfo.value.issues] == [
+        "unsupported-path-policy",
+        "unsupported-tool-policy",
+        "integration-not-executable",
+    ]
 
 
 def test_runresult_changed_files_defaults_empty():

@@ -33,6 +33,7 @@ class AiderIntegration(BaseIntegration):
         self._write_sidecar_identity(agent_dir, agent_dir / "CONVENTIONS.md", identity)
 
     def run(self, request: IntegrationRunRequest) -> RunResult:
+        self.require_valid_run(request)
         cmd = self._find_cmd()
         start = time.monotonic()
         try:

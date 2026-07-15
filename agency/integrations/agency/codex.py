@@ -33,6 +33,7 @@ class CodexIntegration(BaseIntegration):
         self._write_sidecar_identity(agent_dir, agent_dir / "AGENTS.md", identity)
 
     def run(self, request: IntegrationRunRequest) -> RunResult:
+        self.require_valid_run(request)
         prompt_text = request.task_file.read_text()
         cmd = self._find_cmd()
         start = time.monotonic()

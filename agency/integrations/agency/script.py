@@ -85,6 +85,7 @@ class ScriptIntegration(BaseIntegration):
         return tuple(issues)
 
     def run(self, request: IntegrationRunRequest) -> RunResult:
+        self.require_valid_run(request)
         errors = self.validate_config(self._config)
         if errors:
             raise IntegrationError("; ".join(errors))

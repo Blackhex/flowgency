@@ -237,6 +237,7 @@ class CopilotIntegration(BaseIntegration):
             return path
 
     def run(self, request: IntegrationRunRequest) -> RunResult:
+        self.require_valid_run(request)
         prompt_text = request.task_file.read_text()
         cmd = self._resolve_real_cmd(self._find_cmd())
 

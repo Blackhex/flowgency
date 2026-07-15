@@ -134,6 +134,10 @@ def execute_job(job_path: Path) -> JobRecord:
             runtime_policy=runtime_policy,
             skill=None,
             skill_arguments=(),
+            # superseded jobs still derive runtime policy from pre-canonical context.
+            # Keep them out of typed adapter validation until Task 10 wires
+            # pinned blueprint snapshots and full canonical policy resolution.
+            enforce_validation=False,
         )
         result = context.integration.run(request)
         stdout_path.write_text(result.stdout, encoding="utf-8")

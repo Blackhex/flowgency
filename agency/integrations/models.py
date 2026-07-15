@@ -45,3 +45,4 @@ class IntegrationRunRequest:
     runtime_policy: EffectiveRuntimePolicy
     skill: str | None
     skill_arguments: tuple[str, ...] = ()
+    enforce_validation: bool = True

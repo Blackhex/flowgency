@@ -1,4 +1,5 @@
 import pytest
+from agency.configuration import ValidationFailed
 from agency.integrations.agency.script import ScriptIntegration
 from agency.integrations import AgentIdentity
 from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
@@ -86,7 +87,37 @@ def test_run_with_config(tmp_agent_dir, tmp_path):
         ),
         skill=None,
         skill_arguments=(),
+        enforce_validation=False,
     )
     result = configured.run(request)
     assert result.exit_code == 0
     assert "ran-" in result.stdout
+
+
+def test_run_rejects_invalid_typed_request_before_script_launch(tmp_path):
+    integration = ScriptIntegration({"command": "echo {prompt_file} {runtime_dir} {workspace_dir} {skill}"})
+    request = IntegrationRunRequest(
+        workspace_dir=tmp_path / "workspace",
+        launch_dir=tmp_path / "runtime",
+        task_file=tmp_path / "runtime" / "missing-task.md",
+        timeout=60,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill="daily-review",
+        skill_arguments=(),
+    )
+
+    request.launch_dir.mkdir(parents=True)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        integration.run(request)
+
+    assert [issue.code for issue in excinfo.value.issues] == [
+        "unsupported-path-policy",
+        "unsupported-tool-policy",
+        "unsupported-skill-activation",
+    ]
