@@ -42,6 +42,7 @@ from agency.jobs.prompts import build_decision_prompt, build_routine_task_input
 from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, question_option_labels, SKIP_EXECUTION_SUMMARY
 import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
+from starlette.convertors import Convertor, register_url_convertor
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -112,6 +113,19 @@ def reload_groups() -> None:
 
 CONFIG = load_config()
 GROUPS = _runtime_groups(CONFIG)
+
+
+class PromptSlugConvertor(Convertor[str]):
+    regex = r"(?!(?:dispatch)$)[^/]+"
+
+    def convert(self, value: str) -> str:
+        return value
+
+    def to_string(self, value: str) -> str:
+        return value
+
+
+register_url_convertor("promptslug", PromptSlugConvertor())
 
 
 def get_agency_config() -> dict:
@@ -3343,7 +3357,7 @@ async def prompts_list(request: Request, group: str):
     })
 
 
-@app.get("/{group}/prompts/{slug}", response_class=HTMLResponse)
+@app.get("/{group}/prompts/{slug:promptslug}", response_class=HTMLResponse)
 async def prompt_detail(request: Request, group: str, slug: str):
     """View/edit a prompt."""
     g = get_group(group)
@@ -3361,7 +3375,7 @@ async def prompt_detail(request: Request, group: str, slug: str):
     })
 
 
-@app.post("/{group}/prompts/{slug}/save", response_class=HTMLResponse)
+@app.post("/{group}/prompts/{slug:promptslug}/save", response_class=HTMLResponse)
 async def prompt_save(request: Request, group: str, slug: str):
     """Save edits to a prompt."""
     g = get_group(group)
@@ -3370,11 +3384,6 @@ async def prompt_save(request: Request, group: str, slug: str):
     content = form.get("content", "")
     path.write_text(content)
     return RedirectResponse(f"/{group}/prompts/{slug}", status_code=303)
-
-
-@app.post("/{group}/prompts/dispatch", response_class=HTMLResponse)
-async def prompts_dispatch_save(request: Request, group: str):
-    raise HTTPException(404, "Prompts dispatch scheduling is not available")
 
 
 @app.get("/{group}/memory", response_class=HTMLResponse)

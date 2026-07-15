@@ -304,23 +304,21 @@ def test_prompts_page_is_read_only_and_preserves_strict_canonical_config(tmp_pat
     config_path = tmp_path / "config.yaml"
     before = config_path.read_bytes()
     client = TestClient(app)
+    route_paths = {
+        route.path
+        for route in app.routes
+        if "POST" in getattr(route, "methods", set())
+    }
 
     response = client.get("/test/prompts")
 
     assert response.status_code == 200
-    assert '/test/prompts/dispatch' not in response.text
+    assert "/{group}/prompts/dispatch" not in route_paths
     assert 'id="dispatch-form"' not in response.text
     assert 'Save Dispatch Config' not in response.text
+    post_response = client.post("/test/prompts/dispatch", data={"assign_agent_routine_0": "product"})
+    assert post_response.status_code == 404
     assert config_path.read_bytes() == before
-
-
-def test_prompts_dispatch_post_returns_404(tmp_path):
-    _setup_group(tmp_path)
-    client = TestClient(app)
-
-    response = client.post("/test/prompts/dispatch", data={"assign_agent_routine_0": "product"})
-
-    assert response.status_code == 404
 
 
 @pytest.mark.parametrize(
