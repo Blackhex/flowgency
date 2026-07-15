@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 import threading
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -11,6 +12,7 @@ import yaml
 from agency.blueprints.library import BlueprintLibrary
 from agency.configuration.models import MemorySelector
 from agency.configuration.store import ConfigConflictError, ConfigStore
+from agency.fs.locks import exclusive_lock
 from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
@@ -75,6 +77,14 @@ def _resolved_memory(
         channels={"support": {"display_name": "Support"}},
         store_root=memory_root,
     )
+
+
+def _directory_files(path: Path) -> dict[str, bytes]:
+    return {
+        child.name: child.read_bytes()
+        for child in path.iterdir()
+        if child.is_file()
+    }
 
 
 def _make_spec(
@@ -492,6 +502,147 @@ def test_move_empty_mode_seeds_memory_md_only(instance_service, instance_env):
     }
 
 
+@pytest.mark.parametrize(
+    ("memory_mode", "expected_created_files"),
+    [
+        (
+            "copy",
+            {
+                "agent": {
+                    "memory.md": b"agent\n",
+                    "notes.md": b"keep\n",
+                },
+                "routine": {
+                    "memory.md": b"routine\n",
+                    "context.md": b"same\n",
+                },
+            },
+        ),
+        (
+            "empty",
+            {
+                "agent": {"memory.md": b""},
+                "routine": {"memory.md": b""},
+            },
+        ),
+    ],
+)
+def test_move_rolls_back_created_targets_when_config_patch_fails(
+    instance_service,
+    instance_env,
+    monkeypatch,
+    memory_mode,
+    expected_created_files,
+):
+    from agency.instances import get_instance
+
+    agent_memory = _resolved_memory(
+        instance_env["memory_root"],
+        MemorySelector(scope="agent"),
+        group_key="newsletter",
+        agent_name="builder",
+    )
+    routine_memory = _resolved_memory(
+        instance_env["memory_root"],
+        MemorySelector(scope="routine"),
+        group_key="newsletter",
+        agent_name="builder",
+        routine_id="daily-review",
+    )
+    seeded_agent = instance_env["memory_store"].ensure(agent_memory)
+    seeded_routine = instance_env["memory_store"].ensure(routine_memory)
+    instance_env["memory_store"].try_save(
+        agent_memory,
+        seeded_agent.revision,
+        {"memory.md": b"agent\n", "notes.md": b"keep\n"},
+    )
+    instance_env["memory_store"].try_save(
+        routine_memory,
+        seeded_routine.revision,
+        {"memory.md": b"routine\n", "context.md": b"same\n"},
+    )
+
+    preview = instance_service.preview_move(
+        "newsletter",
+        "builder",
+        "other",
+        memory_mode,
+    )
+    target_agent = _resolved_memory(
+        instance_env["memory_root"],
+        MemorySelector(scope="agent"),
+        group_key="other",
+        agent_name="builder",
+    )
+    target_routine = _resolved_memory(
+        instance_env["memory_root"],
+        MemorySelector(scope="routine"),
+        group_key="other",
+        agent_name="builder",
+        routine_id="daily-review",
+    )
+    unrelated_target = _resolved_memory(
+        instance_env["memory_root"],
+        MemorySelector(scope="agent"),
+        group_key="other",
+        agent_name="sentinel",
+    )
+    unrelated_created = instance_env["memory_store"].ensure(unrelated_target)
+    instance_env["memory_store"].try_save(
+        unrelated_target,
+        unrelated_created.revision,
+        {"memory.md": b"sentinel\n"},
+    )
+    sentinel_revision = instance_env["memory_store"].read(unrelated_target).revision
+
+    class InjectedPatchFailure(RuntimeError):
+        pass
+
+    original_patch = instance_env["config_store"].patch
+
+    def fail_after_targets_created(expected_revision, patcher):
+        snapshot = instance_env["config_store"].load()
+        assert snapshot.revision == expected_revision
+        raw = deepcopy(snapshot.raw)
+        patcher(raw)
+        assert raw["groups"]["newsletter"]["agents"] == []
+        assert raw["groups"]["other"]["agents"][0]["name"] == "builder"
+        assert _directory_files(target_agent.directory) == expected_created_files["agent"]
+        assert _directory_files(target_routine.directory) == expected_created_files["routine"]
+        raise InjectedPatchFailure("fail after target creation")
+
+    monkeypatch.setattr(
+        instance_env["config_store"],
+        "patch",
+        fail_after_targets_created,
+    )
+
+    with pytest.raises(InjectedPatchFailure):
+        instance_service.move(preview)
+
+    snapshot = instance_env["config_store"].load()
+    assert get_instance(snapshot, "newsletter", "builder").name == "builder"
+    assert "builder" not in snapshot.config.groups["other"].agents
+    assert not target_agent.directory.exists()
+    assert not target_routine.directory.exists()
+    assert instance_env["memory_store"].read(agent_memory).files == {
+        "memory.md": b"agent\n",
+        "notes.md": b"keep\n",
+    }
+    assert instance_env["memory_store"].read(routine_memory).files == {
+        "memory.md": b"routine\n",
+        "context.md": b"same\n",
+    }
+    assert instance_env["memory_store"].read(agent_memory).revision == preview.source_revisions[0][1]
+    assert instance_env["memory_store"].read(routine_memory).revision == preview.source_revisions[1][1]
+    assert instance_env["memory_store"].read(unrelated_target).files == {
+        "memory.md": b"sentinel\n"
+    }
+    assert instance_env["memory_store"].read(unrelated_target).revision == sentinel_revision
+
+    monkeypatch.setattr(instance_env["config_store"], "patch", original_patch)
+
+
 def test_move_revalidates_revision_and_rolls_back_new_target_memory(
     instance_service,
     instance_env,
@@ -527,6 +678,129 @@ def test_move_revalidates_revision_and_rolls_back_new_target_memory(
     )
     assert not target_agent.directory.exists()
     assert not target_routine.directory.exists()
+
+
+def test_create_blocks_on_group_operation_lock_until_release(instance_env):
+    from agency.instances import AgentInstanceCreate, InstanceService
+
+    service = InstanceService(
+        config_store=instance_env["config_store"],
+        library=instance_env["library"],
+        memory_store=instance_env["memory_store"],
+    )
+    request = AgentInstanceCreate(
+        name="advisor",
+        blueprint="advisor",
+        integration="copilot",
+        display_name="Advisor",
+    )
+    result: dict[str, object] = {}
+    group_lock = instance_env["newsletter_path"] / "shared" / "jobs" / ".operations.lock"
+
+    with exclusive_lock(group_lock, wait=True):
+        thread = threading.Thread(
+            target=lambda: result.setdefault(
+                "mutation", service.create("newsletter", request)
+            )
+        )
+        thread.start()
+        thread.join(timeout=0.2)
+        assert thread.is_alive()
+        snapshot = instance_env["config_store"].load()
+        assert "advisor" not in snapshot.config.groups["newsletter"].agents
+
+    thread.join(timeout=5)
+
+    assert result["mutation"].instance.name == "advisor"
+    snapshot = instance_env["config_store"].load()
+    assert snapshot.config.groups["newsletter"].agents["advisor"].name == "advisor"
+
+
+def test_submit_cannot_slip_past_create_group_lock(
+    instance_env,
+    monkeypatch,
+):
+    from agency.instances import AgentInstanceCreate, InstanceService
+    import agency.instances as instances_module
+    import agency.jobs.submission as submission_module
+
+    service = InstanceService(
+        config_store=instance_env["config_store"],
+        library=instance_env["library"],
+        memory_store=instance_env["memory_store"],
+    )
+    request = AgentInstanceCreate(
+        name="advisor",
+        blueprint="advisor",
+        integration="copilot",
+        display_name="Advisor",
+    )
+    submit_request = JobRequest(
+        config_path=instance_env["config_store"].path,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        routine_id="daily-review",
+        task_input="Run it",
+        trigger_context={"source": "test"},
+    )
+    launcher = Mock()
+    launcher.launch.return_value = Mock(worker_pid=4321)
+    create_entered = threading.Event()
+    release_create = threading.Event()
+    submit_resolve_started = threading.Event()
+    create_outcome: dict[str, object] = {}
+    submit_outcome: dict[str, object] = {}
+    original_create = instances_module.create_agent_instance
+    original_resolve = submission_module._resolve_request
+
+    def gated_create(store, expected_revision, group_id, agent):
+        create_entered.set()
+        assert release_create.wait(timeout=5)
+        return original_create(store, expected_revision, group_id, agent)
+
+    def gated_resolve(job_request):
+        submit_resolve_started.set()
+        return original_resolve(job_request)
+
+    monkeypatch.setattr(instances_module, "create_agent_instance", gated_create)
+    monkeypatch.setattr(submission_module, "_resolve_request", gated_resolve)
+
+    def create_agent() -> None:
+        try:
+            create_outcome["result"] = service.create("newsletter", request)
+        except Exception as exc:  # pragma: no cover - asserted below
+            create_outcome["error"] = exc
+
+    def submit_job() -> None:
+        try:
+            submit_outcome["handle"] = submit_job_request(
+                submit_request,
+                launcher,
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            submit_outcome["error"] = exc
+
+    create_thread = threading.Thread(target=create_agent)
+    create_thread.start()
+    assert create_entered.wait(timeout=5)
+
+    submit_thread = threading.Thread(target=submit_job)
+    submit_thread.start()
+    submit_thread.join(timeout=0.2)
+    assert submit_thread.is_alive()
+    assert not submit_resolve_started.is_set()
+
+    jobs_dir = instance_env["newsletter_path"] / "shared" / "jobs"
+    assert not any(jobs_dir.glob("*.yaml"))
+    release_create.set()
+    create_thread.join(timeout=5)
+    submit_thread.join(timeout=5)
+
+    assert "error" not in create_outcome
+    assert create_outcome["result"].instance.name == "advisor"
+    assert submit_resolve_started.is_set()
+    assert "handle" in submit_outcome or "error" in submit_outcome
 
 
 def test_move_holds_group_lock_and_concurrent_submit_re_resolves_after_move(
