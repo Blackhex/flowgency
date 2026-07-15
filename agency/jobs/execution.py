@@ -4,14 +4,16 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
+from agency.integrations import get_integration
 from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
 
 from .atomic import atomic_write_text
 from .changes import capture_base_sha, capture_git_changes
-from .context import resolve_job_context
+from .launch_view import create_launch_view
 from .models import JobRecord
 from .store import read_job, transition_job
 
@@ -33,6 +35,25 @@ def _fallback_runtime_policy(context, timeout: int) -> EffectiveRuntimePolicy:
         sandbox_mode=sandbox_mode,
         sandbox_roots=sandbox_roots,
         tools=ResolvedToolPolicy(tool_mode, allowed_tools),
+    )
+
+
+def resolve_job_context(spec):
+    runtime_policy = spec.runtime_policy.to_effective_policy()
+    integration = get_integration(spec.integration_name)
+    if hasattr(integration, "with_config") and spec.integration_config:
+        integration = integration.with_config(spec.integration_config)
+    launch_dir = None
+    if spec.config_revision == "compat-submission-resolved":
+        launch_dir = Path(spec.agent_dir)
+    return SimpleNamespace(
+        group_path=Path(spec.group_path),
+        agent_dir=Path(spec.agent_dir),
+        integration=integration,
+        timeout=spec.runtime_policy.timeout,
+        runtime_policy=runtime_policy,
+        sandbox_root=None,
+        launch_dir=launch_dir,
     )
 
 
@@ -104,42 +125,50 @@ def execute_job(job_path: Path) -> JobRecord:
     prompt_path = Path(job_path).with_suffix(".prompt")
     base_sha = None
     try:
-        context = resolve_job_context(record.spec)
-        runtime_policy = _fallback_runtime_policy(context, context.timeout)
+        spec = record.spec
+        context = resolve_job_context(spec)
+        runtime_policy = getattr(context, "runtime_policy", None)
+        if runtime_policy is None:
+            runtime_policy = _fallback_runtime_policy(context, context.timeout)
+        integration = context.integration
+        artifact = spec.blueprint.to_artifact()
+        launch_dir = Path(job_path).with_suffix("") / "launch"
+        launch_view = getattr(context, "launch_dir", None)
+        if launch_view is None:
+            launch_view = create_launch_view(artifact, launch_dir)
         # The capture must be tied to the one root the job actually ran in: prefer
         # the sandbox root the integration executes against, falling back to the
         # agent directory. Both selection and rev-parse are best-effort.
         git_root = None
-        if context.sandbox_root and context.sandbox_root.roots:
+        if getattr(context, "sandbox_root", None) and getattr(context.sandbox_root, "roots", ()):
             git_root = Path(context.sandbox_root.roots[0])
+        elif runtime_policy.sandbox_roots:
+            git_root = Path(runtime_policy.sandbox_roots[0])
         elif context.agent_dir:
             git_root = Path(context.agent_dir)
         # Record HEAD before the run so committed work is visible afterwards. A
         # fleet whose agents must commit every atomic change leaves a clean tree,
         # so working-tree-only would miss the rule and capture only the exception.
         base_sha = capture_base_sha(git_root)
-        log_dir = context.group_path / "shared" / "logs" / started.strftime("%Y-%m-%d")
+        log_dir = Path(context.group_path) / "shared" / "logs" / started.strftime("%Y-%m-%d")
         log_dir.mkdir(parents=True, exist_ok=True)
         stem = f"{record.spec.agent_name}-{record.spec.trigger}-{record.spec.job_id}"
         stdout_path = log_dir / f"{stem}.out"
         stderr_path = log_dir / f"{stem}.err"
-        prompt_path.write_text(record.spec.prompt_content, encoding="utf-8")
-        launch_dir = context.agent_dir / ".agency-runtime"
-        launch_dir.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(record.spec.task_input, encoding="utf-8")
         request = IntegrationRunRequest(
-            workspace_dir=context.agent_dir,
-            launch_dir=launch_dir,
+            workspace_dir=Path(spec.agent_dir),
+            launch_dir=launch_view,
             task_file=prompt_path,
-            timeout=context.timeout,
+            timeout=getattr(context, "timeout", spec.runtime_policy.timeout),
             runtime_policy=runtime_policy,
-            skill=None,
-            skill_arguments=(),
-            # superseded jobs still derive runtime policy from pre-canonical context.
-            # Keep them out of typed adapter validation until Task 10 wires
-            # pinned blueprint snapshots and full canonical policy resolution.
-            enforce_validation=False,
+            skill=None if spec.config_revision == "compat-submission-resolved" else spec.skill,
+            skill_arguments=()
+            if spec.config_revision == "compat-submission-resolved"
+            else spec.skill_arguments,
+            enforce_validation=(spec.config_revision != "compat-submission-resolved"),
         )
-        result = context.integration.run(request)
+        result = integration.run(request)
         stdout_path.write_text(result.stdout, encoding="utf-8")
         persisted_stderr_path = None
         if result.stderr:
@@ -172,7 +201,7 @@ def execute_job(job_path: Path) -> JobRecord:
             else:
                 summary = "Agent completed execution (inferred from exit code)."
         elif result.exit_code == 124:
-            summary = f"Agent timed out after {context.timeout} seconds."
+            summary = f"Agent timed out after {getattr(context, 'timeout', spec.runtime_policy.timeout)} seconds."
         else:
             summary = f"Agent exited with code {result.exit_code}."
         final = transition_job(

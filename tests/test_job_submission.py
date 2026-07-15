@@ -1,11 +1,17 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 from unittest.mock import Mock, patch
 
 import pytest
 
-from agency.jobs import JobSpec, JobSubmissionError, JobValidationError, submit_job
-from agency.jobs.context import resolve_job_context
+from agency.blueprints import CompilationCache
+from agency.blueprints.library import BlueprintLibrary
+from agency.blueprints.projectors import StaticRuntimeProjector
+from agency.configuration.store import ConfigStore
+from agency.integrations import BaseIntegration
+from agency.integrations.models import ProjectorCapabilities, RuntimeCapabilities
+from agency.jobs import JobSpec, JobSubmissionError, submit_job
+from agency.jobs.resolution import JobRequest, resolve_job_request
 from agency.jobs.launcher import (
     CREATE_NEW_PROCESS_GROUP,
     DETACHED_PROCESS,
@@ -17,6 +23,90 @@ from agency.jobs.launcher import (
     default_launcher,
 )
 from agency.jobs.store import read_job
+
+
+def _projector(version: str = "v-test") -> StaticRuntimeProjector:
+    return StaticRuntimeProjector(
+        version=version,
+        capabilities=ProjectorCapabilities(
+            instruction_target=PurePosixPath("AGENTS.md"),
+            skills_target=PurePosixPath(".agents/skills"),
+            discovers_skills=True,
+            activates_selected_skill=True,
+        ),
+    )
+
+
+class FakeIntegration(BaseIntegration):
+    name = "copilot"
+    display_name = "Copilot"
+    supports_execution = True
+    projector = _projector()
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"restricted", "unrestricted"}),
+        tool_modes=frozenset({"allowlist", "all"}),
+    )
+
+    def identity_filename(self) -> str:
+        return "AGENTS.md"
+
+    def parse_identity(self, agent_dir: Path):
+        return None
+
+    def write_identity(self, agent_dir: Path, identity):
+        raise NotImplementedError
+
+    def run(self, request):
+        raise NotImplementedError
+
+
+def _write_blueprint(root: Path, key: str = "builder-blueprint") -> None:
+    blueprint = root / key
+    skill = blueprint / ".agents" / "skills" / "daily-review"
+    skill.mkdir(parents=True)
+    (blueprint / "AGENTS.md").write_text("# Builder\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review daily work.\n---\n\nRun it.\n",
+        encoding="utf-8",
+    )
+
+
+def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo ok") -> Path:
+    group = tmp_path / "agents" / "newsletter"
+    (group / "builder").mkdir(parents=True, exist_ok=True)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "schema_version: 2\n"
+        "agency:\n"
+        "  title: Agency\n"
+        "  default_group: newsletter\n"
+        "  ai_backend: claude-code\n"
+        "  agent_library: agent-library\n"
+        "  compilation_cache: compiled-agents\n"
+        "  memory_store: memory\n"
+        "groups:\n"
+        "  newsletter:\n"
+        "    name: Newsletter\n"
+        "    path: agents/newsletter\n"
+        "    default_integration: copilot\n"
+        f"    runtime:\n      timeout: {timeout}\n"
+        "      sandbox:\n        mode: restricted\n        roots:\n          - repo\n"
+        "      tools:\n        mode: allowlist\n        names:\n          - shell\n          - write\n"
+        "    agents:\n"
+        "      - name: builder\n"
+        "        blueprint: builder-blueprint\n"
+        "        integration: copilot\n"
+        "        integration_config:\n"
+        f"          command: {command}\n"
+        "        default_memory:\n          scope: agent\n"
+        "        routines:\n"
+        "          - id: daily-review\n"
+        "            skill: daily-review\n"
+        "            schedule:\n"
+        "              at: '09:00'\n",
+        encoding="utf-8",
+    )
+    return config
 
 
 def configured_spec(tmp_path: Path, *, agent="product") -> JobSpec:
@@ -36,8 +126,34 @@ def configured_spec(tmp_path: Path, *, agent="product") -> JobSpec:
         group_key="test",
         agent_name=agent,
         trigger="manual_prompt",
-        prompt_source={"type": "saved_prompt", "path": "routine.md"},
-        prompt_content="Run it",
+        integration_name="script",
+        integration_config={"command": "echo ok"},
+        config_revision="cfg-1",
+        blueprint={
+            "key": "superseded",
+            "source_digest": "digest-1",
+            "integration": "script",
+            "projector_version": "v1",
+            "cache_path": "C:/cache/script/v1/digest-1",
+        },
+        runtime_policy={
+            "timeout": 1800,
+            "sandbox_mode": "unrestricted",
+            "sandbox_roots": (),
+            "tool_mode": "all",
+            "tool_names": (),
+        },
+        memory={
+            "selector": {"scope": "run", "version": 1, "job": "placeholder"},
+            "canonical_json": '{"job":"placeholder","scope":"run","version":1}',
+            "memory_hash": "memory-hash-superseded",
+            "path": "C:/memory/memory-hash-superseded",
+        },
+        routine_id="routine-1",
+        skill="superseded",
+        skill_arguments=(),
+        task_input="Run it",
+        trigger_context={"source": "test"},
     )
 
 
@@ -67,44 +183,60 @@ def test_submit_marks_record_failed_when_launch_fails(tmp_path):
     assert "spawn denied" in record.execution_summary
 
 
-def test_resolve_job_context_prefers_per_agent_timeout_over_group_default(tmp_path):
-    """Worker context resolution must be the sole timeout authority: a
-    configured per-agent timeout wins over the group default when the spec
-    itself carries no override (trigger routes no longer pass one)."""
-    group = tmp_path / "group"
-    (group / "product").mkdir(parents=True)
-    config = tmp_path / "config.yaml"
-    config.write_text(
-        "groups:\n  test:\n    name: Test\n    path: "
-        + str(group).replace("\\", "/")
-        + "\n    agents:\n      - name: product\n        integration: script\n"
-        "        integration_config:\n          command: echo ok\n"
-        "    dispatch:\n      timeout: 1800\n      agents:\n        product:\n          timeout: 45\n"
-    )
-    spec = JobSpec.create(
+def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path):
+    config = _write_config(tmp_path, timeout=1800, command="echo first")
+    _write_blueprint(tmp_path / "agent-library")
+    request = JobRequest(
         config_path=config,
-        group_key="test",
-        agent_name="product",
+        group_key="newsletter",
+        agent_name="builder",
         trigger="manual_prompt",
-        prompt_source={"type": "saved_prompt", "path": "routine.md"},
-        prompt_content="Run it",
+        task_input="Run it",
+        routine_id="daily-review",
     )
-    assert spec.timeout_override is None
 
-    context = resolve_job_context(spec)
-
-    assert context.timeout == 45
-
-
-def test_submit_rejects_missing_or_non_executable_agent(tmp_path):
-    spec = configured_spec(tmp_path, agent="missing")
-    Path(spec.config_path).write_text(
-        "groups:\n  test:\n    name: Test\n    path: "
-        + str(tmp_path / "group").replace("\\", "/")
-        + "\n    agents:\n      - name: missing\n        integration: sdk\n"
+    spec = resolve_job_request(
+        request,
+        config_store=ConfigStore(config),
+        library=BlueprintLibrary(tmp_path / "agent-library"),
+        cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+        integrations={"copilot": FakeIntegration()},
     )
-    with pytest.raises(JobValidationError):
-        submit_job(spec, Mock())
+
+    _write_config(tmp_path, timeout=45, command="echo second")
+
+    assert spec.runtime_policy.timeout == 1800
+    assert spec.integration_config == {"command": "echo first"}
+    assert spec.blueprint.source_digest
+    assert spec.memory.selector["scope"] == "agent"
+
+
+def test_submit_releases_cache_pin_when_launch_fails(tmp_path):
+    config = _write_config(tmp_path)
+    _write_blueprint(tmp_path / "agent-library")
+    cache = CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()})
+    spec = resolve_job_request(
+        JobRequest(
+            config_path=config,
+            group_key="newsletter",
+            agent_name="builder",
+            trigger="manual_prompt",
+            task_input="Run it",
+            routine_id="daily-review",
+        ),
+        config_store=ConfigStore(config),
+        library=BlueprintLibrary(tmp_path / "agent-library"),
+        cache=cache,
+        integrations={"copilot": FakeIntegration()},
+    )
+    launcher = Mock()
+    launcher.launch.side_effect = OSError("spawn denied")
+
+    with pytest.raises(JobSubmissionError, match="spawn denied"):
+        submit_job(spec, launcher)
+
+    pins_root = tmp_path / "compiled-agents" / "_pins"
+    assert list(pins_root.rglob("*")) == []
 
 
 def test_windows_launcher_uses_detached_flags(tmp_path):

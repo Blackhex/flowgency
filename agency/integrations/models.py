@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
+from agency.projector_capabilities import ProjectorCapabilities
+
 PathPolicyMode = Literal["restricted", "unrestricted"]
 ToolPolicyMode = Literal["all", "allowlist", "none"]
 
@@ -26,14 +28,6 @@ class EffectiveRuntimePolicy:
 class RuntimeCapabilities:
     path_modes: frozenset[PathPolicyMode] = frozenset()
     tool_modes: frozenset[ToolPolicyMode] = frozenset()
-
-
-@dataclass(frozen=True)
-class ProjectorCapabilities:
-    instruction_target: PurePosixPath
-    skills_target: PurePosixPath
-    discovers_skills: bool
-    activates_selected_skill: bool
 
 
 @dataclass(frozen=True)

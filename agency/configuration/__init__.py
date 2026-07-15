@@ -1,7 +1,6 @@
 """Strict canonical configuration models, store, and validation primitives."""
 
 from .compat import SandboxSpec, load_config_path, save_config_path
-from .effective import resolve_effective_policy
 from .issues import ValidationFailed, ValidationIssue
 from .models import (
     AgencyConfigcanonical,
@@ -63,7 +62,6 @@ __all__ = [
     "patch_memory_channels",
     "parse_config_canonical",
     "remove_agent_instance",
-    "resolve_effective_policy",
     "replace_agent_routines",
     "save_config_path",
     "validate_config_canonical",

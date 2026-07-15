@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Any, Protocol
 
 from agency.configuration.issues import ValidationIssue
 from agency.fs.snapshot import TreeSnapshot
-from agency.integrations.models import ProjectorCapabilities
+from agency.projector_capabilities import ProjectorCapabilities
 
 
 def _issue(code: str, field: str, message: str, hint: str) -> ValidationIssue:
@@ -21,7 +21,7 @@ def _issue(code: str, field: str, message: str, hint: str) -> ValidationIssue:
 
 class RuntimeProjector(Protocol):
     version: str
-    capabilities: ProjectorCapabilities
+    capabilities: Any
 
     def project(self, source: TreeSnapshot, destination: Path) -> None:
         raise NotImplementedError
@@ -37,7 +37,7 @@ class RuntimeProjector(Protocol):
 @dataclass(frozen=True)
 class StaticRuntimeProjector:
     version: str
-    capabilities: ProjectorCapabilities
+    capabilities: Any
 
     def _mapped_paths(self, source: TreeSnapshot) -> dict[PurePosixPath, bytes]:
         mapped: dict[PurePosixPath, bytes] = {}
