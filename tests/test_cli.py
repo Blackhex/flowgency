@@ -127,9 +127,8 @@ def test_cli_no_args_shows_help():
 
 
 def test_command_handlers_return_integer_statuses(monkeypatch):
-    monkeypatch.setenv("AGENCY_CONFIG", str(cli.DEFAULT_CONFIG_PATH))
     monkeypatch.setattr(cli, "run_server", lambda **options: None)
-    assert cli.cmd_serve(Namespace(host="127.0.0.1", port=8500, reload=False)) == 0
+    assert cli.cmd_serve(Namespace(host="127.0.0.1", port=8500, reload=False, config="config.yaml")) == 0
 
 
 def test_cli_serve_help_shows_reload():
@@ -145,11 +144,10 @@ def test_cli_serve_help_shows_reload():
 
 def test_cmd_serve_forwards_arguments_without_mutating_sys_argv(monkeypatch):
     calls = []
-    monkeypatch.setenv("AGENCY_CONFIG", str(cli.DEFAULT_CONFIG_PATH))
     monkeypatch.setattr(cli, "run_server", lambda **options: calls.append(options))
     original_argv = sys.argv.copy()
 
-    cli.cmd_serve(Namespace(host="127.0.0.1", port=8700, reload=True))
+    cli.cmd_serve(Namespace(host="127.0.0.1", port=8700, reload=True, config="config.yaml"))
 
     assert calls == [{"host": "127.0.0.1", "port": 8700, "reload": True}]
     assert sys.argv == original_argv
@@ -159,8 +157,8 @@ def test_cmd_serve_forwards_arguments_without_mutating_sys_argv(monkeypatch):
 def test_cmd_serve_config_precedence_is_visible_at_lazy_import(tmp_path, monkeypatch, selection):
     explicit_path = tmp_path / "explicit.yaml"
     environment_path = tmp_path / "environment.yaml"
-    default_path = tmp_path / "default.yaml"
-    monkeypatch.setattr(cli, "CONFIG_PATH", default_path)
+    default_path = tmp_path / "config.yaml"
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AGENCY_CONFIG", str(environment_path))
     args = Namespace(host="127.0.0.1", port=8700, reload=False)
     if selection == "explicit":
@@ -444,8 +442,7 @@ def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", ques
         "_agents_normalized": agents,
     }
     monkeypatch.setattr(cli, "_resolve_group", lambda args: runtime_group)
-    monkeypatch.setattr(cli, "CONFIG_PATH", tmp_path / "config.yaml")
-    return Namespace(group="test", slug="change"), shared / "decisions" / "change.md", proposal_path
+    return Namespace(group="test", slug="change", config=str(tmp_path / "config.yaml")), shared / "decisions" / "change.md", proposal_path
 
 
 def test_cmd_decide_rejects_invalid_proposal_schema(tmp_path, monkeypatch, capsys):

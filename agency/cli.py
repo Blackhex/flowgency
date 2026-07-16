@@ -43,8 +43,6 @@ def _supports_color() -> bool:
 
 
 COLORS_ENABLED = _supports_color()
-DEFAULT_CONFIG_PATH = (Path.cwd() / "config.yaml").resolve()
-globals()["CONFIG_PATH"] = DEFAULT_CONFIG_PATH
 
 
 def _c(code: str, text: str) -> str:
@@ -107,7 +105,7 @@ def _validation_failure(
 
 
 def _config_path(args: Namespace) -> Path:
-    selected = getattr(args, "config", None) or os.environ.get("AGENCY_CONFIG") or globals().get("CONFIG_PATH", DEFAULT_CONFIG_PATH)
+    selected = getattr(args, "config", None) or os.environ.get("AGENCY_CONFIG") or (Path.cwd() / "config.yaml")
     return Path(selected).expanduser().resolve()
 
 

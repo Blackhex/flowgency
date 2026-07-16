@@ -154,6 +154,47 @@ def test_cli_has_no_top_level_app_import_or_mutable_app_globals():
     assert forbidden.isdisjoint({node.id for node in ast.walk(tree) if isinstance(node, ast.Name)})
 
 
+def test_cli_has_no_hidden_config_path_authority():
+    source = Path(cli.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    assert "CONFIG_PATH" not in {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert "DEFAULT_CONFIG_PATH" not in {
+        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
+    }
+
+    top_level_values = [
+        statement.value
+        for statement in tree.body
+        if isinstance(statement, (ast.Assign, ast.AnnAssign))
+    ]
+    import_time_cwd_calls = [
+        call
+        for value in top_level_values
+        for call in ast.walk(value)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "Path"
+        and call.func.attr == "cwd"
+    ]
+    assert import_time_cwd_calls == []
+
+
+def test_status_fallback_uses_cwd_at_command_call_time(cli_config, cli_runner, monkeypatch):
+    monkeypatch.delenv("AGENCY_CONFIG", raising=False)
+    monkeypatch.chdir(cli_config.parent)
+
+    result = cli_runner("status", "--json")
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["newsletter"]["name"] == "Newsletter"
+
+
 def test_no_command_returns_success_and_prints_help(cli_runner):
     result = cli_runner()
     assert result.exit_code == 0
