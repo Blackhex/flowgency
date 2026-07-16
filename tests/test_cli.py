@@ -80,6 +80,15 @@ def _setup_jobs_group(tmp_path, monkeypatch):
         "key": "test", "name": "Test", "path": group,
         "agents": ["engineer"], "_agents_normalized": [{"name": "engineer"}],
     }})
+    monkeypatch.setattr(
+        cli,
+        "_group",
+        lambda args: (
+            None,
+            "test",
+            Namespace(name="Test", path=group),
+        ),
+    )
     return spec
 
 
@@ -105,6 +114,11 @@ def test_cli_no_args_shows_help():
     )
     output = result.stdout + result.stderr
     assert "serve" in output or result.returncode == 0
+
+
+def test_command_handlers_return_integer_statuses(monkeypatch):
+    monkeypatch.setattr(cli, "run_server", lambda **options: None)
+    assert cli.cmd_serve(Namespace(host="127.0.0.1", port=8500, reload=False)) == 0
 
 
 def test_cli_serve_help_shows_reload():
@@ -149,6 +163,25 @@ def _dispatch_status(state="active", installed=True, error=None):
     }
 
 
+def _write_dispatch_config(path):
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 2,
+                "agency": {
+                    "agent_library": "agent-library",
+                    "compilation_cache": "compiled-agents",
+                    "memory_store": "memory",
+                    "dispatch": {"interval": 15},
+                },
+                "groups": {},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_cli_help_shows_dispatch_subcommands():
     result = subprocess.run(
         [sys.executable, "-m", "agency.cli", "dispatch", "--help"],
@@ -161,7 +194,7 @@ def test_cli_help_shows_dispatch_subcommands():
 
 def test_cmd_dispatch_install_persists_interval_and_forwards_replace(tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("agency: {}\ngroups: {}\n", encoding="utf-8")
+    _write_dispatch_config(config_path)
     calls = []
     monkeypatch.setattr(cli, "install_timer", lambda path, interval, replace=False: calls.append((path, interval, replace)))
     monkeypatch.setattr(cli, "get_timer_status", lambda path, interval: _dispatch_status())
@@ -179,14 +212,14 @@ def test_cmd_dispatch_install_persists_interval_and_forwards_replace(tmp_path, m
     [
         (_dispatch_status(), 0),
         (_dispatch_status(state="inactive", installed=False), 1),
-        (_dispatch_status(state="inactive", installed=True), 2),
+        (_dispatch_status(state="inactive", installed=True), 1),
         (_dispatch_status(state="misconfigured", installed=True), 3),
-        (_dispatch_status(state="inactive", installed=False, error="unavailable"), 4),
+        (_dispatch_status(state="inactive", installed=False, error="unavailable"), 1),
     ],
 )
 def test_dispatch_status_exit_codes(tmp_path, monkeypatch, status, expected):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("agency:\n  dispatch:\n    interval: 15\ngroups: {}\n", encoding="utf-8")
+    _write_dispatch_config(config_path)
     monkeypatch.setattr(cli, "get_timer_status", lambda path, interval: status)
     args = Namespace(dispatch_command="status", config=str(config_path), interval=None, replace=False, force=False)
     assert cli.cmd_dispatch(args) == expected
@@ -194,7 +227,7 @@ def test_dispatch_status_exit_codes(tmp_path, monkeypatch, status, expected):
 
 def test_cmd_dispatch_uninstall_forwards_force(tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("agency: {}\ngroups: {}\n", encoding="utf-8")
+    _write_dispatch_config(config_path)
     calls = []
     monkeypatch.setattr(cli, "uninstall_timer", lambda path, force=False: calls.append((path, force)))
     args = Namespace(dispatch_command="uninstall", config=str(config_path), interval=None, replace=False, force=True)
@@ -254,12 +287,7 @@ def test_cmd_logs_no_job_id_lists_recent(tmp_path, monkeypatch, capsys):
 
 def test_cmd_logs_unknown_job_exits(tmp_path, monkeypatch):
     _setup_jobs_group(tmp_path, monkeypatch)
-    try:
-        cli.cmd_logs(Namespace(group="test", job_id="deadbeef", lines=40, stderr=False))
-    except SystemExit as exc:
-        assert exc.code == 1
-    else:
-        raise AssertionError("expected SystemExit for unknown job id")
+    assert cli.cmd_logs(Namespace(group="test", job_id="deadbeef", lines=40, stderr=False)) == 1
 
 
 # ── Task 5: CLI decide parity tests ─────────────────────────────────────────
@@ -310,9 +338,7 @@ def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", ques
 
 def test_cmd_decide_rejects_invalid_proposal_schema(tmp_path, monkeypatch, capsys):
     args, _, _ = setup_cli_proposal(tmp_path, monkeypatch, execution_agent="")
-    with pytest.raises(SystemExit) as error:
-        cli.cmd_decide(args)
-    assert error.value.code == 1
+    assert cli.cmd_decide(args) == 3
     assert "execution_agent is required" in capsys.readouterr().err
 
 
@@ -383,9 +409,7 @@ def test_cmd_decide_submission_failure_removes_decision_and_preserves_proposal(t
     responses = iter(["", "a", ""])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
     monkeypatch.setattr(cli, "submit_job_request", lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)))
-    with pytest.raises(SystemExit) as error:
-        cli.cmd_decide(args)
-    assert error.value.code == 1
+    assert cli.cmd_decide(args) == 1
     assert not decision_path.exists()
     assert "status: proposed" in proposal_path.read_text()
 
@@ -396,9 +420,7 @@ def test_cmd_decide_eoferror_exits_cleanly(tmp_path, monkeypatch, capsys):
     """EOFError from stdin must be caught, produce a concise stderr error, and exit 1."""
     args, _, _ = setup_cli_proposal(tmp_path, monkeypatch)
     monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError()))
-    with pytest.raises(SystemExit) as error:
-        cli.cmd_decide(args)
-    assert error.value.code == 1
+    assert cli.cmd_decide(args) == 1
     assert "Input closed" in capsys.readouterr().err
 
 
