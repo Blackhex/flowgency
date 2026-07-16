@@ -26,3 +26,8 @@ include = ["agency*"]
 
 [tool.setuptools.package-data]
 agency = ["templates/*.html", "static/*", "themes/*.yaml"]
+
+[tool.pytest.ini_options]
+markers = [
+    "real_runtime: opt-in probes against installed external AI runtimes",
+]
