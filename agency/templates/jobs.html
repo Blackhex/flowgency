@@ -26,9 +26,12 @@
         </div>
         <div class="mt-2 text-sm text-gray-600">Routine: {{ job.routine_title }}</div>
         <div class="mt-1 text-xs text-gray-500">Memory: {{ job.memory_label }}</div>
+        {% if job.instance_missing %}<div class="mt-1 text-xs text-amber-700">Instance no longer belongs to this group</div>{% endif %}
       </div>
       <div class="flex gap-2 flex-wrap">
+        {% if job.activity_href %}
         <a href="{{ job.activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
+        {% endif %}
         <a href="{{ job.detail_href }}" class="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">Details</a>
       </div>
     </div>

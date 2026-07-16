@@ -7,7 +7,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from agency import app as app_mod
-from agency.app import app, build_pipeline_stats, build_activity_feed
+from agency.app import app, build_activity_feed, build_dashboard_fleet, build_pipeline_stats
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import transition_job, write_job
 
@@ -284,6 +284,19 @@ def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_pa
     assert spec.memory.memory_hash not in response.text
 
 
+def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_path, canonical_raw_config):
+    _, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+    spec = _job_spec(group_root, config_path, status="running", job_id="job-running")
+    path = group_root / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    write_job(path, JobRecord.from_spec(spec))
+    transition_job(path, "queued", "running")
+
+    fleet = build_dashboard_fleet(app_mod.get_group("newsletter"))
+
+    assert fleet[0]["health"] == "red"
+    assert fleet[0]["running"] is True
+
+
 def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, tmp_path, canonical_raw_config):
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -328,6 +341,15 @@ def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, t
     assert "Waiting for memory" in response.text
     assert "Running" in response.text
     assert "1 running" in response.text
+    assert response.text.count('title="Running"') == 1
+
+    fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_group("newsletter"))}
+    assert fleet["advisor"]["job_status_key"] == "queued"
+    assert fleet["advisor"]["running"] is False
+    assert fleet["researcher"]["job_status_key"] == "waiting_for_memory"
+    assert fleet["researcher"]["running"] is False
+    assert fleet["writer"]["job_status_key"] == "running"
+    assert fleet["writer"]["running"] is True
 
 
 def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, canonical_raw_config):

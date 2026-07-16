@@ -1377,6 +1377,8 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
     observations = list_observations(g)
     fleet: list[dict] = []
     for instance in group.agents.values():
+        last_run = get_agent_last_run(g, instance.name)
+        last_seen = last_run["at"] if last_run else get_agent_last_seen(g, instance.name)
         jobs = sorted(
             active_jobs(group.path, instance.name),
             key=lambda record: (record.started_at or "", record.spec.created_at),
@@ -1397,8 +1399,8 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
                 "blueprint": instance.blueprint,
                 "integration": instance.integration,
                 "open_observations": sum(1 for item in observations if item.get("agent") == instance.name and item.get("status") == "open"),
-                "health": "green" if current is not None else "red",
-                "running": bool(current is not None),
+                "health": agent_health_status(last_seen),
+                "running": current is not None and current.status == "running",
                 "job_status_key": current.status if current is not None else None,
                 "job_status": _job_state_label(current.status) if current is not None else None,
                 "job_href": f"/{g['key']}/jobs/{current.spec.job_id}" if current is not None else "",

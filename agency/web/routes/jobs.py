@@ -73,13 +73,11 @@ def _friendly_trigger(trigger: str) -> str:
     }.get(trigger, trigger.replace("_", " ").title())
 
 
-def _routine_title(instance, routine_id: str | None, prompt_source: dict[str, Any] | None) -> str:
+def _routine_title(routine_id: str | None, prompt_source: dict[str, Any] | None) -> str:
     if prompt_source and isinstance(prompt_source.get("title"), str) and prompt_source.get("title"):
         return str(prompt_source["title"])
     if routine_id:
-        for routine in instance.routines:
-            if routine.id == routine_id:
-                return routine.id.replace("-", " ").title()
+        return routine_id
     return "Ad hoc"
 
 
@@ -124,22 +122,22 @@ def _job_rows(snapshot, group_id: str) -> list[dict[str, Any]]:
     for path in sorted(jobs_dir.glob("*.yaml"), key=lambda item: item.stat().st_mtime, reverse=True):
         record = read_job(path)
         instance = group.agents.get(record.spec.agent_name)
-        if instance is None:
-            continue
+        agent_name = record.spec.agent_name
         rows.append(
             {
                 "job_id": record.spec.job_id,
                 "status": record.status,
                 "status_label": _friendly_status(record.status),
                 "trigger_label": _friendly_trigger(record.spec.trigger),
-                "display_name": instance.identity.display_name or instance.name,
-                "agent_name": instance.name,
-                "blueprint": instance.blueprint,
-                "integration": instance.integration,
-                "routine_title": _routine_title(instance, record.spec.routine_id, record.spec.prompt_source),
+                "display_name": (instance.identity.display_name or instance.name) if instance is not None else agent_name,
+                "agent_name": agent_name,
+                "blueprint": record.spec.blueprint.key,
+                "integration": record.spec.integration_name,
+                "routine_title": _routine_title(record.spec.routine_id, record.spec.prompt_source),
                 "memory_label": _memory_label(record.spec.memory.selector, snapshot),
                 "detail_href": f"/{group_id}/jobs/{record.spec.job_id}",
-                "activity_href": f"/{group_id}/agents/{instance.name}/activity",
+                "activity_href": f"/{group_id}/agents/{agent_name}/activity" if instance is not None else "",
+                "instance_missing": instance is None,
             }
         )
     return rows
@@ -147,7 +145,8 @@ def _job_rows(snapshot, group_id: str) -> list[dict[str, Any]]:
 
 def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
     group = snapshot.config.groups[group_id]
-    instance = group.agents[record.spec.agent_name]
+    instance = group.agents.get(record.spec.agent_name)
+    agent_name = record.spec.agent_name
     artifact_dir = group.path / "shared" / "jobs" / "artifacts" / record.spec.job_id
     failed_artifacts = []
     if artifact_dir.exists():
@@ -165,18 +164,19 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
         "job": record,
         "job_status_label": _friendly_status(record.status),
         "trigger_label": _friendly_trigger(record.spec.trigger),
-        "display_name": instance.identity.display_name or instance.name,
-        "title": instance.identity.title,
-        "agent_name": instance.name,
-        "blueprint": instance.blueprint,
-        "integration": instance.integration,
-        "routine_title": _routine_title(instance, record.spec.routine_id, record.spec.prompt_source),
+        "display_name": (instance.identity.display_name or instance.name) if instance is not None else agent_name,
+        "title": instance.identity.title if instance is not None else None,
+        "agent_name": agent_name,
+        "blueprint": record.spec.blueprint.key,
+        "integration": record.spec.integration_name,
+        "routine_title": _routine_title(record.spec.routine_id, record.spec.prompt_source),
         "memory_label": _memory_label(record.spec.memory.selector, snapshot),
         "failed_artifacts": failed_artifacts,
         "publication_receipt": publication,
-        "activity_href": f"/{group_id}/agents/{instance.name}/activity",
-        "routine_href": f"/{group_id}/agents/{instance.name}/routines",
-        "profile_href": f"/{group_id}/agents/{instance.name}/profile",
+        "activity_href": f"/{group_id}/agents/{agent_name}/activity" if instance is not None else "",
+        "routine_href": f"/{group_id}/agents/{agent_name}/routines" if instance is not None else "",
+        "profile_href": f"/{group_id}/agents/{agent_name}/profile" if instance is not None else "",
+        "instance_missing": instance is None,
         "can_cancel": record.status in {"queued", "waiting_for_memory"},
         "diagnostic_memory_hash": record.spec.memory.memory_hash,
     }

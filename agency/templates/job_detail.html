@@ -23,17 +23,25 @@
     <span>Routine: {{ routine_title }}</span>
     <span>Memory: {{ memory_label }}</span>
   </div>
+  {% if instance_missing %}<div class="mb-6 text-sm text-amber-700">Instance no longer belongs to this group</div>{% endif %}
 
   <details class="mb-6">
     <summary class="text-sm text-gray-500 cursor-pointer">Diagnostics</summary>
     <div class="mt-2 text-xs font-mono text-gray-500">Job: {{ job.spec.job_id }}</div>
+    <div class="text-xs font-mono text-gray-500">Memory hash: {{ diagnostic_memory_hash }}</div>
     <div class="text-xs text-gray-500">Artifact access is constrained to this job's canonical directory.</div>
   </details>
 
   <div class="flex gap-2 flex-wrap mb-6">
+    {% if profile_href %}
     <a href="{{ profile_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Agent Detail</a>
+    {% endif %}
+    {% if activity_href %}
     <a href="{{ activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
+    {% endif %}
+    {% if routine_href %}
     <a href="{{ routine_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Routines</a>
+    {% endif %}
     {% if can_cancel %}
     <form method="POST" action="/{{ group }}/jobs/{{ job.spec.job_id }}/cancel">
       <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors">Cancel</button>

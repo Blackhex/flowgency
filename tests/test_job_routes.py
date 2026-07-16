@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
 import yaml
@@ -191,7 +192,88 @@ def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, ca
     assert "advisor/activity" in response.text
     assert "advisor/routines" in response.text
     assert "job-failed" not in response.text.split("<summary", 1)[0]
-    assert failed.spec.memory.memory_hash not in response.text
+    before_diagnostics, diagnostics = response.text.split('<summary class="text-sm text-gray-500 cursor-pointer">Diagnostics</summary>', 1)
+    assert failed.spec.memory.memory_hash not in before_diagnostics
+    assert f"Memory hash: {failed.spec.memory.memory_hash}" in diagnostics
+
+    list_response = client.get("/newsletter/jobs")
+    dashboard_response = client.get("/newsletter/")
+    assert failed.spec.memory.memory_hash not in list_response.text
+    assert failed.spec.memory.memory_hash not in dashboard_response.text
+
+
+def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    _write_job_record(group_root, config_path, job_id="job-historical", status="failed")
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["agents"] = []
+    _write_yaml(config_path, raw)
+    app_mod.reload_groups()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+
+    list_response = client.get("/newsletter/jobs")
+    detail_response = client.get("/newsletter/jobs/job-historical")
+
+    assert list_response.status_code == 200
+    assert detail_response.status_code == 200
+    for response in (list_response, detail_response):
+        assert "advisor" in response.text
+        assert "Blueprint:" in response.text
+        assert "copilot" in response.text.lower()
+        assert "Routine: Daily review" in response.text
+        assert "Instance no longer belongs to this group" in response.text
+        assert "/newsletter/agents/advisor/" not in response.text
+
+
+def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    _write_job_record(group_root, config_path, job_id="job-moved", status="failed")
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    advisor = raw["groups"]["newsletter"]["agents"].pop()
+    moved_root = group_root.parent / "research"
+    moved_root.joinpath("shared", "jobs").mkdir(parents=True)
+    raw["groups"]["research"] = {
+        "name": "Research",
+        "path": str(moved_root),
+        "default_integration": "copilot",
+        "agents": [advisor],
+    }
+    _write_yaml(config_path, raw)
+    app_mod.reload_groups()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+
+    response = client.get("/newsletter/jobs/job-moved")
+
+    assert response.status_code == 200
+    assert "advisor" in response.text
+    assert "Blueprint:" in response.text
+    assert "copilot" in response.text.lower()
+    assert "Routine: Daily review" in response.text
+    assert "Instance no longer belongs to this group" in response.text
+    assert "/newsletter/agents/advisor/" not in response.text
+
+
+def test_job_metadata_uses_spec_snapshot_when_instance_still_exists(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    path = _write_job_record(group_root, config_path, job_id="job-snapshot", status="failed")
+    record = read_job(path)
+    snapshot_spec = replace(
+        record.spec,
+        blueprint=replace(record.spec.blueprint, key="historical-advisor"),
+        integration_name="claude-code",
+        routine_id="snapshot-review",
+        prompt_source={"type": "routine", "routine_id": "snapshot-review", "title": "Snapshot review"},
+    )
+    write_job(path, replace(record, spec=snapshot_spec))
+
+    response = client.get("/newsletter/jobs/job-snapshot")
+
+    assert response.status_code == 200
+    assert "Advisor" in response.text
+    assert "Brand Strategist" in response.text
+    assert "historical-advisor" in response.text
+    assert "claude-code" in response.text
+    assert "Routine: Snapshot review" in response.text
 
 
 def test_cancel_waiting_job(monkeypatch, tmp_path, canonical_raw_config):

@@ -259,6 +259,7 @@ def test_roster_shows_exact_active_job_state(monkeypatch, tmp_path, canonical_ra
     assert response.status_code == 200
     assert label in response.text
     assert '/newsletter/jobs/job-1' in response.text
+    assert "a" * 64 not in response.text
 
 
 def test_roster_without_active_job_omits_job_badge(monkeypatch, tmp_path, canonical_raw_config):
