@@ -20,7 +20,7 @@
       <div class="min-w-0">
         <div class="flex items-center gap-3 flex-wrap">
           <a href="{{ job.detail_href }}" class="font-semibold text-gray-900 hover:text-indigo-700">{{ job.display_name }}</a>
-          <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">{{ job.status_label }}</span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ job.status_classes }}">{{ job.status_label }}</span>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">Blueprint: {{ job.blueprint }}</span>
           {{ job.integration | integration_badge }}
         </div>

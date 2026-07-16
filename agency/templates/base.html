@@ -61,6 +61,9 @@
     }
   </script>
   <style>
+    .text-gray-400 { color: #475569; }
+    .text-gray-500 { color: #475569; }
+
     /* Prose — light mode */
     .prose h2 { font-size: 1.25rem; font-weight: 700; margin-top: 1.5rem; margin-bottom: 0.5rem; color: #1e293b; }
     .prose h3 { font-size: 1.1rem; font-weight: 600; margin-top: 1.25rem; margin-bottom: 0.5rem; color: #334155; }
@@ -110,7 +113,7 @@
     .nav-item.active .nav-icon { opacity: 0.9; }
     .nav-item:hover .nav-icon { opacity: 0.7; }
     .nav-badge { font-size: 0.8125rem; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 9999px; line-height: 1.4; }
-    .nav-section { font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #475569; padding: 0 0.75rem; margin-top: 1.25rem; margin-bottom: 0.375rem; }
+    .nav-section { font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #cbd5e1; padding: 0 0.75rem; margin-top: 1.25rem; margin-bottom: 0.375rem; }
 
     /* Main content base */
     main { font-size: 1.0625rem; }
@@ -138,9 +141,14 @@
     .dark .text-gray-900 { color: #f1f5f9 !important; }
     .dark .text-gray-800 { color: #e2e8f0 !important; }
     .dark .text-gray-700 { color: #cbd5e1 !important; }
-    .dark .text-gray-600 { color: #94a3b8 !important; }
-    .dark .text-gray-500 { color: #64748b !important; }
-    .dark .text-gray-400 { color: #64748b !important; }
+    .dark .text-gray-600 { color: #cbd5e1 !important; }
+    .dark .text-gray-500 { color: #94a3b8 !important; }
+    .dark .text-gray-400 { color: #cbd5e1 !important; }
+
+    .dark .text-indigo-800 { color: #e0e7ff !important; }
+    .dark .text-indigo-700 { color: #c7d2fe !important; }
+    .dark .text-indigo-600 { color: #a5b4fc !important; }
+    .dark .text-indigo-500 { color: #c7d2fe !important; }
 
     /* Form inputs */
     .dark input, .dark textarea, .dark select {
@@ -155,7 +163,7 @@
 
     /* Tinted backgrounds */
     .dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.1) !important; }
-    .dark .bg-indigo-50 { background-color: rgba(99, 102, 241, 0.1) !important; }
+    .dark .bg-indigo-50 { background-color: rgba(99, 102, 241, 0.22) !important; }
     .dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.1) !important; }
     .dark .bg-purple-50 { background-color: rgba(139, 92, 246, 0.1) !important; }
     .dark .bg-red-50 { background-color: rgba(239, 68, 68, 0.1) !important; }
@@ -224,7 +232,7 @@
 <body class="h-full bg-gray-50 dark:bg-gray-900 font-sans text-gray-900 dark:text-gray-100 transition-colors duration-200">
   <!-- Mobile top bar -->
   <div class="mobile-topbar md:hidden fixed top-0 left-0 right-0 z-30 bg-agency-950 border-b border-agency-900 flex items-center px-3">
-    <button onclick="document.getElementById('sidebar').classList.remove('-translate-x-full'); document.getElementById('overlay').classList.remove('hidden')" class="p-1.5 rounded-lg hover:bg-white/10">
+    <button type="button" aria-label="Open navigation" onclick="document.getElementById('sidebar').classList.remove('-translate-x-full'); document.getElementById('overlay').classList.remove('hidden')" class="p-1.5 rounded-lg hover:bg-white/10">
       <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
     <span class="ml-2 text-sm font-semibold text-white">{{ agency_title|default('Agency') }}</span>
@@ -256,14 +264,15 @@
           </div>
           <span class="text-lg font-bold text-white tracking-tight">{{ agency_title|default('Agency') }}</span>
         </a>
-        <button class="md:hidden absolute right-4 p-1 rounded hover:bg-white/10" onclick="document.getElementById('sidebar').classList.add('-translate-x-full'); document.getElementById('overlay').classList.add('hidden')">
+        <button type="button" aria-label="Close navigation" class="md:hidden absolute right-4 p-1 rounded hover:bg-white/10" onclick="document.getElementById('sidebar').classList.add('-translate-x-full'); document.getElementById('overlay').classList.add('hidden')">
           <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
 
       <!-- Group switcher (hidden on admin pages) -->
       <div class="px-3 pt-3 pb-2 {% if admin_active %}hidden{% endif %}">
-        <select onchange="var parts=window.location.pathname.split('/').filter(Boolean);var section=parts[1]||'';window.location='/'+this.value+(section?'/'+section:'/')" class="w-full px-2.5 py-2 text-sm font-medium border border-white/10 rounded-lg bg-white/5 text-gray-300 focus:outline-none focus:ring-1 focus:ring-agency-500 cursor-pointer" style="background-color: rgba(255,255,255,0.05);">
+        <label for="group-switcher" class="sr-only">Current group</label>
+        <select id="group-switcher" aria-label="Current group" onchange="var parts=window.location.pathname.split('/').filter(Boolean);var section=parts[1]||'';window.location='/'+this.value+(section?'/'+section:'/')" class="w-full px-2.5 py-2 text-sm font-medium border border-white/10 rounded-lg bg-white/5 text-gray-300 focus:outline-none focus:ring-1 focus:ring-agency-500 cursor-pointer" style="background-color: rgba(255,255,255,0.05);">
           {% for gkey, gname in groups.items() %}
           <option value="{{ gkey }}" {% if gkey == group %}selected{% endif %}>{{ gname }}</option>
           {% endfor %}

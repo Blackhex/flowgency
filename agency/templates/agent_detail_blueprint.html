@@ -1,31 +1,31 @@
 <section class="space-y-5">
   <div>
     <h2 class="text-lg font-semibold text-gray-900">Blueprint</h2>
-    <p class="text-sm text-gray-500">Read-only source and runtime projection details for the pinned blueprint.</p>
+    <p class="text-sm text-gray-600">Read-only source and runtime projection details for the pinned blueprint.</p>
   </div>
   <dl class="grid gap-4 md:grid-cols-2 text-sm text-gray-700">
     <div>
-      <dt class="text-xs uppercase tracking-wide text-gray-400">Source key</dt>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Source key</dt>
       <dd class="font-mono">{{ inspection.key }}</dd>
     </div>
     <div>
-      <dt class="text-xs uppercase tracking-wide text-gray-400">Title</dt>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Title</dt>
       <dd>{{ inspection.title }}</dd>
     </div>
     <div>
-      <dt class="text-xs uppercase tracking-wide text-gray-400">Digest</dt>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Digest</dt>
       <dd class="font-mono break-all">{{ inspection.snapshot.digest }}</dd>
     </div>
     <div>
-      <dt class="text-xs uppercase tracking-wide text-gray-400">Cache status</dt>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Cache status</dt>
       <dd>{{ cache_status.state }}</dd>
     </div>
     <div>
-      <dt class="text-xs uppercase tracking-wide text-gray-400">Instruction target</dt>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Instruction target</dt>
       <dd class="font-mono">{{ compatibility.instruction_target }}</dd>
     </div>
     <div>
-      <dt class="text-xs uppercase tracking-wide text-gray-400">Skills target</dt>
+      <dt class="text-xs uppercase tracking-wide text-gray-600">Skills target</dt>
       <dd class="font-mono">{{ compatibility.skills_target }}</dd>
     </div>
   </dl>

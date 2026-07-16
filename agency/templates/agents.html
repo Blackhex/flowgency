@@ -7,7 +7,7 @@
 <div class="flex items-baseline justify-between mb-6 gap-4 flex-wrap">
   <div>
     <h1 class="text-2xl font-bold text-gray-900">Instances assigned to {{ group_name }}</h1>
-    <p class="text-sm text-gray-500 mt-1">This roster is sourced from config records only.</p>
+    <p class="text-sm text-gray-600 mt-1">This roster is sourced from config records only.</p>
   </div>
   <span class="text-sm text-gray-500">{{ instances|length }} instance{{ 's' if instances|length != 1 else '' }}</span>
 </div>
@@ -17,21 +17,33 @@
 {% endif %}
 
 <div class="bg-white rounded-xl border border-gray-200 p-5 mb-8">
-  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Create Instance</h2>
+  <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-4">Create Instance</h2>
   <form method="post" action="/{{ group }}/agents/create" class="grid gap-4 md:grid-cols-4">
     <input type="hidden" name="revision" value="{{ config_revision }}">
-    <input type="text" name="name" placeholder="instance name" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">
-    <select name="blueprint" class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-mono">
+    <label class="block">
+      <span class="sr-only">Instance name</span>
+      <input type="text" name="name" placeholder="instance name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">
+    </label>
+    <label class="block">
+      <span class="sr-only">Blueprint</span>
+      <select name="blueprint" aria-label="Blueprint" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-mono">
       {% for blueprint in available_blueprints %}
       <option value="{{ blueprint }}">{{ blueprint }}</option>
       {% endfor %}
-    </select>
-    <select name="integration" class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+      </select>
+    </label>
+    <label class="block">
+      <span class="sr-only">Integration</span>
+      <select name="integration" aria-label="Integration" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
       {% for integration in available_integrations %}
       <option value="{{ integration }}">{{ integration }}</option>
       {% endfor %}
-    </select>
-    <input type="text" name="display_name" placeholder="Display name" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+      </select>
+    </label>
+    <label class="block">
+      <span class="sr-only">Display name</span>
+      <input type="text" name="display_name" placeholder="Display name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+    </label>
     <div class="md:col-span-4 flex justify-end">
       <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add Instance</button>
     </div>
@@ -49,7 +61,7 @@
           </div>
           <div>
             <div class="font-semibold text-gray-900">{{ instance.display_name }}</div>
-            <div class="text-xs text-gray-500 font-mono">{{ instance.name }}</div>
+            <div class="text-xs text-gray-600 font-mono">{{ instance.name }}</div>
           </div>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">Blueprint: {{ instance.blueprint }}</span>
           {{ instance.integration | integration_badge }}
@@ -61,7 +73,7 @@
         <div class="mt-2 text-sm text-gray-600">{{ instance.title }}</div>
         {% endif %}
         {% if instance.memory_label %}
-        <div class="mt-1 text-xs text-gray-500">Memory: {{ instance.memory_label }}</div>
+        <div class="mt-1 text-xs text-gray-600">Memory: {{ instance.memory_label }}</div>
         {% endif %}
       </div>
       <div class="flex gap-2 flex-wrap">
@@ -69,17 +81,23 @@
         <a href="{{ instance.profile_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Configure</a>
         <form method="post" action="{{ instance.move_href }}" class="flex gap-2 items-center flex-wrap">
           <input type="hidden" name="revision" value="{{ config_revision }}">
-          <input type="text" name="target_group" placeholder="target group" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono w-32">
-          <select name="memory_mode" class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+          <label class="block">
+            <span class="sr-only">Target group</span>
+            <input type="text" name="target_group" placeholder="target group" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono w-32">
+          </label>
+          <label class="block">
+            <span class="sr-only">Memory move mode</span>
+            <select name="memory_mode" aria-label="Memory move mode" class="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
             <option value="empty">empty</option>
             <option value="copy">copy</option>
-          </select>
+            </select>
+          </label>
           <button type="submit" class="px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Move</button>
         </form>
         <form method="post" action="{{ instance.remove_href }}">
           <input type="hidden" name="revision" value="{{ config_revision }}">
           <input type="hidden" name="confirm" value="true">
-          <button type="submit" class="px-3 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors">Remove</button>
+          <button type="submit" class="px-3 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors dark:bg-red-900/40 dark:text-red-100 dark:hover:bg-red-900/60">Remove</button>
         </form>
       </div>
     </div>

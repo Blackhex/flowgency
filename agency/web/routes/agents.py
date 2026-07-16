@@ -63,10 +63,25 @@ def _active_job_sort_key(record) -> tuple[str, str]:
 
 def _job_badge_classes(status: str) -> str:
     return {
-        "queued": "bg-slate-100 text-slate-700 border border-slate-200",
-        "waiting_for_memory": "bg-amber-100 text-amber-800 border border-amber-200",
-        "running": "bg-sky-100 text-sky-700 border border-sky-200",
-    }.get(status, "bg-slate-100 text-slate-700 border border-slate-200")
+        "queued": (
+            "bg-slate-100 text-slate-700 border border-slate-200 "
+            "dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700"
+        ),
+        "waiting_for_memory": (
+            "bg-amber-100 text-amber-800 border border-amber-200 "
+            "dark:bg-amber-900/50 dark:text-amber-100 dark:border-amber-700"
+        ),
+        "running": (
+            "bg-sky-100 text-sky-700 border border-sky-200 "
+            "dark:bg-sky-900/50 dark:text-sky-100 dark:border-sky-700"
+        ),
+    }.get(
+        status,
+        (
+            "bg-slate-100 text-slate-700 border border-slate-200 "
+            "dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700"
+        ),
+    )
 
 
 def _job_badge_title(status: str) -> str:

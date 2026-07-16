@@ -16,13 +16,13 @@
     </div>
     <form method="POST" action="/tips/hide-all" class="inline">
       <input type="hidden" name="redirect" value="/{{ group }}/">
-      <button type="submit" class="text-sm text-agency-500 hover:text-agency-700 dark:hover:text-agency-300 mt-1">Hide all tips</button>
+      <button type="submit" class="text-sm text-agency-700 hover:text-agency-800 dark:text-agency-200 dark:hover:text-agency-100 mt-1">Hide all tips</button>
     </form>
   </div>
   <form method="POST" action="/tips/dismiss" class="absolute top-2 right-2">
     <input type="hidden" name="tip_id" value="pipeline">
     <input type="hidden" name="redirect" value="/{{ group }}/">
-    <button type="submit" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none">&times;</button>
+    <button type="submit" aria-label="Dismiss pipeline tip" class="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 text-lg leading-none">&times;</button>
   </form>
 </div>
 {% endif %}
@@ -46,9 +46,9 @@
       <span class="{% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% else %}text-rose-500{% endif %} text-sm leading-none">&#9679;</span>
       {% endif %}
       <span class="text-gray-700 dark:text-gray-300 text-base">{{ a.display_name or a.name }}</span>
-      {% if a.blueprint %}<span class="text-xs text-gray-400">Blueprint: {{ a.blueprint }}</span>{% endif %}
-      {% if a.integration %}<span class="text-xs text-gray-500">{{ a.integration }}</span>{% endif %}
-      {% if a.open_observations %}<span class="font-mono text-sm text-amber-600 dark:text-amber-400">{{ a.open_observations }}</span>{% endif %}
+      {% if a.blueprint %}<span class="text-xs text-gray-600 dark:text-gray-300">Blueprint: {{ a.blueprint }}</span>{% endif %}
+      {% if a.integration %}<span class="text-xs text-gray-700 dark:text-gray-200">{{ a.integration }}</span>{% endif %}
+      {% if a.open_observations %}<span class="font-mono text-sm text-amber-700 dark:text-amber-300">{{ a.open_observations }}</span>{% endif %}
     </a>
     {% if a.job_status and a.job_href %}
     <a href="{{ a.job_href }}" class="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ a.job_status }}</a>
@@ -59,7 +59,7 @@
     {% endfor %}
   </div>
   <div class="mt-1.5 text-sm text-gray-500 dark:text-gray-400 font-mono">
-    {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_running %} · <span class="text-emerald-600 dark:text-emerald-400">{{ fleet_running }} running</span>{% endif %}{% if fleet_agents|length - fleet_healthy > 0 %} · <span class="text-amber-600 dark:text-amber-400">{{ fleet_agents|length - fleet_healthy }} needs attention</span>{% endif %}
+    {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_running %} · <span class="text-emerald-700 dark:text-emerald-300">{{ fleet_running }} running</span>{% endif %}{% if fleet_agents|length - fleet_healthy > 0 %} · <span class="text-amber-700 dark:text-amber-300">{{ fleet_agents|length - fleet_healthy }} needs attention</span>{% endif %}
   </div>
   {% else %}
   <div class="text-sm text-gray-400 dark:text-gray-500">No agents configured</div>
@@ -91,9 +91,9 @@
   <div class="flex items-center justify-between gap-2 mb-1">
     <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Pipeline</span>
     {% if pipeline.flow_status == 'bottleneck' %}
-    <span class="text-sm font-mono text-amber-600 dark:text-amber-400">bottleneck</span>
+    <span class="text-sm font-mono text-amber-700 dark:text-amber-300">bottleneck</span>
     {% else %}
-    <span class="text-sm font-mono text-emerald-600 dark:text-emerald-400">healthy</span>
+    <span class="text-sm font-mono text-emerald-700 dark:text-emerald-300">healthy</span>
     {% endif %}
   </div>
   <div class="flex items-center justify-between">
@@ -129,7 +129,7 @@
 
     {# Decisions #}
     <div class="flex-1 text-center">
-      <div class="text-sm text-emerald-600 dark:text-emerald-400 font-medium mb-0.5">Decisions</div>
+      <div class="text-sm text-emerald-700 dark:text-emerald-300 font-medium mb-0.5">Decisions</div>
       <div class="font-mono font-bold text-2xl text-emerald-700 dark:text-emerald-300">{{ pipeline.decisions.total }}</div>
       <svg class="w-20 h-6 mx-auto text-emerald-500 dark:text-emerald-400 mt-0.5" viewBox="0 0 70 24">
         {% set max_val = pipeline.decisions.sparkline|max or 1 %}
@@ -152,7 +152,7 @@
     <div class="flex items-center justify-between mb-2">
       <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Attention Queue</span>
       {% if needs_action_count %}
-      <span class="font-mono text-sm text-amber-600 dark:text-amber-400">{{ needs_action_count }} items</span>
+      <span class="font-mono text-sm text-amber-700 dark:text-amber-300">{{ needs_action_count }} items</span>
       {% endif %}
     </div>
 
@@ -186,7 +186,7 @@
     {% for c in floated_observations %}
     <a href="/{{ group }}/observations/{{ c._slug }}" class="block border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2.5 mb-2 bg-amber-50/50 dark:bg-amber-950/30 hover:border-amber-400 dark:hover:border-amber-600 transition-colors">
       <div class="flex items-center gap-1.5">
-        <span class="text-sm text-amber-600 dark:text-amber-400 font-medium">floated</span>
+        <span class="text-sm text-amber-700 dark:text-amber-300 font-medium">floated</span>
         {{ c.get("agent", "") | agent_badge }}
       </div>
       <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ c._title }}</div>
@@ -198,7 +198,7 @@
     <a href="/{{ group }}/observations/{{ c._slug }}" class="block border border-gray-150 dark:border-gray-700 rounded-md px-3 py-2 mb-1.5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
       <div class="flex items-center gap-1.5">
         {{ c.get("agent", "") | agent_badge }}
-        {% if c.get("float") %}<span class="text-sm text-amber-500 dark:text-amber-400">floated</span>{% endif %}
+        {% if c.get("float") %}<span class="text-sm text-amber-700 dark:text-amber-300">floated</span>{% endif %}
       </div>
       <div class="text-sm text-gray-700 dark:text-gray-300 mt-0.5 leading-tight">{{ c._title }}</div>
     </a>
@@ -206,8 +206,8 @@
 
     {# ─ Footer links ─ #}
     <div class="flex gap-4 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-      <a href="/{{ group }}/observations" class="text-sm text-agency-600 dark:text-agency-400 hover:text-agency-800 dark:hover:text-agency-200">View all observations &rarr;</a>
-      <a href="/{{ group }}/proposals" class="text-sm text-agency-600 dark:text-agency-400 hover:text-agency-800 dark:hover:text-agency-200">View all proposals &rarr;</a>
+      <a href="/{{ group }}/observations" class="text-sm text-agency-700 dark:text-agency-200 hover:text-agency-800 dark:hover:text-white">View all observations &rarr;</a>
+      <a href="/{{ group }}/proposals" class="text-sm text-agency-700 dark:text-agency-200 hover:text-agency-800 dark:hover:text-white">View all proposals &rarr;</a>
     </div>
 
     {% else %}
@@ -223,8 +223,8 @@
       {% for ev in activity_feed %}
       <a href="/{{ group }}/{% if ev.type == 'observation' %}observations{% else %}proposals{% endif %}/{{ ev.slug }}"
          class="flex items-baseline gap-2 py-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors group">
-        <span class="font-mono text-sm text-gray-400 dark:text-gray-500 w-14 flex-shrink-0 text-right">{{ ev.timestamp | relative_time }}</span>
-        <span class="text-sm truncate"><span class="text-gray-600 dark:text-gray-300 group-hover:text-gray-800 dark:group-hover:text-gray-100">{{ ev.agent }}</span> <span class="text-gray-400 dark:text-gray-500">&rarr;</span> filed {{ ev.type }}</span>
+        <span class="font-mono text-sm text-gray-600 dark:text-gray-300 w-14 flex-shrink-0 text-right">{{ ev.timestamp | relative_time }}</span>
+        <span class="text-sm truncate"><span class="text-gray-700 dark:text-gray-200 group-hover:text-gray-800 dark:group-hover:text-white">{{ ev.agent }}</span> <span class="text-gray-600 dark:text-gray-300">&rarr;</span> filed {{ ev.type }}</span>
       </a>
       {% endfor %}
     </div>

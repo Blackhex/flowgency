@@ -64,6 +64,34 @@ def _friendly_status(status: str) -> str:
     }.get(status, status.replace("_", " ").title())
 
 
+def _status_badge_classes(status: str) -> str:
+    return {
+        "waiting_for_memory": (
+            "bg-amber-100 text-amber-800 dark:bg-amber-900/50 "
+            "dark:text-amber-100"
+        ),
+        "queued": (
+            "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        ),
+        "running": (
+            "bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-100"
+        ),
+        "complete": (
+            "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 "
+            "dark:text-emerald-100"
+        ),
+        "failed": (
+            "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-100"
+        ),
+        "cancelled": (
+            "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        ),
+    }.get(
+        status,
+        "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100",
+    )
+
+
 def _friendly_trigger(trigger: str) -> str:
     return {
         "scheduled_prompt": "Scheduled routine",
@@ -128,6 +156,7 @@ def _job_rows(snapshot, group_id: str) -> list[dict[str, Any]]:
                 "job_id": record.spec.job_id,
                 "status": record.status,
                 "status_label": _friendly_status(record.status),
+                "status_classes": _status_badge_classes(record.status),
                 "trigger_label": _friendly_trigger(record.spec.trigger),
                 "display_name": (instance.identity.display_name or instance.name) if instance is not None else agent_name,
                 "agent_name": agent_name,
@@ -163,6 +192,7 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
     return {
         "job": record,
         "job_status_label": _friendly_status(record.status),
+        "job_status_classes": _status_badge_classes(record.status),
         "trigger_label": _friendly_trigger(record.spec.trigger),
         "display_name": (instance.identity.display_name or instance.name) if instance is not None else agent_name,
         "title": instance.identity.title if instance is not None else None,

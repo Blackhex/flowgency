@@ -1,0 +1,12 @@
+{
+  "name": "christag-agency-ui-gate",
+  "private": true,
+  "scripts": {
+    "test:ui": "playwright test",
+    "test:ui:update": "playwright test --update-snapshots"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.52.0"
+  }
+}
