@@ -311,6 +311,20 @@
           </span>
         </a>
 
+        <a href="/admin/agent-library" class="nav-item {% if admin_page == 'agent-library' %}active{% endif %}">
+          <span class="flex items-center gap-2">
+            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.567 2 8.5v8C2 18.433 4.462 20 7.5 20c1.746 0 3.332-.477 4.5-1.253m0-12.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.567 22 8.5v8c0 1.933-2.462 3.5-5.5 3.5-1.746 0-3.332-.477-4.5-1.253"/></svg>
+            Agent Library
+          </span>
+        </a>
+
+        <a href="/admin/memory-channels" class="nav-item {% if admin_page == 'memory-channels' %}active{% endif %}">
+          <span class="flex items-center gap-2">
+            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+            Memory Channels
+          </span>
+        </a>
+
         {% else %}
         <!-- Primary: What needs attention -->
         <a href="/{{ group }}/" class="nav-item mt-1 {% if active == 'home' %}active{% endif %}">

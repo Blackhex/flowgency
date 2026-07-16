@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ channel.display_name }} — Memory Channels{% endblock %}
+{% block content %}
+<div class="max-w-6xl space-y-6">
+  <div>
+    <a href="/admin/memory-channels" class="text-sm text-indigo-600 hover:text-indigo-800">← Memory Channels</a>
+    <h1 class="mt-2 text-2xl font-bold text-gray-900">{{ channel.display_name }}</h1>
+    <p class="mt-1 font-mono text-xs text-gray-500">{{ channel_key }}</p>
+  </div>
+
+  {% if warning %}
+  <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{{ warning }}</div>
+  {% endif %}
+  {% if issues %}
+  <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+    <ul class="list-disc pl-5 text-sm text-red-700">
+      {% for issue in issues %}
+      <li>{{ issue.message }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if content_warning %}
+  <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{{ content_warning }}</div>
+  {% endif %}
+
+  <div class="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+    <div class="space-y-6">
+      <section class="rounded-xl border border-gray-200 bg-white p-5">
+        <h2 class="text-lg font-semibold text-gray-900">Metadata</h2>
+        <form method="post" action="/admin/memory-channels/{{ channel_key }}" class="mt-4 space-y-4">
+          <input type="hidden" name="revision" value="{{ revision }}">
+          <input type="hidden" name="channel_key" value="{{ channel_key }}">
+          <div>
+            <label for="display-name" class="block text-sm font-medium text-gray-700">Display name</label>
+            <input id="display-name" name="display_name" value="{{ channel.display_name }}" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label for="new-key" class="block text-sm font-medium text-gray-700">Stable key</label>
+            <input id="new-key" name="new_key" value="{{ channel_key }}" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm">
+            <p class="mt-1 text-xs text-gray-500">Changing the key is a rekey operation. Referenced channels are blocked until callers are updated.</p>
+          </div>
+          <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save metadata</button>
+        </form>
+        <form method="post" action="/admin/memory-channels/{{ channel_key }}/delete" class="mt-4" onsubmit="return confirm('Delete this memory channel?')">
+          <input type="hidden" name="revision" value="{{ revision }}">
+          <button type="submit" class="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">Delete channel</button>
+        </form>
+      </section>
+
+      <section class="rounded-xl border border-gray-200 bg-white p-5">
+        <h2 class="text-lg font-semibold text-gray-900">Declared references</h2>
+        {% if references %}
+        <ul class="mt-4 space-y-2 text-sm text-gray-600">
+          {% for reference in references %}
+          <li><a href="{{ reference.href }}" class="text-indigo-600 hover:text-indigo-800">{{ reference.label }}</a></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="mt-4 text-sm text-gray-500">No config references currently target this channel.</p>
+        {% endif %}
+      </section>
+    </div>
+
+    <section class="rounded-xl border border-gray-200 bg-white p-5">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-gray-900">Markdown files</h2>
+        <span class="text-sm text-gray-500">{{ memory_snapshot.files | length }} file{{ 's' if memory_snapshot.files | length != 1 else '' }}</span>
+      </div>
+      <form method="post" action="/admin/memory-channels/{{ channel_key }}/content" class="mt-4 space-y-4">
+        <input type="hidden" name="content_revision" value="{{ memory_snapshot.revision }}">
+        <div>
+          <label for="filename" class="block text-sm font-medium text-gray-700">File</label>
+          <select id="filename" name="filename" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white">
+            {% for name in memory_snapshot.files.keys() %}
+            <option value="{{ name }}" {% if selected_filename == name %}selected{% endif %}>{{ name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="memory-content" class="block text-sm font-medium text-gray-700">Content</label>
+          <textarea id="memory-content" name="content" rows="20" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm">{{ selected_content }}</textarea>
+        </div>
+        <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save markdown</button>
+      </form>
+      {% if memory_conflict %}
+      <div class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div class="font-medium text-red-800">Current content differs from your attempted save.</div>
+      </div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

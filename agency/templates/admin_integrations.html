@@ -24,7 +24,12 @@
           <tr class="bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
             <th class="px-4 py-3">Integration</th>
             <th class="px-4 py-3">Author</th>
-            <th class="px-4 py-3">Identity File</th>
+            <th class="px-4 py-3">Projector version</th>
+            <th class="px-4 py-3">Instruction target</th>
+            <th class="px-4 py-3">Skills target</th>
+            <th class="px-4 py-3">Discovery</th>
+            <th class="px-4 py-3">Activation</th>
+            <th class="px-4 py-3">Routine compatibility</th>
             <th class="px-4 py-3">Execution</th>
             <th class="px-4 py-3">AI Backend</th>
             <th class="px-4 py-3"></th>
@@ -35,7 +40,12 @@
           <tr>
             <td class="px-4 py-3">{{ i.name | integration_badge }}</td>
             <td class="px-4 py-3 text-xs text-gray-500">{{ i.author }}</td>
-            <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ i.identity_file }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ i.projector_version }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ i.instruction_target }}</td>
+            <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ i.skills_target }}</td>
+            <td class="px-4 py-3 text-xs text-gray-600">{{ "Yes" if i.discovers_skills else "No" }}</td>
+            <td class="px-4 py-3 text-xs text-gray-600">{{ "Yes" if i.activates_selected_skill else "No" }}</td>
+            <td class="px-4 py-3 text-xs text-gray-600">{{ i.routine_compatibility }}</td>
             <td class="px-4 py-3">
               {% if i.supports_execution %}<span class="text-emerald-600">&#10003;</span>{% else %}<span class="text-gray-300">—</span>{% endif %}
             </td>

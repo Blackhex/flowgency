@@ -44,7 +44,13 @@ import json as json_module
 from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
 from starlette.convertors import Convertor, register_url_convertor
 from agency.web import AgencyServices, build_services, get_services
-from agency.web.routes import admin_groups_router, agent_detail_router, agents_router
+from agency.web.routes import (
+    admin_groups_router,
+    admin_library_router,
+    admin_memory_router,
+    agent_detail_router,
+    agents_router,
+)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1239,6 +1245,8 @@ def integration_badge_filter(name: str) -> Markup:
 templates.env.filters["integration_badge"] = integration_badge_filter
 
 app.include_router(admin_groups_router)
+app.include_router(admin_library_router)
+app.include_router(admin_memory_router)
 app.include_router(agents_router)
 app.include_router(agent_detail_router)
 
@@ -1550,14 +1558,37 @@ async def admin_integrations_page(request: Request):
     for name, i in REGISTRY.items():
         module_name = name.replace("-", "_")
         author = module_to_author.get(module_name, "unknown")
+        projector = i.projector
+        capabilities = getattr(projector, "capabilities", None)
+        routine_compatibility = "None"
+        if capabilities is not None:
+            if capabilities.discovers_skills and capabilities.activates_selected_skill:
+                routine_compatibility = "Full"
+            elif capabilities.discovers_skills or capabilities.activates_selected_skill:
+                routine_compatibility = "Partial"
+            else:
+                routine_compatibility = "Instructions only"
         installed.append({
             "name": name,
             "display_name": i.display_name,
             "module_path": f"{author}.{module_name}",
             "supports_execution": i.supports_execution,
             "supports_ai_backend": i.supports_ai_backend,
-            "identity_file": i.identity_filename() if hasattr(i, 'identity_filename') and callable(i.identity_filename) else "—",
             "author": author,
+            "projector_version": getattr(projector, "version", "—") if projector is not None else "—",
+            "instruction_target": (
+                capabilities.instruction_target.as_posix()
+                if capabilities is not None
+                else "—"
+            ),
+            "skills_target": (
+                capabilities.skills_target.as_posix()
+                if capabilities is not None
+                else "—"
+            ),
+            "discovers_skills": bool(getattr(capabilities, "discovers_skills", False)),
+            "activates_selected_skill": bool(getattr(capabilities, "activates_selected_skill", False)),
+            "routine_compatibility": routine_compatibility,
         })
 
     available = scan_available()

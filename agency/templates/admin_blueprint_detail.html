@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ blueprint.title }} — Agent Library{% endblock %}
+{% block content %}
+<div class="max-w-6xl space-y-6">
+  <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <div>
+      <a href="/admin/agent-library" class="text-sm text-indigo-600 hover:text-indigo-800">← Agent Library</a>
+      <h1 class="mt-2 text-2xl font-bold text-gray-900">{{ blueprint.title }}</h1>
+      <p class="mt-1 font-mono text-xs text-gray-500">{{ blueprint.key }}</p>
+      <p class="mt-2 text-sm text-gray-600">{{ user_summary }}</p>
+    </div>
+    <div class="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+      <div class="font-medium text-gray-900">Source digest</div>
+      <div class="mt-1 font-mono text-xs break-all">{{ blueprint.snapshot.digest }}</div>
+    </div>
+  </div>
+
+  {% if warning %}
+  <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{{ warning }}</div>
+  {% endif %}
+  {% if issues %}
+  <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+    <div class="text-sm font-medium text-red-800">Source validation failed.</div>
+    <ul class="mt-2 list-disc pl-5 text-sm text-red-700">
+      {% for issue in issues %}
+      <li>{{ issue.message }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+    <section class="rounded-xl border border-gray-200 bg-white p-5">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-gray-900">AGENTS.md</h2>
+        <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/skills" class="text-sm text-indigo-600 hover:text-indigo-800">View skills</a>
+      </div>
+      <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/source" class="mt-4 space-y-4">
+        <input type="hidden" name="path" value="{{ form_path }}">
+        <input type="hidden" name="expected_digest" value="{{ blueprint.snapshot.digest }}">
+        <label for="agents-content" class="block text-sm font-medium text-gray-700">Instruction source</label>
+        <textarea id="agents-content" name="content" rows="20" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500">{{ form_content }}</textarea>
+        <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save AGENTS.md</button>
+      </form>
+    </section>
+
+    <div class="space-y-6">
+      <section class="rounded-xl border border-gray-200 bg-white p-5">
+        <h2 class="text-lg font-semibold text-gray-900">Standard files</h2>
+        <ul class="mt-4 space-y-2 text-sm text-gray-600">
+          <li class="font-mono">AGENTS.md</li>
+          {% for item in skill_resources %}
+          <li>
+            <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/skills/{{ item.skill }}" class="text-indigo-600 hover:text-indigo-800">{{ item.skill }}</a>
+            <ul class="mt-1 space-y-1 pl-4">
+              {% for file in item.files %}
+              <li class="font-mono text-xs text-gray-500">{{ file.name }}</li>
+              {% endfor %}
+            </ul>
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <section class="rounded-xl border border-gray-200 bg-white p-5">
+        <h2 class="text-lg font-semibold text-gray-900">Instance users</h2>
+        <ul class="mt-4 space-y-2 text-sm text-gray-600">
+          {% for user in users %}
+          <li><a href="{{ user.href }}" class="text-indigo-600 hover:text-indigo-800">{{ user.group }} / {{ user.agent }}</a></li>
+          {% endfor %}
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <section class="rounded-xl border border-gray-200 bg-white p-5">
+    <h2 class="text-lg font-semibold text-gray-900">Compatible runtimes</h2>
+    <div class="mt-4 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-500">
+            <th class="px-3 py-2">Integration</th>
+            <th class="px-3 py-2">Projector version</th>
+            <th class="px-3 py-2">Instruction target</th>
+            <th class="px-3 py-2">Skills target</th>
+            <th class="px-3 py-2">Discovery</th>
+            <th class="px-3 py-2">Activation</th>
+            <th class="px-3 py-2">Routine compatibility</th>
+            <th class="px-3 py-2">Cache status</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for row in compatibility_rows %}
+          <tr>
+            <td class="px-3 py-2">{{ row.display_name }}</td>
+            <td class="px-3 py-2 font-mono text-xs">{{ row.projector_version }}</td>
+            <td class="px-3 py-2 font-mono text-xs">{{ row.instruction_target }}</td>
+            <td class="px-3 py-2 font-mono text-xs">{{ row.skills_target }}</td>
+            <td class="px-3 py-2">{{ row.discovers_skills }}</td>
+            <td class="px-3 py-2">{{ row.activates_selected_skill }}</td>
+            <td class="px-3 py-2">{{ row.routine_compatibility }}</td>
+            <td class="px-3 py-2">{{ row.cache_state }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
