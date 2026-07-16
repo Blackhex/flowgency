@@ -232,18 +232,18 @@
 <body class="h-full bg-gray-50 dark:bg-gray-900 font-sans text-gray-900 dark:text-gray-100 transition-colors duration-200">
   <!-- Mobile top bar -->
   <div class="mobile-topbar md:hidden fixed top-0 left-0 right-0 z-30 bg-agency-950 border-b border-agency-900 flex items-center px-3">
-    <button type="button" aria-label="Open navigation" onclick="document.getElementById('sidebar').classList.remove('-translate-x-full'); document.getElementById('overlay').classList.remove('hidden')" class="p-1.5 rounded-lg hover:bg-white/10">
+    <button type="button" id="mobile-menu-button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar" onclick="openNavigation()" class="p-1.5 rounded-lg hover:bg-white/10">
       <svg class="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
     <span class="ml-2 text-sm font-semibold text-white">{{ agency_title|default('Agency') }}</span>
   </div>
 
   <!-- Overlay for mobile sidebar -->
-  <div id="overlay" class="hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onclick="document.getElementById('sidebar').classList.add('-translate-x-full'); this.classList.add('hidden')"></div>
+  <div id="overlay" class="hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" aria-hidden="true" onclick="closeNavigation()"></div>
 
   <div class="flex h-full">
     <!-- Sidebar -->
-    <nav id="sidebar" class="fixed md:static z-50 h-full w-[13.5rem] bg-agency-950 flex flex-col shrink-0 transition-transform duration-200 -translate-x-full md:translate-x-0">
+    <nav id="sidebar" aria-label="Primary navigation" class="fixed md:static z-50 h-full w-[13.5rem] bg-agency-950 flex flex-col shrink-0 transition-transform duration-200 -translate-x-full md:translate-x-0">
 
       <!-- Logo + title -->
       <div class="flex items-center justify-start px-4 pt-5 pb-1 relative">
@@ -264,7 +264,7 @@
           </div>
           <span class="text-lg font-bold text-white tracking-tight">{{ agency_title|default('Agency') }}</span>
         </a>
-        <button type="button" aria-label="Close navigation" class="md:hidden absolute right-4 p-1 rounded hover:bg-white/10" onclick="document.getElementById('sidebar').classList.add('-translate-x-full'); document.getElementById('overlay').classList.add('hidden')">
+        <button type="button" id="mobile-menu-close" aria-label="Close navigation" class="md:hidden absolute right-4 p-1 rounded hover:bg-white/10" onclick="closeNavigation()">
           <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
@@ -280,7 +280,7 @@
       </div>
 
       <!-- Navigation -->
-      <div class="flex-1 overflow-y-auto px-3 py-1" onclick="if(window.innerWidth<768){document.getElementById('sidebar').classList.add('-translate-x-full');document.getElementById('overlay').classList.add('hidden')}">
+      <div class="flex-1 overflow-y-auto px-3 py-1" onclick="if(window.innerWidth<768 && event.target.closest('a')){closeNavigation(false)}">
 
         {% if admin_active %}
         <!-- Admin sidebar -->
@@ -404,6 +404,20 @@
           </span>
         </a>
 
+        <a href="/admin/agent-library" class="nav-item">
+          <span class="flex items-center gap-2">
+            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.567 2 8.5v8C2 18.433 4.462 20 7.5 20c1.746 0 3.332-.477 4.5-1.253m0-12.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.567 22 8.5v8c0 1.933-2.462 3.5-5.5 3.5-1.746 0-3.332-.477-4.5-1.253"/></svg>
+            Agent Library
+          </span>
+        </a>
+
+        <a href="/admin/memory-channels" class="nav-item">
+          <span class="flex items-center gap-2">
+            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+            Memory Channels
+          </span>
+        </a>
+
         {% if workspaces_available %}
         <a href="/{{ group }}/workspaces" class="nav-item {% if active == 'workspaces' %}active{% endif %}">
           <span class="flex items-center gap-2">
@@ -421,7 +435,7 @@
       <!-- Bottom: Theme toggle + Settings -->
       <div class="px-3 pb-4 border-t border-white/5 pt-2 space-y-0.5">
         <!-- Theme toggle -->
-        <button onclick="toggleTheme()" class="theme-toggle" id="theme-btn">
+        <button type="button" onclick="toggleTheme()" class="theme-toggle" id="theme-btn">
           <!-- Sun icon (shown in dark mode) -->
           <svg id="icon-sun" class="hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
           <!-- Moon icon (shown in light mode) -->
@@ -450,6 +464,49 @@
   </div>
 
   <script>
+    var mobileMenuButton = document.getElementById('mobile-menu-button');
+    var mobileMenuClose = document.getElementById('mobile-menu-close');
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('overlay');
+
+    function setClosedNavigationState() {
+      if (window.innerWidth < 768 && mobileMenuButton.getAttribute('aria-expanded') !== 'true') {
+        sidebar.inert = true;
+        sidebar.setAttribute('aria-hidden', 'true');
+      } else {
+        sidebar.inert = false;
+        sidebar.removeAttribute('aria-hidden');
+      }
+    }
+
+    function openNavigation() {
+      sidebar.inert = false;
+      sidebar.removeAttribute('aria-hidden');
+      sidebar.classList.remove('-translate-x-full');
+      overlay.classList.remove('hidden');
+      overlay.setAttribute('aria-hidden', 'false');
+      mobileMenuButton.setAttribute('aria-expanded', 'true');
+      mobileMenuClose.focus();
+    }
+
+    function closeNavigation(restoreFocus) {
+      sidebar.classList.add('-translate-x-full');
+      overlay.classList.add('hidden');
+      overlay.setAttribute('aria-hidden', 'true');
+      mobileMenuButton.setAttribute('aria-expanded', 'false');
+      setClosedNavigationState();
+      if (restoreFocus !== false) mobileMenuButton.focus();
+    }
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape' && mobileMenuButton.getAttribute('aria-expanded') === 'true') {
+        event.preventDefault();
+        closeNavigation();
+      }
+    });
+    window.addEventListener('resize', setClosedNavigationState);
+    setClosedNavigationState();
+
     function toggleTheme() {
       var isDark = document.documentElement.classList.toggle('dark');
       localStorage.setItem('theme', isDark ? 'dark' : 'light');

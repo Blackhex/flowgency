@@ -146,6 +146,16 @@ def test_retired_templates_are_deleted_and_navigation_uses_canonical_surfaces():
         assert retired_href not in navigation
     for retained_label in ("Agent Library", "Memory Channels", "Jobs", "Agents"):
         assert retained_label in navigation
+    for mobile_contract in (
+        'aria-label="Open navigation"',
+        'aria-expanded="false"',
+        'aria-controls="sidebar"',
+        'aria-label="Close navigation"',
+        "mobileMenuClose.focus()",
+        "event.key === 'Escape'",
+        "mobileMenuButton.focus()",
+    ):
+        assert mobile_contract in navigation
 
 
 def test_documentation_describes_only_strict_canonical_runtime_authority():

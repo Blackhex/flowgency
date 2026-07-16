@@ -12,7 +12,7 @@
     <div class="space-y-2">
       <h3 class="font-semibold text-gray-900">Group default</h3>
       <p>Timeout: {{ group_timeout }}s</p>
-      <p>Tools: {{ group_tool_mode }}</p>
+      <p>Tools: {{ group_tool_mode }}{% if group_tool_names %} ({{ group_tool_names | replace('\n', ', ') }}){% endif %}</p>
       <p>Roots:</p>
       <ul class="space-y-1">
         {% for root in group_roots %}
@@ -27,7 +27,7 @@
       {% if effective %}
       <p>Timeout: {{ effective.timeout }}s</p>
       <p>Sandbox: {{ effective.sandbox_mode }}</p>
-      <p>Tools: {{ effective.tools.mode }}</p>
+      <p>Tools: {{ effective.tools.mode }}{% if effective.tools.names %} ({{ effective.tools.names | join(', ') }}){% endif %}</p>
       <ul class="space-y-1">
         {% for root in effective_root_rows %}
         <li>{{ root.source }}: <span class="font-mono break-all">{{ root.path }}</span></li>

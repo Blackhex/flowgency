@@ -94,7 +94,7 @@
           </label>
           <button type="submit" class="px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Move</button>
         </form>
-        <form method="post" action="{{ instance.remove_href }}">
+        <form method="post" action="{{ instance.remove_href }}" onsubmit="return window.confirm('Remove {{ instance.display_name }} from {{ group_name }}?')">
           <input type="hidden" name="revision" value="{{ config_revision }}">
           <input type="hidden" name="confirm" value="true">
           <button type="submit" class="px-3 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors dark:bg-red-900/40 dark:text-red-100 dark:hover:bg-red-900/60">Remove</button>

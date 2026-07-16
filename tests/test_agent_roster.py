@@ -161,6 +161,10 @@ def test_agents_page_is_instance_roster(monkeypatch, tmp_path, canonical_raw_con
     assert "headshot" not in response.text.lower()
     assert '<select name="blueprint"' in response.text
     assert '<option value="advisor">advisor</option>' in response.text
+    assert (
+        "return window.confirm('Remove Advisor from Newsletter?')"
+        in response.text
+    )
 
 
 def test_create_instance_from_roster(monkeypatch, tmp_path, canonical_raw_config):

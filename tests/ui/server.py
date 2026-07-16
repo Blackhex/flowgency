@@ -10,7 +10,6 @@ import subprocess
 import sys
 import time
 from urllib.request import urlopen
-from uuid import uuid4
 
 import yaml
 
@@ -22,6 +21,7 @@ from agency.memory import MemoryStore, resolve_memory_selector
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_PARENT = Path(__file__).resolve().parent / ".runtime"
+RUNTIME_ROOT = RUNTIME_PARENT / "current"
 FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.yaml"
 
 
@@ -156,12 +156,18 @@ def _seed_memory(runtime: Path, config: dict) -> None:
     store.try_save(channel, snapshot.revision, {"memory.md": b"# Brand Strategy\n\nPrefer concise, evidence-led releases.\n"})
 
 
+def _safe_remove_runtime(runtime: Path) -> None:
+    parent = RUNTIME_PARENT.resolve(strict=False)
+    candidate = runtime.resolve(strict=False)
+    if candidate.parent != parent or candidate.name != "current":
+        raise RuntimeError(f"Refusing to remove unsafe UI runtime path: {candidate}")
+    shutil.rmtree(candidate, ignore_errors=True)
+
+
 def _prepare_runtime() -> tuple[Path, Path]:
+    runtime = RUNTIME_ROOT
     RUNTIME_PARENT.mkdir(parents=True, exist_ok=True)
-    for stale in RUNTIME_PARENT.iterdir():
-        if stale.is_dir() and time.time() - stale.stat().st_mtime > 24 * 60 * 60:
-            shutil.rmtree(stale, ignore_errors=True)
-    runtime = RUNTIME_PARENT / f"run-{os.getpid()}-{uuid4().hex[:8]}"
+    _safe_remove_runtime(runtime)
     runtime.mkdir()
     raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
     config = _replace_runtime(raw, runtime)
@@ -211,39 +217,42 @@ def main() -> int:
     if not _port_is_free(args.port):
         raise RuntimeError(f"Test port {args.port} is already in use; refusing to reuse an unknown server")
 
-    runtime, config_path = _prepare_runtime()
-    env = os.environ.copy()
-    env["AGENCY_CONFIG"] = str(config_path)
-    env["PYTHONPATH"] = str(ROOT)
-    command = [
-        sys.executable,
-        "-m",
-        "agency.cli",
-        "serve",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(args.port),
-    ]
-    process = subprocess.Popen(command, cwd=ROOT, env=env)
+    runtime = RUNTIME_ROOT
+    process: subprocess.Popen[bytes] | None = None
 
     def stop(_signum: int | None = None, _frame: object | None = None) -> None:
-        if process.poll() is None:
+        if process is not None and process.poll() is None:
             process.terminate()
 
-    signal.signal(signal.SIGINT, stop)
-    signal.signal(signal.SIGTERM, stop)
     try:
+        runtime, config_path = _prepare_runtime()
+        env = os.environ.copy()
+        env["AGENCY_CONFIG"] = str(config_path)
+        env["PYTHONPATH"] = str(ROOT)
+        command = [
+            sys.executable,
+            "-m",
+            "agency.cli",
+            "serve",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(args.port),
+        ]
+        process = subprocess.Popen(command, cwd=ROOT, env=env)
+        signal.signal(signal.SIGINT, stop)
+        signal.signal(signal.SIGTERM, stop)
         _wait_ready(args.port, process)
         return process.wait()
     finally:
         stop()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-        shutil.rmtree(runtime, ignore_errors=True)
+        if process is not None:
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        _safe_remove_runtime(runtime)
 
 
 if __name__ == "__main__":
