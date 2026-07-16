@@ -225,27 +225,6 @@ class TestCustomWorkspace:
         assert files[0]["language"] == "yaml"
 
 
-class TestConfigMigration:
-    def test_migrate_tmux_config_to_workspaces(self):
-        """Old tmux_config string becomes a workspaces list entry."""
-        from agency.workspaces import migrate_tmux_config
-        group_cfg = {"tmux_config": "/path/to/tmux-agents.sh"}
-        result = migrate_tmux_config(group_cfg)
-        assert "workspaces" in result
-        assert len(result["workspaces"]) == 1
-        ws = result["workspaces"][0]
-        assert ws["type"] == "tmux"
-        assert ws["name"] == "tmux"
-        assert ws["config"]["script_path"] == "/path/to/tmux-agents.sh"
-        assert "tmux_config" not in result
-
-    def test_migrate_noop_when_no_tmux_config(self):
-        """Groups without tmux_config are untouched."""
-        from agency.workspaces import migrate_tmux_config
-        group_cfg = {"name": "test"}
-        result = migrate_tmux_config(group_cfg)
-        assert "workspaces" not in result or result.get("workspaces") == []
-
 class TestWorkspaceRoutes:
     """Smoke tests for workspace routes."""
 
@@ -295,18 +274,8 @@ class TestWorkspaceRoutes:
 
     def test_workspace_file_save_disallowed_path(self, tmp_path):
         client = self._make_app(tmp_path)
-        resp = client.post("/test/workspaces/0/file/save", data={
-            "file_path": "/etc/passwd",
-            "content": "hacked",
-        })
+        resp = client.post(
+            "/test/workspaces/0/file/save",
+            data={"file_path": "/etc/passwd", "content": "hacked"},
+        )
         assert resp.status_code == 403
-
-
-    def test_migrate_noop_when_workspaces_already_exist(self):
-        """Don't double-migrate if workspaces list already present."""
-        from agency.workspaces import migrate_tmux_config
-        existing = [{"name": "My Grid", "type": "tmux", "config": {"script_path": "/x.sh"}}]
-        group_cfg = {"tmux_config": "/old.sh", "workspaces": existing}
-        result = migrate_tmux_config(group_cfg)
-        assert len(result["workspaces"]) == 1
-        assert result["workspaces"][0]["config"]["script_path"] == "/x.sh"

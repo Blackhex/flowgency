@@ -41,7 +41,7 @@ from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt, build_routine_task_input
 from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, question_option_labels, SKIP_EXECUTION_SUMMARY
 import json as json_module
-from agency.workspaces import migrate_tmux_config, REGISTRY as WORKSPACE_REGISTRY
+from agency.workspaces import REGISTRY as WORKSPACE_REGISTRY
 from starlette.convertors import Convertor, register_url_convertor
 from agency.web import AgencyServices, build_services, get_services
 from agency.web.routes import (
@@ -86,7 +86,7 @@ def _runtime_groups(config: dict) -> dict:
         normalized = normalize_agents(group.get("agents", []), default_integration)
         group["_agents_normalized"] = normalized
         group["agents"] = agent_names(normalized)
-        groups[key] = migrate_tmux_config(group)
+        groups[key] = group
     return groups
 
 
