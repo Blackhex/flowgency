@@ -30,7 +30,6 @@
         <h2 class="text-lg font-semibold text-gray-900">Metadata</h2>
         <form method="post" action="/admin/memory-channels/{{ channel_key }}" class="mt-4 space-y-4">
           <input type="hidden" name="revision" value="{{ revision }}">
-          <input type="hidden" name="channel_key" value="{{ channel_key }}">
           <div>
             <label for="display-name" class="block text-sm font-medium text-gray-700">Display name</label>
             <input id="display-name" name="display_name" value="{{ channel.display_name }}" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">

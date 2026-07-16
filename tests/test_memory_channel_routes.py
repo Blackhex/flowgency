@@ -281,6 +281,64 @@ def test_channel_rename_updates_display_name_only(
     )
 
 
+def test_channel_rekey_rejects_forged_current_key(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, config_path, _ = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    snapshot = ConfigStore(config_path).load()
+    before = deepcopy(snapshot.raw)
+
+    response = client.post(
+        "/admin/memory-channels/brand-strategy",
+        data={
+            "revision": snapshot.revision,
+            "display_name": "Brand Strategy",
+            "channel_key": "unreferenced",
+            "new_key": "brand-ops",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert ConfigStore(config_path).load().raw == before
+
+
+def test_channel_rekey_rejects_forged_referenced_current_key(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, config_path, _ = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    snapshot = ConfigStore(config_path).load()
+    before = deepcopy(snapshot.raw)
+
+    response = client.post(
+        "/admin/memory-channels/support",
+        data={
+            "revision": snapshot.revision,
+            "display_name": "Support",
+            "channel_key": "brand-strategy",
+            "new_key": "brand-ops",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    refreshed = ConfigStore(config_path).load()
+    assert "support" not in refreshed.config.memory.channels
+    assert refreshed.config.memory.channels["brand-ops"].display_name == "Support"
+
+
 def test_channel_rekey_blocks_when_referenced(
     monkeypatch,
     tmp_path,
@@ -305,3 +363,91 @@ def test_channel_rekey_blocks_when_referenced(
     assert response.status_code == 409
     assert "rekey" in response.text.lower()
     assert "referenced" in response.text.lower()
+
+
+def test_channel_rekey_allows_unreferenced_channel(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, config_path, _ = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    snapshot = ConfigStore(config_path).load()
+
+    response = client.post(
+        "/admin/memory-channels/support",
+        data={
+            "revision": snapshot.revision,
+            "display_name": "Support Desk",
+            "new_key": "support-ops",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    refreshed = ConfigStore(config_path).load()
+    assert "support" not in refreshed.config.memory.channels
+    assert (
+        refreshed.config.memory.channels["support-ops"].display_name
+        == "Support Desk"
+    )
+
+
+def test_channel_rekey_rejects_destination_collision(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, config_path, _ = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    snapshot = ConfigStore(config_path).load()
+
+    response = client.post(
+        "/admin/memory-channels/support",
+        data={
+            "revision": snapshot.revision,
+            "display_name": "Support Desk",
+            "new_key": "brand-strategy",
+        },
+    )
+
+    assert response.status_code == 409
+    assert "already exists" in response.text.lower()
+
+
+def test_channel_content_save_binds_url_identity(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, _, resolved = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    snapshot = app_mod.app.state.services.memory_store.read(resolved)
+    current = (resolved.directory / "memory.md").read_text(encoding="utf-8")
+
+    response = client.post(
+        "/admin/memory-channels/brand-strategy/content",
+        data={
+            "filename": "memory.md",
+            "content_revision": snapshot.revision,
+            "content": current + "Updated\n",
+            "channel_key": "support",
+            "selector": "support",
+            "hash": "deadbeef",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert (
+        resolved.directory / "memory.md"
+    ).read_text(encoding="utf-8") == current

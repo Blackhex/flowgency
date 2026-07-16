@@ -337,9 +337,6 @@ async def admin_memory_channel_save(
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     display_name = str(form.get("display_name", "")).strip()
-    current_key = (
-        str(form.get("channel_key", channel_key)).strip() or channel_key
-    )
     new_key = str(form.get("new_key", channel_key)).strip() or channel_key
     references = _channel_references(snapshot, channel_key)
     try:
@@ -350,12 +347,12 @@ async def admin_memory_channel_save(
             )
         raw = deepcopy(snapshot.raw)
         channels = dict(raw.get("memory", {}).get("channels", {}))
-        if current_key not in channels:
+        if channel_key not in channels:
             raise HTTPException(
                 status_code=404,
                 detail="Unknown memory channel",
             )
-        if new_key != current_key and references:
+        if new_key != channel_key and references:
             return _render_channel_detail(
                 request,
                 services,
@@ -367,8 +364,11 @@ async def admin_memory_channel_save(
                 ),
                 status_code=409,
             )
-        entry = {"display_name": display_name or new_key}
-        if new_key != current_key:
+        if new_key == channel_key:
+            channels[channel_key] = {
+                "display_name": display_name or channel_key,
+            }
+        else:
             if new_key in channels:
                 raise ValidationFailed(
                     (
@@ -390,13 +390,18 @@ async def admin_memory_channel_save(
                 )
             ordered = []
             for key, value in channels.items():
-                if key == current_key:
-                    ordered.append((new_key, entry))
+                if key == channel_key:
+                    ordered.append(
+                        (
+                            new_key,
+                            {
+                                "display_name": display_name or new_key,
+                            },
+                        )
+                    )
                 else:
                     ordered.append((key, value))
             channels = dict(ordered)
-        else:
-            channels[current_key] = entry
         _patch_channels(raw, channels)
         parse_config_canonical(raw, snapshot.path)
         services.config_store.replace(revision, raw)
@@ -419,9 +424,7 @@ async def admin_memory_channel_save(
             status_code=409,
         )
     request.app.state.reload_groups()
-    destination = (
-        new_key if new_key != current_key else current_key
-    )
+    destination = new_key if new_key != channel_key else channel_key
     return RedirectResponse(
         f"/admin/memory-channels/{destination}",
         status_code=303,
@@ -498,6 +501,24 @@ async def admin_memory_channel_content(
     filename = str(form.get("filename", "memory.md")).strip() or "memory.md"
     content_revision = str(form.get("content_revision", "")).strip()
     content = str(form.get("content", ""))
+    forged_fields = [
+        field
+        for field in ("channel_key", "selector", "hash")
+        if str(form.get(field, "")).strip()
+    ]
+    if forged_fields:
+        return _render_channel_detail(
+            request,
+            services,
+            snapshot,
+            channel_key,
+            content_warning=(
+                "Memory content updates must target the URL channel only."
+            ),
+            filename=filename,
+            content_override=content,
+            status_code=409,
+        )
     try:
         resolved = _resolve_channel_memory(snapshot, services, channel_key)
         with try_exclusive_lock(services.memory_store._lock_path(resolved)):
