@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from agency.configuration import ConfigConflictError, ValidationFailed
+from agency.configuration.models import MemorySelector
 from agency.fs.snapshot import AssetValidationError
 from agency.instances import AgentInstanceCreate, InstanceMoveConflict
 from agency.jobs import active_jobs
@@ -45,10 +46,56 @@ def _group_context(request: Request, snapshot, group_id: str) -> dict:
     }
 
 
+def _friendly_status(status: str) -> str:
+    return {
+        "waiting_for_memory": "Waiting for memory",
+        "queued": "Queued",
+        "running": "Running",
+        "complete": "Complete",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+    }.get(status, status.replace("_", " ").title())
+
+
+def _active_job_sort_key(record) -> tuple[str, str]:
+    return (record.spec.created_at, record.spec.job_id)
+
+
+def _job_badge_classes(status: str) -> str:
+    return {
+        "queued": "bg-slate-100 text-slate-700 border border-slate-200",
+        "waiting_for_memory": "bg-amber-100 text-amber-800 border border-amber-200",
+        "running": "bg-sky-100 text-sky-700 border border-sky-200",
+    }.get(status, "bg-slate-100 text-slate-700 border border-slate-200")
+
+
+def _job_badge_title(status: str) -> str:
+    return {
+        "queued": "Queued job awaiting execution",
+        "waiting_for_memory": "Job is waiting for memory publication",
+        "running": "Job is currently executing",
+    }.get(status, _friendly_status(status))
+
+
+def _instance_memory_label(instance, channels) -> str:
+    selector = instance.default_memory or MemorySelector(scope="agent")
+    if selector.scope == "channel":
+        channel = channels.get(selector.channel or "")
+        display = channel.display_name if channel is not None else (selector.channel or "Channel")
+        return f"Channel: {display}"
+    return selector.scope.title() + " memory"
+
+
 def _instance_rows(snapshot, group_id: str) -> list[dict]:
     group = snapshot.config.groups[group_id]
     rows = []
     for instance in group.agents.values():
+        current_jobs = sorted(
+            active_jobs(group.path, instance.name),
+            key=_active_job_sort_key,
+            reverse=True,
+        )
+        current = current_jobs[0] if current_jobs else None
         rows.append(
             {
                 "name": instance.name,
@@ -57,8 +104,18 @@ def _instance_rows(snapshot, group_id: str) -> list[dict]:
                 "emoji": instance.identity.emoji,
                 "blueprint": instance.blueprint,
                 "integration": instance.integration,
-                "job_status": "Running" if active_jobs(group.path, instance.name) else None,
+                "job_status": (
+                    _friendly_status(current.status)
+                    if current is not None
+                    else None
+                ),
+                "job_href": f"/{group_id}/jobs/{current.spec.job_id}" if current is not None else "",
+                "job_status_key": current.status if current is not None else "",
+                "job_status_classes": _job_badge_classes(current.status) if current is not None else "",
+                "job_status_title": _job_badge_title(current.status) if current is not None else "",
+                "memory_label": _instance_memory_label(instance, snapshot.config.memory.channels),
                 "profile_href": f"/{group_id}/agents/{instance.name}/profile",
+                "activity_href": f"/{group_id}/agents/{instance.name}/activity",
                 "remove_href": f"/{group_id}/agents/{instance.name}/remove",
                 "move_href": f"/{group_id}/agents/{instance.name}/move",
             }

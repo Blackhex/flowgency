@@ -485,6 +485,28 @@ def test_retry_prompt_keeps_decision_note(tmp_path, monkeypatch):
     assert "Keep rollback" in captured[0].task_input
 
 
+def test_retry_allows_cancelled_status(tmp_path, monkeypatch):
+    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    decision_path.write_text(
+        "---\nproposal: change.md\nexecution_status: cancelled\n"
+        "execution_agent: engineer\nexecution_job_id: old-job\n"
+        "execution_job_history: []\n---\n"
+    )
+    captured = []
+    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
+
+    response = client.post(
+        "/test/decisions/change/retry",
+        data={"execution_agent": "engineer"},
+        follow_redirects=False,
+    )
+
+    metadata, _ = app_mod.parse_frontmatter(decision_path.read_text())
+    assert response.status_code == 303
+    assert metadata["execution_job_history"] == ["old-job"]
+    assert metadata["execution_job_id"] == captured[0].job_id
+
+
 # ── Finding 2: server-side retry status enforcement ──────────────────────────
 
 @pytest.mark.parametrize("bad_status", ["skipped", "pending", "running", "complete"])

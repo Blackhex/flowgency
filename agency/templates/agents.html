@@ -54,14 +54,18 @@
           <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">Blueprint: {{ instance.blueprint }}</span>
           {{ instance.integration | integration_badge }}
           {% if instance.job_status %}
-          <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">{{ instance.job_status }}</span>
+          <a href="{{ instance.job_href }}" title="{{ instance.job_status_title }}" class="inline-flex min-w-[8.75rem] justify-center items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap {{ instance.job_status_classes }}">{{ instance.job_status }}</a>
           {% endif %}
         </div>
         {% if instance.title %}
         <div class="mt-2 text-sm text-gray-600">{{ instance.title }}</div>
         {% endif %}
+        {% if instance.memory_label %}
+        <div class="mt-1 text-xs text-gray-500">Memory: {{ instance.memory_label }}</div>
+        {% endif %}
       </div>
       <div class="flex gap-2 flex-wrap">
+        <a href="{{ instance.activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
         <a href="{{ instance.profile_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Configure</a>
         <form method="post" action="{{ instance.move_href }}" class="flex gap-2 items-center flex-wrap">
           <input type="hidden" name="revision" value="{{ config_revision }}">

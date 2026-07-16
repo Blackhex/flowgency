@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from pathlib import Path
+
+import yaml
+from fastapi.testclient import TestClient
+
+from agency import app as app_mod
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from agency.jobs.store import read_job, transition_job, write_job
+
+
+def _write_yaml(path: Path, raw: dict) -> Path:
+    path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_blueprint(root: Path, key: str, title: str) -> None:
+    blueprint = root / key
+    skill = blueprint / ".agents" / "skills" / "daily-review"
+    skill.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
+
+
+def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
+    raw = deepcopy(canonical_raw_config)
+    library_root = tmp_path / "agent-library"
+    cache_root = tmp_path / "compiled-agents"
+    memory_root = tmp_path / "memory-store"
+    group_root = tmp_path / "groups" / "newsletter"
+    for rel in [
+        ("shared", "jobs"),
+        ("shared", "logs", "2026-07-16"),
+        ("shared", "observations"),
+        ("shared", "proposals"),
+        ("shared", "decisions"),
+        ("shared", "prompts"),
+    ]:
+        group_root.joinpath(*rel).mkdir(parents=True, exist_ok=True)
+    (group_root / "shared" / "memory.md").write_text("# Shared\n", encoding="utf-8")
+    _write_blueprint(library_root, "advisor", "Advisor")
+
+    raw["agency"]["agent_library"] = str(library_root)
+    raw["agency"]["compilation_cache"] = str(cache_root)
+    raw["agency"]["memory_store"] = str(memory_root)
+    raw["groups"] = {
+        "newsletter": {
+            "name": "Newsletter",
+            "path": str(group_root),
+            "default_integration": "copilot",
+            "agents": [
+                {
+                    "name": "advisor",
+                    "blueprint": "advisor",
+                    "integration": "copilot",
+                    "identity": {
+                        "display_name": "Advisor",
+                        "title": "Brand Strategist",
+                    },
+                    "routines": [
+                        {
+                            "id": "daily-review",
+                            "skill": "daily-review",
+                            "schedule": {"at": "09:00"},
+                            "memory": {"scope": "channel", "channel": "support"},
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+
+    config_path = _write_yaml(tmp_path / "config.yaml", raw)
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.reload_groups()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    return TestClient(app_mod.app), config_path, group_root
+
+
+def _write_job_record(group_root: Path, config_path: Path, *, job_id: str = "job-1", status: str = "queued") -> Path:
+    spec = JobSpec(
+        schema_version=2,
+        job_id=job_id,
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
+        group_key="newsletter",
+        group_path=str(group_root.resolve()),
+        agent_name="advisor",
+        workspace_dir=str(group_root.resolve()),
+        trigger="scheduled_prompt",
+        integration_name="copilot",
+        integration_config={"model": "gpt-5.4"},
+        blueprint=BlueprintRef(
+            key="advisor",
+            source_digest="digest-1",
+            integration="copilot",
+            projector_version="v1",
+            cache_path=str((group_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
+        ),
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=(),
+        task_input="# Routine\n",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="restricted",
+            sandbox_roots=(str(group_root.resolve()),),
+            tool_mode="allowlist",
+            tool_names=("shell",),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "channel", "channel": "support"},
+            canonical_json='{"channel":"support","scope":"channel"}',
+            memory_hash="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+            path=str((group_root.parent.parent / "memory-store" / "channel-support").resolve()),
+        ),
+        trigger_context={"source": "test"},
+        prompt_source={"type": "routine", "routine_id": "daily-review", "title": "Daily review"},
+        timeout_override=None,
+        created_at="2026-07-16T00:00:00+00:00",
+    )
+    path = group_root / "shared" / "jobs" / f"{job_id}.yaml"
+    record = JobRecord.from_spec(spec)
+    write_job(path, record)
+    if status != "queued":
+        transition_job(path, "queued", status)
+    return path
+
+
+def test_job_list_is_group_scoped(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    _write_job_record(group_root, config_path, job_id="job-1", status="queued")
+
+    other_group = group_root.parent / "research"
+    other_group.joinpath("shared", "jobs").mkdir(parents=True, exist_ok=True)
+    _write_job_record(other_group, config_path, job_id="job-2", status="queued")
+
+    response = client.get("/newsletter/jobs")
+
+    assert response.status_code == 200
+    assert "job-1" in response.text
+    assert "job-2" not in response.text
+
+
+def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    path = _write_job_record(group_root, config_path, job_id="job-failed", status="queued")
+    record = read_job(path)
+    failed = JobRecord(
+        spec=record.spec,
+        status="failed",
+        stdout_path=str((group_root / "shared" / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.out").resolve()),
+        stderr_path=str((group_root / "shared" / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.err").resolve()),
+        changed_files=[{"path": "docs/brief.md", "status": "modified", "lines_added": 3, "lines_removed": 1}],
+        execution_summary="Memory publication failed.",
+        memory_publication={
+            "failed_artifacts": [
+                {
+                    "name": "memory.md",
+                    "path": str((group_root / "shared" / "jobs" / "artifacts" / "job-failed" / "memory.md").resolve()),
+                    "size": 12,
+                }
+            ]
+        },
+    )
+    write_job(path, failed)
+    Path(failed.stdout_path).write_text("stdout", encoding="utf-8")
+    Path(failed.stderr_path).write_text("stderr", encoding="utf-8")
+    artifact_dir = group_root / "shared" / "jobs" / "artifacts" / "job-failed"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "memory.md").write_text("snapshot", encoding="utf-8")
+
+    response = client.get("/newsletter/jobs/job-failed")
+
+    assert response.status_code == 200
+    assert "Routine: Daily review" in response.text
+    assert "Memory: Channel: Support" in response.text
+    assert "Failed memory snapshot" in response.text
+    assert "Brand Strategist" in response.text
+    assert "advisor" in response.text
+    assert "copilot" in response.text
+    assert "docs/brief.md" in response.text
+    assert "advisor/activity" in response.text
+    assert "advisor/routines" in response.text
+    assert "job-failed" not in response.text.split("<summary", 1)[0]
+    assert failed.spec.memory.memory_hash not in response.text
+
+
+def test_cancel_waiting_job(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    path = _write_job_record(group_root, config_path, job_id="job-waiting", status="waiting_for_memory")
+
+    response = client.post("/newsletter/jobs/job-waiting/cancel", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert read_job(path).status == "cancelled"
+
+
+def test_cancel_running_job_returns_conflict(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    _write_job_record(group_root, config_path, job_id="job-running", status="running")
+
+    response = client.post("/newsletter/jobs/job-running/cancel")
+
+    assert response.status_code == 409
+
+
+def test_job_artifact_path_must_be_canonical(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    _write_job_record(group_root, config_path, job_id="job-safe", status="failed")
+
+    response = client.get("/newsletter/jobs/job-safe?artifact=..%2F..%2Fsecret.txt")
+
+    assert response.status_code in {400, 403}

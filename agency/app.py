@@ -50,6 +50,7 @@ from agency.web.routes import (
     admin_memory_router,
     agent_detail_router,
     agents_router,
+    jobs_router,
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -1249,6 +1250,7 @@ app.include_router(admin_library_router)
 app.include_router(admin_memory_router)
 app.include_router(agents_router)
 app.include_router(agent_detail_router)
+app.include_router(jobs_router)
 
 
 def agent_health_status(last_seen: datetime | None) -> str:
@@ -1339,6 +1341,72 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             })
 
     return agents, subagents
+
+
+def _job_state_label(status: str) -> str:
+    return {
+        "waiting_for_memory": "Waiting for memory",
+        "queued": "Queued",
+        "running": "Running",
+        "complete": "Complete",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+    }.get(status, status.replace("_", " ").title())
+
+
+def _dashboard_memory_label(selector: dict[str, object], channels) -> str:
+    scope = str(selector.get("scope") or "agent")
+    if scope == "channel":
+        channel_key = str(selector.get("channel") or "")
+        channel = channels.get(channel_key)
+        display = getattr(channel, "display_name", None) or channel_key or "Channel"
+        return f"Channel: {display}"
+    return scope.replace("_", " ").title()
+
+
+def build_dashboard_fleet(g: dict) -> list[dict]:
+    services = getattr(app.state, "services", None)
+    if services is None or getattr(services, "startup_error", None) is not None or services.instances is None:
+        agents, _ = collect_agents_with_identity(g)
+        return agents
+
+    snapshot = services.config_store.load()
+    if g["key"] not in snapshot.config.groups:
+        return []
+    group = snapshot.config.groups[g["key"]]
+    observations = list_observations(g)
+    fleet: list[dict] = []
+    for instance in group.agents.values():
+        jobs = sorted(
+            active_jobs(group.path, instance.name),
+            key=lambda record: (record.started_at or "", record.spec.created_at),
+            reverse=True,
+        )
+        current = jobs[0] if jobs else None
+        selector = (
+            current.spec.memory.selector
+            if current is not None
+            else (instance.default_memory.model_dump(mode="json") if instance.default_memory is not None else {"scope": "agent"})
+        )
+        fleet.append(
+            {
+                "name": instance.name,
+                "display_name": instance.identity.display_name or instance.name,
+                "title": instance.identity.title,
+                "emoji": instance.identity.emoji,
+                "blueprint": instance.blueprint,
+                "integration": instance.integration,
+                "open_observations": sum(1 for item in observations if item.get("agent") == instance.name and item.get("status") == "open"),
+                "health": "green" if current is not None else "red",
+                "running": bool(current is not None),
+                "job_status": _job_state_label(current.status) if current is not None else None,
+                "job_href": f"/{g['key']}/jobs/{current.spec.job_id}" if current is not None else "",
+                "activity_href": f"/{g['key']}/agents/{instance.name}/activity",
+                "profile_href": f"/{g['key']}/agents/{instance.name}/profile",
+                "memory_label": _dashboard_memory_label(selector, snapshot.config.memory.channels),
+            }
+        )
+    return fleet
 
 
 def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:
@@ -1847,7 +1915,7 @@ async def home(request: Request, group: str):
     needs_action_count = len(actionable_proposals) + len(floated_open_observations)
 
     # Zone 1: Fleet status
-    agents, subagents = collect_agents_with_identity(g)
+    agents = build_dashboard_fleet(g)
 
     # Zone 2: Pipeline pulse
     pipeline = build_pipeline_stats(observations, proposals, decisions)
@@ -1861,7 +1929,7 @@ async def home(request: Request, group: str):
         # Zone 1: Fleet
         "fleet_agents": agents,
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
-        "fleet_running": sum(1 for a in agents if a.get("running")),
+        "fleet_running": sum(1 for a in agents if a.get("job_status") in {"Queued", "Waiting for memory", "Running"}),
         # Zone 2: Pipeline
         "pipeline": pipeline,
         # Zone 3: Attention queue
@@ -2280,12 +2348,12 @@ async def decision_retry(request: Request, group: str, slug: str):
     original_text = decision_path.read_text()
     meta, body = parse_frontmatter(original_text)
 
-    # Only failed decisions may be retried
+    # Only failed or cancelled decisions may be retried
     current_status = meta.get("execution_status", "")
-    if current_status != "failed":
+    if current_status not in {"failed", "cancelled"}:
         return render_decision_detail(
             request, g, group, slug,
-            decision_error=f"Cannot retry a decision with status \u2018{current_status}\u2019. Only failed decisions can be retried.",
+            decision_error=f"Cannot retry a decision with status \u2018{current_status}\u2019. Only failed or cancelled decisions can be retried.",
             status_code=400,
         )
 

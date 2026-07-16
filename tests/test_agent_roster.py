@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
 import yaml
 from fastapi.testclient import TestClient
 from starlette.routing import BaseRoute
@@ -86,6 +87,65 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
 
 def _revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
+
+
+def _roster_job_spec(tmp_path: Path, group_root: Path, *, job_id: str, created_at: str) -> JobSpec:
+    return JobSpec(
+        schema_version=2,
+        job_id=job_id,
+        config_path=str((tmp_path / "config.yaml").resolve()),
+        config_revision="cfg-1",
+        group_key="newsletter",
+        group_path=str(group_root.resolve()),
+        agent_name="advisor",
+        workspace_dir=str(group_root.resolve()),
+        trigger="manual_prompt",
+        integration_name="copilot",
+        integration_config={"model": "gpt-5.4"},
+        blueprint=BlueprintRef(
+            key="advisor",
+            source_digest="digest-1",
+            integration="copilot",
+            projector_version="v1",
+            cache_path="C:/cache/copilot/v1/digest-1",
+        ),
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=(),
+        task_input="# Routine\n",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="restricted",
+            sandbox_roots=(str(group_root.resolve()),),
+            tool_mode="allowlist",
+            tool_names=("shell",),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "run", "version": 1, "job": job_id},
+            canonical_json='{"job":"' + job_id + '","scope":"run","version":1}',
+            memory_hash="a" * 64,
+            path=f"C:/memory/{job_id}",
+        ),
+        trigger_context={"source": "test"},
+        prompt_source={"type": "routine", "routine_id": "daily-review"},
+        timeout_override=None,
+        created_at=created_at,
+    )
+
+
+def _write_roster_job(
+    tmp_path: Path,
+    group_root: Path,
+    *,
+    job_id: str,
+    status: str,
+    created_at: str,
+) -> JobRecord:
+    spec = _roster_job_spec(tmp_path, group_root, job_id=job_id, created_at=created_at)
+    record = JobRecord.from_spec(spec)
+    record.status = status
+    write_job(group_root / "shared" / "jobs" / f"{job_id}.yaml", record)
+    return record
 
 
 def test_agents_page_is_instance_roster(monkeypatch, tmp_path, canonical_raw_config):
@@ -176,58 +236,66 @@ def test_move_preview_and_apply(monkeypatch, tmp_path, canonical_raw_config):
     assert moved["blueprint"] == "advisor"
 
 
-def test_roster_shows_current_job(monkeypatch, tmp_path, canonical_raw_config):
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [
+        ("queued", "Queued"),
+        ("waiting_for_memory", "Waiting for memory"),
+        ("running", "Running"),
+    ],
+)
+def test_roster_shows_exact_active_job_state(monkeypatch, tmp_path, canonical_raw_config, status, label):
     client, _, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
-    spec = JobSpec(
-        schema_version=2,
+    _write_roster_job(
+        tmp_path,
+        group_root,
         job_id="job-1",
-        config_path=str((tmp_path / "config.yaml").resolve()),
-        config_revision="cfg-1",
-        group_key="newsletter",
-        group_path=str(group_root.resolve()),
-        agent_name="advisor",
-        workspace_dir=str(group_root.resolve()),
-        trigger="manual_prompt",
-        integration_name="copilot",
-        integration_config={"model": "gpt-5.4"},
-        blueprint=BlueprintRef(
-            key="advisor",
-            source_digest="digest-1",
-            integration="copilot",
-            projector_version="v1",
-            cache_path="C:/cache/copilot/v1/digest-1",
-        ),
-        routine_id="daily-review",
-        skill="daily-review",
-        skill_arguments=(),
-        task_input="# Routine\n",
-        runtime_policy=RuntimePolicySnapshot(
-            timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(group_root.resolve()),),
-            tool_mode="allowlist",
-            tool_names=("shell",),
-        ),
-        memory=MemoryBinding(
-            selector={"scope": "run", "version": 1, "job": "job-1"},
-            canonical_json='{"job":"job-1","scope":"run","version":1}',
-            memory_hash="a" * 64,
-            path="C:/memory/job-1",
-        ),
-        trigger_context={"source": "test"},
-        prompt_source={"type": "routine", "routine_id": "daily-review"},
-        timeout_override=None,
+        status=status,
         created_at="2026-07-15T00:00:00+00:00",
-    )
-    write_job(
-        group_root / "shared" / "jobs" / "job-1.yaml",
-        JobRecord.from_spec(spec),
     )
 
     response = client.get("/newsletter/agents")
 
     assert response.status_code == 200
-    assert "Running" in response.text
+    assert label in response.text
+    assert '/newsletter/jobs/job-1' in response.text
+
+
+def test_roster_without_active_job_omits_job_badge(monkeypatch, tmp_path, canonical_raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+
+    response = client.get("/newsletter/agents")
+
+    assert response.status_code == 200
+    assert '/newsletter/jobs/' not in response.text
+    assert 'title="Queued job awaiting execution"' not in response.text
+    assert 'title="Job is waiting for memory publication"' not in response.text
+    assert 'title="Job is currently executing"' not in response.text
+
+
+def test_roster_uses_newest_active_job_deterministically(monkeypatch, tmp_path, canonical_raw_config):
+    client, _, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    _write_roster_job(
+        tmp_path,
+        group_root,
+        job_id="job-older",
+        status="queued",
+        created_at="2026-07-15T00:00:00+00:00",
+    )
+    _write_roster_job(
+        tmp_path,
+        group_root,
+        job_id="job-newer",
+        status="waiting_for_memory",
+        created_at="2026-07-16T00:00:00+00:00",
+    )
+
+    response = client.get("/newsletter/agents")
+
+    assert response.status_code == 200
+    assert '/newsletter/jobs/job-newer' in response.text
+    assert '/newsletter/jobs/job-older' not in response.text
+    assert 'Waiting for memory' in response.text
 
 
 def test_old_admin_agent_get_redirects_to_profile(monkeypatch, tmp_path, canonical_raw_config):

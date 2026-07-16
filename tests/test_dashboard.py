@@ -1,6 +1,15 @@
 """Tests for mission control dashboard helpers."""
+from copy import deepcopy
 from datetime import datetime, timedelta
-from agency.app import build_pipeline_stats, build_activity_feed
+from pathlib import Path
+
+import yaml
+from fastapi.testclient import TestClient
+
+from agency import app as app_mod
+from agency.app import app, build_pipeline_stats, build_activity_feed
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from agency.jobs.store import transition_job, write_job
 
 
 class TestBuildPipelineStats:
@@ -129,3 +138,172 @@ Decision body
     # Assert change stats are rendered
     assert "+2" in html
     assert "−1" in html or "&minus;1" in html
+
+
+def _write_yaml(path: Path, raw: dict) -> Path:
+    path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_blueprint(root: Path, key: str, title: str) -> None:
+    blueprint = root / key
+    skill = blueprint / ".agents" / "skills" / "daily-review"
+    skill.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
+
+
+def _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config):
+    raw = deepcopy(canonical_raw_config)
+    library_root = tmp_path / "agent-library"
+    cache_root = tmp_path / "compiled-agents"
+    memory_root = tmp_path / "memory-store"
+    group_root = tmp_path / "groups" / "newsletter"
+    for rel in [
+        ("shared", "jobs"),
+        ("shared", "logs", "2026-07-16"),
+        ("shared", "observations"),
+        ("shared", "proposals"),
+        ("shared", "decisions"),
+        ("shared", "prompts"),
+    ]:
+        (group_root.joinpath(*rel)).mkdir(parents=True, exist_ok=True)
+    (group_root / "shared" / "memory.md").write_text("# Shared\n", encoding="utf-8")
+    _write_blueprint(library_root, "advisor", "Advisor")
+
+    raw["agency"]["agent_library"] = str(library_root)
+    raw["agency"]["compilation_cache"] = str(cache_root)
+    raw["agency"]["memory_store"] = str(memory_root)
+    raw["groups"] = {
+        "newsletter": {
+            "name": "Newsletter",
+            "path": str(group_root),
+            "default_integration": "copilot",
+            "agents": [
+                {
+                    "name": "advisor",
+                    "blueprint": "advisor",
+                    "integration": "copilot",
+                    "identity": {
+                        "display_name": "Advisor",
+                        "title": "Strategy Lead",
+                        "emoji": ":)",
+                    },
+                    "routines": [
+                        {
+                            "id": "daily-review",
+                            "skill": "daily-review",
+                            "schedule": {"at": "09:00"},
+                            "memory": {"scope": "channel", "channel": "support"},
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+
+    config_path = _write_yaml(tmp_path / "config.yaml", raw)
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.reload_groups()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    return TestClient(app_mod.app), config_path, group_root
+
+
+def _job_spec(group_root: Path, config_path: Path, *, status: str, job_id: str = "job-waiting") -> JobSpec:
+    return JobSpec(
+        schema_version=2,
+        job_id=job_id,
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
+        group_key="newsletter",
+        group_path=str(group_root.resolve()),
+        agent_name="advisor",
+        workspace_dir=str(group_root.resolve()),
+        trigger="scheduled_prompt",
+        integration_name="copilot",
+        integration_config={"model": "gpt-5.4"},
+        blueprint=BlueprintRef(
+            key="advisor",
+            source_digest="digest-1",
+            integration="copilot",
+            projector_version="v1",
+            cache_path=str((group_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
+        ),
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=(),
+        task_input="# Routine\n",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="restricted",
+            sandbox_roots=(str(group_root.resolve()),),
+            tool_mode="allowlist",
+            tool_names=("shell",),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "channel", "channel": "support"},
+            canonical_json='{"channel":"support","scope":"channel"}',
+            memory_hash="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+            path=str((group_root.parent.parent / "memory-store" / "channel-support").resolve()),
+        ),
+        trigger_context={"source": "test"},
+        prompt_source={"type": "routine", "routine_id": "daily-review", "title": "Daily review"},
+        timeout_override=None,
+        created_at="2026-07-16T00:00:00+00:00",
+    )
+
+
+def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+    spec = _job_spec(group_root, config_path, status="waiting_for_memory")
+    path = group_root / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    write_job(path, JobRecord.from_spec(spec))
+    transition_job(path, "queued", "waiting_for_memory")
+
+    response = client.get("/newsletter/")
+
+    assert response.status_code == 200
+    assert "Waiting for memory" in response.text
+    assert f'/newsletter/jobs/{spec.job_id}' in response.text
+    assert "/newsletter/agents/advisor/activity" in response.text
+    assert "Blueprint: advisor" in response.text
+    assert "copilot" in response.text
+    assert spec.memory.memory_hash not in response.text
+
+
+def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, canonical_raw_config):
+    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+    other_group = group_root.parent / "research"
+    for rel in [("shared", "jobs"), ("shared", "logs"), ("shared", "observations"), ("shared", "proposals"), ("shared", "decisions")]:
+        other_group.joinpath(*rel).mkdir(parents=True, exist_ok=True)
+    other_group.joinpath("shared", "memory.md").write_text("# Shared\n", encoding="utf-8")
+
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["groups"]["research"] = {
+        "name": "Research",
+        "path": str(other_group),
+        "default_integration": "copilot",
+        "agents": [
+            {
+                "name": "analyst",
+                "blueprint": "advisor",
+                "integration": "copilot",
+                "identity": {"display_name": "Analyst"},
+            }
+        ],
+    }
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    app_mod.reload_groups()
+    app_mod.app.state.services = app_mod.build_services(tmp_path / "config.yaml")
+
+    response = client.get("/newsletter/")
+
+    assert response.status_code == 200
+    assert "Advisor" in response.text
+    assert "Analyst" not in response.text

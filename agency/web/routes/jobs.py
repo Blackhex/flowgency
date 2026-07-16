@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+
+from agency.configuration.models import MemorySelector
+from agency.jobs.store import InvalidJobTransition, cancel_job, read_job
+from agency.web.dependencies import AgencyServices, get_services
+
+
+router = APIRouter()
+
+
+def _templates(request: Request):
+    return request.app.state.templates
+
+
+def _theme_css(request: Request) -> str:
+    return request.app.state.theme_css_getter()
+
+
+def _group_context(request: Request, snapshot, group_id: str) -> dict[str, Any]:
+    group = snapshot.config.groups[group_id]
+    return {
+        "group": group_id,
+        "group_name": group.name,
+        "groups": {key: value.name for key, value in snapshot.config.groups.items()},
+        "agency_title": snapshot.config.agency.title,
+        "admin_active": False,
+        "workspaces": [workspace.model_dump(mode="json") for workspace in group.workspaces],
+        "workspaces_available": bool(group.workspaces),
+        "nav_open_observations": 0,
+        "nav_actionable": 0,
+        "nav_actionable_proposals": 0,
+        "nav_agent_count": len(group.agents),
+        "nav_running_decisions": 0,
+        "show_tips": False,
+        "tips_dismissed": [],
+        "theme_css": _theme_css(request),
+    }
+
+
+def _safe_job_id(job_id: str) -> str:
+    if not job_id or Path(job_id).name != job_id or any(ch in job_id for ch in ("/", "\\")):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job_id
+
+
+def _job_path(group_path: Path, job_id: str) -> Path:
+    return group_path / "shared" / "jobs" / f"{_safe_job_id(job_id)}.yaml"
+
+
+def _friendly_status(status: str) -> str:
+    return {
+        "waiting_for_memory": "Waiting for memory",
+        "queued": "Queued",
+        "running": "Running",
+        "complete": "Complete",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+    }.get(status, status.replace("_", " ").title())
+
+
+def _friendly_trigger(trigger: str) -> str:
+    return {
+        "scheduled_prompt": "Scheduled routine",
+        "manual_prompt": "Manual routine",
+        "decision": "Decision",
+        "decision_retry": "Decision retry",
+    }.get(trigger, trigger.replace("_", " ").title())
+
+
+def _routine_title(instance, routine_id: str | None, prompt_source: dict[str, Any] | None) -> str:
+    if prompt_source and isinstance(prompt_source.get("title"), str) and prompt_source.get("title"):
+        return str(prompt_source["title"])
+    if routine_id:
+        for routine in instance.routines:
+            if routine.id == routine_id:
+                return routine.id.replace("-", " ").title()
+    return "Ad hoc"
+
+
+def _memory_label(selector_data: dict[str, object], snapshot) -> str:
+    selector = MemorySelector.model_validate(selector_data)
+    if selector.scope == "run":
+        return "Run memory"
+    if selector.scope == "routine":
+        return "Routine memory"
+    if selector.scope == "agent":
+        return "Agent memory"
+    if selector.scope == "group":
+        return "Group memory"
+    channel = snapshot.config.memory.channels.get(selector.channel or "")
+    display = channel.display_name if channel is not None else (selector.channel or "Channel")
+    return f"Channel: {display}"
+
+
+def _artifact_root(group_path: Path, job_id: str) -> Path:
+    return (group_path / "shared" / "jobs" / "artifacts" / _safe_job_id(job_id)).resolve(strict=False)
+
+
+def _validate_artifact_query(group_path: Path, job_id: str, artifact: str) -> Path:
+    candidate = Path(artifact)
+    if candidate.name != artifact or artifact in {"", ".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid artifact path")
+    target = (_artifact_root(group_path, job_id) / artifact).resolve(strict=False)
+    root = _artifact_root(group_path, job_id)
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Artifact access denied") from exc
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return target
+
+
+def _job_rows(snapshot, group_id: str) -> list[dict[str, Any]]:
+    group = snapshot.config.groups[group_id]
+    jobs_dir = group.path / "shared" / "jobs"
+    rows: list[dict[str, Any]] = []
+    for path in sorted(jobs_dir.glob("*.yaml"), key=lambda item: item.stat().st_mtime, reverse=True):
+        record = read_job(path)
+        instance = group.agents.get(record.spec.agent_name)
+        if instance is None:
+            continue
+        rows.append(
+            {
+                "job_id": record.spec.job_id,
+                "status": record.status,
+                "status_label": _friendly_status(record.status),
+                "trigger_label": _friendly_trigger(record.spec.trigger),
+                "display_name": instance.identity.display_name or instance.name,
+                "agent_name": instance.name,
+                "blueprint": instance.blueprint,
+                "integration": instance.integration,
+                "routine_title": _routine_title(instance, record.spec.routine_id, record.spec.prompt_source),
+                "memory_label": _memory_label(record.spec.memory.selector, snapshot),
+                "detail_href": f"/{group_id}/jobs/{record.spec.job_id}",
+                "activity_href": f"/{group_id}/agents/{instance.name}/activity",
+            }
+        )
+    return rows
+
+
+def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
+    group = snapshot.config.groups[group_id]
+    instance = group.agents[record.spec.agent_name]
+    artifact_dir = group.path / "shared" / "jobs" / "artifacts" / record.spec.job_id
+    failed_artifacts = []
+    if artifact_dir.exists():
+        for artifact in sorted(artifact_dir.glob("*.md")):
+            label = "Failed memory snapshot" if artifact.name == "memory.md" else artifact.stem.replace("-", " ").title()
+            failed_artifacts.append(
+                {
+                    "name": artifact.name,
+                    "label": label,
+                    "href": f"/{group_id}/jobs/{record.spec.job_id}?artifact={artifact.name}",
+                }
+            )
+    publication = record.memory_publication or {}
+    return {
+        "job": record,
+        "job_status_label": _friendly_status(record.status),
+        "trigger_label": _friendly_trigger(record.spec.trigger),
+        "display_name": instance.identity.display_name or instance.name,
+        "title": instance.identity.title,
+        "agent_name": instance.name,
+        "blueprint": instance.blueprint,
+        "integration": instance.integration,
+        "routine_title": _routine_title(instance, record.spec.routine_id, record.spec.prompt_source),
+        "memory_label": _memory_label(record.spec.memory.selector, snapshot),
+        "failed_artifacts": failed_artifacts,
+        "publication_receipt": publication,
+        "activity_href": f"/{group_id}/agents/{instance.name}/activity",
+        "routine_href": f"/{group_id}/agents/{instance.name}/routines",
+        "profile_href": f"/{group_id}/agents/{instance.name}/profile",
+        "can_cancel": record.status in {"queued", "waiting_for_memory"},
+        "diagnostic_memory_hash": record.spec.memory.memory_hash,
+    }
+
+
+@router.get("/{group}/jobs", response_class=HTMLResponse)
+async def jobs_list(request: Request, group: str, services: AgencyServices = Depends(get_services)):
+    snapshot = services.config_store.load()
+    if group not in snapshot.config.groups:
+        raise HTTPException(status_code=404, detail="Unknown group")
+    return _templates(request).TemplateResponse(
+        request,
+        "jobs.html",
+        {
+            "request": request,
+            **_group_context(request, snapshot, group),
+            "active": "jobs",
+            "jobs": _job_rows(snapshot, group),
+        },
+    )
+
+
+@router.get("/{group}/jobs/{job_id}", response_class=HTMLResponse)
+async def job_detail(request: Request, group: str, job_id: str, artifact: str = "", services: AgencyServices = Depends(get_services)):
+    snapshot = services.config_store.load()
+    if group not in snapshot.config.groups:
+        raise HTTPException(status_code=404, detail="Unknown group")
+    group_cfg = snapshot.config.groups[group]
+    if artifact:
+        target = _validate_artifact_query(group_cfg.path, job_id, artifact)
+        return FileResponse(target)
+    path = _job_path(group_cfg.path, job_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    record = read_job(path)
+    context = _job_detail_context(snapshot, group, record)
+    return _templates(request).TemplateResponse(
+        request,
+        "job_detail.html",
+        {
+            "request": request,
+            **_group_context(request, snapshot, group),
+            "active": "jobs",
+            **context,
+        },
+    )
+
+
+@router.post("/{group}/jobs/{job_id}/cancel", response_class=HTMLResponse)
+async def job_cancel(request: Request, group: str, job_id: str, services: AgencyServices = Depends(get_services)):
+    snapshot = services.config_store.load()
+    if group not in snapshot.config.groups:
+        raise HTTPException(status_code=404, detail="Unknown group")
+    group_cfg = snapshot.config.groups[group]
+    path = _job_path(group_cfg.path, job_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    try:
+        cancel_job(path)
+    except InvalidJobTransition as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse(f"/{group}/jobs/{job_id}", status_code=303)

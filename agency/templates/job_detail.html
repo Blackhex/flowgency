@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% set active = "jobs" %}
+
+{% block title %}Job Detail - {{ group_name }}{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="/{{ group }}/jobs" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to jobs</a>
+</div>
+
+<div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+  <div class="flex items-start justify-between mb-4 gap-4 flex-wrap">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100">{{ display_name }}</h1>
+      {% if title %}<div class="text-sm text-gray-500 mt-1">{{ title }}</div>{% endif %}
+    </div>
+    <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">{{ job_status_label }}</span>
+  </div>
+
+  <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500 dark:text-gray-400 mb-6 pb-4 border-b border-gray-100 dark:border-gray-700">
+    <span>Blueprint: <strong>{{ blueprint }}</strong></span>
+    <span>Integration: <strong>{{ integration }}</strong></span>
+    <span>Routine: {{ routine_title }}</span>
+    <span>Memory: {{ memory_label }}</span>
+  </div>
+
+  <details class="mb-6">
+    <summary class="text-sm text-gray-500 cursor-pointer">Diagnostics</summary>
+    <div class="mt-2 text-xs font-mono text-gray-500">Job: {{ job.spec.job_id }}</div>
+    <div class="text-xs text-gray-500">Artifact access is constrained to this job's canonical directory.</div>
+  </details>
+
+  <div class="flex gap-2 flex-wrap mb-6">
+    <a href="{{ profile_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Agent Detail</a>
+    <a href="{{ activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
+    <a href="{{ routine_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Routines</a>
+    {% if can_cancel %}
+    <form method="POST" action="/{{ group }}/jobs/{{ job.spec.job_id }}/cancel">
+      <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors">Cancel</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if job.changed_files %}
+  <div class="mt-3 mb-6">
+    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Changed files</div>
+    <div class="font-mono text-sm space-y-1">
+      {% for f in job.changed_files %}
+      <div class="flex items-center gap-2">
+        <span class="text-gray-800 dark:text-gray-200">{{ f.path }}</span>
+        {% if f.lines_added %}<span class="text-emerald-600 dark:text-emerald-400">+{{ f.lines_added }}</span>{% endif %}
+        {% if f.lines_removed %}<span class="text-red-600 dark:text-red-400">&minus;{{ f.lines_removed }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if failed_artifacts %}
+  <div class="mb-6">
+    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Artifacts</div>
+    <div class="space-y-2 text-sm">
+      {% for artifact in failed_artifacts %}
+      <div><a href="{{ artifact.href }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ artifact.label }}</a></div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if job.stdout_path or job.stderr_path %}
+  <div class="mb-6 text-sm text-gray-600 dark:text-gray-300">
+    {% if job.stdout_path %}<div>Stdout log: {{ job.stdout_path }}</div>{% endif %}
+    {% if job.stderr_path %}<div>Stderr log: {{ job.stderr_path }}</div>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if publication_receipt %}
+  <div class="mb-6 text-sm text-gray-600 dark:text-gray-300">
+    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Publication receipt</div>
+    {% if publication_receipt.failed_artifacts %}
+    <div>{{ publication_receipt.failed_artifacts|length }} retained artifact{{ 's' if publication_receipt.failed_artifacts|length != 1 else '' }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if job.execution_summary %}
+  <div class="prose dark:prose-invert prose-sm max-w-none">{{ job.execution_summary | render_md }}</div>
+  {% endif %}
+
+</div>
+{% endblock %}

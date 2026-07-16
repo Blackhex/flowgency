@@ -419,6 +419,6 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    assert "Running" in resp.text
+    assert "Queued" in resp.text
     assert "/test/logs/view?path=" not in resp.text
     assert "/test/prompts#schedule-product-0" not in resp.text
