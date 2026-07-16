@@ -1364,10 +1364,40 @@ def _dashboard_memory_label(selector: dict[str, object], channels) -> str:
     return scope.replace("_", " ").title()
 
 
+def _newest_active_job(group_path: Path, agent_name: str):
+    jobs = sorted(
+        active_jobs(group_path, agent_name),
+        key=lambda record: (
+            record.started_at or "",
+            record.spec.created_at,
+            record.spec.job_id,
+        ),
+        reverse=True,
+    )
+    return jobs[0] if jobs else None
+
+
+def _overlay_dashboard_job_state(agent: dict, current, group_key: str) -> None:
+    agent_name = agent["name"]
+    agent.update(
+        {
+            "running": current is not None and current.status == "running",
+            "job_status_key": current.status if current is not None else None,
+            "job_status": _job_state_label(current.status) if current is not None else None,
+            "job_href": f"/{group_key}/jobs/{current.spec.job_id}" if current is not None else "",
+            "activity_href": f"/{group_key}/agents/{agent_name}/activity",
+            "profile_href": f"/{group_key}/agents/{agent_name}/profile",
+        }
+    )
+
+
 def build_dashboard_fleet(g: dict) -> list[dict]:
     services = getattr(app.state, "services", None)
     if services is None or getattr(services, "startup_error", None) is not None or services.instances is None:
         agents, _ = collect_agents_with_identity(g)
+        for agent in agents:
+            current = _newest_active_job(g["path"], agent["name"])
+            _overlay_dashboard_job_state(agent, current, g["key"])
         return agents
 
     snapshot = services.config_store.load()
@@ -1379,12 +1409,7 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
     for instance in group.agents.values():
         last_run = get_agent_last_run(g, instance.name)
         last_seen = last_run["at"] if last_run else get_agent_last_seen(g, instance.name)
-        jobs = sorted(
-            active_jobs(group.path, instance.name),
-            key=lambda record: (record.started_at or "", record.spec.created_at),
-            reverse=True,
-        )
-        current = jobs[0] if jobs else None
+        current = _newest_active_job(group.path, instance.name)
         selector = (
             current.spec.memory.selector
             if current is not None
@@ -1400,15 +1425,10 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
                 "integration": instance.integration,
                 "open_observations": sum(1 for item in observations if item.get("agent") == instance.name and item.get("status") == "open"),
                 "health": agent_health_status(last_seen),
-                "running": current is not None and current.status == "running",
-                "job_status_key": current.status if current is not None else None,
-                "job_status": _job_state_label(current.status) if current is not None else None,
-                "job_href": f"/{g['key']}/jobs/{current.spec.job_id}" if current is not None else "",
-                "activity_href": f"/{g['key']}/agents/{instance.name}/activity",
-                "profile_href": f"/{g['key']}/agents/{instance.name}/profile",
                 "memory_label": _dashboard_memory_label(selector, snapshot.config.memory.channels),
             }
         )
+        _overlay_dashboard_job_state(fleet[-1], current, g["key"])
     return fleet
 
 

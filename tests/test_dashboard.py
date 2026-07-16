@@ -2,7 +2,9 @@
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import yaml
 from fastapi.testclient import TestClient
 
@@ -350,6 +352,93 @@ def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, t
     assert fleet["researcher"]["running"] is False
     assert fleet["writer"]["job_status_key"] == "running"
     assert fleet["writer"]["running"] is True
+
+
+@pytest.mark.parametrize("fallback_mode", ["absent", "startup_error"])
+def test_dashboard_fallback_preserves_exact_active_job_states(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+    fallback_mode,
+):
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    advisor = raw["groups"]["newsletter"]["agents"][0]
+    for agent_name in ("researcher", "writer"):
+        agent = deepcopy(advisor)
+        agent["name"] = agent_name
+        agent["identity"]["display_name"] = agent_name.title()
+        raw["groups"]["newsletter"]["agents"].append(agent)
+        (group_root / agent_name).mkdir()
+        (group_root / agent_name / "AGENTS.md").write_text(
+            f"# {agent_name.title()}\n",
+            encoding="utf-8",
+        )
+    (group_root / "advisor").mkdir()
+    (group_root / "advisor" / "AGENTS.md").write_text("# Advisor\n", encoding="utf-8")
+    _write_yaml(config_path, raw)
+    app_mod.reload_groups()
+
+    jobs = [
+        _job_spec(group_root, config_path, status="queued", job_id="job-queued"),
+        _job_spec(
+            group_root,
+            config_path,
+            status="waiting_for_memory",
+            job_id="job-waiting",
+            agent_name="researcher",
+        ),
+        _job_spec(
+            group_root,
+            config_path,
+            status="running",
+            job_id="job-running",
+            agent_name="writer",
+        ),
+    ]
+    for spec in jobs:
+        path = group_root / "shared" / "jobs" / f"{spec.job_id}.yaml"
+        write_job(path, JobRecord.from_spec(spec))
+        if spec.job_id == "job-waiting":
+            transition_job(path, "queued", "waiting_for_memory")
+        elif spec.job_id == "job-running":
+            transition_job(path, "queued", "running")
+
+    writer_log = group_root / "shared" / "logs" / "2026-07-16" / "writer-run.out"
+    writer_log.write_text("recent activity\n", encoding="utf-8")
+    if fallback_mode == "absent":
+        monkeypatch.delattr(app_mod.app.state, "services", raising=False)
+    else:
+        app_mod.app.state.services = SimpleNamespace(startup_error=RuntimeError("unavailable"))
+
+    response = client.get("/newsletter/")
+    fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_group("newsletter"))}
+
+    assert response.status_code == 200
+    assert "Queued" in response.text
+    assert "Waiting for memory" in response.text
+    assert "/newsletter/jobs/job-queued" in response.text
+    assert "/newsletter/jobs/job-waiting" in response.text
+    assert "1 running" in response.text
+    assert response.text.count('title="Running"') == 1
+    assert fleet["advisor"]["job_status_key"] == "queued"
+    assert fleet["advisor"]["job_status"] == "Queued"
+    assert fleet["advisor"]["job_href"] == "/newsletter/jobs/job-queued"
+    assert fleet["advisor"]["running"] is False
+    assert fleet["advisor"]["health"] == "red"
+    assert fleet["researcher"]["job_status_key"] == "waiting_for_memory"
+    assert fleet["researcher"]["job_status"] == "Waiting for memory"
+    assert fleet["researcher"]["job_href"] == "/newsletter/jobs/job-waiting"
+    assert fleet["researcher"]["running"] is False
+    assert fleet["researcher"]["health"] == "red"
+    assert fleet["writer"]["job_status_key"] == "running"
+    assert fleet["writer"]["job_status"] == "Running"
+    assert fleet["writer"]["job_href"] == "/newsletter/jobs/job-running"
+    assert fleet["writer"]["running"] is True
+    assert fleet["writer"]["health"] == "green"
+    for agent_name in ("advisor", "researcher", "writer"):
+        assert fleet[agent_name]["activity_href"] == f"/newsletter/agents/{agent_name}/activity"
+        assert fleet[agent_name]["profile_href"] == f"/newsletter/agents/{agent_name}/profile"
 
 
 def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, canonical_raw_config):
