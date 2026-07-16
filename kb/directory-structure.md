@@ -29,4 +29,6 @@ The Agent Library follows `AGENTS.md` and Agent Skills standards. It has no Agen
 
 The project workspace belongs to the group. Configured instances run there and do not own physical subdirectories. Optional tmux, IDE, or Windows Terminal launchers also start from this group workspace and never become configuration authority.
 
+## superseded v1 migration
+
 superseded native definitions, sidecars, and per-agent memory may remain as untouched source history after standalone migration, but runtime does not consult them.

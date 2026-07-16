@@ -38,7 +38,7 @@ export default defineConfig({
     toHaveScreenshot: {
       animations: 'disabled',
       caret: 'hide',
-      maxDiffPixels: 350,
+      maxDiffPixels: 50,
     },
   },
   use: {

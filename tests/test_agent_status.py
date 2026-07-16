@@ -176,14 +176,9 @@ def test_next_run_at_future(tmp_path):
     g = _group_with_logs(tmp_path)
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
 
-    class _Frozen(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed_now
-
     future = (fixed_now + timedelta(hours=2)).strftime("%H:%M")
     cfg = {"enabled": True, "routines": {"product": [{"id": "r", "at": future}]}}
-    with patch.object(app_module, "datetime", _Frozen):
+    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", cfg)
     assert result is not None
     assert result.date() == fixed_now.date()
@@ -194,14 +189,9 @@ def test_next_run_at_past_rolls_to_tomorrow(tmp_path):
     g = _group_with_logs(tmp_path)
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
 
-    class _Frozen(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed_now
-
     past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
     cfg = {"enabled": True, "routines": {"product": [{"id": "r", "at": past}]}}
-    with patch.object(app_module, "datetime", _Frozen):
+    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", cfg)
     assert result is not None
     assert result.date() == (fixed_now + timedelta(days=1)).date()
@@ -254,17 +244,12 @@ def test_next_run_detail_identifies_winning_rule(tmp_path):
     g = _group_with_logs(tmp_path)
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
 
-    class _Frozen(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed_now
-
     cfg = {"enabled": True, "routines": {"product": [
         {"id": "later", "at": "17:00"},
         {"id": "soon", "at": "12:30"},
     ]}}
 
-    with patch.object(app_module, "datetime", _Frozen):
+    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         detail = compute_next_run_detail(g, "product", cfg)
         compatible_value = compute_next_run(g, "product", cfg)
 
@@ -280,17 +265,12 @@ def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
     g = _group_with_logs(tmp_path)
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
 
-    class _Frozen(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed_now
-
     cfg = {"enabled": True, "routines": {"product": [
         {"id": "first", "at": "13:00"},
         {"id": "second", "at": "13:00"},
     ]}}
 
-    with patch.object(app_module, "datetime", _Frozen):
+    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         detail = compute_next_run_detail(g, "product", cfg)
 
     assert detail["routine_id"] == "first"
@@ -312,12 +292,7 @@ def test_relative_future_minutes():
 def test_relative_future_hours():
     fixed_now = datetime(2026, 7, 11, 23, 30)
 
-    class _Frozen(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed_now
-
-    with patch.object(app_module, "datetime", _Frozen):
+    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         assert relative_future(fixed_now + timedelta(hours=2, minutes=1)) == "2h away"
 
 
@@ -325,12 +300,7 @@ def test_relative_future_tomorrow():
     fixed_now = datetime(2026, 7, 11, 12, 0)
     dt = fixed_now + timedelta(days=1)
 
-    class _Frozen(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed_now
-
-    with patch.object(app_module, "datetime", _Frozen):
+    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         assert relative_future(dt) == f"tomorrow {dt.strftime('%H:%M')}"
 
 

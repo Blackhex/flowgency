@@ -22,9 +22,9 @@ Memory selectors are semantic: `run`, `routine`, `agent`, `group`, or declared g
 
 See [../config.yaml.example](../config.yaml.example) for a complete example.
 
-## Migration
+## superseded v1 migration
 
-The application does not auto-convert older files:
+The application does not auto-convert older files. Invoke `agency-migration`, then use the standalone commands:
 
 ```text
 python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml

@@ -1,64 +1,32 @@
 # Contributing an Integration
 
-Agency uses a plugin system to support different LLM tools. Each integration is a Python class that teaches Agency how to interact with a specific tool.
+An integration adapts a configured strict-canonical instance to one LLM runtime. Config selects the integration explicitly; project files do not select it.
 
-## Quick Start
+## Quick start
 
-1. **Create your author directory:**
-   ```bash
-   mkdir -p agency/integrations/{your-name}
-   touch agency/integrations/{your-name}/__init__.py
-   ```
+1. Create `agency/integrations/<author>/__init__.py` and copy `agency/integrations/_template.py` to that package.
+2. Implement execution, policy support, and a versioned runtime projector following the template and existing official adapters.
+3. Register the plugin in `agency/integrations/integrations.yaml` through Admin > Integrations.
+4. Run the integration and projector contract suites.
 
-2. **Copy the template:**
-   ```bash
-   cp agency/integrations/_template.py agency/integrations/{your-name}/your_tool.py
-   ```
-
-3. **Fill in the methods** — see the template comments for guidance on each method.
-
-4. **Test your integration:**
-   ```bash
-   .venv/bin/python -m pytest tests/test_integration_contract.py -v
-   ```
-
-5. **Register via the dashboard:**
-   Visit Admin → Integrations. Your integration will appear in "Available to Register." Click Register, then restart the service.
-
-## Directory Structure
-
-```
-agency/integrations/
-├── agency/           # Official integrations
-│   ├── claude_code.py
-│   ├── codex.py
-│   └── ...
-├── {your-name}/      # Your integration
-│   ├── __init__.py
-│   └── your_tool.py
-├── _template.py      # Start here
-└── integrations.yaml # Auto-managed by the admin UI
+```text
+.venv/bin/python -m pytest tests/test_integration_contract.py tests/test_runtime_projectors.py -v
 ```
 
-## What Each Method Does
+## Contract
 
-| Method | When It's Called | What to Return |
-|--------|-----------------|----------------|
-| `identity_filename()` | Determining which file to read/write for agent identity | The filename (e.g., `'CLAUDE.md'`, `'.cursorrules'`) |
-| `detect(agent_dir)` | Auto-detecting which tool an agent uses | `True` if the directory belongs to your tool |
-| `parse_identity(agent_dir)` | Reading agent name/title/emoji from the native file | An `AgentIdentity` dataclass, or `None` |
-| `write_identity(agent_dir, identity)` | Saving identity changes from the profile page | Write fields to the native file or sidecar |
-| `run(agent_dir, prompt_file, timeout)` | Executing the tool with a prompt (dispatch, decisions) | A `RunResult` with exit code, stdout, stderr, duration |
+An integration declares whether it can execute, which sandbox and tool policies it enforces, where projected instructions and skills must be placed, and whether selected Agent Skills can activate non-interactively. It returns structured execution results and fails closed when it cannot enforce requested policy.
 
-## Two Identity Patterns
+Projectors consume a blueprint's standard `AGENTS.md` and complete `.agents/skills` tree. They may relocate those files into the runtime's discovery layout, but must preserve bytes, write only to the compilation cache, and key output by integration, projector version, and source digest. Config identity and mutable semantic memory never enter blueprint source.
 
-**Frontmatter tools** (like Claude Code with `CLAUDE.md`): Parse YAML frontmatter from the identity file directly. See `agency/integrations/agency/claude_code.py`.
+## Submission checklist
 
-**Sidecar tools** (like Codex, Gemini): The native file doesn't support YAML frontmatter, so Agency stores metadata in `.agency-meta.yaml` next to the native file. See `agency/integrations/agency/codex.py` and use the `read_sidecar()`/`write_sidecar()` helpers.
+- The plugin registers under a unique author namespace.
+- Projected instruction and `SKILL.md` bytes are unchanged.
+- Unsupported policies fail before launch.
+- Compatible skill discovery has an opt-in live runtime probe.
+- Contract and normal test suites pass without requiring a live CLI.
 
-## Submitting
+## superseded v1 migration
 
-Open a PR with your author directory. Make sure:
-- [ ] All contract tests pass
-- [ ] `_register()` is called at module level
-- [ ] `__init__.py` exists in your directory
+Native-file detection, sidecars, and identity parsing are migration concerns only. New runtime integrations must not reintroduce them. Convert old installations with `agency-migration` and the standalone migration commands documented in [Configuration](configuration.md).

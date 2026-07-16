@@ -23,6 +23,7 @@ import uvicorn
 from uvicorn.supervisors.watchfilesreload import WatchFilesReload
 
 from agency.config import agent_can_write, normalize_agents, agent_names
+from agency.clock import now as clock_now, today as clock_today
 from agency.integrations import get_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 from agency.jobs import (
@@ -522,7 +523,7 @@ def check_ttl_expired(meta: dict) -> bool:
         ttl = int(ttl)
     except (ValueError, TypeError):
         return False
-    return datetime.now(tz=item_date.tzinfo) > item_date + timedelta(days=ttl)
+    return clock_now(tz=item_date.tzinfo) > item_date + timedelta(days=ttl)
 
 
 def enforce_ttl(filepath: Path, meta: dict) -> bool:
@@ -597,7 +598,7 @@ def list_decisions(g: dict) -> list[dict]:
 def build_pipeline_stats(observations: list[dict], proposals: list[dict],
                          decisions: list[dict]) -> dict:
     """Compute pipeline stage counts and 7-day sparkline data for dashboard."""
-    today = datetime.now().date()
+    today = clock_today()
 
     def sparkline_buckets(items: list[dict]) -> list[int]:
         buckets = [0] * 7
@@ -842,7 +843,7 @@ def compute_next_run_detail(
     if not isinstance(rules, list):
         return None
 
-    now = datetime.now()
+    now = clock_now()
     logs_root = g["shared"] / "logs"
     candidates: list[dict] = []
 
@@ -901,7 +902,7 @@ def relative_time(dt: datetime | None) -> str:
     """Format datetime as relative string."""
     if dt is None:
         return "No activity recorded"
-    now = datetime.now()
+    now = clock_now()
     diff = now - dt
     seconds = int(diff.total_seconds())
     if seconds < 60:
@@ -925,7 +926,7 @@ def relative_future(dt: datetime | None) -> str:
     """Format an upcoming datetime as '5m away', '2h away', 'tomorrow HH:MM', etc."""
     if dt is None:
         return ""
-    now = datetime.now()
+    now = clock_now()
     seconds = int((dt - now).total_seconds())
     if seconds <= 0:
         return "due now"
@@ -977,7 +978,7 @@ def agent_health_status(last_seen: datetime | None) -> str:
     """Return health status based on last seen time. green/amber/red."""
     if last_seen is None:
         return "red"
-    hours = (datetime.now() - last_seen).total_seconds() / 3600
+    hours = (clock_now() - last_seen).total_seconds() / 3600
     if hours < 24:
         return "green"
     elif hours < 48:
@@ -1169,11 +1170,11 @@ def build_agent_timeline(g: dict, agent_name: str, agent_observations: list[dict
             try:
                 obs_date = datetime.fromisoformat(obs_date).replace(tzinfo=None)
             except (ValueError, TypeError):
-                obs_date = datetime.now()
+                obs_date = clock_now()
         elif isinstance(obs_date, datetime):
             obs_date = obs_date.replace(tzinfo=None)
         else:
-            obs_date = datetime.now()
+            obs_date = clock_now()
         events.append({
             "type": "observation",
             "timestamp": obs_date,
@@ -1894,7 +1895,7 @@ async def proposal_decide(request: Request, group: str, slug: str):
 
     agency_cfg = get_agency_config()
     decided_by = agency_cfg.get("decided_by", "admin")
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = clock_now().strftime("%Y-%m-%d")
 
     decisions_dir.mkdir(exist_ok=True)
     decision_path = decisions_dir / f"{slug}.md"
@@ -2154,7 +2155,7 @@ async def decision_verify(request: Request, group: str, slug: str):
 
     agency_cfg = get_agency_config()
     verifier = agency_cfg.get("decided_by", "admin")
-    now = datetime.now().isoformat(timespec="seconds")
+    now = clock_now().isoformat(timespec="seconds")
 
     meta["verification_status"] = outcome
     meta["verified_by"] = verifier
@@ -2183,7 +2184,7 @@ def _create_follow_up_observation(g: dict, decision_slug: str, meta: dict, body:
     observations_dir = g["shared"] / "observations"
     observations_dir.mkdir(parents=True, exist_ok=True)
 
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = clock_now().strftime("%Y%m%d-%H%M%S")
     follow_up_slug = f"{decision_slug}-follow-up-{stamp}"
 
     agent = (
@@ -2194,7 +2195,7 @@ def _create_follow_up_observation(g: dict, decision_slug: str, meta: dict, body:
     proposal = meta.get("proposal", "")
     obs_meta = {
         "agent": agent,
-        "date": datetime.now().isoformat(timespec="seconds"),
+        "date": clock_now().isoformat(timespec="seconds"),
         "category": "verification",
         "status": "open",
         "float": True,

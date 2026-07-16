@@ -48,7 +48,7 @@ Agency runs on any OS with Python 3.11+:
 
 - **Linux** — full support including systemd dispatch timers
 - **macOS** — full support including launchd dispatch timers
-- **Windows** — app runs, dispatch timers require manual Task Scheduler setup
+- **Windows** — full support including Windows Task Scheduler dispatch timers
 
 ## Notes
 

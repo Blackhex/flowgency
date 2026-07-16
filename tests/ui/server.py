@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import shutil
@@ -23,11 +24,17 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_PARENT = Path(__file__).resolve().parent / ".runtime"
 RUNTIME_ROOT = RUNTIME_PARENT / "current"
 FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.yaml"
+FIXED_NOW = "2026-07-16T12:00:00+00:00"
 
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _set_mtime(path: Path, value: str) -> None:
+    timestamp = datetime.fromisoformat(value).astimezone(timezone.utc).timestamp()
+    os.utime(path, (timestamp, timestamp))
 
 
 def _replace_runtime(value: object, runtime: Path) -> object:
@@ -138,6 +145,8 @@ def _seed_jobs(runtime: Path, config_path: Path) -> None:
     failed.stderr_path = str((runtime / "groups" / "newsletter" / "shared" / "logs" / "2026-07-16" / "advisor-job-failed.err").resolve())
     _write(Path(failed.stdout_path), "deterministic stdout\n")
     _write(Path(failed.stderr_path), "deterministic stderr\n")
+    _set_mtime(Path(failed.stdout_path), "2026-07-16T11:30:00+00:00")
+    _set_mtime(Path(failed.stderr_path), "2026-07-16T11:30:00+00:00")
     write_job(failed_path, failed)
 
 
@@ -228,6 +237,7 @@ def main() -> int:
         runtime, config_path = _prepare_runtime()
         env = os.environ.copy()
         env["AGENCY_CONFIG"] = str(config_path)
+        env["AGENCY_FIXED_NOW"] = FIXED_NOW
         env["PYTHONPATH"] = str(ROOT)
         command = [
             sys.executable,

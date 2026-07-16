@@ -1,30 +1,19 @@
 # Agency Setup Skill
 
-Agency ships with an interactive skill that bootstraps a fully functional agent team for
-an existing codebase. It currently generates one of two host profiles:
-
-| Profile | Identity | Dispatch | Workspace |
-|---|---|---|---|
-| Claude on Linux | `CLAUDE.md` | Agency global dispatcher | tmux panes |
-| GitHub Copilot on Windows | `AGENTS.md` plus `.copilot/` | Agency global dispatcher | Windows Terminal tabs |
+The `agency-setup` skill creates standard global blueprints and registers explicit instances, routines, runtime policy, and semantic memory in one authoritative strict-canonical config. It does not create runtime-native identities, physical agent directories, memory files, or prompt schedules.
 
 ## Install
 
 ### Claude Code on Linux
 
-```bash
-# Create the skills directory if it doesn't exist
+```text
 mkdir -p ~/.claude/skills
-
-# Symlink the skill, replacing the path with wherever you cloned Agency
 ln -s /path/to/agency/skills/agency-setup ~/.claude/skills/agency-setup
 ```
 
 ### GitHub Copilot on Windows
 
-Expose the canonical skill directory at `.github\skills\agency-setup` in the project
-where Copilot should discover it. This repository already includes that discovery link.
-For another local project, a directory junction avoids duplicating the skill:
+Expose the canonical skill at `.github\skills\agency-setup`. A junction keeps one source copy:
 
 ```powershell
 New-Item -ItemType Directory -Force .github\skills | Out-Null
@@ -33,33 +22,32 @@ New-Item -ItemType Junction `
   -Target C:\path\to\agency\skills\agency-setup | Out-Null
 ```
 
-## Usage
+## Run
 
-From the project directory, invoke `agency-setup` in the active agent chat. In Claude
-Code, run:
+Invoke `agency-setup` from the project workspace. The skill:
 
+1. Inspects project instructions, source, tests, deployment, and available integrations.
+2. Proposes reusable roles, Agent Skills, schedules, runtime policy, and semantic memory for approval.
+3. Resolves exactly one config and accepts only `schema_version: 2` with `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store`.
+4. Writes each approved blueprint as global `AGENTS.md` source plus standard Agent Skills under `.agents/skills/<skill>/SKILL.md`.
+5. Registers explicit group-owned instances. Every instance pins a blueprint and integration; routines select skills and semantic memory selectors.
+6. Validates cross-references and revision safety, writes atomically, reparses from disk, and optionally verifies the singleton dispatcher.
+
+Projectors create runtime-native layouts in the compilation cache when jobs launch. Optional tmux or Windows Terminal launchers start every configured instance in the group workspace and remain non-authoritative.
+
+## Result
+
+After setup, the Agents page lists the configured group instances. Agent Detail provides `Profile/Blueprint/Runtime/Routines/Memory/Activity`; identity is the config display name, title, and emoji. Agent Library owns reusable instructions and Agent Skills. Memory Channels own named shared memory. Group Settings continues to manage defaults only.
+
+The skill reports blueprint keys, instance names, routines, memory scopes and channels, the authoritative config path, any optional launcher, and scheduler status.
+
+## superseded v1 migration
+
+If the skill finds a superseded config or physical agent layout, it stops registration and invokes `agency-migration`; it never converts or mixes superseded authority itself.
+
+```text
+python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
+python tools/migrate_agent_model.py apply --plan migration-plan.yaml
+python tools/migrate_agent_model.py verify --config config.yaml
+python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
 ```
-/agency-setup
-```
-
-On Windows, the skill detects PowerShell and the installed Copilot CLI automatically.
-It asks only when multiple runtimes make the intended profile ambiguous.
-
-## What It Does
-
-1. **Analyzes your codebase** - language, framework, structure, tests, deployment, and purpose
-2. **Proposes a lean agent team** tailored to the project - you approve or revise ownership
-3. **Generates everything Agency needs:**
-   - Agent role definitions and memory files
-   - `shared/` folder with observations, proposals, decisions, logs, prompts
-   - Dispatch prompts with project-specific observation tasks
-   - Platform-native runtime workspace
-4. **Registers the new group** with Agency (if installed), including config-native dispatch schedules
-5. **Verifies the dispatch timer** via official CLI so agents start running on schedule
-
-## Verification and Safety
-
-The skill verifies generated agent detection and, on Windows, resolves and starts the
-real `copilot.exe` rather than accepting package-manager wrappers. Registration uses a
-YAML parser and atomic replacement, preserves unrelated settings, and reparses the file
-after dashboard reload so concurrent writes or normalization drift cannot pass unnoticed.

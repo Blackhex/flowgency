@@ -20,6 +20,8 @@ An instance belongs to exactly one group. Its config record owns stable `name`, 
     scope: agent
 ```
 
-Agent Detail is the sole identity editor. It patches config with an expected revision; it never edits blueprint source. Agent Library edits reusable source separately.
+The Agents page lists group-owned instances. Agent Detail provides `Profile/Blueprint/Runtime/Routines/Memory/Activity`; Profile patches config identity with an expected revision and never edits blueprint source. Identity is display name, title, and emoji. Agent Library edits reusable source separately.
+
+## superseded v1 migration
 
 The standalone migration utility may read superseded native identity files and superseded `.agency-meta.yaml` as source history, then moves identity into explicit instance records. Runtime does not read those superseded files.

@@ -47,65 +47,65 @@ Use this strict-canonical shape:
 ```yaml
 schema_version: 2
 agency:
-	agent_library: C:/Agency/agent-library
-	compilation_cache: C:/Agency/compiled-agents
-	memory_store: C:/Agency/memory
+  agent_library: C:/Agency/agent-library
+  compilation_cache: C:/Agency/compiled-agents
+  memory_store: C:/Agency/memory
 memory:
-	channels:
-		project-strategy:
-			display_name: Project Strategy
+  channels:
+    project-strategy:
+      display_name: Project Strategy
 groups:
-	example:
-		name: Example
-		path: C:/Projects/example
-		default_integration: copilot
-		runtime:
-			timeout: 1800
-			sandbox:
-				mode: restricted
-				roots: [C:/Projects/example]
-			tools:
-				mode: allowlist
-				names: [read, search]
-		dispatch:
-			enabled: true
-			daily_limit: 15
-		agents:
-			- name: builder
-				blueprint: builder
-				integration: copilot
-				identity:
-					display_name: Builder
-					title: Implementation Lead
-				capabilities:
-					write: true
-				runtime:
-					sandbox:
-						additional_roots: []
-					tools:
-						mode: allowlist
-						names: [read, search, write]
-				default_memory:
-					scope: agent
-				routines:
-					- id: morning-review
-						skill: morning-review
-						schedule:
-							at: "07:00"
-						memory:
-							scope: routine
-					- id: strategy-review
-						skill: strategy-review
-						schedule:
-							at: "21:00"
-						memory:
-							scope: channel
-							channel: project-strategy
-			- name: advisor
-				blueprint: advisor
-				integration: copilot
-				capabilities:
-					write: false
+  example:
+    name: Example
+    path: C:/Projects/example
+    default_integration: copilot
+    runtime:
+      timeout: 1800
+      sandbox:
+        mode: restricted
+        roots: [C:/Projects/example]
+      tools:
+        mode: allowlist
+        names: [read, search]
+    dispatch:
+      enabled: true
+      daily_limit: 15
+    agents:
+      - name: builder
+        blueprint: builder
+        integration: copilot
+        identity:
+          display_name: Builder
+          title: Implementation Lead
+        capabilities:
+          write: true
+        runtime:
+          sandbox:
+            additional_roots: []
+          tools:
+            mode: allowlist
+            names: [read, search, write]
+        default_memory:
+          scope: agent
+        routines:
+          - id: morning-review
+            skill: morning-review
+            schedule:
+              at: "07:00"
+            memory:
+              scope: routine
+          - id: strategy-review
+            skill: strategy-review
+            schedule:
+              at: "21:00"
+            memory:
+              scope: channel
+              channel: project-strategy
+      - name: advisor
+        blueprint: advisor
+        integration: copilot
+        capabilities:
+          write: false
 ```
 
 Record each approved Phase 2 routine assignment under that instance's `routines`. A routine selects one standard skill, one schedule (`at`, `every`, or supported condition), optional arguments, and optional semantic memory. Never write prompt filenames or superseded per-agent dispatch maps.

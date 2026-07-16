@@ -81,6 +81,8 @@ Relative global and group paths resolve against the config directory. Relative s
 
 ## Execution
 
+The Agents page lists group-owned instances. Agent Detail owns the `Profile/Blueprint/Runtime/Routines/Memory/Activity` surfaces; Group Settings owns defaults only. Agent Library owns standard `AGENTS.md` and Agent Skills, while Memory Channels and semantic memory selectors own mutable memory.
+
 Configured instance integration is authoritative. Job submission resolves the blueprint digest, projector, effective runtime policy, selected routine/skill, immutable task input, and semantic memory before launch. The worker runs from a private launch view and publishes memory only after successful execution and validation.
 
 Decision execution requires an explicit configured `execution_agent` whose integration is executable and whose `capabilities.write` is true. A missing, invalid, non-executable, or non-writable executor blocks the decide form and POST until corrected. It does not silently skip execution.

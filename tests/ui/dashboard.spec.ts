@@ -2,6 +2,17 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { expectLayoutIntegrity } from './layout';
 
+function dashboardScreenshotMasks(page: Page) {
+  const attentionQueue = page.locator('main > div > div').filter({
+    has: page.getByText('Attention Queue', { exact: true }),
+  }).first();
+  return [
+    attentionQueue.getByText('advisor', { exact: true }),
+    attentionQueue.getByText('proposed', { exact: true }),
+    attentionQueue.getByText('floated', { exact: true }),
+  ];
+}
+
 test.beforeEach(async ({ page }, testInfo) => {
   await page.addInitScript((theme) => {
     if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
@@ -17,7 +28,10 @@ test('dashboard reports selected group pipeline and durable job semantics', asyn
   await expect(page.getByRole('link', { name: /Advisor/ }).first()).toHaveAttribute('href', '/newsletter/agents/advisor/profile');
   await expect(page.locator('body')).not.toContainText('Add Instance');
   await expectLayoutIntegrity(page);
-  await expect(page).toHaveScreenshot('dashboard.png', { fullPage: true });
+  await expect(page).toHaveScreenshot('dashboard.png', {
+    fullPage: true,
+    mask: dashboardScreenshotMasks(page),
+  });
 });
 
 test('jobs expose waiting, failed artifact, diagnostics hash, and empty state', async ({ page }) => {

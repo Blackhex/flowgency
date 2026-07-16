@@ -2,59 +2,63 @@
 
 ## Install
 
-```bash
+```text
 git clone https://github.com/christag/agency.git
 cd agency
-pip install -e .
-```
-
-## First Run
-
-```bash
+python -m pip install -e .
 christag-agency serve
 ```
 
-Open `http://localhost:8500`. On first run, the setup wizard asks you to point to the directory where your agent subdirectories live. Agency creates the group, sets up the `shared/` folder structure (observations, proposals, decisions, logs, prompts), and drops you into your dashboard.
+Open `http://127.0.0.1:8500`.
 
-From there, you can configure the group further in the admin panel — set a display name, choose a default integration, auto-detect agents, and add dispatch schedules.
+## First run
 
-## Development Reload
+The setup wizard creates a strict-canonical control plane. Choose the authoritative config path and provide the global Agent Library, compilation cache, and memory store paths. Add a group with a display name and project workspace path. The wizard writes `schema_version: 2`; it does not scan folders, create physical agent directories, or infer instances.
 
-```bash
+Next, create reusable blueprints and Agent Skills in Agent Library. Open the group's Agents page to add explicit instances that select a blueprint and integration. Configure identity, runtime overrides, routines, and semantic memory from Agent Detail.
+
+## Core concepts
+
+### Blueprints and instances
+
+A blueprint is reusable standard source in the global Agent Library: one `AGENTS.md` plus optional Agent Skills. An instance belongs to one group and stores its stable name, blueprint, integration, display identity, capability, runtime overrides, routines, and default memory selector in config.
+
+Runtime projectors compile blueprint source into disposable native layouts for each integration. Do not edit the compilation cache.
+
+### Groups and settings
+
+A group owns a project workspace, runtime defaults, dispatch limits, workspaces, and explicit instances. Group Settings changes defaults only. The Agents page owns the roster; Agent Detail exposes `Profile/Blueprint/Runtime/Routines/Memory/Activity`.
+
+### Routines, jobs, and memory
+
+A routine selects one Agent Skill, schedule, optional arguments, and optional semantic memory. Routine and decision submissions create durable jobs. Memory uses selectors such as `scope: routine`, `scope: agent`, or `scope: channel`; Memory Channels define named cross-instance memory.
+
+### Pipeline
+
+Agency links observations to proposals, human decisions, durable execution jobs, and verification. Proposal execution requires an explicit instance whose integration supports execution and whose `capabilities.write` is true.
+
+## Development reload
+
+```text
 christag-agency serve --reload
 ```
 
-Reload mode watches the current working directory for Python code, templates, static assets, themes, and YAML/JSON configuration. Changes to `config.yaml`, including saves from the admin UI, restart the development server. Runtime records under group `shared/` directories are excluded.
+Reload watches application code, templates, static assets, themes, and control-plane configuration. Runtime records under group workspaces do not trigger reload.
 
-## Basic Concepts
+## Next steps
 
-### Agents
+- Read [Configuration](configuration.md) for the strict-canonical schema.
+- Read [Directory Structure](directory-structure.md) before choosing global paths.
+- Use [Agency Setup Skill](setup-skill.md) to propose blueprints and explicit instances.
+- Use [Dispatch and Routines](dispatch.md) to install the singleton scheduler.
 
-An agent is a subdirectory containing an identity file — `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, `GEMINI.md` for Gemini, and so on. Agency detects the tool automatically from the file that exists.
+## superseded v1 migration
 
-### Groups
+If an existing install has physical agent definitions, prompt schedules, or file-based memory, stop and invoke `agency-migration`. Runtime does not import that layout.
 
-A group is a collection of agents that work together. Each group points to a directory on your filesystem. You can have multiple groups for different projects, and each can use different LLM tools.
-
-### The Pipeline
-
-Agency organizes agent work into a five-stage pipeline:
-
-- **Observations** — things an agent noticed (written as markdown files)
-- **Proposals** — actionable suggestions that emerge from observations
-- **Decisions** — your answers to the proposal's questions (approve/defer/reject, choose from options, or free-text input)
-- **Execution** — Agency dispatches the agent to act on your answers
-- **Verification** — confirm the outcome satisfied the proposal, or open a linked follow-up observation when it didn't
-
-Every item in the pipeline links to its neighbors, so you can always trace the full chain.
-
-### Dispatch
-
-Dispatch is the optional scheduling system. It runs agents on a timer — daily at a specific time or every N hours — using your OS's native scheduler (systemd on Linux, launchd on macOS). You configure schedules through the admin panel.
-
-## Next Steps
-
-- **Add agent identities** — give agents display names, titles, and avatars from their profile pages
-- **Set up dispatch** — configure schedules in the admin panel under your group's settings
-- **Explore the CLI** — run `agency --help` to see terminal commands
-- **Read the docs** — the rest of the `kb/` folder covers integrations, configuration, and deployment
+```text
+python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
+python tools/migrate_agent_model.py apply --plan migration-plan.yaml
+python tools/migrate_agent_model.py verify --config config.yaml
+python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
+```

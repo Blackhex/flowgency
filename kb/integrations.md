@@ -10,6 +10,8 @@ Group sandbox roots form the baseline; instance `additional_roots` are additive.
 
 `agency/integrations/integrations.yaml` controls which Python plugins are loadable. It is plugin discovery metadata, not group, instance, routine, identity, or memory configuration.
 
+## superseded v1 migration
+
 superseded integration detection and sidecar parsing are retained only by standalone migration. To convert an old installation:
 
 ```text
