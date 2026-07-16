@@ -389,6 +389,7 @@ def run_server(**options) -> None:
 
 
 def cmd_serve(args: Namespace) -> int:
+    os.environ["AGENCY_CONFIG"] = str(_config_path(args))
     run_server(host=args.host, port=args.port, reload=args.reload)
     return 0
 

@@ -55,7 +55,7 @@ from agency.web.routes import (
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-CONFIG_PATH = Path.cwd() / "config.yaml"
+CONFIG_PATH = Path(os.environ.get("AGENCY_CONFIG") or Path.cwd() / "config.yaml").expanduser().resolve()
 
 
 def load_config() -> dict:

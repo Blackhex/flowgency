@@ -1,8 +1,11 @@
 """Tests for the CLI interface."""
 
 from argparse import Namespace
+import os
+from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -124,6 +127,7 @@ def test_cli_no_args_shows_help():
 
 
 def test_command_handlers_return_integer_statuses(monkeypatch):
+    monkeypatch.setenv("AGENCY_CONFIG", str(cli.DEFAULT_CONFIG_PATH))
     monkeypatch.setattr(cli, "run_server", lambda **options: None)
     assert cli.cmd_serve(Namespace(host="127.0.0.1", port=8500, reload=False)) == 0
 
@@ -141,6 +145,7 @@ def test_cli_serve_help_shows_reload():
 
 def test_cmd_serve_forwards_arguments_without_mutating_sys_argv(monkeypatch):
     calls = []
+    monkeypatch.setenv("AGENCY_CONFIG", str(cli.DEFAULT_CONFIG_PATH))
     monkeypatch.setattr(cli, "run_server", lambda **options: calls.append(options))
     original_argv = sys.argv.copy()
 
@@ -148,6 +153,76 @@ def test_cmd_serve_forwards_arguments_without_mutating_sys_argv(monkeypatch):
 
     assert calls == [{"host": "127.0.0.1", "port": 8700, "reload": True}]
     assert sys.argv == original_argv
+
+
+@pytest.mark.parametrize("selection", ["explicit", "environment", "default"])
+def test_cmd_serve_config_precedence_is_visible_at_lazy_import(tmp_path, monkeypatch, selection):
+    explicit_path = tmp_path / "explicit.yaml"
+    environment_path = tmp_path / "environment.yaml"
+    default_path = tmp_path / "default.yaml"
+    monkeypatch.setattr(cli, "CONFIG_PATH", default_path)
+    monkeypatch.setenv("AGENCY_CONFIG", str(environment_path))
+    args = Namespace(host="127.0.0.1", port=8700, reload=False)
+    if selection == "explicit":
+        args.config = str(explicit_path)
+        expected = explicit_path
+    elif selection == "environment":
+        expected = environment_path
+    else:
+        monkeypatch.delenv("AGENCY_CONFIG")
+        expected = default_path
+
+    observed = []
+
+    def fake_import(name):
+        assert name == "agency.app"
+        observed.append(Path(os.environ["AGENCY_CONFIG"]))
+        return SimpleNamespace(run_server=lambda **options: None)
+
+    monkeypatch.setattr(cli.importlib, "import_module", fake_import)
+
+    assert cli.cmd_serve(args) == 0
+    assert observed == [expected.resolve()]
+
+
+def test_serve_app_config_path_honors_agency_config_at_import(tmp_path):
+    selected_path = tmp_path / "missing.yaml"
+    environment = os.environ.copy()
+    environment["AGENCY_CONFIG"] = str(selected_path)
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import agency.app; print(agency.app.CONFIG_PATH)"],
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode == 0
+    assert Path(result.stdout.strip()) == selected_path.resolve()
+
+
+def test_serve_missing_config_bootstraps_selected_path_not_cwd(tmp_path):
+    selected_path = tmp_path / "selected.yaml"
+    environment = os.environ.copy()
+    environment["AGENCY_CONFIG"] = str(selected_path)
+    script = (
+        "import agency.app as app; "
+        "app.reload_groups = lambda: None; "
+        "app.uvicorn.run = lambda *args, **kwargs: None; "
+        "app.run_server('127.0.0.1', 8500)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=environment,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert selected_path.exists()
+    assert not (tmp_path / "config.yaml").exists()
 
 
 # Task 2 (Official Dispatch CLI): Tests for cmd_dispatch
