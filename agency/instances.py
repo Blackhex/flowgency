@@ -21,7 +21,6 @@ from agency.configuration.patches import (
     create_agent_instance,
     remove_agent_instance,
 )
-from agency.fs.locks import exclusive_lock
 from agency.integrations import get_integration
 from agency.jobs import active_jobs
 from agency.jobs.store import acquire_group_operation_locks
@@ -33,10 +32,11 @@ from agency.memory import (
 )
 from agency.memory.store import (
     _ensure_canonical_directory,
+    _memory_lock,
     _read_canonical_files,
-    _replace_canonical_files,
     memory_content_revision,
 )
+from agency.memory.publication import _save_direct_locked
 
 
 MemoryMode = Literal["copy", "empty"]
@@ -259,13 +259,12 @@ def move_instance(
             resolved.memory_hash: resolved
             for resolved in (*source_memories, *destination_memories)
         }
-        for memory_hash in sorted(unique):
-            stack.enter_context(
-                exclusive_lock(
-                    memory_store._lock_path(unique[memory_hash]),
-                    wait=True,
-                )
+        leases = {
+            memory_hash: stack.enter_context(
+                _memory_lock(unique[memory_hash], wait=True)
             )
+            for memory_hash in sorted(unique)
+        }
 
         current_revisions = tuple(
             (
@@ -294,9 +293,14 @@ def move_instance(
                         source_resolved.memory_hash
                     )
                     if source_snapshot is not None:
-                        _replace_canonical_files(
-                            target_resolved.directory,
+                        target_snapshot = _read_memory_without_relocking(
+                            target_resolved
+                        )
+                        _save_direct_locked(
+                            target_resolved,
+                            target_snapshot,
                             source_snapshot.files,
+                            lease=leases[target_resolved.memory_hash],
                         )
 
             updated = store.patch(

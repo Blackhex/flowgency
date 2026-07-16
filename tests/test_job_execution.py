@@ -11,7 +11,6 @@ import yaml
 from agency.integrations import FileChange, RunResult
 from agency.integrations.models import IntegrationRunRequest
 from agency.jobs.artifacts import JobArtifact
-from agency.jobs.execution import _selector_lock_path
 from agency.jobs.execution import execute_job
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import cancel_job
@@ -194,7 +193,7 @@ def test_execute_job_waits_for_memory_before_starting_run(tmp_path, monkeypatch)
     fixture = MemoryJobFixture(tmp_path)
     seen = {}
     finished = threading.Event()
-    held_lock = _selector_lock_path(fixture.resolved)
+    held_lock = fixture.store._lock_path(fixture.resolved)
 
     class Integration:
         supports_execution = True
@@ -241,7 +240,7 @@ def test_execute_job_waits_for_memory_before_starting_run(tmp_path, monkeypatch)
 
 def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_path, monkeypatch):
     fixture = MemoryJobFixture(tmp_path)
-    held_lock = _selector_lock_path(fixture.resolved)
+    held_lock = fixture.store._lock_path(fixture.resolved)
     called = {"run": 0}
 
     class Integration:
@@ -279,6 +278,15 @@ def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_pat
     assert record.status == "cancelled"
     assert record.started_at is None
     assert called["run"] == 0
+
+
+def test_job_execution_has_no_selector_lock_authority():
+    import inspect
+    import agency.jobs.execution as execution
+
+    source = inspect.getsource(execution)
+    assert ".selectors" not in source
+    assert "_selector_lock_path" not in source
 
 
 def test_execute_job_failed_run_keeps_canonical_memory_and_retains_stage(tmp_path, monkeypatch):

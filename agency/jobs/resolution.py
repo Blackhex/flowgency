@@ -9,7 +9,11 @@ from agency.configuration.models import AgentInstance, Routine
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.configuration.store import ConfigStore
 from agency.integrations import BaseIntegration, get_integration
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
+from agency.integrations.models import (
+    EffectiveRuntimePolicy,
+    IntegrationRunRequest,
+    ResolvedToolPolicy,
+)
 from agency.memory.selectors import (
     resolve_memory_selector,
     select_effective_memory,
@@ -162,10 +166,27 @@ def resolve_job_request(
         store_root=snapshot.config.agency.memory_store,
     )
 
-    if not integration.supports_execution:
-        raise JobValidationError(
-            f"Integration '{integration.name}' does not support execution"
+    validation_task_file = (
+        group.path.resolve()
+        / "shared"
+        / "jobs"
+        / f"{request.job_id}.prompt"
+    )
+    integration.require_valid_run(
+        IntegrationRunRequest(
+            workspace_dir=group.path.resolve(),
+            launch_dir=artifact.runtime_path.resolve(),
+            task_file=validation_task_file,
+            timeout=runtime_policy.timeout,
+            runtime_policy=runtime_policy,
+            skill=routine.skill if routine is not None else None,
+            skill_arguments=(
+                routine.arguments if routine is not None else ()
+            ),
+            enforce_validation=True,
+            memory_working_dir=None,
         )
+    )
 
     if request.trigger in {"manual_prompt", "scheduled_prompt"}:
         prompt_source = {"type": "routine", "routine_id": routine.id if routine else None}

@@ -12,17 +12,16 @@ from agency.jobs.store import read_job
 
 from .models import (
     MemoryPublicationReceipt,
-    MemoryStage,
-    PreparedPublication,
     ResolvedMemory,
 )
-from .publication import _cleanup, _mark_complete, _mark_failed
+from .publication import _cleanup_paths, _mark_complete, _mark_failed
 from .store import (
     _canonical_directory,
     _ensure_actual_directory,
     _ensure_child_directory,
     _ensure_infrastructure_directory,
     _is_symlink_or_reparse,
+    _memory_lock,
     _read_canonical_files,
     _validate_job_id,
     _validate_memory_hash,
@@ -52,13 +51,16 @@ def recover_publications(store_root: Path, job_store: Path) -> RecoveryResult:
     journals_root = _ensure_actual_directory(journals_root, label="journal")
 
     recovered = 0
-    for journal_path in journals_root.glob("*/*.yaml"):
+    for journal_path in sorted(
+        journals_root.glob("*/*.yaml"),
+        key=lambda path: (path.parent.name, path.name),
+    ):
         payload = (
             yaml.safe_load(journal_path.read_text(encoding="utf-8"))
             or {}
         )
         try:
-            prepared = _prepared_from_payload(
+            operation = _operation_from_payload(
                 payload,
                 journal_path,
                 store_root,
@@ -67,53 +69,54 @@ def recover_publications(store_root: Path, job_store: Path) -> RecoveryResult:
         except Exception:
             _quarantine_journal(store_root, journal_path)
             raise
-        phase = str(payload.get("phase") or "")
-        current_revision = memory_content_revision(
-            _read_canonical_files(
-                _canonical_directory(prepared.stage.resolved)
-            )
-        )
-        if phase == "published" and current_revision == prepared.new_revision:
-            receipt = MemoryPublicationReceipt(
-                selector=prepared.selector,
-                memory_hash=prepared.memory_hash,
-                old_revision=prepared.old_revision,
-                new_revision=prepared.new_revision,
-                diff_artifact=None,
-                published_at=_published_at(prepared.job_path),
-                no_change=prepared.no_change,
-            )
-            _mark_complete(prepared.job_path, receipt)
-            _cleanup(prepared=prepared)
-            recovered += 1
-        elif current_revision == prepared.old_revision:
-            _mark_failed(
-                prepared.job_path,
-                summary=(
-                    "Recovered incomplete memory publication with old "
-                    "canonical revision."
-                ),
-            )
-            _cleanup(prepared=prepared)
-            recovered += 1
+        with _memory_lock(operation.resolved, wait=True):
+            recovered += _recover_locked(operation)
     return RecoveryResult(recovered=recovered)
 
 
-def _prepared_from_payload(
+@dataclass(frozen=True)
+class _RecoveryOperation:
+    kind: str
+    operation_id: str
+    phase: str
+    no_change: bool
+    selector: dict[str, object]
+    resolved: ResolvedMemory
+    memory_hash: str
+    old_revision: str
+    new_revision: str
+    stage_path: Path
+    backup_path: Path
+    journal_path: Path
+    job_path: Path | None
+
+
+def _operation_from_payload(
     payload: dict[str, Any],
     journal_path: Path,
     store_root: Path,
     job_store: Path,
-) -> PreparedPublication:
+) -> _RecoveryOperation:
     if _is_symlink_or_reparse(journal_path):
         raise ValueError("journal path is unsafe")
+    kind = str(payload.get("kind") or "job")
+    if kind not in {"job", "direct-save"}:
+        raise ValueError("journal kind is invalid")
     memory_hash = _validate_memory_hash(str(payload["memory_hash"]))
     journal_path = journal_path.resolve(strict=False)
     if journal_path.parent.name != memory_hash:
         raise ValueError("journal memory hash does not match its directory")
-    job_id = _validate_job_id(str(payload["job_id"]))
-    if journal_path.name != f"{job_id}.yaml":
-        raise ValueError("journal filename does not match its job id")
+    operation_id = _validate_job_id(
+        str(payload.get("operation_id") or payload.get("job_id"))
+    )
+    if kind == "job":
+        journal_job_id = _validate_job_id(str(payload["job_id"]))
+        if journal_job_id != operation_id:
+            raise ValueError(
+                "journal job id does not match its operation id"
+            )
+    if journal_path.name != f"{operation_id}.yaml":
+        raise ValueError("journal filename does not match its operation id")
     selector_payload = dict(payload["selector"])
     selector = MemorySelector(**selector_payload)
     for superseded_field in ("job_path", "stage_path", "backup_path"):
@@ -125,14 +128,14 @@ def _prepared_from_payload(
     stage_name = _safe_directory_name(
         payload.get("stage_directory"),
         field_name="stage_directory",
-        expected=job_id,
+        expected=operation_id,
     )
     backup_name = _safe_directory_name(
-        payload.get("backup_directory", job_id),
+        payload.get("backup_directory", operation_id),
         field_name="backup_directory",
-        expected=job_id,
+        expected=operation_id,
     )
-    job_path = _job_path(job_store, job_id)
+    job_path = _job_path(job_store, operation_id) if kind == "job" else None
     stage_path = _stage_path(store_root, memory_hash, stage_name)
     backup_path = _backup_path(
         store_root,
@@ -146,35 +149,104 @@ def _prepared_from_payload(
         memory_hash=memory_hash,
         directory=Path(store_root) / memory_hash,
     )
-    old_files = (
-        _read_canonical_files(backup_path)
-        if backup_path.exists()
-        else _read_canonical_files(resolved.directory)
-    )
-    new_files = _read_canonical_files(stage_path)
-    return PreparedPublication(
-        stage=MemoryStage(
-            resolved=resolved,
-            job_id=job_id,
-            directory=stage_path,
-            base_revision=str(payload["old_revision"]),
-        ),
-        job_store=job_store,
-        job_path=job_path,
+    return _RecoveryOperation(
+        kind=kind,
+        operation_id=operation_id,
+        phase=str(payload.get("phase") or ""),
+        no_change=bool(payload.get("no_change", False)),
         selector=selector_payload,
+        resolved=resolved,
         memory_hash=memory_hash,
         old_revision=str(payload["old_revision"]),
         new_revision=str(payload["new_revision"]),
-        old_files=old_files,
-        new_files=new_files,
-        diff_bytes=b"",
-        journal_path=journal_path,
+        stage_path=stage_path,
         backup_path=backup_path,
-        no_change=bool(payload.get("no_change", False)),
+        journal_path=journal_path,
+        job_path=job_path,
     )
 
 
-def _published_at(job_path: Path) -> str:
+def _recover_locked(operation: _RecoveryOperation) -> int:
+    phase = operation.phase
+    current_revision = memory_content_revision(
+        _read_canonical_files(_canonical_directory(operation.resolved))
+    )
+    stage_revision = memory_content_revision(
+        _read_canonical_files(operation.stage_path)
+    )
+
+    if stage_revision != operation.new_revision:
+        _quarantine_journal(
+            operation.resolved.directory.parent,
+            operation.journal_path,
+        )
+        return 0
+
+    if (
+        phase in {"backed_up", "published"}
+        and current_revision == operation.new_revision
+    ):
+        _finalize_recovered_success(operation)
+        return 1
+
+    if (
+        phase == "prepared"
+        and operation.no_change
+        and current_revision
+        == operation.old_revision
+        == operation.new_revision
+    ):
+        if operation.kind == "job":
+            _finalize_recovered_success(operation)
+        else:
+            _cleanup_operation(operation)
+        return 1
+
+    if current_revision == operation.old_revision:
+        if operation.kind == "job":
+            _mark_failed(
+                operation.job_path,
+                summary=(
+                    "Recovered incomplete memory publication with old "
+                    "canonical revision."
+                ),
+            )
+        _cleanup_operation(operation)
+        return 1
+
+    _quarantine_journal(
+        operation.resolved.directory.parent,
+        operation.journal_path,
+    )
+    return 0
+
+
+def _finalize_recovered_success(operation: _RecoveryOperation) -> None:
+    if operation.kind == "job":
+        receipt = MemoryPublicationReceipt(
+            selector=operation.selector,
+            memory_hash=operation.memory_hash,
+            old_revision=operation.old_revision,
+            new_revision=operation.new_revision,
+            diff_artifact=None,
+            published_at=_published_at(operation.job_path),
+            no_change=operation.no_change,
+        )
+        _mark_complete(operation.job_path, receipt)
+    _cleanup_operation(operation)
+
+
+def _cleanup_operation(operation: _RecoveryOperation) -> None:
+    _cleanup_paths(
+        journal_path=operation.journal_path,
+        backup_path=operation.backup_path,
+        stage_directory=operation.stage_path,
+    )
+
+
+def _published_at(job_path: Path | None) -> str:
+    if job_path is None:
+        return ""
     record = read_job(job_path)
     return record.completed_at or record.started_at or ""
 

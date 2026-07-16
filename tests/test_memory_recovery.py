@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 import yaml
@@ -280,7 +282,7 @@ def test_recovery_does_not_complete_prepared_journal_with_matching_new_revision(
 def test_recovery_does_not_complete_backed_up_journal_with_matching_new_revision(
     recovery_fixture,
 ):
-    recovery_fixture.crash_at("backed_up")
+    recovery_fixture.crash_at("after_replace")
 
     result = recover_publications(
         recovery_fixture.store_root,
@@ -288,7 +290,33 @@ def test_recovery_does_not_complete_backed_up_journal_with_matching_new_revision
     )
 
     assert result.recovered == 1
-    assert read_job(recovery_fixture.job_path).status == "failed"
+    assert read_job(recovery_fixture.job_path).status == "complete"
+
+
+def test_recovery_holds_canonical_memory_lock_before_reading_journal_state(
+    recovery_fixture,
+):
+    recovery_fixture.crash_at("prepared")
+    lock_path = recovery_fixture.store._lock_path(recovery_fixture.resolved)
+    from agency.fs.locks import exclusive_lock
+    import threading
+
+    finished = threading.Event()
+
+    def recover():
+        recover_publications(
+            recovery_fixture.store_root,
+            recovery_fixture.job_store,
+        )
+        finished.set()
+
+    with exclusive_lock(lock_path, wait=True):
+        worker = threading.Thread(target=recover)
+        worker.start()
+        assert not finished.wait(0.2)
+    worker.join(5)
+    assert not worker.is_alive()
+    assert finished.is_set()
 
 
 def test_recovery_completes_published_journal_with_matching_new_revision(
@@ -303,3 +331,88 @@ def test_recovery_completes_published_journal_with_matching_new_revision(
 
     assert result.recovered == 1
     assert read_job(recovery_fixture.job_path).status == "complete"
+
+
+def _run_python(code: str, *args: str, timeout: int = 20):
+    return subprocess.run(
+        [sys.executable, "-c", code, *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+@pytest.mark.parametrize(
+    ("phase", "expected"),
+    [
+        ("prepared", b"old\n"),
+        ("backed_up", b"old\n"),
+        ("after_replace", b"new\n"),
+        ("published", b"new\n"),
+    ],
+)
+def test_direct_save_crash_recovery_subprocess_keeps_complete_old_or_new(
+    tmp_path,
+    phase,
+    expected,
+):
+    store_root = tmp_path / "memory-store"
+    jobs_dir = tmp_path / "jobs"
+    crash_code = """
+from pathlib import Path
+import os
+import sys
+from agency.configuration.models import MemorySelector
+from agency.memory import MemoryStore, resolve_memory_selector
+from agency.memory.publication import _prepare_direct_transaction, _run_transaction_locked
+from agency.memory.store import _memory_lock
+
+root = Path(sys.argv[1])
+phase = sys.argv[2]
+store = MemoryStore(root)
+resolved = resolve_memory_selector(
+    MemorySelector(scope='agent'),
+    job_id='job-direct',
+    group_key='news',
+    agent_name='writer',
+    routine_id=None,
+    channels={},
+    store_root=root,
+)
+seeded = store.ensure(resolved)
+current = store.try_save(resolved, seeded.revision, {'memory.md': b'old\\n'})
+operation = _prepare_direct_transaction(resolved, current.files, {'memory.md': b'new\\n'})
+with _memory_lock(resolved, wait=True):
+    try:
+        _run_transaction_locked(operation, crash_at=phase)
+    except Exception:
+        os._exit(75)
+os._exit(0)
+"""
+    recover_code = """
+from pathlib import Path
+import sys
+from agency.memory.recovery import recover_publications
+
+recover_publications(Path(sys.argv[1]), Path(sys.argv[2]))
+"""
+
+    crashed = _run_python(crash_code, str(store_root), phase)
+    assert crashed.returncode == 75
+
+    recovered = _run_python(recover_code, str(store_root), str(jobs_dir))
+    assert recovered.returncode == 0, recovered.stderr
+
+    store = MemoryStore(store_root)
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="job-direct",
+        group_key="news",
+        agent_name="writer",
+        routine_id=None,
+        channels={},
+        store_root=store_root,
+    )
+    assert store.read(resolved).files == {"memory.md": expected}
+    assert not list((store_root / ".journals").glob("*/*.yaml"))

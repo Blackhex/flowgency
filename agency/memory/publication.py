@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import difflib
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import yaml
 
@@ -18,6 +21,7 @@ from .store import (
     _canonical_directory,
     _ensure_child_directory,
     _ensure_infrastructure_directory,
+    _MemoryLockLease,
     _is_symlink_or_reparse,
     _lock_path,
     _read_canonical_files,
@@ -25,6 +29,7 @@ from .store import (
     _safe_rmtree,
     _store_root,
     _validate_job_id,
+    _validate_lock_lease,
     _validate_memory_hash,
     _validate_resolved_memory,
     memory_content_revision,
@@ -58,10 +63,34 @@ class PublicationCrash(RuntimeError):
 
 
 @dataclass(frozen=True)
+class _MemoryTransaction:
+    kind: str
+    operation_id: str
+    resolved: object
+    old_revision: str
+    new_revision: str
+    old_files: Mapping[str, bytes]
+    new_files: Mapping[str, bytes]
+    stage_directory: Path
+    journal_path: Path
+    backup_path: Path
+    selector: dict[str, object]
+    memory_hash: str
+    no_change: bool
+    job_store: Path | None = None
+    job_path: Path | None = None
+    diff_bytes: bytes = b""
+
+
+@dataclass(frozen=True)
 class AppliedPublication:
     prepared: PreparedPublication
     published_at: str
     diff_artifact: JobArtifact | None
+
+
+def _transaction_checkpoint(operation: _MemoryTransaction, phase: str) -> None:
+    return None
 
 
 def prepare_publication(
@@ -69,12 +98,18 @@ def prepare_publication(
     *,
     job_store: Path,
     job_path: Path | None = None,
+    lease: _MemoryLockLease | None = None,
 ) -> PreparedPublication:
     try:
         _validate_resolved_memory(stage.resolved)
+        if lease is not None:
+            _validate_lock_lease(lease, stage.resolved)
         job_store = _validate_job_store(job_store)
         canonical_job_path = _job_path(job_store, stage.job_id)
-        if job_path is not None and Path(job_path).resolve() != canonical_job_path.resolve():
+        if (
+            job_path is not None
+            and Path(job_path).resolve() != canonical_job_path.resolve()
+        ):
             raise MemoryPublicationError(
                 "job path must match the canonical file in job store"
             )
@@ -127,62 +162,39 @@ def apply_publication(
     crash_at: str | None = None,
     fail_after_publish: bool = False,
     retain_failed_stage_artifacts: bool = False,
+    lease: _MemoryLockLease | None = None,
 ) -> AppliedPublication:
+    operation = _job_transaction(prepared)
     try:
-        with exclusive_lock(_lock_path(prepared.stage.resolved), wait=True):
-            current_files = _read_canonical_files(
-                _canonical_directory(prepared.stage.resolved)
+        if lease is None:
+            manager = exclusive_lock(
+                _lock_path(prepared.stage.resolved), wait=True
             )
-            current_revision = memory_content_revision(current_files)
-            if current_revision != prepared.stage.base_revision:
-                raise MemoryPublicationConflictError(
-                    reason="base revision changed before apply",
-                    expected_revision=prepared.stage.base_revision,
-                    current_revision=current_revision,
-                )
+        else:
+            _validate_lock_lease(lease, prepared.stage.resolved)
+            manager = nullcontext()
 
-            _write_journal(prepared, phase="prepared")
-            if crash_at == "prepared":
-                raise PublicationCrash("simulated crash at prepared")
-
-            if prepared.no_change:
-                _write_journal(prepared, phase="published")
-                if crash_at == "published":
-                    raise PublicationCrash("simulated crash at published")
-                return AppliedPublication(
-                    prepared=prepared,
-                    published_at=_now_iso(),
-                    diff_artifact=None,
-                )
-
-            _write_backup(prepared.backup_path, prepared.old_files)
-            _write_journal(prepared, phase="backed_up")
-            if crash_at == "backed_up":
-                raise PublicationCrash("simulated crash at backed_up")
-
-            _replace_canonical_files(
-                _canonical_directory(prepared.stage.resolved),
-                prepared.new_files,
+        with manager:
+            _run_transaction_locked(
+                operation,
+                crash_at=crash_at,
+                fail_after_publish=fail_after_publish,
             )
-            _write_journal(prepared, phase="published")
-            if crash_at == "published":
-                raise PublicationCrash("simulated crash at published")
-            if fail_after_publish:
-                raise OSError("simulated publication failure")
 
-            return AppliedPublication(
-                prepared=prepared,
-                published_at=_now_iso(),
-                diff_artifact=None,
-            )
+        return AppliedPublication(
+            prepared=prepared,
+            published_at=_now_iso(),
+            diff_artifact=None,
+        )
     except MemoryPublicationConflictError:
         raise
     except PublicationCrash:
         raise
     except Exception as error:
-        _rollback_failed_publication(
-            prepared,
+        _rollback_failed_transaction(
+            operation,
             error,
+            lease=lease,
             retain_failed_stage_artifacts=retain_failed_stage_artifacts,
         )
         raise MemoryPublicationError(str(error)) from error
@@ -201,30 +213,218 @@ def finalize_publication(
         no_change=applied.prepared.no_change,
     )
     _mark_complete(applied.prepared.job_path, receipt)
-    _cleanup(prepared=applied.prepared)
+    _cleanup_paths(
+        journal_path=applied.prepared.journal_path,
+        backup_path=applied.prepared.backup_path,
+        stage_directory=applied.prepared.stage.directory,
+    )
     return receipt
 
 
-def _rollback_failed_publication(
-    prepared: PreparedPublication,
+def _save_direct_locked(
+    resolved,
+    current_snapshot,
+    new_files,
+    *,
+    lease: _MemoryLockLease,
+):
+    _validate_lock_lease(lease, resolved)
+    operation = _prepare_direct_transaction(
+        resolved,
+        current_snapshot.files,
+        new_files,
+    )
+    try:
+        _run_transaction_locked(operation)
+    except PublicationCrash as error:
+        raise MemoryPublicationError(str(error)) from error
+    except Exception as error:
+        _rollback_failed_transaction(
+            operation,
+            error,
+            lease=lease,
+            retain_failed_stage_artifacts=False,
+        )
+        raise MemoryPublicationError(str(error)) from error
+    _cleanup_paths(
+        journal_path=operation.journal_path,
+        backup_path=operation.backup_path,
+        stage_directory=operation.stage_directory,
+    )
+    return _snapshot_result(resolved, current_snapshot, new_files)
+
+
+def _snapshot_result(resolved, current_snapshot, new_files):
+    revision = memory_content_revision(new_files)
+    snapshot_type = type(current_snapshot)
+    try:
+        return snapshot_type(
+            resolved=resolved,
+            files=new_files,
+            revision=revision,
+        )
+    except TypeError:
+        return SimpleNamespace(
+            resolved=resolved,
+            files=new_files,
+            revision=revision,
+        )
+
+
+def _job_transaction(prepared: PreparedPublication) -> _MemoryTransaction:
+    return _MemoryTransaction(
+        kind="job",
+        operation_id=prepared.stage.job_id,
+        resolved=prepared.stage.resolved,
+        old_revision=prepared.old_revision,
+        new_revision=prepared.new_revision,
+        old_files=prepared.old_files,
+        new_files=prepared.new_files,
+        stage_directory=prepared.stage.directory,
+        journal_path=prepared.journal_path,
+        backup_path=prepared.backup_path,
+        selector=prepared.selector,
+        memory_hash=prepared.memory_hash,
+        no_change=prepared.no_change,
+        job_store=prepared.job_store,
+        job_path=prepared.job_path,
+        diff_bytes=prepared.diff_bytes,
+    )
+
+
+def _prepare_direct_transaction(
+    resolved,
+    old_files: Mapping[str, bytes],
+    new_files: Mapping[str, bytes],
+) -> _MemoryTransaction:
+    operation_id = f"direct-save-{uuid4().hex}"
+    store_root = _store_root(resolved)
+    stage_directory = _stage_directory(
+        store_root,
+        resolved.memory_hash,
+        operation_id,
+    )
+    if stage_directory.exists():
+        _safe_rmtree(stage_directory, label="staging")
+    stage_directory = _ensure_child_directory(
+        stage_directory.parent,
+        stage_directory.name,
+        label="staging",
+    )
+    for name, payload in new_files.items():
+        atomic_write_bytes(stage_directory / name, payload)
+    return _MemoryTransaction(
+        kind="direct-save",
+        operation_id=operation_id,
+        resolved=resolved,
+        old_revision=memory_content_revision(old_files),
+        new_revision=memory_content_revision(new_files),
+        old_files=old_files,
+        new_files=new_files,
+        stage_directory=stage_directory,
+        journal_path=_journal_path(
+            store_root,
+            resolved.memory_hash,
+            operation_id,
+        ),
+        backup_path=_backup_path(
+            store_root,
+            resolved.memory_hash,
+            operation_id,
+        ),
+        selector=resolved.selector.model_dump(exclude_none=True),
+        memory_hash=resolved.memory_hash,
+        no_change=old_files == new_files,
+    )
+
+
+def _run_transaction_locked(
+    operation: _MemoryTransaction,
+    *,
+    crash_at: str | None = None,
+    fail_after_publish: bool = False,
+) -> None:
+    current_files = _read_canonical_files(
+        _canonical_directory(operation.resolved)
+    )
+    current_revision = memory_content_revision(current_files)
+    if current_revision != operation.old_revision:
+        raise MemoryPublicationConflictError(
+            reason="base revision changed before apply",
+            expected_revision=operation.old_revision,
+            current_revision=current_revision,
+        )
+
+    _write_transaction_journal(operation, phase="prepared")
+    _transaction_checkpoint(operation, "prepared")
+    if crash_at == "prepared":
+        raise PublicationCrash("simulated crash at prepared")
+
+    if operation.no_change:
+        _write_transaction_journal(operation, phase="published")
+        _transaction_checkpoint(operation, "published")
+        if crash_at == "published":
+            raise PublicationCrash("simulated crash at published")
+        if fail_after_publish:
+            raise OSError("simulated publication failure")
+        return
+
+    _write_backup(operation.backup_path, operation.old_files)
+    _write_transaction_journal(operation, phase="backed_up")
+    _transaction_checkpoint(operation, "backed_up")
+    if crash_at == "backed_up":
+        raise PublicationCrash("simulated crash at backed_up")
+
+    _replace_canonical_files(
+        _canonical_directory(operation.resolved),
+        operation.new_files,
+    )
+    _transaction_checkpoint(operation, "after_replace")
+    if crash_at == "after_replace":
+        raise PublicationCrash("simulated crash at after_replace")
+
+    _write_transaction_journal(operation, phase="published")
+    _transaction_checkpoint(operation, "published")
+    if crash_at == "published":
+        raise PublicationCrash("simulated crash at published")
+    if fail_after_publish:
+        raise OSError("simulated publication failure")
+
+
+def _rollback_failed_transaction(
+    operation: _MemoryTransaction,
     error: Exception,
     *,
+    lease: _MemoryLockLease | None,
     retain_failed_stage_artifacts: bool,
 ) -> None:
-    with exclusive_lock(_lock_path(prepared.stage.resolved), wait=True):
+    manager = (
+        exclusive_lock(_lock_path(operation.resolved), wait=True)
+        if lease is None
+        else nullcontext()
+    )
+    with manager:
         _replace_canonical_files(
-            _canonical_directory(prepared.stage.resolved),
-            prepared.old_files,
+            _canonical_directory(operation.resolved),
+            operation.old_files,
         )
-    if retain_failed_stage_artifacts:
+    if retain_failed_stage_artifacts and operation.job_store is not None:
         retain_failed_stage(
-            job_store=prepared.job_store,
-            job_id=prepared.stage.job_id,
-            stage_directory=prepared.stage.directory,
-            diff_bytes=prepared.diff_bytes,
+            job_store=operation.job_store,
+            job_id=operation.operation_id,
+            stage_directory=operation.stage_directory,
+            diff_bytes=operation.diff_bytes,
         )
-    _mark_failed(prepared.job_path, summary=f"Memory publication failed: {error}")
-    _cleanup(prepared=prepared)
+    if operation.job_path is not None:
+        _mark_failed(
+            operation.job_path,
+            summary=f"Memory publication failed: {error}",
+        )
+    _cleanup_paths(
+        journal_path=operation.journal_path,
+        backup_path=operation.backup_path,
+        stage_directory=operation.stage_directory,
+    )
 
 
 def _validate_job_store(job_store: Path) -> Path:
@@ -253,46 +453,77 @@ def _job_path(job_store: Path, expected_job_id: str) -> Path:
     if candidate.parent.resolve() != Path(job_store).resolve():
         raise MemoryPublicationError("job path escapes job store")
     if not candidate.is_file():
-        raise MemoryPublicationError("job path must be a direct file in job store")
+        raise MemoryPublicationError(
+            "job path must be a direct file in job store"
+        )
     return candidate
 
 
-def _journal_path(store_root: Path, memory_hash: str, job_id: str) -> Path:
+def _journal_path(
+    store_root: Path,
+    memory_hash: str,
+    operation_id: str,
+) -> Path:
     _validate_memory_hash(memory_hash)
-    safe_job_id = _validate_job_id(job_id)
+    safe_operation_id = _validate_job_id(operation_id)
     journal_root = _ensure_infrastructure_directory(
         store_root,
         [".journals", memory_hash],
         label="journal",
     )
-    return journal_root / f"{safe_job_id}.yaml"
+    return journal_root / f"{safe_operation_id}.yaml"
 
 
-def _backup_path(store_root: Path, memory_hash: str, job_id: str) -> Path:
+def _backup_path(
+    store_root: Path,
+    memory_hash: str,
+    operation_id: str,
+) -> Path:
     _validate_memory_hash(memory_hash)
-    safe_job_id = _validate_job_id(job_id)
+    safe_operation_id = _validate_job_id(operation_id)
     backup_root = _ensure_infrastructure_directory(
         store_root,
         [".publication-backups", memory_hash],
         label="backup",
     )
-    return backup_root / safe_job_id
+    return backup_root / safe_operation_id
 
 
-def _write_journal(prepared: PreparedPublication, *, phase: str) -> None:
+def _stage_directory(
+    store_root: Path,
+    memory_hash: str,
+    operation_id: str,
+) -> Path:
+    _validate_memory_hash(memory_hash)
+    safe_operation_id = _validate_job_id(operation_id)
+    stage_root = _ensure_infrastructure_directory(
+        store_root,
+        [".staging", memory_hash],
+        label="staging",
+    )
+    return stage_root / safe_operation_id
+
+
+def _write_transaction_journal(
+    operation: _MemoryTransaction,
+    *,
+    phase: str,
+) -> None:
     payload = {
-        "job_id": prepared.stage.job_id,
-        "selector": prepared.selector,
-        "memory_hash": prepared.memory_hash,
-        "old_revision": prepared.old_revision,
-        "new_revision": prepared.new_revision,
-        "stage_directory": prepared.stage.directory.name,
-        "backup_directory": prepared.backup_path.name,
+        "kind": operation.kind,
+        "operation_id": operation.operation_id,
+        "job_id": operation.operation_id if operation.kind == "job" else None,
+        "selector": operation.selector,
+        "memory_hash": operation.memory_hash,
+        "old_revision": operation.old_revision,
+        "new_revision": operation.new_revision,
+        "stage_directory": operation.stage_directory.name,
+        "backup_directory": operation.backup_path.name,
         "phase": phase,
-        "no_change": prepared.no_change,
+        "no_change": operation.no_change,
     }
     atomic_write_text(
-        prepared.journal_path,
+        operation.journal_path,
         yaml.safe_dump(payload, sort_keys=False),
     )
 
@@ -338,11 +569,18 @@ def _mark_failed(job_path: Path, *, summary: str) -> None:
             raise
 
 
-def _cleanup(*, prepared: PreparedPublication) -> None:
-    if prepared.journal_path.exists():
-        prepared.journal_path.unlink()
-    if prepared.backup_path.exists():
-        _safe_rmtree(prepared.backup_path, label="backup")
+def _cleanup_paths(
+    *,
+    journal_path: Path,
+    backup_path: Path,
+    stage_directory: Path,
+) -> None:
+    if journal_path.exists():
+        journal_path.unlink()
+    if backup_path.exists():
+        _safe_rmtree(backup_path, label="backup")
+    if stage_directory.exists():
+        _safe_rmtree(stage_directory, label="staging")
 
 
 def _receipt_to_dict(receipt: MemoryPublicationReceipt) -> dict[str, object]:

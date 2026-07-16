@@ -26,7 +26,11 @@ from agency.memory.publication import (
     finalize_publication,
     prepare_publication,
 )
-from agency.memory.store import ensure_memory, stage_memory
+from agency.memory.store import (
+    _ensure_memory_locked,
+    _memory_lock,
+    _stage_memory_locked,
+)
 
 from .atomic import atomic_write_text
 from .artifacts import JobArtifact, retain_failed_stage
@@ -58,14 +62,6 @@ def _resolved_memory(spec) -> ResolvedMemory:
 
 def _jobs_dir(job_path: Path) -> Path:
     return Path(job_path).resolve().parent
-
-
-def _selector_lock_path(resolved: ResolvedMemory) -> Path:
-    return (
-        resolved.directory.parent
-        / ".selectors"
-        / f"{resolved.memory_hash}.lock"
-    )
 
 
 def _mark_cancelled_if_waiting(job_path: Path) -> JobRecord:
@@ -329,14 +325,21 @@ def execute_job(job_path: Path) -> JobRecord:
         def cancelled() -> bool:
             return read_job(job_path).status == "cancelled"
 
-        selector_lock = _selector_lock_path(resolved_memory)
         try:
-            with exclusive_lock(selector_lock, wait=True, cancelled=cancelled):
+            with _memory_lock(
+                resolved_memory,
+                wait=True,
+                cancelled=cancelled,
+            ) as memory_lease:
                 if cancelled():
                     final = _mark_cancelled_if_waiting(job_path)
                     return final
-                snapshot = ensure_memory(resolved_memory)
-                stage = stage_memory(resolved_memory, job_id=spec.job_id)
+                snapshot = _ensure_memory_locked(resolved_memory, memory_lease)
+                stage = _stage_memory_locked(
+                    resolved_memory,
+                    job_id=spec.job_id,
+                    lease=memory_lease,
+                )
                 canonical_files = dict(snapshot.files)
                 if launch_view is None:
                     launch_view = create_launch_view(artifact, launch_dir)
@@ -459,11 +462,13 @@ def execute_job(job_path: Path) -> JobRecord:
                             stage,
                             job_store=_jobs_dir(job_path),
                             job_path=job_path,
+                            lease=memory_lease,
                         )
                         finalize_publication(
                             apply_publication(
                                 prepared,
                                 retain_failed_stage_artifacts=True,
+                                lease=memory_lease,
                             )
                         )
                         summary = (

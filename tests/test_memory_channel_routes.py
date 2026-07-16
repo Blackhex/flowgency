@@ -3,13 +3,23 @@ from __future__ import annotations
 from copy import deepcopy
 from multiprocessing import Event, Process
 from pathlib import Path
+from uuid import uuid4
 
 import yaml
 from fastapi.testclient import TestClient
+import pytest
 
 from agency import app as app_mod
-from agency.configuration import ConfigStore
+from agency.configuration import ConfigConflictError, ConfigStore
 from agency.configuration.models import MemorySelector
+from agency.jobs.models import (
+    BlueprintRef,
+    JobRecord,
+    JobSpec,
+    MemoryBinding,
+    RuntimePolicySnapshot,
+)
+from agency.jobs.store import read_job, write_job
 from agency.memory import resolve_memory_selector
 from tests._lock_helpers import hold_exclusive_lock
 
@@ -124,6 +134,84 @@ def _seed_memory_app(monkeypatch, tmp_path, canonical_raw_config):
 
 def _config_revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
+
+
+def _write_channel_job(
+    config_path: Path,
+    channel_key: str,
+    *,
+    status: str,
+    job_id: str | None = None,
+) -> Path:
+    snapshot = ConfigStore(config_path).load()
+    group = snapshot.config.groups["newsletter"]
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="channel", channel=channel_key),
+        job_id=job_id or uuid4().hex,
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=snapshot.config.memory.channels,
+        store_root=snapshot.config.agency.memory_store,
+    )
+    spec = JobSpec(
+        schema_version=2,
+        job_id=job_id or uuid4().hex,
+        config_path=str(config_path.resolve()),
+        config_revision=snapshot.revision,
+        group_key="newsletter",
+        group_path=str(group.path.resolve()),
+        agent_name="advisor",
+        workspace_dir=str(group.path.resolve()),
+        trigger="manual_prompt",
+        integration_name="copilot",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="advisor",
+            source_digest="digest-1",
+            integration="copilot",
+            projector_version="v-test",
+            cache_path=str(
+                (
+                    config_path.parent
+                    / "compiled-agents"
+                    / "copilot"
+                    / "v-test"
+                    / "digest-1"
+                ).resolve()
+            ),
+        ),
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=(),
+        task_input="Run it",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "channel", "channel": channel_key},
+            canonical_json=resolved.canonical_json,
+            memory_hash=resolved.memory_hash,
+            path=str(resolved.directory.resolve()),
+        ),
+        trigger_context=None,
+        prompt_source={
+            "type": "saved_prompt",
+            "path": "shared/prompts/daily-review.md",
+        },
+        timeout_override=None,
+        created_at="2026-07-16T00:00:00+00:00",
+    )
+    path = group.path / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    write_job(path, JobRecord(spec=spec, status=status))
+    assert read_job(path).status == status
+    return path
+
+
 def test_channel_is_global_across_groups(monkeypatch, tmp_path, canonical_raw_config):
     client, _, _ = _seed_memory_app(monkeypatch, tmp_path, canonical_raw_config)
 
@@ -247,6 +335,275 @@ def test_channel_delete_blocks_when_referenced(
     assert "Newsletter / Advisor" in response.text
 
 
+@pytest.mark.parametrize("status", ["queued", "waiting_for_memory", "running"])
+def test_channel_delete_blocks_when_active_job_targets_channel(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+    status,
+):
+    client, config_path, resolved = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    _write_channel_job(
+        config_path,
+        "support",
+        status=status,
+        job_id=f"job-{status}",
+    )
+    assert not _channel_references_for_test(config_path, "support")
+    services = app_mod.app.state.services
+    support = resolve_memory_selector(
+        MemorySelector(scope="channel", channel="support"),
+        job_id="preview",
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=ConfigStore(config_path).load().config.memory.channels,
+        store_root=services.memory_store.root,
+    )
+    services.memory_store.ensure(support)
+
+    response = client.post(
+        "/admin/memory-channels/support/delete",
+        data={"revision": _config_revision(config_path)},
+    )
+
+    assert response.status_code == 409
+    assert "active job" in response.text.lower()
+    assert f"job-{status}" in response.text
+    assert support.directory.exists()
+
+
+def test_channel_delete_ignores_terminal_jobs(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, config_path, _ = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    _write_channel_job(
+        config_path,
+        "support",
+        status="failed",
+        job_id="job-failed",
+    )
+    services = app_mod.app.state.services
+    support = resolve_memory_selector(
+        MemorySelector(scope="channel", channel="support"),
+        job_id="preview",
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=ConfigStore(config_path).load().config.memory.channels,
+        store_root=services.memory_store.root,
+    )
+    services.memory_store.ensure(support)
+    (support.directory / "memory.md").write_text(
+        "# Support\n",
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/admin/memory-channels/support/delete",
+        data={"revision": _config_revision(config_path)},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+
+
+def test_channel_delete_returns_423_when_memory_is_busy(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, config_path, _ = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    services = app_mod.app.state.services
+    support = resolve_memory_selector(
+        MemorySelector(scope="channel", channel="support"),
+        job_id="preview",
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=ConfigStore(config_path).load().config.memory.channels,
+        store_root=services.memory_store.root,
+    )
+    snapshot = services.memory_store.ensure(support)
+    acquired = Event()
+    release = Event()
+    process = Process(
+        target=hold_exclusive_lock,
+        args=(
+            str(services.memory_store._lock_path(support)),
+            acquired,
+            release,
+            30,
+        ),
+    )
+    process.start()
+    try:
+        assert acquired.wait(15)
+        response = client.post(
+            "/admin/memory-channels/support/delete",
+            data={"revision": _config_revision(config_path)},
+        )
+    finally:
+        release.set()
+        process.join(15)
+        if process.is_alive():
+            process.terminate()
+            process.join(15)
+        assert process.exitcode == 0
+
+    assert response.status_code == 423
+    assert ConfigStore(config_path).load().config.memory.channels["support"]
+    assert support.directory.exists()
+    assert snapshot.revision
+
+
+def test_channel_delete_restores_archive_when_config_replace_conflicts(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, config_path, _ = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    services = app_mod.app.state.services
+    support = resolve_memory_selector(
+        MemorySelector(scope="channel", channel="support"),
+        job_id="preview",
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=ConfigStore(config_path).load().config.memory.channels,
+        store_root=services.memory_store.root,
+    )
+    services.memory_store.ensure(support)
+    (support.directory / "memory.md").write_text(
+        "# Restore me\n",
+        encoding="utf-8",
+    )
+
+    def fail_replace(expected_revision, raw):
+        raise ConfigConflictError("config.yaml changed; reload before saving")
+
+    monkeypatch.setattr(services.config_store, "replace", fail_replace)
+
+    response = client.post(
+        "/admin/memory-channels/support/delete",
+        data={"revision": _config_revision(config_path)},
+    )
+
+    assert response.status_code == 409
+    assert support.directory.exists()
+    assert (
+        support.directory / "memory.md"
+    ).read_text(encoding="utf-8") == "# Restore me\n"
+    assert "support" in ConfigStore(config_path).load().config.memory.channels
+
+
+def test_channel_delete_archives_canonical_and_recreation_starts_fresh(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, config_path, _ = _seed_memory_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    services = app_mod.app.state.services
+    support = resolve_memory_selector(
+        MemorySelector(scope="channel", channel="support"),
+        job_id="preview",
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=ConfigStore(config_path).load().config.memory.channels,
+        store_root=services.memory_store.root,
+    )
+    services.memory_store.ensure(support)
+    services.memory_store.try_save(
+        support,
+        services.memory_store.read(support).revision,
+        {"memory.md": b"# superseded support\n"},
+    )
+
+    response = client.post(
+        "/admin/memory-channels/support/delete",
+        data={"revision": _config_revision(config_path)},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    snapshot = ConfigStore(config_path).load()
+    assert "support" not in snapshot.config.memory.channels
+    assert not support.directory.exists()
+    archives = list(
+        (services.memory_store.root / ".deleted").glob(
+            f"{support.memory_hash}-*"
+        )
+    )
+    assert len(archives) == 1
+    assert (
+        archives[0] / "memory.md"
+    ).read_text(encoding="utf-8") == "# superseded support\n"
+
+    create = client.post(
+        "/admin/memory-channels/create",
+        data={
+            "revision": snapshot.revision,
+            "channel_key": "support",
+            "display_name": "Support",
+        },
+        follow_redirects=False,
+    )
+
+    assert create.status_code == 303
+    refreshed = ConfigStore(config_path).load()
+    recreated = resolve_memory_selector(
+        MemorySelector(scope="channel", channel="support"),
+        job_id="preview",
+        group_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels=refreshed.config.memory.channels,
+        store_root=services.memory_store.root,
+    )
+    recreated_snapshot = services.memory_store.ensure(recreated)
+    assert recreated_snapshot.files == {"memory.md": b""}
+
+
+def _channel_references_for_test(
+    config_path: Path,
+    channel_key: str,
+) -> list[str]:
+    snapshot = ConfigStore(config_path).load()
+    refs: list[str] = []
+    for group in snapshot.config.groups.values():
+        for agent in group.agents.values():
+            if (
+                agent.default_memory is not None
+                and agent.default_memory.scope == "channel"
+                and agent.default_memory.channel == channel_key
+            ):
+                refs.append(agent.name)
+    return refs
+
+
 def test_channel_rename_updates_display_name_only(
     monkeypatch,
     tmp_path,
@@ -318,8 +675,6 @@ def test_channel_rekey_rejects_forged_referenced_current_key(
         canonical_raw_config,
     )
     snapshot = ConfigStore(config_path).load()
-    before = deepcopy(snapshot.raw)
-
     response = client.post(
         "/admin/memory-channels/support",
         data={
@@ -334,7 +689,10 @@ def test_channel_rekey_rejects_forged_referenced_current_key(
     assert response.status_code == 303
     refreshed = ConfigStore(config_path).load()
     assert "support" not in refreshed.config.memory.channels
-    assert refreshed.config.memory.channels["brand-ops"].display_name == "Support"
+    assert (
+        refreshed.config.memory.channels["brand-ops"].display_name
+        == "Support"
+    )
 
 
 def test_channel_rekey_blocks_when_referenced(

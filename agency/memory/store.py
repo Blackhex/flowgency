@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import hashlib
 import os
 import re
@@ -32,6 +34,54 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"COM{number}" for number in range(1, 10)),
     *(f"LPT{number}" for number in range(1, 10)),
 }
+_LOCK_LEASE_MARKER = object()
+
+
+class _MemoryLockLease:
+    __slots__ = ("resolved", "lock_path", "_marker")
+
+    def __init__(
+        self,
+        resolved: ResolvedMemory,
+        lock_path: Path,
+        marker: object,
+    ) -> None:
+        if marker is not _LOCK_LEASE_MARKER:
+            raise MemoryStoreError("memory lock leases are internal")
+        self.resolved = resolved
+        self.lock_path = lock_path
+        self._marker = marker
+
+
+@contextmanager
+def _memory_lock(
+    resolved: ResolvedMemory,
+    *,
+    wait: bool,
+    cancelled: Callable[[], bool] | None = None,
+) -> Iterator[_MemoryLockLease]:
+    _validate_resolved_memory(resolved)
+    lock_path = _lock_path(resolved)
+    with exclusive_lock(
+        lock_path,
+        wait=wait,
+        cancelled=cancelled,
+    ):
+        yield _MemoryLockLease(resolved, lock_path, _LOCK_LEASE_MARKER)
+
+
+def _validate_lock_lease(
+    lease: _MemoryLockLease,
+    resolved: ResolvedMemory,
+) -> None:
+    if not isinstance(lease, _MemoryLockLease):
+        raise MemoryStoreError("canonical memory lock lease required")
+    if lease._marker is not _LOCK_LEASE_MARKER:
+        raise MemoryStoreError("invalid canonical memory lock lease")
+    if lease.resolved.memory_hash != resolved.memory_hash:
+        raise MemoryStoreError("memory lock lease identity mismatch")
+    if lease.lock_path != _lock_path(resolved):
+        raise MemoryStoreError("memory lock lease path mismatch")
 
 
 def _normalized_key(value: str) -> str:
@@ -55,26 +105,40 @@ def read_memory(
     wait: bool = True,
 ) -> MemorySnapshot:
     _validate_resolved_memory(resolved)
-    lock_path = _lock_path(resolved)
-    with exclusive_lock(lock_path, wait=wait):
-        files = _read_canonical_files(_canonical_directory(resolved))
-        return MemorySnapshot(
-            resolved=resolved,
-            files=files,
-            revision=memory_content_revision(files),
-        )
+    with _memory_lock(resolved, wait=wait) as lease:
+        return _read_memory_locked(resolved, lease)
+
+
+def _read_memory_locked(
+    resolved: ResolvedMemory,
+    lease: _MemoryLockLease,
+) -> MemorySnapshot:
+    _validate_lock_lease(lease, resolved)
+    files = _read_canonical_files(_canonical_directory(resolved))
+    return MemorySnapshot(
+        resolved=resolved,
+        files=files,
+        revision=memory_content_revision(files),
+    )
 
 
 def ensure_memory(resolved: ResolvedMemory) -> MemorySnapshot:
     _validate_resolved_memory(resolved)
-    lock_path = _lock_path(resolved)
-    with exclusive_lock(lock_path, wait=True):
-        directory = _ensure_canonical_directory(resolved)
-        if not any(directory.iterdir()):
-            atomic_write_bytes(directory / "memory.md", b"")
-        files = _read_canonical_files(directory)
-        if not files:
-            raise ValueError("memory must contain at least one markdown file")
+    with _memory_lock(resolved, wait=True) as lease:
+        return _ensure_memory_locked(resolved, lease)
+
+
+def _ensure_memory_locked(
+    resolved: ResolvedMemory,
+    lease: _MemoryLockLease,
+) -> MemorySnapshot:
+    _validate_lock_lease(lease, resolved)
+    directory = _ensure_canonical_directory(resolved)
+    if not any(directory.iterdir()):
+        atomic_write_bytes(directory / "memory.md", b"")
+    files = _read_canonical_files(directory)
+    if not files:
+        raise ValueError("memory must contain at least one markdown file")
     return MemorySnapshot(
         resolved=resolved,
         files=files,
@@ -83,7 +147,18 @@ def ensure_memory(resolved: ResolvedMemory) -> MemorySnapshot:
 
 
 def stage_memory(resolved: ResolvedMemory, *, job_id: str) -> MemoryStage:
-    snapshot = ensure_memory(resolved)
+    with _memory_lock(resolved, wait=True) as lease:
+        return _stage_memory_locked(resolved, job_id=job_id, lease=lease)
+
+
+def _stage_memory_locked(
+    resolved: ResolvedMemory,
+    *,
+    job_id: str,
+    lease: _MemoryLockLease,
+) -> MemoryStage:
+    _validate_lock_lease(lease, resolved)
+    snapshot = _ensure_memory_locked(resolved, lease)
     safe_job_id = _validate_job_id(job_id)
     stage_parent = _ensure_infrastructure_directory(
         _store_root(resolved),
@@ -112,8 +187,7 @@ def try_save_memory(
 ) -> MemorySnapshot:
     _validate_resolved_memory(resolved)
     normalized = _normalize_candidate_files(files)
-    lock_path = _lock_path(resolved)
-    with try_exclusive_lock(lock_path):
+    with _memory_lock(resolved, wait=False) as lease:
         current_files = _read_canonical_files(resolved.directory)
         current = MemorySnapshot(
             resolved=resolved,
@@ -126,12 +200,14 @@ def try_save_memory(
                 current=current,
                 attempted_files=normalized,
             )
-        _replace_canonical_files(resolved.directory, normalized)
-    return MemorySnapshot(
-        resolved=resolved,
-        files=normalized,
-        revision=memory_content_revision(normalized),
-    )
+        from .publication import _save_direct_locked
+
+        return _save_direct_locked(
+            resolved,
+            current,
+            normalized,
+            lease=lease,
+        )
 
 
 class MemoryStore:

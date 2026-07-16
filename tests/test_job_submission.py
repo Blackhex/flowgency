@@ -65,6 +65,18 @@ class FakeIntegration(BaseIntegration):
         raise NotImplementedError
 
 
+class NoSkillIntegration(FakeIntegration):
+    projector = StaticRuntimeProjector(
+        version="v-no-skill",
+        capabilities=ProjectorCapabilities(
+            instruction_target=PurePosixPath("AGENTS.md"),
+            skills_target=PurePosixPath(".agents/skills"),
+            discovers_skills=True,
+            activates_selected_skill=False,
+        ),
+    )
+
+
 def _write_blueprint(root: Path, key: str = "builder-blueprint") -> None:
     blueprint = root / key
     skill = blueprint / ".agents" / "skills" / "daily-review"
@@ -180,6 +192,32 @@ def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
         assert not any(jobs_dir.glob("*.yaml"))
     pins_root = tmp_path / "compiled-agents" / "_pins"
     assert not pins_root.exists()
+    assert launcher.launch.call_count == 0
+
+
+def test_full_run_validation_rejects_unsupported_skill_before_pin_or_job(
+    tmp_path,
+):
+    config = _write_config(tmp_path)
+    _write_blueprint(tmp_path / "agent-library")
+    request = JobRequest(
+        config_path=config,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        routine_id="daily-review",
+        task_input="Run it",
+    )
+    launcher = Mock()
+
+    with patch.dict("agency.jobs.submission.REGISTRY", {"copilot": NoSkillIntegration()}, clear=True):
+        with pytest.raises(Exception, match="activate routine skills|unsupported-skill"):
+            submit_job_request(request, launcher)
+
+    jobs_dir = tmp_path / "agents" / "newsletter" / "shared" / "jobs"
+    assert not jobs_dir.exists() or not any(jobs_dir.glob("*.yaml"))
+    pins_root = tmp_path / "compiled-agents" / "_pins"
+    assert not pins_root.exists() or not any(pins_root.rglob("*"))
     assert launcher.launch.call_count == 0
 
 

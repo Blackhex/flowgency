@@ -395,6 +395,39 @@ def test_try_save_replaces_canonical_markdown_set_atomically(
     ) == ["memory.md"]
 
 
+def test_try_save_uses_direct_save_journal_and_cleans_transaction_evidence(
+    memory_store,
+    resolved_memory,
+    monkeypatch,
+):
+    seeded = memory_store.ensure(resolved_memory)
+    phases = []
+
+    def observe(operation, phase):
+        phases.append((operation.kind, phase))
+
+    monkeypatch.setattr(
+        "agency.memory.publication._transaction_checkpoint",
+        observe,
+    )
+
+    saved = memory_store.try_save(
+        resolved_memory,
+        seeded.revision,
+        {"memory.md": b"journaled"},
+    )
+
+    assert saved.files == {"memory.md": b"journaled"}
+    assert phases == [
+        ("direct-save", "prepared"),
+        ("direct-save", "backed_up"),
+        ("direct-save", "after_replace"),
+        ("direct-save", "published"),
+    ]
+    assert not list((memory_store.root / ".journals").glob("*/*.yaml"))
+    assert not list((memory_store.root / ".publication-backups").glob("*/*"))
+
+
 def test_try_save_rolls_back_if_install_fails_after_evacuating_old_files(
     monkeypatch,
     memory_store,

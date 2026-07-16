@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from copy import deepcopy
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -14,7 +15,12 @@ from agency.configuration import (
 )
 from agency.configuration.models import MemorySelector
 from agency.fs import ResourceBusyError, try_exclusive_lock
+from agency.jobs.store import acquire_group_operation_locks, active_jobs
 from agency.memory import MemoryConflictError, resolve_memory_selector
+from agency.memory.store import (
+    _ensure_infrastructure_directory,
+    _is_symlink_or_reparse,
+)
 from agency.web.dependencies import AgencyServices, get_services
 
 
@@ -240,6 +246,48 @@ def _remove_channel_directory(services: AgencyServices, resolved) -> None:
         shutil.rmtree(resolved.directory, ignore_errors=True)
 
 
+def _active_channel_jobs(snapshot, channel_key: str) -> list[str]:
+    references: list[str] = []
+    for group_key, group in snapshot.config.groups.items():
+        for record in active_jobs(group.path):
+            selector = dict(record.spec.memory.selector)
+            if (
+                selector.get("scope") == "channel"
+                and selector.get("channel") == channel_key
+            ):
+                references.append(
+                    f"{group.name} / {record.spec.agent_name} / "
+                    f"{record.spec.job_id}"
+                )
+    references.sort()
+    return references
+
+
+def _archive_channel_directory(services: AgencyServices, resolved):
+    if not resolved.directory.exists():
+        return None
+    if _is_symlink_or_reparse(resolved.directory):
+        raise HTTPException(
+            status_code=500,
+            detail="Unsafe memory channel directory",
+        )
+    archive_root = _ensure_infrastructure_directory(
+        services.memory_store.root,
+        [".deleted"],
+        label="deleted",
+    )
+    archive_name = f"{resolved.memory_hash}-{uuid4().hex}"
+    archive_path = archive_root / archive_name
+    resolved.directory.rename(archive_path)
+    return archive_path
+
+
+def _restore_channel_archive(resolved, archive_path):
+    if archive_path is None or not archive_path.exists():
+        return
+    archive_path.rename(resolved.directory)
+
+
 @router.get("/admin/memory-channels", response_class=HTMLResponse)
 async def admin_memory_channels(
     request: Request,
@@ -443,37 +491,96 @@ async def admin_memory_channel_delete(
     snapshot = services.config_store.load()
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
-    references = _channel_references(snapshot, channel_key)
-    if references:
-        return _render_channel_detail(
-            request,
-            services,
-            snapshot,
-            channel_key,
-            warning=(
-                "Cannot delete a referenced channel. Remove or "
-                "migrate declared references first."
-            ),
-            status_code=409,
-        )
     try:
-        if not revision:
-            raise ConfigConflictError(
-                "config.yaml changed; reload before saving"
+        all_group_paths = tuple(
+            group.path for group in snapshot.config.groups.values()
+        )
+        with acquire_group_operation_locks(*all_group_paths):
+            refreshed = services.config_store.load()
+            references = _channel_references(refreshed, channel_key)
+            if references:
+                return _render_channel_detail(
+                    request,
+                    services,
+                    refreshed,
+                    channel_key,
+                    warning=(
+                        "Cannot delete a referenced channel. Remove or "
+                        "migrate declared references first."
+                    ),
+                    status_code=409,
+                )
+            active_job_refs = _active_channel_jobs(refreshed, channel_key)
+            if active_job_refs:
+                return _render_channel_detail(
+                    request,
+                    services,
+                    refreshed,
+                    channel_key,
+                    warning=(
+                        "Cannot delete a channel targeted by an active job: "
+                        + "; ".join(active_job_refs)
+                    ),
+                    status_code=409,
+                )
+            if not revision or refreshed.revision != revision:
+                raise ConfigConflictError(
+                    "config.yaml changed; reload before saving"
+                )
+            resolved = _resolve_channel_memory(
+                refreshed,
+                services,
+                channel_key,
             )
-        raw = deepcopy(snapshot.raw)
-        channels = dict(raw.get("memory", {}).get("channels", {}))
-        if channel_key not in channels:
-            raise HTTPException(
-                status_code=404,
-                detail="Unknown memory channel",
-            )
-        del channels[channel_key]
-        _patch_channels(raw, channels)
-        parse_config_canonical(raw, snapshot.path)
-        services.config_store.replace(revision, raw)
-        resolved = _resolve_channel_memory(snapshot, services, channel_key)
-        _remove_channel_directory(services, resolved)
+            archive_path = None
+            try:
+                with try_exclusive_lock(
+                    services.memory_store._lock_path(resolved)
+                ):
+                    raw = deepcopy(refreshed.raw)
+                    channels = dict(raw.get("memory", {}).get("channels", {}))
+                    if channel_key not in channels:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Unknown memory channel",
+                        )
+                    archive_path = _archive_channel_directory(
+                        services,
+                        resolved,
+                    )
+                    del channels[channel_key]
+                    _patch_channels(raw, channels)
+                    parse_config_canonical(raw, refreshed.path)
+                    services.config_store.replace(refreshed.revision, raw)
+            except (ConfigConflictError, ValidationFailed) as exc:
+                try:
+                    _restore_channel_archive(resolved, archive_path)
+                except OSError as restore_error:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=(
+                            "Failed to restore archived channel after config "
+                            "error; archive preserved at "
+                            f"{archive_path}: {restore_error}"
+                        ),
+                    ) from restore_error
+                if isinstance(exc, ValidationFailed):
+                    return _render_channel_detail(
+                        request,
+                        services,
+                        refreshed,
+                        channel_key,
+                        issues=_issue_dicts(exc),
+                        status_code=409,
+                    )
+                return _render_channel_detail(
+                    request,
+                    services,
+                    refreshed,
+                    channel_key,
+                    warning=str(exc),
+                    status_code=409,
+                )
     except ConfigConflictError as exc:
         return _render_channel_detail(
             request,
@@ -482,6 +589,18 @@ async def admin_memory_channel_delete(
             channel_key,
             warning=str(exc),
             status_code=409,
+        )
+    except ResourceBusyError:
+        return _render_channel_detail(
+            request,
+            services,
+            snapshot,
+            channel_key,
+            warning=(
+                "Memory is busy; try again after the active writer "
+                "finishes."
+            ),
+            status_code=423,
         )
     request.app.state.refresh_services()
     return RedirectResponse("/admin/memory-channels", status_code=303)
