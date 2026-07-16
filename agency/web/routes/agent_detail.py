@@ -654,7 +654,7 @@ async def agent_detail_profile_save(request: Request, group: str, agent: str, se
         return _detail_context(request, services, group, agent, "profile", status_code=409, issues=_issue_dicts(exc))
     except ConfigConflictError as exc:
         return _detail_context(request, services, group, agent, "profile", status_code=409, banner=str(exc))
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents/{agent}/profile", status_code=303)
 
 
@@ -710,7 +710,7 @@ async def agent_detail_runtime_save(request: Request, group: str, agent: str, se
         return _detail_context(request, services, group, agent, "runtime", status_code=409, issues=_issue_dicts(exc))
     except ConfigConflictError as exc:
         return _detail_context(request, services, group, agent, "runtime", status_code=409, banner=str(exc))
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents/{agent}/runtime", status_code=303)
 
 
@@ -742,7 +742,7 @@ async def agent_detail_routines_save(request: Request, group: str, agent: str, s
         return _detail_context(request, services, group, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": False})
     except ConfigConflictError as exc:
         return _detail_context(request, services, group, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": False})
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents/{agent}/routines", status_code=303)
 
 
@@ -853,7 +853,7 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
         return _detail_context(request, services, group, agent, "memory", status_code=409, issues=_issue_dicts(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
     except ConfigConflictError as exc:
         return _detail_context(request, services, group, agent, "memory", status_code=409, banner=str(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents/{agent}/memory", status_code=303)
 
 

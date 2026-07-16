@@ -61,7 +61,7 @@ def _make_client(monkeypatch, tmp_path, canonical_raw_config):
     raw["groups"]["newsletter"]["dispatch"] = {"enabled": True, "daily_limit": 12}
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     return TestClient(app_mod.app), ConfigStore(config_path)
 
 
@@ -113,8 +113,11 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, canonical_raw_
 def test_setup_post_creates_strict_canonical_group_without_scanning_agents(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.save_config({"agency": {"title": "Agency", "default_group": ""}, "groups": {}})
-    app_mod.reload_groups()
+    config_path.write_text(
+        "agency:\n  title: Agency\n  default_group: ''\ngroups: {}\n",
+        encoding="utf-8",
+    )
+    app_mod.refresh_services()
 
     group_path = tmp_path / "groups" / "newsletter"
     library = tmp_path / "agent-library"
@@ -157,7 +160,7 @@ def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_pat
     config_path = tmp_path / "config.yaml"
     config_path.write_text("agency:\n  title: Agency\ngroups: {}\n", encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     client = TestClient(app_mod.app)
 
     response = client.get("/setup")
@@ -174,7 +177,7 @@ def test_setup_page_includes_expected_revision_for_existing_bootstrap_config(
     original = b"agency:\n  title: Agency\ngroups: {}\n"
     config_path.write_bytes(original)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     client = TestClient(app_mod.app)
 
     response = client.get("/setup")
@@ -191,7 +194,7 @@ def test_setup_form_has_distinct_group_key_and_expected_revision_inputs(
     original = b"agency:\n  title: Agency\ngroups: {}\n"
     config_path.write_bytes(original)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     client = TestClient(app_mod.app)
 
     response = client.get("/setup")
@@ -234,7 +237,7 @@ def test_setup_post_write_failure_preserves_existing_bytes(
     original = b"agency:\n  title: Agency\ngroups: {}\n"
     config_path.write_bytes(original)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
 
     original_encode = ConfigStore._encode
 
@@ -275,7 +278,7 @@ def test_setup_post_conflict_returns_409_and_preserves_concurrent_bytes(
     concurrent = b"agency:\n  title: Changed elsewhere\ngroups: {}\n"
     config_path.write_bytes(original)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     client = TestClient(app_mod.app)
 
     get_response = client.get("/setup")

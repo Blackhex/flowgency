@@ -62,7 +62,7 @@ def _make_client(monkeypatch, tmp_path, canonical_raw_config):
     }
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     return TestClient(app_mod.app), ConfigStore(config_path)
 
 

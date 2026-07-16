@@ -211,7 +211,7 @@ async def agent_create(request: Request, group: str, services: AgencyServices = 
         )
     except ConfigConflictError as exc:
         return _render_roster(request, services, group, warning=str(exc), status_code=409)
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents", status_code=303)
 
 
@@ -229,7 +229,7 @@ async def agent_remove(request: Request, group: str, agent: str, services: Agenc
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ConfigConflictError as exc:
         return _render_roster(request, services, group, warning=str(exc), status_code=409)
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents", status_code=303)
 
 
@@ -299,7 +299,7 @@ async def agent_move_apply(request: Request, group: str, agent: str, services: A
         services.instances.move(preview)
     except (ConfigConflictError, InstanceMoveConflict) as exc:
         return _render_roster(request, services, group, warning=str(exc), status_code=409)
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/{preview.target_group}/agents", status_code=303)
 
 

@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import stat
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -529,14 +530,31 @@ def _publish_stage(
     stage_root: Path,
     backup_root: Path,
 ) -> None:
+    def replace_directory(source: Path, destination: Path) -> None:
+        deadline = time.monotonic() + 0.25
+        delay = 0.01
+        while True:
+            try:
+                os.replace(source, destination)
+                return
+            except PermissionError as exc:
+                if destination.exists():
+                    raise
+                if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32}:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, 0.05)
+
     backup_target = backup_root / target_root.name
     try:
         if target_root.exists():
-            os.replace(target_root, backup_target)
-        os.replace(stage_root, target_root)
+            replace_directory(target_root, backup_target)
+        replace_directory(stage_root, target_root)
     except Exception:
         if not target_root.exists() and backup_target.exists():
-            os.replace(backup_target, target_root)
+            replace_directory(backup_target, target_root)
         raise
     finally:
         if backup_target.exists():

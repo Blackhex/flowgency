@@ -30,7 +30,38 @@ def _setup_jobs_group(
     jobs_dir = group / "shared" / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 2,
+                "agency": {
+                    "title": "Agency",
+                    "default_group": "test",
+                    "ai_backend": "claude-code",
+                    "agent_library": str((tmp_path / "agent-library").resolve()),
+                    "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
+                    "memory_store": str((tmp_path / "memory").resolve()),
+                },
+                "groups": {
+                    "test": {
+                        "name": "Test",
+                        "path": str(group.resolve()),
+                        "default_integration": "script",
+                        "agents": [
+                            {
+                                "name": "engineer",
+                                "blueprint": "engineer-blueprint",
+                                "integration": "script",
+                                "integration_config": {"command": "echo ok"},
+                            }
+                        ],
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
 
     spec = JobSpec(
         schema_version=2,
@@ -85,11 +116,8 @@ def _setup_jobs_group(
     record.stdout_path = str(stdout_path)
     write_job(jobs_dir / (record_filename or f"{spec.job_id}.yaml"), record)
 
-    monkeypatch.setattr(app_mod, "CONFIG", {"groups": {"test": {"path": str(group)}}})
-    monkeypatch.setattr(app_mod, "GROUPS", {"test": {
-        "key": "test", "name": "Test", "path": group,
-        "agents": ["engineer"], "_agents_normalized": [{"name": "engineer"}],
-    }})
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.refresh_services()
     monkeypatch.setattr(
         cli,
         "_group",
@@ -205,7 +233,6 @@ def test_serve_missing_config_bootstraps_selected_path_not_cwd(tmp_path):
     environment["AGENCY_CONFIG"] = str(selected_path)
     script = (
         "import agency.app as app; "
-        "app.reload_groups = lambda: None; "
         "app.uvicorn.run = lambda *args, **kwargs: None; "
         "app.run_server('127.0.0.1', 8500)"
     )
@@ -219,7 +246,10 @@ def test_serve_missing_config_bootstraps_selected_path_not_cwd(tmp_path):
     )
 
     assert result.returncode == 0
-    assert selected_path.exists()
+    output = result.stdout + result.stderr
+    assert "strict schema_version: 2 config not found" in output
+    assert "/admin/" in output
+    assert not selected_path.exists()
     assert not (tmp_path / "config.yaml").exists()
 
 

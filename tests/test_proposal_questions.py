@@ -162,9 +162,9 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         "  title: Agency\n"
         "  default_group: test\n"
         "  ai_backend: claude-code\n"
-        "  agent_library: agent-library\n"
-        "  compilation_cache: compiled-agents\n"
-        "  memory_store: memory\n"
+        f"  agent_library: {(tmp_path / 'agent-library').as_posix()}\n"
+        f"  compilation_cache: {(tmp_path / 'compiled-agents').as_posix()}\n"
+        f"  memory_store: {(tmp_path / 'memory').as_posix()}\n"
         "groups:\n"
         "  test:\n"
         "    name: Test\n"
@@ -185,17 +185,14 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    monkeypatch.setattr(app_mod, "CONFIG", {"groups": {"test": {"path": str(group), "agents": agents}}})
-    monkeypatch.setattr(app_mod, "GROUPS", {"test": {
-        "key": "test", "name": "Test", "path": group,
-        "agents": [item["name"] for item in agents], "_agents_normalized": agents,
-    }})
+    (tmp_path / "agent-library").mkdir()
+    app_mod.refresh_services()
     return TestClient(app), proposal_path, shared / "decisions" / "change.md"
 
 
 def test_executor_options_exclude_agents_without_explicit_write_capability(tmp_path, monkeypatch):
     _setup_decision_group(tmp_path, monkeypatch)
-    assert app_mod.execution_agent_options(app_mod.GROUPS["test"]) == ["engineer"]
+    assert app_mod.execution_agent_options(app_mod.get_group("test")) == ["engineer"]
 
 
 def test_proposal_form_defaults_executor_to_explicit_execution_agent(tmp_path, monkeypatch):

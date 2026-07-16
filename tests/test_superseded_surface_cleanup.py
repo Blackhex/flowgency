@@ -130,16 +130,33 @@ def _superseded_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     return TestClient(app_mod.app), tmp_path
 
 
 def test_retired_routes_are_not_registered():
-    registered = {
-        (method, route.path)
-        for route in app_mod.app.routes
-        for method in getattr(route, "methods", set())
-    }
+    registered = set()
+    for route in app_mod.app.routes:
+        for method in getattr(route, "methods", set()):
+            registered.add((method, route.path))
+        effective_route_contexts = getattr(route, "effective_route_contexts", None)
+        if not callable(effective_route_contexts):
+            continue
+        for route_context in effective_route_contexts():
+            starlette_route = getattr(route_context, "starlette_route", None)
+            original_route = getattr(route_context, "original_route", None)
+            methods = getattr(starlette_route, "methods", None) or getattr(
+                original_route,
+                "methods",
+                set(),
+            )
+            path = getattr(starlette_route, "path", "") or getattr(
+                original_route,
+                "path",
+                "",
+            )
+            for method in methods:
+                registered.add((method, path))
     assert RETIRED_ROUTES.isdisjoint(registered)
 
 

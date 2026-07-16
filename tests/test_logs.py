@@ -1,4 +1,5 @@
 import os
+import yaml
 from datetime import datetime
 from pathlib import Path
 
@@ -81,21 +82,40 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     mtime = datetime(2026, 7, 12, 20, 6).timestamp()
     os.utime(log_file, (mtime, mtime))
 
-    monkeypatch.setattr(app_mod, "CONFIG", {"agency": {"title": "Agency"}})
-    monkeypatch.setattr(
-        app_mod,
-        "GROUPS",
-        {
-            "test": {
-                "key": "test",
-                "name": "Test Group",
-                "path": Path(group_path),
-                "shared": group_path / "shared",
-                "agents": ["agent"],
-                "_agents_normalized": [{"name": "agent", "integration": "script"}],
-            }
-        },
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 2,
+                "agency": {
+                    "title": "Agency",
+                    "default_group": "test",
+                    "ai_backend": "claude-code",
+                    "agent_library": str((tmp_path / "agent-library").resolve()),
+                    "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
+                    "memory_store": str((tmp_path / "memory").resolve()),
+                },
+                "groups": {
+                    "test": {
+                        "name": "Test Group",
+                        "path": str(group_path.resolve()),
+                        "default_integration": "script",
+                        "agents": [
+                            {
+                                "name": "agent",
+                                "blueprint": "agent-blueprint",
+                                "integration": "script",
+                            }
+                        ],
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
     )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.refresh_services()
 
     client = TestClient(app_mod.app)
     response = client.get("/test/logs")

@@ -112,18 +112,45 @@ changed_files:
 Decision body
 """)
 
-    # Configure app
-    app_mod.CONFIG = {"groups": {"test": {"name": "Test Group", "path": str(group_path)}}}
-    app_mod.GROUPS = {
-        "test": {
-            "key": "test",
-            "name": "Test Group",
-            "path": group_path,
-            "shared": group_path / "shared",
-            "agents": ["worker"],
-            "_agents_normalized": [{"name": "worker", "integration": "script"}],
-        }
-    }
+    library_root = tmp_path / "agent-library"
+    cache_root = tmp_path / "compiled-agents"
+    memory_root = tmp_path / "memory-store"
+    library_root.mkdir()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 2,
+                "agency": {
+                    "title": "Agency",
+                    "default_group": "test",
+                    "ai_backend": "script",
+                    "agent_library": str(library_root),
+                    "compilation_cache": str(cache_root),
+                    "memory_store": str(memory_root),
+                },
+                "memory": {"channels": {}},
+                "groups": {
+                    "test": {
+                        "name": "Test Group",
+                        "path": str(group_path),
+                        "default_integration": "script",
+                        "agents": [
+                            {
+                                "name": "worker",
+                                "blueprint": "worker",
+                                "integration": "script",
+                            }
+                        ],
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.refresh_services()
 
     client = TestClient(app)
     resp = client.get("/test/decisions/test-decision")
@@ -212,7 +239,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config):
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
     return TestClient(app_mod.app), config_path, group_root
 
@@ -309,7 +336,7 @@ def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, t
         agent["identity"]["display_name"] = agent_name.title()
         raw["groups"]["newsletter"]["agents"].append(agent)
     _write_yaml(config_path, raw)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
 
     queued = _job_spec(group_root, config_path, status="queued", job_id="job-queued")
@@ -377,7 +404,7 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
     (group_root / "advisor").mkdir()
     (group_root / "advisor" / "AGENTS.md").write_text("# Advisor\n", encoding="utf-8")
     _write_yaml(config_path, raw)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
 
     jobs = [
         _job_spec(group_root, config_path, status="queued", job_id="job-queued"),
@@ -463,7 +490,7 @@ def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, can
         ],
     }
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(tmp_path / "config.yaml")
 
     response = client.get("/newsletter/")

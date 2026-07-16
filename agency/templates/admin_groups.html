@@ -51,6 +51,7 @@
           </form>
           <form method="post" action="/admin/orgs/{{ org.key }}/delete" class="inline"
                 onsubmit="return confirm('Delete group \'{{ org.name }}\'? This only removes it from config — files on disk are not deleted.')">
+            <input type="hidden" name="revision" value="{{ revision }}">
             <button type="submit"
                     class="px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors">
               Delete

@@ -83,7 +83,7 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     monkeypatch.setattr(app_mod, "_get_timer_status", lambda path, interval: scheduler_status)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     return TestClient(app_mod.app)
 
 
@@ -254,10 +254,13 @@ def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monk
 
 def test_admin_org_edit_preserves_selected_theme(tmp_path, monkeypatch):
     client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
-    config = app_mod.load_config()
+    config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
     config["agency"]["theme"] = "workshop"
-    app_mod.save_config(config)
-    app_mod.reload_groups()
+    app_mod.CONFIG_PATH.write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
+    app_mod.refresh_services()
 
     response = client.get("/admin/orgs/test/edit")
 

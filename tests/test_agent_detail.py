@@ -96,7 +96,7 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
     return TestClient(app_mod.app), config_path
 
@@ -136,7 +136,7 @@ def _seed_activity_app(monkeypatch, tmp_path, canonical_raw_config):
     )
     log_file = group_root.joinpath("shared", "logs", "2026-07-16", "advisor-run.out")
     log_file.write_text("# log\n", encoding="utf-8")
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
     return TestClient(app_mod.app), config_path, log_file
 
@@ -208,7 +208,7 @@ def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
-    app_mod.reload_groups()
+    app_mod.refresh_services()
 
     response = client.get("/newsletter/agents/advisor/runtime")
 
@@ -338,7 +338,7 @@ def test_runtime_post_surfaces_unsupported_capability_issue(monkeypatch, tmp_pat
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     revision = _revision(config_path)
 
     response = client.post(
@@ -543,7 +543,7 @@ def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memo
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
-    app_mod.reload_groups()
+    app_mod.refresh_services()
 
     response = client.post(
         "/newsletter/agents/advisor/memory",

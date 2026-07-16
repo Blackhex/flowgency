@@ -1,11 +1,9 @@
 """Agency Dashboard — multi-group agent management interface."""
 
-import copy
 import os
 import re
 import stat
 import subprocess
-import tempfile
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -22,8 +20,15 @@ from markupsafe import Markup
 import uvicorn
 from uvicorn.supervisors.watchfilesreload import WatchFilesReload
 
-from agency.config import agent_can_write, normalize_agents, agent_names
 from agency.clock import now as clock_now, today as clock_today
+from agency.configuration import (
+    AgencySettingsPatch,
+    ConfigConflictError,
+    ConfigStore,
+    dismiss_tip,
+    hide_all_tips,
+    patch_agency_settings,
+)
 from agency.integrations import get_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 from agency.jobs import (
@@ -40,6 +45,7 @@ from agency.proposals import validate_proposal_schema, validate_answers, should_
 import json as json_module
 from agency.workspaces import REGISTRY as WORKSPACE_REGISTRY
 from agency.web import AgencyServices, build_services, get_services
+from agency.web.state import agency_settings, runtime_group
 from agency.web.routes import (
     admin_groups_router,
     admin_library_router,
@@ -52,38 +58,6 @@ from agency.web.routes import (
 # ── Config ────────────────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path(os.environ.get("AGENCY_CONFIG") or Path.cwd() / "config.yaml").expanduser().resolve()
-
-
-def load_config() -> dict:
-    """Read config.yaml and return dict. Returns defaults if file doesn't exist."""
-    if not CONFIG_PATH.exists():
-        return {"agency": {"title": "Agency", "default_group": ""}, "groups": {}}
-    with open(CONFIG_PATH) as f:
-        return yaml.safe_load(f) or {}
-
-
-def save_config(config: dict) -> None:
-    """Atomically write config.yaml (temp file + rename)."""
-    fd, tmp = tempfile.mkstemp(dir=CONFIG_PATH.parent, suffix=".yaml")
-    try:
-        with os.fdopen(fd, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-        os.replace(tmp, CONFIG_PATH)
-    except Exception:
-        os.unlink(tmp)
-        raise
-
-
-def _runtime_groups(config: dict) -> dict:
-    """Build normalized runtime groups without mutating raw config data."""
-    groups = copy.deepcopy(config.get("groups", {}))
-    for key, group in groups.items():
-        default_integration = group.get("default_integration", "claude-code")
-        normalized = normalize_agents(group.get("agents", []), default_integration)
-        group["_agents_normalized"] = normalized
-        group["agents"] = agent_names(normalized)
-        groups[key] = group
-    return groups
 
 
 def _parse_sandbox_roots(text: str):
@@ -109,27 +83,70 @@ def _sandbox_root_text(val) -> str:
     return str(val)
 
 
-def reload_groups() -> None:
-    """Reload the global GROUPS dict from config."""
-    global GROUPS, CONFIG
-    CONFIG = load_config()
-    GROUPS = _runtime_groups(CONFIG)
+def refresh_services() -> AgencyServices:
+    services = build_services(CONFIG_PATH)
+    app.state.services = services
+    return services
 
 
-CONFIG = load_config()
-GROUPS = _runtime_groups(CONFIG)
+def _services() -> AgencyServices:
+    services = getattr(app.state, "services", None)
+    if (
+        services is None
+        or not hasattr(services, "config_path")
+        or services.config_path != CONFIG_PATH
+    ):
+        services = refresh_services()
+    return services
+
+
+def _load_snapshot():
+    return ConfigStore(CONFIG_PATH).load()
+
+
+def _has_config_file() -> bool:
+    return ConfigStore(CONFIG_PATH).inspect().exists
+
+
+def _config_error_message(error: Exception) -> str:
+    return (
+        f"Configuration is not available: {error}. "
+        "Create or migrate a strict schema_version: 2 config and reload."
+    )
+
+
+def _update_tip_settings(patcher) -> None:
+    store = ConfigStore(CONFIG_PATH)
+    for _ in range(2):
+        snapshot = store.load()
+        try:
+            patcher(store, snapshot.revision)
+            return
+        except ConfigConflictError:
+            continue
+    raise ConfigConflictError("config.yaml changed; reload before saving")
 
 
 def get_agency_config() -> dict:
-    """Return agency-level config with defaults."""
-    agency = CONFIG.get("agency", {})
-    return {
-        "title": agency.get("title", "Agency"),
-        "default_group": agency.get("default_group", "") or (list(GROUPS.keys())[0] if GROUPS else ""),
-        "decided_by": agency.get("decided_by", "admin"),
-        "ai_backend": agency.get("ai_backend", "claude-code"),
-        "theme": agency.get("theme", ""),
-    }
+    """Return agency-level config derived from the strict canonical snapshot."""
+    try:
+        return agency_settings(_load_snapshot())
+    except Exception as error:
+        if not _has_config_file():
+            return {
+                "title": "Agency",
+                "default_group": "",
+                "decided_by": "admin",
+                "ai_backend": "claude-code",
+                "theme": "",
+                "dispatch_interval": 15,
+                "show_tips": True,
+                "tips_dismissed": [],
+            }
+        raise HTTPException(
+            status_code=409,
+            detail=_config_error_message(error),
+        )
 
 
 # ── Themes ─────────────────────────────────────────────────────────────────
@@ -290,7 +307,10 @@ _THEME_CSS_CACHE: dict[str, str] = {}
 
 def get_theme_css() -> str:
     """Return theme CSS for the currently selected theme, or empty string."""
-    theme_key = CONFIG.get("agency", {}).get("theme", "")
+    try:
+        theme_key = get_agency_config().get("theme", "")
+    except HTTPException:
+        return ""
     if not theme_key:
         return ""
     if theme_key in _THEME_CSS_CACHE:
@@ -315,28 +335,27 @@ def _workspace_types_json() -> str:
 
 def get_dispatch_status() -> dict:
     """Return runtime scheduler status for the active singleton config."""
-    config = load_config()
-    interval = config.get("agency", {}).get("dispatch", {}).get("interval", 15)
+    interval = int(get_agency_config().get("dispatch_interval", 15))
     return _get_timer_status(CONFIG_PATH.resolve(), interval)
 
 
 def install_dispatch(interval: int | None = None, replace: bool = False) -> str | None:
     """Install or repair the scheduler for the active singleton config."""
-    config = load_config()
-    dispatch_config = config.setdefault("agency", {}).setdefault("dispatch", {})
-    dispatch_config.pop("installed", None)
-    desired_interval = interval if interval is not None else dispatch_config.get("interval", 15)
-    if interval is not None:
-        dispatch_config["interval"] = desired_interval
-        save_config(config)
-        reload_groups()
+    desired_interval = interval if interval is not None else int(get_agency_config().get("dispatch_interval", 15))
     return install_timer(str(CONFIG_PATH.resolve()), desired_interval, replace=replace)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.services = build_services(CONFIG_PATH)
-    reconcile_jobs(GROUPS)
+    services = refresh_services()
+    if services.startup_error is None:
+        snapshot = services.config_store.load()
+        reconcile_jobs(
+            {
+                group_id: {"path": str(group.path)}
+                for group_id, group in snapshot.config.groups.items()
+            }
+        )
     yield
 
 
@@ -346,8 +365,8 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.state.templates = templates
 app.state.theme_css_getter = get_theme_css
 app.state.workspace_types_json_getter = _workspace_types_json
-app.state.reload_groups = reload_groups
 app.state.build_services = build_services
+app.state.refresh_services = refresh_services
 app.state.get_config_path = lambda: CONFIG_PATH
 
 md = markdown.Markdown(extensions=["tables", "fenced_code", "meta", "nl2br"])
@@ -380,23 +399,21 @@ async def manifest():
 
 def get_group(group: str) -> dict:
     """Resolve a group key to its full config dict."""
-    if group not in GROUPS:
+    try:
+        snapshot = _load_snapshot()
+    except Exception as error:
+        raise HTTPException(
+            status_code=409,
+            detail=_config_error_message(error),
+        )
+    if group not in snapshot.config.groups:
         raise HTTPException(404, f"Unknown group: {group}")
-    g = GROUPS[group]
-    return {
-        "key": group,
-        "name": g["name"],
-        "path": Path(g["path"]),
-        "agents": g["agents"],
-        "_agents_normalized": g.get("_agents_normalized", []),
-        "agents_full": g.get("_agents_normalized", []),
-        "shared": Path(g["path"]) / "shared",
-    }
+    return runtime_group(snapshot, group)
 
 
 def get_agent_integration(g: dict, agent_name: str):
     """Resolve the integration explicitly pinned by a configured canonical instance."""
-    for agent_info in g.get("agents_full") or g.get("_agents_normalized", []):
+    for agent_info in g.get("agents_full", []):
         if agent_info["name"] == agent_name:
             return get_integration(agent_info["integration"])
     raise KeyError(agent_name)
@@ -411,8 +428,9 @@ def safe_redirect(url: str, fallback: str = "/") -> str:
 
 def group_context(g: dict, observations: list[dict] | None = None, proposals: list[dict] | None = None) -> dict:
     """Return standard template context for a group. Accepts precomputed lists to avoid double-reads."""
-    agency = get_agency_config()
-    group_cfg = GROUPS.get(g["key"], {})
+    snapshot = _load_snapshot()
+    agency = agency_settings(snapshot)
+    group_cfg = snapshot.config.groups[g["key"]]
     if observations is None:
         observations = list_observations(g)
     if proposals is None:
@@ -426,18 +444,23 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
     return {
         "group": g["key"],
         "group_name": g["name"],
-        "groups": {k: v["name"] for k, v in GROUPS.items()},
+        "groups": {
+            key: value.name for key, value in snapshot.config.groups.items()
+        },
         "agency_title": agency.get("title", "Agency"),
         "admin_active": False,
-        "workspaces": group_cfg.get("workspaces", []),
-        "workspaces_available": bool(group_cfg.get("workspaces")),
+        "workspaces": [
+            workspace.model_dump(mode="json")
+            for workspace in group_cfg.workspaces
+        ],
+        "workspaces_available": bool(group_cfg.workspaces),
         "nav_open_observations": open_observation_count,
         "nav_actionable": needs_action_count,
         "nav_actionable_proposals": actionable_proposal_count,
         "nav_agent_count": len(g["agents"]),
         "nav_running_decisions": running_decisions,
-        "show_tips": CONFIG.get("agency", {}).get("show_tips", True) is not False,
-        "tips_dismissed": CONFIG.get("agency", {}).get("tips_dismissed", []),
+        "show_tips": agency.get("show_tips", True),
+        "tips_dismissed": agency.get("tips_dismissed", []),
         "theme_css": get_theme_css(),
     }
 
@@ -769,11 +792,19 @@ templates.env.filters["render_md"] = render_md
 def execution_agent_options(g: dict) -> list[str]:
     """List configured writable instances whose integration supports execution."""
     options = []
-    agents = g.get("_agents_normalized", [])
     for name in g["agents"]:
         try:
             integration = get_agent_integration(g, name)
-            if integration.supports_execution and agent_can_write(agents, name):
+            instance = next(
+                (
+                    candidate
+                    for candidate in g.get("agents_full", [])
+                    if candidate.get("name") == name
+                ),
+                None,
+            )
+            capabilities = instance.get("capabilities", {}) if instance else {}
+            if integration.supports_execution and capabilities.get("write") is True:
                 options.append(name)
         except KeyError:
             continue
@@ -989,9 +1020,8 @@ def agent_health_status(last_seen: datetime | None) -> str:
 def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
     """Build configured instance info. The retired subagent list is always empty."""
     observations = list_observations(g)
-    group_cfg = GROUPS.get(g["key"], {})
-    dispatch_cfg = group_cfg.get("dispatch", {})
-    run_timeout = dispatch_cfg.get("timeout", 1800)
+    dispatch_cfg = g.get("dispatch", {})
+    run_timeout = g.get("runtime", {}).get("timeout", 1800)
     agents = []
     for instance in g.get("agents_full", []):
         agent_name = instance["name"]
@@ -1076,6 +1106,11 @@ def _overlay_dashboard_job_state(agent: dict, current, group_key: str) -> None:
 
 
 def build_dashboard_fleet(g: dict) -> list[dict]:
+    try:
+        snapshot = _load_snapshot()
+    except Exception:
+        return []
+
     services = getattr(app.state, "services", None)
     if services is None or getattr(services, "startup_error", None) is not None or services.instances is None:
         agents, _ = collect_agents_with_identity(g)
@@ -1084,7 +1119,6 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
             _overlay_dashboard_job_state(agent, current, g["key"])
         return agents
 
-    snapshot = services.config_store.load()
     if g["key"] not in snapshot.config.groups:
         return []
     group = snapshot.config.groups[g["key"]]
@@ -1194,12 +1228,15 @@ def build_agent_timeline(g: dict, agent_name: str, agent_observations: list[dict
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     """Redirect to the default group."""
+    services = _services()
+    if services.startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
+    snapshot = services.config_store.load()
     agency = get_agency_config()
-    default = agency.get("default_group", list(GROUPS.keys())[0] if GROUPS else "")
-    if default and default in GROUPS:
+    default = agency.get("default_group", "")
+    if default and default in snapshot.config.groups:
         return RedirectResponse(f"/{default}/", status_code=303)
-    # Fallback to first group
-    first = list(GROUPS.keys())[0] if GROUPS else ""
+    first = next(iter(snapshot.config.groups), "")
     if first:
         return RedirectResponse(f"/{first}/", status_code=303)
     return RedirectResponse("/setup", status_code=303)
@@ -1208,9 +1245,14 @@ async def root(request: Request):
 @app.get("/setup/complete/{group}", response_class=HTMLResponse)
 async def setup_complete(request: Request, group: str):
     """Post-setup page — tells user to come back later."""
-    agency_title = get_agency_config().get("title", "Agency")
-    g = GROUPS.get(group)
-    group_name = g["name"] if g else group
+    group_name = group
+    agency_title = "Agency"
+    services = _services()
+    if services.startup_error is None:
+        snapshot = services.config_store.load()
+        agency_title = agency_settings(snapshot).get("title", "Agency")
+        if group in snapshot.config.groups:
+            group_name = snapshot.config.groups[group].name
     return templates.TemplateResponse(request, "setup_complete.html", {
         "request": request,
         "agency_title": agency_title,
@@ -1230,15 +1272,8 @@ async def tip_dismiss(request: Request):
     redirect = safe_redirect(form.get("redirect", "/"))
 
     if tip_id:
-        config = load_config()
-        if "agency" not in config:
-            config["agency"] = {}
-        dismissed = config["agency"].get("tips_dismissed", [])
-        if tip_id not in dismissed:
-            dismissed.append(tip_id)
-            config["agency"]["tips_dismissed"] = dismissed
-            save_config(config)
-            reload_groups()
+        _update_tip_settings(lambda store, revision: dismiss_tip(store, revision, tip_id))
+        refresh_services()
 
     return RedirectResponse(redirect, status_code=303)
 
@@ -1249,12 +1284,8 @@ async def tip_hide_all(request: Request):
     form = await request.form()
     redirect = safe_redirect(form.get("redirect", "/"))
 
-    config = load_config()
-    if "agency" not in config:
-        config["agency"] = {}
-    config["agency"]["show_tips"] = False
-    save_config(config)
-    reload_groups()
+    _update_tip_settings(hide_all_tips)
+    refresh_services()
 
     return RedirectResponse(redirect, status_code=303)
 
@@ -1264,30 +1295,32 @@ async def tip_hide_all(request: Request):
 
 def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dict:
     """Build common context for admin pages."""
-    config = load_config()
-    agency = config.get("agency", {"title": "Agency", "default_group": ""})
-    groups = config.get("groups", {})
+    snapshot = _load_snapshot()
+    agency = agency_settings(snapshot)
     orgs = []
-    for key, g in groups.items():
-        org_path = Path(g["path"])
+    for key, group in snapshot.config.groups.items():
+        org_path = Path(group.path)
         shared_exists = (org_path / "shared").exists()
         path_exists = org_path.exists()
-        dispatch_cfg = g.get("dispatch", {})
+        dispatch_cfg = group.dispatch
         orgs.append({
             "key": key,
-            "name": g["name"],
-            "path": g["path"],
-            "agents": g.get("agents", []),
-            "agent_count": len(g.get("agents", [])),
+            "name": group.name,
+            "path": str(group.path),
+            "agents": list(group.agents.keys()),
+            "agent_count": len(group.agents),
             "initialized": shared_exists,
             "path_exists": path_exists,
-            "dispatch_enabled": dispatch_cfg.get("enabled", False),
+            "dispatch_enabled": dispatch_cfg.enabled,
         })
     return {
         "agency_title": agency.get("title", "Agency"),
         "default_group": agency.get("default_group", ""),
         "orgs": orgs,
-        "groups": {k: v["name"] for k, v in groups.items()},
+        "groups": {
+            key: group.name for key, group in snapshot.config.groups.items()
+        },
+        "revision": snapshot.revision,
         "admin_active": True,
         "active": "admin",
         "admin_page": admin_page,
@@ -1300,6 +1333,8 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
 @app.get("/admin/", response_class=HTMLResponse)
 async def admin_settings_page(request: Request):
     """Admin app settings page."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
     return templates.TemplateResponse(request, "admin_settings.html", {
         "request": request,
         **admin_context("settings"),
@@ -1320,6 +1355,8 @@ def _read_integration_config():
 @app.get("/admin/integrations", response_class=HTMLResponse)
 async def admin_integrations_page(request: Request):
     """Admin integrations management page."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
     from agency.integrations import scan_available
 
     config_modules = _read_integration_config()
@@ -1412,6 +1449,8 @@ async def admin_integrations_restart(request: Request):
 @app.get("/admin/dispatch", response_class=HTMLResponse)
 async def admin_dispatch_page(request: Request):
     """Admin dispatch configuration page."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
     return templates.TemplateResponse(request, "admin_dispatch.html", {
         "request": request,
         **admin_context("dispatch"),
@@ -1421,6 +1460,8 @@ async def admin_dispatch_page(request: Request):
 @app.get("/admin/groups", response_class=HTMLResponse)
 async def admin_groups_page(request: Request):
     """Admin agent groups page."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
     return templates.TemplateResponse(request, "admin_groups.html", {
         "request": request,
         **admin_context("groups"),
@@ -1430,26 +1471,19 @@ async def admin_groups_page(request: Request):
 @app.post("/admin/settings", response_class=HTMLResponse)
 async def admin_save_settings(request: Request):
     """Save agency-level settings."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
     form = await request.form()
+    revision = str(form.get("revision", "")).strip()
     title = form.get("title", "Agency").strip()
     default_group = form.get("default_group", "").strip()
-
-    config = load_config()
-    if "agency" not in config:
-        config["agency"] = {}
-    config["agency"]["title"] = title or "Agency"
-    if default_group:
-        config["agency"]["default_group"] = default_group
-
+    snapshot = _load_snapshot()
+    settings = agency_settings(snapshot)
     ai_backend = form.get("ai_backend", "claude-code")
-    config["agency"]["ai_backend"] = ai_backend
-
     theme = form.get("theme", "").strip()
-    config["agency"]["theme"] = theme
     _THEME_CSS_CACHE.clear()  # Invalidate cached CSS
 
-    # Handle dispatch interval update
-    dispatch_interval = None
+    dispatch_interval = settings.get("dispatch_interval", 15)
     dispatch_interval_raw = form.get("dispatch_interval", "")
     if dispatch_interval_raw:
         try:
@@ -1458,21 +1492,50 @@ async def admin_save_settings(request: Request):
             candidate_interval = 0
         if 5 <= candidate_interval <= 120:
             dispatch_interval = candidate_interval
-            dispatch_config = config.setdefault("agency", {}).setdefault("dispatch", {})
-            dispatch_config.pop("installed", None)
-            dispatch_config["interval"] = dispatch_interval
-
-    save_config(config)
-    reload_groups()
+    try:
+        patch_agency_settings(
+            ConfigStore(snapshot.path),
+            revision or snapshot.revision,
+            AgencySettingsPatch(
+                title=title or "Agency",
+                default_group=default_group,
+                ai_backend=ai_backend,
+                theme=theme,
+                dispatch_interval=int(dispatch_interval),
+                agent_library=settings.get("agent_library", ""),
+                compilation_cache=settings.get("compilation_cache", ""),
+                memory_store=settings.get("memory_store", ""),
+            ),
+        )
+    except ConfigConflictError:
+        return templates.TemplateResponse(
+            request,
+            "admin_settings.html",
+            {
+                "request": request,
+                **admin_context("settings"),
+                "integrations": {
+                    name: integration.display_name
+                    for name, integration in REGISTRY.items()
+                    if integration.supports_ai_backend
+                },
+                "ai_backend": ai_backend,
+                "installed_count": len(REGISTRY),
+                "themes": load_themes(),
+                "current_theme": theme,
+            },
+            status_code=409,
+        )
+    refresh_services()
     dispatch_error = ""
-    if dispatch_interval is not None:
-        runtime_status = _get_timer_status(CONFIG_PATH.resolve(), dispatch_interval)
+    if dispatch_interval_raw:
+        runtime_status = _get_timer_status(CONFIG_PATH.resolve(), int(dispatch_interval))
         if runtime_status["error"]:
             dispatch_error = runtime_status["error"]
         elif runtime_status["installed"]:
             dispatch_error = install_timer(
                 str(CONFIG_PATH.resolve()),
-                dispatch_interval,
+                int(dispatch_interval),
                 replace=False,
             ) or ""
     if dispatch_error:
@@ -1490,6 +1553,8 @@ async def admin_save_settings(request: Request):
 @app.post("/admin/dispatch/install", response_class=HTMLResponse)
 async def admin_dispatch_install(request: Request):
     """Install or repair the global platform scheduler."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
     form = await request.form()
     error = install_dispatch(replace=form.get("replace") == "true")
     if error:
@@ -1505,8 +1570,10 @@ async def admin_dispatch_install(request: Request):
 @app.get("/admin/orgs/new", response_class=HTMLResponse)
 async def admin_org_new(request: Request):
     """Create new org form."""
+    if _services().startup_error is not None:
+        return RedirectResponse("/setup", status_code=303)
     agency = get_agency_config()
-    config = load_config()
+    snapshot = _load_snapshot()
     return templates.TemplateResponse(request, "admin_org_edit.html", {
         "request": request,
         "agency_title": agency.get("title", "Agency"),
@@ -1514,7 +1581,9 @@ async def admin_org_new(request: Request):
         "active": "admin",
         "admin_page": "groups",
         "theme_css": get_theme_css(),
-        "groups": {k: v["name"] for k, v in config.get("groups", {}).items()},
+        "groups": {
+            key: group.name for key, group in snapshot.config.groups.items()
+        },
         "mode": "create",
         "org_key": "",
         "org_name": "",
@@ -1526,27 +1595,6 @@ async def admin_org_new(request: Request):
         "agent_infos": [],
         "warning": "",
     })
-
-
-@app.post("/admin/orgs/{org}/delete", response_class=HTMLResponse)
-async def admin_org_delete(request: Request, org: str):
-    """Remove org from config (does not delete files on disk)."""
-    config = load_config()
-    if org not in config.get("groups", {}):
-        raise HTTPException(404, f"Unknown org: {org}")
-
-    del config["groups"][org]
-
-    # If the deleted group was the default, update default
-    agency = config.get("agency", {})
-    if agency.get("default_group") == org:
-        remaining = list(config.get("groups", {}).keys())
-        agency["default_group"] = remaining[0] if remaining else ""
-        config["agency"] = agency
-
-    save_config(config)
-    reload_groups()
-    return RedirectResponse("/admin/groups", status_code=303)
 
 
 @app.post("/{group}/agents/{agent}/run")
@@ -2256,8 +2304,7 @@ async def log_view(request: Request, group: str, path: str):
 async def workspaces_list(request: Request, group: str):
     """List all workspaces for a group."""
     g = get_group(group)
-    group_cfg = GROUPS.get(group, {})
-    workspace_list = group_cfg.get("workspaces", [])
+    workspace_list = g.get("workspaces", [])
     from agency.workspaces import REGISTRY
     enriched = []
     for ws in workspace_list:
@@ -2281,8 +2328,7 @@ async def workspaces_list(request: Request, group: str):
 async def workspace_file_view(request: Request, group: str, idx: int):
     """View/edit a config file within a workspace."""
     g = get_group(group)
-    group_cfg = GROUPS.get(group, {})
-    workspace_list = group_cfg.get("workspaces", [])
+    workspace_list = g.get("workspaces", [])
     if idx < 0 or idx >= len(workspace_list):
         raise HTTPException(404, "Workspace not found")
     ws = workspace_list[idx]
@@ -2324,8 +2370,7 @@ async def workspace_file_view(request: Request, group: str, idx: int):
 async def workspace_file_save(request: Request, group: str, idx: int):
     """Save edits to a workspace config file."""
     g = get_group(group)
-    group_cfg = GROUPS.get(group, {})
-    workspace_list = group_cfg.get("workspaces", [])
+    workspace_list = g.get("workspaces", [])
     if idx < 0 or idx >= len(workspace_list):
         raise HTTPException(404, "Workspace not found")
     form = await request.form()
@@ -2416,11 +2461,10 @@ def _run_reload_server(host: str, port: int) -> None:
 def run_server(host: str, port: int, reload: bool = False) -> None:
     """Initialize Agency and run the web server."""
     if not CONFIG_PATH.exists():
-        save_config({"agency": {"title": "Agency", "default_group": ""}, "groups": {}})
-        print(f"First run — created config.yaml in {CONFIG_PATH.parent}")
+        print(f"First run — strict schema_version: 2 config not found in {CONFIG_PATH.parent}")
         print(f"Visit http://localhost:{port}/admin/ to set up your first agent group.")
 
-    reload_groups()
+    refresh_services()
     if reload:
         _run_reload_server(host, port)
         return

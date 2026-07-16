@@ -81,12 +81,33 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     return TestClient(app_mod.app), config_path, group_root
 
 
 def _revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
+
+
+def _all_route_paths() -> list[str]:
+    paths: list[str] = []
+    for route in app_mod.app.routes:
+        path = getattr(route, "path", "")
+        if isinstance(route, BaseRoute) and path:
+            paths.append(path)
+        effective_route_contexts = getattr(route, "effective_route_contexts", None)
+        if not callable(effective_route_contexts):
+            continue
+        for route_context in effective_route_contexts():
+            starlette_route = getattr(route_context, "starlette_route", None)
+            effective_path = getattr(starlette_route, "path", "") or getattr(
+                getattr(route_context, "original_route", None),
+                "path",
+                "",
+            )
+            if effective_path:
+                paths.append(effective_path)
+    return paths
 
 
 def _roster_job_spec(tmp_path: Path, group_root: Path, *, job_id: str, created_at: str) -> JobSpec:
@@ -357,7 +378,7 @@ def test_roster_returns_actionable_warning_when_agent_library_is_unavailable(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
-    app_mod.reload_groups()
+    app_mod.refresh_services()
 
     before = config_path.read_text(encoding="utf-8")
     response = client.get("/newsletter/agents")
@@ -405,11 +426,7 @@ def test_stale_move_apply_returns_conflict(monkeypatch, tmp_path, canonical_raw_
 
 def test_removed_mutation_routes_are_absent_from_route_table(monkeypatch, tmp_path, canonical_raw_config):
     _seed_app(monkeypatch, tmp_path, canonical_raw_config)
-    route_paths = {
-        getattr(route, "path", "")
-        for route in app_mod.app.routes
-        if isinstance(route, BaseRoute)
-    }
+    route_paths = set(_all_route_paths())
 
     for path in {
         "/admin/orgs/{group}/agents/create",
@@ -420,7 +437,6 @@ def test_removed_mutation_routes_are_absent_from_route_table(monkeypatch, tmp_pa
         "/admin/orgs/{org}/agents/{agent}/save",
         "/admin/orgs/{org}/agents/{agent}/rename",
         "/admin/orgs/{org}/agents/{agent}/delete",
-        "/{group}/agents/{agent}",
         "/{group}/agents/{agent}/identity",
         "/{group}/agents/{agent}/definition",
         "/{group}/agents/{agent}/upload-headshot",
@@ -433,11 +449,7 @@ def test_removed_mutation_routes_are_absent_from_route_table(monkeypatch, tmp_pa
 def test_task14_removed_mutation_routes_are_unregistered_and_nonmutating(monkeypatch, tmp_path, canonical_raw_config):
     client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
     before = config_path.read_bytes()
-    route_paths = {
-        getattr(route, "path", "")
-        for route in app_mod.app.routes
-        if isinstance(route, BaseRoute)
-    }
+    route_paths = set(_all_route_paths())
 
     for path in {
         "/admin/orgs/{org}/initialize",
@@ -458,11 +470,7 @@ def test_task14_removed_mutation_routes_are_unregistered_and_nonmutating(monkeyp
 
 def test_task14_route_ownership_is_unique_and_canonical(monkeypatch, tmp_path, canonical_raw_config):
     client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
-    route_paths = [
-        getattr(route, "path", "")
-        for route in app_mod.app.routes
-        if isinstance(route, BaseRoute)
-    ]
+    route_paths = _all_route_paths()
 
     canonical_paths = {
         "/admin/",

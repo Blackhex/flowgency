@@ -13,12 +13,27 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
     (group_path / "product").mkdir()
     config_path = tmp_path / "config.yaml"
     config = {
-        "agency": {"title": "Agency", "default_group": "test"},
+        "schema_version": 2,
+        "agency": {
+            "title": "Agency",
+            "default_group": "test",
+            "ai_backend": "claude-code",
+            "agent_library": str((tmp_path / "agent-library").resolve()),
+            "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
+            "memory_store": str((tmp_path / "memory").resolve()),
+        },
         "groups": {
             "test": {
                 "name": "Test",
                 "path": str(group_path),
-                "agents": ["product"],
+                "default_integration": "claude-code",
+                "agents": [
+                    {
+                        "name": "product",
+                        "blueprint": "product-blueprint",
+                        "integration": "claude-code",
+                    }
+                ],
             },
         },
     }
@@ -45,31 +60,23 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
         "_get_timer_status",
         lambda path, interval: conflict_status
     )
-    app_mod.reload_groups()
+    app_mod.refresh_services()
 
     client = TestClient(app_mod.app)
     response = client.get("/admin/dispatch")
 
     assert response.status_code == 200
 
-    # Debug: print patterns found
     import re
     html = response.text
     onsubmit_patterns = re.findall(r'onsubmit="[^"]*"', html, re.IGNORECASE)
-    print(f"\nFound onsubmit patterns: {onsubmit_patterns}")
-    print(f"\nO'Brien in text: {'O' in html or 'Brien' in html}")
 
-    # Must not interpolate the path into onsubmit attribute
     for pattern in onsubmit_patterns:
-        print(f"Checking pattern: {pattern}")
         assert "O'Brien" not in pattern, f"Path must not be in onsubmit handler: {pattern}"
         assert "Brien" not in pattern, f"Path must not be in onsubmit handler: {pattern}"
 
-    # Must still have the replace hidden input
     assert 'name="replace" value="true"' in response.text
 
-    # Confirmation message should be static (not contain the dynamic path)
     if onsubmit_patterns:
-        # Should use a generic message like "Replace the existing dispatcher"
         for pattern in onsubmit_patterns:
             assert "config_path" not in pattern.lower(), "onsubmit must not reference config_path variable"

@@ -20,6 +20,7 @@ class AgencySettingsPatch:
     title: str
     default_group: str
     ai_backend: str
+    theme: str
     dispatch_interval: int
     agent_library: str
     compilation_cache: str
@@ -141,6 +142,7 @@ def patch_agency_settings(
         agency["title"] = patch.title
         agency["default_group"] = patch.default_group
         agency["ai_backend"] = patch.ai_backend
+        agency["theme"] = patch.theme
         agency["agent_library"] = patch.agent_library
         agency["compilation_cache"] = patch.compilation_cache
         agency["memory_store"] = patch.memory_store
@@ -407,5 +409,51 @@ def patch_memory_channels(
     def apply(raw: dict[str, Any]) -> None:
         memory = raw.setdefault("memory", {})
         memory["channels"] = deepcopy(channels)
+
+    return store.patch(expected_revision, apply)
+
+
+def dismiss_tip(
+    store: ConfigStore,
+    expected_revision: str,
+    tip_id: str,
+) -> ConfigSnapshot:
+    def apply(raw: dict[str, Any]) -> None:
+        agency = raw.setdefault("agency", {})
+        dismissed = agency.get("tips_dismissed")
+        if not isinstance(dismissed, list):
+            dismissed = []
+        if tip_id not in dismissed:
+            dismissed.append(tip_id)
+        agency["tips_dismissed"] = dismissed
+
+    return store.patch(expected_revision, apply)
+
+
+def hide_all_tips(
+    store: ConfigStore,
+    expected_revision: str,
+) -> ConfigSnapshot:
+    def apply(raw: dict[str, Any]) -> None:
+        agency = raw.setdefault("agency", {})
+        agency["show_tips"] = False
+
+    return store.patch(expected_revision, apply)
+
+
+def delete_group(
+    store: ConfigStore,
+    expected_revision: str,
+    group_id: str,
+) -> ConfigSnapshot:
+    def apply(raw: dict[str, Any]) -> None:
+        groups = _groups(raw)
+        if group_id not in groups:
+            raise KeyError(group_id)
+        del groups[group_id]
+
+        agency = raw.setdefault("agency", {})
+        if agency.get("default_group") == group_id:
+            agency["default_group"] = next(iter(groups), "")
 
     return store.patch(expected_revision, apply)

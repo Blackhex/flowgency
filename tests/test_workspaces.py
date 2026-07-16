@@ -1,6 +1,7 @@
 """Tests for workspace plugin system."""
 
 import pytest
+import yaml
 from pathlib import Path
 from starlette.testclient import TestClient
 
@@ -230,29 +231,48 @@ class TestWorkspaceRoutes:
 
     def _make_app(self, tmp_path):
         """Create a test app with a group that has workspaces configured."""
-        from agency.app import app, CONFIG, GROUPS
+        from agency.app import app
+        import agency.app as app_mod
 
-        group_cfg = {
-            "name": "Test Group",
-            "path": str(tmp_path),
-            "agents": [],
-            "_agents_normalized": [],
-            "workspaces": [
-                {
-                    "name": "Terminal Grid",
-                    "type": "tmux",
-                    "config": {"script_path": str(tmp_path / "tmux.sh")},
-                },
-            ],
-        }
         (tmp_path / "tmux.sh").write_text("#!/bin/bash\ntmux new-session")
         (tmp_path / "shared" / "observations").mkdir(parents=True, exist_ok=True)
         (tmp_path / "shared" / "proposals").mkdir(parents=True, exist_ok=True)
 
-        CONFIG.clear()
-        CONFIG.update({"agency": {"title": "Test", "default_group": "test"}, "groups": {"test": group_cfg}})
-        GROUPS.clear()
-        GROUPS["test"] = group_cfg
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "schema_version": 2,
+                    "agency": {
+                        "title": "Test",
+                        "default_group": "test",
+                        "ai_backend": "claude-code",
+                        "agent_library": str((tmp_path / "agent-library").resolve()),
+                        "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
+                        "memory_store": str((tmp_path / "memory").resolve()),
+                    },
+                    "groups": {
+                        "test": {
+                            "name": "Test Group",
+                            "path": str(tmp_path.resolve()),
+                            "default_integration": "claude-code",
+                            "agents": [],
+                            "workspaces": [
+                                {
+                                    "name": "Terminal Grid",
+                                    "type": "tmux",
+                                    "config": {"script_path": str(tmp_path / "tmux.sh")},
+                                }
+                            ],
+                        }
+                    },
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        app_mod.CONFIG_PATH = config_path
+        app_mod.refresh_services()
         return TestClient(app)
 
     def test_workspaces_list(self, tmp_path):

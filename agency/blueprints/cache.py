@@ -6,6 +6,7 @@ import os
 import shutil
 import stat
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -221,13 +222,24 @@ def validate_artifact(
 
 def _publish_directory(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.replace(source, destination)
-    except PermissionError:
-        if destination.exists():
-            raise
-        shutil.copytree(source, destination)
-        shutil.rmtree(source, ignore_errors=True)
+    deadline = time.monotonic() + 0.25
+    delay = 0.01
+    while True:
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError as exc:
+            if destination.exists():
+                raise
+            if os.name != "nt" or getattr(exc, "winerror", None) not in {
+                5,
+                32,
+            }:
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.05)
 
 
 def _quarantine_artifact(root: Path, ref: CacheRef, entry_path: Path) -> None:

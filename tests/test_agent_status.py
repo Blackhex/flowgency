@@ -325,26 +325,18 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
     g = {
         "key": "grp", "name": "Grp", "path": group_path,
         "agents": ["product"],
-        "agents_full": [{"name": "product", "integration": "claude-code"}],
-        "_agents_normalized": [{
+        "agents_full": [{
             "name": "product",
             "integration": "claude-code",
             "routines": [{"id": "r", "skill": "r", "schedule": {"every": "6h"}}],
         }],
         "shared": shared,
+        "dispatch": {"enabled": True, "routines": {"product": [{"id": "r", "every": "6h"}]}},
     }
 
     _write_job(group_path, "running")
 
-    groups_cfg = {"grp": {
-        "dispatch": {"enabled": True, "routines": {
-            "product": [{"id": "r", "every": "6h"}]
-        }},
-        "_agents_normalized": g["_agents_normalized"],
-    }}
-
-    with patch.object(app_module, "GROUPS", groups_cfg):
-        agents, _subagents = app_module.collect_agents_with_identity(g)
+    agents, _subagents = app_module.collect_agents_with_identity(g)
 
     product = next(agent for agent in agents if agent["name"] == "product")
     assert product["running"] is True

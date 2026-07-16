@@ -5,6 +5,8 @@ it. Verification records whether an executed outcome satisfied its originating
 proposal and, when it did not, floats a linked follow-up observation so the
 execute -> verify loop stays connected.
 """
+from copy import deepcopy
+
 import yaml
 from fastapi.testclient import TestClient
 
@@ -31,15 +33,42 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
         encoding="utf-8",
     )
 
-    agents = [{"name": "engineer", "integration": "script", "integration_config": {"command": "echo ok"}}]
-    monkeypatch.setattr(app_mod, "CONFIG", {
-        "agency": {"decided_by": "captain"},
-        "groups": {"test": {"path": str(group), "agents": agents}},
-    })
-    monkeypatch.setattr(app_mod, "GROUPS", {"test": {
-        "key": "test", "name": "Test", "path": group,
-        "agents": ["engineer"], "_agents_normalized": agents,
-    }})
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 2,
+                "agency": {
+                    "title": "Agency",
+                    "default_group": "test",
+                    "ai_backend": "claude-code",
+                    "decided_by": "captain",
+                    "agent_library": str((tmp_path / "agent-library").resolve()),
+                    "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
+                    "memory_store": str((tmp_path / "memory").resolve()),
+                },
+                "groups": {
+                    "test": {
+                        "name": "Test",
+                        "path": str(group.resolve()),
+                        "default_integration": "script",
+                        "agents": [
+                            {
+                                "name": "engineer",
+                                "blueprint": "engineer-blueprint",
+                                "integration": "script",
+                                "integration_config": {"command": "echo ok"},
+                            }
+                        ],
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.refresh_services()
     return TestClient(app), decision_path, shared
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -8,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from agency.configuration import (
     ABSENT_REVISION,
     ConfigConflictError,
+    delete_group,
     GroupCreateStatePatch,
     GroupSettingsStatePatch,
     ValidationFailed,
@@ -304,10 +306,7 @@ async def setup_process(
             error="Configuration changed. Reload before saving setup.",
             status_code=409,
         )
-    request.app.state.services = request.app.state.build_services(
-        services.config_path
-    )
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/{values['group_key']}/agents", status_code=303)
 
 
@@ -392,7 +391,7 @@ async def admin_org_save(
             status_code=409,
         )
 
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(f"/admin/orgs/{org}/edit", status_code=303)
 
 
@@ -490,5 +489,52 @@ async def admin_org_create(
             workspaces=tuple(workspaces),
         ),
     )
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
+    return RedirectResponse("/admin/groups", status_code=303)
+
+
+@router.post("/admin/orgs/{org}/delete", response_class=HTMLResponse)
+async def admin_org_delete(
+    request: Request,
+    org: str,
+    services: AgencyServices = Depends(get_services),
+):
+    if services.startup_error is not None:
+        return _setup_response(request, services)
+    snapshot = services.config_store.load()
+    revision = str((await request.form()).get("revision", "")).strip()
+    try:
+        delete_group(
+            services.config_store,
+            revision or snapshot.revision,
+            org,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConfigConflictError:
+        current = services.config_store.load()
+        return _templates(request).TemplateResponse(
+            request,
+            "admin_groups.html",
+            {
+                **_base_admin_context(request, current),
+                "orgs": [
+                    {
+                        "key": key,
+                        "name": group.name,
+                        "path": str(group.path),
+                        "agents": list(group.agents.keys()),
+                        "agent_count": len(group.agents),
+                        "initialized": (Path(group.path) / "shared").exists(),
+                        "path_exists": Path(group.path).exists(),
+                        "dispatch_enabled": group.dispatch.enabled,
+                    }
+                    for key, group in current.config.groups.items()
+                ],
+                "revision": current.revision,
+                "dispatch_error": "Configuration changed. Reload before deleting.",
+            },
+            status_code=409,
+        )
+    request.app.state.refresh_services()
     return RedirectResponse("/admin/groups", status_code=303)

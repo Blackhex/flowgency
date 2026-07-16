@@ -304,7 +304,7 @@ async def admin_memory_channel_create(
             warning=str(exc),
             status_code=409,
         )
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse(
         f"/admin/memory-channels/{channel_key}",
         status_code=303,
@@ -423,7 +423,7 @@ async def admin_memory_channel_save(
             warning=str(exc),
             status_code=409,
         )
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     destination = new_key if new_key != channel_key else channel_key
     return RedirectResponse(
         f"/admin/memory-channels/{destination}",
@@ -483,7 +483,7 @@ async def admin_memory_channel_delete(
             warning=str(exc),
             status_code=409,
         )
-    request.app.state.reload_groups()
+    request.app.state.refresh_services()
     return RedirectResponse("/admin/memory-channels", status_code=303)
 
 

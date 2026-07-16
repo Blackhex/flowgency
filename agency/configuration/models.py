@@ -18,7 +18,7 @@ _IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
 
 class AgencyDispatch(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="allow", frozen=True)
     interval: int = 15
 
 

@@ -69,7 +69,7 @@ def _setup_group(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     app_mod.CONFIG_PATH = config_path
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     return group_path
 
 
@@ -86,7 +86,7 @@ def _configure_schedule(routine_id: str) -> None:
         yaml.safe_dump(config, sort_keys=False),
         encoding="utf-8",
     )
-    app_mod.reload_groups()
+    app_mod.refresh_services()
 
 
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
@@ -202,7 +202,7 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
         write_job(job_path(group_path, spec.job_id), record)
 
     assert not (group_path / "shared" / "logs" / ".running-product").exists()
-    assert is_agent_running(app_mod.GROUPS["test"], "product") is True
+    assert is_agent_running(app_mod.get_group("test"), "product") is True
 
 
 def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):

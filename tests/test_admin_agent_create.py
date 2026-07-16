@@ -42,7 +42,7 @@ def _seed_client(monkeypatch, tmp_path, canonical_raw_config):
     raw["agency"]["default_group"] = "grp"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     return TestClient(app_mod.app), config_path, group_root
 
 

@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import json
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 import pytest
 
 from agency.blueprints import BlueprintInspection
+from agency.blueprints import cache as cache_module
 from agency.blueprints.projectors import StaticRuntimeProjector
 from agency.fs.snapshot import capture_tree
 from agency.integrations.models import ProjectorCapabilities
@@ -66,6 +68,134 @@ def cache(cache_root: Path):
     from agency.blueprints.cache import CompilationCache
 
     return CompilationCache(cache_root, {"copilot": _projector()})
+
+
+def _windows_permission_error(winerror: int) -> PermissionError:
+    error = PermissionError(13, "Access is denied")
+    error.winerror = winerror
+    return error
+
+
+def test_publish_directory_retries_transient_windows_sharing_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    (source / "complete.txt").write_text("complete", encoding="utf-8")
+    real_replace = os.replace
+    attempts = 0
+
+    def transient_then_success(current_source, current_destination):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise _windows_permission_error(32)
+        real_replace(current_source, current_destination)
+
+    monkeypatch.setattr(cache_module.os, "replace", transient_then_success)
+    monkeypatch.setattr(
+        cache_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda _: None),
+        raising=False,
+    )
+
+    cache_module._publish_directory(source, destination)
+
+    assert attempts == 3
+    assert destination.joinpath("complete.txt").read_text(encoding="utf-8") == "complete"
+    assert not source.exists()
+
+
+def test_publish_directory_exhaustion_leaves_destination_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    attempts = 0
+
+    def always_busy(*_args):
+        nonlocal attempts
+        attempts += 1
+        raise _windows_permission_error(5)
+
+    def copytree_must_not_run(*_args, **_kwargs):
+        raise AssertionError("copytree must never publish a live cache entry")
+
+    monotonic_values = iter((0.0, 0.0, 1.0))
+    monkeypatch.setattr(cache_module.os, "replace", always_busy)
+    monkeypatch.setattr(cache_module.shutil, "copytree", copytree_must_not_run)
+    monkeypatch.setattr(
+        cache_module,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: next(monotonic_values),
+            sleep=lambda _: None,
+        ),
+        raising=False,
+    )
+
+    with pytest.raises(PermissionError):
+        cache_module._publish_directory(source, destination)
+
+    assert attempts == 2
+    assert source.exists()
+    assert not destination.exists()
+
+
+def test_publish_directory_does_not_retry_non_transient_permission_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    attempts = 0
+
+    def denied(*_args):
+        nonlocal attempts
+        attempts += 1
+        raise _windows_permission_error(13)
+
+    monkeypatch.setattr(cache_module.os, "replace", denied)
+
+    with pytest.raises(PermissionError):
+        cache_module._publish_directory(source, destination)
+
+    assert attempts == 1
+    assert source.exists()
+    assert not destination.exists()
+
+
+def test_publish_directory_does_not_overwrite_destination_created_during_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    calls = 0
+
+    def destination_race(*_args):
+        nonlocal calls
+        calls += 1
+        destination.mkdir()
+        destination.joinpath("winner.txt").write_text("winner", encoding="utf-8")
+        raise _windows_permission_error(32)
+
+    monkeypatch.setattr(cache_module.os, "replace", destination_race)
+
+    with pytest.raises(PermissionError):
+        cache_module._publish_directory(source, destination)
+
+    assert calls == 1
+    assert source.exists()
+    assert destination.joinpath("winner.txt").read_text(encoding="utf-8") == "winner"
+
 
 
 def test_identical_blueprint_and_projector_reuse_one_artifact(

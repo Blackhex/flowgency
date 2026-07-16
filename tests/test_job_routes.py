@@ -81,7 +81,7 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
     return TestClient(app_mod.app), config_path, group_root
 
@@ -208,7 +208,7 @@ def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, canonic
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["groups"]["newsletter"]["agents"] = []
     _write_yaml(config_path, raw)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
 
     list_response = client.get("/newsletter/jobs")
@@ -239,7 +239,7 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
         "agents": [advisor],
     }
     _write_yaml(config_path, raw)
-    app_mod.reload_groups()
+    app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
 
     response = client.get("/newsletter/jobs/job-moved")

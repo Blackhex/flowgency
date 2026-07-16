@@ -17,7 +17,6 @@ def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    monkeypatch.setattr(app_mod, "reload_groups", lambda: None)
     return config_path
 
 
@@ -187,41 +186,39 @@ def test_reload_server_propagates_supervisor_errors(tmp_path, monkeypatch):
         app_mod._run_reload_server("127.0.0.1", 8601)
 
 
-def test_run_server_creates_config_before_starting_uvicorn(
+def test_run_server_reports_first_run_before_starting_uvicorn(
     tmp_path, monkeypatch, capsys
 ):
     config_path = tmp_path / "config.yaml"
     events = []
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
 
-    def fake_reload_groups():
-        assert config_path.exists()
-        events.append("reload_groups")
+    def fake_refresh_services():
+        assert not config_path.exists()
+        events.append("refresh_services")
 
     def fake_uvicorn_run(application, **options):
-        assert config_path.exists()
         assert application is app_mod.app
         assert options == {"host": "127.0.0.1", "port": 8602}
         events.append("uvicorn.run")
 
-    monkeypatch.setattr(app_mod, "reload_groups", fake_reload_groups)
+    monkeypatch.setattr(app_mod, "refresh_services", fake_refresh_services)
     monkeypatch.setattr(app_mod.uvicorn, "run", fake_uvicorn_run)
 
     app_mod.run_server(host="127.0.0.1", port=8602)
 
-    assert events == ["reload_groups", "uvicorn.run"]
-    assert yaml.safe_load(config_path.read_text(encoding="utf-8")) == {
-        "agency": {"title": "Agency", "default_group": ""},
-        "groups": {},
-    }
+    assert events == ["refresh_services", "uvicorn.run"]
+    assert not config_path.exists()
     output = capsys.readouterr().out
-    assert f"First run — created config.yaml in {tmp_path}" in output
+    assert (
+        f"First run — strict schema_version: 2 config not found in {tmp_path}"
+        in output
+    )
     assert "Visit http://localhost:8602/admin/" in output
 
 
 def test_setup_get_returns_wizard_when_no_groups_exist(tmp_path, monkeypatch):
     _configure_existing_config(tmp_path, monkeypatch)
-    monkeypatch.setattr(app_mod, "GROUPS", {})
     client = TestClient(app_mod.app)
 
     response = client.get("/setup")
@@ -233,7 +230,6 @@ def test_setup_get_returns_wizard_when_no_groups_exist(tmp_path, monkeypatch):
 
 def test_setup_post_invalid_and_empty_agent_paths_render_errors(tmp_path, monkeypatch):
     _configure_existing_config(tmp_path, monkeypatch)
-    monkeypatch.setattr(app_mod, "GROUPS", {})
     client = TestClient(app_mod.app)
 
     invalid_response = client.post("/setup", data={"path": str(tmp_path / "missing")})
@@ -260,7 +256,6 @@ def test_setup_post_invalid_and_empty_agent_paths_render_errors(tmp_path, monkey
 
 def test_setup_post_valid_path_creates_group_and_redirects(tmp_path, monkeypatch):
     config_path = _configure_existing_config(tmp_path, monkeypatch)
-    monkeypatch.setattr(app_mod, "GROUPS", {})
     group_path = tmp_path / "newsletter-agents"
     client = TestClient(app_mod.app)
     expected_revision = app_mod.build_services(config_path).config_store.inspect().revision
