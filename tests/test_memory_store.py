@@ -17,12 +17,17 @@ from agency.memory import (
 )
 
 
+PROCESS_ACQUIRE_TIMEOUT = 15
+PROCESS_RELEASE_TIMEOUT = 30
+PROCESS_JOIN_TIMEOUT = 15
+
+
 def _hold_memory_lock(lock_path: str, acquired: Event, release: Event) -> None:
     from agency.fs.locks import exclusive_lock
 
     with exclusive_lock(Path(lock_path), wait=True):
         acquired.set()
-        release.wait(5)
+        release.wait(PROCESS_RELEASE_TIMEOUT)
 
 
 def _make_hostile_infra_entry(path: Path, target: Path, monkeypatch) -> str:
@@ -310,7 +315,10 @@ def test_try_save_reports_nonblocking_busy_ui_save(
         ),
     )
     process.start()
-    assert acquired.wait(5)
+    if not acquired.wait(PROCESS_ACQUIRE_TIMEOUT):
+        process.terminate()
+        process.join(PROCESS_JOIN_TIMEOUT)
+        pytest.fail("lock holder did not acquire within timeout")
 
     try:
         with pytest.raises(ResourceBusyError):
@@ -321,7 +329,11 @@ def test_try_save_reports_nonblocking_busy_ui_save(
             )
     finally:
         release.set()
-        process.join(5)
+        process.join(PROCESS_JOIN_TIMEOUT)
+        if process.is_alive():
+            process.terminate()
+            process.join(PROCESS_JOIN_TIMEOUT)
+        assert not process.is_alive()
         assert process.exitcode == 0
 
 

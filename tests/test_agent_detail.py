@@ -11,6 +11,7 @@ from agency import app as app_mod
 from agency.configuration import ConfigStore
 from agency.configuration.models import MemorySelector
 from agency.memory import resolve_memory_selector
+from tests._lock_helpers import hold_exclusive_lock
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -142,16 +143,6 @@ def _seed_activity_app(monkeypatch, tmp_path, canonical_raw_config):
 
 def _revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
-
-
-def _hold_lock(lock_path: str, acquired: Event, release: Event) -> None:
-    from agency.fs.locks import exclusive_lock
-
-    with exclusive_lock(Path(lock_path), wait=True):
-        acquired.set()
-        release.wait(5)
-
-
 def test_agent_detail_base_redirects_to_profile(monkeypatch, tmp_path, canonical_raw_config):
     client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
 
@@ -588,11 +579,14 @@ def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, cano
     before_config_bytes = config_path.read_bytes()
     lock_path = memory_store._lock_path(resolved)
     acquired, release = Event(), Event()
-    process = Process(target=_hold_lock, args=(str(lock_path), acquired, release))
+    process = Process(
+        target=hold_exclusive_lock,
+        args=(str(lock_path), acquired, release, 30),
+    )
     process.start()
-    assert acquired.wait(5)
 
     try:
+        assert acquired.wait(15)
         response = client.post(
             "/newsletter/agents/advisor/memory",
             data={
@@ -606,7 +600,12 @@ def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, cano
         )
     finally:
         release.set()
-        process.join(5)
+        process.join(15)
+        if process.is_alive():
+            process.terminate()
+            process.join(15)
+        assert not process.is_alive()
+        assert process.exitcode == 0
 
     assert response.status_code == 423
     assert "Memory is busy" in response.text

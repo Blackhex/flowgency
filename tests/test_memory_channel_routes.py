@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from agency import app as app_mod
 from agency.configuration import ConfigStore
 from agency.configuration.models import MemorySelector
-from agency.fs.locks import exclusive_lock
 from agency.memory import resolve_memory_selector
+from tests._lock_helpers import hold_exclusive_lock
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -124,14 +124,6 @@ def _seed_memory_app(monkeypatch, tmp_path, canonical_raw_config):
 
 def _config_revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
-
-
-def _hold_lock(lock_path: str, acquired: Event, release: Event) -> None:
-    with exclusive_lock(Path(lock_path), wait=True):
-        acquired.set()
-        release.wait(5)
-
-
 def test_channel_is_global_across_groups(monkeypatch, tmp_path, canonical_raw_config):
     client, _, _ = _seed_memory_app(monkeypatch, tmp_path, canonical_raw_config)
 
@@ -203,16 +195,17 @@ def test_channel_markdown_save_returns_423_when_locked(
     acquired = Event()
     release = Event()
     process = Process(
-        target=_hold_lock,
+        target=hold_exclusive_lock,
         args=(
             str(services.memory_store._lock_path(resolved)),
             acquired,
             release,
+            30,
         ),
     )
     process.start()
-    acquired.wait(5)
     try:
+        assert acquired.wait(15)
         response = client.post(
             "/admin/memory-channels/brand-strategy/content",
             data={
@@ -223,7 +216,12 @@ def test_channel_markdown_save_returns_423_when_locked(
         )
     finally:
         release.set()
-        process.join(5)
+        process.join(15)
+        if process.is_alive():
+            process.terminate()
+            process.join(15)
+        assert not process.is_alive()
+        assert process.exitcode == 0
 
     assert response.status_code == 423
 
