@@ -12,39 +12,45 @@ def test_copilot_skill_discovery_resolves_to_canonical_source():
     assert DISCOVERY_SKILL_DIR.resolve() == CANONICAL_SKILL_DIR.resolve()
 
 
-def test_copilot_profile_requires_detection_marker():
+def test_setup_creates_standard_global_agent_library_blueprints():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    verification = skill.split(
-        "After generation, verify every Copilot agent is detectable.", maxsplit=1
-    )[1].split("### 4.3 Dispatch Prompts", maxsplit=1)[0]
-
-    assert 'New-Item -ItemType Directory -Force "agents/$_/.copilot"' in skill
-    assert "`agents/{agent}/.copilot/`" in skill
-    assert 'detect_integration(agent_dir).name == "copilot"' in verification
-    assert "`agents/{agent}/.copilot/`" in verification
-    assert "`agents/{agent}/AGENTS.md`" in verification
+    assert "agency.agent_library" in skill
+    assert "{agent_library}/{blueprint}/AGENTS.md" in skill
+    assert "{agent_library}/{blueprint}/.agents/skills/{skill}/SKILL.md" in skill
+    assert "standard Agent Skills" in skill
+    for forbidden in ("agents/{agent}/CLAUDE.md", "agents/{agent}/memory.md", "agents/{agent}/.copilot/"):
+        assert forbidden not in skill
 
 
-def test_copilot_profile_verifies_real_executable_before_completion():
+def test_setup_registers_explicit_canonical_instances_routines_and_memory():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    verification = skill.split(
-        "After generation, verify every Copilot agent is detectable.", maxsplit=1
-    )[1].split("### 4.3 Dispatch Prompts", maxsplit=1)[0]
+    assert "schema_version: 2" in skill
+    assert "blueprint:" in skill
+    assert "integration:" in skill
+    assert "routines:" in skill
+    assert "skill:" in skill
+    assert "default_memory:" in skill
+    assert "scope: agent" in skill
+    assert "scope: routine" in skill
+    assert "scope: channel" in skill
+    assert "additional_roots" in skill
+    assert "complete override" in skill
+    assert "dispatch.agents" not in skill
 
-    assert "Get-Command copilot -All" in verification
-    assert "copilot.exe" in verification
-    assert "--version" in verification
 
-
-def test_registration_revalidates_disk_after_dashboard_reload():
+def test_setup_hands_superseded_config_to_migration_skill():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
-        "### 4.8 Singleton Scheduler Setup", maxsplit=1
-    )[0]
+    assert "agency-migration" in skill
+    assert "Do not migrate superseded configuration in this skill" in skill
+    assert "tools/migrate_agent_model.py" not in skill
 
-    assert "parse the config from disk again" in registration
-    assert "preserve concurrent changes" in registration
-    assert "stale pre-reload object" in registration
+
+def test_setup_maintains_one_authoritative_strict_canonical_config():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    assert "one authoritative" in skill
+    assert "schema_version == 2" in skill
+    assert "revision" in skill
+    assert "atomically" in skill
 
 
 def test_setup_uses_official_singleton_scheduler_cli():
@@ -69,16 +75,12 @@ def test_setup_does_not_generate_project_scheduler_artifacts():
         assert text not in combined
 
 
-def test_setup_writes_schedule_rules_directly_from_assignments():
+def test_setup_writes_routines_directly_from_assignments():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
-        "### 4.8 Singleton Scheduler Setup",
-        maxsplit=1,
-    )[0]
-    assert 'at: "07:00"' in registration
-    assert 'at: "21:00"' in registration
-    assert "Phase 2 dispatch assignment" in registration
-    assert "generated platform dispatch script" not in registration
+    assert 'at: "07:00"' in skill
+    assert 'at: "21:00"' in skill
+    assert "Phase 2 routine assignment" in skill
+    assert "generated platform dispatch script" not in skill
 
 
 def test_windows_launcher_still_resolves_real_copilot_executable():
@@ -90,60 +92,9 @@ def test_windows_launcher_still_resolves_real_copilot_executable():
     assert "Invoke-Expression" not in launcher
 
 
-def test_registration_skipped_when_user_declines_config_selection():
-    """When multiple configs exist and user declines/skips/invalid, skip registration and scheduler setup."""
-    skill = SKILL_PATH.read_text(encoding="utf-8")
-    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
-        "### 4.8 Singleton Scheduler Setup", maxsplit=1
-    )[0]
-    # Normalize whitespace for assertions that may span line breaks
-    normalized = " ".join(registration.split())
-
-    # Must ask when multiple valid configs exist
-    assert "If multiple remaining candidates are valid" in normalized
-    assert "ask which" in normalized
-    # Must skip registration when user declines/invalid
-    assert "If the user declines, skips, or supplies an invalid selection" in normalized
-    assert "skip registration and scheduler setup" in normalized
-    # Never pick implicitly
-    assert "never pick one implicitly" in normalized
-
-
-def test_scheduler_setup_only_after_registration_verification():
-    """Phase 4.8 scheduler setup offered only after registration and on-disk verification succeed."""
-    skill = SKILL_PATH.read_text(encoding="utf-8")
-    scheduler = skill.split("### 4.8 Singleton Scheduler Setup", maxsplit=1)[1]
-    # Normalize whitespace for assertions that may span line breaks
-    normalized = " ".join(scheduler.split())
-
-    # Must enforce registration prerequisite
-    assert "Only offer scheduler setup after registration and on-disk verification succeed" in normalized
-    # Must report when registration was skipped
-    assert "If no authoritative Agency config was found" in normalized
-    assert "registration and scheduling were not completed" in normalized
-    assert "do not create a fallback project scheduler" in normalized
-
-
-def test_condition_rules_skipped_by_python_dispatcher():
-    """Rules with condition field are skipped by Python dispatcher, run by external code only."""
-    skill = SKILL_PATH.read_text(encoding="utf-8")
-    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
-        "### 4.8 Singleton Scheduler Setup", maxsplit=1
-    )[0]
-
-    # Must explain condition rules are skipped by Python dispatcher
-    assert "condition:" in registration
-    assert "skipped by" in registration or "runs only when triggered by external" in registration
-    # Must say they remain read-only in UI
-    assert "read-only" in registration
-
-
 def test_registration_writes_explicit_fail_closed_agent_capabilities():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
-        "### 4.8 Singleton Scheduler Setup", maxsplit=1
-    )[0]
-    normalized = " ".join(registration.split())
+    normalized = " ".join(skill.split())
 
     assert "capabilities.write: true" in normalized
     assert "capabilities.write: false" in normalized

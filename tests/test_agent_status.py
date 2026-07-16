@@ -297,38 +297,6 @@ def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
     assert detail["rule_index"] == 0
 
 
-def test_collect_prompts_preserves_original_agent_rule_index(tmp_path):
-    g = _group_with_logs(tmp_path)
-    g["agents"] = ["product"]
-    g["_agents_normalized"] = [{
-        "name": "product",
-        "integration": "claude-code",
-        "routines": [
-            {"id": "missing", "skill": "missing", "schedule": {"at": "08:00"}},
-            {"id": "routine", "skill": "routine", "schedule": {"at": "09:00"}},
-        ],
-    }]
-    prompts_dir = g["shared"] / "prompts"
-    prompts_dir.mkdir()
-    (prompts_dir / "routine.md").write_text("# Routine\n")
-    groups_cfg = {"grp": {"_agents_normalized": g["_agents_normalized"]}}
-
-    with patch.object(app_module, "GROUPS", groups_cfg):
-        prompt = next(
-            item for item in app_module.collect_prompts(g)
-            if item["name"] == "routine.md"
-        )
-
-    assert prompt["assignments"] == [{
-        "agent": "product",
-        "condition": "",
-        "rule_index": 1,
-        "routine_id": "routine",
-        "type": "at",
-        "value": "09:00",
-    }]
-
-
 def test_relative_future_none():
     assert relative_future(None) == ""
 

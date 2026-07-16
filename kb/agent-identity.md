@@ -1,63 +1,25 @@
-# Agent Identity
+# Agent Identity And Blueprints
 
-Each agent has an identity file determined by its integration. The file format depends on the tool:
+Strict canonical separates reusable behavior from configured identity.
 
-| Integration | Identity File | Supports Frontmatter |
-|-------------|--------------|---------------------|
-| Claude Code | `CLAUDE.md` | Yes |
-| Codex | `AGENTS.md` | No (uses sidecar) |
-| Gemini | `GEMINI.md` | No (uses sidecar) |
-| Aider | `CONVENTIONS.md` | No (uses sidecar) |
-| Goose | `.goosehints` | No (uses sidecar) |
-| Script / SDK | `agent.md` | Yes |
+A blueprint is a global Agent Library directory containing reusable `AGENTS.md` instructions and standard Agent Skills. It has no display identity, integration, schedule, permissions, workspace, or mutable memory.
 
-## Identity Fields
-
-Agents can have display names, titles, and emoji avatars. For tools that support frontmatter (Claude Code, Script, SDK), these are stored directly:
+An instance belongs to exactly one group. Its config record owns stable `name`, `blueprint`, explicit `integration`, `identity`, `capabilities`, runtime overrides, routines, and default semantic memory. Display names, titles, and emoji may change without changing stable selectors.
 
 ```yaml
----
-display_name: "Researcher"
-title: "Senior Research Analyst"
-emoji: "🔍"
----
-# Research Agent
-
-Your agent's role definition goes here...
+- name: advisor
+  blueprint: advisor
+  integration: copilot
+  identity:
+    display_name: Advisor
+    title: Editorial Advisor
+    emoji: "A"
+  capabilities:
+    write: false
+  default_memory:
+    scope: agent
 ```
 
-For tools that don't support frontmatter (Codex, Gemini, Aider, Goose), Agency stores metadata in a `.agency-meta.yaml` sidecar file alongside the native identity file:
+Agent Detail is the sole identity editor. It patches config with an expected revision; it never edits blueprint source. Agent Library edits reusable source separately.
 
-```yaml
-display_name: Researcher
-title: Senior Research Analyst
-emoji: "🔍"
-```
-
-All identity fields are optional. If omitted, the directory name is used as the display name.
-
-## Integration Detection
-
-Agency automatically detects which integration an agent uses by checking which identity file exists on disk. This takes priority over config settings — an agent with `CLAUDE.md` is always handled by the Claude Code integration, even if the group's default is different.
-
-## Integration Badges
-
-The agent list and profile pages show colored badges indicating which integration each agent uses (e.g., "Claude Code", "Codex", "SDK"). The admin settings page shows a table of all installed integrations.
-
-## Headshots
-
-Upload a headshot image (PNG, JPG, or WebP, max 2MB) through the agent profile page. The image is saved as `headshot.{ext}` in the agent's directory and appears on the agent list and profile views.
-
-## Editing Identity
-
-Identity fields can be edited from the agent profile page in the UI. Changes are written back through the agent's integration — to CLAUDE.md frontmatter for Claude Code agents, to the sidecar file for others.
-
-## Health Pulse
-
-The agent list shows a color-coded dot next to each agent's "last seen" time:
-
-- **Green** — active within the last 24 hours
-- **Amber** — 24-48 hours since last activity
-- **Red** — 48+ hours or no recorded activity
-
-Health is derived from log file timestamps — no configuration needed.
+The standalone migration utility may read superseded native identity files and superseded `.agency-meta.yaml` as source history, then moves identity into explicit instance records. Runtime does not read those superseded files.

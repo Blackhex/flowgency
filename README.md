@@ -1,4 +1,65 @@
-<p align="center">
+# Agency
+
+Agency is a FastAPI control plane for reusable AI agent blueprints, group-owned agent instances, scheduled routines, semantic memory, durable jobs, and an observation-to-decision pipeline. It supports multiple LLM integrations without making runtime-native agent folders authoritative.
+
+## Install
+
+Agency requires Python 3.11 or newer.
+
+```text
+python -m venv .venv
+.venv/Scripts/python -m pip install -e .
+.venv/Scripts/python -m agency.app
+```
+
+On POSIX, use `.venv/bin/python`. The dashboard listens on `http://127.0.0.1:8500` by default. Set `AGENCY_CONFIG` to select the one authoritative config.
+
+## Strict canonical model
+
+Agency accepts only `schema_version: 2`. `config.yaml` owns groups, explicit instances, runtime policy, routines, integration selection, identity, capabilities, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
+
+Global paths under `agency` separate reusable and mutable data:
+
+- `agent_library` contains standards-based blueprints.
+- `compilation_cache` contains disposable immutable runtime projections.
+- `memory_store` contains semantic mutable Markdown memories.
+
+Each immediate Agent Library child is a blueprint with `AGENTS.md` and optional standard Agent Skills under `.agents/skills/<skill>/SKILL.md`. A group instance explicitly selects one blueprint and one integration. Runtime projectors may relocate source files into native layouts, but source bytes remain unchanged.
+
+Group runtime values are defaults. Agent `runtime.sandbox.additional_roots` are additive to group roots. A present agent tool policy is a complete override, with mode `all`, `allowlist`, or `none`. It is never merged with the group tool list.
+
+Routines replace prompt-file schedules. Each routine has a stable ID, selects a standard Agent Skill, defines one schedule, and may select semantic memory. Supported memory scopes are `run`, `routine`, `agent`, `group`, and globally declared `channel`.
+
+## Surfaces
+
+- Agent Library manages reusable `AGENTS.md` and Agent Skills.
+- Agents is the sole group roster; Agent Detail is the sole instance editor.
+- Memory Channels and Agent Detail expose semantic memory.
+- Jobs shows queued, waiting, running, completed, failed, and cancelled execution.
+- Observations, proposals, decisions, logs, and workspaces remain group-scoped.
+
+Workspace launchers are optional convenience frontends. They operate from the configured group workspace and configured instance list; they do not own agent configuration.
+
+## Migration
+
+Runtime startup never parses or rewrites superseded configuration. Preview and review a standalone migration plan before applying it:
+
+```text
+python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
+python tools/migrate_agent_model.py apply --plan migration-plan.yaml
+python tools/migrate_agent_model.py verify --config config.yaml
+python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
+```
+
+The migration utility alone may read superseded native definitions, prompt assignments, per-agent memory, `tmux_config`, and superseded `.agency-meta.yaml` source history. It copies source data and leaves superseded directories untouched.
+
+## Development
+
+```text
+.venv/Scripts/python -m pytest tests/ -q
+```
+
+Use `christag-agency dispatch install --config <path>` to install the singleton platform scheduler and `christag-agency dispatch status --config <path>` to verify it.<p align="center">
   <img src="screenshots/logo.svg" width="80" height="80" alt="Agency logo">
 </p>
 

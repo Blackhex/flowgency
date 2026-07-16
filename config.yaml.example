@@ -1,21 +1,77 @@
+schema_version: 2
+
 agency:
   title: Agency
   default_group: my-project
+  ai_backend: copilot
+  dispatch:
+    interval: 15
+  agent_library: C:/Agency/agent-library
+  compilation_cache: C:/Agency/compiled-agents
+  memory_store: C:/Agency/memory
+
+memory:
+  channels:
+    product-strategy:
+      display_name: Product Strategy
+
 groups:
   my-project:
-    name: My Project Agents
-    path: /path/to/your/agents
-    default_integration: claude-code
+    name: My Project
+    path: C:/Projects/my-project
+    default_integration: copilot
+    runtime:
+      timeout: 1800
+      sandbox:
+        mode: restricted
+        roots:
+          - C:/Projects/my-project
+      tools:
+        mode: allowlist
+        names: [read, search]
+    dispatch:
+      enabled: true
+      daily_limit: 20
     agents:
-    - name: builder
-      integration: claude-code
-      capabilities:
-        write: true
-    - name: advisor
-      integration: claude-code
-      capabilities:
-        write: false
-    - name: sentinel
-      integration: claude-code
-      capabilities:
-        write: false
+      - name: builder
+        blueprint: builder
+        integration: copilot
+        identity:
+          display_name: Builder
+          title: Implementation Lead
+        capabilities:
+          write: true
+        runtime:
+          sandbox:
+            additional_roots:
+              - C:/Research/my-project
+          tools:
+            mode: allowlist
+            names: [read, search, write]
+        default_memory:
+          scope: agent
+        routines:
+          - id: daily-review
+            skill: daily-review
+            schedule:
+              at: "09:00"
+            memory:
+              scope: routine
+          - id: strategy-review
+            skill: strategy-review
+            schedule:
+              every: 7d
+            memory:
+              scope: channel
+              channel: product-strategy
+      - name: advisor
+        blueprint: advisor
+        integration: copilot
+        capabilities:
+          write: false
+    workspaces:
+      - name: Main workspace
+        type: ide
+        config:
+          ide_name: VS Code
+          project_path: C:/Projects/my-project

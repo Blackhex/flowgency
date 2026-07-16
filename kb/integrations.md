@@ -1,72 +1,20 @@
 # Integrations
 
-Agency works with multiple LLM tools through a plugin system. Each agent uses one integration, and different agents in the same group can use different tools.
+An integration adapts an explicit configured instance to one LLM runtime. Each instance pins one integration; filesystem contents do not override it.
 
-## Supported Integrations
+Integrations declare executable support, enforceable sandbox/tool modes, a versioned runtime projector, native instruction and skill targets, and whether a selected skill can be activated non-interactively. Unsupported policy or activation fails before launch.
 
-| Integration | Identity File | How Agents Are Run |
-|-------------|--------------|-------------------|
-| **Claude Code** | `CLAUDE.md` | `claude --dangerously-skip-permissions -p` |
-| **OpenAI Codex** | `AGENTS.md` | `codex exec --yolo` |
-| **Google Gemini** | `GEMINI.md` | `gemini -p` |
-| **Aider** | `CONVENTIONS.md` | `aider --message-file` |
-| **Goose** | `.goosehints` | `goose run` |
-| **GitHub Copilot** | `AGENTS.md` | `copilot -p --autopilot --experimental` |
-| **Custom Script** | `agent.md` | Your command with `{prompt_file}` placeholder |
-| **SDK** | `agent.md` | None — you run the agent externally, Agency manages the files |
+Runtime projectors consume standards-based Agent Library source. They may relocate root `AGENTS.md` and whole `.agents/skills` directories into native discovery paths, but must preserve instruction and `SKILL.md` bytes. Compiled artifacts are immutable and keyed by integration, projector version, and source digest.
 
-## How Detection Works
+Group sandbox roots form the baseline; instance `additional_roots` are additive. A present instance tool policy is a complete override. Integrations reject modes or names they cannot enforce rather than widening access.
 
-Agency auto-detects which integration an agent uses by checking which identity file exists in the agent's directory. This takes priority over any config setting:
+`agency/integrations/integrations.yaml` controls which Python plugins are loadable. It is plugin discovery metadata, not group, instance, routine, identity, or memory configuration.
 
-1. **Filesystem first** — check what file exists on disk
-2. **Config fallback** — use the agent's `integration` field in config.yaml
-3. **Group default** — use the group's `default_integration`
-4. **Global default** — fall back to `claude-code`
+superseded integration detection and sidecar parsing are retained only by standalone migration. To convert an old installation:
 
-This means an agent with `CLAUDE.md` is always handled correctly, even if the group's default integration is something else.
-
-## Mixing Integrations
-
-You can mix integrations within a single group. In `config.yaml`:
-
-```yaml
-groups:
-  my-project:
-    default_integration: claude-code
-    agents:
-    - researcher              # uses group default (Claude Code)
-    - name: data-bot
-      integration: codex      # uses Codex
-    - name: runner
-      integration: script     # uses a custom script
-      integration_config:
-        command: "./run.sh {prompt_file}"
+```text
+python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
+python tools/migrate_agent_model.py apply --plan migration-plan.yaml
+python tools/migrate_agent_model.py verify --config config.yaml
+python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
 ```
-
-## Sidecar Metadata
-
-Tools whose native files don't support YAML frontmatter (Codex, Gemini, Aider, Goose) store Agency metadata in a `.agency-meta.yaml` sidecar file:
-
-```yaml
-display_name: Product Manager
-title: Content Strategy Lead
-emoji: "📦"
-```
-
-Sidecar files are created automatically when you edit identity fields in the UI.
-
-## AI Backend
-
-Agency itself can use an LLM for its own features (e.g., summarization). The AI backend is configured in the admin settings — choose whichever integration you want Agency to use for its own AI calls.
-
-## Adding New Integrations
-
-Agency's integration system is extensible. Integrations are organized by author namespace:
-
-1. Copy `agency/integrations/_template.py` to `agency/integrations/{your-name}/your_tool.py`
-2. Fill in the methods (detection, identity parsing, execution)
-3. Register via the admin UI at Admin → Integrations
-4. Restart the service
-
-See the full guide: **[Contributing Integrations](contributing-integrations.md)** — includes the template walkthrough, sidecar vs. frontmatter guidance, contract tests, and submission instructions.

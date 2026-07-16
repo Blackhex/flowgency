@@ -266,60 +266,6 @@ def test_agents_page_shows_config_only_roster_without_activity_links(tmp_path):
     assert "last run stdout log" not in resp.text
 
 
-def test_prompts_page_marks_exact_schedule_target(tmp_path):
-    _setup_group(tmp_path)
-    _configure_schedule("product-routine")
-    client = TestClient(app)
-
-    resp = client.get("/test/prompts")
-
-    assert resp.status_code == 200
-    assert 'id="schedule-product-0"' not in resp.text
-    assert "scroll-mt-20" not in resp.text
-    assert "target:ring-2" not in resp.text
-
-
-def test_prompts_page_is_read_only_and_preserves_strict_canonical_config(tmp_path):
-    _setup_group(tmp_path)
-    config_path = tmp_path / "config.yaml"
-    before = config_path.read_bytes()
-    client = TestClient(app)
-    route_paths = {
-        route.path
-        for route in app.routes
-        if "POST" in getattr(route, "methods", set())
-    }
-
-    response = client.get("/test/prompts")
-
-    assert response.status_code == 200
-    assert "/{group}/prompts/dispatch" not in route_paths
-    assert 'id="dispatch-form"' not in response.text
-    assert 'Save Dispatch Config' not in response.text
-    post_response = client.post("/test/prompts/dispatch", data={"assign_agent_routine_0": "product"})
-    assert post_response.status_code == 404
-    assert config_path.read_bytes() == before
-
-
-def test_prompt_detail_and_save_work_for_non_dispatch_slug(tmp_path):
-    group_path = _setup_group(tmp_path)
-    prompt_path = group_path / "shared" / "prompts" / "routine.md"
-    client = TestClient(app)
-
-    detail_response = client.get("/test/prompts/routine")
-    save_response = client.post(
-        "/test/prompts/routine/save",
-        data={"content": "# Updated routine\n"},
-        follow_redirects=False,
-    )
-
-    assert detail_response.status_code == 200
-    assert "Routine" in detail_response.text
-    assert save_response.status_code == 303
-    assert save_response.headers["location"] == "/test/prompts/routine"
-    assert prompt_path.read_text(encoding="utf-8") == "# Updated routine\n"
-
-
 def test_exact_dispatch_slug_does_not_resolve_to_generic_prompt_routes(tmp_path):
     _setup_group(tmp_path)
     client = TestClient(app)
