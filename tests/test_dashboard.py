@@ -215,7 +215,14 @@ def _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config):
     return TestClient(app_mod.app), config_path, group_root
 
 
-def _job_spec(group_root: Path, config_path: Path, *, status: str, job_id: str = "job-waiting") -> JobSpec:
+def _job_spec(
+    group_root: Path,
+    config_path: Path,
+    *,
+    status: str,
+    job_id: str = "job-waiting",
+    agent_name: str = "advisor",
+) -> JobSpec:
     return JobSpec(
         schema_version=2,
         job_id=job_id,
@@ -223,7 +230,7 @@ def _job_spec(group_root: Path, config_path: Path, *, status: str, job_id: str =
         config_revision="cfg-1",
         group_key="newsletter",
         group_path=str(group_root.resolve()),
-        agent_name="advisor",
+        agent_name=agent_name,
         workspace_dir=str(group_root.resolve()),
         trigger="scheduled_prompt",
         integration_name="copilot",
@@ -275,6 +282,52 @@ def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_pa
     assert "Blueprint: advisor" in response.text
     assert "copilot" in response.text
     assert spec.memory.memory_hash not in response.text
+
+
+def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    advisor = raw["groups"]["newsletter"]["agents"][0]
+    for agent_name in ("researcher", "writer"):
+        agent = deepcopy(advisor)
+        agent["name"] = agent_name
+        agent["identity"]["display_name"] = agent_name.title()
+        raw["groups"]["newsletter"]["agents"].append(agent)
+    _write_yaml(config_path, raw)
+    app_mod.reload_groups()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+
+    queued = _job_spec(group_root, config_path, status="queued", job_id="job-queued")
+    waiting = _job_spec(
+        group_root,
+        config_path,
+        status="waiting_for_memory",
+        job_id="job-waiting",
+        agent_name="researcher",
+    )
+    running = _job_spec(
+        group_root,
+        config_path,
+        status="running",
+        job_id="job-running",
+        agent_name="writer",
+    )
+    queued_path = group_root / "shared" / "jobs" / f"{queued.job_id}.yaml"
+    waiting_path = group_root / "shared" / "jobs" / f"{waiting.job_id}.yaml"
+    running_path = group_root / "shared" / "jobs" / f"{running.job_id}.yaml"
+    write_job(queued_path, JobRecord.from_spec(queued))
+    write_job(waiting_path, JobRecord.from_spec(waiting))
+    transition_job(waiting_path, "queued", "waiting_for_memory")
+    write_job(running_path, JobRecord.from_spec(running))
+    transition_job(running_path, "queued", "running")
+
+    response = client.get("/newsletter/")
+
+    assert response.status_code == 200
+    assert "Queued" in response.text
+    assert "Waiting for memory" in response.text
+    assert "Running" in response.text
+    assert "1 running" in response.text
 
 
 def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, canonical_raw_config):

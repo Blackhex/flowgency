@@ -1399,6 +1399,7 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
                 "open_observations": sum(1 for item in observations if item.get("agent") == instance.name and item.get("status") == "open"),
                 "health": "green" if current is not None else "red",
                 "running": bool(current is not None),
+                "job_status_key": current.status if current is not None else None,
                 "job_status": _job_state_label(current.status) if current is not None else None,
                 "job_href": f"/{g['key']}/jobs/{current.spec.job_id}" if current is not None else "",
                 "activity_href": f"/{g['key']}/agents/{instance.name}/activity",
@@ -1929,7 +1930,7 @@ async def home(request: Request, group: str):
         # Zone 1: Fleet
         "fleet_agents": agents,
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
-        "fleet_running": sum(1 for a in agents if a.get("job_status") in {"Queued", "Waiting for memory", "Running"}),
+        "fleet_running": sum(1 for a in agents if a.get("job_status_key") == "running"),
         # Zone 2: Pipeline
         "pipeline": pipeline,
         # Zone 3: Attention queue
