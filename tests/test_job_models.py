@@ -1,5 +1,7 @@
 from pathlib import Path
 import inspect
+import io
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -83,6 +85,170 @@ def test_job_record_round_trips_through_atomic_store(tmp_path):
 
     assert read_job(path) == record
     assert spec.config_path == str((tmp_path / "config.yaml").resolve())
+
+
+def test_read_job_retries_transient_windows_permission_error(
+    tmp_path,
+    monkeypatch,
+):
+    spec = make_spec(tmp_path)
+    path = job_path(tmp_path / "group", spec.job_id)
+    record = JobRecord.from_spec(spec)
+    payload = yaml.safe_dump(record.to_dict(), sort_keys=False)
+    attempts = {"count": 0}
+    sleeps = []
+
+    def fake_open(self, *args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            error = PermissionError(13, "Access is denied", str(self))
+            error.winerror = 5
+            raise error
+        return io.StringIO(payload)
+
+    monkeypatch.setattr(
+        store_module,
+        "os",
+        SimpleNamespace(name="nt"),
+        raising=False,
+    )
+    monkeypatch.setattr(store_module.Path, "open", fake_open)
+    monkeypatch.setattr(
+        store_module,
+        "_WINDOWS_READ_RETRIES",
+        3,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "_WINDOWS_READ_DELAY_SECONDS",
+        0.25,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "time",
+        SimpleNamespace(sleep=sleeps.append),
+        raising=False,
+    )
+
+    loaded = read_job(path)
+
+    assert loaded == record
+    assert attempts["count"] == 3
+    assert sleeps == [0.25, 0.25]
+
+
+def test_read_job_raises_immediately_for_non_windows_permission_error(
+    tmp_path,
+    monkeypatch,
+):
+    path = job_path(tmp_path / "group", "job-123")
+    attempts = {"count": 0}
+
+    def fake_open(self, *args, **kwargs):
+        attempts["count"] += 1
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(
+        store_module,
+        "os",
+        SimpleNamespace(name="posix"),
+        raising=False,
+    )
+    monkeypatch.setattr(store_module.Path, "open", fake_open)
+    monkeypatch.setattr(
+        store_module,
+        "time",
+        SimpleNamespace(sleep=lambda seconds: None),
+        raising=False,
+    )
+
+    with pytest.raises(PermissionError, match="Permission denied"):
+        read_job(path)
+
+    assert attempts["count"] == 1
+
+
+def test_read_job_raises_immediately_for_non_transient_windows_permission_error(
+    tmp_path,
+    monkeypatch,
+):
+    path = job_path(tmp_path / "group", "job-123")
+    attempts = {"count": 0}
+
+    def fake_open(self, *args, **kwargs):
+        attempts["count"] += 1
+        error = PermissionError(13, "Permission denied", str(self))
+        error.winerror = 32
+        raise error
+
+    monkeypatch.setattr(
+        store_module,
+        "os",
+        SimpleNamespace(name="nt"),
+        raising=False,
+    )
+    monkeypatch.setattr(store_module.Path, "open", fake_open)
+    monkeypatch.setattr(
+        store_module,
+        "time",
+        SimpleNamespace(sleep=lambda seconds: None),
+        raising=False,
+    )
+
+    with pytest.raises(PermissionError, match="Permission denied"):
+        read_job(path)
+
+    assert attempts["count"] == 1
+
+
+def test_read_job_raises_last_error_after_transient_windows_retry_exhaustion(
+    tmp_path,
+    monkeypatch,
+):
+    path = job_path(tmp_path / "group", "job-123")
+    attempts = {"count": 0}
+    sleeps = []
+    last_error = PermissionError(13, "Access is denied", str(path))
+    last_error.winerror = 5
+
+    def fake_open(self, *args, **kwargs):
+        attempts["count"] += 1
+        raise last_error
+
+    monkeypatch.setattr(
+        store_module,
+        "os",
+        SimpleNamespace(name="nt"),
+        raising=False,
+    )
+    monkeypatch.setattr(store_module.Path, "open", fake_open)
+    monkeypatch.setattr(
+        store_module,
+        "_WINDOWS_READ_RETRIES",
+        3,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "_WINDOWS_READ_DELAY_SECONDS",
+        0.5,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        store_module,
+        "time",
+        SimpleNamespace(sleep=sleeps.append),
+        raising=False,
+    )
+
+    with pytest.raises(PermissionError) as error_info:
+        read_job(path)
+
+    assert error_info.value is last_error
+    assert attempts["count"] == 3
+    assert sleeps == [0.5, 0.5]
 
 
 def test_transition_job_requires_expected_status(tmp_path):

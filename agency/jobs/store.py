@@ -2,7 +2,9 @@
 
 from contextlib import ExitStack
 from dataclasses import replace
+import os
 from pathlib import Path
+import time
 from typing import Any
 
 import yaml
@@ -24,6 +26,10 @@ VALID_TRANSITIONS = {
     "failed": set(),
     "cancelled": set(),
 }
+
+
+_WINDOWS_READ_RETRIES = 20
+_WINDOWS_READ_DELAY_SECONDS = 0.01
 
 
 def job_path(group_path: Path, job_id: str) -> Path:
@@ -64,9 +70,30 @@ def job_lock_path(path: Path) -> Path:
     return Path(f"{path}.lock")
 
 
+def _read_job_payload(path: Path) -> str:
+    if os.name != "nt":
+        with Path(path).open(encoding="utf-8") as job_file:
+            return job_file.read()
+
+    last_error = None
+    for attempt in range(_WINDOWS_READ_RETRIES):
+        try:
+            with Path(path).open(encoding="utf-8") as job_file:
+                return job_file.read()
+        except PermissionError as error:
+            last_error = error
+            if getattr(error, "winerror", None) != 5:
+                raise
+            if attempt == _WINDOWS_READ_RETRIES - 1:
+                raise
+            time.sleep(_WINDOWS_READ_DELAY_SECONDS)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("unreachable")
+
+
 def read_job(path: Path) -> JobRecord:
-    with Path(path).open(encoding="utf-8") as job_file:
-        return JobRecord.from_dict(yaml.safe_load(job_file))
+    return JobRecord.from_dict(yaml.safe_load(_read_job_payload(Path(path))))
 
 
 def transition_job(
