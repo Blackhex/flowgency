@@ -13,18 +13,25 @@ from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, 
 from agency.jobs.store import write_job
 
 
-def _setup_jobs_group(tmp_path, monkeypatch):
+def _setup_jobs_group(
+    tmp_path,
+    monkeypatch,
+    *,
+    job_id="cli-job",
+    record_filename=None,
+    started_at="2026-07-11T10:00:00+00:00",
+):
     """Create a group with one complete job that has changed files, and wire it
     into the app registry the CLI reads through get_group."""
     group = tmp_path / "group"
     jobs_dir = group / "shared" / "jobs"
-    jobs_dir.mkdir(parents=True)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
 
     spec = JobSpec(
         schema_version=2,
-        job_id="cli-job",
+        job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key="test",
@@ -53,8 +60,8 @@ def _setup_jobs_group(tmp_path, monkeypatch):
             tool_names=(),
         ),
         memory=MemoryBinding(
-            selector={"scope": "run", "version": 1, "job": "cli-job"},
-            canonical_json='{"job":"cli-job","scope":"run","version":1}',
+            selector={"scope": "run", "version": 1, "job": job_id},
+            canonical_json=f'{{"job":"{job_id}","scope":"run","version":1}}',
             memory_hash="memory-hash-1",
             path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
         ),
@@ -66,14 +73,14 @@ def _setup_jobs_group(tmp_path, monkeypatch):
     record = JobRecord.from_spec(spec)
     record.status = "complete"
     record.exit_code = 0
-    record.started_at = "2026-07-11T10:00:00+00:00"
+    record.started_at = started_at
     record.completed_at = "2026-07-11T10:00:05+00:00"
     record.changed_files = [{"path": "a.txt", "status": "modified", "lines_added": 2, "lines_removed": 1}]
     stdout_path = group / "shared" / "logs" / f"{spec.job_id}.out"
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stdout_path.write_text("line one\nline two\nline three\n", encoding="utf-8")
     record.stdout_path = str(stdout_path)
-    write_job(jobs_dir / f"{spec.job_id}.yaml", record)
+    write_job(jobs_dir / (record_filename or f"{spec.job_id}.yaml"), record)
 
     monkeypatch.setattr(app_mod, "CONFIG", {"groups": {"test": {"path": str(group)}}})
     monkeypatch.setattr(app_mod, "GROUPS", {"test": {
@@ -283,6 +290,36 @@ def test_cmd_logs_no_job_id_lists_recent(tmp_path, monkeypatch, capsys):
     cli.cmd_logs(Namespace(group="test", job_id=None, lines=40, stderr=False))
     out = capsys.readouterr().out
     assert spec.job_id in out
+
+
+def test_equal_timestamp_jobs_use_deterministic_id_order_in_json_and_logs(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    timestamp = "2026-07-11T10:00:00+00:00"
+    _setup_jobs_group(
+        tmp_path,
+        monkeypatch,
+        job_id="beta-job",
+        record_filename="a-record.yaml",
+        started_at=timestamp,
+    )
+    _setup_jobs_group(
+        tmp_path,
+        monkeypatch,
+        job_id="alpha-job",
+        record_filename="z-record.yaml",
+        started_at=timestamp,
+    )
+
+    cli.cmd_jobs(Namespace(group="test", status=None, agent=None, json=True))
+    jobs = yaml.safe_load(capsys.readouterr().out)
+    assert [job["job_id"] for job in jobs] == ["alpha-job", "beta-job"]
+
+    cli.cmd_logs(Namespace(group="test", job_id=None, lines=40, stderr=False))
+    logs = capsys.readouterr().out
+    assert logs.index("alpha-job") < logs.index("beta-job")
 
 
 def test_cmd_logs_unknown_job_exits(tmp_path, monkeypatch):

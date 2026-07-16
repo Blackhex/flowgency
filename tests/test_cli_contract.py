@@ -324,6 +324,73 @@ def test_memory_save_uses_expected_revision(cli_config, cli_runner):
     assert json.loads(result.stdout) == {"revision": saved.revision, "file": "memory.md"}
 
 
+def test_memory_save_uses_public_store_contract():
+    source = Path(cli.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    forbidden = {
+        "_ensure_canonical_directory",
+        "_read_canonical_files",
+        "_replace_canonical_files",
+        "memory_content_revision",
+        "try_exclusive_lock",
+    }
+    assert forbidden.isdisjoint(
+        {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    )
+
+
+def test_memory_save_preserves_other_markdown_files(cli_config, cli_runner):
+    services, resolved = _resolved_agent_memory(cli_config)
+    initial = services.memory_store.ensure(resolved)
+    seeded = services.memory_store.try_save(
+        resolved,
+        initial.revision,
+        {"memory.md": b"# Original\n", "notes.md": b"# Keep me\n"},
+    )
+    result = cli_runner(
+        "memory", "save", "builder", "--group", "newsletter", "--scope", "agent",
+        "--file", "memory.md", "--revision", seeded.revision, "--json",
+        config=cli_config,
+        stdin="# Updated\n",
+    )
+    assert result.exit_code == 0
+    assert services.memory_store.read(resolved).files == {
+        "memory.md": b"# Updated\n",
+        "notes.md": b"# Keep me\n",
+    }
+
+
+@pytest.mark.parametrize(
+    "filename",
+    (
+        "../escape.md",
+        "..\\escape.md",
+        "nested/escape.md",
+        ".hidden.md",
+        "CON.md",
+        "notes.txt",
+        "notes",
+    ),
+)
+def test_memory_save_rejects_unsafe_filename_without_writing(
+    cli_config,
+    cli_runner,
+    filename,
+):
+    services, resolved = _resolved_agent_memory(cli_config)
+    snapshot = services.memory_store.ensure(resolved)
+    before = _tree_snapshot(services.memory_store.root)
+    result = cli_runner(
+        "memory", "save", "builder", "--group", "newsletter", "--scope", "agent",
+        "--file", filename, "--revision", snapshot.revision,
+        config=cli_config,
+        stdin="# Escape\n",
+    )
+    assert result.exit_code == 3
+    assert "memory" in result.stderr.lower()
+    assert _tree_snapshot(services.memory_store.root) == before
+
+
 def test_memory_save_stale_revision_preserves_newer_content(cli_config, cli_runner):
     services, resolved = _resolved_agent_memory(cli_config)
     stale = services.memory_store.ensure(resolved)

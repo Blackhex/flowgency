@@ -21,14 +21,13 @@ from agency.configuration import ConfigSnapshot, ConfigStore, ValidationFailed, 
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
 from agency.dispatch.install import get_timer_status, install_timer, uninstall_timer
-from agency.fs.locks import LockCancelledError, ResourceBusyError, try_exclusive_lock
+from agency.fs.locks import LockCancelledError, ResourceBusyError
 from agency.integrations import REGISTRY
 from agency.jobs import JobRequest, JobSubmissionError, active_jobs, submit_job_request
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt, build_routine_task_input
 from agency.jobs.store import read_job
 from agency.memory import MemoryConflictError, MemoryStore, resolve_memory_selector
-from agency.memory.store import _ensure_canonical_directory, _read_canonical_files, _replace_canonical_files, memory_content_revision
 from agency.proposals import (
     SKIP_EXECUTION_SUMMARY,
     question_option_labels,
@@ -274,6 +273,12 @@ def _job_records(group_path: Path):
             records.append((path, read_job(path)))
         except Exception:
             records.append((path, None))
+    records.sort(
+        key=lambda item: (
+            item[1].spec.job_id if item[1] is not None else item[0].name,
+            item[0].as_posix(),
+        )
+    )
     records.sort(
         key=lambda item: item[1].started_at or item[1].spec.created_at or "" if item[1] is not None else "",
         reverse=True,
@@ -741,22 +746,12 @@ def cmd_memory_save(args: Namespace) -> int:
     )
     resolved = _resolve_memory(args, services, snapshot)
     payload = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode("utf-8")
-    with try_exclusive_lock(store._lock_path(resolved)):
-        directory = _ensure_canonical_directory(resolved)
-        current_files = _read_canonical_files(directory)
-        current_revision = memory_content_revision(current_files)
-        if current_revision != args.revision:
-            raise CliFailure(
-                ExitCode.OPERATIONAL_FAILURE,
-                "memory-conflict",
-                "Memory changed; reload before saving.",
-            )
-        files = dict(current_files)
-        files[args.file] = payload
-        _replace_canonical_files(directory, files)
-        saved_revision = memory_content_revision(files)
-    result = {"revision": saved_revision, "file": args.file}
-    _print_json(result) if args.json else print(f"Saved {args.file}; revision {saved_revision}")
+    current = store.read(resolved, wait=False)
+    candidate_files = dict(current.files)
+    candidate_files[args.file] = payload
+    saved = store.try_save(resolved, args.revision, candidate_files)
+    result = {"revision": saved.revision, "file": args.file}
+    _print_json(result) if args.json else print(f"Saved {args.file}; revision {saved.revision}")
     return 0
 
 

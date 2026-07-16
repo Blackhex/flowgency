@@ -49,10 +49,14 @@ def memory_content_revision(files: Mapping[str, bytes]) -> str:
     return digest.hexdigest()
 
 
-def read_memory(resolved: ResolvedMemory) -> MemorySnapshot:
+def read_memory(
+    resolved: ResolvedMemory,
+    *,
+    wait: bool = True,
+) -> MemorySnapshot:
     _validate_resolved_memory(resolved)
     lock_path = _lock_path(resolved)
-    with exclusive_lock(lock_path, wait=True):
+    with exclusive_lock(lock_path, wait=wait):
         files = _read_canonical_files(_canonical_directory(resolved))
         return MemorySnapshot(
             resolved=resolved,
@@ -138,9 +142,14 @@ class MemoryStore:
         _validate_resolved_memory(resolved, expected_root=self.root)
         return self.root / ".locks" / f"{resolved.memory_hash}.lock"
 
-    def read(self, resolved: ResolvedMemory) -> MemorySnapshot:
+    def read(
+        self,
+        resolved: ResolvedMemory,
+        *,
+        wait: bool = True,
+    ) -> MemorySnapshot:
         _validate_resolved_memory(resolved, expected_root=self.root)
-        return read_memory(resolved)
+        return read_memory(resolved, wait=wait)
 
     def ensure(self, resolved: ResolvedMemory) -> MemorySnapshot:
         _validate_resolved_memory(resolved, expected_root=self.root)
