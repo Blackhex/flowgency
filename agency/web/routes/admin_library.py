@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
 import tempfile
+import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -28,6 +30,87 @@ def _templates(request: Request):
 
 def _theme_css(request: Request) -> str:
     return request.app.state.theme_css_getter()
+
+
+def _is_symlink_or_reparse(path: Path) -> bool:
+    try:
+        stat_result = path.lstat()
+    except FileNotFoundError:
+        return False
+    file_attributes = getattr(stat_result, "st_file_attributes", 0) or 0
+    return bool(
+        stat.S_ISLNK(stat_result.st_mode)
+        or file_attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
+
+
+def _ensure_directory(path: Path, *, label: str) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        stat_result = path.lstat()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Missing {label} directory: {path}",
+        ) from exc
+    if _is_symlink_or_reparse(path):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unsafe {label} directory: {path}",
+        )
+    if not stat.S_ISDIR(stat_result.st_mode):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{label} path is not a directory: {path}",
+        )
+    return path
+
+
+def _ensure_child_directory(parent: Path, name: str, *, label: str) -> Path:
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or PurePosixPath(name).is_absolute()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unsafe {label} segment: {name}",
+        )
+    candidate = _ensure_directory(parent, label=f"{label} parent") / name
+    return _ensure_directory(candidate, label=label)
+
+
+def _safe_key_hash(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _library_infra_root(services: AgencyServices) -> Path:
+    library_root = _require_library(services).root.resolve()
+    infra_root = _ensure_child_directory(
+        library_root.parent,
+        ".agency-agent-library",
+        label="Agent Library infrastructure root",
+    )
+    return _ensure_child_directory(
+        infra_root,
+        hashlib.sha256(str(library_root).encode("utf-8")).hexdigest(),
+        label="Agent Library infrastructure root",
+    )
+
+
+def _infra_bucket(services: AgencyServices, name: str) -> Path:
+    return _ensure_child_directory(
+        _library_infra_root(services),
+        name,
+        label=f"Agent Library {name}",
+    )
+
+
+def _create_verified_tempdir(parent: Path, *, prefix: str, label: str) -> Path:
+    created = Path(tempfile.mkdtemp(prefix=prefix, dir=str(parent)))
+    return _ensure_directory(created, label=label)
 
 
 def _base_admin_context(request: Request, snapshot) -> dict[str, Any]:
@@ -338,7 +421,7 @@ def _render_blueprint_skill(
 
 
 def _lock_path(services: AgencyServices, key: str) -> Path:
-    return _require_library(services).root / "_locks" / f"{key}.lock"
+    return _infra_bucket(services, "locks") / f"{_safe_key_hash(key)}.lock"
 
 
 def _validate_source_path(path_value: str) -> str:
@@ -441,11 +524,11 @@ def _stage_blueprint(
         destination.write_bytes(content)
 
 
-def _publish_stage(target_root: Path, stage_root: Path) -> None:
-    parent = target_root.parent
-    backup_root = Path(
-        tempfile.mkdtemp(prefix=f".{target_root.name}.backup-", dir=parent)
-    )
+def _publish_stage(
+    target_root: Path,
+    stage_root: Path,
+    backup_root: Path,
+) -> None:
     backup_target = backup_root / target_root.name
     try:
         if target_root.exists():
@@ -458,7 +541,6 @@ def _publish_stage(target_root: Path, stage_root: Path) -> None:
     finally:
         if backup_target.exists():
             shutil.rmtree(backup_target, ignore_errors=True)
-        shutil.rmtree(backup_root, ignore_errors=True)
 
 
 def _redirect_after_save(key: str, edited_path: str) -> str:
@@ -559,24 +641,34 @@ async def admin_blueprint_source_save(
                     status_code=409,
                     detail="Blueprint source changed; reload before saving",
                 )
-            stage_parent = Path(
-                tempfile.mkdtemp(
-                    prefix=f".{key}.stage-",
-                    dir=str(_require_library(services).root.parent),
-                )
+            stage_parent = _create_verified_tempdir(
+                _infra_bucket(services, "staging"),
+                prefix=f".{_safe_key_hash(key)}.stage-",
+                label="Agent Library staging",
             )
             stage_root = stage_parent / key
             stage_root.mkdir(parents=True, exist_ok=True)
+            backup_parent = _create_verified_tempdir(
+                _infra_bucket(services, "backups"),
+                prefix=f".{_safe_key_hash(key)}.backup-",
+                label="Agent Library backup",
+            )
             try:
                 _stage_blueprint(inspection, target_path, content, stage_root)
                 _require_library(services).inspect(key)
                 from agency.blueprints.library import inspect_blueprint
 
                 inspect_blueprint(stage_parent, key)
-                _publish_stage(_blueprint_root(services, key), stage_root)
+                _publish_stage(
+                    _blueprint_root(services, key),
+                    stage_root,
+                    backup_parent,
+                )
             finally:
                 if stage_parent.exists():
                     shutil.rmtree(stage_parent, ignore_errors=True)
+                if backup_parent.exists():
+                    shutil.rmtree(backup_parent, ignore_errors=True)
     except HTTPException as exc:
         if raw_path.startswith(".agents/skills/"):
             parts = PurePosixPath(raw_path.replace("\\", "/")).parts

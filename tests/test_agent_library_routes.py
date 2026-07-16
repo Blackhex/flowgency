@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import shutil
 from copy import deepcopy
 from pathlib import Path
@@ -201,6 +202,44 @@ def test_library_source_write_rejects_stale_digest(
     ).read_text(encoding="utf-8") == current_content
 
 
+def test_library_source_write_keeps_infra_outside_source_root(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, _, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    blueprint_root = library_root / "advisor"
+    digest = compute_source_digest(
+        app_mod.build_services(tmp_path / "config.yaml")
+        .blueprint_library.inspect("advisor")
+        .snapshot.files,
+    )
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/source",
+        data={
+            "path": "AGENTS.md",
+            "expected_digest": digest,
+            "content": "# Advisor\n\nUpdated.\n",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert not any(child.name == "_locks" for child in library_root.iterdir())
+    assert not any(child.name.startswith(".agency-agent-library") for child in library_root.iterdir())
+    assert (blueprint_root / "AGENTS.md").read_text(encoding="utf-8") == "# Advisor\n\nUpdated.\n"
+    assert compute_source_digest(
+        app_mod.build_services(tmp_path / "config.yaml")
+        .blueprint_library.inspect("advisor")
+        .snapshot.files,
+    ) != digest
+
+
 def test_library_skill_write_rejects_nonstandard_path(
     monkeypatch,
     tmp_path,
@@ -226,6 +265,49 @@ def test_library_skill_write_rejects_nonstandard_path(
 
     assert response.status_code == 409
     assert not (library_root / "advisor" / "escape.md").exists()
+
+
+def test_library_source_write_serializes_concurrent_saves(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, _, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        canonical_raw_config,
+    )
+    inspection = app_mod.build_services(tmp_path / "config.yaml").blueprint_library.inspect("advisor")
+    digest = inspection.snapshot.digest
+    first_done = threading.Event()
+    second_done = threading.Event()
+    responses: list[int] = []
+
+    def save(content: str, done: threading.Event) -> None:
+        response = client.post(
+            "/admin/agent-library/blueprints/advisor/source",
+            data={
+                "path": "AGENTS.md",
+                "expected_digest": digest,
+                "content": content,
+            },
+            follow_redirects=False,
+        )
+        responses.append(response.status_code)
+        done.set()
+
+    first = threading.Thread(target=save, args=("# Advisor\n\nFirst.\n", first_done))
+    second = threading.Thread(target=save, args=("# Advisor\n\nSecond.\n", second_done))
+
+    first.start()
+    second.start()
+    assert first_done.wait(10)
+    assert second_done.wait(10)
+    first.join(10)
+    second.join(10)
+
+    assert sorted(responses) == [303, 409]
+    assert not any(child.name == "_locks" for child in library_root.iterdir())
 
 
 def test_integrations_page_shows_projector_compatibility(
