@@ -5,6 +5,7 @@ dist/
 build/
 .venv/
 config.yaml
+!tests/ui/fixtures/config.yaml
 agents/
 agency.service
 docs/*

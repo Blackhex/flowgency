@@ -1,0 +1,81 @@
+schema_version: 2
+agency:
+  title: Agency UI Gate
+  default_group: newsletter
+  ai_backend: copilot
+  agent_library: __RUNTIME__/agent-library
+  compilation_cache: __RUNTIME__/compiled-agents
+  memory_store: __RUNTIME__/memory-store
+memory:
+  channels:
+    brand-strategy:
+      display_name: Brand Strategy
+groups:
+  newsletter:
+    name: Newsletter
+    path: __RUNTIME__/groups/newsletter
+    default_integration: copilot
+    runtime:
+      timeout: 2400
+      sandbox:
+        mode: restricted
+        roots:
+          - __RUNTIME__/groups/newsletter/shared
+      tools:
+        mode: allowlist
+        names: [shell, write]
+    agents:
+      - name: advisor
+        blueprint: advisor
+        integration: copilot
+        identity:
+          display_name: Advisor
+          title: Strategy Lead
+          emoji: A
+        runtime:
+          timeout: 1200
+          sandbox:
+            additional_roots:
+              - __RUNTIME__/groups/newsletter/editorial
+          tools:
+            mode: allowlist
+            names: [shell]
+        default_memory:
+          scope: channel
+          channel: brand-strategy
+        routines:
+          - id: daily-review
+            skill: daily-review
+            arguments: [--brief]
+            schedule:
+              at: "09:00"
+            memory:
+              scope: channel
+              channel: brand-strategy
+      - name: builder
+        blueprint: builder
+        integration: script
+        identity:
+          display_name: Builder
+          title: Production Editor
+          emoji: B
+        default_memory:
+          scope: agent
+        routines:
+          - id: publish-draft
+            skill: publish-draft
+            schedule:
+              every: "3600"
+            memory:
+              scope: routine
+    workspaces:
+      - name: Editorial Terminal
+        type: tmux
+        config:
+          script_path: shared/pipeline/tmux-agents.sh
+  research:
+    name: Research
+    path: __RUNTIME__/groups/research
+    default_integration: copilot
+    agents: []
+    workspaces: []
