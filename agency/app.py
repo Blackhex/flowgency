@@ -354,7 +354,8 @@ async def lifespan(app: FastAPI):
             {
                 group_id: {"path": str(group.path)}
                 for group_id, group in snapshot.config.groups.items()
-            }
+            },
+            memory_store_root=snapshot.config.agency.memory_store,
         )
     yield
 
@@ -1594,6 +1595,7 @@ async def admin_org_new(request: Request):
         "workspace_types_json": _workspace_types_json(),
         "agent_infos": [],
         "warning": "",
+        "revision": snapshot.revision,
     })
 
 

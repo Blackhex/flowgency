@@ -110,6 +110,47 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, canonical_raw_
     assert "reload" in response.text.lower()
 
 
+def test_stale_group_create_returns_conflict_without_writing_group(
+    monkeypatch,
+    tmp_path,
+    canonical_raw_config,
+):
+    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+    response = client.get("/admin/orgs/new")
+    forms = [
+        form
+        for form in _parse_forms(response.text)
+        if form["attrs"].get("action") == "/admin/orgs/create"
+    ]
+    inputs = {
+        item["name"]: item
+        for item in forms[0]["inputs"]
+        if item.get("name")
+    }
+    stale = store.load().revision
+    store.patch(
+        stale,
+        lambda raw: raw["agency"].__setitem__("title", "Elsewhere"),
+    )
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "revision": stale,
+            "key": "new-group",
+            "name": "New Group",
+            "path": str(tmp_path / "groups" / "new-group"),
+            "default_integration": "copilot",
+            "workspaces_json": "[]",
+        },
+        follow_redirects=False,
+    )
+
+    assert inputs["revision"]["value"] == stale
+    assert response.status_code == 409
+    assert "new-group" not in store.load().config.groups
+
+
 def test_setup_post_creates_strict_canonical_group_without_scanning_agents(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)

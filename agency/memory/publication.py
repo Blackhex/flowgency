@@ -512,8 +512,8 @@ def _write_transaction_journal(
     payload = {
         "kind": operation.kind,
         "operation_id": operation.operation_id,
-        "job_id": operation.operation_id if operation.kind == "job" else None,
         "selector": operation.selector,
+        "canonical_json": operation.resolved.canonical_json,
         "memory_hash": operation.memory_hash,
         "old_revision": operation.old_revision,
         "new_revision": operation.new_revision,
@@ -522,6 +522,8 @@ def _write_transaction_journal(
         "phase": phase,
         "no_change": operation.no_change,
     }
+    if operation.kind == "job":
+        payload["job_id"] = operation.operation_id
     atomic_write_text(
         operation.journal_path,
         yaml.safe_dump(payload, sort_keys=False),

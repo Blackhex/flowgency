@@ -14,17 +14,28 @@ from agency.memory.recovery import recover_publications
 
 
 class RecoveryFixture:
-    def __init__(self, tmp_path: Path):
+    def __init__(self, tmp_path: Path, *, group_key: str = "news"):
         self.group_path = tmp_path / "group"
         self.group_path.mkdir(parents=True)
         config_path = tmp_path / "config.yaml"
         config_path.write_text("groups: {}\n", encoding="utf-8")
+        self.store_root = tmp_path / "memory-store"
+        self.store = MemoryStore(self.store_root)
+        self.resolved = resolve_memory_selector(
+            MemorySelector(scope="agent"),
+            job_id="recovery-job",
+            group_key=group_key,
+            agent_name="writer",
+            routine_id="publish-memory",
+            channels={},
+            store_root=self.store_root,
+        )
         spec = JobSpec(
             schema_version=2,
             job_id="recovery-job",
             config_path=str(config_path.resolve()),
             config_revision="cfg-1",
-            group_key="news",
+            group_key=group_key,
             group_path=str(self.group_path.resolve()),
             agent_name="writer",
             workspace_dir=str(self.group_path.resolve()),
@@ -50,10 +61,10 @@ class RecoveryFixture:
                 tool_names=(),
             ),
             memory=MemoryBinding(
-                selector={"scope": "agent"},
-                canonical_json='{"scope":"agent"}',
-                memory_hash="memory-hash-1",
-                path=str((tmp_path / "memory-store" / "agent").resolve()),
+                selector=self.resolved.selector.model_dump(mode="python"),
+                canonical_json=self.resolved.canonical_json,
+                memory_hash=self.resolved.memory_hash,
+                path=str(self.resolved.directory.resolve()),
             ),
             trigger_context=None,
             prompt_source={
@@ -68,17 +79,6 @@ class RecoveryFixture:
         )
         write_job(self.job_path, JobRecord.from_spec(spec))
         write_job(self.job_path, JobRecord(spec=spec, status="running"))
-        self.store_root = tmp_path / "memory-store"
-        self.store = MemoryStore(self.store_root)
-        self.resolved = resolve_memory_selector(
-            MemorySelector(scope="agent"),
-            job_id=spec.job_id,
-            group_key="news",
-            agent_name="writer",
-            routine_id=None,
-            channels={},
-            store_root=self.store_root,
-        )
         seeded = self.store.ensure(self.resolved)
         self.store.try_save(
             self.resolved,
@@ -118,7 +118,7 @@ def test_recovery_resolves_job_and_memory_consistently(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        recovery_fixture.job_store,
+        {"news": recovery_fixture.job_store},
     )
     record = recovery_fixture.read_job()
 
@@ -134,7 +134,7 @@ def test_recovery_is_noop_without_publication_journals(tmp_path):
     assert (
         recover_publications(
             tmp_path / "missing-store",
-            tmp_path / "jobs",
+            {},
         ).recovered
         == 0
     )
@@ -158,20 +158,16 @@ def test_recovery_rejects_corrupted_absolute_paths_without_touching_sentinel(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="journal|unsafe|invalid|job"):
-        recover_publications(
-            recovery_fixture.store_root,
-            recovery_fixture.job_store,
-        )
+    result = recover_publications(
+        recovery_fixture.store_root,
+        {"news": recovery_fixture.job_store},
+    )
 
     assert sentinel.read_text(encoding="utf-8") == "do-not-touch"
     assert sentinel.exists()
-    assert not journal_path.exists()
-    assert list(
-        (recovery_fixture.store_root / ".journals" / "_quarantine").glob(
-            "*/*.yaml"
-        )
-    )
+    assert journal_path.exists()
+    assert result.blocked_job_ids == ("recovery-job",)
+    assert result.errors
     assert read_job(recovery_fixture.job_path).status == "running"
 
 
@@ -198,18 +194,14 @@ def test_recovery_rejects_mismatched_journal_identity(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="journal|hash|job"):
-        recover_publications(
-            recovery_fixture.store_root,
-            recovery_fixture.job_store,
-        )
-
-    assert not journal_path.exists()
-    assert list(
-        (recovery_fixture.store_root / ".journals" / "_quarantine").glob(
-            "*/*.yaml"
-        )
+    result = recover_publications(
+        recovery_fixture.store_root,
+        {"news": recovery_fixture.job_store},
     )
+
+    assert journal_path.exists()
+    assert result.blocked_job_ids == ("recovery-job",)
+    assert result.errors
     assert read_job(recovery_fixture.job_path).status == "running"
 
 
@@ -221,19 +213,69 @@ def test_recovery_rejects_journal_filename_mismatch(recovery_fixture):
     mismatched = journal_path.with_name("otherjob.yaml")
     journal_path.rename(mismatched)
 
-    with pytest.raises(ValueError, match="journal|filename|job"):
-        recover_publications(
-            recovery_fixture.store_root,
-            recovery_fixture.job_store,
-        )
-
-    assert not mismatched.exists()
-    assert list(
-        (recovery_fixture.store_root / ".journals" / "_quarantine").glob(
-            "*/*.yaml"
-        )
+    result = recover_publications(
+        recovery_fixture.store_root,
+        {"news": recovery_fixture.job_store},
     )
+
+    assert mismatched.exists()
+    assert result.blocked_job_ids == ("recovery-job",)
+    assert result.errors
     assert read_job(recovery_fixture.job_path).status == "running"
+
+
+def test_recovery_rejects_job_owned_by_wrong_configured_group(tmp_path):
+    forged = RecoveryFixture(tmp_path, group_key="forged")
+    forged.crash_at("published")
+    journal_path = next(
+        (forged.store_root / ".journals").glob("*/*.yaml")
+    )
+
+    result = recover_publications(
+        forged.store_root,
+        {"news": forged.job_store},
+    )
+
+    assert result.recovered == 0
+    assert result.blocked_job_ids == ("recovery-job",)
+    assert "configured group" in result.errors[0]
+    assert journal_path.exists()
+    assert forged.read_job().status == "running"
+
+
+def test_recovery_rejects_changed_journal_with_equal_revisions(
+    recovery_fixture,
+):
+    recovery_fixture.crash_at("published")
+    journal_path = next(
+        (recovery_fixture.store_root / ".journals").glob("*/*.yaml")
+    )
+    payload = yaml.safe_load(journal_path.read_text(encoding="utf-8"))
+    payload["old_revision"] = payload["new_revision"]
+    journal_path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    backup_path = (
+        recovery_fixture.store_root
+        / ".publication-backups"
+        / recovery_fixture.resolved.memory_hash
+        / "recovery-job"
+    )
+    for path in backup_path.iterdir():
+        if path.is_file():
+            path.unlink()
+    for path in recovery_fixture.stage.directory.iterdir():
+        if path.is_file():
+            (backup_path / path.name).write_bytes(path.read_bytes())
+
+    result = recover_publications(
+        recovery_fixture.store_root,
+        {"news": recovery_fixture.job_store},
+    )
+
+    assert result.recovered == 0
+    assert result.blocked_job_ids == ("recovery-job",)
+    assert "revision" in result.errors[0]
+    assert journal_path.exists()
+    assert recovery_fixture.read_job().status == "running"
 
 
 def test_recovery_is_idempotent_for_valid_old_and_new_journals(
@@ -243,11 +285,11 @@ def test_recovery_is_idempotent_for_valid_old_and_new_journals(
 
     first = recover_publications(
         recovery_fixture.store_root,
-        recovery_fixture.job_store,
+        {"news": recovery_fixture.job_store},
     )
     second = recover_publications(
         recovery_fixture.store_root,
-        recovery_fixture.job_store,
+        {"news": recovery_fixture.job_store},
     )
 
     assert first.recovered == 1
@@ -272,7 +314,7 @@ def test_recovery_does_not_complete_prepared_journal_with_matching_new_revision(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        recovery_fixture.job_store,
+        {"news": recovery_fixture.job_store},
     )
 
     assert result.recovered == 0
@@ -286,7 +328,7 @@ def test_recovery_does_not_complete_backed_up_journal_with_matching_new_revision
 
     result = recover_publications(
         recovery_fixture.store_root,
-        recovery_fixture.job_store,
+        {"news": recovery_fixture.job_store},
     )
 
     assert result.recovered == 1
@@ -306,7 +348,7 @@ def test_recovery_holds_canonical_memory_lock_before_reading_journal_state(
     def recover():
         recover_publications(
             recovery_fixture.store_root,
-            recovery_fixture.job_store,
+            {"news": recovery_fixture.job_store},
         )
         finished.set()
 
@@ -319,6 +361,54 @@ def test_recovery_holds_canonical_memory_lock_before_reading_journal_state(
     assert finished.is_set()
 
 
+def test_recovery_rereads_journal_after_waiting_for_live_publisher(
+    recovery_fixture,
+    monkeypatch,
+):
+    recovery_fixture.crash_at("prepared")
+    journal_path = next(
+        (recovery_fixture.store_root / ".journals").glob("*/*.yaml")
+    )
+    identity_read = __import__("threading").Event()
+    original_read_identity = __import__(
+        "agency.memory.recovery",
+        fromlist=["_read_identity"],
+    )._read_identity
+
+    def observed_identity(*args):
+        result = original_read_identity(*args)
+        identity_read.set()
+        return result
+
+    monkeypatch.setattr(
+        "agency.memory.recovery._read_identity",
+        observed_identity,
+    )
+    from agency.fs.locks import exclusive_lock
+    import threading
+
+    outcome = {}
+    lock_path = recovery_fixture.store._lock_path(recovery_fixture.resolved)
+    with exclusive_lock(lock_path, wait=True):
+        worker = threading.Thread(
+            target=lambda: outcome.setdefault(
+                "result",
+                recover_publications(
+                    recovery_fixture.store_root,
+                    {"news": recovery_fixture.job_store},
+                ),
+            )
+        )
+        worker.start()
+        assert identity_read.wait(5)
+        journal_path.unlink()
+    worker.join(5)
+
+    assert not worker.is_alive()
+    assert outcome["result"].errors == ()
+    assert outcome["result"].blocked_job_ids == ()
+
+
 def test_recovery_completes_published_journal_with_matching_new_revision(
     recovery_fixture,
 ):
@@ -326,11 +416,108 @@ def test_recovery_completes_published_journal_with_matching_new_revision(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        recovery_fixture.job_store,
+        {"news": recovery_fixture.job_store},
     )
 
     assert result.recovered == 1
     assert read_job(recovery_fixture.job_path).status == "complete"
+
+
+def test_direct_save_only_recovery_needs_no_job_store(tmp_path):
+    store_root = tmp_path / "memory-store"
+    store = MemoryStore(store_root)
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id="direct-job",
+        group_key="news",
+        agent_name="writer",
+        routine_id=None,
+        channels={},
+        store_root=store_root,
+    )
+    seeded = store.ensure(resolved)
+    current = store.try_save(resolved, seeded.revision, {"memory.md": b"old\n"})
+    from agency.memory.publication import _prepare_direct_transaction, _run_transaction_locked
+    from agency.memory.store import _memory_lock
+
+    operation = _prepare_direct_transaction(
+        resolved,
+        current.files,
+        {"memory.md": b"new\n"},
+    )
+    with _memory_lock(resolved, wait=True):
+        with pytest.raises(Exception):
+            _run_transaction_locked(operation, crash_at="published")
+
+    result = recover_publications(store_root, {})
+
+    assert result.recovered == 1
+    assert result.blocked_job_ids == ()
+    assert store.read(resolved).files == {"memory.md": b"new\n"}
+
+
+def test_duplicate_job_id_across_allowed_stores_establishes_barrier(
+    recovery_fixture,
+    tmp_path,
+):
+    recovery_fixture.crash_at("published")
+    duplicate_store = tmp_path / "other" / "shared" / "jobs"
+    duplicate_store.mkdir(parents=True)
+    duplicate_path = duplicate_store / recovery_fixture.job_path.name
+    duplicate_path.write_bytes(recovery_fixture.job_path.read_bytes())
+    journal_path = next(
+        (recovery_fixture.store_root / ".journals").glob("*/*.yaml")
+    )
+
+    result = recover_publications(
+        recovery_fixture.store_root,
+        {
+            "news": recovery_fixture.job_store,
+            "other": duplicate_store,
+        },
+    )
+
+    assert result.recovered == 0
+    assert result.blocked_job_ids == ("recovery-job",)
+    assert result.errors
+    assert journal_path.exists()
+    assert read_job(recovery_fixture.job_path).status == "running"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda payload: payload.pop("kind"), "kind"),
+        (lambda payload: payload.update(phase="unknown"), "phase"),
+        (lambda payload: payload.update(old_revision="invalid"), "revision"),
+        (lambda payload: payload.update(extra="forbidden"), "keys"),
+        (lambda payload: payload.update(stage_directory="../escape"), "stage"),
+    ],
+)
+def test_invalid_journal_schema_is_a_persistent_barrier(
+    recovery_fixture,
+    mutation,
+    message,
+):
+    recovery_fixture.crash_at("prepared")
+    journal_path = next(
+        (recovery_fixture.store_root / ".journals").glob("*/*.yaml")
+    )
+    payload = yaml.safe_load(journal_path.read_text(encoding="utf-8"))
+    mutation(payload)
+    journal_path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+
+    result = recover_publications(
+        recovery_fixture.store_root,
+        {"news": recovery_fixture.job_store},
+    )
+
+    assert result.recovered == 0
+    assert result.blocked_job_ids == ("recovery-job",)
+    assert message in result.errors[0]
+    assert journal_path.exists()
+    assert recovery_fixture.stage.directory.exists()
+    assert read_job(recovery_fixture.job_path).status == "running"
 
 
 def _run_python(code: str, *args: str, timeout: int = 20):
@@ -395,7 +582,7 @@ from pathlib import Path
 import sys
 from agency.memory.recovery import recover_publications
 
-recover_publications(Path(sys.argv[1]), Path(sys.argv[2]))
+recover_publications(Path(sys.argv[1]), {})
 """
 
     crashed = _run_python(crash_code, str(store_root), phase)

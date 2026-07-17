@@ -22,7 +22,7 @@ from agency.configuration import (
 )
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
-from agency.fs import ResourceBusyError, try_exclusive_lock
+from agency.fs import ResourceBusyError
 from agency.integrations import get_integration
 from agency.jobs import active_jobs
 from agency.memory import MemoryConflictError, resolve_memory_selector
@@ -788,20 +788,14 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
                 channels=snapshot.config.memory.channels,
                 store_root=services.memory_store.root,
             )
-            with try_exclusive_lock(services.memory_store._lock_path(resolved)):
-                pass
-            memory_snapshot = _resolve_tab_memory(snapshot, services, group, agent, effective_selector)
-            files = dict(memory_snapshot.files)
-            if filename not in files:
-                files[filename] = b""
-            files[filename] = content.encode("utf-8")
-            if not content_revision:
-                raise MemoryConflictError(
-                    expected_revision="",
-                    current=memory_snapshot,
-                    attempted_files=files,
-                )
-            services.memory_store.try_save(memory_snapshot.resolved, content_revision, files)
+            services.memory_store.try_update(
+                resolved,
+                content_revision,
+                lambda current: {
+                    **current.files,
+                    filename: content.encode("utf-8"),
+                },
+            )
         else:
             raise ValidationFailed(
                 (

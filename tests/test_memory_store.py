@@ -337,6 +337,81 @@ def test_try_save_reports_nonblocking_busy_ui_save(
         assert process.exitcode == 0
 
 
+def test_try_update_lazy_seeds_and_saves_under_one_lease(
+    memory_store,
+    resolved_memory,
+):
+    empty_revision = memory_content_revision({"memory.md": b""})
+    seen = []
+
+    saved = memory_store.try_update(
+        resolved_memory,
+        empty_revision,
+        lambda current: (
+            seen.append(current.files)
+            or {**current.files, "memory.md": b"created"}
+        ),
+    )
+
+    assert seen == [{"memory.md": b""}]
+    assert saved.files == {"memory.md": b"created"}
+
+
+def test_try_update_preserves_siblings(memory_store, resolved_memory):
+    seeded = memory_store.ensure(resolved_memory)
+    current = memory_store.try_save(
+        resolved_memory,
+        seeded.revision,
+        {"memory.md": b"old", "notes.md": b"keep"},
+    )
+
+    saved = memory_store.try_update(
+        resolved_memory,
+        current.revision,
+        lambda snapshot: {**snapshot.files, "memory.md": b"new"},
+    )
+
+    assert saved.files == {"memory.md": b"new", "notes.md": b"keep"}
+
+
+def test_try_update_stale_conflict_preserves_attempted_content(
+    memory_store,
+    resolved_memory,
+):
+    seeded = memory_store.ensure(resolved_memory)
+    current = memory_store.try_save(
+        resolved_memory,
+        seeded.revision,
+        {"memory.md": b"server"},
+    )
+
+    with pytest.raises(MemoryConflictError) as excinfo:
+        memory_store.try_update(
+            resolved_memory,
+            seeded.revision,
+            lambda snapshot: {**snapshot.files, "memory.md": b"client"},
+        )
+
+    assert excinfo.value.current.revision == current.revision
+    assert excinfo.value.attempted_files["memory.md"] == b"client"
+
+
+def test_try_update_rejects_invalid_filename_without_mutation(
+    memory_store,
+    resolved_memory,
+):
+    seeded = memory_store.ensure(resolved_memory)
+
+    with pytest.raises(ValueError, match="filename"):
+        memory_store.try_update(
+            resolved_memory,
+            seeded.revision,
+            lambda snapshot: {**snapshot.files, "../escape.md": b"bad"},
+        )
+
+    assert memory_store.read(resolved_memory).files == seeded.files
+
+
 def test_try_save_rejects_hostile_backups_symlink_and_preserves_sentinel(
     memory_store,
     resolved_memory,

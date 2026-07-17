@@ -71,10 +71,17 @@ def running_decision_job(tmp_path: Path, pid: int = 999999):
     return group, decision, path
 
 
+def reconcile_for_test(groups, tmp_path, *, memory_store_root=None):
+    return reconcile_jobs(
+        groups,
+        memory_store_root=memory_store_root or (tmp_path / "memory"),
+    )
+
+
 def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
     group, decision, path = running_decision_job(tmp_path)
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: True)
-    result = reconcile_jobs({"test": {"path": str(group)}})
+    result = reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
     assert result.left_running == 1
     assert read_job(path).status == "running"
     assert "execution_status: running" in decision.read_text()
@@ -83,7 +90,7 @@ def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
 def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
     group, decision, path = running_decision_job(tmp_path)
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
-    result = reconcile_jobs({"test": {"path": str(group)}})
+    result = reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
     assert result.failed == 1
     record = read_job(path)
     assert record.status == "failed"
@@ -106,7 +113,7 @@ def test_reconcile_releases_pin_for_dead_waiting_worker(tmp_path, monkeypatch):
 
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
 
-    result = reconcile_jobs({"test": {"path": str(group)}})
+    result = reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
 
     assert result.failed == 1
     assert active_pins(record.spec.blueprint.cache_root, artifact.ref) == ()
@@ -134,11 +141,12 @@ def test_reconcile_releases_pin_for_dead_running_worker_but_keeps_live_pin(
         lambda pid: False if pid == 999999 else True,
     )
 
-    result = reconcile_jobs(
+    result = reconcile_for_test(
         {
             "dead": {"path": str(dead_group)},
             "live": {"path": str(live_group)},
-        }
+        },
+        tmp_path,
     )
 
     assert result.failed == 1
@@ -162,7 +170,7 @@ def test_reconcile_projects_terminal_job_to_stale_decision(tmp_path):
         ),
     )
 
-    reconcile_jobs({"test": {"path": str(group)}})
+    reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
 
     decision_text = decision.read_text()
     assert "execution_status: failed" in decision_text
@@ -191,7 +199,7 @@ def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
         ),
     )
 
-    reconcile_jobs({"test": {"path": str(group)}})
+    reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
 
     metadata = yaml.safe_load(decision.read_text().split("---")[1])
     assert metadata["execution_status"] == "complete"
@@ -205,7 +213,7 @@ def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
 def test_reconcile_leaves_uncertain_worker_running(tmp_path, monkeypatch):
     group, _, path = running_decision_job(tmp_path)
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: None)
-    result = reconcile_jobs({"test": {"path": str(group)}})
+    result = reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
     assert result.left_running == 1
     assert read_job(path).status == "running"
 
@@ -220,7 +228,7 @@ def test_reconcile_fails_dead_waiting_worker(tmp_path, monkeypatch):
 
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
 
-    result = reconcile_jobs({"test": {"path": str(group)}})
+    result = reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
 
     assert result.failed == 1
     reconciled = read_job(path)
@@ -313,7 +321,11 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
 
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
 
-    result = reconcile_jobs({"test": {"path": str(group)}})
+    result = reconcile_for_test(
+        {"test": {"path": str(group)}},
+        tmp_path,
+        memory_store_root=store_root,
+    )
 
     assert result.failed == 0
     assert read_job(path).status == "complete"
@@ -325,7 +337,7 @@ def test_superseded_running_decision_without_job_id_is_not_failed(tmp_path):
     decision = group / "shared" / "decisions" / "superseded.md"
     decision.parent.mkdir(parents=True)
     decision.write_text("---\nexecution_status: running\n---\n")
-    reconcile_jobs({"test": {"path": str(group)}})
+    reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
     assert "execution_status: running" in decision.read_text()
 
 
@@ -334,11 +346,73 @@ def test_reconcile_ignores_malformed_job_and_logs_warning(tmp_path, caplog):
     jobs.mkdir(parents=True)
     (jobs / "broken.yaml").write_text("spec: [")
 
-    result = reconcile_jobs({"test": {"path": str(tmp_path / "group")}})
+    result = reconcile_for_test(
+        {"test": {"path": str(tmp_path / "group")}},
+        tmp_path,
+    )
 
     assert result.failed == 0
     assert result.left_running == 0
     assert "broken.yaml" in caplog.text
+
+
+def test_reconcile_invokes_global_recovery_once_with_no_job_records(
+    tmp_path,
+    monkeypatch,
+):
+    from agency.memory.recovery import RecoveryResult
+
+    group_a = tmp_path / "a"
+    group_b = tmp_path / "b"
+    calls = []
+
+    def observe(store_root, job_stores):
+        calls.append((Path(store_root), dict(job_stores)))
+        return RecoveryResult()
+
+    monkeypatch.setattr("agency.jobs.reconciliation.recover_publications", observe)
+
+    reconcile_jobs(
+        {
+            "a": {"path": str(group_a)},
+            "b": {"path": str(group_b)},
+        },
+        memory_store_root=tmp_path / "memory-store",
+    )
+
+    assert calls == [
+        (
+            tmp_path / "memory-store",
+            {
+                "a": (group_a / "shared" / "jobs").resolve(),
+                "b": (group_b / "shared" / "jobs").resolve(),
+            },
+        )
+    ]
+
+
+def test_reconcile_does_not_fail_recovery_blocked_dead_job(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    from agency.memory.recovery import RecoveryResult
+
+    group, _, path = running_decision_job(tmp_path)
+    monkeypatch.setattr(
+        "agency.jobs.reconciliation.recover_publications",
+        lambda *args: RecoveryResult(
+            blocked_job_ids=("decision-job",),
+            errors=("persistent recovery barrier",),
+        ),
+    )
+    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+
+    result = reconcile_for_test({"test": {"path": str(group)}}, tmp_path)
+
+    assert result.failed == 0
+    assert read_job(path).status == "running"
+    assert "manual intervention" in caplog.text
 
 
 def test_worker_alive_rejects_missing_and_invalid_pids():

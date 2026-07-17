@@ -7,7 +7,7 @@ from pathlib import Path
 from agency.blueprints import BlueprintLibrary, CompilationCache
 from agency.configuration.models import AgentInstance, Routine
 from agency.configuration.issues import ValidationFailed, ValidationIssue
-from agency.configuration.store import ConfigStore
+from agency.configuration.store import ConfigSnapshot, ConfigStore
 from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
@@ -116,8 +116,9 @@ def resolve_job_request(
     library: BlueprintLibrary,
     cache: CompilationCache,
     integrations: Mapping[str, BaseIntegration],
+    snapshot: ConfigSnapshot | None = None,
 ) -> JobSpec:
-    snapshot = config_store.load()
+    snapshot = snapshot or config_store.load()
     try:
         group = snapshot.config.groups[request.group_key]
     except KeyError as exc:

@@ -135,6 +135,7 @@ def test_admin_org_create_persists_sandbox_root(tmp_path, monkeypatch, canonical
     response = client.post(
         "/admin/orgs/create",
         data={
+            "revision": store.load().revision,
             "key": "new",
             "name": "New Group",
             "path": str(tmp_path / "new-agents"),
@@ -159,6 +160,7 @@ def test_admin_org_create_omits_sandbox_root_when_empty(tmp_path, monkeypatch, c
     response = client.post(
         "/admin/orgs/create",
         data={
+            "revision": store.load().revision,
             "key": "new",
             "name": "New Group",
             "path": str(tmp_path / "new-agents"),
@@ -353,6 +355,7 @@ def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch, ca
     response = client.post(
         "/admin/orgs/create",
         data={
+            "revision": store.load().revision,
             "key": "new",
             "name": "New Group",
             "path": str(tmp_path / "new-agents"),
@@ -384,6 +387,7 @@ def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
     response = client.post(
         "/admin/orgs/create",
         data={
+            "revision": store.load().revision,
             "key": "copilot-group",
             "name": "Copilot Group",
             "path": str(tmp_path / "new-agents"),
@@ -447,6 +451,7 @@ def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
     response = client.post(
         "/admin/orgs/create",
         data={
+            "revision": store.load().revision,
             "key": "new",
             "name": "New Group",
             "path": str(tmp_path / "new-agents"),

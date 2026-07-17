@@ -171,6 +171,28 @@ def test_submit_request_persists_validated_canonical_snapshot(tmp_path):
     assert record.spec.routine_id == "daily-review"
 
 
+def test_submit_resolves_from_locked_second_snapshot_without_third_load(
+    tmp_path,
+    monkeypatch,
+):
+    request = configured_request(tmp_path)
+    launcher = Mock()
+    launcher.launch.return_value = LaunchResult(worker_pid=4321)
+    original_load = ConfigStore.load
+    load_count = 0
+
+    def counted_load(self, *args, **kwargs):
+        nonlocal load_count
+        load_count += 1
+        return original_load(self, *args, **kwargs)
+
+    monkeypatch.setattr(ConfigStore, "load", counted_load)
+
+    submit_job_request(request, launcher)
+
+    assert load_count == 2
+
+
 def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
     config = _write_config(tmp_path, timeout=1800, command="echo first")
     _write_blueprint(tmp_path / "agent-library")
@@ -282,10 +304,10 @@ def test_submit_blocks_move_and_move_then_observes_active_job(
     release_resolve = threading.Event()
     original_resolve = submission._resolve_request
 
-    def gated_resolve(job_request):
+    def gated_resolve(job_request, locked_snapshot):
         resolve_started.set()
         assert release_resolve.wait(timeout=5)
-        return original_resolve(job_request)
+        return original_resolve(job_request, locked_snapshot)
 
     monkeypatch.setattr(submission, "_resolve_request", gated_resolve)
 

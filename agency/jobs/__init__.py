@@ -21,10 +21,10 @@ from .store import active_jobs, cancel_job
 from .submission import JobSubmissionError, submit_job_request
 
 
-def reconcile_jobs(groups: dict):
+def reconcile_jobs(groups: dict, *, memory_store_root):
     from .reconciliation import reconcile_jobs as _reconcile_jobs
 
-    return _reconcile_jobs(groups)
+    return _reconcile_jobs(groups, memory_store_root=memory_store_root)
 
 __all__ = [
     "DetachedProcessLauncher",

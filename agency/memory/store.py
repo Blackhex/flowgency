@@ -11,9 +11,10 @@ import stat
 import tempfile
 import unicodedata
 from pathlib import Path
+from typing import TypeVar
 
 from agency.fs.atomic import atomic_write_bytes
-from agency.fs.locks import exclusive_lock, try_exclusive_lock
+from agency.fs.locks import exclusive_lock
 
 from .models import (
     MemoryConflictError,
@@ -25,6 +26,7 @@ from .models import (
 
 
 _REVISION_DOMAIN = b"agency-memory-content:v1\0"
+_ResultT = TypeVar("_ResultT")
 _LOWER_HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 _WINDOWS_RESERVED_NAMES = {
     "CON",
@@ -185,21 +187,29 @@ def try_save_memory(
     expected_revision: str,
     files: Mapping[str, bytes],
 ) -> MemorySnapshot:
+    return try_update_memory(
+        resolved,
+        expected_revision,
+        lambda _current: files,
+    )
+
+
+def try_update_memory(
+    resolved: ResolvedMemory,
+    expected_revision: str,
+    updater: Callable[[MemorySnapshot], Mapping[str, bytes]],
+) -> MemorySnapshot:
     _validate_resolved_memory(resolved)
-    normalized = _normalize_candidate_files(files)
     with _memory_lock(resolved, wait=False) as lease:
-        current_files = _read_canonical_files(resolved.directory)
-        current = MemorySnapshot(
-            resolved=resolved,
-            files=current_files,
-            revision=memory_content_revision(current_files),
-        )
+        current = _ensure_memory_locked(resolved, lease)
         if current.revision != expected_revision:
+            attempted = _normalize_candidate_files(updater(current))
             raise MemoryConflictError(
                 expected_revision=expected_revision,
                 current=current,
-                attempted_files=normalized,
+                attempted_files=attempted,
             )
+        normalized = _normalize_candidate_files(updater(current))
         from .publication import _save_direct_locked
 
         return _save_direct_locked(
@@ -244,6 +254,24 @@ class MemoryStore:
         _validate_resolved_memory(resolved, expected_root=self.root)
         return try_save_memory(resolved, expected_revision, files)
 
+    def try_update(
+        self,
+        resolved: ResolvedMemory,
+        expected_revision: str,
+        updater: Callable[[MemorySnapshot], Mapping[str, bytes]],
+    ) -> MemorySnapshot:
+        _validate_resolved_memory(resolved, expected_root=self.root)
+        return try_update_memory(resolved, expected_revision, updater)
+
+    def try_locked(
+        self,
+        resolved: ResolvedMemory,
+        operation: Callable[[], _ResultT],
+    ) -> _ResultT:
+        _validate_resolved_memory(resolved, expected_root=self.root)
+        with _memory_lock(resolved, wait=False):
+            return operation()
+
 
 def _store_root(resolved: ResolvedMemory) -> Path:
     return resolved.directory.parent
@@ -286,7 +314,9 @@ def _validate_memory_hash(memory_hash: str) -> str:
     if not isinstance(memory_hash, str):
         raise TypeError("memory hash must be a string")
     if not _LOWER_HEX_64_RE.fullmatch(memory_hash):
-        raise ValueError("memory hash must be exactly 64 lowercase hex characters")
+        raise ValueError(
+            "memory hash must be exactly 64 lowercase hex characters"
+        )
     return memory_hash
 
 

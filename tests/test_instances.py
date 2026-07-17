@@ -759,9 +759,9 @@ def test_submit_cannot_slip_past_create_group_lock(
         assert release_create.wait(timeout=5)
         return original_create(store, expected_revision, group_id, agent)
 
-    def gated_resolve(job_request):
+    def gated_resolve(job_request, locked_snapshot):
         submit_resolve_started.set()
-        return original_resolve(job_request)
+        return original_resolve(job_request, locked_snapshot)
 
     monkeypatch.setattr(instances_module, "create_agent_instance", gated_create)
     monkeypatch.setattr(submission_module, "_resolve_request", gated_resolve)
@@ -854,9 +854,9 @@ def test_move_holds_group_lock_and_concurrent_submit_re_resolves_after_move(
     resolve_called = threading.Event()
     original_resolve = submission._resolve_request
 
-    def record_resolve(job_request):
+    def record_resolve(job_request, locked_snapshot):
         resolve_called.set()
-        return original_resolve(job_request)
+        return original_resolve(job_request, locked_snapshot)
 
     monkeypatch.setattr(submission, "_resolve_request", record_resolve)
 
@@ -970,9 +970,9 @@ def test_remove_uses_group_lock_to_block_new_submissions(
     resolve_called = threading.Event()
     original_resolve = submission._resolve_request
 
-    def record_resolve(job_request):
+    def record_resolve(job_request, locked_snapshot):
         resolve_called.set()
-        return original_resolve(job_request)
+        return original_resolve(job_request, locked_snapshot)
 
     monkeypatch.setattr(submission, "_resolve_request", record_resolve)
 

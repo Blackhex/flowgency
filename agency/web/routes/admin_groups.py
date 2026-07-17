@@ -18,6 +18,7 @@ from agency.configuration import (
     validate_config_canonical,
 )
 from agency.integrations import REGISTRY
+from agency.jobs.store import revision_bound_group_operation
 from agency.web.dependencies import AgencyServices, get_services
 
 
@@ -164,6 +165,13 @@ def _split_lines(text: str) -> list[str]:
 
 def _integration_names() -> list[str]:
     return sorted(REGISTRY)
+
+
+def _canonical_group_path(config_path: Path, value: str) -> Path:
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = config_path.parent / candidate
+    return candidate.resolve()
 
 
 @router.get("/setup", response_class=HTMLResponse)
@@ -363,24 +371,32 @@ async def admin_org_save(
         )
 
     try:
-        patch_group_settings_state(
+        with revision_bound_group_operation(
             services.config_store,
-            revision,
-            org,
-            GroupSettingsStatePatch(
-                name=name,
-                path=path,
-                default_integration=default_integration,
-                runtime_timeout=runtime_timeout,
-                sandbox_mode=sandbox_mode,
-                sandbox_roots=tuple(sandbox_roots),
-                tool_mode=tool_mode,
-                tool_names=tuple(tool_names),
-                dispatch_enabled=dispatch_enabled,
-                dispatch_daily_limit=daily_limit,
-                workspaces=tuple(workspaces),
+            group_ids=(org,),
+            proposed_paths=(
+                _canonical_group_path(services.config_path, path),
             ),
-        )
+            expected_revision=revision,
+        ) as locked:
+            patch_group_settings_state(
+                services.config_store,
+                locked.revision,
+                org,
+                GroupSettingsStatePatch(
+                    name=name,
+                    path=path,
+                    default_integration=default_integration,
+                    runtime_timeout=runtime_timeout,
+                    sandbox_mode=sandbox_mode,
+                    sandbox_roots=tuple(sandbox_roots),
+                    tool_mode=tool_mode,
+                    tool_names=tuple(tool_names),
+                    dispatch_enabled=dispatch_enabled,
+                    dispatch_daily_limit=daily_limit,
+                    workspaces=tuple(workspaces),
+                ),
+            )
     except ConfigConflictError:
         snapshot = services.config_store.load()
         return _group_settings_response(
@@ -403,6 +419,7 @@ async def admin_org_create(
     if services.startup_error is not None:
         return _setup_response(request, services)
     form = await request.form()
+    revision = str(form.get("revision", "")).strip()
     key = str(form.get("key", "")).strip().lower().replace(" ", "-")
     name = str(form.get("name", "")).strip()
     path = str(form.get("path", "")).strip()
@@ -417,11 +434,14 @@ async def admin_org_create(
                 "org_key": key,
                 "org_name": name,
                 "org_path": path,
-                "default_integration": str(form.get("default_integration", "")).strip(),
+                "default_integration": str(
+                    form.get("default_integration", "")
+                ).strip(),
                 "org_workspaces_json": str(form.get("workspaces_json", "[]")),
                 "workspace_types_json": _workspace_types_json(request),
                 "warning": "Key, name, and path are required.",
                 "integration_names": _integration_names(),
+                "revision": snapshot.revision,
             },
         )
     snapshot = services.config_store.load()
@@ -440,8 +460,11 @@ async def admin_org_create(
                 "default_integration": default_integration,
                 "org_workspaces_json": str(form.get("workspaces_json", "[]")),
                 "workspace_types_json": _workspace_types_json(request),
-                "warning": f"Integration '{default_integration}' is not registered.",
+                "warning": (
+                    f"Integration '{default_integration}' is not registered."
+                ),
                 "integration_names": _integration_names(),
+                "revision": snapshot.revision,
             },
             status_code=409,
         )
@@ -468,27 +491,56 @@ async def admin_org_create(
                 "workspace_types_json": _workspace_types_json(request),
                 "warning": "Workspaces payload is invalid.",
                 "integration_names": _integration_names(),
+                "revision": snapshot.revision,
             },
             status_code=409,
         )
-    create_group_state(
-        services.config_store,
-        snapshot.revision,
-        key,
-        GroupCreateStatePatch(
-            name=name,
-            path=path,
-            default_integration=default_integration or "claude-code",
-            runtime_timeout=1800,
-            sandbox_mode="restricted" if roots else "unrestricted",
-            sandbox_roots=tuple(roots),
-            tool_mode="allowlist" if tools else "all",
-            tool_names=tuple(tools),
-            dispatch_enabled=False,
-            dispatch_daily_limit=20,
-            workspaces=tuple(workspaces),
-        ),
-    )
+    try:
+        with revision_bound_group_operation(
+            services.config_store,
+            proposed_paths=(
+                _canonical_group_path(services.config_path, path),
+            ),
+            expected_revision=revision,
+        ) as locked:
+            create_group_state(
+                services.config_store,
+                locked.revision,
+                key,
+                GroupCreateStatePatch(
+                    name=name,
+                    path=path,
+                    default_integration=default_integration or "claude-code",
+                    runtime_timeout=1800,
+                    sandbox_mode="restricted" if roots else "unrestricted",
+                    sandbox_roots=tuple(roots),
+                    tool_mode="allowlist" if tools else "all",
+                    tool_names=tuple(tools),
+                    dispatch_enabled=False,
+                    dispatch_daily_limit=20,
+                    workspaces=tuple(workspaces),
+                ),
+            )
+    except ConfigConflictError:
+        current = services.config_store.load()
+        return _templates(request).TemplateResponse(
+            request,
+            "admin_org_edit.html",
+            {
+                **_base_admin_context(request, current),
+                "mode": "create",
+                "org_key": key,
+                "org_name": name,
+                "org_path": path,
+                "default_integration": default_integration,
+                "org_workspaces_json": workspaces_json,
+                "workspace_types_json": _workspace_types_json(request),
+                "warning": "Configuration changed. Reload before saving.",
+                "integration_names": _integration_names(),
+                "revision": current.revision,
+            },
+            status_code=409,
+        )
     request.app.state.refresh_services()
     return RedirectResponse("/admin/groups", status_code=303)
 
@@ -504,11 +556,16 @@ async def admin_org_delete(
     snapshot = services.config_store.load()
     revision = str((await request.form()).get("revision", "")).strip()
     try:
-        delete_group(
+        with revision_bound_group_operation(
             services.config_store,
-            revision or snapshot.revision,
-            org,
-        )
+            group_ids=(org,),
+            expected_revision=revision or snapshot.revision,
+        ) as locked:
+            delete_group(
+                services.config_store,
+                locked.revision,
+                org,
+            )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ConfigConflictError:
@@ -532,7 +589,9 @@ async def admin_org_delete(
                     for key, group in current.config.groups.items()
                 ],
                 "revision": current.revision,
-                "dispatch_error": "Configuration changed. Reload before deleting.",
+                "dispatch_error": (
+                    "Configuration changed. Reload before deleting."
+                ),
             },
             status_code=409,
         )

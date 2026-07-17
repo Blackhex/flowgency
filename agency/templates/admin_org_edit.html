@@ -18,9 +18,7 @@
 
   <form method="post" action="{% if mode == 'create' %}/admin/orgs/create{% else %}/admin/orgs/{{ org_key }}/save{% endif %}"
         class="bg-white rounded-xl border border-gray-200 p-6 space-y-6 mb-8">
-    {% if mode != 'create' %}
     <input type="hidden" name="revision" value="{{ revision }}">
-    {% endif %}
 
     <div>
       <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wider">Group Settings</h2>

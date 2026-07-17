@@ -745,10 +745,11 @@ def cmd_memory_save(args: Namespace) -> int:
     )
     resolved = _resolve_memory(args, services, snapshot)
     payload = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode("utf-8")
-    current = store.read(resolved, wait=False)
-    candidate_files = dict(current.files)
-    candidate_files[args.file] = payload
-    saved = store.try_save(resolved, args.revision, candidate_files)
+    saved = store.try_update(
+        resolved,
+        args.revision,
+        lambda current: {**current.files, args.file: payload},
+    )
     result = {"revision": saved.revision, "file": args.file}
     _print_json(result) if args.json else print(f"Saved {args.file}; revision {saved.revision}")
     return 0

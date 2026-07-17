@@ -1,6 +1,6 @@
 """Atomic YAML persistence for durable agent jobs."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 import os
 from pathlib import Path
@@ -10,6 +10,11 @@ from typing import Any
 import yaml
 
 from agency.fs.locks import exclusive_lock
+from agency.configuration.store import (
+    ConfigConflictError,
+    ConfigSnapshot,
+    ConfigStore,
+)
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.models import JobRecord
 
@@ -59,6 +64,63 @@ def acquire_group_operation_locks(*group_paths: Path) -> ExitStack:
         stack.close()
         raise
     return stack
+
+
+@contextmanager
+def revision_bound_group_operation(
+    config_store: ConfigStore,
+    *,
+    group_ids: tuple[str, ...] = (),
+    proposed_paths: tuple[Path, ...] = (),
+    all_groups: bool = False,
+    expected_revision: str | None = None,
+):
+    initial = config_store.load()
+    relevant_ids = (
+        tuple(sorted(initial.config.groups))
+        if all_groups
+        else tuple(sorted(set(group_ids)))
+    )
+    initial_identity = _group_path_identity(initial, relevant_ids)
+    lock_paths = tuple(initial_identity.values()) + tuple(proposed_paths)
+    with acquire_group_operation_locks(*lock_paths):
+        locked = config_store.load()
+        locked_ids = (
+            tuple(sorted(locked.config.groups))
+            if all_groups
+            else relevant_ids
+        )
+        if (
+            locked.revision != initial.revision
+            or locked_ids != relevant_ids
+            or _group_path_identity(locked, locked_ids) != initial_identity
+        ):
+            raise ConfigConflictError(
+                "config group paths changed while acquiring operation locks"
+            )
+        if (
+            expected_revision is not None
+            and locked.revision != expected_revision
+        ):
+            raise ConfigConflictError(
+                "config.yaml changed; reload before saving"
+            )
+        yield locked
+
+
+def _group_path_identity(
+    snapshot: ConfigSnapshot,
+    group_ids: tuple[str, ...],
+) -> dict[str, Path]:
+    identity: dict[str, Path] = {}
+    for group_id in group_ids:
+        try:
+            identity[group_id] = (
+                snapshot.config.groups[group_id].path.resolve()
+            )
+        except KeyError as exc:
+            raise ValueError(f"Unknown group: {group_id}") from exc
+    return identity
 
 
 def write_job(path: Path, record: JobRecord) -> None:

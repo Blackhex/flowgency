@@ -61,17 +61,41 @@ def worker_alive(pid: int | None) -> bool | None:
         return None
 
 
-def reconcile_jobs(groups: dict) -> ReconciliationResult:
+def reconcile_jobs(
+    groups: dict,
+    *,
+    memory_store_root: Path,
+) -> ReconciliationResult:
     """Fail running jobs only when their worker is confirmed absent."""
     failed = 0
     left_running = 0
+    job_stores = {
+        group_id: Path(group["path"]).resolve() / "shared" / "jobs"
+        for group_id, group in sorted(groups.items())
+        if group.get("path")
+    }
+    blocked_job_ids: set[str] = set()
+    recovery_unavailable = False
+    try:
+        recovery = recover_publications(memory_store_root, job_stores)
+        blocked_job_ids.update(recovery.blocked_job_ids)
+        for error in recovery.errors:
+            logger.warning(
+                "Memory recovery requires manual intervention: %s",
+                error,
+            )
+    except Exception as error:
+        recovery_unavailable = True
+        logger.warning(
+            "Global memory recovery failed and requires manual intervention: %s",
+            error,
+        )
     for group in groups.values():
         group_path = group.get("path")
         if not group_path:
             continue
         jobs_dir = Path(group_path) / "shared" / "jobs"
         records: list[tuple[Path, object]] = []
-        memory_roots: set[Path] = set()
         for path in jobs_dir.glob("*.yaml"):
             try:
                 record = read_job(path)
@@ -79,21 +103,18 @@ def reconcile_jobs(groups: dict) -> ReconciliationResult:
                 logger.warning("Ignoring malformed job record %s: %s", path, error)
                 continue
             records.append((path, record))
-            memory_roots.add(Path(record.spec.memory.path).parent)
-        for root in sorted(memory_roots):
-            try:
-                recover_publications(root, jobs_dir)
-            except Exception as error:
-                logger.warning(
-                    "Failed to recover memory publications for %s: %s",
-                    group_path,
-                    error,
-                )
         for path, _ in records:
             try:
                 record = read_job(path)
             except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
                 logger.warning("Ignoring malformed job record %s: %s", path, error)
+                continue
+            if recovery_unavailable or record.spec.job_id in blocked_job_ids:
+                logger.warning(
+                    "Skipping reconciliation for job %s because memory "
+                    "recovery requires manual intervention",
+                    record.spec.job_id,
+                )
                 continue
             if record.status in {"complete", "failed"}:
                 try:

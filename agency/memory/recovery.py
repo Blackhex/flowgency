@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ import yaml
 
 from agency.configuration.models import MemorySelector
 from agency.jobs.store import read_job
+from agency.memory.selectors import resolve_memory_selector
 
 from .models import (
     MemoryPublicationReceipt,
@@ -18,7 +20,6 @@ from .publication import _cleanup_paths, _mark_complete, _mark_failed
 from .store import (
     _canonical_directory,
     _ensure_actual_directory,
-    _ensure_child_directory,
     _ensure_infrastructure_directory,
     _is_symlink_or_reparse,
     _memory_lock,
@@ -32,46 +33,175 @@ from .store import (
 @dataclass(frozen=True)
 class RecoveryResult:
     recovered: int = 0
+    blocked_job_ids: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
 
 
-def recover_publications(store_root: Path, job_store: Path) -> RecoveryResult:
+def recover_publications(
+    store_root: Path,
+    job_stores: Mapping[str, Path],
+) -> RecoveryResult:
     store_root = _ensure_actual_directory(
         Path(store_root),
         label="memory",
         create=True,
     )
-    job_store = _ensure_actual_directory(
-        Path(job_store),
-        label="job",
-        create=True,
-    )
+    allowed_job_stores = _validate_job_stores(job_stores)
     journals_root = store_root / ".journals"
     if not journals_root.exists():
         return RecoveryResult()
     journals_root = _ensure_actual_directory(journals_root, label="journal")
 
     recovered = 0
+    blocked_job_ids: set[str] = set()
+    errors: list[str] = []
     for journal_path in sorted(
         journals_root.glob("*/*.yaml"),
         key=lambda path: (path.parent.name, path.name),
     ):
-        payload = (
-            yaml.safe_load(journal_path.read_text(encoding="utf-8"))
-            or {}
-        )
         try:
-            operation = _operation_from_payload(
-                payload,
-                journal_path,
-                store_root,
-                job_store,
+            identity = _read_identity(journal_path, store_root)
+            resolved = ResolvedMemory(
+                selector=MemorySelector(scope="run"),
+                canonical_json="",
+                memory_hash=identity.memory_hash,
+                directory=store_root / identity.memory_hash,
             )
-        except Exception:
-            _quarantine_journal(store_root, journal_path)
-            raise
-        with _memory_lock(operation.resolved, wait=True):
-            recovered += _recover_locked(operation)
-    return RecoveryResult(recovered=recovered)
+            with _memory_lock(resolved, wait=True):
+                try:
+                    payload = _read_payload(journal_path)
+                except FileNotFoundError:
+                    continue
+                operation = _operation_from_payload(
+                    payload,
+                    journal_path,
+                    store_root,
+                    allowed_job_stores,
+                )
+                recovered += _recover_locked(operation)
+        except Exception as error:
+            blocked_job_ids.update(
+                _barrier_job_ids(journal_path, allowed_job_stores)
+            )
+            errors.append(f"{journal_path}: {error}")
+            continue
+    return RecoveryResult(
+        recovered=recovered,
+        blocked_job_ids=tuple(sorted(blocked_job_ids)),
+        errors=tuple(errors),
+    )
+
+
+@dataclass(frozen=True)
+class _JournalIdentity:
+    memory_hash: str
+    operation_id: str
+
+
+def _read_identity(journal_path: Path, store_root: Path) -> _JournalIdentity:
+    if _is_symlink_or_reparse(journal_path):
+        raise ValueError("journal path is unsafe")
+    canonical = journal_path.resolve(strict=False)
+    if canonical.parent.parent != (store_root / ".journals").resolve():
+        raise ValueError("journal path escapes journal store")
+    memory_hash = _validate_memory_hash(canonical.parent.name)
+    operation_id = _operation_id_from_path(canonical)
+    if operation_id is None:
+        raise ValueError("journal filename operation id is invalid")
+    return _JournalIdentity(memory_hash, operation_id)
+
+
+def _read_payload(journal_path: Path) -> dict[str, Any]:
+    loaded = yaml.safe_load(journal_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError("journal must decode to a mapping")
+    return loaded
+
+
+def _operation_id_from_path(journal_path: Path) -> str | None:
+    if journal_path.suffix != ".yaml":
+        return None
+    try:
+        return _validate_job_id(journal_path.stem)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
+class _JobStoreOwner:
+    group_id: str
+    path: Path
+
+
+def _validate_job_stores(
+    job_stores: Mapping[str, Path],
+) -> tuple[_JobStoreOwner, ...]:
+    if not isinstance(job_stores, Mapping):
+        raise TypeError("job stores must map configured group ids to paths")
+    validated: list[_JobStoreOwner] = []
+    seen: set[Path] = set()
+    for group_id, value in job_stores.items():
+        if not isinstance(group_id, str) or not group_id:
+            raise ValueError("job store owner must be a configured group id")
+        candidate = Path(value).expanduser()
+        if candidate.name != "jobs" or candidate.parent.name != "shared":
+            raise ValueError(
+                "job store must be a direct shared/jobs directory"
+            )
+        components = (candidate.parent.parent, candidate.parent, candidate)
+        for component in components:
+            if component.exists() and _is_symlink_or_reparse(component):
+                raise ValueError("job store is unsafe")
+        canonical = candidate.resolve(strict=False)
+        if canonical.name != "jobs" or canonical.parent.name != "shared":
+            raise ValueError("job store must resolve to shared/jobs")
+        if canonical in seen:
+            raise ValueError("job stores must be canonical and distinct")
+        if canonical.exists():
+            _ensure_actual_directory(canonical, label="job")
+        seen.add(canonical)
+        validated.append(_JobStoreOwner(group_id=group_id, path=canonical))
+    return tuple(
+        sorted(validated, key=lambda owner: (str(owner.path), owner.group_id))
+    )
+
+
+def _matching_job_paths(
+    job_stores: tuple[_JobStoreOwner, ...],
+    operation_id: str,
+) -> tuple[tuple[_JobStoreOwner, Path], ...]:
+    matches: list[tuple[_JobStoreOwner, Path]] = []
+    for owner in job_stores:
+        candidate = owner.path / f"{operation_id}.yaml"
+        if _is_symlink_or_reparse(candidate):
+            raise ValueError("job path is unsafe")
+        if candidate.is_file():
+            matches.append((owner, candidate))
+    return tuple(matches)
+
+
+def _barrier_job_ids(
+    journal_path: Path,
+    job_stores: tuple[_JobStoreOwner, ...],
+) -> tuple[str, ...]:
+    candidates = {_operation_id_from_path(journal_path)}
+    try:
+        payload = _read_payload(journal_path)
+    except Exception:
+        payload = {}
+    for field_name in ("operation_id", "job_id"):
+        try:
+            candidates.add(_validate_job_id(payload.get(field_name)))
+        except (TypeError, ValueError):
+            pass
+    blocked = set()
+    for operation_id in candidates - {None}:
+        try:
+            if _matching_job_paths(job_stores, operation_id):
+                blocked.add(operation_id)
+        except ValueError:
+            blocked.add(operation_id)
+    return tuple(sorted(blocked))
 
 
 @dataclass(frozen=True)
@@ -81,6 +211,7 @@ class _RecoveryOperation:
     phase: str
     no_change: bool
     selector: dict[str, object]
+    canonical_json: str
     resolved: ResolvedMemory
     memory_hash: str
     old_revision: str
@@ -89,26 +220,42 @@ class _RecoveryOperation:
     backup_path: Path
     journal_path: Path
     job_path: Path | None
+    owner_group_id: str | None
 
 
 def _operation_from_payload(
     payload: dict[str, Any],
     journal_path: Path,
     store_root: Path,
-    job_store: Path,
+    job_stores: tuple[_JobStoreOwner, ...],
 ) -> _RecoveryOperation:
-    if _is_symlink_or_reparse(journal_path):
-        raise ValueError("journal path is unsafe")
-    kind = str(payload.get("kind") or "job")
+    kind = payload.get("kind")
+    if "kind" not in payload:
+        raise ValueError("journal kind is required")
+    required = {
+        "kind",
+        "operation_id",
+        "selector",
+        "canonical_json",
+        "memory_hash",
+        "old_revision",
+        "new_revision",
+        "stage_directory",
+        "backup_directory",
+        "phase",
+        "no_change",
+    }
+    if kind == "job":
+        required.add("job_id")
+    if set(payload) != required:
+        raise ValueError("journal keys do not match the closed schema")
     if kind not in {"job", "direct-save"}:
         raise ValueError("journal kind is invalid")
     memory_hash = _validate_memory_hash(str(payload["memory_hash"]))
     journal_path = journal_path.resolve(strict=False)
     if journal_path.parent.name != memory_hash:
         raise ValueError("journal memory hash does not match its directory")
-    operation_id = _validate_job_id(
-        str(payload.get("operation_id") or payload.get("job_id"))
-    )
+    operation_id = _validate_job_id(str(payload["operation_id"]))
     if kind == "job":
         journal_job_id = _validate_job_id(str(payload["job_id"]))
         if journal_job_id != operation_id:
@@ -117,14 +264,24 @@ def _operation_from_payload(
             )
     if journal_path.name != f"{operation_id}.yaml":
         raise ValueError("journal filename does not match its operation id")
+    if not isinstance(payload["selector"], Mapping):
+        raise ValueError("journal selector must be a mapping")
     selector_payload = dict(payload["selector"])
     selector = MemorySelector(**selector_payload)
-    for superseded_field in ("job_path", "stage_path", "backup_path"):
-        if superseded_field in payload:
-            raise ValueError(
-                "journal contains unsupported superseded field: "
-                f"{superseded_field}"
-            )
+    canonical_json = payload["canonical_json"]
+    if not isinstance(canonical_json, str) or not canonical_json:
+        raise ValueError("journal canonical_json must be a non-empty string")
+    phase = payload["phase"]
+    if phase not in {"prepared", "backed_up", "published"}:
+        raise ValueError("journal phase is invalid")
+    no_change = payload["no_change"]
+    if type(no_change) is not bool:
+        raise ValueError("journal no_change must be a literal boolean")
+    for field_name in ("old_revision", "new_revision"):
+        if not isinstance(payload[field_name], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", payload[field_name]
+        ):
+            raise ValueError(f"journal {field_name} revision is invalid")
     stage_name = _safe_directory_name(
         payload.get("stage_directory"),
         field_name="stage_directory",
@@ -135,26 +292,38 @@ def _operation_from_payload(
         field_name="backup_directory",
         expected=operation_id,
     )
-    job_path = _job_path(job_store, operation_id) if kind == "job" else None
+    job_path = None
+    owner_group_id = None
+    if kind == "job":
+        matches = _matching_job_paths(job_stores, operation_id)
+        if len(matches) != 1:
+            raise ValueError(
+                "job journal must resolve to exactly one allowed job record"
+            )
+        owner, job_path = matches[0]
+        owner_group_id = owner.group_id
     stage_path = _stage_path(store_root, memory_hash, stage_name)
     backup_path = _backup_path(
         store_root,
         memory_hash,
         backup_name,
-        required=payload.get("phase") in {"backed_up", "published"},
+        required=(
+            not no_change and phase in {"backed_up", "published"}
+        ),
     )
     resolved = ResolvedMemory(
         selector=selector,
-        canonical_json="",
+        canonical_json=canonical_json,
         memory_hash=memory_hash,
         directory=Path(store_root) / memory_hash,
     )
-    return _RecoveryOperation(
+    operation = _RecoveryOperation(
         kind=kind,
         operation_id=operation_id,
-        phase=str(payload.get("phase") or ""),
-        no_change=bool(payload.get("no_change", False)),
+        phase=phase,
+        no_change=no_change,
         selector=selector_payload,
+        canonical_json=canonical_json,
         resolved=resolved,
         memory_hash=memory_hash,
         old_revision=str(payload["old_revision"]),
@@ -163,7 +332,78 @@ def _operation_from_payload(
         backup_path=backup_path,
         journal_path=journal_path,
         job_path=job_path,
+        owner_group_id=owner_group_id,
     )
+    if kind == "job":
+        _validate_job_ownership(operation)
+    else:
+        _validate_direct_identity(operation)
+    return operation
+
+
+def _validate_job_ownership(
+    operation: _RecoveryOperation,
+) -> None:
+    record = read_job(operation.job_path)
+    spec = record.spec
+    if spec.job_id != operation.operation_id:
+        raise ValueError("job spec id does not own journal operation")
+    if spec.group_key != operation.owner_group_id:
+        raise ValueError("job does not belong to its configured group owner")
+    matched_store = operation.job_path.parent.resolve()
+    trusted_group_path = matched_store.parent.parent
+    if Path(spec.group_path).resolve() != trusted_group_path:
+        raise ValueError("job spec group path does not match configured group")
+    if Path(spec.workspace_dir).resolve() != trusted_group_path:
+        raise ValueError("job spec workspace does not match configured group")
+    if (
+        Path(spec.memory.path).resolve().parent
+        != operation.resolved.directory.parent
+    ):
+        raise ValueError("job spec memory path is outside global store")
+    selector = MemorySelector(**spec.memory.selector)
+    channels = (
+        {selector.channel: object()}
+        if selector.scope == "channel" and selector.channel is not None
+        else {}
+    )
+    recomputed = resolve_memory_selector(
+        selector,
+        job_id=spec.job_id,
+        group_key=spec.group_key,
+        agent_name=spec.agent_name,
+        routine_id=spec.routine_id,
+        channels=channels,
+        store_root=operation.resolved.directory.parent,
+    )
+    journal_selector = operation.resolved.selector.model_dump(
+        exclude_none=True
+    )
+    spec_selector = selector.model_dump(exclude_none=True)
+    if journal_selector != spec_selector:
+        raise ValueError("journal selector does not match job spec")
+    if spec.memory.canonical_json != recomputed.canonical_json:
+        raise ValueError("job spec canonical JSON is invalid")
+    if operation.canonical_json != recomputed.canonical_json:
+        raise ValueError("journal canonical JSON does not match job spec")
+    if spec.memory.memory_hash != recomputed.memory_hash:
+        raise ValueError("job spec memory hash is invalid")
+    if operation.memory_hash != recomputed.memory_hash:
+        raise ValueError("journal memory hash does not match job spec")
+    if Path(spec.memory.path).resolve() != recomputed.directory.resolve():
+        raise ValueError("job spec memory path does not match selector")
+
+
+def _validate_direct_identity(operation: _RecoveryOperation) -> None:
+    from .selectors import resolved_memory_from_canonical
+
+    recomputed = resolved_memory_from_canonical(
+        operation.resolved.selector,
+        operation.canonical_json,
+        store_root=operation.resolved.directory.parent,
+    )
+    if recomputed.memory_hash != operation.memory_hash:
+        raise ValueError("direct-save canonical identity hash mismatch")
 
 
 def _recover_locked(operation: _RecoveryOperation) -> int:
@@ -176,11 +416,36 @@ def _recover_locked(operation: _RecoveryOperation) -> int:
     )
 
     if stage_revision != operation.new_revision:
-        _quarantine_journal(
-            operation.resolved.directory.parent,
-            operation.journal_path,
+        raise ValueError("stage revision does not match journal new revision")
+
+    backup_revision = None
+    if operation.backup_path.exists():
+        backup_revision = memory_content_revision(
+            _read_canonical_files(operation.backup_path)
         )
-        return 0
+    if (
+        backup_revision is not None
+        and backup_revision != operation.old_revision
+    ):
+        raise ValueError("backup revision does not match journal old revision")
+    if (
+        not operation.no_change
+        and operation.phase in {"backed_up", "published"}
+        and backup_revision is None
+    ):
+        raise ValueError("journal phase requires an old-revision backup")
+    if operation.no_change and backup_revision is not None:
+        raise ValueError("no_change journal must not have a backup")
+    if (
+        operation.no_change
+        and operation.old_revision != operation.new_revision
+    ):
+        raise ValueError("no_change journal revisions differ")
+    if (
+        not operation.no_change
+        and operation.old_revision == operation.new_revision
+    ):
+        raise ValueError("changed journal revisions must differ")
 
     if (
         phase in {"backed_up", "published"}
@@ -214,11 +479,9 @@ def _recover_locked(operation: _RecoveryOperation) -> int:
         _cleanup_operation(operation)
         return 1
 
-    _quarantine_journal(
-        operation.resolved.directory.parent,
-        operation.journal_path,
+    raise ValueError(
+        "canonical revision is unknown; manual intervention required"
     )
-    return 0
 
 
 def _finalize_recovered_success(operation: _RecoveryOperation) -> None:
@@ -259,7 +522,10 @@ def _safe_directory_name(
 ) -> str:
     if not isinstance(value, str):
         raise ValueError(f"journal {field_name} must be a string")
-    safe = _validate_job_id(value)
+    try:
+        safe = _validate_job_id(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"journal {field_name} is unsafe") from exc
     if safe != expected:
         raise ValueError(f"journal {field_name} does not match job id")
     return safe
@@ -293,31 +559,3 @@ def _backup_path(
     if path.exists():
         return _ensure_actual_directory(path, label="backup")
     return path
-
-
-def _job_path(job_store: Path, job_id: str) -> Path:
-    job_path = job_store / f"{job_id}.yaml"
-    if _is_symlink_or_reparse(job_path):
-        raise ValueError("job path is unsafe")
-    parent = job_path.parent.resolve()
-    if parent != job_store.resolve():
-        raise ValueError("job path escapes job store")
-    if not job_path.is_file():
-        raise ValueError("job path must be a direct file in job store")
-    return job_path
-
-
-def _quarantine_journal(store_root: Path, journal_path: Path) -> None:
-    quarantine_root = _ensure_infrastructure_directory(
-        store_root,
-        [".journals", "_quarantine"],
-        label="journal",
-    )
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    target_dir = _ensure_child_directory(
-        quarantine_root,
-        timestamp,
-        label="journal",
-    )
-    target = target_dir / journal_path.name
-    journal_path.replace(target)

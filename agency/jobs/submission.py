@@ -3,13 +3,13 @@ from pathlib import Path
 from agency.blueprints.cache import active_pins
 from agency.blueprints import BlueprintLibrary, CompilationCache
 from agency.configuration import ConfigStore
+from agency.configuration.store import ConfigConflictError, ConfigSnapshot
 from agency.integrations import REGISTRY
-from agency.fs.locks import exclusive_lock
 
 from .launcher import JobLauncher, default_launcher
 from .models import JobHandle, JobRecord, JobRequest, JobSpec
 from .resolution import resolve_job_request
-from .store import group_operation_lock_path, job_path, write_job
+from .store import job_path, revision_bound_group_operation, write_job
 
 
 class JobSubmissionError(RuntimeError):
@@ -26,9 +26,11 @@ def _projector_registry() -> dict[str, object]:
     }
 
 
-def _resolve_request(request: JobRequest) -> JobSpec:
+def _resolve_request(
+    request: JobRequest,
+    snapshot: ConfigSnapshot,
+) -> JobSpec:
     config_store = ConfigStore(Path(request.config_path))
-    snapshot = config_store.load()
     config_dir = snapshot.path.resolve().parent
     library_root = snapshot.config.agency.agent_library or (
         config_dir / "agent-library"
@@ -42,16 +44,8 @@ def _resolve_request(request: JobRequest) -> JobSpec:
         library=BlueprintLibrary(Path(library_root)),
         cache=CompilationCache(Path(cache_root), _projector_registry()),
         integrations=REGISTRY,
+        snapshot=snapshot,
     )
-
-
-def _requested_group_path(request: JobRequest) -> Path:
-    config_store = ConfigStore(Path(request.config_path))
-    snapshot = config_store.load()
-    try:
-        return snapshot.config.groups[request.group_key].path.resolve()
-    except KeyError as exc:
-        raise ValueError(f"Unknown group: {request.group_key}") from exc
 
 
 def _submit_resolved(
@@ -100,6 +94,20 @@ def submit_job_request(
     request: JobRequest,
     launcher: JobLauncher | None = None,
 ) -> JobHandle:
-    requested_group = _requested_group_path(request)
-    with exclusive_lock(group_operation_lock_path(requested_group), wait=True):
-        return _submit_resolved(_resolve_request(request), launcher)
+    config_store = ConfigStore(Path(request.config_path))
+    last_conflict = None
+    for _attempt in range(3):
+        try:
+            with revision_bound_group_operation(
+                config_store,
+                group_ids=(request.group_key,),
+            ) as locked_snapshot:
+                return _submit_resolved(
+                    _resolve_request(request, locked_snapshot),
+                    launcher,
+                )
+        except ConfigConflictError as error:
+            last_conflict = error
+    raise last_conflict or ConfigConflictError(
+        "config changed while submitting job"
+    )

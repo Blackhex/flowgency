@@ -14,8 +14,8 @@ from agency.configuration import (
     parse_config_canonical,
 )
 from agency.configuration.models import MemorySelector
-from agency.fs import ResourceBusyError, try_exclusive_lock
-from agency.jobs.store import acquire_group_operation_locks, active_jobs
+from agency.fs import ResourceBusyError
+from agency.jobs.store import active_jobs, revision_bound_group_operation
 from agency.memory import MemoryConflictError, resolve_memory_selector
 from agency.memory.store import (
     _ensure_infrastructure_directory,
@@ -492,11 +492,11 @@ async def admin_memory_channel_delete(
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     try:
-        all_group_paths = tuple(
-            group.path for group in snapshot.config.groups.values()
-        )
-        with acquire_group_operation_locks(*all_group_paths):
-            refreshed = services.config_store.load()
+        with revision_bound_group_operation(
+            services.config_store,
+            all_groups=True,
+            expected_revision=revision,
+        ) as refreshed:
             references = _channel_references(refreshed, channel_key)
             if references:
                 return _render_channel_detail(
@@ -534,9 +534,8 @@ async def admin_memory_channel_delete(
             )
             archive_path = None
             try:
-                with try_exclusive_lock(
-                    services.memory_store._lock_path(resolved)
-                ):
+                def archive_and_patch():
+                    nonlocal archive_path
                     raw = deepcopy(refreshed.raw)
                     channels = dict(raw.get("memory", {}).get("channels", {}))
                     if channel_key not in channels:
@@ -552,6 +551,7 @@ async def admin_memory_channel_delete(
                     _patch_channels(raw, channels)
                     parse_config_canonical(raw, refreshed.path)
                     services.config_store.replace(refreshed.revision, raw)
+                services.memory_store.try_locked(resolved, archive_and_patch)
             except (ConfigConflictError, ValidationFailed) as exc:
                 try:
                     _restore_channel_archive(resolved, archive_path)
@@ -640,18 +640,14 @@ async def admin_memory_channel_content(
         )
     try:
         resolved = _resolve_channel_memory(snapshot, services, channel_key)
-        with try_exclusive_lock(services.memory_store._lock_path(resolved)):
-            pass
-        memory_snapshot = services.memory_store.ensure(resolved)
-        files = dict(memory_snapshot.files)
-        files[filename] = content.encode("utf-8")
-        if not content_revision:
-            raise MemoryConflictError(
-                expected_revision="",
-                current=memory_snapshot,
-                attempted_files=files,
-            )
-        services.memory_store.try_save(resolved, content_revision, files)
+        services.memory_store.try_update(
+            resolved,
+            content_revision,
+            lambda current: {
+                **current.files,
+                filename: content.encode("utf-8"),
+            },
+        )
     except ResourceBusyError:
         return _render_channel_detail(
             request,
