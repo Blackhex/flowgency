@@ -22,8 +22,13 @@ def test_build_setup_prompt_names_project_and_config(tmp_path: Path) -> None:
     prompt = build_setup_prompt(tmp_path, tmp_path / "config.yaml")
 
     assert "agency-setup" in prompt
+    assert "Discuss and obtain approval for the group name" in prompt
+    assert "storage paths" in prompt
     assert str(tmp_path.resolve()) in prompt
     assert str((tmp_path / "config.yaml").resolve()) in prompt
+    assert "one complete configuration" in prompt
+    assert "validation" in prompt.lower()
+    assert "one atomic write" in prompt.lower()
     assert "Do not write a partial configuration" in prompt
 
 

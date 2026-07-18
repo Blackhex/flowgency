@@ -247,8 +247,9 @@ def test_serve_missing_config_bootstraps_selected_path_not_cwd(tmp_path):
 
     assert result.returncode == 0
     output = result.stdout + result.stderr
-    assert "First run: no canonical config found" in output
-    assert "/admin/" in output
+    assert "First run: open http://localhost:8500/setup to launch guided Agency setup." in output
+    assert "/admin/" not in output
+    assert "/setup" in output
     assert not selected_path.exists()
     assert not (tmp_path / "config.yaml").exists()
 

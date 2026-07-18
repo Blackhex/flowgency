@@ -241,6 +241,18 @@ def test_setup_skill_windows_examples_use_literal_paths():
     assert "-Target C:\\path\\to\\agency\\skills\\agency-setup" in setup_skill
 
 
+def test_readme_and_getting_started_describe_the_project_handoff():
+    expected = (
+        "Start Agency, choose the project folder and supported AI integration, "
+        "complete the agency-setup conversation, and return to the dashboard automatically."
+    )
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    getting_started = (REPO_ROOT / "kb" / "getting-started.md").read_text(encoding="utf-8")
+    normalized = " ".join(f"{readme}\n{getting_started}".split())
+
+    assert expected in normalized
+
+
 def test_local_links_in_active_documentation_resolve():
     missing: list[str] = []
     link_pattern = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")

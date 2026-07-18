@@ -6,13 +6,13 @@ user_invocable: true
 
 # Agency Setup
 
-Create a standards-based global Agent Library and register explicit agent instances in one authoritative canonical Agency config. Accept only the canonical config shape, create it when absent, and report validation errors directly. Do not create physical per-agent runtime directories.
+The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates it when absent, and reports validation errors directly. It does not create runtime-native identities, physical per-agent runtime directories, memory files, prompt schedules, or conversion surfaces.
 
 ## 1. Inspect
 
 Read project instructions, README, dependency manifests, source layout, tests, deployment files, and recent git history. Detect the host OS and available agent CLI. Summarize the project, then propose three to five distinct roles. Exactly one builder normally receives write capability; observational roles remain fail-closed.
 
-Ask the user to approve the team, each role's routine tasks, runtime integration, schedules, and any shared memory channels.
+Ask the user to approve the team, each role's routine tasks, runtime integration, schedules, workspace paths, and any shared memory channels.
 
 ## 2. Resolve Agency
 
@@ -111,15 +111,9 @@ Record each approved Phase 2 routine assignment under that instance's `routines`
 
 Set `capabilities.write: true` only for an explicitly approved implementation role and `capabilities.write: false` otherwise. Never infer write authority for an existing agent; ask the user when a newly generated role is ambiguous.
 
-## 5. Workspace Launcher
+## 5. Verify And Schedule
 
-A launcher is optional and never authoritative. It may open one terminal surface per configured instance, but every surface starts in the group's configured workspace path. It must not create instance directories or duplicate config. Use `references/dispatch-templates.md`; keep the resulting path only in the group's `workspaces` list.
-
-## 6. Verify And Schedule
-
-Validate every blueprint and Agent Skill, config cross-reference, explicit integration, effective root union, complete tool override, routine skill, channel, and workspace. Parse the final config from disk and confirm it is still the revision just written.
-
-Only after registration verification, offer the singleton scheduler:
+Validate every blueprint and Agent Skill, config cross-reference, explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path. Parse the final config from disk and confirm it is still the revision just written. Write one complete configuration atomically, then offer the singleton scheduler:
 
 ```text
 christag-agency dispatch install --config "{config_path}"
@@ -128,4 +122,4 @@ christag-agency dispatch status --config "{config_path}"
 
 There must be exactly one Agency dashboard and one singleton scheduler; do not create a fallback project scheduler.
 
-Report blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, workspace launcher path if created, and scheduler status.
+Report blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.

@@ -13,9 +13,9 @@ Open `http://127.0.0.1:8500`.
 
 ## First run
 
-The setup wizard creates the control plane. Choose the authoritative config path and provide the global Agent Library, compilation cache, and memory store paths. Add a group with a display name and project workspace path. The wizard writes `schema_version: 2`; it does not scan folders, create physical agent directories, or infer instances.
+Start Agency, choose the project folder and supported AI integration, complete the agency-setup conversation, and return to the dashboard automatically. The Agency Setup Skill owns group naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
 
-Next, create reusable blueprints and Agent Skills in Agent Library. Open the group's Agents page to add explicit instances that select a blueprint and integration. Configure identity, runtime overrides, routines, and semantic memory from Agent Detail.
+On first run, open `/setup` and hand off the project folder and supported integration to `agency-setup`. After setup, create reusable blueprints and Agent Skills in Agent Library. Open the group's Agents page to add explicit instances that select a blueprint and integration. Configure identity, runtime overrides, routines, and semantic memory from Agent Detail.
 
 ## Core concepts
 

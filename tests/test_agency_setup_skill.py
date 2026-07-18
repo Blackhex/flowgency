@@ -40,6 +40,25 @@ def test_setup_registers_explicit_instances_routines_and_memory():
     assert "dispatch.agents" not in skill
 
 
+def test_setup_skill_owns_group_naming_storage_workspaces_and_atomic_write():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split()).lower()
+
+    for phrase in (
+        "group naming",
+        "storage paths",
+        "blueprints",
+        "instances",
+        "routines",
+        "runtime policy",
+        "workspaces",
+        "memory",
+        "validation",
+        "one atomic config write",
+    ):
+        assert phrase in normalized
+
+
 def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_skills():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     kb = SETUP_KB_PATH.read_text(encoding="utf-8")

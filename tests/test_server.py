@@ -250,10 +250,11 @@ def test_run_server_reports_first_run_before_starting_uvicorn(
     assert not config_path.exists()
     output = capsys.readouterr().out
     assert (
-        f"First run: no canonical config found in {tmp_path}"
+        "First run: open http://localhost:8602/setup to launch guided Agency setup."
         in output
     )
-    assert "Visit http://localhost:8602/admin/" in output
+    assert "/admin/" not in output
+    assert "/setup" in output
 
 
 def test_setup_get_renders_only_project_and_integration_fields(tmp_path, monkeypatch):
@@ -270,6 +271,9 @@ def test_setup_get_renders_only_project_and_integration_fields(tmp_path, monkeyp
     response = client.get("/setup")
 
     assert response.status_code == 200
+    assert "project folder" in response.text.lower()
+    assert "agent_library" not in response.text
+    assert "workspace config json" not in response.text.lower()
     assert 'name="project_dir"' in response.text
     assert 'name="integration"' in response.text
     assert 'name="group_name"' not in response.text

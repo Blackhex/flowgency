@@ -24,9 +24,10 @@ def build_setup_prompt(project_dir: Path, config_path: Path) -> str:
         "Use the agency-setup skill to configure Agency for this project. "
         f"Project workspace: {project_dir.resolve()}. "
         f"Authoritative config: {config_path.resolve()}. "
-        "Discuss and obtain approval for the group name, agent team, integrations, "
-        "routines, runtime policy, workspaces, and memory before writing one "
-        "complete configuration. Do not write a partial configuration."
+        "Discuss and obtain approval for the group name, storage paths, agent team, "
+        "integrations, routines, runtime policy, workspaces, and memory. Perform "
+        "validation on the final config and make one atomic write for one complete configuration. Do not "
+        "write a partial configuration."
     )
 
 

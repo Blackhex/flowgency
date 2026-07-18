@@ -2468,8 +2468,9 @@ def _run_reload_server(host: str, port: int) -> None:
 def run_server(host: str, port: int, reload: bool = False) -> None:
     """Initialize Agency and run the web server."""
     if not CONFIG_PATH.exists():
-        print(f"First run: no canonical config found in {CONFIG_PATH.parent}")
-        print(f"Visit http://localhost:{port}/admin/ to set up your first agent group.")
+        print(
+            f"First run: open http://localhost:{port}/setup to launch guided Agency setup."
+        )
 
     refresh_services()
     if reload:

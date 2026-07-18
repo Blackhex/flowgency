@@ -44,9 +44,9 @@ Workspace launchers are optional frontends. They start configured instances in t
 
 ## Quick start
 
-Start Agency and open `http://127.0.0.1:8500`. On first run, the setup wizard creates the control-plane paths for the Agent Library, compilation cache, and memory store, plus an explicit group workspace. It does not scan an agent directory or create agent folders.
+Start Agency, choose the project folder and supported AI integration, complete the agency-setup conversation, and return to the dashboard automatically. The [Agency Setup Skill](kb/setup-skill.md) owns group naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
 
-Create reusable blueprints and Agent Skills in Agent Library, then create explicit instances from the group roster and assign routines and semantic memory. The optional [Agency Setup Skill](kb/setup-skill.md) can perform this workflow after team approval.
+On first run, open `/setup` and hand off the project folder and supported integration to `agency-setup`. After setup, create reusable blueprints and Agent Skills in Agent Library, then create explicit instances from the group roster and assign routines and semantic memory.
 
 ## Pipeline and execution
 
