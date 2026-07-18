@@ -29,5 +29,5 @@
 - None.
 ## Review Fix
 - Grammar: `skills/agency-setup/SKILL.md` now says `never scan or convert superseded authority`; `tests/test_agency_setup_skill.py` matches that wording.
-- Focused: `.venv\Scripts\python -m pytest tests	est_agency_setup_skill.py tests	est_surface_contracts.py -q` -> 17 passed in 0.49s
+- Focused: `.venv\Scripts\python -m pytest tests\test_agency_setup_skill.py tests\test_surface_contracts.py -q` -> 17 passed in 0.49s
 - Full suite: `.venv\Scripts\python -m pytest tests -q` -> 1154 passed, 3 skipped in 125.98s

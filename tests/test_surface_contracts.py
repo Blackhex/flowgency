@@ -222,6 +222,25 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current():
     assert next(selector for selector in selectors if selector["scope"] == "channel")["channel"] == "project-strategy"
 
 
+def test_active_documentation_omits_unexpected_ascii_control_characters():
+    invalid: list[str] = []
+    for path in _active_documentation_paths():
+        data = path.read_bytes()
+        for index, byte in enumerate(data):
+            if byte < 0x20 and byte not in {0x09, 0x0A, 0x0D}:
+                invalid.append(
+                    f"{path.relative_to(REPO_ROOT).as_posix()} byte 0x{byte:02x} at offset {index}"
+                )
+    assert not invalid, "\n".join(invalid)
+
+
+def test_setup_skill_windows_examples_use_literal_paths():
+    setup_skill = (REPO_ROOT / "kb" / "setup-skill.md").read_text(encoding="utf-8")
+    assert "`.github\\skills\\agency-setup`" in setup_skill
+    assert "-Path .github\\skills\\agency-setup" in setup_skill
+    assert "-Target C:\\path\\to\\agency\\skills\\agency-setup" in setup_skill
+
+
 def test_local_links_in_active_documentation_resolve():
     missing: list[str] = []
     link_pattern = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")

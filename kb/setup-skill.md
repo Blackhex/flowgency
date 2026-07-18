@@ -13,13 +13,13 @@ ln -s /path/to/agency/skills/agency-setup ~/.claude/skills/agency-setup
 
 ### GitHub Copilot on Windows
 
-Expose the canonical skill at `.github\skillsgency-setup`. A junction keeps one source copy:
+Expose the canonical skill at `.github\skills\agency-setup`. A junction keeps one source copy:
 
 ```powershell
 New-Item -ItemType Directory -Force .github\skills | Out-Null
 New-Item -ItemType Junction `
-  -Path .github\skillsgency-setup `
-  -Target C:\path	ogency\skillsgency-setup | Out-Null
+  -Path .github\skills\agency-setup `
+  -Target C:\path\to\agency\skills\agency-setup | Out-Null
 ```
 
 ## Run
