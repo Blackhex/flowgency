@@ -248,9 +248,9 @@ def test_readme_and_getting_started_describe_the_project_handoff():
     )
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     getting_started = (REPO_ROOT / "kb" / "getting-started.md").read_text(encoding="utf-8")
-    normalized = " ".join(f"{readme}\n{getting_started}".split())
 
-    assert expected in normalized
+    assert expected in readme
+    assert expected in getting_started
 
 
 def test_local_links_in_active_documentation_resolve():

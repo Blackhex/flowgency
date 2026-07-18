@@ -91,6 +91,18 @@ def test_setup_uses_official_singleton_scheduler_cli():
     assert "do not create a fallback project scheduler" in skill
 
 
+def test_setup_verification_protocol_orders_atomic_write_before_revision_check():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    section = skill.split("## 5. Verify And Schedule", 1)[1]
+    atomic = section.index("Write one complete configuration atomically.")
+    revision = section.index(
+        "Then parse the final config from disk and confirm it is still the revision just written."
+    )
+    scheduler = section.index("Then offer the singleton scheduler setup:")
+
+    assert atomic < revision < scheduler
+
+
 def test_setup_does_not_generate_project_scheduler_artifacts():
     combined = SKILL_PATH.read_text(encoding="utf-8") + DISPATCH_TEMPLATES_PATH.read_text(encoding="utf-8")
     forbidden = [

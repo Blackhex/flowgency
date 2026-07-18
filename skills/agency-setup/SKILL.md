@@ -113,7 +113,7 @@ Set `capabilities.write: true` only for an explicitly approved implementation ro
 
 ## 5. Verify And Schedule
 
-Validate every blueprint and Agent Skill, config cross-reference, explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path. Parse the final config from disk and confirm it is still the revision just written. Write one complete configuration atomically, then offer the singleton scheduler:
+Validate every blueprint and Agent Skill, config cross-reference, explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path. Write one complete configuration atomically. Then parse the final config from disk and confirm it is still the revision just written. Then offer the singleton scheduler setup:
 
 ```text
 christag-agency dispatch install --config "{config_path}"
