@@ -218,23 +218,29 @@
           invalid: "Setup wrote an invalid configuration. Fix the setup session, then wait for the next refresh.",
           incomplete: "Setup is not finished yet. Complete the configuration in the launched session.",
         };
+        let pollTimer = null;
 
         const pollStatus = async () => {
+          let shouldScheduleNextPoll = true;
           try {
             const response = await fetch("/setup/status", { cache: "no-store" });
             const payload = await response.json();
             if (payload.state === "ready" && payload.redirect) {
+              shouldScheduleNextPoll = false;
               window.location.assign(payload.redirect);
               return;
             }
             statusMessage.textContent = payload.message || defaultMessages[payload.state] || "";
           } catch (error) {
             statusMessage.textContent = "Status check failed. Finish setup, then refresh this page.";
+          } finally {
+            if (shouldScheduleNextPoll) {
+              pollTimer = window.setTimeout(pollStatus, 1500);
+            }
           }
         };
 
-        window.setInterval(pollStatus, 1500);
-        pollStatus();
+        pollTimer = window.setTimeout(pollStatus, 1500);
       }
     })();
   </script>

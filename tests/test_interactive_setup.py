@@ -15,25 +15,30 @@ from agency.integrations.models import InteractiveSetupRequest
 
 def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -> None:
     integration = BaseIntegration()
+    request = InteractiveSetupRequest(
+        project_dir=tmp_path,
+        config_path=tmp_path / "config.yaml",
+        prompt="Set up Agency.",
+    )
 
     assert integration.interactive_setup_available() is False
 
     with pytest.raises(IntegrationError):
-        integration.launch_interactive_setup(
-            InteractiveSetupRequest(
-                project_dir=tmp_path,
-                config_path=tmp_path / "config.yaml",
-                prompt="Set up Agency.",
-            )
-        )
+        integration.launch_interactive_setup(request)
+
+    with pytest.raises(IntegrationError):
+        integration.interactive_setup_fallback_command(request)
 
 
 def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 
+    from agency.integrations.interactive import format_interactive_command
+
     monkeypatch.setattr(
         "agency.integrations.agency.copilot.spawn_interactive_terminal",
-        lambda command, cwd: captured.update(command=tuple(command), cwd=cwd) or "copilot command",
+        lambda command, cwd: captured.update(command=tuple(command), cwd=cwd)
+        or format_interactive_command(command),
     )
     monkeypatch.setattr(
         CopilotIntegration,
@@ -60,7 +65,38 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
         "Agency setup",
     )
     assert captured["cwd"] == tmp_path.resolve()
-    assert result.fallback_command == "copilot command"
+    assert result.fallback_command == integration.interactive_setup_fallback_command(
+        request
+    )
+
+
+def test_copilot_builds_fallback_command_without_launch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot.exe")
+
+    integration = CopilotIntegration()
+    request = InteractiveSetupRequest(
+        project_dir=tmp_path,
+        config_path=tmp_path / "agency.yaml",
+        prompt="Use the agency-setup skill.",
+    )
+
+    assert integration.interactive_setup_fallback_command(request) == (
+        subprocess.list2cmdline(
+            [
+                "copilot.exe",
+                "-C",
+                str(tmp_path.resolve()),
+                "-i",
+                "Use the agency-setup skill.",
+                "--name",
+                "Agency setup",
+            ]
+        )
+    )
 
 
 def test_copilot_interactive_setup_unavailable_without_terminal(

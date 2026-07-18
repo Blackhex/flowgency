@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Sequence
 
 from agency.blueprints.projectors import get_projector
 from agency.integrations import (
@@ -16,6 +17,7 @@ from agency.integrations import (
     IntegrationError,
     RunResult,
     _register,
+    format_interactive_command,
     spawn_interactive_terminal,
     terminal_available,
 )
@@ -62,9 +64,12 @@ class CopilotIntegration(BaseIntegration):
     def interactive_setup_available(self) -> bool:
         return terminal_available() and Path(self._find_cmd()).exists()
 
-    def launch_interactive_setup(self, request: InteractiveSetupRequest) -> InteractiveSetupResult:
+    def _interactive_setup_command(
+        self,
+        request: InteractiveSetupRequest,
+    ) -> Sequence[str]:
         project_dir = request.project_dir.resolve(strict=True)
-        command = [
+        return (
             self._find_cmd(),
             "-C",
             str(project_dir),
@@ -72,9 +77,19 @@ class CopilotIntegration(BaseIntegration):
             request.prompt,
             "--name",
             "Agency setup",
-        ]
+        )
+
+    def launch_interactive_setup(self, request: InteractiveSetupRequest) -> InteractiveSetupResult:
+        project_dir = request.project_dir.resolve(strict=True)
+        command = self._interactive_setup_command(request)
         fallback_command = spawn_interactive_terminal(command, project_dir)
         return InteractiveSetupResult(fallback_command=fallback_command)
+
+    def interactive_setup_fallback_command(
+        self,
+        request: InteractiveSetupRequest,
+    ) -> str:
+        return format_interactive_command(self._interactive_setup_command(request))
 
     # Copilot native file-edit tools that mutate the filesystem. Read-only
     # tools like "view" are intentionally excluded. Shell edits are not

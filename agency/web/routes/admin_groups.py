@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import json
-import platform
-import shlex
-import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -225,30 +222,6 @@ def _select_integration(
     return "", ""
 
 
-def _fallback_setup_command(
-    integration_name: str,
-    project_dir: Path,
-    prompt: str,
-    launch_error: Exception | None = None,
-) -> str:
-    if integration_name == "copilot":
-        command = [
-            "copilot",
-            "-C",
-            str(project_dir.resolve()),
-            "-i",
-            prompt,
-            "--name",
-            "Agency setup",
-        ]
-        if platform.system() == "Windows":
-            return subprocess.list2cmdline(command)
-        return shlex.join(command)
-    if launch_error is None:
-        return ""
-    return str(launch_error).strip()
-
-
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page(
     request: Request,
@@ -320,32 +293,29 @@ async def setup_launch(
         )
     resolved_project_dir = project_dir.resolve()
     integration = launchable_by_name[requested_integration]
-    prompt = build_setup_prompt(resolved_project_dir, services.config_path)
+    setup_request = InteractiveSetupRequest(
+        project_dir=resolved_project_dir,
+        config_path=services.config_path.resolve(),
+        prompt=build_setup_prompt(resolved_project_dir, services.config_path),
+    )
     fallback_command = ""
     launch_notice = ""
     try:
-        result = integration.launch_interactive_setup(
-            InteractiveSetupRequest(
-                project_dir=resolved_project_dir,
-                config_path=services.config_path.resolve(),
-                prompt=prompt,
-            )
+        result = await run_in_threadpool(
+            integration.launch_interactive_setup,
+            setup_request,
         )
-        fallback_command = result.fallback_command
+        if result.fallback_command:
+            fallback_command = result.fallback_command
+        else:
+            fallback_command = integration.interactive_setup_fallback_command(
+                setup_request
+            )
     except Exception as exc:
-        fallback_command = _fallback_setup_command(
-            integration.name,
-            resolved_project_dir,
-            prompt,
-            exc,
+        fallback_command = integration.interactive_setup_fallback_command(
+            setup_request
         )
         launch_notice = str(exc).strip()
-    if not fallback_command:
-        fallback_command = _fallback_setup_command(
-            requested_integration,
-            resolved_project_dir,
-            prompt,
-        )
     return _setup_response(
         request,
         services,

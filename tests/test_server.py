@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from agency import app as app_mod
 from agency.integrations import IntegrationError
+from agency.web.folder_picker import pick_directory
 
 
 def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
@@ -41,6 +42,7 @@ class _LaunchIntegration:
         self._fallback_command = fallback_command
         self._error = error
         self.requests = []
+        self.fallback_requests = []
 
     def launch_interactive_setup(self, request) -> object:
         self.requests.append(request)
@@ -51,6 +53,10 @@ class _LaunchIntegration:
             (),
             {"fallback_command": self._fallback_command},
         )()
+
+    def interactive_setup_fallback_command(self, request) -> str:
+        self.fallback_requests.append(request)
+        return self._fallback_command
 
 
 def test_run_server_normal_mode_uses_in_memory_app(tmp_path, monkeypatch):
@@ -329,6 +335,17 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
         "agency.web.routes.admin_groups.launchable_integrations",
         lambda integrations, project_dir: (integration,),
     )
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        assert getattr(func, "__self__", None) is integration
+        assert getattr(func, "__name__", "") == "launch_interactive_setup"
+        assert len(args) == 1
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.run_in_threadpool",
+        fake_run_in_threadpool,
+    )
     client = TestClient(app_mod.app)
 
     response = client.post(
@@ -339,38 +356,61 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert not config_path.exists()
     assert "Waiting for setup to complete" in response.text
+    assert "setTimeout(" in response.text
+    assert "setInterval(" not in response.text
     assert integration.requests[0].project_dir == project_dir.resolve()
     assert integration.requests[0].config_path == config_path.resolve()
     assert "agency-setup" in integration.requests[0].prompt
+    assert integration.fallback_requests == []
 
-
-def test_setup_launch_shows_fallback_when_terminal_launch_fails(tmp_path, monkeypatch):
+def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
+    tmp_path, monkeypatch
+):
     _configure_missing_config(tmp_path, monkeypatch)
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     integration = _LaunchIntegration(
-        error=IntegrationError("Run copilot -C manually."),
+        name="custom-launcher",
+        display_name="Custom Launcher",
+        fallback_command="custom-launcher --resume-setup",
+        error=IntegrationError("Launch failed."),
     )
     monkeypatch.setattr(
         "agency.web.routes.admin_groups.launchable_integrations",
         lambda integrations, project_dir: (integration,),
     )
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        assert getattr(func, "__self__", None) is integration
+        assert getattr(func, "__name__", "") == "launch_interactive_setup"
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.run_in_threadpool",
+        fake_run_in_threadpool,
+    )
     client = TestClient(app_mod.app)
 
     response = client.post(
         "/setup/launch",
-        data={"project_dir": str(project_dir.resolve()), "integration": "copilot"},
+        data={
+            "project_dir": str(project_dir.resolve()),
+            "integration": "custom-launcher",
+        },
     )
 
     assert response.status_code == 200
     assert "Waiting for setup to complete" in response.text
-    assert "Run copilot -C manually." in response.text
+    assert "custom-launcher --resume-setup" in response.text
+    assert "copilot -C" not in response.text
+    assert integration.fallback_requests == integration.requests
 
 
 def test_setup_browse_returns_null_when_cancelled(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
 
     async def fake_run_in_threadpool(func, *args, **kwargs):
+        assert func is pick_directory
         assert args == ()
         return None
 
@@ -392,6 +432,7 @@ def test_setup_browse_returns_selected_path(tmp_path, monkeypatch):
     selected.mkdir()
 
     async def fake_run_in_threadpool(func, *args, **kwargs):
+        assert func is pick_directory
         assert args == ()
         return selected.resolve()
 

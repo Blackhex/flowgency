@@ -9,6 +9,7 @@ import yaml
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.integrations.errors import IntegrationError
 from agency.integrations.interactive import (
+    format_interactive_command,
     spawn_interactive_terminal,
     terminal_available,
 )
@@ -221,6 +222,14 @@ class BaseIntegration:
     ) -> InteractiveSetupResult:
         raise IntegrationError(
             f"{self.display_name or self.name or 'Integration'} does not support interactive setup."
+        )
+
+    def interactive_setup_fallback_command(
+        self,
+        request: InteractiveSetupRequest,
+    ) -> str:
+        raise IntegrationError(
+            f"{self.display_name or self.name or 'Integration'} does not support interactive setup fallback commands."
         )
 
     @staticmethod
