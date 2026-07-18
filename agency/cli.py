@@ -262,12 +262,10 @@ def _markdown_items(group_path: Path, kind: str) -> list[dict[str, Any]]:
     return items
 
 
-def _job_records(group_path: Path):
-    jobs_dir = group_path / "shared" / "jobs"
-    if not jobs_dir.is_dir():
-        return []
+def _job_records(snapshot, group_id: str):
+    job_store = JobStore(snapshot.config.agency.memory_store)
     records = []
-    for path in jobs_dir.glob("*.yaml"):
+    for path in job_store.paths(group_id):
         try:
             records.append((path, read_job(path)))
         except Exception:
@@ -618,8 +616,8 @@ def cmd_inbox(args: Namespace) -> int:
 
 
 def cmd_jobs(args: Namespace) -> int:
-    _, _, group = _group(args)
-    records = _job_records(group.path)
+    snapshot, group_id, group = _group(args)
+    records = _job_records(snapshot, group_id)
     if args.status:
         records = [(path, record) for path, record in records if record and record.status == args.status]
     if args.agent:
@@ -665,8 +663,8 @@ def cmd_logs(args: Namespace) -> int:
 
 
 def _cmd_logs_inner(args: Namespace) -> int:
-    _, _, group = _group(args)
-    records = _job_records(group.path)
+    snapshot, group_id, group = _group(args)
+    records = _job_records(snapshot, group_id)
     if not args.job_id:
         rows = [record for _, record in records if record is not None and record.stdout_path]
         print(f"\n{bold('Execution logs')} - {group.name}\n")

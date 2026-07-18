@@ -12,6 +12,7 @@ import yaml
 
 import agency.app as app_mod
 from agency import cli
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import write_job
 
@@ -21,14 +22,12 @@ def _setup_jobs_group(
     monkeypatch,
     *,
     job_id="cli-job",
-    record_filename=None,
     started_at="2026-07-11T10:00:00+00:00",
 ):
     """Create a group with one complete job that has changed files, and wire it
     into the app registry the CLI reads through get_group."""
     group = tmp_path / "group"
-    jobs_dir = group / "shared" / "jobs"
-    jobs_dir.mkdir(parents=True, exist_ok=True)
+    (group / "shared" / "logs").mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
@@ -114,15 +113,17 @@ def _setup_jobs_group(
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stdout_path.write_text("line one\nline two\nline three\n", encoding="utf-8")
     record.stdout_path = str(stdout_path)
-    write_job(jobs_dir / (record_filename or f"{spec.job_id}.yaml"), record)
+    job_store = JobStore(tmp_path / "memory")
+    write_job(job_store.path("test", spec.job_id), record)
 
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
+    snapshot = cli._snapshot_read_only(config_path.resolve())
     monkeypatch.setattr(
         cli,
         "_group",
         lambda args: (
-            None,
+            snapshot,
             "test",
             Namespace(name="Test", path=group),
         ),
@@ -407,14 +408,12 @@ def test_equal_timestamp_jobs_use_deterministic_id_order_in_json_and_logs(
         tmp_path,
         monkeypatch,
         job_id="beta-job",
-        record_filename="a-record.yaml",
         started_at=timestamp,
     )
     _setup_jobs_group(
         tmp_path,
         monkeypatch,
         job_id="alpha-job",
-        record_filename="z-record.yaml",
         started_at=timestamp,
     )
 
@@ -430,6 +429,51 @@ def test_equal_timestamp_jobs_use_deterministic_id_order_in_json_and_logs(
 def test_cmd_logs_unknown_job_exits(tmp_path, monkeypatch):
     _setup_jobs_group(tmp_path, monkeypatch)
     assert cli.cmd_logs(Namespace(group="test", job_id="deadbeef", lines=40, stderr=False)) == 1
+
+
+def test_cmd_jobs_and_logs_ignore_superseded_shared_jobs_records(tmp_path, monkeypatch, capsys):
+    spec = _setup_jobs_group(tmp_path, monkeypatch, job_id="canonical-job")
+    superseded_path = tmp_path / "group" / "shared" / "jobs" / "forged-job.yaml"
+    superseded_path.parent.mkdir(parents=True, exist_ok=True)
+    superseded_record = JobRecord.from_spec(
+        JobSpec(
+            schema_version=2,
+            job_id="forged-job",
+            config_path=spec.config_path,
+            config_revision=spec.config_revision,
+            group_key="test",
+            group_path=spec.group_path,
+            agent_name=spec.agent_name,
+            workspace_dir=spec.workspace_dir,
+            trigger=spec.trigger,
+            integration_name=spec.integration_name,
+            integration_config=spec.integration_config,
+            blueprint=spec.blueprint,
+            routine_id=spec.routine_id,
+            skill=spec.skill,
+            skill_arguments=spec.skill_arguments,
+            task_input=spec.task_input,
+            runtime_policy=spec.runtime_policy,
+            memory=spec.memory,
+            trigger_context=spec.trigger_context,
+            prompt_source=spec.prompt_source,
+            timeout_override=spec.timeout_override,
+            created_at=spec.created_at,
+        )
+    )
+    superseded_record.status = "complete"
+    superseded_record.started_at = spec.created_at
+    superseded_record.stdout_path = str(tmp_path / "group" / "shared" / "logs" / "forged-job.out")
+    write_job(superseded_path, superseded_record)
+
+    cli.cmd_jobs(Namespace(group="test", status=None, agent=None, json=True))
+    jobs = yaml.safe_load(capsys.readouterr().out)
+    assert [job["job_id"] for job in jobs] == ["canonical-job"]
+
+    cli.cmd_logs(Namespace(group="test", job_id=None, lines=40, stderr=False))
+    logs = capsys.readouterr().out
+    assert "canonical-job" in logs
+    assert "forged-job" not in logs
 
 
 # ── Task 5: CLI decide parity tests ─────────────────────────────────────────
