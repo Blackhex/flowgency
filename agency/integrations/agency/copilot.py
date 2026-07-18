@@ -2,6 +2,7 @@
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,9 @@ class CopilotIntegration(BaseIntegration):
         path_modes=frozenset({"restricted", "unrestricted"}),
         tool_modes=frozenset({"all", "allowlist"}),
     )
+    _WINDOWS_SHELL_HOSTS = ("powershell.exe", "pwsh.exe")
+    _WINDOWS_SCRIPT_EXTENSIONS = (".ps1",)
+    _WINDOWS_WRAPPER_EXTENSIONS = (".bat", ".cmd")
 
     def identity_filename(self) -> str:
         return "AGENTS.md"
@@ -62,9 +66,75 @@ class CopilotIntegration(BaseIntegration):
         self._write_sidecar_identity(agent_dir, self._identity_file(agent_dir), identity)
 
     def interactive_setup_available(self) -> bool:
+        if not terminal_available():
+            return False
+        try:
+            self._interactive_setup_command_prefix()
+        except IntegrationError:
+            return False
+        return True
+
+    @staticmethod
+    def _command_exists(cmd: str) -> bool:
+        path = Path(cmd)
+        return path.exists() or shutil.which(cmd) is not None
+
+    @classmethod
+    def _resolve_windows_shell_host(cls) -> str | None:
+        for candidate in cls._WINDOWS_SHELL_HOSTS:
+            resolved = shutil.which(candidate, path=os.environ.get("PATH", ""))
+            if resolved and Path(resolved).suffix.lower() == ".exe":
+                return resolved
+        return None
+
+    @classmethod
+    def _resolve_windows_wrapper_script(cls, cmd: str) -> str | None:
+        wrapper = Path(cmd)
+        suffix = wrapper.suffix.lower()
+        if suffix in cls._WINDOWS_SCRIPT_EXTENSIONS and wrapper.is_file():
+            return str(wrapper)
+        if suffix not in cls._WINDOWS_WRAPPER_EXTENSIONS:
+            return None
+        script = wrapper.with_suffix(".ps1")
+        if script.is_file():
+            return str(script)
+        return None
+
+    def _interactive_setup_command_prefix(self) -> tuple[str, ...]:
         cmd = self._resolve_real_cmd(self._find_cmd())
-        return terminal_available() and (
-            Path(cmd).exists() or shutil.which(cmd) is not None
+        if platform.system() != "Windows":
+            if not self._command_exists(cmd):
+                raise IntegrationError(
+                    f"GitHub Copilot CLI not found. Looked for: {cmd}"
+                )
+            return (cmd,)
+        if Path(cmd).suffix.lower() == ".exe":
+            if not self._command_exists(cmd):
+                raise IntegrationError(
+                    f"GitHub Copilot CLI not found. Looked for: {cmd}"
+                )
+            return (cmd,)
+        script = self._resolve_windows_wrapper_script(cmd)
+        if script is None:
+            raise IntegrationError(
+                "GitHub Copilot interactive setup requires copilot.exe "
+                "or a copilot.ps1 wrapper with PowerShell."
+            )
+        shell_host = self._resolve_windows_shell_host()
+        if shell_host is None:
+            raise IntegrationError(
+                "GitHub Copilot interactive setup requires powershell.exe "
+                "or pwsh.exe to run copilot.ps1."
+            )
+        return (
+            shell_host,
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            script,
         )
 
     def _interactive_setup_command(
@@ -72,9 +142,8 @@ class CopilotIntegration(BaseIntegration):
         request: InteractiveSetupRequest,
     ) -> Sequence[str]:
         project_dir = request.project_dir.resolve(strict=True)
-        cmd = self._resolve_real_cmd(self._find_cmd())
         return (
-            cmd,
+            *self._interactive_setup_command_prefix(),
             "-C",
             str(project_dir),
             "-i",

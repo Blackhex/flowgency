@@ -50,6 +50,11 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
         "_resolve_real_cmd",
         staticmethod(lambda cmd: r"C:\Program Files\GitHub Copilot\copilot.exe"),
     )
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_command_exists",
+        staticmethod(lambda cmd: True),
+    )
 
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
@@ -86,6 +91,11 @@ def test_copilot_builds_fallback_command_without_launch(
         "_resolve_real_cmd",
         staticmethod(lambda cmd: r"C:\Program Files\GitHub Copilot\copilot.exe"),
     )
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_command_exists",
+        staticmethod(lambda cmd: True),
+    )
 
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
@@ -100,6 +110,129 @@ def test_copilot_builds_fallback_command_without_launch(
         "'-i' 'Use the agency-setup skill.' "
         "'--name' 'Agency setup'"
     )
+
+
+def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_install(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import agency.integrations.agency.copilot as copilot_mod
+
+    wrappers = tmp_path / "npm-bin"
+    wrappers.mkdir()
+    cmd_wrapper = wrappers / "copilot.cmd"
+    cmd_wrapper.write_text("@echo off\r\n", encoding="utf-8")
+    ps1_wrapper = wrappers / "copilot.ps1"
+    ps1_wrapper.write_text("Write-Host 'copilot'\r\n", encoding="utf-8")
+    project_dir = tmp_path / "project & docs"
+    project_dir.mkdir()
+    powershell = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    captured: dict[str, object] = {}
+
+    from agency.integrations.interactive import format_interactive_command
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(copilot_mod.sys, "platform", "win32")
+    monkeypatch.setattr(
+        copilot_mod.shutil,
+        "which",
+        lambda name, path=None: {
+            "copilot.exe": None,
+            "powershell.exe": powershell,
+            "pwsh.exe": None,
+        }.get(name),
+    )
+    monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: str(cmd_wrapper))
+    monkeypatch.setattr(
+        "agency.integrations.agency.copilot.spawn_interactive_terminal",
+        lambda command, cwd: captured.update(command=tuple(command), cwd=cwd)
+        or format_interactive_command(command),
+    )
+
+    integration = CopilotIntegration()
+    request = InteractiveSetupRequest(
+        project_dir=project_dir,
+        config_path=tmp_path / "agency.yaml",
+        prompt="Use the agency-setup skill.",
+    )
+
+    result = integration.launch_interactive_setup(request)
+
+    assert captured["cwd"] == project_dir.resolve()
+    assert captured["command"][:8] == (
+        powershell,
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(ps1_wrapper),
+    )
+    assert captured["command"][8:] == (
+        "-C",
+        str(project_dir.resolve()),
+        "-i",
+        "Use the agency-setup skill.",
+        "--name",
+        "Agency setup",
+    )
+    assert str(cmd_wrapper) not in captured["command"]
+    assert all(
+        not str(arg).lower().endswith((".cmd", ".bat"))
+        for arg in captured["command"]
+    )
+    assert result.fallback_command == (
+        f"& '{powershell}' '-NoLogo' '-NoProfile' '-NonInteractive' "
+        f"'-ExecutionPolicy' 'Bypass' '-File' '{ps1_wrapper}' "
+        f"'-C' '{project_dir.resolve()}' "
+        "'-i' 'Use the agency-setup skill.' "
+        "'--name' 'Agency setup'"
+    )
+
+
+def test_copilot_interactive_setup_unavailable_without_safe_windows_route(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import agency.integrations.agency.copilot as copilot_mod
+
+    wrappers = tmp_path / "npm-bin"
+    wrappers.mkdir()
+    cmd_wrapper = wrappers / "copilot.cmd"
+    cmd_wrapper.write_text("@echo off\r\n", encoding="utf-8")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(copilot_mod.sys, "platform", "win32")
+    monkeypatch.setattr(
+        copilot_mod.shutil,
+        "which",
+        lambda name, path=None: {
+            "copilot.exe": None,
+            "powershell.exe": r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "pwsh.exe": None,
+        }.get(name),
+    )
+    monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: str(cmd_wrapper))
+    monkeypatch.setattr(
+        "agency.integrations.agency.copilot.spawn_interactive_terminal",
+        lambda command, cwd: (_ for _ in ()).throw(AssertionError("spawn must not run")),
+    )
+
+    integration = CopilotIntegration()
+    request = InteractiveSetupRequest(
+        project_dir=project_dir,
+        config_path=tmp_path / "agency.yaml",
+        prompt="Use the agency-setup skill.",
+    )
+
+    assert integration.interactive_setup_available() is False
+    with pytest.raises(IntegrationError, match="requires copilot.exe or a copilot.ps1 wrapper"):
+        integration.interactive_setup_fallback_command(request)
+    with pytest.raises(IntegrationError, match="requires copilot.exe or a copilot.ps1 wrapper"):
+        integration.launch_interactive_setup(request)
 
 
 def test_copilot_interactive_setup_unavailable_without_terminal(
