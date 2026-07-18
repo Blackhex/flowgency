@@ -6,6 +6,7 @@ CANONICAL_SKILL_DIR = REPO_ROOT / "skills" / "agency-setup"
 DISCOVERY_SKILL_DIR = REPO_ROOT / ".github" / "skills" / "agency-setup"
 SKILL_PATH = CANONICAL_SKILL_DIR / "SKILL.md"
 DISPATCH_TEMPLATES_PATH = CANONICAL_SKILL_DIR / "references" / "dispatch-templates.md"
+SETUP_KB_PATH = REPO_ROOT / "kb" / "setup-skill.md"
 
 
 def test_copilot_skill_discovery_resolves_to_canonical_source():
@@ -39,11 +40,20 @@ def test_setup_registers_explicit_canonical_instances_routines_and_memory():
     assert "dispatch.agents" not in skill
 
 
-def test_setup_hands_superseded_config_to_migration_skill():
+def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_skills():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    assert "agency-migration" in skill
-    assert "Do not migrate superseded configuration in this skill" in skill
-    assert "tools/migrate_agent_model.py" not in skill
+    kb = SETUP_KB_PATH.read_text(encoding="utf-8")
+    combined = f"{skill}\n{kb}".lower()
+    for phrase in (
+        "accepts only the canonical config shape",
+        "creates the config when absent",
+        "reports validation errors",
+        "never invoke another skill",
+        "never scans or converts superseded authority",
+    ):
+        assert phrase in combined
+    assert "agency-migration" not in combined
+    assert "tools/migrate_agent_model.py" not in combined
 
 
 def test_setup_maintains_one_authoritative_strict_canonical_config():

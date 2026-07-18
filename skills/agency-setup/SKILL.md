@@ -6,7 +6,7 @@ user_invocable: true
 
 # Agency Setup
 
-Create a standards-based global Agent Library and register explicit agent instances in one authoritative canonical Agency config. Do not create physical per-agent runtime directories.
+Create a standards-based global Agent Library and register explicit agent instances in one authoritative canonical Agency config. Accept only the canonical strict-canonical shape, create it when absent, and report validation errors directly. Do not create physical per-agent runtime directories.
 
 ## 1. Inspect
 
@@ -18,7 +18,7 @@ Ask the user to approve the team, each role's routine tasks, runtime integration
 
 Find one authoritative config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where the required `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store` paths are present.
 
-If a candidate is superseded or otherwise incompatible, stop registration and invoke the `agency-migration` skill. Do not migrate superseded configuration in this skill and do not create a second config. If multiple canonical configs remain, ask the user which is authoritative; never choose implicitly.
+If no config exists, create the canonical strict-canonical config at the authoritative path. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill, never scans or converts superseded authority, and never convert old layouts. If multiple canonical configs remain, ask the user which is authoritative; never choose implicitly.
 
 Load the config revision before editing. Re-read and compare the revision immediately before replacement, preserve unrelated keys and groups, validate the complete canonical result, write atomically, then parse and verify the file from disk.
 

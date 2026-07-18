@@ -1,6 +1,6 @@
 # Agency Setup Skill
 
-The `agency-setup` skill creates standard global blueprints and registers explicit instances, routines, runtime policy, and semantic memory in one authoritative strict-canonical config. It does not create runtime-native identities, physical agent directories, memory files, or prompt schedules.
+The `agency-setup` skill creates standard global blueprints and registers explicit instances, routines, runtime policy, and semantic memory in one authoritative strict-canonical config. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, or prompt schedules.
 
 ## Install
 
@@ -24,7 +24,7 @@ New-Item -ItemType Junction `
 
 ## Run
 
-Invoke `agency-setup` from the project workspace. The skill:
+Invoke `agency-setup` from the project workspace. If no config exists, create the canonical strict-canonical config at the authoritative path. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
 
 1. Inspects project instructions, source, tests, deployment, and available integrations.
 2. Proposes reusable roles, Agent Skills, schedules, runtime policy, and semantic memory for approval.
@@ -40,14 +40,3 @@ Projectors create runtime-native layouts in the compilation cache when jobs laun
 After setup, the Agents page lists the configured group instances. Agent Detail provides `Profile/Blueprint/Runtime/Routines/Memory/Activity`; identity is the config display name, title, and emoji. Agent Library owns reusable instructions and Agent Skills. Memory Channels own named shared memory. Group Settings continues to manage defaults only.
 
 The skill reports blueprint keys, instance names, routines, memory scopes and channels, the authoritative config path, any optional launcher, and scheduler status.
-
-## superseded v1 migration
-
-If the skill finds a superseded config or physical agent layout, it stops registration and invokes `agency-migration`; it never converts or mixes superseded authority itself.
-
-```text
-python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
-python tools/migrate_agent_model.py apply --plan migration-plan.yaml
-python tools/migrate_agent_model.py verify --config config.yaml
-python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
-```
