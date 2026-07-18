@@ -507,7 +507,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     assert read_job(path) == result
 
 
-def test_execute_job_uses_resolved_skill_from_canonical_snapshot(tmp_path, monkeypatch):
+def test_execute_job_uses_resolved_skill_from_current_snapshot(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
     seen = {}
 
@@ -643,7 +643,7 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
 
 def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
-    superseded_result = SimpleNamespace(
+    minimal_result = SimpleNamespace(
         exit_code=0,
         stdout="done",
         stderr="",
@@ -656,7 +656,7 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
             timeout=30,
             sandbox_root=None,
             group_path=tmp_path / "group",
-            integration=SimpleNamespace(run=lambda request: superseded_result),
+            integration=SimpleNamespace(run=lambda request: minimal_result),
         ),
     )
 

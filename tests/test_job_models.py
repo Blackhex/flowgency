@@ -383,7 +383,7 @@ def test_job_spec_constructor_rejects_agent_dir_input(tmp_path):
         )
 
 
-def test_job_request_no_longer_accepts_superseded_prompt_source(tmp_path):
+def test_job_request_no_longer_accepts_extra_prompt_source(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
 
@@ -395,7 +395,7 @@ def test_job_request_no_longer_accepts_superseded_prompt_source(tmp_path):
             trigger="manual_prompt",
             task_input="run",
             routine_id="routine-1",
-            superseded_prompt_source={"type": "prompt", "path": "routine.md"},
+            saved_prompt_source={"type": "prompt", "path": "routine.md"},
         )
 
 
@@ -403,7 +403,7 @@ def test_job_spec_no_longer_exposes_create_constructor():
     assert not hasattr(JobSpec, "create")
 
 
-def test_job_spec_from_dict_ignores_superseded_agent_dir_when_workspace_matches(tmp_path):
+def test_job_spec_from_dict_rejects_agent_dir_even_when_workspace_matches(tmp_path):
     spec = make_spec(tmp_path)
     payload = spec.to_dict()
     payload["agent_dir"] = payload["workspace_dir"]
@@ -412,7 +412,7 @@ def test_job_spec_from_dict_ignores_superseded_agent_dir_when_workspace_matches(
         JobSpec.from_dict(payload)
 
 
-def test_job_spec_from_dict_rejects_superseded_agent_dir_mismatch(tmp_path):
+def test_job_spec_from_dict_rejects_agent_dir_mismatch(tmp_path):
     spec = make_spec(tmp_path)
     payload = spec.to_dict()
     payload["agent_dir"] = str((tmp_path / "different").resolve())
@@ -471,7 +471,7 @@ def test_decision_jobs_require_null_routine_and_skill(tmp_path):
     assert spec.skill is None
 
 
-def test_job_record_rejects_superseded_schema_version_one(tmp_path):
+def test_job_record_rejects_older_schema_version_one(tmp_path):
     spec = make_spec(tmp_path)
     record = JobRecord.from_spec(spec).to_dict()
     record["spec"]["schema_version"] = 1
@@ -589,5 +589,5 @@ def test_active_jobs_ignores_malformed_field_types(tmp_path):
     assert [record.spec.job_id for record in records] == [valid_spec.job_id]
 
 
-def test_runtime_config_surface_exposes_only_strict_canonical_symbols():
+def test_runtime_config_surface_exposes_only_current_symbols():
     assert not hasattr(strict_config_module, "load_config_path")

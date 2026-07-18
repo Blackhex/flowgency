@@ -256,7 +256,7 @@ record, and log files.
 This choice allows simultaneous edits in the same sandbox. Agency will not attempt
 to merge, serialize, or undo conflicting changes. The UI may report multiple active
 runs, but it must not collapse their job state into one shared per-agent marker.
-superseded `.running-{agent}` markers therefore cannot be the authoritative job-state
+Historical `.running-{agent}` markers therefore cannot be the authoritative job-state
 model; running state is derived from active job records.
 
 ## Security
@@ -285,7 +285,7 @@ model; running state is derived from active job records.
 - Unique records and logs for concurrent jobs belonging to one agent.
 - Worker success, nonzero exit, timeout, exception, logs, and changed-file capture.
 - Decision result projection and retry history.
-- Executor resolution from `execution_agent`, superseded fallback to `origin_agent`,
+- Executor resolution from `execution_agent`, historical fallback to `origin_agent`,
   explicit form override, missing agent, missing directory, and non-executing
   integration.
 
@@ -315,7 +315,7 @@ python -m pytest tests/ -q
 
 Existing saved prompts and schedules require no data migration. Existing proposals
 without `execution_agent` use `origin_agent`. Existing decisions without job IDs
-continue to render from their current execution fields and use superseded retry
+continue to render from their current execution fields and use historical retry
 resolution once; the next retry stores `execution_agent` and job references.
 
 The current `execute_decision()` and dispatch `run_agent_prompt()` orchestration

@@ -14,9 +14,9 @@ python -m venv .venv
 
 On POSIX, use `.venv/bin/python`. The dashboard listens on `http://127.0.0.1:8500` by default. Set `AGENCY_CONFIG` to select the one authoritative config.
 
-## Strict canonical model
+## Current configuration model
 
-Agency accepts only `schema_version: 2`. `config.yaml` owns groups, explicit instances, runtime policy, routines, integration selection, identity, capabilities, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
+Agency accepts one current `config.yaml` shape headed by `schema_version: 2`. `config.yaml` owns groups, explicit instances, runtime policy, routines, integration selection, identity, capabilities, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
 
 Global paths separate reusable and mutable data:
 
@@ -44,7 +44,7 @@ Workspace launchers are optional frontends. They start configured instances in t
 
 ## Quick start
 
-Start Agency and open `http://127.0.0.1:8500`. On first run, the setup wizard creates strict-canonical control-plane paths for the Agent Library, compilation cache, and memory store, plus an explicit group workspace. It does not scan an agent directory or create agent folders.
+Start Agency and open `http://127.0.0.1:8500`. On first run, the setup wizard creates the control-plane paths for the Agent Library, compilation cache, and memory store, plus an explicit group workspace. It does not scan an agent directory or create agent folders.
 
 Create reusable blueprints and Agent Skills in Agent Library, then create explicit instances from the group roster and assign routines and semantic memory. The optional [Agency Setup Skill](kb/setup-skill.md) can perform this workflow after team approval.
 
@@ -59,18 +59,11 @@ christag-agency dispatch install --config C:/Agency/config.yaml
 christag-agency dispatch status --config C:/Agency/config.yaml
 ```
 
-## superseded v1 migration
+## Superseded layout cleanup
 
-Runtime never parses or rewrites superseded authority. Invoke `agency-migration` and review a standalone migration plan before applying it:
+Runtime never parses or rewrites directory-coupled or sidecar-based authority. Older installations must be rewritten into the current config shape before Agency can load them.
 
-```text
-python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
-python tools/migrate_agent_model.py apply --plan migration-plan.yaml
-python tools/migrate_agent_model.py verify --config config.yaml
-python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
-```
-
-Only migration may inspect old native identity definitions, `.agency-meta.yaml`, prompt directories, physical memory files, `dispatch.agents`, or `tmux_config`. It leaves source directories untouched; strict-canonical runtime does not consult them.
+Files such as native identity sidecars, prompt directories, physical memory files, `dispatch.agents`, or `tmux_config` are not consulted by runtime.
 
 ## Documentation
 

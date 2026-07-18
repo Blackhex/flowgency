@@ -35,9 +35,9 @@ class CursorWorkspace(BaseWorkspace):
         if cursor_rules.is_dir():
             for mdc in sorted(cursor_rules.glob("*.mdc")):
                 files.append({"label": mdc.name, "path": str(mdc), "language": "markdown"})
-        legacy = Path(path) / ".cursorrules"
-        if legacy.is_file():
-            files.append({"label": ".cursorrules (legacy)", "path": str(legacy), "language": "markdown"})
+        root_rules_file = Path(path) / ".cursorrules"
+        if root_rules_file.is_file():
+            files.append({"label": ".cursorrules (root rules file)", "path": str(root_rules_file), "language": "markdown"})
         worktrees = Path(path) / ".cursor" / "worktrees.json"
         if worktrees.is_file():
             files.append({"label": "worktrees.json", "path": str(worktrees), "language": "json"})

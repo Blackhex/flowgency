@@ -21,7 +21,7 @@ def test_detect_with_agent_md(integration, tmp_agent_dir):
 def test_detect_without_agent_md(integration, tmp_agent_dir):
     assert integration.detect(tmp_agent_dir) is False
 
-def test_run_returns_error_for_superseded_bridge_request(integration, tmp_agent_dir, tmp_path):
+def test_run_returns_error_for_external_bridge_request(integration, tmp_agent_dir, tmp_path):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Do something")
     request = IntegrationRunRequest(

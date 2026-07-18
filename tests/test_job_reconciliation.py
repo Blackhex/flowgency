@@ -353,9 +353,9 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
     assert read_job(path).memory_publication is not None
 
 
-def test_superseded_running_decision_without_job_id_is_not_failed(tmp_path):
+def test_running_decision_without_job_id_is_not_failed(tmp_path):
     group = tmp_path / "group"
-    decision = group / "shared" / "decisions" / "superseded.md"
+    decision = group / "shared" / "decisions" / "orphan.md"
     decision.parent.mkdir(parents=True)
     decision.write_text("---\nexecution_status: running\n---\n")
     reconcile_for_test({"test": {"path": str(group)}}, tmp_path)

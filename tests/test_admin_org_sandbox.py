@@ -311,7 +311,7 @@ def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_p
     snapshot.raw["groups"]["grp"]["runtime"] = {
         "timeout": 1200,
         "runtime_extension": {"preserve": True},
-        "sandbox": {"mode": "restricted", "roots": ["superseded"], "sandbox_extension": {"preserve": True}},
+        "sandbox": {"mode": "restricted", "roots": ["shared-root"], "sandbox_extension": {"preserve": True}},
         "tools": {"mode": "allowlist", "names": ["shell"], "tools_extension": {"preserve": True}},
     }
     snapshot.raw["groups"]["grp"]["dispatch"] = {
@@ -320,9 +320,9 @@ def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_p
     }
     snapshot.raw["groups"]["grp"]["workspaces"] = [
         {
-            "name": "superseded",
+            "name": "Archive",
             "type": "tmux",
-            "config": {"script_path": "superseded.sh"},
+            "config": {"script_path": "workspace.sh"},
             "workspace_extension": {"preserve": True},
         }
     ]

@@ -241,7 +241,7 @@ def test_admin_groups_card_layout_stacks_on_mobile(tmp_path, monkeypatch):
 
 
 def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monkeypatch):
-    """Group settings no longer render the superseded per-agent schedule rule editor."""
+    """Group settings no longer render the old per-agent schedule rule editor."""
     client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
     response = client.get("/admin/orgs/test/edit")
     assert response.status_code == 200

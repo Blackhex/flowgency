@@ -13,7 +13,7 @@
 - Support exactly one Agency dashboard and one authoritative `config.yaml` per OS user; multiple dashboard configs for one user are unsupported.
 - Use one Agency-managed scheduler per user: `AgencyDispatch` on Windows, `agency-dispatch.timer` plus `agency-dispatch.service` on Linux, or `com.agency.dispatch` on macOS.
 - Keep all group schedules in the singleton config; do not add a config registry or standalone dispatch manifest.
-- Do not add production discovery, compatibility, or migration behavior for project-specific superseded schedulers.
+- Do not add production discovery, compatibility, or migration behavior for project-specific historical schedulers.
 - Keep `agency.dispatch.interval` as desired configuration with a default of 15 minutes and an accepted range of 5 through 120 minutes.
 - Treat runtime scheduler inspection as authoritative; ignore any persisted `agency.dispatch.installed` key.
 - Use current-user, non-elevated scheduling and never store credentials or weaken PowerShell execution policy.
@@ -1963,18 +1963,18 @@ Write-Output "AUTHORITATIVE_CONFIG=$configPath"
 Expected: the printed path is the permanent `christag-agency\config.yaml` and
 there is no pre-existing global task whose ownership could be overwritten.
 
-- [ ] **Step 2: Capture and disable the superseded task without deleting it**
+- [ ] **Step 2: Capture and disable the historical task without deleting it**
 
 Run:
 
 ```powershell
-$supersededTask = Get-ScheduledTask -TaskName 'christag-agency-dispatch' -ErrorAction Stop
-$supersededInfo = Get-ScheduledTaskInfo -TaskName 'christag-agency-dispatch'
-$supersededTask | Select-Object TaskName, State | Format-Table
-$supersededInfo | Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List
+$historicalTask = Get-ScheduledTask -TaskName 'christag-agency-dispatch' -ErrorAction Stop
+$historicalInfo = Get-ScheduledTaskInfo -TaskName 'christag-agency-dispatch'
+$historicalTask | Select-Object TaskName, State | Format-Table
+$historicalInfo | Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List
 Disable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
 if ((Get-ScheduledTask -TaskName 'christag-agency-dispatch').State -ne 'Disabled') {
-    throw 'superseded scheduler did not enter Disabled state.'
+    throw 'Historical scheduler did not enter Disabled state.'
 }
 ```
 
@@ -1989,13 +1989,13 @@ python -m agency.cli dispatch install --config $configPath --interval 15
 if ($LASTEXITCODE -ne 0) {
     python -m agency.cli dispatch uninstall --config $configPath --force
     Enable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
-    throw 'Global installation failed; superseded scheduler re-enabled.'
+    throw 'Global installation failed; historical scheduler re-enabled.'
 }
 python -m agency.cli dispatch status --config $configPath
 if ($LASTEXITCODE -ne 0) {
     python -m agency.cli dispatch uninstall --config $configPath --force
     Enable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
-    throw 'Global verification failed; superseded scheduler re-enabled.'
+    throw 'Global verification failed; historical scheduler re-enabled.'
 }
 $globalTask = Get-ScheduledTask -TaskName 'AgencyDispatch' -ErrorAction Stop
 $globalInfo = Get-ScheduledTaskInfo -TaskName 'AgencyDispatch'
@@ -2032,7 +2032,7 @@ $info = Get-ScheduledTaskInfo -TaskName 'AgencyDispatch'
 if ($info.LastRunTime -le $before -or $info.LastTaskResult -ne 0) {
     python -m agency.cli dispatch uninstall --config $configPath --force
     Enable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
-    throw "Heartbeat failed with result $($info.LastTaskResult); superseded scheduler re-enabled."
+    throw "Heartbeat failed with result $($info.LastTaskResult); historical scheduler re-enabled."
 }
 $info | Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List
 $afterJobs = @(
@@ -2066,7 +2066,7 @@ print(f"Verified {len(identities)} unique scheduled submission(s).")
 if ($LASTEXITCODE -ne 0) {
   python -m agency.cli dispatch uninstall --config $configPath --force
   Enable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
-  throw 'Duplicate-submission verification failed; superseded scheduler re-enabled.'
+  throw 'Duplicate-submission verification failed; historical scheduler re-enabled.'
 }
 ```
 
@@ -2080,7 +2080,7 @@ Run:
 ```powershell
 Unregister-ScheduledTask -TaskName 'christag-agency-dispatch' -Confirm:$false
 if (Get-ScheduledTask -TaskName 'christag-agency-dispatch' -ErrorAction SilentlyContinue) {
-    throw 'superseded task still exists.'
+    throw 'Historical task still exists.'
 }
 ```
 

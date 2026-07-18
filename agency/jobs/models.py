@@ -226,8 +226,8 @@ class JobSpec:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "JobSpec":
         values = dict(data)
-        superseded_agent_dir = values.pop("agent_dir", None)
-        if superseded_agent_dir is not None:
+        agent_dir_value = values.pop("agent_dir", None)
+        if agent_dir_value is not None:
             raise ValueError("agent_dir is not accepted in strict schema_version: 2 jobs")
         values["integration_config"] = dict(values.get("integration_config") or {})
         values["blueprint"] = BlueprintRef(**values["blueprint"])

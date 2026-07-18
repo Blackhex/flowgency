@@ -4,7 +4,7 @@
 
 **Goal:** Make proposal decisions validate questionnaire data and dispatch only explicitly writable, human-selected executor agents while supporting open-ended guidance and decision notes.
 
-**Architecture:** Add pure proposal-policy helpers in `agency/proposals.py` and a fail-closed capability lookup in `agency/config.py`. FastAPI routes and the CLI consume those helpers, while existing route code continues to own atomic decision writes and durable job submission. Jinja templates render validated controls and superseded-safe answer displays without mutating source proposal files.
+**Architecture:** Add pure proposal-policy helpers in `agency/proposals.py` and a fail-closed capability lookup in `agency/config.py`. FastAPI routes and the CLI consume those helpers, while existing route code continues to own atomic decision writes and durable job submission. Jinja templates render validated controls and historical-safe answer displays without mutating source proposal files.
 
 **Tech Stack:** Python 3.11+, FastAPI, Starlette form data, Jinja2, PyYAML, pytest
 
@@ -13,8 +13,8 @@
 - `capabilities.write` defaults to `false`; only the literal boolean `true` grants decision implementation authority.
 - New decisions require proposal `execution_agent`; never fall back to `origin_agent` for creation.
 - Executor overrides may select only configured, available agents whose integration supports execution and whose config explicitly grants write capability.
-- Boolean answers are exactly `approved` or `declined`; `deferred` and `rejected` remain display-only superseded values.
-- `free-response` and superseded `text` questions default to `required: true`; `required: false` permits an empty answer.
+- Boolean answers are exactly `approved` or `declined`; `deferred` and `rejected` remain display-only historical values.
+- `free-response` and historical `text` questions default to `required: true`; `required: false` permits an empty answer.
 - `choice` questions require a non-empty, unique option set and default to `required: true`.
 - Validation failures create no decision, mutate no proposal, and submit no job.
 - Skip execution only when boolean questions exist, all are declined, and choice answers, open-ended answers, and the decision note contain no substantive guidance.
@@ -187,7 +187,7 @@ def test_validate_proposal_schema_accepts_supported_questions():
         question(),
         question("mode", "choice", options=["Repair", {"label": "Replace"}]),
         question("detail", "free-response", required=False),
-        question("superseded", "text"),
+        question("historical", "text"),
     )
     assert validate_proposal_schema(meta) == []
 
@@ -482,7 +482,7 @@ Expected: FAIL because notes, schema/answer validation, and skipped execution ar
 
 - [ ] **Step 3: Extend immutable prompt construction**
 
-Change `build_decision_prompt()` to accept `decision_note=""`, append a `Decision note` section only when non-empty, and replace the superseded Defer/Reject sentence with:
+Change `build_decision_prompt()` to accept `decision_note=""`, append a `Decision note` section only when non-empty, and replace the historical Defer/Reject sentence with:
 
 ```python
 note_section = f"\n\nDecision note:\n{decision_note.strip()}" if decision_note.strip() else ""
@@ -556,7 +556,7 @@ git commit -m "feat(decisions): validate questionnaires before submission"
 
 ---
 
-### Task 4: Questionnaire UI and superseded-Safe Decision Display
+### Task 4: Questionnaire UI and Historical-Safe Decision Display
 
 **Files:**
 - Modify: `agency/templates/proposal_detail.html`
@@ -598,7 +598,7 @@ def test_invalid_schema_disables_questionnaire_submission(tmp_path, monkeypatch)
     assert "Submit All Answers" not in response.text
 
 
-def test_superseded_blank_answer_displays_no_answer_recorded(tmp_path, monkeypatch):
+def test_historical_blank_answer_displays_no_answer_recorded(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: ''\nexecution_status: skipped\n---\n")
     response = client.get("/test/decisions/change")
@@ -611,7 +611,7 @@ def test_superseded_blank_answer_displays_no_answer_recorded(tmp_path, monkeypat
 Run:
 
 ```powershell
-python -m pytest tests/test_proposal_questions.py tests/test_dashboard.py -k "questionnaire_renders or invalid_schema_disables or superseded_blank" -v
+python -m pytest tests/test_proposal_questions.py tests/test_dashboard.py -k "questionnaire_renders or invalid_schema_disables or historical_blank" -v
 ```
 
 Expected: FAIL against current controls and blank badges.
@@ -627,7 +627,7 @@ Make these exact behavior changes in `proposal_detail.html`:
 - Preserve string and list choice selections.
 - Add the optional decision-note textarea before the executor selector.
 - Keep the `Implement with` selector visible and eligible-only.
-- On read-only answers, render `No answer recorded` when an answer is empty; map `declined` to Declined and preserve Deferred/Rejected superseded labels.
+- On read-only answers, render `No answer recorded` when an answer is empty; map `declined` to Declined and preserve Deferred/Rejected historical labels.
 - Display the persisted decision note below answers when non-empty.
 
 - [ ] **Step 4: Update decision detail display**
@@ -636,7 +636,7 @@ Pass `decision_note = meta.get("decision_note", "")` from `render_decision_detai
 
 - Render blank answers as `No answer recorded` before type-specific badges.
 - Render `declined` in the red decline style.
-- Preserve superseded `deferred` and `rejected` labels.
+- Preserve historical `deferred` and `rejected` labels.
 - Render a `Decision note` block when non-empty.
 - Render a neutral `Skipped` execution status badge and its summary.
 - Never render a retry form for `skipped`.
@@ -971,5 +971,5 @@ git commit -m "docs: define proposal executor capabilities"
 - [ ] Confirm malformed proposal GET is non-mutating and POST is side-effect free.
 - [ ] Confirm all-declined decisions execute when a choice, open answer, or note provides guidance.
 - [ ] Confirm skipped decisions have no job ID and cannot be retried.
-- [ ] Confirm superseded blank/deferred/rejected answers remain readable.
+- [ ] Confirm historical blank/deferred/rejected answers remain readable.
 - [ ] Confirm scheduled and manual prompt execution tests remain unchanged and passing.

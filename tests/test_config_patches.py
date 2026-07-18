@@ -172,7 +172,7 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
     snapshot.raw["groups"]["newsletter"]["runtime"] = {
         "timeout": 1200,
         "runtime_extension": {"preserve": True},
-        "sandbox": {"mode": "restricted", "roots": ["superseded"], "sandbox_extension": {"preserve": True}},
+        "sandbox": {"mode": "restricted", "roots": ["shared-root"], "sandbox_extension": {"preserve": True}},
         "tools": {"mode": "allowlist", "names": ["shell"], "tools_extension": {"preserve": True}},
     }
     snapshot.raw["groups"]["newsletter"]["dispatch"] = {
@@ -324,7 +324,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         "timeout": 900,
         "sandbox": {
             "mode": "restricted",
-            "additional_roots": ["superseded"],
+            "additional_roots": ["shared-root"],
             "sandbox_extension": {"preserve": True},
         },
         "tools": {

@@ -1,6 +1,6 @@
 # Agency Repository Guide
 
-Agency is a FastAPI and Jinja2 application with filesystem-backed strict-canonical configuration, standards-based agent blueprints, immutable runtime projections, semantic Markdown memory, durable jobs, and observation/proposal/decision records.
+Agency is a FastAPI and Jinja2 application with filesystem-backed canonical configuration, standards-based agent blueprints, immutable runtime projections, semantic Markdown memory, durable jobs, and observation/proposal/decision records.
 
 ## Authority boundaries
 
@@ -11,7 +11,7 @@ Agency is a FastAPI and Jinja2 application with filesystem-backed strict-canonic
 - A group `path` is the execution workspace and pipeline-record root, not an agent-definition root.
 - Every group agent entry is an explicit instance with `name`, `blueprint`, and `integration`.
 
-Do not add runtime superseded loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup migration. superseded parsing belongs only to `tools/migrate_agent_model.py` and `skills/agency-migration/`.
+Do not add runtime directory-shape loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup conversion.
 
 ## Configuration
 
@@ -96,15 +96,8 @@ Preserve observation, proposal, decision, log, job, dashboard, and workspace beh
 .venv/Scripts/python -m agency.app
 ```
 
-Routes use async FastAPI handlers, POST plus 303 redirects, shared domain validators, revision-checked config patches, and path validation. Config writes must lock, compare the expected revision, preserve unrelated data, validate strict canonical, and replace atomically.
+Routes use async FastAPI handlers, POST plus 303 redirects, shared domain validators, revision-checked config patches, and path validation. Config writes must lock, compare the expected revision, preserve unrelated data, validate the current config, and replace atomically.
 
-## Standalone migration
+## Superseded layout handling
 
-```text
-python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
-python tools/migrate_agent_model.py apply --plan migration-plan.yaml
-python tools/migrate_agent_model.py verify --config config.yaml
-python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
-```
-
-Only standalone migration may interpret superseded agent folders, native identity files, superseded `.agency-meta.yaml`, prompt schedules, per-agent memory, or `tmux_config`. Runtime must reject superseded shape and direct users to migration.
+Only the current control-plane shape is accepted at runtime. Directory-coupled agent folders, native identity sidecars, prompt schedules, per-agent memory files, or `tmux_config` must not be loaded by the application.

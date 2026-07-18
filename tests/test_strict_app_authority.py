@@ -7,7 +7,7 @@ from pathlib import Path
 APP_PATH = Path(__file__).parents[1] / "agency" / "app.py"
 
 
-def test_app_defines_no_parallel_superseded_config_authority() -> None:
+def test_app_defines_no_parallel_config_authority() -> None:
     tree = ast.parse(APP_PATH.read_text(encoding="utf-8"))
     forbidden_names = {
         "CONFIG",

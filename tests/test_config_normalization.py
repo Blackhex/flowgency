@@ -7,7 +7,7 @@ from agency.configuration import ConfigStore
 from agency.web.state import runtime_group
 
 
-def test_runtime_config_module_exposes_no_superseded_agent_helper_surface():
+def test_runtime_config_module_exposes_no_retired_agent_helper_surface():
     for name in (
         "agent_can_write",
         "agent_names",
@@ -19,7 +19,7 @@ def test_runtime_config_module_exposes_no_superseded_agent_helper_surface():
         assert not hasattr(strict_config_module, name)
 
 
-def test_runtime_group_exposes_resolved_canonical_agent_instances_without_mutating_raw_input():
+def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_input():
     raw_config = {
         "agency": {
             "title": "Agency",

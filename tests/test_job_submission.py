@@ -161,7 +161,7 @@ def test_submit_persists_then_launches(tmp_path):
     assert handle.worker_pid == 4321
 
 
-def test_submit_request_persists_validated_canonical_snapshot(tmp_path):
+def test_submit_request_persists_validated_current_snapshot(tmp_path):
     request = configured_request(tmp_path)
     launcher = Mock()
     launcher.launch.return_value = LaunchResult(worker_pid=4321)
@@ -451,8 +451,8 @@ def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": "placeholder"},
             canonical_json='{"job":"placeholder","scope":"run","version":1}',
-            memory_hash="memory-hash-superseded",
-            path=str((tmp_path / "memory" / "memory-hash-superseded").resolve()),
+            memory_hash="memory-hash-archive",
+            path=str((tmp_path / "memory" / "memory-hash-archive").resolve()),
         ),
         routine_id=None,
         skill=None,

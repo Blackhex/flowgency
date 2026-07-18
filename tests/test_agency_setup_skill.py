@@ -23,7 +23,7 @@ def test_setup_creates_standard_global_agent_library_blueprints():
         assert forbidden not in skill
 
 
-def test_setup_registers_explicit_canonical_instances_routines_and_memory():
+def test_setup_registers_explicit_instances_routines_and_memory():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     assert "one authoritative canonical Agency config" in skill
     assert "agency.agent_library" in skill
@@ -56,7 +56,7 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
     assert "tools/migrate_agent_model.py" not in combined
 
 
-def test_setup_maintains_one_authoritative_strict_canonical_config():
+def test_setup_maintains_one_authoritative_canonical_config():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     assert "one authoritative" in skill
     assert "canonical Agency config" in skill
@@ -116,7 +116,7 @@ def test_registration_writes_explicit_fail_closed_agent_capabilities():
 def test_docs_clarify_execution_agent_blocks_not_skips():
     """kb/data-formats.md and CLAUDE.md must state that a missing, invalid, non-executable,
     or non-writable execution_agent blocks the decide form and POST until corrected — not
-    that it silently creates a skipped decision. The prohibited superseded-skip row must be
+    that it silently creates a skipped decision. The prohibited obsolete skip row must be
     absent. The substantive-input and no-boolean-questions execution rules must be stated."""
     data_formats = (REPO_ROOT / "kb" / "data-formats.md").read_text(encoding="utf-8")
     claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
@@ -139,6 +139,6 @@ def test_docs_clarify_execution_agent_blocks_not_skips():
     assert "blocks the decide form" in claude_md, \
         "CLAUDE.md Pipeline Relationships must say missing/invalid execution_agent blocks the decide form"
 
-    # Prohibited: superseded-skip row implying missing executor creates a skipped decision
+    # Prohibited: obsolete skip row implying missing executor creates a skipped decision
     assert "No writable `execution_agent` is available | `skipped`" not in data_formats, \
-        "data-formats.md must not contain the inaccurate superseded-skip table row"
+        "data-formats.md must not contain the inaccurate obsolete skip table row"

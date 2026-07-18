@@ -56,7 +56,7 @@ the user to select the singleton installation. It never schedules all candidates
 - Supporting multiple dashboard configs for one user.
 - Adding a config registry under `$HOME` or elsewhere.
 - Adding standalone project dispatch manifests.
-- Supporting or automatically discovering superseded project-specific tasks in
+- Supporting or automatically discovering historical project-specific tasks in
   production code.
 - Enforcing the singleton invariant with a cross-process lock.
 - Changing the semantics of group `at`, `every`, or conditional schedule rules.
@@ -132,7 +132,7 @@ loads that config once per heartbeat, iterates every enabled group, evaluates du
 rules, and submits jobs through the existing job submission layer. Existing
 per-rule marker files remain the deduplication authority.
 
-No registry enumeration, project script invocation, or superseded-task detection is
+No registry enumeration, project script invocation, or historical-task detection is
 added to the runner.
 
 ### CLI
@@ -288,7 +288,7 @@ re-enable the unchanged project task. This provides rollback without allowing
 both schedulers to run concurrently.
 
 Production code and the setup skill do not search for or migrate similarly named
-superseded tasks on other machines.
+historical tasks on other machines.
 
 ## Testing
 
@@ -364,5 +364,5 @@ Update user-facing dispatch and Agency Setup documentation to state:
 The change is complete when one global scheduler drives every enabled group in
 the singleton dashboard config, the dashboard accurately distinguishes schedule
 configuration from scheduler health, Agency Setup cannot create a second
-project-specific scheduler, the local superseded task has been removed after verified
+project-specific scheduler, the local historical task has been removed after verified
 replacement, and all automated and local acceptance checks pass.

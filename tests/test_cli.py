@@ -429,11 +429,11 @@ def test_cmd_logs_unknown_job_exits(tmp_path, monkeypatch):
     assert cli.cmd_logs(Namespace(group="test", job_id="deadbeef", lines=40, stderr=False)) == 1
 
 
-def test_cmd_jobs_and_logs_ignore_superseded_shared_jobs_records(tmp_path, monkeypatch, capsys):
+def test_cmd_jobs_and_logs_ignore_forged_shared_jobs_records(tmp_path, monkeypatch, capsys):
     spec = _setup_jobs_group(tmp_path, monkeypatch, job_id="canonical-job")
-    superseded_path = tmp_path / "group" / "shared" / "jobs" / "forged-job.yaml"
-    superseded_path.parent.mkdir(parents=True, exist_ok=True)
-    superseded_record = JobRecord.from_spec(
+    forged_path = tmp_path / "group" / "shared" / "jobs" / "forged-job.yaml"
+    forged_path.parent.mkdir(parents=True, exist_ok=True)
+    forged_record = JobRecord.from_spec(
         JobSpec(
             schema_version=2,
             job_id="forged-job",
@@ -459,10 +459,10 @@ def test_cmd_jobs_and_logs_ignore_superseded_shared_jobs_records(tmp_path, monke
             created_at=spec.created_at,
         )
     )
-    superseded_record.status = "complete"
-    superseded_record.started_at = spec.created_at
-    superseded_record.stdout_path = str(tmp_path / "group" / "shared" / "logs" / "forged-job.out")
-    write_job(superseded_path, superseded_record)
+    forged_record.status = "complete"
+    forged_record.started_at = spec.created_at
+    forged_record.stdout_path = str(tmp_path / "group" / "shared" / "logs" / "forged-job.out")
+    write_job(forged_path, forged_record)
 
     cli.cmd_jobs(Namespace(group="test", status=None, agent=None, json=True))
     jobs = yaml.safe_load(capsys.readouterr().out)

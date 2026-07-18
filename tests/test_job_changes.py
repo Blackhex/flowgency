@@ -136,7 +136,7 @@ def test_capture_sees_committed_work_when_tree_clean(tmp_path):
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-q", "-m", "atomic change")
 
-    # Working tree is clean, so the superseded path sees nothing.
+    # Working tree is clean, so the direct path sees nothing.
     assert capture_git_changes(tmp_path) == []
 
     changes = {c.path: c for c in capture_git_changes(tmp_path, base_sha)}

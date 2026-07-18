@@ -1,6 +1,6 @@
 # Agent Identity And Blueprints
 
-Strict canonical separates reusable behavior from configured identity.
+The current model separates reusable behavior from configured identity.
 
 A blueprint is a global Agent Library directory containing reusable `AGENTS.md` instructions and standard Agent Skills. It has no display identity, integration, schedule, permissions, workspace, or mutable memory.
 
@@ -22,6 +22,6 @@ An instance belongs to exactly one group. Its config record owns stable `name`, 
 
 The Agents page lists group-owned instances. Agent Detail provides `Profile/Blueprint/Runtime/Routines/Memory/Activity`; Profile patches config identity with an expected revision and never edits blueprint source. Identity is display name, title, and emoji. Agent Library edits reusable source separately.
 
-## superseded v1 migration
+## Superseded layouts
 
-The standalone migration utility may read superseded native identity files and superseded `.agency-meta.yaml` as source history, then moves identity into explicit instance records. Runtime does not read those superseded files.
+Native identity sidecars and adjacent metadata files are not read by runtime. Identity belongs in explicit instance records.

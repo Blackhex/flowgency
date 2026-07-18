@@ -288,7 +288,7 @@ def test_exact_dispatch_slug_does_not_resolve_to_generic_prompt_routes(tmp_path)
     "prompt",
     ["missing", "_observation-system-steps"],
 )
-def test_agents_page_does_not_render_superseded_schedule_links(
+def test_agents_page_does_not_render_retired_schedule_links(
     tmp_path,
     prompt,
 ):
@@ -306,7 +306,7 @@ def test_agents_page_keeps_roster_layout_when_logs_exist(tmp_path):
     group_path = _setup_group(tmp_path)
     day = group_path / "shared" / "logs" / "2026-07-11"
     day.mkdir()
-    (day / "product-superseded.err").write_text("superseded failure")
+    (day / "product-error.err").write_text("run failure")
     client = TestClient(app)
 
     resp = client.get("/test/agents")

@@ -68,7 +68,7 @@ def test_validate_proposal_schema_accepts_supported_questions():
             "mode", "choice", options=["Repair", {"label": "Replace"}]
         ),
         question("detail", "free-response", required=False),
-        question("superseded", "text"),
+        question("detail-text", "text"),
     )
     assert validate_proposal_schema(meta) == []
 

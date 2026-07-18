@@ -38,7 +38,7 @@ does not infer routing or permissions from prose.
 7. Support one optional decision-level note.
 8. Avoid dispatching work when every actionable boolean item is declined and no
    other substantive direction was supplied.
-9. Preserve superseded decisions for display without permitting new malformed data.
+9. Preserve historical decisions for display without permitting new malformed data.
 
 ## Non-Goals
 
@@ -104,7 +104,7 @@ Each question must contain:
 
 - A non-empty, unique `id`.
 - A non-empty `prompt`.
-- A supported `type`: `boolean`, `choice`, `free-response`, or superseded `text`.
+- A supported `type`: `boolean`, `choice`, `free-response`, or historical `text`.
 
 Additional rules by type:
 
@@ -112,7 +112,7 @@ Additional rules by type:
 - `choice` requires a non-empty `options` list. Each option may be a string or a
   mapping with a non-empty `label`. Option labels must be unique within the
   question. `multi: true` enables multiple selections.
-- `free-response` and superseded `text` render as textareas. `required` defaults to
+- `free-response` and historical `text` render as textareas. `required` defaults to
   `true`; proposal authors may set `required: false`.
 
 Schema validation runs before an unanswered proposal becomes actionable. A
@@ -211,7 +211,7 @@ Proposal errors are specific and actionable, including:
 - Missing, empty, or duplicate choice options.
 - Missing required answer or answer outside the declared values.
 
-Decision and proposal detail pages display superseded empty answers as
+Decision and proposal detail pages display historical empty answers as
 `No answer recorded`, never as an empty success badge. Existing `deferred`
 answers remain readable with their historical label.
 
@@ -228,7 +228,7 @@ proposal.
 - Current and shipped example configurations will mark known implementation
   agents with `capabilities.write: true` and known observational/advisory agents
   with `false`.
-- superseded `text` questions remain aliases of `free-response`.
+- Historical `text` questions remain aliases of `free-response`.
 - Existing decisions with blank or `deferred` answers remain displayable.
 - New proposal decisions require explicit valid metadata and complete answers.
 - Scheduled and manually launched prompts retain their current behavior; write
@@ -244,7 +244,7 @@ Focused tests will cover:
 4. Executor filtering and POST rejection for read-only agents.
 5. Visible executor override and preservation after validation errors.
 6. Required Approve/Decline boolean answers and rejection of `deferred`.
-7. Required and optional open-ended answers, including superseded `text`.
+7. Required and optional open-ended answers, including historical `text`.
 8. Single- and multi-choice answer validation.
 9. Decision-note persistence, display, and prompt inclusion.
 10. Preservation of entered answers, note, and executor on POST errors.
@@ -252,7 +252,7 @@ Focused tests will cover:
 12. Execution when choices, open-ended answers, or a note provide guidance even
     when all booleans are declined.
 13. Execution for validated questionnaires without boolean questions.
-14. superseded blank and deferred answer display.
+14. Historical blank and deferred answer display.
 15. Retry executor capability validation.
 16. No decision, proposal mutation, or job submission after validation failure.
 

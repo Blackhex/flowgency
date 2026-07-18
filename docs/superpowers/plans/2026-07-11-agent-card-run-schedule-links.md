@@ -13,7 +13,7 @@
 - Apply the interaction only to regular cards on `/{group}/agents`; collapsed subagent cards remain whole-card profile links.
 - Add no HTTP endpoints, database state, API request, or client-side click-resolution state.
 - Preserve current dispatch scheduling semantics and the `compute_next_run(g, agent_name, dispatch_cfg) -> datetime | None` interface.
-- Select the latest stdout by file modification time, ignore `.err` files, and keep superseded last-seen activity as an unlinked fallback.
+- Select the latest stdout by file modification time, ignore `.err` files, and keep historical last-seen activity as an unlinked fallback.
 - Link normal editable prompts to their exact assignment row; missing and underscore-prefixed system prompts fall back to `/admin/orgs/{group}/edit#rules-{agent}`.
 - Keep the status dot, separator, and `Running` label non-interactive; starting a manual run must remove both idle links in place.
 - URL-encode complete stdout paths and schedule fragments so Windows paths and configured agent names navigate correctly.
@@ -25,7 +25,7 @@
 - Modify `agency/templates/agents.html`: render accessible last-run and next-run anchors inside the existing live status label.
 - Modify `agency/templates/prompts.html`: give editable schedule rows stable fragment IDs and visible target styling.
 - Modify `tests/test_agent_status.py`: cover pure stdout selection, next-run detail identity, tie ordering, compatibility, prompt rule indexes, and agent view-model wiring.
-- Modify `tests/test_agent_run.py`: cover rendered URLs, target IDs, fallbacks, superseded activity, and running-state guards.
+- Modify `tests/test_agent_run.py`: cover rendered URLs, target IDs, fallbacks, historical activity, and running-state guards.
 
 Design reference: `docs/superpowers/specs/2026-07-11-agent-card-run-schedule-links-design.md`
 
@@ -483,11 +483,11 @@ def test_agents_page_uses_group_settings_for_uneditable_schedule(
     assert 'href="/test/prompts#schedule-product-0"' not in resp.text
 
 
-def test_agents_page_keeps_superseded_activity_unlinked(tmp_path):
+def test_agents_page_keeps_historical_activity_unlinked(tmp_path):
     group_path = _setup_group(tmp_path)
     day = group_path / "shared" / "logs" / "2026-07-11"
     day.mkdir()
-    (day / "product-superseded.err").write_text("superseded failure")
+    (day / "product-historical.err").write_text("historical failure")
     client = TestClient(app)
 
     resp = client.get("/test/agents")
@@ -562,10 +562,10 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
 Run:
 
 ```bash
-python -m pytest tests/test_agent_status.py tests/test_agent_run.py -k "collect_agents or last_stdout or exact_schedule_target or uneditable_schedule or superseded_activity or running_status" -v
+python -m pytest tests/test_agent_status.py tests/test_agent_run.py -k "collect_agents or last_stdout or exact_schedule_target or uneditable_schedule or historical_activity or running_status" -v
 ```
 
-Expected: failures show missing `last_run`/`next_run_detail` fields, missing card anchors, and a missing schedule-row fragment ID. The superseded and running guard tests may already pass independently, but the focused selection must remain red until the feature fields and links exist.
+Expected: failures show missing `last_run`/`next_run_detail` fields, missing card anchors, and a missing schedule-row fragment ID. The historical and running guard tests may already pass independently, but the focused selection must remain red until the feature fields and links exist.
 
 - [ ] **Step 3: Wire both detail records into agent dictionaries**
 

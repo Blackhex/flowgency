@@ -218,8 +218,8 @@ def test_projector_version_separates_cache_keys(
 ):
     from agency.blueprints.cache import CompilationCache
 
-    first_cache = CompilationCache(cache_root, {"copilot": _projector("v1")})
-    second_cache = CompilationCache(cache_root, {"copilot": _projector("canonical")})
+    first_cache = CompilationCache(cache_root, {"copilot": _projector("baseline")})
+    second_cache = CompilationCache(cache_root, {"copilot": _projector("updated")})
 
     first = first_cache.ensure_compiled("copilot", inspection)
     second = second_cache.ensure_compiled("copilot", inspection)
@@ -227,11 +227,11 @@ def test_projector_version_separates_cache_keys(
     assert first.entry_path != second.entry_path
     assert (
         first.entry_path
-        == cache_root / "copilot" / "v1" / inspection.snapshot.digest
+        == cache_root / "copilot" / "baseline" / inspection.snapshot.digest
     )
     assert (
         second.entry_path
-        == cache_root / "copilot" / "canonical" / inspection.snapshot.digest
+        == cache_root / "copilot" / "updated" / inspection.snapshot.digest
     )
 
 

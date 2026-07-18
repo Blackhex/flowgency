@@ -1,6 +1,6 @@
 # Configuration
 
-Agency uses one authoritative strict-canonical YAML document. The top-level `schema_version: 2`, `agency`, and `groups` fields are required. `memory.channels` may be empty.
+Agency uses one authoritative YAML document. The top-level `schema_version: 2`, `agency`, and `groups` fields are required. `memory.channels` may be empty.
 
 ## Global paths
 
@@ -22,13 +22,6 @@ Memory selectors are semantic: `run`, `routine`, `agent`, `group`, or declared g
 
 See [../config.yaml.example](../config.yaml.example) for a complete example.
 
-## superseded v1 migration
+## Superseded layouts
 
-The application does not auto-convert older files. Invoke `agency-migration`, then use the standalone commands:
-
-```text
-python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
-python tools/migrate_agent_model.py apply --plan migration-plan.yaml
-python tools/migrate_agent_model.py verify --config config.yaml
-python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
-```
+The application does not auto-load directory-coupled agent state, sidecars, prompt schedules, or per-agent memory files.

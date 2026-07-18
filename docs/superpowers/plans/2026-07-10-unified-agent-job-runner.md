@@ -51,11 +51,11 @@
 - `tests/test_job_models.py`: model serialization, atomic persistence, transitions, and active-job queries.
 - `tests/test_job_submission.py`: context validation, detached flags, launch success/failure, and concurrent submission.
 - `tests/test_job_execution.py`: worker execution, logs, failures, prompt snapshots, and guarded decision projection.
-- `tests/test_job_reconciliation.py`: live, dead, uncertain, complete, and superseded decision behavior.
+- `tests/test_job_reconciliation.py`: live, dead, uncertain, complete, and historical decision behavior.
 - `tests/test_job_detached_process.py`: child continues after the submitting process exits.
 - `tests/test_dispatch_run.py`: scheduled submission and marker ordering.
 - `tests/test_agent_run.py`: manual saved-prompt submission and concurrent acceptance.
-- `tests/test_execute_decision.py`: replace superseded in-process execution tests with decision job route and projection tests.
+- `tests/test_execute_decision.py`: replace historical in-process execution tests with decision job route and projection tests.
 - `tests/test_proposal_questions.py`: executor defaults, form rendering, and validation errors.
 
 ---
@@ -1052,7 +1052,7 @@ Run:
 rg "run_agent_prompt|background_tasks\.add_task|integration\.run" agency/dispatch/run.py agency/app.py
 ```
 
-Expected: no `run_agent_prompt`; decision background-task matches may remain until Task 5; `integration.run` remains only in the superseded decision function until Task 5.
+Expected: no `run_agent_prompt`; decision background-task matches may remain until Task 5; `integration.run` remains only in the historical decision function until Task 5.
 
 - [ ] **Step 7: Commit saved-prompt trigger migration**
 
@@ -1125,7 +1125,7 @@ def test_proposal_form_defaults_executor_to_explicit_execution_agent(tmp_path, m
     assert '<option value="engineer" selected>' in response.text
 
 
-def test_superseded_proposal_defaults_executor_to_origin_agent(tmp_path, monkeypatch):
+def test_historical_proposal_defaults_executor_to_origin_agent(tmp_path, monkeypatch):
     client, _, _ = _setup_decision_group(tmp_path, monkeypatch, explicit_executor=False)
     response = client.get("/test/proposals/change")
     assert '<option value="product" selected>' in response.text
@@ -1207,7 +1207,7 @@ Run:
 python -m pytest tests/test_proposal_questions.py tests/test_execute_decision.py -v
 ```
 
-Expected: failures show missing executor context, no job IDs, and superseded `origin_agent` background dispatch.
+Expected: failures show missing executor context, no job IDs, and historical `origin_agent` background dispatch.
 
 - [ ] **Step 3: Implement immutable decision prompt construction**
 
@@ -1289,7 +1289,7 @@ The `decision_context` must contain absolute `decision_path` and `proposal_path`
 
 For retry:
 
-1. Default the form to `decision.execution_agent`; for a superseded decision use proposal `execution_agent`, then `origin_agent`.
+1. Default the form to `decision.execution_agent`; for a historical decision use proposal `execution_agent`, then `origin_agent`.
 2. Validate the submitted executor before changing decision fields.
 3. Build the `decision_retry` spec so its job ID is known before launch.
 4. Save the complete original decision text, then atomically append the previous nonempty `execution_job_id` once to `execution_job_history`, store the new ID and executor, clear stale summary/changed-files fields, and set `execution_status: pending`.
@@ -1298,7 +1298,7 @@ For retry:
 
 - [ ] **Step 7: Document frontmatter fields**
 
-Update `kb/data-formats.md` proposal fields with optional `execution_agent`, and decision fields with `execution_agent`, `execution_job_id`, and `execution_job_history`. State the superseded fallback order and that retries retain prior IDs.
+Update `kb/data-formats.md` proposal fields with optional `execution_agent`, and decision fields with `execution_agent`, `execution_job_id`, and `execution_job_history`. State the historical fallback order and that retries retain prior IDs.
 
 - [ ] **Step 8: Run decision and template tests**
 
@@ -1396,9 +1396,9 @@ def test_reconcile_leaves_uncertain_worker_running(tmp_path, monkeypatch):
     assert read_job(path).status == "running"
 
 
-def test_superseded_running_decision_without_job_id_is_not_failed(tmp_path):
+def test_historical_running_decision_without_job_id_is_not_failed(tmp_path):
     group = tmp_path / "group"
-    decision = group / "shared" / "decisions" / "superseded.md"
+    decision = group / "shared" / "decisions" / "historical.md"
     decision.parent.mkdir(parents=True)
     decision.write_text("---\nexecution_status: running\n---\n")
     reconcile_jobs({"test": {"path": str(group)}})
@@ -1454,7 +1454,7 @@ Return `None` whenever absence is not confirmed. Do not add an age-based failure
 
 Add `ReconciliationResult(failed, left_running)` and scan only `shared/jobs/*.yaml` records with `status == "running"`. If `worker_alive` is `False`, atomically transition the record to failed with completion timestamp and summary `Worker process (PID N) was not found.` Then call the guarded `project_decision(record)`. Leave `True` and `None` untouched. Ignore malformed records after logging a warning.
 
-Do not scan decisions and infer orphaning from dashboard startup. superseded running decisions without job IDs are untouched because their worker liveness cannot be established.
+Do not scan decisions and infer orphaning from dashboard startup. Historical running decisions without job IDs are untouched because their worker liveness cannot be established.
 
 - [ ] **Step 5: Replace marker-based running state and startup recovery**
 
@@ -1465,7 +1465,7 @@ def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
     return bool(active_jobs(g["path"], agent_name))
 ```
 
-Keep the `timeout` parameter temporarily for call-site compatibility but document that persisted jobs are authoritative. Remove superseded `.running-{agent}` creation and recovery code. In lifespan call `reconcile_jobs(GROUPS)` instead of `recover_orphaned_executions()`.
+Keep the `timeout` parameter temporarily for call-site compatibility but document that persisted jobs are authoritative. Remove historical `.running-{agent}` creation and recovery code. In lifespan call `reconcile_jobs(GROUPS)` instead of `recover_orphaned_executions()`.
 
 Export `reconcile_jobs` and `active_jobs` from `agency/jobs/__init__.py` only if app call sites need them; keep platform helpers internal unless tests import them directly.
 
@@ -1652,7 +1652,7 @@ git diff --check
 Expected:
 
 - `integration.run` appears only in `agency/jobs/execution.py`.
-- The superseded orchestration and running-marker search produces no matches.
+- The historical orchestration and running-marker search produces no matches.
 - `compileall` exits zero.
 - `git diff --check` exits zero.
 

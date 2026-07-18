@@ -1,6 +1,6 @@
 # Directory Structure
 
-Strict canonical separates source, generated runtime context, mutable memory, and workspaces.
+The current model separates source, generated runtime context, mutable memory, and workspaces.
 
 ```text
 agent-library/
@@ -29,6 +29,6 @@ The Agent Library follows `AGENTS.md` and Agent Skills standards. It has no Agen
 
 The project workspace belongs to the group. Configured instances run there and do not own physical subdirectories. Optional tmux, IDE, or Windows Terminal launchers also start from this group workspace and never become configuration authority.
 
-## superseded v1 migration
+## Superseded layouts
 
-superseded native definitions, sidecars, and per-agent memory may remain as untouched source history after standalone migration, but runtime does not consult them.
+Directory-coupled agent folders, sidecars, and per-agent memory can remain in repository history, but runtime does not consult them.

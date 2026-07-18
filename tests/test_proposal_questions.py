@@ -212,7 +212,7 @@ def test_unanswered_boolean_form_only_offers_approve_and_decline(tmp_path, monke
     assert ">Defer<" not in response.text
 
 
-def test_superseded_proposal_excludes_origin_agent_without_write_capability(tmp_path, monkeypatch):
+def test_historical_proposal_excludes_origin_agent_without_write_capability(tmp_path, monkeypatch):
     client, _, _ = _setup_decision_group(tmp_path, monkeypatch, explicit_executor=False)
     response = client.get("/test/proposals/change")
     assert "execution_agent is required" in response.text
@@ -309,7 +309,7 @@ def test_invalid_schema_disables_questionnaire_submission(tmp_path, monkeypatch)
     assert "Submit All Answers" not in response.text
 
 
-def test_superseded_blank_answer_displays_no_answer_recorded(tmp_path, monkeypatch):
+def test_historical_blank_answer_displays_no_answer_recorded(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: ''\nexecution_status: skipped\n---\n")
     response = client.get("/test/decisions/change")

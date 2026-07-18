@@ -319,11 +319,11 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
         elif _is_mapping(dispatch) and "agents" in dispatch:
             issues.append(
                 _build_issue(
-                    code="superseded-group-dispatch-agents",
+                    code="group-dispatch-agents-not-supported",
                     scope=f"groups.{group_name}.dispatch",
                     field=f"{group_field}.dispatch.agents",
-                    message="Group dispatch schedules are superseded v1 data and are not supported in canonical.",
-                    hint="Move schedules into each agent's routines using the standalone migration utility.",
+                    message="Group dispatch schedules belong on agent routines and are not supported in the current config.",
+                    hint="Move schedules into each agent's routines on the configured instances.",
                 )
             )
 
@@ -585,7 +585,7 @@ def _validate_agent_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
                 code="invalid-config",
                 scope=scope,
                 field=f"{scope}.runtime.sandbox.roots",
-                message="superseded sandbox roots are not supported for agent runtime.",
+                message="Agent runtime sandbox roots are not supported.",
                 hint="Remove runtime.sandbox.roots and use runtime.sandbox.additional_roots instead.",
             )
         )

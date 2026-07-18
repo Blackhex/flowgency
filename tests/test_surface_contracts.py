@@ -59,31 +59,12 @@ def _active_documentation_paths() -> list[Path]:
     ]
 
 
-def _without_superseded_migration_sections(markdown_text: str) -> str:
-    lines = markdown_text.splitlines()
-    kept: list[str] = []
-    skipped_level: int | None = None
-    for line in lines:
-        heading = re.match(r"^(#{1,6})\s+(.+)$", line)
-        if heading:
-            level = len(heading.group(1))
-            title = heading.group(2).lower()
-            if skipped_level is not None and level <= skipped_level:
-                skipped_level = None
-            if "migration" in title or "v1 history" in title:
-                skipped_level = level
-                continue
-        if skipped_level is None:
-            kept.append(line)
-    return "\n".join(kept)
-
-
 @pytest.fixture
 def repo_root() -> Path:
     return REPO_ROOT
 
 
-def _superseded_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
+def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     library = tmp_path / "agent-library"
     blueprint = library / "advisor"
     skill = blueprint / ".agents" / "skills" / "daily-review"
@@ -170,7 +151,7 @@ def test_retired_routes_are_not_registered():
 
 
 def test_retired_routes_return_ordinary_404_without_mutating_source(tmp_path, monkeypatch):
-    client, source_root = _superseded_client(tmp_path, monkeypatch)
+    client, source_root = _config_only_client(tmp_path, monkeypatch)
     before = _snapshot_bytes(source_root)
     requests = [
         ("get", "/newsletter/documents", {}),
@@ -199,7 +180,7 @@ def test_retired_routes_return_ordinary_404_without_mutating_source(tmp_path, mo
     assert _snapshot_bytes(source_root) == before
 
 
-def test_retired_templates_are_deleted_and_navigation_uses_canonical_surfaces():
+def test_retired_templates_are_deleted_and_navigation_uses_current_surfaces():
     template_root = REPO_ROOT / "agency" / "templates"
     assert not {path.name for path in template_root.iterdir()} & RETIRED_TEMPLATES
     navigation = (template_root / "base.html").read_text(encoding="utf-8")
@@ -219,7 +200,7 @@ def test_retired_templates_are_deleted_and_navigation_uses_canonical_surfaces():
         assert mobile_contract in navigation
 
 
-def test_setup_skill_strict_canonical_yaml_is_parseable_and_structurally_current():
+def test_setup_skill_yaml_is_parseable_and_structurally_current():
     skill = (REPO_ROOT / "skills" / "agency-setup" / "SKILL.md").read_text(encoding="utf-8")
     match = re.search(r"Use this canonical shape:\s*```yaml\n(?P<yaml>.*?)\n```", skill, re.DOTALL)
     assert match is not None

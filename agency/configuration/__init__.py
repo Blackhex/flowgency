@@ -1,4 +1,4 @@
-"""Strict canonical configuration models, store, and validation primitives."""
+"""Configuration models, store, and validation primitives."""
 
 from .issues import ValidationFailed, ValidationIssue
 from .models import (

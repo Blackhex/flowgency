@@ -154,7 +154,7 @@ def test_stale_group_create_returns_conflict_without_writing_group(
     assert "new-group" not in store.load().config.groups
 
 
-def test_setup_post_creates_strict_canonical_group_without_scanning_agents(monkeypatch, tmp_path):
+def test_setup_post_creates_current_group_without_scanning_agents(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     config_path.write_text(

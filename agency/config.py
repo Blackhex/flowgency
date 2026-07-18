@@ -1,4 +1,4 @@
-"""Strict canonical configuration re-exports."""
+"""Configuration re-exports."""
 
 from agency.configuration import (
     AgencyConfig,

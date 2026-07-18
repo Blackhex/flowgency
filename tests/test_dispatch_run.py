@@ -56,7 +56,7 @@ def test_check_every_rule_minutes(tmp_path):
 
 
 def _make_group(tmp_path):
-    """Create a strict-canonical group and config path; return (group_path, config_path, log_dir)."""
+    """Create a current group and config path; return (group_path, config_path, log_dir)."""
     group_path = tmp_path / "grp"
     agent_dir = group_path / "product"
     agent_dir.mkdir(parents=True)
@@ -66,7 +66,7 @@ def _make_group(tmp_path):
     return group_path, tmp_path / "config.yaml", log_dir
 
 
-def _write_canonical_config(
+def _write_config(
     config_path: Path,
     group_path: Path,
     *,
@@ -153,7 +153,7 @@ def _request_summary(request):
 
 def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monkeypatch):
     group_path, config_path, _ = _make_group(tmp_path)
-    _write_canonical_config(
+    _write_config(
         config_path,
         group_path,
         routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}],
@@ -181,7 +181,7 @@ def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monk
 
 def test_due_schedule_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
     group_path, config_path, _ = _make_group(tmp_path)
-    _write_canonical_config(
+    _write_config(
         config_path,
         group_path,
         routines=[
@@ -207,7 +207,7 @@ def test_due_schedule_renders_routine_arguments_in_task_input(tmp_path, monkeypa
 
 def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypatch):
     group_path, config_path, _ = _make_group(tmp_path)
-    _write_canonical_config(
+    _write_config(
         config_path,
         group_path,
         routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}],
@@ -227,7 +227,7 @@ def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypa
 
 def test_schedule_skips_condition_rules(tmp_path, monkeypatch):
     group_path, config_path, _ = _make_group(tmp_path)
-    _write_canonical_config(
+    _write_config(
         config_path,
         group_path,
         routines=[
@@ -263,8 +263,8 @@ def test_check_every_rule_days(tmp_path):
 def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, monkeypatch):
     first_path, first_config, _ = _make_group(tmp_path / "first")
     second_path, second_config, _ = _make_group(tmp_path / "second")
-    _write_canonical_config(first_config, first_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
-    _write_canonical_config(second_config, second_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    _write_config(first_config, first_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    _write_config(second_config, second_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
     submitted = []
     monkeypatch.setattr(
         "agency.dispatch.run.submit_job_request",
@@ -301,7 +301,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
 
     monkeypatch.setattr("agency.dispatch.run.datetime", MockDatetime)
 
-    _write_canonical_config(
+    _write_config(
         config_path,
         group_path,
         routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"at": "09:00"}}],
@@ -323,8 +323,8 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
 def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
     enabled_path, enabled_config, _ = _make_group(tmp_path / "enabled")
     disabled_path, disabled_config, _ = _make_group(tmp_path / "disabled")
-    _write_canonical_config(enabled_config, enabled_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
-    _write_canonical_config(disabled_config, disabled_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}], enabled=False)
+    _write_config(enabled_config, enabled_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    _write_config(disabled_config, disabled_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}], enabled=False)
     submitted = []
     monkeypatch.setattr(
         "agency.dispatch.run.submit_job_request",
@@ -337,7 +337,7 @@ def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
 
 def test_disabled_routine_is_never_submitted_or_marked(tmp_path, monkeypatch):
     group_path, config_path, _ = _make_group(tmp_path)
-    _write_canonical_config(
+    _write_config(
         config_path,
         group_path,
         routines=[

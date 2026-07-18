@@ -1,6 +1,6 @@
 # Agency Setup Skill
 
-The `agency-setup` skill creates standard global blueprints and registers explicit instances, routines, runtime policy, and semantic memory in one authoritative strict-canonical config. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, or prompt schedules.
+The `agency-setup` skill creates standard global blueprints and registers explicit instances, routines, runtime policy, and semantic memory in one authoritative canonical config. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, or prompt schedules.
 
 ## Install
 
@@ -13,18 +13,18 @@ ln -s /path/to/agency/skills/agency-setup ~/.claude/skills/agency-setup
 
 ### GitHub Copilot on Windows
 
-Expose the canonical skill at `.github\skills\agency-setup`. A junction keeps one source copy:
+Expose the canonical skill at `.github\skillsgency-setup`. A junction keeps one source copy:
 
 ```powershell
 New-Item -ItemType Directory -Force .github\skills | Out-Null
 New-Item -ItemType Junction `
-  -Path .github\skills\agency-setup `
-  -Target C:\path\to\agency\skills\agency-setup | Out-Null
+  -Path .github\skillsgency-setup `
+  -Target C:\path	ogency\skillsgency-setup | Out-Null
 ```
 
 ## Run
 
-Invoke `agency-setup` from the project workspace. If no config exists, create the canonical strict-canonical config at the authoritative path. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
+Invoke `agency-setup` from the project workspace. If no config exists, create the canonical config at the authoritative path. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
 
 1. Inspects project instructions, source, tests, deployment, and available integrations.
 2. Proposes reusable roles, Agent Skills, schedules, runtime policy, and semantic memory for approval.

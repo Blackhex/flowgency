@@ -37,7 +37,7 @@ Add a focused helper that resolves the latest stdout log for an agent. It return
 
 The helper considers only files that match the agent prefix and `.out` suffix, and chooses the maximum modification time. It must not rely on lexicographic filename order because job IDs do not encode execution order.
 
-For agents with a stdout log, that timestamp supplies the card's relative last-run label and normal health calculation, so the displayed time, status color, and click destination refer to the same run. Existing last-seen behavior remains a fallback for superseded activity that has no stdout file; such a label is rendered without a link.
+For agents with a stdout log, that timestamp supplies the card's relative last-run label and normal health calculation, so the displayed time, status color, and click destination refer to the same run. Existing last-seen behavior remains a fallback for historical activity that has no stdout file; such a label is rendered without a link.
 
 ### Next Run Detail
 
@@ -140,7 +140,7 @@ Focused tests cover:
 
 - Latest stdout selection by modification time rather than filename.
 - Ignoring `.err` files when resolving the click destination.
-- superseded activity without stdout remaining visible but unlinked.
+- Historical activity without stdout remaining visible but unlinked.
 - Next-run detail containing the winning prompt and rule index.
 - Deterministic config-order behavior for tied next-run candidates.
 - Existing `compute_next_run()` datetime compatibility.

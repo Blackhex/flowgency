@@ -1,5 +1,5 @@
 // Agency Service Worker — app-shell caching for PWA
-const CACHE_NAME = 'agency-v2';
+const CACHE_NAME = 'agency-app-shell';
 
 // Pre-cache the app shell (fonts, CSS framework)
 const APP_SHELL = [

@@ -547,7 +547,7 @@ def test_channel_delete_archives_canonical_and_recreation_starts_fresh(
     services.memory_store.try_save(
         support,
         services.memory_store.read(support).revision,
-        {"memory.md": b"# superseded support\n"},
+        {"memory.md": b"# Archived support\n"},
     )
 
     response = client.post(
@@ -568,7 +568,7 @@ def test_channel_delete_archives_canonical_and_recreation_starts_fresh(
     assert len(archives) == 1
     assert (
         archives[0] / "memory.md"
-    ).read_text(encoding="utf-8") == "# superseded support\n"
+    ).read_text(encoding="utf-8") == "# Archived support\n"
 
     create = client.post(
         "/admin/memory-channels/create",

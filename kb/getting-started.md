@@ -13,7 +13,7 @@ Open `http://127.0.0.1:8500`.
 
 ## First run
 
-The setup wizard creates a strict-canonical control plane. Choose the authoritative config path and provide the global Agent Library, compilation cache, and memory store paths. Add a group with a display name and project workspace path. The wizard writes `schema_version: 2`; it does not scan folders, create physical agent directories, or infer instances.
+The setup wizard creates the control plane. Choose the authoritative config path and provide the global Agent Library, compilation cache, and memory store paths. Add a group with a display name and project workspace path. The wizard writes `schema_version: 2`; it does not scan folders, create physical agent directories, or infer instances.
 
 Next, create reusable blueprints and Agent Skills in Agent Library. Open the group's Agents page to add explicit instances that select a blueprint and integration. Configure identity, runtime overrides, routines, and semantic memory from Agent Detail.
 
@@ -47,18 +47,11 @@ Reload watches application code, templates, static assets, themes, and control-p
 
 ## Next steps
 
-- Read [Configuration](configuration.md) for the strict-canonical schema.
+- Read [Configuration](configuration.md) for the current config schema.
 - Read [Directory Structure](directory-structure.md) before choosing global paths.
 - Use [Agency Setup Skill](setup-skill.md) to propose blueprints and explicit instances.
 - Use [Dispatch and Routines](dispatch.md) to install the singleton scheduler.
 
-## superseded v1 migration
+## Superseded layouts
 
-If an existing install has physical agent definitions, prompt schedules, or file-based memory, stop and invoke `agency-migration`. Runtime does not import that layout.
-
-```text
-python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
-python tools/migrate_agent_model.py apply --plan migration-plan.yaml
-python tools/migrate_agent_model.py verify --config config.yaml
-python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
-```
+If an existing install depends on physical agent definitions, prompt schedules, or file-based memory, rewrite it into the current config shape before starting Agency.

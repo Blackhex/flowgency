@@ -30,13 +30,6 @@ christag-agency dispatch install --config C:/Agency/config.yaml
 christag-agency dispatch status --config C:/Agency/config.yaml
 ```
 
-## superseded v1 migration
+## Superseded layouts
 
-superseded schedules must be converted outside runtime with `agency-migration`:
-
-```text
-python tools/migrate_agent_model.py preview --config config.yaml --plan migration-plan.yaml
-python tools/migrate_agent_model.py apply --plan migration-plan.yaml
-python tools/migrate_agent_model.py verify --config config.yaml
-python tools/migrate_agent_model.py rollback --plan migration-plan.yaml
-```
+Runtime does not read prompt directories or per-agent schedule maps. Rewrite older schedule sources into instance routines before enabling dispatch.

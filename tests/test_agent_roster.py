@@ -221,8 +221,8 @@ def test_create_instance_from_roster(monkeypatch, tmp_path, raw_config):
 
 def test_remove_instance_updates_config_only(monkeypatch, tmp_path, raw_config):
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    superseded_dir = group_root / "advisor"
-    superseded_dir.mkdir(parents=True)
+    preexisting_dir = group_root / "advisor"
+    preexisting_dir.mkdir(parents=True)
     revision = _revision(config_path)
 
     response = client.post(
@@ -234,7 +234,7 @@ def test_remove_instance_updates_config_only(monkeypatch, tmp_path, raw_config):
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["groups"]["newsletter"]["agents"] == []
-    assert superseded_dir.is_dir()
+    assert preexisting_dir.is_dir()
 
 
 def test_move_preview_and_apply(monkeypatch, tmp_path, raw_config):

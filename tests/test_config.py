@@ -29,7 +29,7 @@ def test_validate_config_rejects_unknown_root_key(raw_config, config_paths):
     assert any(issue.field == "schema_version" for issue in issues)
 
 
-def test_canonical_defaults_are_explicit(raw_config, config_paths):
+def test_current_defaults_are_explicit(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
@@ -51,7 +51,7 @@ def test_rejects_routine_default_without_routine_context(raw_config, config_path
     assert any(issue.code == "invalid-memory-scope" for issue in issues)
 
 
-def test_validate_config_reports_superseded_group_dispatch_agents(raw_config, config_paths):
+def test_validate_config_reports_group_dispatch_agents_not_supported(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["dispatch"] = {
@@ -64,16 +64,16 @@ def test_validate_config_reports_superseded_group_dispatch_agents(raw_config, co
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == "superseded-group-dispatch-agents" for issue in issues)
+    assert any(issue.code == "group-dispatch-agents-not-supported" for issue in issues)
     assert any(issue.field == "groups.newsletter.dispatch.agents" for issue in issues)
     assert any(
         issue.corrective_hint
-        == "Move schedules into each agent's routines using the standalone migration utility."
+        == "Move schedules into each agent's routines on the configured instances."
         for issue in issues
     )
 
 
-def test_parse_config_rejects_superseded_group_dispatch_agents(raw_config, config_paths):
+def test_parse_config_rejects_group_dispatch_agents_not_supported(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
     raw_config["groups"]["newsletter"]["dispatch"] = {
@@ -87,7 +87,7 @@ def test_parse_config_rejects_superseded_group_dispatch_agents(raw_config, confi
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == "superseded-group-dispatch-agents" for issue in excinfo.value.issues)
+    assert any(issue.code == "group-dispatch-agents-not-supported" for issue in excinfo.value.issues)
 
 
 def test_accepts_supported_group_dispatch_and_routines(raw_config, config_paths):
@@ -232,7 +232,7 @@ def test_allows_omitted_default_group(raw_config, config_paths):
     assert parsed.agency.default_group == ""
 
 
-def test_validate_config_rejects_unknown_root_key_superseded(raw_config, config_paths):
+def test_validate_config_rejects_unknown_root_key_schema_version(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
     raw_config["schema_version"] = 1

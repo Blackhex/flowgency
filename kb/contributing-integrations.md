@@ -1,6 +1,6 @@
 # Contributing an Integration
 
-An integration adapts a configured strict-canonical instance to one LLM runtime. Config selects the integration explicitly; project files do not select it.
+An integration adapts a configured current instance to one LLM runtime. Config selects the integration explicitly; project files do not select it.
 
 ## Quick start
 
@@ -27,6 +27,6 @@ Projectors consume a blueprint's standard `AGENTS.md` and complete `.agents/skil
 - Compatible skill discovery has an opt-in live runtime probe.
 - Contract and normal test suites pass without requiring a live CLI.
 
-## superseded v1 migration
+## Superseded layouts
 
-Native-file detection, sidecars, and identity parsing are migration concerns only. New runtime integrations must not reintroduce them. Convert old installations with `agency-migration` and the standalone migration commands documented in [Configuration](configuration.md).
+Native-file detection, sidecars, and identity parsing are outside runtime integration scope. New integrations must not reintroduce them.
