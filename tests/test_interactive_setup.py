@@ -72,13 +72,32 @@ def test_copilot_interactive_setup_unavailable_without_terminal(
     monkeypatch.setattr(
         CopilotIntegration,
         "_find_cmd",
-        lambda self: str(tmp_path / "copilot.exe"),
+        lambda self: str(tmp_path / "copilot"),
     )
-    (tmp_path / "copilot.exe").write_text("")
+    (tmp_path / "copilot").write_text("")
 
     integration = CopilotIntegration()
 
     assert integration.interactive_setup_available() is False
+
+
+def test_copilot_interactive_setup_available_when_terminal_and_executable_present(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name: "x-terminal-emulator" if name == "x-terminal-emulator" else None,
+    )
+    executable = tmp_path / "copilot"
+    executable.write_text("")
+    monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: str(executable.resolve()))
+
+    integration = CopilotIntegration()
+
+    assert integration.interactive_setup_available() is True
 
 
 def test_copilot_interactive_setup_unavailable_without_executable(
@@ -94,7 +113,7 @@ def test_copilot_interactive_setup_unavailable_without_executable(
     monkeypatch.setattr(
         CopilotIntegration,
         "_find_cmd",
-        lambda self: str(tmp_path / "copilot.exe"),
+        lambda self: str(tmp_path / "copilot"),
     )
 
     integration = CopilotIntegration()
