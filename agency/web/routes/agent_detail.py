@@ -24,7 +24,7 @@ from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
 from agency.fs import ResourceBusyError
 from agency.integrations import get_integration
-from agency.jobs import active_jobs
+from agency.jobs.authority import JobStore
 from agency.memory import MemoryConflictError, resolve_memory_selector
 from agency.web.dependencies import AgencyServices, get_services
 
@@ -215,7 +215,7 @@ def _recent_log_rows(group_id: str, group_path: Path, agent_id: str) -> list[dic
     return rows
 
 
-def _activity_items(group_id: str, group_path: Path, agent_id: str) -> dict[str, Any]:
+def _activity_items(group_id: str, group_path: Path, agent_id: str, job_store: JobStore | None) -> dict[str, Any]:
     observations = [
         _ActivityItem(
             kind="Observation",
@@ -242,7 +242,7 @@ def _activity_items(group_id: str, group_path: Path, agent_id: str) -> dict[str,
             "status": record.status,
             "trigger": record.spec.trigger,
         }
-        for record in active_jobs(group_path, agent_id)
+        for record in (job_store.active(group_id, agent_id) if job_store is not None else ())
     ]
     return {
         "observations": observations[:8],
@@ -411,6 +411,10 @@ def _parse_routines_payload(form, blueprint_skills: tuple[str, ...]) -> tuple[li
         if not isinstance(arguments, list) or any(not isinstance(arg, str) or not arg.strip() for arg in arguments):
             issues.append({"field": f"{field_prefix}.arguments", "message": "Routine arguments must be an ordered list of non-empty strings.", "hint": "Provide each argument as its own string."})
             arguments = []
+        enabled = item.get("enabled", True)
+        if not isinstance(enabled, bool):
+            issues.append({"field": f"{field_prefix}.enabled", "message": "Routine enabled must be true or false.", "hint": "Use a YAML boolean."})
+            enabled = True
         schedule = item.get("schedule") or {}
         if not isinstance(schedule, dict):
             issues.append({"field": f"{field_prefix}.schedule", "message": "Schedule must be a mapping with exactly one of at or every.", "hint": "Set either at or every."})
@@ -432,6 +436,7 @@ def _parse_routines_payload(form, blueprint_skills: tuple[str, ...]) -> tuple[li
             {
                 "id": routine_id,
                 "skill": skill,
+                "enabled": enabled,
                 "arguments": [arg.strip() for arg in arguments if isinstance(arg, str) and arg.strip()],
                 "schedule": {"at": str(schedule.get("at", "")).strip()} if has_at else {"every": str(schedule.get("every", "")).strip()} if has_every else {},
                 **({"memory": memory_payload} if memory_payload is not None else {}),
@@ -534,7 +539,7 @@ def _routines_context(services: AgencyServices, snapshot, group_id: str, agent_i
     return {
         "blueprint_skills": inspection.skills if inspection is not None else (),
         "routines_yaml": routines_yaml,
-        "supports_enabled": False,
+        "supports_enabled": True,
     }
 
 
@@ -615,7 +620,7 @@ def _detail_context(
     elif tab == "memory":
         context.update(_memory_context(snapshot, services, group_id, agent_id))
     elif tab == "activity":
-        context.update(_activity_items(group_id, group.path, agent_id))
+        context.update(_activity_items(group_id, group.path, agent_id, services.job_store))
     if overrides:
         context.update(overrides)
     return _templates(request).TemplateResponse(request, "agent_detail.html", context, status_code=status_code)
@@ -733,15 +738,15 @@ async def agent_detail_routines_save(request: Request, group: str, agent: str, s
     skills = inspection.skills if inspection is not None else ()
     routines, parse_issues = _parse_routines_payload(form, skills)
     if parse_issues:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": False})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": True})
     try:
         if not revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
         replace_agent_routines(services.config_store, revision, group, agent, routines)
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": False})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": True})
     except ConfigConflictError as exc:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": False})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": True})
     request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents/{agent}/routines", status_code=303)
 

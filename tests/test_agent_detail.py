@@ -39,6 +39,8 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
     group_root = tmp_path / "groups" / "newsletter"
+    (tmp_path / "Research" / "shared").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "Research" / "editorial").mkdir(parents=True, exist_ok=True)
     (group_root / "shared" / "jobs").mkdir(parents=True, exist_ok=True)
     (group_root / "shared" / "logs").mkdir(parents=True, exist_ok=True)
     (group_root / "shared" / "observations").mkdir(parents=True, exist_ok=True)
@@ -143,6 +145,8 @@ def _seed_activity_app(monkeypatch, tmp_path, canonical_raw_config):
 
 def _revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
+
+
 def test_agent_detail_base_redirects_to_profile(monkeypatch, tmp_path, canonical_raw_config):
     client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
 
@@ -305,6 +309,8 @@ def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path
 def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_path, canonical_raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
     revision = _revision(config_path)
+    reports_root = (tmp_path / "Research" / "reports").resolve()
+    reports_root.mkdir(parents=True, exist_ok=True)
 
     response = client.post(
         "/newsletter/agents/advisor/runtime",
@@ -313,7 +319,7 @@ def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_pa
             "timeout": "1801",
             "tool_mode": "allowlist",
             "tool_names": "shell\nwrite",
-            "additional_roots": "C:/Research/editorial\nC:/Research/reports",
+            "additional_roots": f"{(tmp_path / 'Research' / 'editorial').resolve()}\n{reports_root}",
         },
         follow_redirects=False,
     )
@@ -325,8 +331,8 @@ def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_pa
     assert runtime["tools"]["mode"] == "allowlist"
     assert runtime["tools"]["names"] == ["shell", "write"]
     assert runtime["sandbox"]["additional_roots"] == [
-        "C:/Research/editorial",
-        "C:/Research/reports",
+        str((tmp_path / "Research" / "editorial").resolve()),
+        str(reports_root),
     ]
 
 
@@ -364,6 +370,7 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, canonical_ra
             {
                 "id": "triage",
                 "skill": "daily-review",
+                "enabled": False,
                 "arguments": ["--triage"],
                 "schedule": {"every": "6h"},
                 "memory": {"scope": "routine"},
@@ -388,8 +395,23 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, canonical_ra
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     routines = saved["groups"]["newsletter"]["agents"][0]["routines"]
     assert [routine["id"] for routine in routines] == ["triage", "digest"]
+    assert routines[0]["enabled"] is False
+    assert routines[1]["enabled"] is True
     assert routines[0]["memory"] == {"scope": "routine"}
     assert routines[1]["schedule"] == {"at": "17:30"}
+
+
+def test_routines_get_preserves_disabled_state(monkeypatch, tmp_path, canonical_raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["agents"][0]["routines"][0]["enabled"] = False
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+
+    response = client.get("/newsletter/agents/advisor/routines")
+
+    assert response.status_code == 200
+    assert "enabled: false" in response.text
 
 
 def test_routines_post_rejects_duplicate_ids(monkeypatch, tmp_path, canonical_raw_config):

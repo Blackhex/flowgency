@@ -1,11 +1,11 @@
 import pytest
 
+from agency.jobs.authority import JobStore
 from agency.jobs.artifacts import JobArtifact, retain_failed_stage
 
 
 def test_retain_failed_stage_persists_stage_files_and_diff(tmp_path):
-    group_path = tmp_path / "group"
-    job_store = group_path / "shared" / "jobs"
+    job_store = JobStore(tmp_path / "memory").group_root("group")
     job_store.mkdir(parents=True)
     stage_dir = tmp_path / "stage"
     stage_dir.mkdir()
@@ -25,9 +25,7 @@ def test_retain_failed_stage_persists_stage_files_and_diff(tmp_path):
         "notes.md",
     }
     assert all(isinstance(artifact, JobArtifact) for artifact in artifacts)
-    artifact_root = (
-        group_path / "shared" / "jobs" / "artifacts" / "job-123"
-    )
+    artifact_root = job_store / "artifacts" / "job-123"
     assert (artifact_root / "memory.md").read_bytes() == b"new\n"
     assert (artifact_root / "notes.md").read_bytes() == b"stable\n"
     assert (artifact_root / "memory.diff").read_bytes() == (
@@ -36,10 +34,9 @@ def test_retain_failed_stage_persists_stage_files_and_diff(tmp_path):
 
 
 def test_retain_failed_stage_rejects_symlinked_job_store(tmp_path):
-    group_path = tmp_path / "group"
     external_root = tmp_path / "external"
     external_root.mkdir()
-    job_store = group_path / "shared" / "jobs"
+    job_store = tmp_path / "memory" / ".jobs" / "group"
     job_store.parent.mkdir(parents=True)
     stage_dir = tmp_path / "stage"
     stage_dir.mkdir()

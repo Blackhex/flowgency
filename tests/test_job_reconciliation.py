@@ -4,13 +4,24 @@ from pathlib import Path
 import yaml
 
 from agency.blueprints.cache import active_pins, pin_artifact
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.reconciliation import reconcile_jobs, worker_alive
 from agency.memory.recovery import recover_publications
 from agency.jobs.store import job_path, read_job, write_job
 
 
-def running_decision_job(tmp_path: Path, pid: int = 999999):
+def _job_store(tmp_path: Path) -> JobStore:
+    return JobStore(tmp_path / "memory")
+
+
+def running_decision_job(
+    tmp_path: Path,
+    pid: int = 999999,
+    *,
+    group_key: str = "test",
+    memory_store_root: Path | None = None,
+):
     group = tmp_path / "group"
     decision = group / "shared" / "decisions" / "change.md"
     decision.parent.mkdir(parents=True)
@@ -21,7 +32,7 @@ def running_decision_job(tmp_path: Path, pid: int = 999999):
         job_id="decision-job",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="test",
+        group_key=group_key,
         group_path=str(group.resolve()),
         agent_name="product",
         workspace_dir=str(group.resolve()),
@@ -63,7 +74,7 @@ def running_decision_job(tmp_path: Path, pid: int = 999999):
     decision.write_text(
         f"---\nexecution_status: running\nexecution_job_id: {spec.job_id}\n---\n"
     )
-    path = job_path(group, spec.job_id)
+    path = JobStore(memory_store_root or (tmp_path / "memory")).path(spec.group_key, spec.job_id)
     write_job(
         path,
         replace(JobRecord.from_spec(spec), status="running", worker_pid=pid),
@@ -123,8 +134,18 @@ def test_reconcile_releases_pin_for_dead_running_worker_but_keeps_live_pin(
     tmp_path,
     monkeypatch,
 ):
-    dead_group, _, dead_path = running_decision_job(tmp_path / "dead")
-    live_group, _, live_path = running_decision_job(tmp_path / "live", pid=123456)
+    shared_store = tmp_path / "memory"
+    dead_group, _, dead_path = running_decision_job(
+        tmp_path / "dead",
+        group_key="dead",
+        memory_store_root=shared_store,
+    )
+    live_group, _, live_path = running_decision_job(
+        tmp_path / "live",
+        pid=123456,
+        group_key="live",
+        memory_store_root=shared_store,
+    )
     dead_record = read_job(dead_path)
     live_record = read_job(live_path)
     dead_artifact = dead_record.spec.blueprint.to_artifact()
@@ -295,10 +316,10 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
-    path = job_path(group, spec.job_id)
+    store_root = tmp_path / "memory-store"
+    path = JobStore(store_root).path(spec.group_key, spec.job_id)
     write_job(path, replace(JobRecord.from_spec(spec), status="running", worker_pid=999999))
 
-    store_root = tmp_path / "memory-store"
     store = MemoryStore(store_root)
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
@@ -313,7 +334,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
     store.try_save(resolved, seeded.revision, {"memory.md": b"old\n"})
     stage = store.stage(resolved, job_id=spec.job_id)
     (stage.directory / "memory.md").write_bytes(b"new\n")
-    prepared = prepare_publication(stage, job_store=group / "shared" / "jobs")
+    prepared = prepare_publication(stage, job_store=JobStore(store_root).group_root("test"))
     try:
         apply_publication(prepared, crash_at="published")
     except Exception:
@@ -342,7 +363,7 @@ def test_superseded_running_decision_without_job_id_is_not_failed(tmp_path):
 
 
 def test_reconcile_ignores_malformed_job_and_logs_warning(tmp_path, caplog):
-    jobs = tmp_path / "group" / "shared" / "jobs"
+    jobs = _job_store(tmp_path).group_root("test")
     jobs.mkdir(parents=True)
     (jobs / "broken.yaml").write_text("spec: [")
 
@@ -384,8 +405,14 @@ def test_reconcile_invokes_global_recovery_once_with_no_job_records(
         (
             tmp_path / "memory-store",
             {
-                "a": (group_a / "shared" / "jobs").resolve(),
-                "b": (group_b / "shared" / "jobs").resolve(),
+                "a": {
+                    "job_store": (tmp_path / "memory-store" / ".jobs" / "a").resolve(),
+                    "group_path": str(group_a),
+                },
+                "b": {
+                    "job_store": (tmp_path / "memory-store" / ".jobs" / "b").resolve(),
+                    "group_path": str(group_b),
+                },
             },
         )
     ]

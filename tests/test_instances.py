@@ -13,6 +13,7 @@ from agency.blueprints.library import BlueprintLibrary
 from agency.configuration.models import MemorySelector
 from agency.configuration.store import ConfigConflictError, ConfigStore
 from agency.fs.locks import exclusive_lock
+from agency.jobs.authority import JobStore
 from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
@@ -22,7 +23,7 @@ from agency.jobs.models import (
     RuntimePolicySnapshot,
 )
 from agency.jobs.resolution import JobValidationError
-from agency.jobs.store import job_path, transition_job, write_job
+from agency.jobs.store import transition_job, write_job
 from agency.jobs.submission import submit_job_request
 from agency.memory import MemoryStore, resolve_memory_selector
 
@@ -382,7 +383,7 @@ def test_move_blocks_when_relevant_jobs_are_active(
         else instance_env["other_path"]
     )
     spec = _make_spec(group_path, agent_name="builder", group_key=group_key)
-    record_path = job_path(group_path, spec.job_id)
+    record_path = JobStore(instance_env["memory_root"]).path(group_key, spec.job_id)
     write_job(record_path, JobRecord.from_spec(spec))
     if status != "queued":
         transition_job(record_path, "queued", status)

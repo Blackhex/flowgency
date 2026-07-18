@@ -23,7 +23,8 @@ from agency.configuration.models import MemorySelector
 from agency.dispatch.install import get_timer_status, install_timer, uninstall_timer
 from agency.fs.locks import LockCancelledError, ResourceBusyError
 from agency.integrations import REGISTRY
-from agency.jobs import JobRequest, JobSubmissionError, active_jobs, submit_job_request
+from agency.jobs import JobRequest, JobSubmissionError, submit_job_request
+from agency.jobs.authority import JobStore
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt, build_routine_task_input
 from agency.jobs.store import read_job
@@ -284,8 +285,8 @@ def _job_records(group_path: Path):
     return records
 
 
-def _active_job(group_path: Path, agent_name: str):
-    records = active_jobs(group_path, agent_name)
+def _active_job(snapshot, group_id: str, agent_name: str):
+    records = JobStore(snapshot.config.agency.memory_store).active(group_id, agent_name)
     return max(records, key=lambda record: (record.spec.created_at, record.spec.job_id), default=None)
 
 
@@ -333,7 +334,7 @@ def _cache_status_read_only(snapshot, integrations: dict[str, Any], instance, in
 
 def _agent_payload_read_only(snapshot, group_id: str, instance) -> dict[str, Any]:
     group = snapshot.config.groups[group_id]
-    current = _active_job(group.path, instance.name)
+    current = _active_job(snapshot, group_id, instance.name)
     library, integrations = _read_only_runtime(snapshot)
     inspection = library.inspect(instance.blueprint)
     policy = resolve_effective_policy(snapshot.config, group_id, instance.name)
@@ -357,7 +358,7 @@ def _agent_payload_read_only(snapshot, group_id: str, instance) -> dict[str, Any
 
 def _agent_payload(services: AgencyServices, snapshot, group_id: str, instance) -> dict[str, Any]:
     group = snapshot.config.groups[group_id]
-    current = _active_job(group.path, instance.name)
+    current = _active_job(snapshot, group_id, instance.name)
     inspection = services.blueprint_library.inspect(instance.blueprint)
     policy = resolve_effective_policy(snapshot.config, group_id, instance.name)
     return {
@@ -394,6 +395,7 @@ def cmd_serve(args: Namespace) -> int:
 
 def cmd_status(args: Namespace) -> int:
     snapshot = _snapshot(args)
+    job_store = JobStore(snapshot.config.agency.memory_store)
     result = {}
     for group_id, group in snapshot.config.groups.items():
         observations = _markdown_items(group.path, "observations")
@@ -405,7 +407,7 @@ def cmd_status(args: Namespace) -> int:
             "proposals": len(proposals),
             "decisions": len(decisions),
             "agents": len(group.agents),
-            "active": sum(bool(active_jobs(group.path, name)) for name in group.agents),
+            "active": sum(bool(job_store.active(group_id, name)) for name in group.agents),
         }
     if args.json:
         _print_json(result)
@@ -502,6 +504,14 @@ def cmd_agent_run(args: Namespace) -> int:
             scope=f"groups.{group_id}.agents.{args.agent}",
             field="routine",
             hint="Choose an existing stable routine ID.",
+        )
+    if not routine.enabled:
+        raise _validation_failure(
+            "routine-disabled",
+            f"Routine '{routine.id}' is disabled; enable it before running.",
+            scope=f"groups.{group_id}.agents.{args.agent}",
+            field="routine",
+            hint="Enable the routine in Agent Detail before submitting it.",
         )
     request = JobRequest(
         config_path=config_path,
@@ -702,12 +712,14 @@ def _resolve_memory(args: Namespace, services: AgencyServices, snapshot):
 def cmd_memory_show(args: Namespace) -> int:
     snapshot = _snapshot(args)
     store = MemoryStore(Path(snapshot.config.agency.memory_store))
+    job_store = JobStore(Path(snapshot.config.agency.memory_store))
     services = AgencyServices(
         config_path=snapshot.path,
         config_store=ConfigStore(snapshot.path),
         blueprint_library=None,
         compilation_cache=None,
         memory_store=store,
+        job_store=job_store,
         instances=None,
         integrations=REGISTRY,
         startup_error=None,
@@ -733,12 +745,14 @@ def cmd_memory_show(args: Namespace) -> int:
 def cmd_memory_save(args: Namespace) -> int:
     snapshot = _snapshot(args)
     store = MemoryStore(Path(snapshot.config.agency.memory_store))
+    job_store = JobStore(Path(snapshot.config.agency.memory_store))
     services = AgencyServices(
         config_path=snapshot.path,
         config_store=ConfigStore(snapshot.path),
         blueprint_library=None,
         compilation_cache=None,
         memory_store=store,
+        job_store=job_store,
         instances=None,
         integrations=REGISTRY,
         startup_error=None,

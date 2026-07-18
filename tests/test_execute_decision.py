@@ -7,9 +7,9 @@ import pytest
 import yaml
 
 import agency.app as app_mod
-from agency.config import SandboxSpec
 from agency.integrations import FileChange, RunResult
 from agency.integrations.models import IntegrationRunRequest
+from agency.jobs.authority import JobStore
 from agency.jobs import JobRequest, JobSubmissionError
 from agency.jobs.execution import execute_job
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
@@ -17,6 +17,15 @@ from agency.jobs.store import write_job
 from agency.memory.selectors import resolve_memory_selector
 from agency.configuration.models import MemorySelector
 from test_proposal_questions import _setup_decision_group
+
+
+def _authority(spec: JobSpec):
+    store = JobStore(Path(spec.memory.path).parent)
+    return store.reference(
+        spec.group_key,
+        spec.job_id,
+        JobRecord.from_spec(spec).authority_digest,
+    )
 
 
 def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tuple[Path, Path, JobSpec]:
@@ -86,7 +95,7 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
         f"---\nexecution_job_id: {spec.job_id}\nexecution_status: pending\n---\n",
         encoding="utf-8",
     )
-    job_path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    job_path = JobStore(tmp_path / ".compat-memory-root").path(spec.group_key, spec.job_id)
     write_job(job_path, JobRecord.from_spec(spec))
     return group_path, decision_path, spec
 
@@ -122,15 +131,15 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
 
     context = SimpleNamespace(
         group_path=group_path,
-        agent_dir=group_path / "worker",
+        workspace_dir=group_path / "worker",
         timeout=30,
-        sandbox_root=SandboxSpec(roots=(repo,), allowed_tools=()),
+        sandbox_root=SimpleNamespace(roots=(repo,), allowed_tools=()),
         integration=FakeIntegration(),
     )
-    context.agent_dir.mkdir(parents=True)
+    context.workspace_dir.mkdir(parents=True)
     monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
 
-    execute_job(group_path / "shared" / "jobs" / f"{spec.job_id}.yaml")
+    execute_job(_authority(spec))
 
     meta = _read_meta(decision)
     assert seen["sandbox_root"] == (repo,)
@@ -152,7 +161,7 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
 
     context = SimpleNamespace(
         group_path=group_path,
-        agent_dir=group_path / "worker",
+        workspace_dir=group_path / "worker",
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(
@@ -165,10 +174,10 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
             )
         ),
     )
-    context.agent_dir.mkdir(parents=True)
+    context.workspace_dir.mkdir(parents=True)
     monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
 
-    execute_job(group_path / "shared" / "jobs" / f"{spec.job_id}.yaml")
+    execute_job(_authority(spec))
 
     meta = _read_meta(decision)
     assert meta["execution_status"] == "complete"
@@ -180,7 +189,7 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
 
     context = SimpleNamespace(
         group_path=group_path,
-        agent_dir=group_path / "worker",
+        workspace_dir=group_path / "worker",
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(
@@ -193,10 +202,10 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
             )
         ),
     )
-    context.agent_dir.mkdir(parents=True)
+    context.workspace_dir.mkdir(parents=True)
     monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
 
-    execute_job(group_path / "shared" / "jobs" / f"{spec.job_id}.yaml")
+    execute_job(_authority(spec))
 
     meta = _read_meta(decision)
     assert meta["execution_status"] == "failed"

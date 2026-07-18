@@ -15,7 +15,8 @@ from agency.configuration import (
 )
 from agency.configuration.models import MemorySelector
 from agency.fs import ResourceBusyError
-from agency.jobs.store import active_jobs, revision_bound_group_operation
+from agency.jobs.authority import JobStore
+from agency.jobs.store import revision_bound_group_operation
 from agency.memory import MemoryConflictError, resolve_memory_selector
 from agency.memory.store import (
     _ensure_infrastructure_directory,
@@ -248,8 +249,9 @@ def _remove_channel_directory(services: AgencyServices, resolved) -> None:
 
 def _active_channel_jobs(snapshot, channel_key: str) -> list[str]:
     references: list[str] = []
+    job_store = JobStore(snapshot.config.agency.memory_store)
     for group_key, group in snapshot.config.groups.items():
-        for record in active_jobs(group.path):
+        for record in job_store.active(group_key):
             selector = dict(record.spec.memory.selector)
             if (
                 selector.get("scope") == "channel"

@@ -274,6 +274,8 @@ def _dispatch_status(state="active", installed=True, error=None):
 
 
 def _write_dispatch_config(path):
+    (path.parent / "agent-library").mkdir(parents=True, exist_ok=True)
+    (path.parent / "memory").mkdir(parents=True, exist_ok=True)
     path.write_text(
         yaml.safe_dump(
             {

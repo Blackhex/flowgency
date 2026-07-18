@@ -131,6 +131,7 @@ def _operation_id_from_path(journal_path: Path) -> str | None:
 class _JobStoreOwner:
     group_id: str
     path: Path
+    group_path: Path | None
 
 
 def _validate_job_stores(
@@ -143,24 +144,35 @@ def _validate_job_stores(
     for group_id, value in job_stores.items():
         if not isinstance(group_id, str) or not group_id:
             raise ValueError("job store owner must be a configured group id")
-        candidate = Path(value).expanduser()
-        if candidate.name != "jobs" or candidate.parent.name != "shared":
+        configured_group_path: Path | None = None
+        if isinstance(value, Mapping):
+            candidate = Path(value["job_store"]).expanduser()
+            configured_group_path = Path(value["group_path"]).expanduser().resolve(strict=False)
+        else:
+            candidate = Path(value).expanduser()
+        if candidate.parent.name != ".jobs":
             raise ValueError(
-                "job store must be a direct shared/jobs directory"
+                "job store must be a direct .jobs/<group> directory"
             )
-        components = (candidate.parent.parent, candidate.parent, candidate)
+        components = (candidate.parent, candidate)
         for component in components:
             if component.exists() and _is_symlink_or_reparse(component):
                 raise ValueError("job store is unsafe")
         canonical = candidate.resolve(strict=False)
-        if canonical.name != "jobs" or canonical.parent.name != "shared":
-            raise ValueError("job store must resolve to shared/jobs")
+        if canonical.parent.name != ".jobs":
+            raise ValueError("job store must resolve to .jobs/<group>")
         if canonical in seen:
             raise ValueError("job stores must be canonical and distinct")
         if canonical.exists():
             _ensure_actual_directory(canonical, label="job")
         seen.add(canonical)
-        validated.append(_JobStoreOwner(group_id=group_id, path=canonical))
+        validated.append(
+            _JobStoreOwner(
+                group_id=group_id,
+                path=canonical,
+                group_path=configured_group_path,
+            )
+        )
     return tuple(
         sorted(validated, key=lambda owner: (str(owner.path), owner.group_id))
     )
@@ -221,6 +233,7 @@ class _RecoveryOperation:
     journal_path: Path
     job_path: Path | None
     owner_group_id: str | None
+    owner_group_path: Path | None
 
 
 def _operation_from_payload(
@@ -294,6 +307,7 @@ def _operation_from_payload(
     )
     job_path = None
     owner_group_id = None
+    owner_group_path = None
     if kind == "job":
         matches = _matching_job_paths(job_stores, operation_id)
         if len(matches) != 1:
@@ -302,6 +316,7 @@ def _operation_from_payload(
             )
         owner, job_path = matches[0]
         owner_group_id = owner.group_id
+        owner_group_path = owner.group_path
     stage_path = _stage_path(store_root, memory_hash, stage_name)
     backup_path = _backup_path(
         store_root,
@@ -333,6 +348,7 @@ def _operation_from_payload(
         journal_path=journal_path,
         job_path=job_path,
         owner_group_id=owner_group_id,
+        owner_group_path=owner_group_path,
     )
     if kind == "job":
         _validate_job_ownership(operation)
@@ -350,8 +366,9 @@ def _validate_job_ownership(
         raise ValueError("job spec id does not own journal operation")
     if spec.group_key != operation.owner_group_id:
         raise ValueError("job does not belong to its configured group owner")
-    matched_store = operation.job_path.parent.resolve()
-    trusted_group_path = matched_store.parent.parent
+    if operation.owner_group_path is None:
+        raise ValueError("configured group path is required for job recovery")
+    trusted_group_path = operation.owner_group_path.resolve()
     if Path(spec.group_path).resolve() != trusted_group_path:
         raise ValueError("job spec group path does not match configured group")
     if Path(spec.workspace_dir).resolve() != trusted_group_path:

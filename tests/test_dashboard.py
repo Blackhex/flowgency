@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from agency import app as app_mod
 from agency.app import app, build_activity_feed, build_dashboard_fleet, build_pipeline_stats
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import transition_job, write_job
 
@@ -298,7 +299,7 @@ def _job_spec(
 def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_path, canonical_raw_config):
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
     spec = _job_spec(group_root, config_path, status="waiting_for_memory")
-    path = group_root / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     transition_job(path, "queued", "waiting_for_memory")
 
@@ -316,7 +317,7 @@ def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_pa
 def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_path, canonical_raw_config):
     _, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
     spec = _job_spec(group_root, config_path, status="running", job_id="job-running")
-    path = group_root / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     transition_job(path, "queued", "running")
 
@@ -354,9 +355,10 @@ def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, t
         job_id="job-running",
         agent_name="writer",
     )
-    queued_path = group_root / "shared" / "jobs" / f"{queued.job_id}.yaml"
-    waiting_path = group_root / "shared" / "jobs" / f"{waiting.job_id}.yaml"
-    running_path = group_root / "shared" / "jobs" / f"{running.job_id}.yaml"
+    authority = JobStore(tmp_path / "memory-store")
+    queued_path = authority.path("newsletter", queued.job_id)
+    waiting_path = authority.path("newsletter", waiting.job_id)
+    running_path = authority.path("newsletter", running.job_id)
     write_job(queued_path, JobRecord.from_spec(queued))
     write_job(waiting_path, JobRecord.from_spec(waiting))
     transition_job(waiting_path, "queued", "waiting_for_memory")
@@ -423,8 +425,9 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
             agent_name="writer",
         ),
     ]
+    authority = JobStore(tmp_path / "memory-store")
     for spec in jobs:
-        path = group_root / "shared" / "jobs" / f"{spec.job_id}.yaml"
+        path = authority.path("newsletter", spec.job_id)
         write_job(path, JobRecord.from_spec(spec))
         if spec.job_id == "job-waiting":
             transition_job(path, "queued", "waiting_for_memory")

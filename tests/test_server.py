@@ -257,6 +257,8 @@ def test_setup_post_invalid_and_empty_agent_paths_render_errors(tmp_path, monkey
 def test_setup_post_valid_path_creates_group_and_redirects(tmp_path, monkeypatch):
     config_path = _configure_existing_config(tmp_path, monkeypatch)
     group_path = tmp_path / "newsletter-agents"
+    group_path.mkdir()
+    (tmp_path / "library").mkdir()
     client = TestClient(app_mod.app)
     expected_revision = app_mod.build_services(config_path).config_store.inspect().revision
 
@@ -307,4 +309,4 @@ def test_setup_post_valid_path_creates_group_and_redirects(tmp_path, monkeypatch
             }
         },
     }
-    assert not group_path.exists()
+    assert group_path.is_dir()

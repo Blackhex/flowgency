@@ -38,7 +38,7 @@ _WINDOWS_READ_DELAY_SECONDS = 0.01
 
 
 def job_path(group_path: Path, job_id: str) -> Path:
-    return Path(group_path) / "shared" / "jobs" / f"{job_id}.yaml"
+    return Path(group_path) / f"{job_id}.yaml"
 
 
 def group_operation_lock_path(group_path: Path) -> Path:
@@ -124,6 +124,8 @@ def _group_path_identity(
 
 
 def write_job(path: Path, record: JobRecord) -> None:
+    if record.authority_digest != record.spec.immutable_digest():
+        raise ValueError("immutable job authority digest mismatch")
     content = yaml.safe_dump(record.to_dict(), sort_keys=False)
     atomic_write_text(Path(path), content)
 
@@ -154,8 +156,11 @@ def _read_job_payload(path: Path) -> str:
     raise RuntimeError("unreachable")
 
 
-def read_job(path: Path) -> JobRecord:
-    return JobRecord.from_dict(yaml.safe_load(_read_job_payload(Path(path))))
+def read_job(path: Path, *, expected_digest: str | None = None) -> JobRecord:
+    record = JobRecord.from_dict(yaml.safe_load(_read_job_payload(Path(path))))
+    if expected_digest is not None and record.authority_digest != expected_digest:
+        raise ValueError("immutable job authority does not match launch reference")
+    return record
 
 
 def transition_job(
@@ -192,13 +197,16 @@ def cancel_job(path: Path) -> JobRecord:
 
 
 def active_jobs(
-    group_path: Path,
+    job_paths: Path | tuple[Path, ...],
     agent_name: str | None = None,
 ) -> list[JobRecord]:
     """Return persisted active jobs, optionally for one agent."""
-    jobs_dir = Path(group_path) / "shared" / "jobs"
+    if isinstance(job_paths, Path):
+        paths = tuple(sorted(job_paths.glob("*.yaml"))) if job_paths.is_dir() else ()
+    else:
+        paths = tuple(job_paths)
     records = []
-    for path in jobs_dir.glob("*.yaml"):
+    for path in paths:
         try:
             record = read_job(path)
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError):

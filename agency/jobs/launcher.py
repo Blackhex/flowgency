@@ -7,6 +7,8 @@ import subprocess
 import sys
 from typing import Callable, Protocol
 
+from .authority import JobAuthorityRef
+
 
 DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
@@ -19,11 +21,11 @@ class LaunchResult:
 
 
 class JobLauncher(Protocol):
-    def launch(self, job_path: Path) -> LaunchResult: ...
+    def launch(self, authority: JobAuthorityRef) -> LaunchResult: ...
 
 
 class DetachedProcessLauncher:
-    def launch(self, job_path: Path) -> LaunchResult:
+    def launch(self, authority: JobAuthorityRef) -> LaunchResult:
         kwargs = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,
@@ -42,7 +44,7 @@ class DetachedProcessLauncher:
                 sys.executable,
                 "-m",
                 "agency.jobs.worker",
-                str(job_path.resolve()),
+                *authority.worker_args(),
             ],
             **kwargs,
         )
@@ -78,13 +80,13 @@ def _systemd_available() -> bool:
 class SystemdRunLauncher:
     """Launch jobs as transient user systemd services via systemd-run."""
 
-    def launch(self, job_path: Path) -> LaunchResult:
-        unit_name = f"agency-job-{_sanitize_unit_name(job_path.stem)}"
+    def launch(self, authority: JobAuthorityRef) -> LaunchResult:
+        unit_name = f"agency-job-{_sanitize_unit_name(authority.job_id)}"
         worker_cmd = [
             sys.executable,
             "-m",
             "agency.jobs.worker",
-            str(job_path.resolve()),
+            *authority.worker_args(),
         ]
         argv = [
             "systemd-run",

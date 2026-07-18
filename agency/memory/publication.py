@@ -431,14 +431,14 @@ def _validate_job_store(job_store: Path) -> Path:
     candidate = Path(job_store)
     if _is_symlink_or_reparse(candidate):
         raise MemoryPublicationError("job store is unsafe")
-    if candidate.name != "jobs" or candidate.parent.name != "shared":
+    if candidate.parent.name != ".jobs":
         raise MemoryPublicationError(
-            "job store must be the canonical shared/jobs directory"
+            "job store must be a canonical .jobs/<group> directory"
         )
     resolved = candidate.resolve()
-    if resolved.name != "jobs" or resolved.parent.name != "shared":
+    if resolved.parent.name != ".jobs":
         raise MemoryPublicationError(
-            "job store must be the canonical shared/jobs directory"
+            "job store must be a canonical .jobs/<group> directory"
         )
     if not resolved.is_dir():
         raise MemoryPublicationError("job store must be an existing directory")

@@ -102,6 +102,11 @@ def _write_canonical_config(
             if routine.get("condition")
             else ""
         )
+        + (
+            f"            enabled: {str(routine['enabled']).lower()}\n"
+            if "enabled" in routine
+            else ""
+        )
         for routine in routines
     )
     config_path.write_text(
@@ -329,3 +334,29 @@ def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
     run_dispatch_cycle({}, enabled_config)
     run_dispatch_cycle({}, disabled_config)
     assert submitted == ["test"]
+
+
+def test_disabled_routine_is_never_submitted_or_marked(tmp_path, monkeypatch):
+    group_path, config_path, _ = _make_group(tmp_path)
+    _write_canonical_config(
+        config_path,
+        group_path,
+        routines=[
+            {
+                "id": "daily-review",
+                "skill": "daily-review",
+                "schedule": {"every": "1h"},
+                "enabled": False,
+            }
+        ],
+    )
+    submitted = []
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job_request",
+        lambda request, launcher=None: submitted.append(request),
+    )
+
+    run_dispatch_cycle({}, config_path)
+
+    assert submitted == []
+    assert not (group_path / "shared" / "logs" / ".last-product-daily-review").exists()

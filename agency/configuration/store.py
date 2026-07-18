@@ -12,7 +12,9 @@ import yaml
 from agency.fs.atomic import atomic_write_bytes
 from agency.fs.locks import exclusive_lock
 
+from .issues import ValidationFailed
 from .models import AgencyConfigcanonical, parse_config_canonical
+from .paths import initialize_control_directories, validate_resolved_paths
 
 
 ABSENT_REVISION = "absent"
@@ -149,7 +151,11 @@ class ConfigStore:
         )
 
     def _encode(self, raw: dict[str, Any]) -> bytes:
-        parse_config_canonical(raw, self.path)
+        parsed = parse_config_canonical(raw, self.path)
+        initialize_control_directories(parsed.resolved)
+        issues = validate_resolved_paths(parsed.resolved)
+        if issues:
+            raise ValidationFailed(issues)
         return yaml.safe_dump(
             raw, sort_keys=False, allow_unicode=True
         ).encode("utf-8")

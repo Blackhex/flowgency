@@ -2,10 +2,13 @@ from pathlib import Path
 import subprocess
 import sys
 
+from dataclasses import replace
+
 import pytest
 import yaml
 
 from agency.configuration.models import MemorySelector
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import read_job, write_job
 from agency.memory import MemoryStore, resolve_memory_selector
@@ -15,11 +18,13 @@ from agency.memory.recovery import recover_publications
 
 class RecoveryFixture:
     def __init__(self, tmp_path: Path, *, group_key: str = "news"):
+        self.group_key = group_key
         self.group_path = tmp_path / "group"
         self.group_path.mkdir(parents=True)
         config_path = tmp_path / "config.yaml"
         config_path.write_text("groups: {}\n", encoding="utf-8")
         self.store_root = tmp_path / "memory-store"
+        self.job_store_root = JobStore(self.store_root)
         self.store = MemoryStore(self.store_root)
         self.resolved = resolve_memory_selector(
             MemorySelector(scope="agent"),
@@ -74,11 +79,12 @@ class RecoveryFixture:
             timeout_override=None,
             created_at="2026-07-15T00:00:00+00:00",
         )
-        self.job_path = (
-            self.group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
-        )
-        write_job(self.job_path, JobRecord.from_spec(spec))
-        write_job(self.job_path, JobRecord(spec=spec, status="running"))
+        self.job_store = self.job_store_root.group_root(group_key)
+        self.job_store.mkdir(parents=True, exist_ok=True)
+        self.job_path = self.job_store_root.path(group_key, spec.job_id)
+        queued = JobRecord.from_spec(spec)
+        write_job(self.job_path, queued)
+        write_job(self.job_path, replace(queued, status="running"))
         seeded = self.store.ensure(self.resolved)
         self.store.try_save(
             self.resolved,
@@ -87,8 +93,16 @@ class RecoveryFixture:
         )
         self.stage = self.store.stage(self.resolved, job_id=spec.job_id)
         (self.stage.directory / "memory.md").write_bytes(b"new\n")
-        self.job_store = self.group_path / "shared" / "jobs"
         self.canonical_is_new = False
+
+    @property
+    def owner_mapping(self) -> dict[str, object]:
+        return {
+            self.group_key: {
+                "job_store": self.job_store,
+                "group_path": self.group_path,
+            }
+        }
 
     def crash_at(self, phase: str) -> None:
         prepared = prepare_publication(self.stage, job_store=self.job_store)
@@ -118,7 +132,7 @@ def test_recovery_resolves_job_and_memory_consistently(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
     record = recovery_fixture.read_job()
 
@@ -160,7 +174,7 @@ def test_recovery_rejects_corrupted_absolute_paths_without_touching_sentinel(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert sentinel.read_text(encoding="utf-8") == "do-not-touch"
@@ -196,7 +210,7 @@ def test_recovery_rejects_mismatched_journal_identity(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert journal_path.exists()
@@ -215,7 +229,7 @@ def test_recovery_rejects_journal_filename_mismatch(recovery_fixture):
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert mismatched.exists()
@@ -233,7 +247,7 @@ def test_recovery_rejects_job_owned_by_wrong_configured_group(tmp_path):
 
     result = recover_publications(
         forged.store_root,
-        {"news": forged.job_store},
+        {"news": {"job_store": forged.job_store, "group_path": forged.group_path}},
     )
 
     assert result.recovered == 0
@@ -268,7 +282,7 @@ def test_recovery_rejects_changed_journal_with_equal_revisions(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert result.recovered == 0
@@ -285,11 +299,11 @@ def test_recovery_is_idempotent_for_valid_old_and_new_journals(
 
     first = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
     second = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert first.recovered == 1
@@ -314,7 +328,7 @@ def test_recovery_does_not_complete_prepared_journal_with_matching_new_revision(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert result.recovered == 0
@@ -328,7 +342,7 @@ def test_recovery_does_not_complete_backed_up_journal_with_matching_new_revision
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert result.recovered == 1
@@ -348,7 +362,7 @@ def test_recovery_holds_canonical_memory_lock_before_reading_journal_state(
     def recover():
         recover_publications(
             recovery_fixture.store_root,
-            {"news": recovery_fixture.job_store},
+            recovery_fixture.owner_mapping,
         )
         finished.set()
 
@@ -395,7 +409,7 @@ def test_recovery_rereads_journal_after_waiting_for_live_publisher(
                 "result",
                 recover_publications(
                     recovery_fixture.store_root,
-                    {"news": recovery_fixture.job_store},
+                    recovery_fixture.owner_mapping,
                 ),
             )
         )
@@ -407,6 +421,7 @@ def test_recovery_rereads_journal_after_waiting_for_live_publisher(
     assert not worker.is_alive()
     assert outcome["result"].errors == ()
     assert outcome["result"].blocked_job_ids == ()
+    assert outcome["result"].recovered == 0
 
 
 def test_recovery_completes_published_journal_with_matching_new_revision(
@@ -416,7 +431,7 @@ def test_recovery_completes_published_journal_with_matching_new_revision(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert result.recovered == 1
@@ -461,7 +476,7 @@ def test_duplicate_job_id_across_allowed_stores_establishes_barrier(
     tmp_path,
 ):
     recovery_fixture.crash_at("published")
-    duplicate_store = tmp_path / "other" / "shared" / "jobs"
+    duplicate_store = tmp_path / "other" / ".jobs" / "other"
     duplicate_store.mkdir(parents=True)
     duplicate_path = duplicate_store / recovery_fixture.job_path.name
     duplicate_path.write_bytes(recovery_fixture.job_path.read_bytes())
@@ -472,8 +487,14 @@ def test_duplicate_job_id_across_allowed_stores_establishes_barrier(
     result = recover_publications(
         recovery_fixture.store_root,
         {
-            "news": recovery_fixture.job_store,
-            "other": duplicate_store,
+            "news": {
+                "job_store": recovery_fixture.job_store,
+                "group_path": recovery_fixture.group_path,
+            },
+            "other": {
+                "job_store": duplicate_store,
+                "group_path": tmp_path / "other-group",
+            },
         },
     )
 
@@ -509,7 +530,7 @@ def test_invalid_journal_schema_is_a_persistent_barrier(
 
     result = recover_publications(
         recovery_fixture.store_root,
-        {"news": recovery_fixture.job_store},
+        recovery_fixture.owner_mapping,
     )
 
     assert result.recovered == 0

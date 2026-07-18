@@ -7,6 +7,7 @@ from pathlib import Path
 from agency.blueprints import BlueprintLibrary, CompilationCache
 from agency.configuration.models import AgentInstance, Routine
 from agency.configuration.issues import ValidationFailed, ValidationIssue
+from agency.configuration.paths import validate_resolved_paths
 from agency.configuration.store import ConfigSnapshot, ConfigStore
 from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import (
@@ -119,6 +120,9 @@ def resolve_job_request(
     snapshot: ConfigSnapshot | None = None,
 ) -> JobSpec:
     snapshot = snapshot or config_store.load()
+    issues = validate_resolved_paths(snapshot.config)
+    if issues:
+        raise ValidationFailed(issues)
     try:
         group = snapshot.config.groups[request.group_key]
     except KeyError as exc:
@@ -130,6 +134,10 @@ def resolve_job_request(
     if request.trigger in {"scheduled_prompt", "manual_prompt"} and routine is None:
         raise JobValidationError(
             "scheduled and manual jobs require an existing routine"
+        )
+    if request.trigger in {"scheduled_prompt", "manual_prompt"} and not routine.enabled:
+        raise JobValidationError(
+            f"Routine '{routine.id}' is disabled; enable it before running"
         )
     if request.trigger in {"decision", "decision_retry"} and request.routine_id is not None:
         raise JobValidationError(
@@ -167,12 +175,7 @@ def resolve_job_request(
         store_root=snapshot.config.agency.memory_store,
     )
 
-    validation_task_file = (
-        group.path.resolve()
-        / "shared"
-        / "jobs"
-        / f"{request.job_id}.prompt"
-    )
+    validation_task_file = group.path.resolve() / "shared" / "logs" / f"{request.job_id}.prompt"
     integration.require_valid_run(
         IntegrationRunRequest(
             workspace_dir=group.path.resolve(),

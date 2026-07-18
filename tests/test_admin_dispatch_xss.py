@@ -11,6 +11,7 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
     group_path = tmp_path / "agents"
     (group_path / "shared" / "prompts").mkdir(parents=True)
     (group_path / "product").mkdir()
+    (tmp_path / "agent-library").mkdir()
     config_path = tmp_path / "config.yaml"
     config = {
         "schema_version": 2,

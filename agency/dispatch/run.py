@@ -86,6 +86,9 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
 
         for agent_name, agent in group.agents.items():
             for routine in agent.routines:
+                if not routine.enabled:
+                    log.info("  SKIP: %s/%s is disabled", agent_name, routine.id)
+                    continue
                 at_time = routine.schedule.at or ""
                 every_val = routine.schedule.every or ""
                 marker_id = _marker_safe(routine.id)

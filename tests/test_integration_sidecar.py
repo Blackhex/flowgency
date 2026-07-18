@@ -1,6 +1,5 @@
 import pytest
 from agency.configuration import ValidationFailed
-from agency.config import SandboxSpec
 from agency.integrations import AgentIdentity, detect_integration
 from agency.integrations.agency.codex import CodexIntegration
 from agency.integrations.agency.gemini import GeminiIntegration

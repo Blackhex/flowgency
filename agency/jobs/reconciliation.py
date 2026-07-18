@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 from agency.blueprints.cache import release_pin
+from .authority import JobStore
 from .execution import project_decision
 from agency.memory.recovery import recover_publications
 from .store import InvalidJobTransition, read_job, transition_job
@@ -69,8 +70,12 @@ def reconcile_jobs(
     """Fail running jobs only when their worker is confirmed absent."""
     failed = 0
     left_running = 0
+    job_store = JobStore(memory_store_root)
     job_stores = {
-        group_id: Path(group["path"]).resolve() / "shared" / "jobs"
+        group_id: {
+            "job_store": (job_store.root / group_id),
+            "group_path": group["path"],
+        }
         for group_id, group in sorted(groups.items())
         if group.get("path")
     }
@@ -90,13 +95,11 @@ def reconcile_jobs(
             "Global memory recovery failed and requires manual intervention: %s",
             error,
         )
-    for group in groups.values():
-        group_path = group.get("path")
-        if not group_path:
+    for group_id, group in groups.items():
+        if not group.get("path"):
             continue
-        jobs_dir = Path(group_path) / "shared" / "jobs"
         records: list[tuple[Path, object]] = []
-        for path in jobs_dir.glob("*.yaml"):
+        for path in job_store.paths(group_id):
             try:
                 record = read_job(path)
             except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:

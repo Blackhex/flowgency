@@ -3,7 +3,6 @@
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
 
 import yaml
 
@@ -14,9 +13,6 @@ from agency.integrations.models import (
     ProjectorCapabilities,
     RuntimeCapabilities,
 )
-
-if TYPE_CHECKING:
-    from agency.config import SandboxSpec
 
 SIDECAR_FILENAME = ".agency-meta.yaml"
 

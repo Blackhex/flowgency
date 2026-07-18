@@ -1,6 +1,5 @@
 """Strict canonical configuration models, store, and validation primitives."""
 
-from .compat import SandboxSpec, load_config_path, save_config_path
 from .issues import ValidationFailed, ValidationIssue
 from .models import (
     AgencyConfigcanonical,
@@ -58,7 +57,6 @@ __all__ = [
     "GroupSettingsPatch",
     "GroupSettingsStatePatch",
     "ParsedConfig",
-    "SandboxSpec",
     "ToolPolicy",
     "ValidationFailed",
     "ValidationIssue",
@@ -69,7 +67,6 @@ __all__ = [
     "delete_group",
     "dismiss_tip",
     "hide_all_tips",
-    "load_config_path",
     "load_config_snapshot",
     "patch_agency_settings",
     "patch_agent_profile",
@@ -81,6 +78,5 @@ __all__ = [
     "parse_config_canonical",
     "remove_agent_instance",
     "replace_agent_routines",
-    "save_config_path",
     "validate_config_canonical",
 ]

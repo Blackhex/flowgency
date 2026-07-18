@@ -22,7 +22,7 @@ from agency.configuration.patches import (
     remove_agent_instance,
 )
 from agency.integrations import get_integration
-from agency.jobs import active_jobs
+from agency.jobs.authority import JobStore
 from agency.jobs.store import acquire_group_operation_locks
 from agency.memory import (
     MemoryStore,
@@ -610,11 +610,10 @@ def _has_active_jobs(
     target_group: str,
     agent_id: str,
 ) -> bool:
-    source_path = snapshot.config.groups[source_group].path
-    target_path = snapshot.config.groups[target_group].path
+    job_store = JobStore(snapshot.config.agency.memory_store)
     return bool(
-        active_jobs(source_path, agent_id)
-        or active_jobs(target_path, agent_id)
+        job_store.active(source_group, agent_id)
+        or job_store.active(target_group, agent_id)
     )
 
 

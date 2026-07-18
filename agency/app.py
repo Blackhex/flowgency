@@ -860,7 +860,7 @@ def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
     ``timeout`` is retained temporarily for call-site compatibility; durable
     job records are authoritative.
     """
-    return bool(active_jobs(g["path"], agent_name))
+    return bool(active_jobs(tuple(g.get("job_paths", ())), agent_name))
 
 
 def compute_next_run_detail(
@@ -1079,9 +1079,9 @@ def _dashboard_memory_label(selector: dict[str, object], channels) -> str:
     return scope.replace("_", " ").title()
 
 
-def _newest_active_job(group_path: Path, agent_name: str):
+def _newest_active_job(group_jobs: tuple[Path, ...], agent_name: str):
     jobs = sorted(
-        active_jobs(group_path, agent_name),
+        active_jobs(group_jobs, agent_name),
         key=lambda record: (
             record.started_at or "",
             record.spec.created_at,
@@ -1116,7 +1116,7 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
     if services is None or getattr(services, "startup_error", None) is not None or services.instances is None:
         agents, _ = collect_agents_with_identity(g)
         for agent in agents:
-            current = _newest_active_job(g["path"], agent["name"])
+            current = _newest_active_job(tuple(g.get("job_paths", ())), agent["name"])
             _overlay_dashboard_job_state(agent, current, g["key"])
         return agents
 
@@ -1128,7 +1128,7 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
     for instance in group.agents.values():
         last_run = get_agent_last_run(g, instance.name)
         last_seen = last_run["at"] if last_run else get_agent_last_seen(g, instance.name)
-        current = _newest_active_job(group.path, instance.name)
+        current = _newest_active_job(tuple(g.get("job_paths", ())), instance.name)
         selector = (
             current.spec.memory.selector
             if current is not None
@@ -1627,6 +1627,11 @@ async def agent_run(
     )
     if routine is None:
         raise HTTPException(status_code=404, detail="Routine not found")
+    if not routine.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Routine '{routine.id}' is disabled; enable it before running.",
+        )
 
     memory_scope = str(form.get("memory_scope") or "").strip()
     memory_override = None

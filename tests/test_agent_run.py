@@ -10,8 +10,9 @@ import agency.app as app_mod
 from agency.app import app, is_agent_running
 from agency.configuration import ConfigStore
 from agency.jobs import JobRequest
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import job_path, write_job
+from agency.jobs.store import write_job
 
 
 def _setup_group(tmp_path: Path) -> Path:
@@ -156,6 +157,9 @@ def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
 
 def test_agent_running_state_comes_from_active_job_records(tmp_path):
     group_path = _setup_group(tmp_path)
+    job_store = JobStore(tmp_path / "memory")
+    group_store = job_store.group_root("test")
+    group_store.mkdir(parents=True, exist_ok=True)
     for status in ("queued", "running"):
         spec = JobSpec(
             schema_version=2,
@@ -199,7 +203,7 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
             created_at="2026-07-15T00:00:00+00:00",
         )
         record = replace(JobRecord.from_spec(spec), status=status)
-        write_job(job_path(group_path, spec.job_id), record)
+        write_job(job_store.path("test", spec.job_id), record)
 
     assert not (group_path / "shared" / "logs" / ".running-product").exists()
     assert is_agent_running(app_mod.get_group("test"), "product") is True
@@ -318,6 +322,9 @@ def test_agents_page_keeps_roster_layout_when_logs_exist(tmp_path):
 def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
     _setup_group(tmp_path)
     monkeypatch.setattr(app_mod, "is_agent_running", lambda *args, **kwargs: True)
+    job_store = JobStore(tmp_path / "memory")
+    group_store = job_store.group_root("test")
+    group_store.mkdir(parents=True, exist_ok=True)
     spec = JobSpec(
         schema_version=2,
         job_id="job-running",
@@ -359,7 +366,7 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
-    write_job(job_path(tmp_path / "grp", spec.job_id), JobRecord.from_spec(spec))
+    write_job(job_store.path("test", spec.job_id), JobRecord.from_spec(spec))
     client = TestClient(app)
 
     resp = client.get("/test/agents")

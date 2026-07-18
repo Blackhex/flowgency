@@ -15,6 +15,7 @@ from urllib.request import urlopen
 import yaml
 
 from agency.configuration.models import MemorySelector
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import transition_job, write_job
 from agency.memory import MemoryStore, resolve_memory_selector
@@ -59,6 +60,7 @@ def _seed_blueprint(library: Path, key: str, title: str, skill: str) -> None:
 def _seed_pipeline(group: Path) -> None:
     for directory in ("jobs", "logs/2026-07-16", "observations", "proposals", "decisions", "pipeline"):
         (group / "shared" / directory).mkdir(parents=True, exist_ok=True)
+    (group / "editorial").mkdir(parents=True, exist_ok=True)
     _write(group / "shared" / "memory.md", "# Newsletter shared memory\n")
     _write(
         group / "shared" / "observations" / "audience-signal.md",
@@ -126,17 +128,18 @@ def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
 
 
 def _seed_jobs(runtime: Path, config_path: Path) -> None:
-    jobs = runtime / "groups" / "newsletter" / "shared" / "jobs"
-    waiting_path = jobs / "job-waiting.yaml"
+    authority = JobStore(runtime / "memory-store")
+    authority.group_root("newsletter").mkdir(parents=True, exist_ok=True)
+    waiting_path = authority.path("newsletter", "job-waiting")
     write_job(waiting_path, JobRecord.from_spec(_job_spec(runtime, config_path, "job-waiting")))
     transition_job(waiting_path, "queued", "waiting_for_memory")
 
-    failed_path = jobs / "job-failed.yaml"
+    failed_path = authority.path("newsletter", "job-failed")
     failed = JobRecord.from_spec(_job_spec(runtime, config_path, "job-failed"))
     failed.status = "failed"
     failed.changed_files = [{"path": "docs/newsletter.md", "status": "modified", "lines_added": 4, "lines_removed": 1}]
     failed.execution_summary = "Memory publication failed after the draft was retained."
-    artifact = jobs / "artifacts" / "job-failed" / "memory.md"
+    artifact = authority.artifact_root("newsletter", "job-failed") / "memory.md"
     _write(artifact, "# Retained draft memory\n")
     failed.memory_publication = {
         "failed_artifacts": [{"name": "memory.md", "path": str(artifact.resolve()), "size": artifact.stat().st_size}]

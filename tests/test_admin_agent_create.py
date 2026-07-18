@@ -25,7 +25,7 @@ def _seed_client(monkeypatch, tmp_path, canonical_raw_config):
     library_root = tmp_path / "library"
     cache_root = tmp_path / "cache"
     memory_root = tmp_path / "memory"
-    group_root.mkdir()
+    group_root.mkdir(exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(cache_root)

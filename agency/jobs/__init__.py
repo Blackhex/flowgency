@@ -1,4 +1,5 @@
 from .artifacts import JobArtifact, retain_failed_stage
+from .authority import JobAuthorityError, JobAuthorityRef, JobStore
 from .launch_view import create_launch_view
 from .launcher import (
     DetachedProcessLauncher,
@@ -28,7 +29,10 @@ def reconcile_jobs(groups: dict, *, memory_store_root):
 
 __all__ = [
     "DetachedProcessLauncher",
+    "JobAuthorityError",
+    "JobAuthorityRef",
     "SystemdRunLauncher",
+    "JobStore",
     "active_jobs",
     "BlueprintRef",
     "cancel_job",

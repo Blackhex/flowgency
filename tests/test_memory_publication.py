@@ -1,6 +1,9 @@
+from dataclasses import replace
+
 import pytest
 
 from agency.configuration.models import MemorySelector
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import read_job, write_job
 from agency.memory import MemoryStore, resolve_memory_selector
@@ -18,6 +21,7 @@ def publication_fixture(tmp_path):
     group_path.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
+    memory_root = tmp_path / "memory-store"
     spec = JobSpec(
         schema_version=2,
         job_id="publication-job",
@@ -62,12 +66,14 @@ def publication_fixture(tmp_path):
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
-    job_path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
-    write_job(job_path, JobRecord.from_spec(spec))
+    authority_store = JobStore(memory_root)
+    group_job_store = authority_store.group_root("news")
+    group_job_store.mkdir(parents=True, exist_ok=True)
+    job_path = authority_store.path("news", spec.job_id)
+    queued = JobRecord.from_spec(spec)
+    write_job(job_path, queued)
     job = read_job(job_path)
-    write_job(job_path, JobRecord(spec=job.spec, status="running"))
-
-    memory_root = tmp_path / "memory-store"
+    write_job(job_path, replace(job, status="running"))
     store = MemoryStore(memory_root)
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
@@ -88,7 +94,7 @@ def publication_fixture(tmp_path):
     return {
         "group_path": group_path,
         "job_path": job_path,
-        "job_store": group_path / "shared" / "jobs",
+        "job_store": group_job_store,
         "job_id": spec.job_id,
         "store": store,
         "resolved": resolved,
@@ -193,7 +199,7 @@ def test_publication_rejects_hostile_external_job_path_and_preserves_sentinel(
     stage = publication_fixture["stage"]
     job_store = publication_fixture["job_store"]
     hostile_group = publication_fixture["group_path"].parent / "hostile"
-    hostile_job_store = hostile_group / "shared" / "jobs"
+    hostile_job_store = hostile_group / ".jobs" / "hostile"
     hostile_job_store.mkdir(parents=True)
     hostile_job_path = hostile_job_store / f"{publication_fixture['job_id']}.yaml"
     hostile_job_path.write_text("sentinel", encoding="utf-8")
@@ -217,7 +223,7 @@ def test_publication_rejects_symlinked_jobs_directory(
 ):
     stage = publication_fixture["stage"]
     job_store = publication_fixture["job_store"]
-    linked_jobs = publication_fixture["group_path"].parent / "linked-group" / "shared" / "jobs"
+    linked_jobs = publication_fixture["group_path"].parent / "linked-group" / ".jobs" / "linked-group"
     linked_jobs.parent.mkdir(parents=True)
     with pytest.raises(MemoryPublicationError, match="unsafe|job store"):
         prepare_publication(stage, job_store=linked_jobs)

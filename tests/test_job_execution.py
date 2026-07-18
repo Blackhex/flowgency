@@ -10,6 +10,7 @@ import yaml
 
 from agency.integrations import FileChange, RunResult
 from agency.integrations.models import IntegrationRunRequest
+from agency.jobs.authority import JobStore
 from agency.jobs.artifacts import JobArtifact
 from agency.jobs.execution import execute_job
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
@@ -22,6 +23,15 @@ from agency.memory.selectors import resolve_memory_selector
 from agency.configuration.models import MemorySelector
 from agency.blueprints.cache import active_pins, pin_artifact
 from agency.fs.locks import exclusive_lock
+
+
+def _authority(spec: JobSpec):
+    store = JobStore(Path(spec.memory.path).parent)
+    return store.reference(
+        spec.group_key,
+        spec.job_id,
+        JobRecord.from_spec(spec).authority_digest,
+    )
 
 
 def queued_job(tmp_path: Path, *, decision_context=None):
@@ -82,7 +92,7 @@ def queued_job(tmp_path: Path, *, decision_context=None):
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
-    path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    path = JobStore(tmp_path / ".compat-memory-root").path(spec.group_key, spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     return path, spec
 
@@ -142,7 +152,7 @@ def memory_bound_job(tmp_path: Path):
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
-    path = group_path / "shared" / "jobs" / f"{spec.job_id}.yaml"
+    path = JobStore(tmp_path / "memory-store").path(spec.group_key, spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     return path, spec
 
@@ -170,6 +180,7 @@ class MemoryJobFixture:
     def __init__(self, tmp_path: Path):
         self.tmp_path = tmp_path
         self.job_path, self.spec = memory_bound_job(tmp_path)
+        self.authority = _authority(self.spec)
         self.group_path = Path(self.spec.group_path)
         self.memory_root = tmp_path / "memory-store"
         self.store = MemoryStore(self.memory_root)
@@ -217,7 +228,7 @@ def test_execute_job_waits_for_memory_before_starting_run(tmp_path, monkeypatch)
     )
 
     with exclusive_lock(held_lock, wait=True):
-        worker = threading.Thread(target=execute_job, args=(fixture.job_path,))
+        worker = threading.Thread(target=execute_job, args=(fixture.authority,))
         worker.start()
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
@@ -263,7 +274,7 @@ def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_pat
     )
 
     with exclusive_lock(held_lock, wait=True):
-        worker = threading.Thread(target=execute_job, args=(fixture.job_path,))
+        worker = threading.Thread(target=execute_job, args=(fixture.authority,))
         worker.start()
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
@@ -314,7 +325,7 @@ def test_execute_job_failed_run_keeps_canonical_memory_and_retains_stage(tmp_pat
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
-    result = execute_job(fixture.job_path)
+    result = execute_job(fixture.authority)
 
     assert result.status == "failed"
     assert fixture.store.read(fixture.resolved).files == {"memory.md": b"old"}
@@ -343,7 +354,7 @@ def test_execute_job_releases_cache_pin_after_terminal_state(tmp_path, monkeypat
         ),
     )
 
-    result = execute_job(fixture.job_path)
+    result = execute_job(fixture.authority)
 
     assert result.status == "complete"
     assert active_pins(fixture.spec.blueprint.cache_root, artifact.ref) == ()
@@ -412,7 +423,7 @@ def test_execute_job_persists_execution_evidence_when_publication_failure_pre_fa
         fail_after_task9_terminalization,
     )
 
-    result = execute_job(fixture.job_path)
+    result = execute_job(fixture.authority)
 
     assert result.status == "failed"
     assert result.stdout_path is not None
@@ -443,6 +454,7 @@ def read_metadata(path: Path) -> dict:
 
 def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
+    authority = _authority(spec)
     seen = {}
 
     class Integration:
@@ -473,7 +485,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
-    result = execute_job(path)
+    result = execute_job(authority)
 
     assert seen == {
         "running": "running",
@@ -496,7 +508,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
 
 
 def test_execute_job_uses_resolved_skill_from_canonical_snapshot(tmp_path, monkeypatch):
-    path, _ = queued_job(tmp_path)
+    path, spec = queued_job(tmp_path)
     seen = {}
 
     class Integration:
@@ -520,14 +532,14 @@ def test_execute_job_uses_resolved_skill_from_canonical_snapshot(tmp_path, monke
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
-    result = execute_job(path)
+    result = execute_job(_authority(spec))
 
     assert result.status == "complete"
     assert seen == {"skill": "daily-review", "sandbox_mode": "unrestricted"}
 
 
 def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
-    path, _ = queued_job(tmp_path)
+    path, spec = queued_job(tmp_path)
     workspace_dir = tmp_path / "group"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
@@ -543,14 +555,14 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
         ),
     )
 
-    result = execute_job(path)
+    result = execute_job(_authority(spec))
 
     assert result.stderr_path is None
     assert not list((tmp_path / "group" / "shared" / "logs").rglob("*.err"))
 
 
 def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
-    path, _ = queued_job(tmp_path)
+    path, spec = queued_job(tmp_path)
     context = SimpleNamespace(
         workspace_dir=tmp_path / "group",
         timeout=30,
@@ -564,7 +576,7 @@ def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
-    result = execute_job(path)
+    result = execute_job(_authority(spec))
 
     assert result.status == "failed"
     assert "boom" in result.execution_summary
@@ -579,7 +591,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
     decision.write_text(
         "---\nexecution_job_id: newer-job\nexecution_status: running\n---\n"
     )
-    path, _ = queued_job(
+    path, spec = queued_job(
         tmp_path,
         decision_context={
             "decision_path": str(decision),
@@ -599,7 +611,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
         ),
     )
 
-    execute_job(path)
+    execute_job(_authority(spec))
 
     assert read_metadata(decision) == {
         "execution_job_id": "newer-job",
@@ -608,7 +620,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
 
 
 def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
-    path, _ = queued_job(tmp_path)
+    path, spec = queued_job(tmp_path)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
@@ -622,7 +634,7 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
         ),
     )
 
-    result = execute_job(path)
+    result = execute_job(_authority(spec))
 
     assert result.status == "failed"
     assert result.exit_code == 124
@@ -630,7 +642,7 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
 
 
 def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch):
-    path, _ = queued_job(tmp_path)
+    path, spec = queued_job(tmp_path)
     superseded_result = SimpleNamespace(
         exit_code=0,
         stdout="done",
@@ -648,14 +660,14 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
         ),
     )
 
-    result = execute_job(path)
+    result = execute_job(_authority(spec))
 
     assert result.status == "complete"
     assert result.changed_files == []
 
 
 def test_execute_job_projection_failure_before_run_still_completes(tmp_path, monkeypatch, caplog):
-    path, _ = queued_job(tmp_path)
+    path, spec = queued_job(tmp_path)
     calls = {"count": 0}
 
     def flaky_project(record):
@@ -677,7 +689,7 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
         ),
     )
 
-    result = execute_job(path)
+    result = execute_job(_authority(spec))
 
     assert calls["count"] == 2
     assert result.status == "complete"
@@ -686,7 +698,7 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
 
 
 def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeypatch, caplog):
-    path, _ = queued_job(tmp_path)
+    path, spec = queued_job(tmp_path)
     calls = {"count": 0}
 
     def flaky_project(record):
@@ -698,7 +710,7 @@ def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeyp
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            agent_dir=tmp_path,
+            workspace_dir=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
             group_path=tmp_path / "group",
@@ -708,7 +720,7 @@ def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeyp
         ),
     )
 
-    result = execute_job(path)
+    result = execute_job(_authority(spec))
 
     assert calls["count"] == 2
     assert result.status == "failed"
@@ -721,7 +733,7 @@ def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkey
     is None). This proves execute_job's own queued->running transition records
     the worker's real, confirmable PID regardless of what the launcher reported,
     so reconciliation always has a usable PID for a running job."""
-    path, _ = queued_job(tmp_path)
+    path, spec = queued_job(tmp_path)
     assert read_job(path).worker_pid is None
 
     captured = {}
@@ -737,18 +749,18 @@ def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkey
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
-        agent_dir=tmp_path / "group" / "product",
+        workspace_dir=tmp_path / "group" / "product",
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
         group_path=tmp_path / "group",
     )
-    context.agent_dir.mkdir(parents=True)
+    context.workspace_dir.mkdir(parents=True)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
-    result = execute_job(path)
+    result = execute_job(_authority(spec))
 
     assert captured["status"] == "running"
     assert captured["pid"] == os.getpid()
@@ -758,7 +770,8 @@ def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkey
 
 
 def test_worker_returns_status_as_exit_code(tmp_path, monkeypatch):
-    job_path = tmp_path / "job.yaml"
+    store = JobStore(tmp_path / "memory-store")
+    authority = store.reference("test", "job", "a" * 64)
     seen = []
 
     def fake_execute(path):
@@ -766,11 +779,11 @@ def test_worker_returns_status_as_exit_code(tmp_path, monkeypatch):
         return SimpleNamespace(status="complete")
 
     monkeypatch.setattr("agency.jobs.worker.execute_job", fake_execute)
-    assert worker_main([str(job_path)]) == 0
+    assert worker_main(authority.worker_args()) == 0
 
     monkeypatch.setattr(
         "agency.jobs.worker.execute_job",
         lambda path: SimpleNamespace(status="failed"),
     )
-    assert worker_main([str(job_path)]) == 1
-    assert seen == [job_path.resolve()]
+    assert worker_main(authority.worker_args()) == 1
+    assert seen == [authority]

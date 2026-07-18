@@ -8,9 +8,11 @@ from typing import Mapping
 from fastapi import Request
 
 from agency.blueprints import BlueprintLibrary, CompilationCache
-from agency.configuration import ConfigStore
+from agency.configuration import ConfigStore, ValidationFailed
+from agency.configuration.paths import initialize_control_directories, validate_resolved_paths
 from agency.integrations import REGISTRY, BaseIntegration
 from agency.instances import InstanceService
+from agency.jobs.authority import JobStore
 from agency.jobs.submission import _projector_registry
 from agency.memory import MemoryStore
 
@@ -22,6 +24,7 @@ class AgencyServices:
     blueprint_library: BlueprintLibrary | None
     compilation_cache: CompilationCache | None
     memory_store: MemoryStore | None
+    job_store: JobStore | None
     instances: InstanceService | None
     integrations: Mapping[str, BaseIntegration]
     startup_error: Exception | None = None
@@ -36,6 +39,10 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
     config_store = ConfigStore(resolved)
     try:
         snapshot = config_store.load()
+        initialize_control_directories(snapshot.config)
+        issues = validate_resolved_paths(snapshot.config)
+        if issues:
+            raise ValidationFailed(issues)
         agency = snapshot.config.agency
         library_root = agency.agent_library
         cache_root = agency.compilation_cache
@@ -45,6 +52,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
         blueprint_library = BlueprintLibrary(Path(library_root))
         compilation_cache = CompilationCache(Path(cache_root), _projector_registry())
         memory_store = MemoryStore(Path(memory_root))
+        job_store = JobStore(Path(memory_root))
         instances = InstanceService(
             config_store=config_store,
             library=blueprint_library,
@@ -56,6 +64,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             blueprint_library=blueprint_library,
             compilation_cache=compilation_cache,
             memory_store=memory_store,
+            job_store=job_store,
             instances=instances,
             integrations=REGISTRY,
             startup_error=None,
@@ -67,6 +76,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             blueprint_library=None,
             compilation_cache=None,
             memory_store=None,
+            job_store=None,
             instances=None,
             integrations=REGISTRY,
             startup_error=exc,

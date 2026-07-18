@@ -10,7 +10,6 @@ from agency.configuration import ConfigConflictError, ValidationFailed
 from agency.configuration.models import MemorySelector
 from agency.fs.snapshot import AssetValidationError
 from agency.instances import AgentInstanceCreate, InstanceMoveConflict
-from agency.jobs import active_jobs
 from agency.web.dependencies import AgencyServices, get_services
 
 
@@ -101,12 +100,14 @@ def _instance_memory_label(instance, channels) -> str:
     return selector.scope.title() + " memory"
 
 
-def _instance_rows(snapshot, group_id: str) -> list[dict]:
+def _instance_rows(snapshot, services: AgencyServices, group_id: str) -> list[dict]:
     group = snapshot.config.groups[group_id]
+    if services.job_store is None:
+        raise HTTPException(status_code=409, detail="Job store unavailable")
     rows = []
     for instance in group.agents.values():
         current_jobs = sorted(
-            active_jobs(group.path, instance.name),
+            services.job_store.active(group_id, instance.name),
             key=_active_job_sort_key,
             reverse=True,
         )
@@ -165,7 +166,7 @@ def _render_roster(request: Request, services: AgencyServices, group_id: str, *,
             "request": request,
             **_group_context(request, snapshot, group_id),
             "active": "agents",
-            "instances": _instance_rows(snapshot, group_id),
+            "instances": _instance_rows(snapshot, services, group_id),
             "config_revision": snapshot.revision,
             "available_blueprints": available_blueprints,
             "available_integrations": sorted(services.integrations.keys()),

@@ -99,6 +99,7 @@ class Routine(BaseModel):
     arguments: tuple[str, ...] = ()
     schedule: ScheduleRule
     memory: MemorySelector | None = None
+    enabled: bool = True
 
 
 class AgentInstance(BaseModel):

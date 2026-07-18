@@ -41,23 +41,24 @@ def _write_blueprint(root: Path) -> None:
 @pytest.fixture
 def cli_config(tmp_path):
     group_path = tmp_path / "newsletter"
-    for name in ("observations", "proposals", "decisions", "jobs", "logs"):
+    for name in ("observations", "proposals", "decisions", "logs"):
         (group_path / "shared" / name).mkdir(parents=True)
     _write_blueprint(tmp_path / "agent-library")
+    group_path.mkdir(parents=True, exist_ok=True)
     raw = {
         "schema_version": 2,
         "agency": {
             "title": "Contract Agency",
             "default_group": "newsletter",
-            "agent_library": "agent-library",
-            "compilation_cache": "compiled-agents",
-            "memory_store": "memory",
+            "agent_library": str((tmp_path / "agent-library").resolve()),
+            "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
+            "memory_store": str((tmp_path / "memory").resolve()),
         },
         "memory": {"channels": {"support": {"display_name": "Support Desk"}}},
         "groups": {
             "newsletter": {
                 "name": "Newsletter",
-                "path": "newsletter",
+                "path": str(group_path.resolve()),
                 "default_integration": "script",
                 "runtime": {
                     "timeout": 321,

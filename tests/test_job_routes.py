@@ -8,6 +8,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from agency import app as app_mod
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import read_job, transition_job, write_job
 
@@ -37,6 +38,7 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
     group_root = tmp_path / "groups" / "newsletter"
+    (tmp_path / "Research" / "shared").mkdir(parents=True, exist_ok=True)
     for rel in [
         ("shared", "jobs"),
         ("shared", "logs", "2026-07-16"),
@@ -87,12 +89,14 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
 
 
 def _write_job_record(group_root: Path, config_path: Path, *, job_id: str = "job-1", status: str = "queued") -> Path:
+    group_id = "research" if group_root.name == "research" else "newsletter"
+    job_store = JobStore(group_root.parent.parent / "memory-store")
     spec = JobSpec(
         schema_version=2,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="newsletter",
+        group_key=group_id,
         group_path=str(group_root.resolve()),
         agent_name="advisor",
         workspace_dir=str(group_root.resolve()),
@@ -128,7 +132,7 @@ def _write_job_record(group_root: Path, config_path: Path, *, job_id: str = "job
         timeout_override=None,
         created_at="2026-07-16T00:00:00+00:00",
     )
-    path = group_root / "shared" / "jobs" / f"{job_id}.yaml"
+    path = job_store.path(group_id, job_id)
     record = JobRecord.from_spec(spec)
     write_job(path, record)
     if status != "queued":
@@ -141,7 +145,17 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, canonical_raw_config):
     _write_job_record(group_root, config_path, job_id="job-1", status="queued")
 
     other_group = group_root.parent / "research"
-    other_group.joinpath("shared", "jobs").mkdir(parents=True, exist_ok=True)
+    other_group.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True, exist_ok=True)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["research"] = {
+        "name": "Research",
+        "path": str(other_group),
+        "default_integration": "copilot",
+        "agents": deepcopy(raw["groups"]["newsletter"]["agents"]),
+    }
+    _write_yaml(config_path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
     _write_job_record(other_group, config_path, job_id="job-2", status="queued")
 
     response = client.get("/newsletter/jobs")
@@ -153,10 +167,12 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, canonical_raw_config):
 
 def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, canonical_raw_config):
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    job_store = JobStore(tmp_path / "memory-store")
     path = _write_job_record(group_root, config_path, job_id="job-failed", status="queued")
     record = read_job(path)
     failed = JobRecord(
         spec=record.spec,
+        authority_digest=record.authority_digest,
         status="failed",
         stdout_path=str((group_root / "shared" / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.out").resolve()),
         stderr_path=str((group_root / "shared" / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.err").resolve()),
@@ -166,7 +182,7 @@ def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, ca
             "failed_artifacts": [
                 {
                     "name": "memory.md",
-                    "path": str((group_root / "shared" / "jobs" / "artifacts" / "job-failed" / "memory.md").resolve()),
+                    "path": str((job_store.artifact_root("newsletter", "job-failed") / "memory.md").resolve()),
                     "size": 12,
                 }
             ]
@@ -175,7 +191,7 @@ def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, ca
     write_job(path, failed)
     Path(failed.stdout_path).write_text("stdout", encoding="utf-8")
     Path(failed.stderr_path).write_text("stderr", encoding="utf-8")
-    artifact_dir = group_root / "shared" / "jobs" / "artifacts" / "job-failed"
+    artifact_dir = job_store.artifact_root("newsletter", "job-failed")
     artifact_dir.mkdir(parents=True, exist_ok=True)
     (artifact_dir / "memory.md").write_text("snapshot", encoding="utf-8")
 
@@ -231,7 +247,7 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["groups"]["newsletter"]["agents"].pop()
     moved_root = group_root.parent / "research"
-    moved_root.joinpath("shared", "jobs").mkdir(parents=True)
+    moved_root.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True)
     raw["groups"]["research"] = {
         "name": "Research",
         "path": str(moved_root),
@@ -264,7 +280,15 @@ def test_job_metadata_uses_spec_snapshot_when_instance_still_exists(monkeypatch,
         routine_id="snapshot-review",
         prompt_source={"type": "routine", "routine_id": "snapshot-review", "title": "Snapshot review"},
     )
-    write_job(path, replace(record, spec=snapshot_spec))
+    write_job(
+        path,
+        replace(
+            JobRecord.from_spec(snapshot_spec),
+            status=record.status,
+            started_at=record.started_at,
+            completed_at=record.completed_at,
+        ),
+    )
 
     response = client.get("/newsletter/jobs/job-snapshot")
 

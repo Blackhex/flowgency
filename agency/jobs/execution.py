@@ -33,6 +33,7 @@ from agency.memory.store import (
 )
 
 from .atomic import atomic_write_text
+from .authority import JobAuthorityError, JobAuthorityRef, JobStore
 from .artifacts import JobArtifact, retain_failed_stage
 from .changes import capture_base_sha, capture_git_changes
 from .launch_view import create_launch_view
@@ -62,6 +63,14 @@ def _resolved_memory(spec) -> ResolvedMemory:
 
 def _jobs_dir(job_path: Path) -> Path:
     return Path(job_path).resolve().parent
+
+
+def _read_authority(
+    authority: JobAuthorityRef,
+) -> tuple[JobStore, Path, JobRecord]:
+    store = JobStore.from_store_root(authority.store_root)
+    record = store.read(authority)
+    return store, authority.path, record
 
 
 def _mark_cancelled_if_waiting(job_path: Path) -> JobRecord:
@@ -296,8 +305,8 @@ def project_decision(record: JobRecord) -> None:
     _write_frontmatter_atomic(decision_path, metadata, body)
 
 
-def execute_job(job_path: Path) -> JobRecord:
-    record = read_job(job_path)
+def execute_job(authority: JobAuthorityRef) -> JobRecord:
+    store, job_path, record = _read_authority(authority)
     record = transition_job(
         job_path,
         "queued",
@@ -311,6 +320,7 @@ def execute_job(job_path: Path) -> JobRecord:
     launch_view = None
     final = record
     try:
+        store.read(authority)
         spec = record.spec
         context = resolve_job_context(spec)
         runtime_policy = getattr(context, "runtime_policy", None)
@@ -323,7 +333,7 @@ def execute_job(job_path: Path) -> JobRecord:
         resolved_memory = _resolved_memory(spec)
 
         def cancelled() -> bool:
-            return read_job(job_path).status == "cancelled"
+            return store.read(authority).status == "cancelled"
 
         try:
             with _memory_lock(
@@ -539,6 +549,13 @@ def execute_job(job_path: Path) -> JobRecord:
         except LockCancelledError:
             final = _mark_cancelled_if_waiting(job_path)
             return final
+    except JobAuthorityError as error:
+        final = _terminalize_failure(
+            job_path,
+            summary=f"Execution authority error: {error}",
+            started_at=None if started is None else started.isoformat(),
+            base_sha=base_sha,
+        )
     except Exception as error:
         final = _terminalize_failure(
             job_path,

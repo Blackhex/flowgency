@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from agency.configuration.models import MemorySelector
+from agency.jobs.authority import JobStore
 from agency.jobs.store import InvalidJobTransition, cancel_job, read_job
 from agency.web.dependencies import AgencyServices, get_services
 
@@ -49,8 +50,8 @@ def _safe_job_id(job_id: str) -> str:
     return job_id
 
 
-def _job_path(group_path: Path, job_id: str) -> Path:
-    return group_path / "shared" / "jobs" / f"{_safe_job_id(job_id)}.yaml"
+def _job_path(job_store: JobStore, group_id: str, job_id: str) -> Path:
+    return job_store.path(group_id, _safe_job_id(job_id))
 
 
 def _friendly_status(status: str) -> str:
@@ -124,16 +125,16 @@ def _memory_label(selector_data: dict[str, object], snapshot) -> str:
     return f"Channel: {display}"
 
 
-def _artifact_root(group_path: Path, job_id: str) -> Path:
-    return (group_path / "shared" / "jobs" / "artifacts" / _safe_job_id(job_id)).resolve(strict=False)
+def _artifact_root(job_store: JobStore, group_id: str, job_id: str) -> Path:
+    return job_store.artifact_root(group_id, _safe_job_id(job_id))
 
 
-def _validate_artifact_query(group_path: Path, job_id: str, artifact: str) -> Path:
+def _validate_artifact_query(job_store: JobStore, group_id: str, job_id: str, artifact: str) -> Path:
     candidate = Path(artifact)
     if candidate.name != artifact or artifact in {"", ".", ".."}:
         raise HTTPException(status_code=400, detail="Invalid artifact path")
-    target = (_artifact_root(group_path, job_id) / artifact).resolve(strict=False)
-    root = _artifact_root(group_path, job_id)
+    target = (_artifact_root(job_store, group_id, job_id) / artifact).resolve(strict=False)
+    root = _artifact_root(job_store, group_id, job_id)
     try:
         target.relative_to(root)
     except ValueError as exc:
@@ -143,11 +144,10 @@ def _validate_artifact_query(group_path: Path, job_id: str, artifact: str) -> Pa
     return target
 
 
-def _job_rows(snapshot, group_id: str) -> list[dict[str, Any]]:
+def _job_rows(snapshot, job_store: JobStore, group_id: str) -> list[dict[str, Any]]:
     group = snapshot.config.groups[group_id]
-    jobs_dir = group.path / "shared" / "jobs"
     rows: list[dict[str, Any]] = []
-    for path in sorted(jobs_dir.glob("*.yaml"), key=lambda item: item.stat().st_mtime, reverse=True):
+    for path in sorted(job_store.paths(group_id), key=lambda item: item.stat().st_mtime, reverse=True):
         record = read_job(path)
         instance = group.agents.get(record.spec.agent_name)
         agent_name = record.spec.agent_name
@@ -176,7 +176,7 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
     group = snapshot.config.groups[group_id]
     instance = group.agents.get(record.spec.agent_name)
     agent_name = record.spec.agent_name
-    artifact_dir = group.path / "shared" / "jobs" / "artifacts" / record.spec.job_id
+    artifact_dir = JobStore(snapshot.config.agency.memory_store).artifact_root(group_id, record.spec.job_id)
     failed_artifacts = []
     if artifact_dir.exists():
         for artifact in sorted(artifact_dir.glob("*.md")):
@@ -217,6 +217,8 @@ async def jobs_list(request: Request, group: str, services: AgencyServices = Dep
     snapshot = services.config_store.load()
     if group not in snapshot.config.groups:
         raise HTTPException(status_code=404, detail="Unknown group")
+    if services.job_store is None:
+        raise HTTPException(status_code=409, detail="Job store unavailable")
     return _templates(request).TemplateResponse(
         request,
         "jobs.html",
@@ -224,7 +226,7 @@ async def jobs_list(request: Request, group: str, services: AgencyServices = Dep
             "request": request,
             **_group_context(request, snapshot, group),
             "active": "jobs",
-            "jobs": _job_rows(snapshot, group),
+            "jobs": _job_rows(snapshot, services.job_store, group),
         },
     )
 
@@ -234,11 +236,12 @@ async def job_detail(request: Request, group: str, job_id: str, artifact: str = 
     snapshot = services.config_store.load()
     if group not in snapshot.config.groups:
         raise HTTPException(status_code=404, detail="Unknown group")
-    group_cfg = snapshot.config.groups[group]
+    if services.job_store is None:
+        raise HTTPException(status_code=409, detail="Job store unavailable")
     if artifact:
-        target = _validate_artifact_query(group_cfg.path, job_id, artifact)
+        target = _validate_artifact_query(services.job_store, group, job_id, artifact)
         return FileResponse(target)
-    path = _job_path(group_cfg.path, job_id)
+    path = _job_path(services.job_store, group, job_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     record = read_job(path)
@@ -260,8 +263,9 @@ async def job_cancel(request: Request, group: str, job_id: str, services: Agency
     snapshot = services.config_store.load()
     if group not in snapshot.config.groups:
         raise HTTPException(status_code=404, detail="Unknown group")
-    group_cfg = snapshot.config.groups[group]
-    path = _job_path(group_cfg.path, job_id)
+    if services.job_store is None:
+        raise HTTPException(status_code=409, detail="Job store unavailable")
+    path = _job_path(services.job_store, group, job_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     try:

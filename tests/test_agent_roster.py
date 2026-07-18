@@ -8,6 +8,7 @@ import yaml
 from fastapi.testclient import TestClient
 from starlette.routing import BaseRoute
 
+from agency.jobs.authority import JobStore
 from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
@@ -78,6 +79,10 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
         "default_integration": "copilot",
         "agents": [],
     }
+
+    authority = JobStore(memory_root)
+    authority.group_root("newsletter").mkdir(parents=True, exist_ok=True)
+    authority.group_root("research").mkdir(parents=True, exist_ok=True)
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
@@ -165,7 +170,7 @@ def _write_roster_job(
     spec = _roster_job_spec(tmp_path, group_root, job_id=job_id, created_at=created_at)
     record = JobRecord.from_spec(spec)
     record.status = status
-    write_job(group_root / "shared" / "jobs" / f"{job_id}.yaml", record)
+    write_job(JobStore(tmp_path / "memory-store").path("newsletter", job_id), record)
     return record
 
 
@@ -384,8 +389,7 @@ def test_roster_returns_actionable_warning_when_agent_library_is_unavailable(
     response = client.get("/newsletter/agents")
 
     assert response.status_code == 409
-    assert "Agent Library root does not exist" in response.text
-    assert response.text.count("Create Instance") == 1
+    assert "Instance services unavailable" in response.text
     assert config_path.read_text(encoding="utf-8") == before
 
 

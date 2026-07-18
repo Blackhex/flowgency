@@ -15,6 +15,7 @@ from agency.app import (
     is_agent_running,
     relative_future,
 )
+from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import job_path, write_job
 
@@ -26,6 +27,7 @@ def _group(tmp_path):
 
 
 def _write_job(tmp_path, status):
+    memory_root = tmp_path.parent / "memory" if tmp_path.name == "grp" else tmp_path / "memory"
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
     spec = JobSpec(
@@ -62,23 +64,24 @@ def _write_job(tmp_path, status):
             selector={"scope": "agent", "version": 1, "group": "grp", "agent": "product"},
             canonical_json='{"agent":"product","group":"grp","scope":"agent","version":1}',
             memory_hash="memory-hash-1",
-            path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
+            path=str((memory_root / "memory-hash-1").resolve()),
         ),
         trigger_context=None,
         prompt_source={"type": "prompt", "path": "routine.md"},
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
-    write_job(
-        job_path(tmp_path, spec.job_id),
-        replace(JobRecord.from_spec(spec), status=status),
-    )
+    store = JobStore(memory_root)
+    group_store = store.group_root("grp")
+    group_store.mkdir(parents=True, exist_ok=True)
+    write_job(store.path("grp", spec.job_id), replace(JobRecord.from_spec(spec), status=status))
 
 
 @pytest.mark.parametrize("status", ["queued", "running"])
 def test_active_job_reports_agent_running(tmp_path, status):
     g = _group(tmp_path)
     _write_job(tmp_path, status)
+    g["job_paths"] = tuple(JobStore(tmp_path / "memory").paths("grp"))
     assert is_agent_running(g, "product", timeout=1800) is True
 
 
@@ -86,6 +89,7 @@ def test_active_job_reports_agent_running(tmp_path, status):
 def test_terminal_job_does_not_report_agent_running(tmp_path, status):
     g = _group(tmp_path)
     _write_job(tmp_path, status)
+    g["job_paths"] = tuple(JobStore(tmp_path / "memory").paths("grp"))
     assert is_agent_running(g, "product", timeout=1800) is False
 
 
@@ -310,6 +314,7 @@ def test_relative_future_under_a_minute():
 
 def test_collect_agents_includes_running_and_next_run(tmp_path):
     group_path = tmp_path / "grp"
+    memory_root = tmp_path / "memory"
     agent_dir = group_path / "product"
     agent_dir.mkdir(parents=True)
     (agent_dir / "CLAUDE.md").write_text("# Product\n")
@@ -331,10 +336,12 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
             "routines": [{"id": "r", "skill": "r", "schedule": {"every": "6h"}}],
         }],
         "shared": shared,
+        "job_paths": tuple(JobStore(memory_root).paths("grp")),
         "dispatch": {"enabled": True, "routines": {"product": [{"id": "r", "every": "6h"}]}},
     }
 
     _write_job(group_path, "running")
+    g["job_paths"] = tuple(JobStore(memory_root).paths("grp"))
 
     agents, _subagents = app_module.collect_agents_with_identity(g)
 

@@ -2,14 +2,16 @@ from pathlib import Path
 
 from agency.blueprints.cache import active_pins
 from agency.blueprints import BlueprintLibrary, CompilationCache
-from agency.configuration import ConfigStore
+from agency.configuration import ConfigStore, ValidationFailed
+from agency.configuration.paths import initialize_control_directories, validate_resolved_paths
 from agency.configuration.store import ConfigConflictError, ConfigSnapshot
 from agency.integrations import REGISTRY
 
+from .authority import JobStore
 from .launcher import JobLauncher, default_launcher
 from .models import JobHandle, JobRecord, JobRequest, JobSpec
 from .resolution import resolve_job_request
-from .store import job_path, revision_bound_group_operation, write_job
+from .store import revision_bound_group_operation
 
 
 class JobSubmissionError(RuntimeError):
@@ -50,12 +52,11 @@ def _resolve_request(
 
 def _submit_resolved(
     spec: JobSpec,
+    job_store: JobStore,
     launcher: JobLauncher | None = None,
 ) -> JobHandle:
     spec.validate()
-    group_path = Path(spec.workspace_dir)
     artifact = spec.blueprint.to_artifact()
-    path = job_path(group_path, spec.job_id)
     record = JobRecord.from_spec(spec)
     from agency.blueprints.cache import pin_artifact, release_pin
 
@@ -65,13 +66,19 @@ def _submit_resolved(
         pass
     pin_artifact(spec.blueprint.cache_root, artifact.ref, spec.job_id)
     selected_launcher = launcher or default_launcher()
+    authority = job_store.reference(
+        spec.group_key,
+        spec.job_id,
+        record.authority_digest,
+    )
     try:
-        write_job(path, record)
-        result = selected_launcher.launch(path)
+        authority = job_store.create(record)
+        result = selected_launcher.launch(authority)
     except Exception as error:
         release_pin(spec.blueprint.cache_root, artifact.ref, spec.job_id)
         failed = JobRecord(
             spec=record.spec,
+            authority_digest=record.authority_digest,
             status="failed",
             worker_pid=record.worker_pid,
             started_at=record.started_at,
@@ -85,9 +92,9 @@ def _submit_resolved(
             base_sha=record.base_sha,
             memory_publication=record.memory_publication,
         )
-        write_job(path, failed)
-        raise JobSubmissionError(str(error), path) from error
-    return JobHandle(spec.job_id, "queued", path, result.worker_pid)
+        job_store.write(authority, failed)
+        raise JobSubmissionError(str(error), authority.path) from error
+    return JobHandle(spec.job_id, "queued", authority.path, result.worker_pid)
 
 
 def submit_job_request(
@@ -102,8 +109,14 @@ def submit_job_request(
                 config_store,
                 group_ids=(request.group_key,),
             ) as locked_snapshot:
+                initialize_control_directories(locked_snapshot.config)
+                issues = validate_resolved_paths(locked_snapshot.config)
+                if issues:
+                    raise ValidationFailed(issues)
+                job_store = JobStore(locked_snapshot.config.agency.memory_store)
                 return _submit_resolved(
                     _resolve_request(request, locked_snapshot),
+                    job_store,
                     launcher,
                 )
         except ConfigConflictError as error:

@@ -47,6 +47,9 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 
 def _make_client(monkeypatch, tmp_path, canonical_raw_config):
     raw = deepcopy(canonical_raw_config)
+    (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "groups" / "newsletter").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "repo-root").mkdir(parents=True, exist_ok=True)
     raw["agency"]["title"] = "Agency"
     raw["agency"]["default_group"] = "newsletter"
     raw["agency"]["agent_library"] = str(tmp_path / "agent-library")
@@ -164,6 +167,8 @@ def test_setup_post_creates_strict_canonical_group_without_scanning_agents(monke
     library = tmp_path / "agent-library"
     cache = tmp_path / "compiled-agents"
     memory = tmp_path / "memory-store"
+    group_path.mkdir(parents=True)
+    library.mkdir(parents=True)
     client = TestClient(app_mod.app)
     revision = ConfigStore(config_path).inspect().revision
 
@@ -194,7 +199,7 @@ def test_setup_post_creates_strict_canonical_group_without_scanning_agents(monke
     assert saved["agency"]["compilation_cache"] == str(cache)
     assert saved["agency"]["memory_store"] == str(memory)
     assert saved["groups"]["newsletter"]["agents"] == []
-    assert not group_path.exists()
+    assert group_path.is_dir()
 
 
 def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_path):
@@ -249,6 +254,9 @@ def test_setup_form_has_distinct_group_key_and_expected_revision_inputs(
     assert inputs["group_key"]["value"] == ""
     assert inputs["expected_revision"]["value"] == config_revision(original)
     assert inputs["group_key"] is not inputs["expected_revision"]
+
+    (tmp_path / "groups" / "newsletter").mkdir(parents=True)
+    (tmp_path / "agent-library").mkdir(parents=True)
 
     payload = {
         "expected_revision": inputs["expected_revision"]["value"],

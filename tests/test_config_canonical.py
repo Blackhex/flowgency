@@ -89,6 +89,18 @@ def test_accepts_supported_group_dispatch_and_routines(canonical_raw_config, can
     assert parsed.groups["newsletter"].agents["builder"].routines[0].schedule.at == "09:00"
 
 
+def test_routine_enabled_is_typed_and_defaults_true(canonical_raw_config, canonical_paths):
+    from agency.configuration.models import parse_config_canonical
+
+    routine = canonical_raw_config["groups"]["newsletter"]["agents"][0]["routines"][0]
+    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert parsed.groups["newsletter"].agents["builder"].routines[0].enabled is True
+
+    routine["enabled"] = False
+    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    assert parsed.groups["newsletter"].agents["builder"].routines[0].enabled is False
+
+
 def test_rejects_other_unknown_group_dispatch_keys(canonical_raw_config, canonical_paths):
     from agency.configuration.models import validate_config_canonical
 

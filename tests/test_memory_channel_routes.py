@@ -12,6 +12,7 @@ import pytest
 from agency import app as app_mod
 from agency.configuration import ConfigConflictError, ConfigStore
 from agency.configuration.models import MemorySelector
+from agency.jobs.authority import JobStore
 from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
@@ -20,6 +21,7 @@ from agency.jobs.models import (
     RuntimePolicySnapshot,
 )
 from agency.jobs.store import read_job, write_job
+from dataclasses import replace
 from agency.memory import resolve_memory_selector
 from tests._lock_helpers import hold_exclusive_lock
 
@@ -108,6 +110,10 @@ def _seed_memory_app(monkeypatch, tmp_path, canonical_raw_config):
         }
     raw["groups"] = groups
 
+    authority = JobStore(memory_root)
+    authority.group_root("newsletter").mkdir(parents=True, exist_ok=True)
+    authority.group_root("product").mkdir(parents=True, exist_ok=True)
+
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
@@ -145,6 +151,8 @@ def _write_channel_job(
 ) -> Path:
     snapshot = ConfigStore(config_path).load()
     group = snapshot.config.groups["newsletter"]
+    authority = JobStore(snapshot.config.agency.memory_store)
+    authority.group_root("newsletter").mkdir(parents=True, exist_ok=True)
     resolved = resolve_memory_selector(
         MemorySelector(scope="channel", channel=channel_key),
         job_id=job_id or uuid4().hex,
@@ -206,8 +214,8 @@ def _write_channel_job(
         timeout_override=None,
         created_at="2026-07-16T00:00:00+00:00",
     )
-    path = group.path / "shared" / "jobs" / f"{spec.job_id}.yaml"
-    write_job(path, JobRecord(spec=spec, status=status))
+    path = authority.path("newsletter", spec.job_id)
+    write_job(path, replace(JobRecord.from_spec(spec), status=status))
     assert read_job(path).status == status
     return path
 

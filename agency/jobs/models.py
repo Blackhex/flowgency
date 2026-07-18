@@ -1,6 +1,8 @@
 """Versioned data models for durable agent jobs."""
 
 from dataclasses import asdict, dataclass, field
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -212,13 +214,21 @@ class JobSpec:
             "created_at": self.created_at,
         }
 
+    def immutable_digest(self) -> str:
+        payload = json.dumps(
+            self.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return hashlib.sha256(b"agency-job-authority:v1\0" + payload).hexdigest()
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "JobSpec":
         values = dict(data)
         superseded_agent_dir = values.pop("agent_dir", None)
-        workspace_dir = values.get("workspace_dir")
-        if superseded_agent_dir is not None and superseded_agent_dir != workspace_dir:
-            raise ValueError("agent_dir is deprecated and must match workspace_dir")
+        if superseded_agent_dir is not None:
+            raise ValueError("agent_dir is not accepted in strict schema_version: 2 jobs")
         values["integration_config"] = dict(values.get("integration_config") or {})
         values["blueprint"] = BlueprintRef(**values["blueprint"])
         runtime_policy = dict(values["runtime_policy"])
@@ -251,6 +261,7 @@ class JobSpec:
 @dataclass
 class JobRecord:
     spec: JobSpec
+    authority_digest: str = ""
     status: str = "queued"
     worker_pid: int | None = None
     started_at: str | None = None
@@ -267,7 +278,7 @@ class JobRecord:
     @classmethod
     def from_spec(cls, spec: JobSpec) -> "JobRecord":
         spec.validate()
-        return cls(spec=spec)
+        return cls(spec=spec, authority_digest=spec.immutable_digest())
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -279,6 +290,8 @@ class JobRecord:
         values = dict(data)
         spec = JobSpec.from_dict(dict(values.pop("spec")))
         record = cls(spec=spec, **values)
+        if record.authority_digest != spec.immutable_digest():
+            raise ValueError("immutable job authority digest mismatch")
         if record.status not in VALID_STATUSES:
             raise ValueError(f"Invalid job status: {record.status}")
         return record

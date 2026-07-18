@@ -7,7 +7,21 @@ import time
 
 import yaml
 
+from agency.jobs.authority import JobStore
 from agency.jobs.store import read_job
+
+
+def _read_job_eventually(path: Path, *, deadline: float):
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            return read_job(path)
+        except (FileNotFoundError, PermissionError, OSError) as error:
+            last_error = error
+            time.sleep(0.05)
+    if last_error is not None:
+        raise last_error
+    raise FileNotFoundError(path)
 
 
 def _shell_command(arguments):
@@ -97,21 +111,25 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     assert submitter.poll() == 0
 
     job_id = job_id_file.read_text().strip()
-    record_path = group_path / "shared" / "jobs" / f"{job_id}.yaml"
+    record_path = JobStore(tmp_path / "memory").path("test", job_id)
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and (
-        not record_path.exists()
-        or read_job(record_path).status in {"queued", "waiting_for_memory"}
-    ):
+    running = None
+    while time.monotonic() < deadline:
+        if not record_path.exists():
+            time.sleep(0.05)
+            continue
+        running = _read_job_eventually(record_path, deadline=deadline)
+        if running.status not in {"queued", "waiting_for_memory"}:
+            break
         time.sleep(0.05)
-    running = read_job(record_path)
+    assert running is not None
     assert running.status in {"waiting_for_memory", "running"}
     assert running.worker_pid != submitter_pid
     assert not sentinel.exists()
 
     gate.touch()
-    while time.monotonic() < deadline and read_job(record_path).status == "running":
+    while time.monotonic() < deadline and _read_job_eventually(record_path, deadline=deadline).status == "running":
         time.sleep(0.05)
-    record = read_job(record_path)
+    record = _read_job_eventually(record_path, deadline=deadline)
     assert sentinel.read_text() == "done"
     assert record.status == "complete"

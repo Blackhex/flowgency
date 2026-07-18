@@ -138,6 +138,7 @@ def test_patch_group_settings_preserves_unowned_group_fields(config_store):
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
+    (snapshot.path.parent / "agents" / "editorial").mkdir(parents=True, exist_ok=True)
 
     refreshed = config_store.load()
     updated = patch_group_settings(
@@ -190,6 +191,7 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
+    (snapshot.path.parent / "agents" / "editorial" / "repo").mkdir(parents=True, exist_ok=True)
 
     refreshed = config_store.load()
     updated = patch_group_settings_state(
@@ -237,6 +239,7 @@ def test_create_group_requires_absent_group_and_preserves_other_top_level_fields
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
+    (snapshot.path.parent / "agents" / "research").mkdir(parents=True, exist_ok=True)
 
     refreshed = config_store.load()
     updated = create_group(
@@ -357,6 +360,8 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
+    (snapshot.path.parent / "agents" / "newsletter" / "shared").mkdir(parents=True, exist_ok=True)
+    (snapshot.path.parent / "agents" / "newsletter" / "assets").mkdir(parents=True, exist_ok=True)
 
     refreshed = config_store.load()
     updated = patch_agent_runtime(

@@ -13,6 +13,7 @@ from agency.integrations import BaseIntegration
 from agency.integrations.models import ProjectorCapabilities, RuntimeCapabilities
 import agency.jobs as jobs_package
 from agency.jobs import JobSpec, JobSubmissionError, submit_job_request
+from agency.jobs.authority import JobStore
 from agency.jobs.prompts import build_routine_task_input
 from agency.jobs.resolution import JobRequest, resolve_job_request
 from agency.jobs.models import BlueprintRef, MemoryBinding, RuntimePolicySnapshot
@@ -91,6 +92,8 @@ def _write_blueprint(root: Path, key: str = "builder-blueprint") -> None:
 def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo ok") -> Path:
     group = tmp_path / "agents" / "newsletter"
     (group / "builder").mkdir(parents=True, exist_ok=True)
+    (group / "repo").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
         "schema_version: 2\n"
@@ -152,7 +155,10 @@ def test_submit_persists_then_launches(tmp_path):
 
     record = read_job(handle.path)
     assert record.status == "queued"
-    assert launcher.launch.call_args.args == (handle.path,)
+    authority = launcher.launch.call_args.args[0]
+    assert authority.path == handle.path
+    assert authority.group_id == "newsletter"
+    assert authority.job_id == handle.job_id
     assert handle.worker_pid == 4321
 
 
@@ -209,7 +215,7 @@ def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
     with pytest.raises(ValueError, match="existing routine"):
         submit_job_request(request, launcher)
 
-    jobs_dir = tmp_path / "agents" / "newsletter" / "shared" / "jobs"
+    jobs_dir = JobStore(tmp_path / "memory").group_root("newsletter")
     if jobs_dir.exists():
         assert not any(jobs_dir.glob("*.yaml"))
     pins_root = tmp_path / "compiled-agents" / "_pins"
@@ -236,7 +242,7 @@ def test_full_run_validation_rejects_unsupported_skill_before_pin_or_job(
         with pytest.raises(Exception, match="activate routine skills|unsupported-skill"):
             submit_job_request(request, launcher)
 
-    jobs_dir = tmp_path / "agents" / "newsletter" / "shared" / "jobs"
+    jobs_dir = JobStore(tmp_path / "memory").group_root("newsletter")
     assert not jobs_dir.exists() or not any(jobs_dir.glob("*.yaml"))
     pins_root = tmp_path / "compiled-agents" / "_pins"
     assert not pins_root.exists() or not any(pins_root.rglob("*"))
@@ -266,6 +272,7 @@ def test_submit_blocks_move_and_move_then_observes_active_job(
     request = configured_request(tmp_path)
     config_store = ConfigStore(request.config_path)
     snapshot = config_store.load()
+    (tmp_path / "agents" / "other").mkdir(parents=True, exist_ok=True)
     config_store.patch(
         snapshot.revision,
         lambda raw: raw["groups"].update(
@@ -503,18 +510,23 @@ def test_submit_releases_cache_pin_when_launch_fails(tmp_path):
     launcher.launch.side_effect = OSError("spawn denied")
 
     with pytest.raises(JobSubmissionError, match="spawn denied"):
-        jobs_package.submission._submit_resolved(spec, launcher)
+        jobs_package.submission._submit_resolved(
+            spec,
+            JobStore(tmp_path / "memory"),
+            launcher,
+        )
 
     pins_root = tmp_path / "compiled-agents" / "_pins"
     assert list(pins_root.rglob("*")) == []
 
 
 def test_windows_launcher_uses_detached_flags(tmp_path):
+    authority = JobStore(tmp_path / "memory").reference("newsletter", "job", "a" * 64)
     with patch("agency.jobs.launcher.os.name", "nt"), patch(
         "agency.jobs.launcher.subprocess.Popen"
     ) as popen:
         popen.return_value.pid = 77
-        result = DetachedProcessLauncher().launch(tmp_path / "job.yaml")
+        result = DetachedProcessLauncher().launch(authority)
     flags = popen.call_args.kwargs["creationflags"]
     assert flags & DETACHED_PROCESS
     assert flags & CREATE_NEW_PROCESS_GROUP
@@ -522,11 +534,12 @@ def test_windows_launcher_uses_detached_flags(tmp_path):
 
 
 def test_posix_launcher_starts_new_session(tmp_path):
+    authority = JobStore(tmp_path / "memory").reference("newsletter", "job", "a" * 64)
     with patch("agency.jobs.launcher.os.name", "posix"), patch(
         "agency.jobs.launcher.subprocess.Popen"
     ) as popen:
         popen.return_value.pid = 78
-        DetachedProcessLauncher().launch(tmp_path / "job.yaml")
+        DetachedProcessLauncher().launch(authority)
     assert popen.call_args.kwargs["start_new_session"] is True
     assert popen.call_args.kwargs["shell"] is False
 
@@ -536,9 +549,9 @@ def test_posix_launcher_starts_new_session(tmp_path):
 
 def test_systemd_launcher_argv_and_shell_false(tmp_path):
     """SystemdRunLauncher uses correct systemd-run argv with shell=False."""
-    job = tmp_path / "abc-123.yaml"
+    authority = JobStore(tmp_path / "memory").reference("newsletter", "abc-123", "a" * 64)
     with patch("agency.jobs.launcher.subprocess.run") as run_mock:
-        result = SystemdRunLauncher().launch(job)
+        result = SystemdRunLauncher().launch(authority)
     call_args = run_mock.call_args
     argv = call_args.args[0]
     assert argv[0] == "systemd-run"
@@ -551,7 +564,10 @@ def test_systemd_launcher_argv_and_shell_false(tmp_path):
     worker_part = argv[sep_idx + 1 :]
     assert "-m" in worker_part
     assert "agency.jobs.worker" in worker_part
-    assert str(job.resolve()) in worker_part
+    assert "--store-root" in worker_part
+    assert str(authority.store_root) in worker_part
+    assert "--job-id" in worker_part
+    assert authority.job_id in worker_part
     # shell=False, no stream inheritance
     assert call_args.kwargs["shell"] is False
     assert call_args.kwargs["stdin"] == subprocess.DEVNULL
@@ -563,9 +579,9 @@ def test_systemd_launcher_argv_and_shell_false(tmp_path):
 
 def test_systemd_launcher_no_stream_inheritance(tmp_path):
     """Streams are explicitly DEVNULL — no stdin/stdout/stderr leak."""
-    job = tmp_path / "x.yaml"
+    authority = JobStore(tmp_path / "memory").reference("newsletter", "x", "a" * 64)
     with patch("agency.jobs.launcher.subprocess.run") as run_mock:
-        SystemdRunLauncher().launch(job)
+        SystemdRunLauncher().launch(authority)
     kw = run_mock.call_args.kwargs
     assert kw["stdin"] == subprocess.DEVNULL
     assert kw["stdout"] == subprocess.DEVNULL
@@ -584,9 +600,9 @@ def test_sanitize_unit_name_replaces_unsafe_chars():
 
 def test_systemd_launcher_launch_result_has_none_pid(tmp_path):
     """LaunchResult from systemd launcher has worker_pid=None."""
-    job = tmp_path / "job.yaml"
+    authority = JobStore(tmp_path / "memory").reference("newsletter", "job", "a" * 64)
     with patch("agency.jobs.launcher.subprocess.run"):
-        result = SystemdRunLauncher().launch(job)
+        result = SystemdRunLauncher().launch(authority)
     assert result == LaunchResult(worker_pid=None)
 
 

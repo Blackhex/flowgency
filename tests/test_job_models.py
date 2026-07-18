@@ -10,6 +10,7 @@ import yaml
 import agency.jobs.execution as execution_module
 import agency.jobs.models as job_models_module
 import agency.jobs.store as store_module
+from agency.jobs.authority import JobStore
 from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
@@ -27,7 +28,11 @@ from agency.jobs.store import (
     transition_job,
     write_job,
 )
-from agency.config import load_config_path
+import agency.config as strict_config_module
+
+
+def _canonical_group_store(tmp_path: Path) -> Path:
+    return JobStore(tmp_path / "memory-store").group_root("newsletter")
 
 
 def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
@@ -403,10 +408,8 @@ def test_job_spec_from_dict_ignores_superseded_agent_dir_when_workspace_matches(
     payload = spec.to_dict()
     payload["agent_dir"] = payload["workspace_dir"]
 
-    restored = JobSpec.from_dict(payload)
-
-    assert restored.workspace_dir == spec.workspace_dir
-    assert restored.agent_dir == spec.workspace_path
+    with pytest.raises(ValueError, match="agent_dir is not accepted"):
+        JobSpec.from_dict(payload)
 
 
 def test_job_spec_from_dict_rejects_superseded_agent_dir_mismatch(tmp_path):
@@ -414,7 +417,7 @@ def test_job_spec_from_dict_rejects_superseded_agent_dir_mismatch(tmp_path):
     payload = spec.to_dict()
     payload["agent_dir"] = str((tmp_path / "different").resolve())
 
-    with pytest.raises(ValueError, match="agent_dir is deprecated"):
+    with pytest.raises(ValueError, match="agent_dir is not accepted"):
         JobSpec.from_dict(payload)
 
 
@@ -478,7 +481,7 @@ def test_job_record_rejects_superseded_schema_version_one(tmp_path):
 
 
 def test_active_jobs_includes_waiting_for_memory(tmp_path):
-    group_path = tmp_path / "group"
+    group_path = _canonical_group_store(tmp_path)
     queued_spec = make_spec(tmp_path, agent="product")
     waiting_spec = make_spec(tmp_path, agent="product")
     running_spec = make_spec(tmp_path, agent="product")
@@ -507,7 +510,7 @@ def test_active_jobs_includes_waiting_for_memory(tmp_path):
 
 def test_cancel_job_transitions_waiting_for_memory_without_expected_argument(tmp_path):
     spec = make_spec(tmp_path)
-    path = job_path(tmp_path / "group", spec.job_id)
+    path = job_path(_canonical_group_store(tmp_path), spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     transition_job(path, "queued", "waiting_for_memory")
 
@@ -532,7 +535,7 @@ def test_cancel_job_signature_no_longer_accepts_expected_parameter():
 @pytest.mark.parametrize("status", ["running", "complete", "failed", "cancelled"])
 def test_cancel_job_rejects_running_and_terminal_states(tmp_path, status):
     spec = make_spec(tmp_path)
-    path = job_path(tmp_path / "group", spec.job_id)
+    path = job_path(_canonical_group_store(tmp_path), spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
 
     if status == "complete":
@@ -546,7 +549,7 @@ def test_cancel_job_rejects_running_and_terminal_states(tmp_path, status):
 
 
 def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):
-    group_path = tmp_path / "group"
+    group_path = _canonical_group_store(tmp_path)
     queued_spec = make_spec(tmp_path, agent="product")
     running_spec = make_spec(tmp_path, agent="product")
     other_spec = make_spec(tmp_path, agent="editorial")
@@ -567,7 +570,7 @@ def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):
 
 
 def test_active_jobs_ignores_malformed_field_types(tmp_path):
-    group_path = tmp_path / "group"
+    group_path = _canonical_group_store(tmp_path)
     valid_spec = make_spec(tmp_path)
     valid_record = JobRecord.from_spec(valid_spec)
     write_job(job_path(group_path, valid_spec.job_id), valid_record)
@@ -586,24 +589,5 @@ def test_active_jobs_ignores_malformed_field_types(tmp_path):
     assert [record.spec.job_id for record in records] == [valid_spec.job_id]
 
 
-def test_load_config_path_is_independent_of_current_working_directory(
-    tmp_path, monkeypatch
-):
-    config_path = tmp_path / "explicit" / "config.yaml"
-    config_path.parent.mkdir()
-    config_path.write_text(
-        "agency:\n  title: Explicit Agency\ngroups:\n  explicit: {}\n",
-        encoding="utf-8",
-    )
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    (elsewhere / "config.yaml").write_text(
-        "agency:\n  title: Wrong Agency\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(elsewhere)
-
-    config = load_config_path(config_path)
-
-    assert config["agency"]["title"] == "Explicit Agency"
-    assert "explicit" in config["groups"]
+def test_runtime_config_surface_exposes_only_strict_canonical_symbols():
+    assert not hasattr(strict_config_module, "load_config_path")
