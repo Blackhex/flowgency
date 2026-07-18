@@ -41,3 +41,15 @@ class IntegrationRunRequest:
     skill_arguments: tuple[str, ...] = ()
     enforce_validation: bool = True
     memory_working_dir: Path | None = None
+
+
+@dataclass(frozen=True)
+class InteractiveSetupRequest:
+    project_dir: Path
+    config_path: Path
+    prompt: str
+
+
+@dataclass(frozen=True)
+class InteractiveSetupResult:
+    fallback_command: str

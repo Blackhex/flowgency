@@ -10,6 +10,8 @@ from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
+    InteractiveSetupRequest,
+    InteractiveSetupResult,
     ProjectorCapabilities,
     RuntimeCapabilities,
 )
@@ -210,6 +212,17 @@ class BaseIntegration:
         if issues:
             raise ValidationFailed(issues)
 
+    def interactive_setup_available(self) -> bool:
+        return False
+
+    def launch_interactive_setup(
+        self,
+        request: InteractiveSetupRequest,
+    ) -> InteractiveSetupResult:
+        raise IntegrationError(
+            f"{self.display_name or self.name or 'Integration'} does not support interactive setup."
+        )
+
     @staticmethod
     def _default_projector(instruction_name: str) -> "RuntimeProjector":
         from agency.blueprints.projectors import StaticRuntimeProjector
@@ -258,6 +271,9 @@ class BaseIntegration:
         Raises IntegrationError on failure.
         """
         raise NotImplementedError
+
+
+from agency.integrations.interactive import spawn_interactive_terminal, terminal_available
 
 
 # ── Sidecar Helpers ───────────────────────────────────────────────────────────
