@@ -9,12 +9,12 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
-from agency.integrations import IntegrationError
+from agency.integrations.errors import IntegrationError
 
 
 def terminal_available() -> bool:
     if platform.system() == "Windows":
-        return True
+        return shutil.which("cmd.exe") is not None
     return shutil.which("x-terminal-emulator") is not None
 
 
@@ -31,11 +31,12 @@ def spawn_interactive_terminal(command: Sequence[str], cwd: Path) -> str:
 
     terminal = shutil.which("x-terminal-emulator")
     if terminal:
+        command_line = shlex.join(command)
         subprocess.Popen(
-            [terminal, "-e", *command],
+            [terminal, "-e", command_line],
             cwd=str(resolved_cwd),
             start_new_session=True,
         )
-        return shlex.join(command)
+        return command_line
 
     raise IntegrationError("No supported interactive terminal is available.")

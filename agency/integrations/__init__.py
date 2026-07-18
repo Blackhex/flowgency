@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from agency.configuration.issues import ValidationFailed, ValidationIssue
+from agency.integrations.errors import IntegrationError
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
@@ -45,11 +46,6 @@ class AgentIdentity:
     title: str | None
     emoji: str | None
     body: str
-
-
-class IntegrationError(Exception):
-    """Raised when an integration fails during prompt() or other operations."""
-    pass
 
 
 def parse_identity_frontmatter(text: str) -> tuple[dict, str]:

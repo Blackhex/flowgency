@@ -29,20 +29,29 @@ def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -
 
 def test_terminal_available_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(platform, "system", lambda: "Windows")
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: "C:\\Windows\\System32\\cmd.exe" if name == "cmd.exe" else None)
 
     from agency.integrations.interactive import terminal_available
 
     assert terminal_available() is True
 
 
-def test_terminal_available_on_posix_requires_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(platform, "system", lambda: "Linux")
+def test_terminal_available_on_windows_without_cmd(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
     from agency.integrations.interactive import terminal_available
 
     assert terminal_available() is False
+
+
+def test_terminal_available_on_posix_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(shutil, "which", lambda name: "x-terminal-emulator" if name == "x-terminal-emulator" else None)
+
+    from agency.integrations.interactive import terminal_available
+
+    assert terminal_available() is True
 
 
 def test_spawn_interactive_terminal_windows_uses_cmd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -94,7 +103,7 @@ def test_spawn_interactive_terminal_posix_uses_x_terminal_emulator(
     assert result == shlex.join(command)
     assert calls == [
         (
-            ["x-terminal-emulator", "-e", *command],
+            ["x-terminal-emulator", "-e", shlex.join(command)],
             {
                 "cwd": str(tmp_path.resolve()),
                 "start_new_session": True,
@@ -114,3 +123,16 @@ def test_spawn_interactive_terminal_raises_without_supported_terminal(
 
     with pytest.raises(IntegrationError, match="No supported interactive terminal is available"):
         spawn_interactive_terminal(["copilot"], tmp_path)
+
+
+def test_spawn_interactive_terminal_raises_for_nonexistent_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(shutil, "which", lambda name: "x-terminal-emulator" if name == "x-terminal-emulator" else None)
+
+    from agency.integrations.interactive import spawn_interactive_terminal
+
+    with pytest.raises(FileNotFoundError):
+        spawn_interactive_terminal(["copilot"], tmp_path / "missing")
