@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+import pytest
+import yaml
+
 
 def _write_yaml(path: Path, raw: dict) -> Path:
     path.write_text(
@@ -228,10 +231,10 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
     assert group["workspaces"][0]["workspace_extension"] == {"preserve": True}
 
 
-def test_create_group_requires_absent_group_and_preserves_other_top_level_fields(
+def test_create_group_rejects_unknown_root_key_on_load(
     config_store,
 ):
-    from agency.configuration.patches import GroupSettingsPatch, create_group
+    from agency.configuration import ValidationFailed
 
     snapshot = config_store.load()
     snapshot.raw["extensions"] = {"beta": {"enabled": True}}
@@ -239,22 +242,10 @@ def test_create_group_requires_absent_group_and_preserves_other_top_level_fields
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
-    (snapshot.path.parent / "agents" / "research").mkdir(parents=True, exist_ok=True)
+    with pytest.raises(ValidationFailed) as excinfo:
+        config_store.load()
 
-    refreshed = config_store.load()
-    updated = create_group(
-        config_store,
-        refreshed.revision,
-        "research",
-        GroupSettingsPatch(
-            name="Research",
-            path=str(refreshed.path.parent / "agents" / "research"),
-            default_integration="claude-code",
-        ),
-    )
-
-    assert updated.raw["extensions"] == {"beta": {"enabled": True}}
-    assert updated.raw["groups"]["research"]["name"] == "Research"
+    assert any(issue.field == "extensions" for issue in excinfo.value.issues)
 
 
 def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_store, monkeypatch):
@@ -306,7 +297,8 @@ def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_stor
     assert "research" not in config_store.load().raw["groups"]
 
 
-def test_patch_memory_channels_replaces_owned_subtree_only(config_store):
+def test_patch_memory_channels_rejects_unknown_root_key_on_load(config_store):
+    from agency.configuration import ValidationFailed
     from agency.configuration.patches import patch_memory_channels
 
     snapshot = config_store.load()
@@ -316,21 +308,10 @@ def test_patch_memory_channels_replaces_owned_subtree_only(config_store):
         encoding="utf-8",
     )
 
-    refreshed = config_store.load()
-    updated = patch_memory_channels(
-        config_store,
-        refreshed.revision,
-        {
-            "support": {"display_name": "Support"},
-            "ops-channel": {"display_name": "Ops"},
-        },
-    )
+    with pytest.raises(ValidationFailed) as excinfo:
+        config_store.load()
 
-    assert updated.raw["memory"]["channels"] == {
-        "support": {"display_name": "Support"},
-        "ops-channel": {"display_name": "Ops"},
-    }
-    assert updated.raw["extensions"] == {"retention": "custom"}
+    assert any(issue.field == "extensions" for issue in excinfo.value.issues)
 
 
 def test_patch_agent_runtime_preserves_extension_keys(config_store):

@@ -18,7 +18,6 @@ from .paths import initialize_control_directories, validate_resolved_paths
 
 
 ABSENT_REVISION = "absent"
-_KNOWN_ROOT_KEYS = ("agency", "memory", "groups")
 
 
 def config_revision(payload: bytes) -> str:
@@ -52,10 +51,6 @@ def _load_raw_mapping(payload: bytes) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise TypeError("config.yaml must decode to a mapping")
     return loaded
-
-
-def _project_known_root_keys(raw: dict[str, Any]) -> dict[str, Any]:
-    return {key: raw[key] for key in _KNOWN_ROOT_KEYS if key in raw}
 
 
 def load_config_snapshot(
@@ -147,7 +142,7 @@ class ConfigStore:
 
     def _snapshot(self, payload: bytes) -> ConfigSnapshot:
         raw = _load_raw_mapping(payload)
-        parsed = parse_config(_project_known_root_keys(raw), self.path)
+        parsed = parse_config(raw, self.path)
         return ConfigSnapshot(
             path=self.path,
             revision=config_revision(payload),
@@ -156,7 +151,7 @@ class ConfigStore:
         )
 
     def _encode(self, raw: dict[str, Any]) -> bytes:
-        parsed = parse_config(_project_known_root_keys(raw), self.path)
+        parsed = parse_config(raw, self.path)
         initialize_control_directories(parsed.resolved)
         issues = validate_resolved_paths(parsed.resolved)
         if issues:

@@ -124,6 +124,25 @@ def test_patch_writes_utf8_yaml(canonical_raw_config, canonical_paths):
     )
 
 
+def test_patch_rejects_unknown_root_key(canonical_raw_config, canonical_paths):
+    from agency.configuration import ValidationFailed
+    from agency.configuration.store import ConfigStore
+
+    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    store = ConfigStore(path)
+    snapshot = store.load()
+    original = path.read_text(encoding="utf-8")
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        store.patch(
+            snapshot.revision,
+            lambda raw: raw.__setitem__("extensions", {"beta": True}),
+        )
+
+    assert any(issue.field == "extensions" for issue in excinfo.value.issues)
+    assert path.read_text(encoding="utf-8") == original
+
+
 def test_patch_reports_lock_contention(canonical_raw_config, canonical_paths):
     from agency.configuration.store import ConfigStore
     from agency.fs.locks import ResourceBusyError
