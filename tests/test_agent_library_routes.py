@@ -36,8 +36,8 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
     (skill / "checklist.md").write_text("- one\n", encoding="utf-8")
 
 
-def _seed_library_app(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _seed_library_app(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
@@ -126,9 +126,9 @@ def _config_revision(config_path: Path) -> str:
 def test_library_detail_shows_standard_files_and_users(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
-    client, _, _, _ = _seed_library_app(monkeypatch, tmp_path, canonical_raw_config)
+    client, _, _, _ = _seed_library_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/agent-library/blueprints/advisor")
 
@@ -142,9 +142,9 @@ def test_library_detail_shows_standard_files_and_users(
 def test_library_skill_alias_route_resolves(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
-    client, _, _, _ = _seed_library_app(monkeypatch, tmp_path, canonical_raw_config)
+    client, _, _, _ = _seed_library_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/agent-library/blueprints/advisor/skills")
 
@@ -156,12 +156,12 @@ def test_library_skill_alias_route_resolves(
 def test_library_list_handles_missing_root_actionably(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, library_root, _ = _seed_library_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     shutil.rmtree(library_root)
 
@@ -174,12 +174,12 @@ def test_library_list_handles_missing_root_actionably(
 def test_library_source_write_rejects_stale_digest(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, library_root, _ = _seed_library_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     blueprint_root = library_root / "advisor"
     stale_digest = compute_source_digest(())
@@ -205,12 +205,12 @@ def test_library_source_write_rejects_stale_digest(
 def test_library_source_write_keeps_infra_outside_source_root(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, library_root, _ = _seed_library_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     blueprint_root = library_root / "advisor"
     digest = compute_source_digest(
@@ -243,12 +243,12 @@ def test_library_source_write_keeps_infra_outside_source_root(
 def test_library_skill_write_rejects_nonstandard_path(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, library_root, _ = _seed_library_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     inspection = app_mod.build_services(
         tmp_path / "config.yaml"
@@ -270,12 +270,12 @@ def test_library_skill_write_rejects_nonstandard_path(
 def test_library_source_write_serializes_concurrent_saves(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, library_root, _ = _seed_library_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     inspection = app_mod.build_services(tmp_path / "config.yaml").blueprint_library.inspect("advisor")
     digest = inspection.snapshot.digest
@@ -313,9 +313,9 @@ def test_library_source_write_serializes_concurrent_saves(
 def test_integrations_page_shows_projector_compatibility(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
-    client, _, _, _ = _seed_library_app(monkeypatch, tmp_path, canonical_raw_config)
+    client, _, _, _ = _seed_library_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/integrations")
 

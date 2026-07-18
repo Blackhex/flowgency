@@ -25,7 +25,7 @@ def tmp_group_path(tmp_path):
 
 
 @pytest.fixture
-def canonical_paths(tmp_path):
+def config_paths(tmp_path):
     config_path = tmp_path / "config.yaml"
     agent_library = tmp_path / "agent-library"
     group_path = tmp_path / "agents" / "newsletter"
@@ -42,15 +42,15 @@ def canonical_paths(tmp_path):
 
 
 @pytest.fixture
-def canonical_raw_config(canonical_paths):
+def raw_config(config_paths):
     return {
         "agency": {
             "title": "Agency",
             "default_group": "newsletter",
             "ai_backend": "claude-code",
-            "agent_library": str(canonical_paths["agent_library"]),
-            "compilation_cache": str(canonical_paths["compilation_cache"]),
-            "memory_store": str(canonical_paths["memory_store"]),
+            "agent_library": str(config_paths["agent_library"]),
+            "compilation_cache": str(config_paths["compilation_cache"]),
+            "memory_store": str(config_paths["memory_store"]),
         },
         "memory": {
             "channels": {
@@ -60,7 +60,7 @@ def canonical_raw_config(canonical_paths):
         "groups": {
             "newsletter": {
                 "name": "Newsletter",
-                "path": str(canonical_paths["group_path"]),
+                "path": str(config_paths["group_path"]),
                 "default_integration": "claude-code",
                 "agents": [
                     {

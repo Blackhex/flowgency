@@ -5,9 +5,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-import pytest
-import yaml
-
 
 def _write_yaml(path: Path, raw: dict) -> Path:
     path.write_text(
@@ -18,10 +15,10 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 
 
 @pytest.fixture
-def config_store(tmp_path, canonical_raw_config):
+def config_store(tmp_path, raw_config):
     from agency.configuration.store import ConfigStore
 
-    path = _write_yaml(tmp_path / "config.yaml", canonical_raw_config)
+    path = _write_yaml(tmp_path / "config.yaml", raw_config)
     return ConfigStore(path)
 
 

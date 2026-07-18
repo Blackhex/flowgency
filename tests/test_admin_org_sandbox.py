@@ -44,8 +44,8 @@ def _write_yaml(path: Path, raw: dict) -> Path:
     return path
 
 
-def _make_client(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _make_client(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     (tmp_path / "library").mkdir(parents=True, exist_ok=True)
     (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
     raw["agency"]["title"] = "Agency"
@@ -68,8 +68,8 @@ def _make_client(monkeypatch, tmp_path, canonical_raw_config):
     return TestClient(app_mod.app), ConfigStore(config_path)
 
 
-def test_admin_org_save_persists_sandbox_root(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_save_persists_sandbox_root(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "repo").mkdir()
     revision = store.load().revision
 
@@ -99,8 +99,8 @@ def test_admin_org_save_persists_sandbox_root(tmp_path, monkeypatch, canonical_r
     }
 
 
-def test_admin_org_save_clears_sandbox_root_when_empty(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_save_clears_sandbox_root_when_empty(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     snapshot = store.load()
     snapshot.raw["groups"]["grp"]["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": ["/old/root"]}
@@ -131,8 +131,8 @@ def test_admin_org_save_clears_sandbox_root_when_empty(tmp_path, monkeypatch, ca
     assert saved["groups"]["grp"]["runtime"]["sandbox"] == {"mode": "unrestricted", "roots": []}
 
 
-def test_admin_org_create_persists_sandbox_root(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_create_persists_sandbox_root(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
     (tmp_path / "repo").mkdir()
 
@@ -157,8 +157,8 @@ def test_admin_org_create_persists_sandbox_root(tmp_path, monkeypatch, canonical
     }
 
 
-def test_admin_org_create_omits_sandbox_root_when_empty(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_create_omits_sandbox_root_when_empty(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
 
     response = client.post(
@@ -182,8 +182,8 @@ def test_admin_org_create_omits_sandbox_root_when_empty(tmp_path, monkeypatch, c
     }
 
 
-def test_admin_org_save_persists_multiline_sandbox_root_as_list(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_save_persists_multiline_sandbox_root_as_list(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "repo").mkdir()
     (tmp_path / "cowork").mkdir()
     revision = store.load().revision
@@ -214,8 +214,8 @@ def test_admin_org_save_persists_multiline_sandbox_root_as_list(tmp_path, monkey
     }
 
 
-def test_admin_org_save_single_line_sandbox_root_stays_string(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_save_single_line_sandbox_root_stays_string(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "repo").mkdir()
     revision = store.load().revision
 
@@ -245,8 +245,8 @@ def test_admin_org_save_single_line_sandbox_root_stays_string(tmp_path, monkeypa
     }
 
 
-def test_admin_org_save_persists_allowed_tools(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_save_persists_allowed_tools(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "repo").mkdir()
     revision = store.load().revision
 
@@ -273,8 +273,8 @@ def test_admin_org_save_persists_allowed_tools(tmp_path, monkeypatch, canonical_
     assert saved["groups"]["grp"]["runtime"]["tools"] == {"mode": "allowlist", "names": ["shell", "write"]}
 
 
-def test_admin_org_save_clears_allowed_tools_when_none_checked(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_save_clears_allowed_tools_when_none_checked(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     snapshot = store.load()
     snapshot.raw["groups"]["grp"]["runtime"] = {"tools": {"mode": "allowlist", "names": ["shell"]}}
     snapshot.path.write_text(yaml.safe_dump(snapshot.raw, sort_keys=False), encoding="utf-8")
@@ -303,8 +303,8 @@ def test_admin_org_save_clears_allowed_tools_when_none_checked(tmp_path, monkeyp
     assert saved["groups"]["grp"]["runtime"]["tools"] == {"mode": "all", "names": []}
 
 
-def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "repo").mkdir()
     snapshot = store.load()
     snapshot.raw["groups"]["grp"]["group_extension"] = {"theme": "sunset"}
@@ -357,8 +357,8 @@ def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_p
     assert saved["groups"]["grp"]["workspaces"][0]["workspace_extension"] == {"preserve": True}
 
 
-def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
     (tmp_path / "repo").mkdir()
     (tmp_path / "cowork").mkdir()
@@ -390,9 +390,9 @@ def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch, ca
 
 
 def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
-    tmp_path, monkeypatch, canonical_raw_config
+    tmp_path, monkeypatch, raw_config
 ):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
 
     response = client.post(
@@ -431,9 +431,9 @@ def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
 
 
 def test_admin_org_create_form_parser_smoke_preserves_default_integration_select(
-    monkeypatch, tmp_path, canonical_raw_config
+    monkeypatch, tmp_path, raw_config
 ):
-    client, _ = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+    client, _ = _make_client(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/orgs/new")
 
@@ -444,9 +444,9 @@ def test_admin_org_create_form_parser_smoke_preserves_default_integration_select
 
 
 def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
-    tmp_path, monkeypatch, canonical_raw_config
+    tmp_path, monkeypatch, raw_config
 ):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
     (tmp_path / "repo").mkdir()
     (tmp_path / "cowork").mkdir()
@@ -501,8 +501,8 @@ def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
     assert saved["agents"] == []
 
 
-def test_admin_org_save_invalid_workspaces_is_all_or_nothing(tmp_path, monkeypatch, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_admin_org_save_invalid_workspaces_is_all_or_nothing(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     before = store.load()
 
     response = client.post(

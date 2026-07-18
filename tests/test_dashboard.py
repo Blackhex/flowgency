@@ -188,8 +188,8 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
     )
 
 
-def _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
@@ -295,8 +295,8 @@ def _job_spec(
     )
 
 
-def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     spec = _job_spec(group_root, config_path, status="waiting_for_memory")
     path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
@@ -313,8 +313,8 @@ def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_pa
     assert spec.memory.memory_hash not in response.text
 
 
-def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_path, canonical_raw_config):
-    _, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_path, raw_config):
+    _, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     spec = _job_spec(group_root, config_path, status="running", job_id="job-running")
     path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
@@ -326,8 +326,8 @@ def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_pa
     assert fleet[0]["running"] is True
 
 
-def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["groups"]["newsletter"]["agents"][0]
     for agent_name in ("researcher", "writer"):
@@ -386,10 +386,10 @@ def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, t
 def test_dashboard_fallback_preserves_exact_active_job_states(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
     fallback_mode,
 ):
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["groups"]["newsletter"]["agents"][0]
     for agent_name in ("researcher", "writer"):
@@ -470,8 +470,8 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
         assert fleet[agent_name]["profile_href"] == f"/newsletter/agents/{agent_name}/profile"
 
 
-def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, canonical_raw_config):
-    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw_config):
+    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     other_group = group_root.parent / "research"
     for rel in [("shared", "jobs"), ("shared", "logs"), ("shared", "observations"), ("shared", "proposals"), ("shared", "decisions")]:
         other_group.joinpath(*rel).mkdir(parents=True, exist_ok=True)

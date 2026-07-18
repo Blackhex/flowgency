@@ -211,7 +211,7 @@ def test_run_server_reports_first_run_before_starting_uvicorn(
     assert not config_path.exists()
     output = capsys.readouterr().out
     assert (
-        f"First run — canonical config not found in {tmp_path}"
+        f"First run: no canonical config found in {tmp_path}"
         in output
     )
     assert "Visit http://localhost:8602/admin/" in output

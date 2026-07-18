@@ -3,11 +3,11 @@ from pathlib import Path
 import pytest
 
 
-def test_agent_roots_are_additive_and_ordered(canonical_raw_config, canonical_paths):
+def test_agent_roots_are_additive_and_ordered(raw_config, config_paths):
     from agency.configuration import parse_config
     from agency.configuration.effective import resolve_effective_policy
 
-    group = canonical_raw_config["groups"]["newsletter"]
+    group = raw_config["groups"]["newsletter"]
     group["path"] = "C:/Projects/newsletter"
     group["runtime"] = {
         "sandbox": {
@@ -25,7 +25,7 @@ def test_agent_roots_are_additive_and_ordered(canonical_raw_config, canonical_pa
         }
     }
 
-    parsed = parse_config(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config(raw_config, config_paths["config_path"])
 
     policy = resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
 
@@ -37,11 +37,11 @@ def test_agent_roots_are_additive_and_ordered(canonical_raw_config, canonical_pa
     )
 
 
-def test_agent_tool_policy_replaces_group(canonical_raw_config, canonical_paths):
+def test_agent_tool_policy_replaces_group(raw_config, config_paths):
     from agency.configuration import parse_config
     from agency.configuration.effective import resolve_effective_policy
 
-    group = canonical_raw_config["groups"]["newsletter"]
+    group = raw_config["groups"]["newsletter"]
     group["runtime"] = {
         "tools": {
             "mode": "allowlist",
@@ -58,7 +58,7 @@ def test_agent_tool_policy_replaces_group(canonical_raw_config, canonical_paths)
         }
     }
 
-    parsed = parse_config(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config(raw_config, config_paths["config_path"])
 
     policy = resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
 
@@ -66,11 +66,11 @@ def test_agent_tool_policy_replaces_group(canonical_raw_config, canonical_paths)
     assert policy.tools.names == ("read", "search", "write")
 
 
-def test_agent_omits_tools_and_inherits_group(canonical_raw_config, canonical_paths):
+def test_agent_omits_tools_and_inherits_group(raw_config, config_paths):
     from agency.configuration import parse_config
     from agency.configuration.effective import resolve_effective_policy
 
-    group = canonical_raw_config["groups"]["newsletter"]
+    group = raw_config["groups"]["newsletter"]
     group["runtime"] = {
         "tools": {
             "mode": "allowlist",
@@ -81,7 +81,7 @@ def test_agent_omits_tools_and_inherits_group(canonical_raw_config, canonical_pa
     agent["name"] = "advisor"
     agent["integration"] = "copilot"
 
-    parsed = parse_config(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config(raw_config, config_paths["config_path"])
 
     policy = resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
 
@@ -89,18 +89,18 @@ def test_agent_omits_tools_and_inherits_group(canonical_raw_config, canonical_pa
     assert policy.tools.names == ("read", "search")
 
 
-def test_timeout_override_precedence_is_job_then_agent_then_group(canonical_raw_config, canonical_paths):
+def test_timeout_override_precedence_is_job_then_agent_then_group(raw_config, config_paths):
     from agency.configuration import parse_config
     from agency.configuration.effective import resolve_effective_policy
 
-    group = canonical_raw_config["groups"]["newsletter"]
+    group = raw_config["groups"]["newsletter"]
     group["runtime"] = {"timeout": 900}
     agent = group["agents"][0]
     agent["name"] = "advisor"
     agent["integration"] = "copilot"
     agent["runtime"] = {"timeout": 1200}
 
-    parsed = parse_config(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config(raw_config, config_paths["config_path"])
 
     inherited = resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
     overridden = resolve_effective_policy(parsed.resolved, "newsletter", "advisor", timeout_override=1800)
@@ -109,12 +109,12 @@ def test_timeout_override_precedence_is_job_then_agent_then_group(canonical_raw_
     assert overridden.timeout == 1800
 
 
-def test_agent_additional_roots_cannot_make_unrestricted_policy_ambiguous(canonical_raw_config, canonical_paths):
+def test_agent_additional_roots_cannot_make_unrestricted_policy_ambiguous(raw_config, config_paths):
     from agency.configuration import parse_config
     from agency.configuration import ValidationFailed
     from agency.configuration.effective import resolve_effective_policy
 
-    group = canonical_raw_config["groups"]["newsletter"]
+    group = raw_config["groups"]["newsletter"]
     agent = group["agents"][0]
     agent["name"] = "advisor"
     agent["integration"] = "copilot"
@@ -124,7 +124,7 @@ def test_agent_additional_roots_cannot_make_unrestricted_policy_ambiguous(canoni
         }
     }
 
-    parsed = parse_config(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config(raw_config, config_paths["config_path"])
 
     with pytest.raises(ValidationFailed) as excinfo:
         resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
@@ -138,15 +138,15 @@ def test_agent_additional_roots_cannot_make_unrestricted_policy_ambiguous(canoni
     assert issue.corrective_hint == "Remove additional roots or switch to restricted mode."
 
 
-def test_unknown_integration_fails_closed(canonical_raw_config, canonical_paths):
+def test_unknown_integration_fails_closed(raw_config, config_paths):
     from agency.configuration import ValidationFailed, parse_config
     from agency.configuration.effective import resolve_effective_policy
 
-    agent = canonical_raw_config["groups"]["newsletter"]["agents"][0]
+    agent = raw_config["groups"]["newsletter"]["agents"][0]
     agent["name"] = "advisor"
     agent["integration"] = "missing-runtime"
 
-    parsed = parse_config(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config(raw_config, config_paths["config_path"])
 
     with pytest.raises(ValidationFailed) as excinfo:
         resolve_effective_policy(parsed.resolved, "newsletter", "advisor")

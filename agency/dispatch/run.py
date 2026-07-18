@@ -55,7 +55,7 @@ def _marker_safe(value: str) -> str:
 
 
 def load_dispatch_config(config_path: str):
-    """Load the strict canonical config snapshot."""
+    """Load the canonical config snapshot."""
     return ConfigStore(Path(config_path)).load()
 
 

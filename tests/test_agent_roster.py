@@ -40,8 +40,8 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
     )
 
 
-def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _seed_app(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
@@ -174,8 +174,8 @@ def _write_roster_job(
     return record
 
 
-def test_agents_page_is_instance_roster(monkeypatch, tmp_path, canonical_raw_config):
-    client, _, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_agents_page_is_instance_roster(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents")
 
@@ -193,8 +193,8 @@ def test_agents_page_is_instance_roster(monkeypatch, tmp_path, canonical_raw_con
     )
 
 
-def test_create_instance_from_roster(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_create_instance_from_roster(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
     response = client.post(
@@ -219,8 +219,8 @@ def test_create_instance_from_roster(monkeypatch, tmp_path, canonical_raw_config
     assert created["identity"]["display_name"] == "Reviewer"
 
 
-def test_remove_instance_updates_config_only(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_remove_instance_updates_config_only(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     superseded_dir = group_root / "advisor"
     superseded_dir.mkdir(parents=True)
     revision = _revision(config_path)
@@ -237,8 +237,8 @@ def test_remove_instance_updates_config_only(monkeypatch, tmp_path, canonical_ra
     assert superseded_dir.is_dir()
 
 
-def test_move_preview_and_apply(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_move_preview_and_apply(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
     preview = client.post(
@@ -274,8 +274,8 @@ def test_move_preview_and_apply(monkeypatch, tmp_path, canonical_raw_config):
         ("running", "Running"),
     ],
 )
-def test_roster_shows_exact_active_job_state(monkeypatch, tmp_path, canonical_raw_config, status, label):
-    client, _, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_roster_shows_exact_active_job_state(monkeypatch, tmp_path, raw_config, status, label):
+    client, _, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_roster_job(
         tmp_path,
         group_root,
@@ -292,8 +292,8 @@ def test_roster_shows_exact_active_job_state(monkeypatch, tmp_path, canonical_ra
     assert "a" * 64 not in response.text
 
 
-def test_roster_without_active_job_omits_job_badge(monkeypatch, tmp_path, canonical_raw_config):
-    client, _, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_roster_without_active_job_omits_job_badge(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents")
 
@@ -304,8 +304,8 @@ def test_roster_without_active_job_omits_job_badge(monkeypatch, tmp_path, canoni
     assert 'title="Job is currently executing"' not in response.text
 
 
-def test_roster_uses_newest_active_job_deterministically(monkeypatch, tmp_path, canonical_raw_config):
-    client, _, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_roster_uses_newest_active_job_deterministically(monkeypatch, tmp_path, raw_config):
+    client, _, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_roster_job(
         tmp_path,
         group_root,
@@ -329,8 +329,8 @@ def test_roster_uses_newest_active_job_deterministically(monkeypatch, tmp_path, 
     assert 'Waiting for memory' in response.text
 
 
-def test_old_admin_agent_get_redirects_to_profile(monkeypatch, tmp_path, canonical_raw_config):
-    client, _, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_old_admin_agent_get_redirects_to_profile(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/orgs/newsletter/agents/advisor", follow_redirects=False)
 
@@ -338,8 +338,8 @@ def test_old_admin_agent_get_redirects_to_profile(monkeypatch, tmp_path, canonic
     assert response.headers["location"] == "/newsletter/agents/advisor/profile"
 
 
-def test_profile_detail_uses_config_identity(monkeypatch, tmp_path, canonical_raw_config):
-    client, _, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_profile_detail_uses_config_identity(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents/advisor/profile")
 
@@ -351,8 +351,8 @@ def test_profile_detail_uses_config_identity(monkeypatch, tmp_path, canonical_ra
     assert 'aria-current="page">Profile' in response.text
 
 
-def test_stale_create_revision_returns_conflict(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_stale_create_revision_returns_conflict(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     stale = store.load().revision
     store.patch(stale, lambda raw: raw["groups"]["newsletter"].__setitem__("name", "Changed"))
@@ -373,9 +373,9 @@ def test_stale_create_revision_returns_conflict(monkeypatch, tmp_path, canonical
 
 
 def test_roster_returns_actionable_warning_when_agent_library_is_unavailable(
-    monkeypatch, tmp_path, canonical_raw_config
+    monkeypatch, tmp_path, raw_config
 ):
-    client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     missing_root = tmp_path / "missing-library"
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["agency"]["agent_library"] = str(missing_root)
@@ -393,8 +393,8 @@ def test_roster_returns_actionable_warning_when_agent_library_is_unavailable(
     assert config_path.read_text(encoding="utf-8") == before
 
 
-def test_stale_move_preview_returns_conflict(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_stale_move_preview_returns_conflict(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     stale = store.load().revision
     store.patch(stale, lambda raw: raw["groups"]["newsletter"].__setitem__("name", "Changed"))
@@ -408,8 +408,8 @@ def test_stale_move_preview_returns_conflict(monkeypatch, tmp_path, canonical_ra
     assert "reload" in response.text.lower()
 
 
-def test_stale_move_apply_returns_conflict(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_stale_move_apply_returns_conflict(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     revision = store.load().revision
     preview = client.post(
@@ -428,8 +428,8 @@ def test_stale_move_apply_returns_conflict(monkeypatch, tmp_path, canonical_raw_
     assert "reload" in response.text.lower()
 
 
-def test_removed_mutation_routes_are_absent_from_route_table(monkeypatch, tmp_path, canonical_raw_config):
-    _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_removed_mutation_routes_are_absent_from_route_table(monkeypatch, tmp_path, raw_config):
+    _seed_app(monkeypatch, tmp_path, raw_config)
     route_paths = set(_all_route_paths())
 
     for path in {
@@ -450,8 +450,8 @@ def test_removed_mutation_routes_are_absent_from_route_table(monkeypatch, tmp_pa
         assert path not in route_paths
 
 
-def test_task14_removed_mutation_routes_are_unregistered_and_nonmutating(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_task14_removed_mutation_routes_are_unregistered_and_nonmutating(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     before = config_path.read_bytes()
     route_paths = set(_all_route_paths())
 
@@ -472,8 +472,8 @@ def test_task14_removed_mutation_routes_are_unregistered_and_nonmutating(monkeyp
         assert config_path.read_bytes() == before
 
 
-def test_task14_route_ownership_is_unique_and_canonical(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_task14_route_ownership_is_unique_and_canonical(monkeypatch, tmp_path, raw_config):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     route_paths = _all_route_paths()
 
     canonical_paths = {

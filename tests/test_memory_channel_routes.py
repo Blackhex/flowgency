@@ -45,8 +45,8 @@ def _write_blueprint(root: Path, key: str) -> None:
     )
 
 
-def _seed_memory_app(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _seed_memory_app(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
@@ -220,8 +220,8 @@ def _write_channel_job(
     return path
 
 
-def test_channel_is_global_across_groups(monkeypatch, tmp_path, canonical_raw_config):
-    client, _, _ = _seed_memory_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_channel_is_global_across_groups(monkeypatch, tmp_path, raw_config):
+    client, _, _ = _seed_memory_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/memory-channels/brand-strategy")
 
@@ -234,12 +234,12 @@ def test_channel_is_global_across_groups(monkeypatch, tmp_path, canonical_raw_co
 def test_unknown_channel_read_never_creates(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, resolved = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     before = sorted(resolved.directory.parent.iterdir())
 
@@ -252,12 +252,12 @@ def test_unknown_channel_read_never_creates(
 def test_channel_markdown_save_rejects_stale_revision(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, resolved = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     current = (resolved.directory / "memory.md").read_text(encoding="utf-8")
 
@@ -279,12 +279,12 @@ def test_channel_markdown_save_rejects_stale_revision(
 def test_channel_markdown_save_returns_423_when_locked(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, resolved = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     services = app_mod.app.state.services
     snapshot = services.memory_store.read(resolved)
@@ -325,12 +325,12 @@ def test_channel_markdown_save_returns_423_when_locked(
 def test_channel_delete_blocks_when_referenced(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
 
     response = client.post(
@@ -347,13 +347,13 @@ def test_channel_delete_blocks_when_referenced(
 def test_channel_delete_blocks_when_active_job_targets_channel(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
     status,
 ):
     client, config_path, resolved = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     _write_channel_job(
         config_path,
@@ -388,12 +388,12 @@ def test_channel_delete_blocks_when_active_job_targets_channel(
 def test_channel_delete_ignores_terminal_jobs(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     _write_channel_job(
         config_path,
@@ -429,12 +429,12 @@ def test_channel_delete_ignores_terminal_jobs(
 def test_channel_delete_returns_423_when_memory_is_busy(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     services = app_mod.app.state.services
     support = resolve_memory_selector(
@@ -482,12 +482,12 @@ def test_channel_delete_returns_423_when_memory_is_busy(
 def test_channel_delete_restores_archive_when_config_replace_conflicts(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     services = app_mod.app.state.services
     support = resolve_memory_selector(
@@ -526,12 +526,12 @@ def test_channel_delete_restores_archive_when_config_replace_conflicts(
 def test_channel_delete_archives_canonical_and_recreation_starts_fresh(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     services = app_mod.app.state.services
     support = resolve_memory_selector(
@@ -615,12 +615,12 @@ def _channel_references_for_test(
 def test_channel_rename_updates_display_name_only(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
 
     response = client.post(
@@ -647,12 +647,12 @@ def test_channel_rename_updates_display_name_only(
 def test_channel_rekey_rejects_forged_current_key(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     snapshot = ConfigStore(config_path).load()
     before = deepcopy(snapshot.raw)
@@ -675,12 +675,12 @@ def test_channel_rekey_rejects_forged_current_key(
 def test_channel_rekey_rejects_forged_referenced_current_key(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     snapshot = ConfigStore(config_path).load()
     response = client.post(
@@ -706,12 +706,12 @@ def test_channel_rekey_rejects_forged_referenced_current_key(
 def test_channel_rekey_blocks_when_referenced(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
 
     response = client.post(
@@ -732,12 +732,12 @@ def test_channel_rekey_blocks_when_referenced(
 def test_channel_rekey_allows_unreferenced_channel(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     snapshot = ConfigStore(config_path).load()
 
@@ -763,12 +763,12 @@ def test_channel_rekey_allows_unreferenced_channel(
 def test_channel_rekey_rejects_destination_collision(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, config_path, _ = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     snapshot = ConfigStore(config_path).load()
 
@@ -788,12 +788,12 @@ def test_channel_rekey_rejects_destination_collision(
 def test_channel_content_save_binds_url_identity(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
     client, _, resolved = _seed_memory_app(
         monkeypatch,
         tmp_path,
-        canonical_raw_config,
+        raw_config,
     )
     snapshot = app_mod.app.state.services.memory_store.read(resolved)
     current = (resolved.directory / "memory.md").read_text(encoding="utf-8")

@@ -1,4 +1,4 @@
-"""Command-line interface for Agency's strict canonical control plane."""
+"""Command-line interface for Agency's canonical control plane."""
 
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ def _services(args: Namespace) -> AgencyServices:
         "configuration",
         str(services.config_path),
         str(error),
-        "Provide a readable strict canonical config and valid configured asset roots.",
+        "Provide a readable canonical config and valid configured asset roots.",
     )
     raise CliFailure(ExitCode.VALIDATION, "invalid-config", "Configuration is invalid", (issue,))
 
@@ -988,7 +988,7 @@ def _cmd_decide_inner(args: Namespace) -> int:
 
 
 def _add_config(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--config", default=argparse.SUPPRESS, help="Path to strict canonical config.yaml")
+    parser.add_argument("--config", default=argparse.SUPPRESS, help="Path to canonical config.yaml")
 
 
 def _add_group_json(parser: argparse.ArgumentParser) -> None:
@@ -999,7 +999,7 @@ def _add_group_json(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="christag-agency", description="Agency - AI Agent Management")
-    parser.add_argument("--config", help="Path to strict canonical config.yaml")
+    parser.add_argument("--config", help="Path to canonical config.yaml")
     subparsers = parser.add_subparsers(dest="command")
 
     serve = subparsers.add_parser("serve", help="Start the web dashboard")

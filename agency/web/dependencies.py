@@ -48,7 +48,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
         cache_root = agency.compilation_cache
         memory_root = agency.memory_store
         if library_root is None or cache_root is None or memory_root is None:
-            raise ValueError("Strict canonical services require agent_library, compilation_cache, and memory_store.")
+            raise ValueError("Agency services require agent_library, compilation_cache, and memory_store.")
         blueprint_library = BlueprintLibrary(Path(library_root))
         compilation_cache = CompilationCache(Path(cache_root), _projector_registry())
         memory_store = MemoryStore(Path(memory_root))

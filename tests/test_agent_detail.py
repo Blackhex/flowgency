@@ -33,8 +33,8 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
     )
 
 
-def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _seed_app(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
@@ -103,8 +103,8 @@ def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
     return TestClient(app_mod.app), config_path
 
 
-def _seed_activity_app(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def _seed_activity_app(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     group_root = tmp_path / "groups" / "newsletter-workspace"
     raw["agency"]["default_group"] = "newsletter-prod"
@@ -147,8 +147,8 @@ def _revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
 
 
-def test_agent_detail_base_redirects_to_profile(monkeypatch, tmp_path, canonical_raw_config):
-    client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_agent_detail_base_redirects_to_profile(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents/advisor", follow_redirects=False)
 
@@ -156,8 +156,8 @@ def test_agent_detail_base_redirects_to_profile(monkeypatch, tmp_path, canonical
     assert response.headers["location"] == "/newsletter/agents/advisor/profile"
 
 
-def test_agent_detail_tabs_have_stable_urls(monkeypatch, tmp_path, canonical_raw_config):
-    client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_agent_detail_tabs_have_stable_urls(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     for tab, label in [
         ("profile", "Profile"),
@@ -172,8 +172,8 @@ def test_agent_detail_tabs_have_stable_urls(monkeypatch, tmp_path, canonical_raw
         assert f'aria-current="page">{label}' in response.text
 
 
-def test_profile_tab_uses_config_identity_and_capability(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_profile_tab_uses_config_identity_and_capability(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
     response = client.get("/newsletter/agents/advisor/profile")
@@ -187,8 +187,8 @@ def test_profile_tab_uses_config_identity_and_capability(monkeypatch, tmp_path, 
     assert "Subagent" not in response.text
 
 
-def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_path, canonical_raw_config):
-    client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents/advisor/runtime")
 
@@ -199,8 +199,8 @@ def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_pat
     assert "Research/editorial" in response.text.replace("\\", "/")
 
 
-def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     shared_root = str((tmp_path / "Research" / "shared").resolve())
     editorial_root = str((tmp_path / "Research" / "editorial").resolve())
@@ -223,8 +223,8 @@ def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch
     assert f"Agent addition: <span class=\"font-mono break-all\">{editorial_root.replace('\\', '/')}</span>" in body
 
 
-def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, canonical_raw_config):
-    client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents/advisor/blueprint")
 
@@ -238,8 +238,8 @@ def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, canonical_raw_config)
     assert '<form' not in response.text
 
 
-def test_memory_tab_shows_selector_without_hash(monkeypatch, tmp_path, canonical_raw_config):
-    client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_memory_tab_shows_selector_without_hash(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents/advisor/memory")
 
@@ -251,8 +251,8 @@ def test_memory_tab_shows_selector_without_hash(monkeypatch, tmp_path, canonical
     assert "a" * 64 not in response.text
 
 
-def test_activity_tab_is_read_only(monkeypatch, tmp_path, canonical_raw_config):
-    client, _ = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_activity_tab_is_read_only(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents/advisor/activity")
 
@@ -261,8 +261,8 @@ def test_activity_tab_is_read_only(monkeypatch, tmp_path, canonical_raw_config):
     assert '<form' not in response.text
 
 
-def test_activity_links_use_routed_group_key_and_round_trip(monkeypatch, tmp_path, canonical_raw_config):
-    client, _, log_file = _seed_activity_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_activity_links_use_routed_group_key_and_round_trip(monkeypatch, tmp_path, raw_config):
+    client, _, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter-prod/agents/advisor/activity")
 
@@ -282,8 +282,8 @@ def test_activity_links_use_routed_group_key_and_round_trip(monkeypatch, tmp_pat
     assert log_file.name in log_response.text
 
 
-def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
     response = client.post(
@@ -306,8 +306,8 @@ def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path
     assert agent["capabilities"]["write"] is True
 
 
-def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
     reports_root = (tmp_path / "Research" / "reports").resolve()
     reports_root.mkdir(parents=True, exist_ok=True)
@@ -336,8 +336,8 @@ def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_pa
     ]
 
 
-def test_runtime_post_surfaces_unsupported_capability_issue(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_runtime_post_surfaces_unsupported_capability_issue(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["groups"]["newsletter"]["agents"][0]["integration"] = "script"
     config_path.write_text(
@@ -362,8 +362,8 @@ def test_runtime_post_surfaces_unsupported_capability_issue(monkeypatch, tmp_pat
     assert "cannot enforce sandbox mode" in response.text
 
 
-def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
     routines_yaml = yaml.safe_dump(
         [
@@ -401,8 +401,8 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, canonical_ra
     assert routines[1]["schedule"] == {"at": "17:30"}
 
 
-def test_routines_get_preserves_disabled_state(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_routines_get_preserves_disabled_state(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["groups"]["newsletter"]["agents"][0]["routines"][0]["enabled"] = False
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
@@ -414,8 +414,8 @@ def test_routines_get_preserves_disabled_state(monkeypatch, tmp_path, canonical_
     assert "enabled: false" in response.text
 
 
-def test_routines_post_rejects_duplicate_ids(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_routines_post_rejects_duplicate_ids(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
     routines_yaml = yaml.safe_dump(
         [
@@ -434,8 +434,8 @@ def test_routines_post_rejects_duplicate_ids(monkeypatch, tmp_path, canonical_ra
     assert "Duplicate routine id" in response.text
 
 
-def test_memory_post_selector_updates_only_config(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_memory_post_selector_updates_only_config(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     snapshot = store.load()
     resolved = resolve_memory_selector(
@@ -470,8 +470,8 @@ def test_memory_post_selector_updates_only_config(monkeypatch, tmp_path, canonic
     assert after.files == before.files
 
 
-def test_memory_post_content_updates_only_selected_memory(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_memory_post_content_updates_only_selected_memory(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     snapshot = store.load()
     resolved = resolve_memory_selector(
@@ -505,8 +505,8 @@ def test_memory_post_content_updates_only_selected_memory(monkeypatch, tmp_path,
     assert current.files["memory.md"] == b"Updated memory"
 
 
-def test_memory_post_returns_409_for_stale_content_revision(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_memory_post_returns_409_for_stale_content_revision(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     snapshot = store.load()
     resolved = resolve_memory_selector(
@@ -542,8 +542,8 @@ def test_memory_post_returns_409_for_stale_content_revision(monkeypatch, tmp_pat
     assert config_path.read_bytes() == before_config_bytes
 
 
-def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memory(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memory(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     snapshot = store.load()
     resolved = resolve_memory_selector(
@@ -583,8 +583,8 @@ def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memo
     assert current.files == seeded.files
 
 
-def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     snapshot = store.load()
     resolved = resolve_memory_selector(

@@ -32,8 +32,8 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
     )
 
 
-def _seed_app(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _seed_app(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
@@ -140,8 +140,8 @@ def _write_job_record(group_root: Path, config_path: Path, *, job_id: str = "job
     return path
 
 
-def test_job_list_is_group_scoped(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(group_root, config_path, job_id="job-1", status="queued")
 
     other_group = group_root.parent / "research"
@@ -165,8 +165,8 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, canonical_raw_config):
     assert "job-2" not in response.text
 
 
-def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     job_store = JobStore(tmp_path / "memory-store")
     path = _write_job_record(group_root, config_path, job_id="job-failed", status="queued")
     record = read_job(path)
@@ -218,8 +218,8 @@ def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, ca
     assert failed.spec.memory.memory_hash not in dashboard_response.text
 
 
-def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(group_root, config_path, job_id="job-historical", status="failed")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["groups"]["newsletter"]["agents"] = []
@@ -241,8 +241,8 @@ def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, canonic
         assert "/newsletter/agents/advisor/" not in response.text
 
 
-def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(group_root, config_path, job_id="job-moved", status="failed")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["groups"]["newsletter"]["agents"].pop()
@@ -269,8 +269,8 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
     assert "/newsletter/agents/advisor/" not in response.text
 
 
-def test_job_metadata_uses_spec_snapshot_when_instance_still_exists(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_job_metadata_uses_spec_snapshot_when_instance_still_exists(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     path = _write_job_record(group_root, config_path, job_id="job-snapshot", status="failed")
     record = read_job(path)
     snapshot_spec = replace(
@@ -300,8 +300,8 @@ def test_job_metadata_uses_spec_snapshot_when_instance_still_exists(monkeypatch,
     assert "Routine: Snapshot review" in response.text
 
 
-def test_cancel_waiting_job(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_cancel_waiting_job(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     path = _write_job_record(group_root, config_path, job_id="job-waiting", status="waiting_for_memory")
 
     response = client.post("/newsletter/jobs/job-waiting/cancel", follow_redirects=False)
@@ -310,8 +310,8 @@ def test_cancel_waiting_job(monkeypatch, tmp_path, canonical_raw_config):
     assert read_job(path).status == "cancelled"
 
 
-def test_cancel_running_job_returns_conflict(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_cancel_running_job_returns_conflict(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(group_root, config_path, job_id="job-running", status="running")
 
     response = client.post("/newsletter/jobs/job-running/cancel")
@@ -319,8 +319,8 @@ def test_cancel_running_job_returns_conflict(monkeypatch, tmp_path, canonical_ra
     assert response.status_code == 409
 
 
-def test_job_artifact_path_must_be_canonical(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, canonical_raw_config)
+def test_job_artifact_path_must_be_canonical(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(group_root, config_path, job_id="job-safe", status="failed")
 
     response = client.get("/newsletter/jobs/job-safe?artifact=..%2F..%2Fsecret.txt")

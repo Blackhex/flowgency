@@ -45,8 +45,8 @@ def _write_yaml(path: Path, raw: dict) -> Path:
     return path
 
 
-def _make_client(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _make_client(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "newsletter").mkdir(parents=True, exist_ok=True)
     (tmp_path / "repo-root").mkdir(parents=True, exist_ok=True)
@@ -68,8 +68,8 @@ def _make_client(monkeypatch, tmp_path, canonical_raw_config):
     return TestClient(app_mod.app), ConfigStore(config_path)
 
 
-def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_path, canonical_raw_config):
-    client, _ = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_path, raw_config):
+    client, _ = _make_client(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/orgs/newsletter/edit")
 
@@ -81,8 +81,8 @@ def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_pat
     assert "Auto-detect" not in response.text
 
 
-def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, canonical_raw_config):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     stale = store.load().revision
 
     store.patch(
@@ -116,9 +116,9 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, canonical_raw_
 def test_stale_group_create_returns_conflict_without_writing_group(
     monkeypatch,
     tmp_path,
-    canonical_raw_config,
+    raw_config,
 ):
-    client, store = _make_client(monkeypatch, tmp_path, canonical_raw_config)
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
     response = client.get("/admin/orgs/new")
     forms = [
         form

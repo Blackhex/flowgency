@@ -8,8 +8,8 @@ from agency.configuration.models import parse_config
 from agency.configuration.paths import job_store_root, validate_resolved_paths
 
 
-def _resolved_config(tmp_path: Path, canonical_raw_config: dict):
-    raw = deepcopy(canonical_raw_config)
+def _resolved_config(tmp_path: Path, raw_config: dict):
+    raw = deepcopy(raw_config)
     library = tmp_path / "library"
     cache = tmp_path / "cache"
     memory = tmp_path / "memory"
@@ -30,16 +30,16 @@ def _resolved_config(tmp_path: Path, canonical_raw_config: dict):
     return raw, parse_config(raw, tmp_path / "config.yaml").resolved
 
 
-def test_job_store_is_under_memory_control_plane(tmp_path, canonical_raw_config):
-    _, config = _resolved_config(tmp_path, canonical_raw_config)
+def test_job_store_is_under_memory_control_plane(tmp_path, raw_config):
+    _, config = _resolved_config(tmp_path, raw_config)
     assert job_store_root(config.agency.memory_store) == (
         config.agency.memory_store / ".jobs"
     ).resolve()
 
 
 @pytest.mark.parametrize("kind", ["missing", "file"])
-def test_missing_or_non_directory_group_path_fails_closed(tmp_path, canonical_raw_config, kind):
-    raw, _ = _resolved_config(tmp_path, canonical_raw_config)
+def test_missing_or_non_directory_group_path_fails_closed(tmp_path, raw_config, kind):
+    raw, _ = _resolved_config(tmp_path, raw_config)
     group_path = tmp_path / "bad-group"
     if kind == "file":
         group_path.write_text("not a directory", encoding="utf-8")
@@ -51,8 +51,8 @@ def test_missing_or_non_directory_group_path_fails_closed(tmp_path, canonical_ra
     assert any(issue.code == "invalid-group-workspace" for issue in issues)
 
 
-def test_missing_restricted_root_fails_closed(tmp_path, canonical_raw_config):
-    raw, _ = _resolved_config(tmp_path, canonical_raw_config)
+def test_missing_restricted_root_fails_closed(tmp_path, raw_config):
+    raw, _ = _resolved_config(tmp_path, raw_config)
     raw["groups"]["newsletter"]["runtime"]["sandbox"]["roots"] = [
         str(tmp_path / "missing-root")
     ]
@@ -65,9 +65,9 @@ def test_missing_restricted_root_fails_closed(tmp_path, canonical_raw_config):
 
 @pytest.mark.parametrize("control_is_ancestor", [True, False])
 def test_control_and_runtime_overlap_is_rejected_in_both_directions(
-    tmp_path, canonical_raw_config, control_is_ancestor
+    tmp_path, raw_config, control_is_ancestor
 ):
-    raw, _ = _resolved_config(tmp_path, canonical_raw_config)
+    raw, _ = _resolved_config(tmp_path, raw_config)
     if control_is_ancestor:
         raw["agency"]["memory_store"] = str(tmp_path / "control")
         runtime = tmp_path / "control" / "workspace"
@@ -84,10 +84,10 @@ def test_control_and_runtime_overlap_is_rejected_in_both_directions(
     assert any(issue.code == "unsafe-path-overlap" for issue in issues)
 
 
-def test_unwritable_nearest_parent_is_rejected_where_portable(tmp_path, canonical_raw_config):
+def test_unwritable_nearest_parent_is_rejected_where_portable(tmp_path, raw_config):
     if os.name == "nt":
         pytest.skip("Windows ACL writability is not represented by mode bits")
-    raw, _ = _resolved_config(tmp_path, canonical_raw_config)
+    raw, _ = _resolved_config(tmp_path, raw_config)
     parent = tmp_path / "locked"
     parent.mkdir()
     parent.chmod(0o500)

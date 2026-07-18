@@ -139,7 +139,7 @@ def _make_spec(
 
 
 @pytest.fixture
-def instance_env(tmp_path, canonical_raw_config):
+def instance_env(tmp_path, raw_config):
     library_root = tmp_path / "agent-library"
     _write_blueprint(library_root, "builder-blueprint")
     _write_blueprint(library_root, "advisor")
@@ -154,7 +154,7 @@ def instance_env(tmp_path, canonical_raw_config):
             encoding="utf-8",
         )
 
-    raw = deepcopy(canonical_raw_config)
+    raw = deepcopy(raw_config)
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
     raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")

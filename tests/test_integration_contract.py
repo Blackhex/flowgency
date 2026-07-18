@@ -253,10 +253,10 @@ def test_filechange_fields():
     assert fc.lines_removed == 1
 
 
-def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, canonical_paths):
+def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
     from agency.configuration import ValidationFailed, parse_config
 
-    group = canonical_raw_config["groups"]["newsletter"]
+    group = raw_config["groups"]["newsletter"]
     group["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": ["C:/repo"]},
         "tools": {"mode": "allowlist", "names": ["read"]},
@@ -265,7 +265,7 @@ def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, cano
     agent["name"] = "builder"
     agent["integration"] = "claude-code"
 
-    parsed = parse_config(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config(raw_config, config_paths["config_path"])
 
     with pytest.raises(ValidationFailed) as excinfo:
         resolve_effective_policy(parsed.resolved, "newsletter", "builder")

@@ -18,8 +18,8 @@ def _write_blueprint(root, key, title):
     )
 
 
-def _seed_client(monkeypatch, tmp_path, canonical_raw_config):
-    raw = deepcopy(canonical_raw_config)
+def _seed_client(monkeypatch, tmp_path, raw_config):
+    raw = deepcopy(raw_config)
     config_path = tmp_path / "config.yaml"
     group_root = tmp_path / "agents"
     library_root = tmp_path / "library"
@@ -50,8 +50,8 @@ def _revision(config_path):
     return ConfigStore(config_path).load().revision
 
 
-def test_roster_create_adds_config_instance_without_scaffolding(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_roster_create_adds_config_instance_without_scaffolding(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_client(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
     response = client.post(
@@ -76,8 +76,8 @@ def test_roster_create_adds_config_instance_without_scaffolding(monkeypatch, tmp
     assert not (group_root / "reviewer").exists()
 
 
-def test_roster_create_rejects_invalid_blueprint_without_partial_files(monkeypatch, tmp_path, canonical_raw_config):
-    client, config_path, group_root = _seed_client(monkeypatch, tmp_path, canonical_raw_config)
+def test_roster_create_rejects_invalid_blueprint_without_partial_files(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_client(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
     response = client.post(

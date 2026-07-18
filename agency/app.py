@@ -111,7 +111,7 @@ def _has_config_file() -> bool:
 def _config_error_message(error: Exception) -> str:
     return (
         f"Configuration is not available: {error}. "
-        "Create or migrate a canonical config and reload."
+        "Create a canonical config and reload."
     )
 
 
@@ -128,7 +128,7 @@ def _update_tip_settings(patcher) -> None:
 
 
 def get_agency_config() -> dict:
-    """Return agency-level config derived from the strict canonical snapshot."""
+    """Return agency-level config derived from the canonical config snapshot."""
     try:
         return agency_settings(_load_snapshot())
     except Exception as error:
@@ -413,7 +413,7 @@ def get_group(group: str) -> dict:
 
 
 def get_agent_integration(g: dict, agent_name: str):
-    """Resolve the integration explicitly pinned by a configured canonical instance."""
+    """Resolve the integration explicitly pinned by a configured instance."""
     for agent_info in g.get("agents_full", []):
         if agent_info["name"] == agent_name:
             return get_integration(agent_info["integration"])
@@ -2468,7 +2468,7 @@ def _run_reload_server(host: str, port: int) -> None:
 def run_server(host: str, port: int, reload: bool = False) -> None:
     """Initialize Agency and run the web server."""
     if not CONFIG_PATH.exists():
-        print(f"First run — canonical config not found in {CONFIG_PATH.parent}")
+        print(f"First run: no canonical config found in {CONFIG_PATH.parent}")
         print(f"Visit http://localhost:{port}/admin/ to set up your first agent group.")
 
     refresh_services()

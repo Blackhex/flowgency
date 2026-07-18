@@ -49,40 +49,50 @@ def _patch_with_external_write(
 
 
 def test_load_config_snapshot_uses_exact_file_bytes_for_revision(
-    canonical_raw_config, canonical_paths
+    raw_config, config_paths
 ):
     from agency.configuration.store import config_revision, load_config_snapshot
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
 
     snapshot = load_config_snapshot(path)
 
     payload = path.read_bytes()
     assert snapshot.revision == hashlib.sha256(payload).hexdigest()
     assert snapshot.revision == config_revision(payload)
-    assert snapshot.raw == canonical_raw_config
+    assert snapshot.raw == raw_config
 
 
-def test_create_requires_absent_file(canonical_raw_config, canonical_paths):
+def test_config_store_round_trips_canonical_config(tmp_path, raw_config):
     from agency.configuration.store import ConfigStore
 
-    store = ConfigStore(canonical_paths["config_path"])
-    created = store.create(canonical_raw_config)
+    path = tmp_path / "config.yaml"
+    snapshot = ConfigStore(path).create(raw_config)
 
-    assert created.path == canonical_paths["config_path"].resolve()
-    assert created.raw == canonical_raw_config
-    assert canonical_paths["config_path"].read_text(encoding="utf-8")
+    assert snapshot.raw == raw_config
+    assert "schema_version" not in snapshot.raw
+
+
+def test_create_requires_absent_file(raw_config, config_paths):
+    from agency.configuration.store import ConfigStore
+
+    store = ConfigStore(config_paths["config_path"])
+    created = store.create(raw_config)
+
+    assert created.path == config_paths["config_path"].resolve()
+    assert created.raw == raw_config
+    assert config_paths["config_path"].read_text(encoding="utf-8")
 
     with pytest.raises(FileExistsError):
-        store.create(canonical_raw_config)
+        store.create(raw_config)
 
 
 def test_patch_rejects_stale_revision_and_preserves_newer_config(
-    canonical_raw_config, canonical_paths
+    raw_config, config_paths
 ):
     from agency.configuration.store import ConfigConflictError, ConfigStore
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
     first = store.load()
 
@@ -100,10 +110,10 @@ def test_patch_rejects_stale_revision_and_preserves_newer_config(
     assert store.load().raw["agency"]["title"] == "New"
 
 
-def test_patch_writes_utf8_yaml(canonical_raw_config, canonical_paths):
+def test_patch_writes_utf8_yaml(raw_config, config_paths):
     from agency.configuration.store import ConfigStore
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
     snapshot = store.load()
 
@@ -124,11 +134,11 @@ def test_patch_writes_utf8_yaml(canonical_raw_config, canonical_paths):
     )
 
 
-def test_patch_rejects_unknown_root_key(canonical_raw_config, canonical_paths):
+def test_patch_rejects_unknown_root_key(raw_config, config_paths):
     from agency.configuration import ValidationFailed
     from agency.configuration.store import ConfigStore
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
     snapshot = store.load()
     original = path.read_text(encoding="utf-8")
@@ -143,11 +153,11 @@ def test_patch_rejects_unknown_root_key(canonical_raw_config, canonical_paths):
     assert path.read_text(encoding="utf-8") == original
 
 
-def test_patch_reports_lock_contention(canonical_raw_config, canonical_paths):
+def test_patch_reports_lock_contention(raw_config, config_paths):
     from agency.configuration.store import ConfigStore
     from agency.fs.locks import ResourceBusyError
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
     acquired = Event()
     release = Event()
@@ -168,11 +178,11 @@ def test_patch_reports_lock_contention(canonical_raw_config, canonical_paths):
 
 
 def test_patch_detects_external_uncoordinated_edit_before_replace(
-    canonical_raw_config, canonical_paths
+    raw_config, config_paths
 ):
     from agency.configuration.store import ConfigStore
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
     snapshot = ConfigStore(path).load()
     queue: Queue[str] = Queue()
     process = Process(
@@ -188,12 +198,12 @@ def test_patch_detects_external_uncoordinated_edit_before_replace(
 
 
 def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
-    canonical_raw_config, canonical_paths
+    raw_config, config_paths
 ):
     from agency.configuration import ValidationFailed
     from agency.configuration.store import ConfigStore
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
     snapshot = store.load()
     original = path.read_bytes()
@@ -211,11 +221,11 @@ def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
 
 
 def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
-    canonical_raw_config, canonical_paths
+    raw_config, config_paths
 ):
     from agency.configuration.store import ConfigConflictError, ConfigStore
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
     first = store.load()
 
@@ -226,17 +236,17 @@ def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
     newer = path.read_bytes()
 
     with pytest.raises(ConfigConflictError):
-        store.replace(first.revision, canonical_raw_config)
+        store.replace(first.revision, raw_config)
 
     assert path.read_bytes() == newer
 
 
 def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
-    canonical_raw_config, canonical_paths
+    raw_config, config_paths
 ):
     from agency.configuration.store import ConfigStore
 
-    path = _write_yaml(canonical_paths["config_path"], canonical_raw_config)
+    path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
 
     first = store.load()
@@ -244,10 +254,10 @@ def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
     alias["agency"]["title"] = "Mutated in memory"
 
     assert path.read_text(encoding="utf-8") != "Mutated in memory"
-    assert store.load().raw["agency"]["title"] == canonical_raw_config["agency"]["title"]
+    assert store.load().raw["agency"]["title"] == raw_config["agency"]["title"]
 
     second = store.load()
-    assert second.raw["agency"]["title"] == canonical_raw_config["agency"]["title"]
+    assert second.raw["agency"]["title"] == raw_config["agency"]["title"]
 
     updated = store.patch(
         second.revision,
@@ -255,5 +265,5 @@ def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
     )
 
     assert first.raw["agency"]["title"] == "Mutated in memory"
-    assert second.raw["agency"]["title"] == canonical_raw_config["agency"]["title"]
+    assert second.raw["agency"]["title"] == raw_config["agency"]["title"]
     assert updated.raw["agency"]["title"] == "Patched"
