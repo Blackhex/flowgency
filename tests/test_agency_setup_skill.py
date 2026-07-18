@@ -49,7 +49,7 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
         "creates the config when absent",
         "reports validation errors",
         "never invoke another skill",
-        "never scans or converts superseded authority",
+        "never scan or convert superseded authority",
     ):
         assert phrase in combined
     assert "agency-migration" not in combined
