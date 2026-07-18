@@ -45,6 +45,16 @@ def test_status_is_invalid_for_validation_errors(tmp_path: Path, raw_config) -> 
     assert status.message == "Group default integration is required."
 
 
+def test_status_is_invalid_for_yaml_parse_errors(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "config.yaml")
+    store.path.write_text("agency: [\n", encoding="utf-8")
+
+    status = inspect_setup_status(store)
+
+    assert status.state == "invalid"
+    assert "\n" not in status.message
+
+
 def test_status_is_incomplete_when_no_groups(tmp_path: Path, raw_config) -> None:
     store = ConfigStore(tmp_path / "config.yaml")
     incomplete = copy.deepcopy(raw_config)

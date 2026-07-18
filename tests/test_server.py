@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 import uvicorn
-import yaml
 from fastapi.testclient import TestClient
 
 from agency import app as app_mod
+from agency.integrations import IntegrationError
 
 
 def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
@@ -18,6 +18,39 @@ def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     return config_path
+
+
+def _configure_missing_config(tmp_path: Path, monkeypatch) -> Path:
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.app.state.services = None
+    return config_path
+
+
+class _LaunchIntegration:
+    def __init__(
+        self,
+        name: str = "copilot",
+        display_name: str = "GitHub Copilot",
+        *,
+        fallback_command: str = "copilot -C C:\\project -i \"prompt\" --name \"Agency setup\"",
+        error: Exception | None = None,
+    ) -> None:
+        self.name = name
+        self.display_name = display_name
+        self._fallback_command = fallback_command
+        self._error = error
+        self.requests = []
+
+    def launch_interactive_setup(self, request) -> object:
+        self.requests.append(request)
+        if self._error is not None:
+            raise self._error
+        return type(
+            "LaunchResult",
+            (),
+            {"fallback_command": self._fallback_command},
+        )()
 
 
 def test_run_server_normal_mode_uses_in_memory_app(tmp_path, monkeypatch):
@@ -217,95 +250,226 @@ def test_run_server_reports_first_run_before_starting_uvicorn(
     assert "Visit http://localhost:8602/admin/" in output
 
 
-def test_setup_get_returns_wizard_when_no_groups_exist(tmp_path, monkeypatch):
-    _configure_existing_config(tmp_path, monkeypatch)
+def test_setup_get_renders_only_project_and_integration_fields(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.launchable_integrations",
+        lambda integrations, project_dir: (
+            _LaunchIntegration("copilot", "GitHub Copilot"),
+            _LaunchIntegration("claude-code", "Claude Code"),
+        ),
+    )
     client = TestClient(app_mod.app)
 
     response = client.get("/setup")
 
     assert response.status_code == 200
-    assert 'action="/setup"' in response.text
-    assert 'name="path"' in response.text
+    assert 'name="project_dir"' in response.text
+    assert 'name="integration"' in response.text
+    assert 'name="group_name"' not in response.text
+    assert 'name="workspace_config"' not in response.text
 
 
-def test_setup_post_invalid_and_empty_agent_paths_render_errors(tmp_path, monkeypatch):
-    _configure_existing_config(tmp_path, monkeypatch)
+def test_setup_get_redirects_to_dashboard_when_setup_is_ready(
+    tmp_path, monkeypatch, raw_config
+):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        __import__("yaml").safe_dump(raw_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.app.state.services = None
     client = TestClient(app_mod.app)
 
-    invalid_response = client.post("/setup", data={"path": str(tmp_path / "missing")})
-    empty_response = client.post(
-        "/setup",
-        data={
-            "group_key": "newsletter",
-            "group_name": "Newsletter",
-            "path": str(tmp_path / "workspace"),
-            "agent_library": str(tmp_path / "library"),
-            "compilation_cache": str(tmp_path / "cache"),
-            "memory_store": str(tmp_path / "memory"),
-            "workspace_name": "Main Workspace",
-            "workspace_type": "tmux",
-            "workspace_config": "not-json",
-        },
-    )
-
-    assert invalid_response.status_code == 200
-    assert "All setup fields are required for the canonical configuration." in invalid_response.text
-    assert empty_response.status_code == 200
-    assert "Workspace config must be a JSON object." in empty_response.text
-
-
-def test_setup_post_valid_path_creates_group_and_redirects(tmp_path, monkeypatch):
-    config_path = _configure_existing_config(tmp_path, monkeypatch)
-    group_path = tmp_path / "newsletter-agents"
-    group_path.mkdir()
-    (tmp_path / "library").mkdir()
-    client = TestClient(app_mod.app)
-    expected_revision = app_mod.build_services(config_path).config_store.inspect().revision
-
-    response = client.post(
-        "/setup",
-        data={
-            "expected_revision": expected_revision,
-            "group_key": "newsletter",
-            "group_name": "Newsletter",
-            "path": str(group_path),
-            "agent_library": str(tmp_path / "library"),
-            "compilation_cache": str(tmp_path / "cache"),
-            "memory_store": str(tmp_path / "memory"),
-            "workspace_name": "Terminal Grid",
-            "workspace_type": "tmux",
-            "workspace_config": '{"script_path": "tmux-agents.sh"}',
-        },
-        follow_redirects=False,
-    )
+    response = client.get("/setup", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/newsletter/agents"
-    assert yaml.safe_load(config_path.read_text(encoding="utf-8")) == {
-        "agency": {
-            "title": "Agency",
-            "default_group": "newsletter",
-            "ai_backend": "claude-code",
-            "agent_library": str(tmp_path / "library"),
-            "compilation_cache": str(tmp_path / "cache"),
-            "memory_store": str(tmp_path / "memory"),
-        },
-        "memory": {"channels": {}},
-        "groups": {
-            "newsletter": {
-                "name": "Newsletter",
-                "path": str(group_path),
-                "default_integration": "claude-code",
-                "dispatch": {"enabled": False, "daily_limit": 20},
-                "workspaces": [
-                    {
-                        "name": "Terminal Grid",
-                        "type": "tmux",
-                        "config": {"script_path": "tmux-agents.sh"},
-                    }
-                ],
-                "agents": [],
-            }
-        },
+    assert response.headers["location"] == "/"
+
+
+def test_setup_launch_requires_absolute_existing_project_dir(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    client = TestClient(app_mod.app)
+
+    response = client.post(
+        "/setup/launch",
+        data={"project_dir": "relative-project", "integration": "copilot"},
+    )
+
+    assert response.status_code == 200
+    assert "Select an absolute existing project folder." in response.text
+
+
+def test_setup_launch_rejects_unavailable_integration(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.launchable_integrations",
+        lambda integrations, project_dir: (_LaunchIntegration("claude-code", "Claude Code"),),
+    )
+    client = TestClient(app_mod.app)
+
+    response = client.post(
+        "/setup/launch",
+        data={"project_dir": str(project_dir.resolve()), "integration": "copilot"},
+    )
+
+    assert response.status_code == 200
+    assert "Choose an available integration." in response.text
+
+
+def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    integration = _LaunchIntegration()
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.launchable_integrations",
+        lambda integrations, project_dir: (integration,),
+    )
+    client = TestClient(app_mod.app)
+
+    response = client.post(
+        "/setup/launch",
+        data={"project_dir": str(project_dir.resolve()), "integration": "copilot"},
+    )
+
+    assert response.status_code == 200
+    assert not config_path.exists()
+    assert "Waiting for setup to complete" in response.text
+    assert integration.requests[0].project_dir == project_dir.resolve()
+    assert integration.requests[0].config_path == config_path.resolve()
+    assert "agency-setup" in integration.requests[0].prompt
+
+
+def test_setup_launch_shows_fallback_when_terminal_launch_fails(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    integration = _LaunchIntegration(
+        error=IntegrationError("Run copilot -C manually."),
+    )
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.launchable_integrations",
+        lambda integrations, project_dir: (integration,),
+    )
+    client = TestClient(app_mod.app)
+
+    response = client.post(
+        "/setup/launch",
+        data={"project_dir": str(project_dir.resolve()), "integration": "copilot"},
+    )
+
+    assert response.status_code == 200
+    assert "Waiting for setup to complete" in response.text
+    assert "Run copilot -C manually." in response.text
+
+
+def test_setup_browse_returns_null_when_cancelled(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        assert args == ()
+        return None
+
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.run_in_threadpool",
+        fake_run_in_threadpool,
+    )
+    client = TestClient(app_mod.app)
+
+    response = client.post("/setup/browse")
+
+    assert response.status_code == 200
+    assert response.json() == {"path": None}
+
+
+def test_setup_browse_returns_selected_path(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    selected = tmp_path / "chosen"
+    selected.mkdir()
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        assert args == ()
+        return selected.resolve()
+
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.run_in_threadpool",
+        fake_run_in_threadpool,
+    )
+    client = TestClient(app_mod.app)
+
+    response = client.post("/setup/browse")
+
+    assert response.status_code == 200
+    assert response.json() == {"path": str(selected.resolve())}
+
+
+def test_setup_status_returns_waiting_when_config_is_absent(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"state": "waiting"}
+
+
+def test_setup_status_returns_invalid_with_message(tmp_path, monkeypatch, raw_config):
+    config_path = tmp_path / "config.yaml"
+    raw_config["groups"]["newsletter"]["default_integration"] = ""
+    config_path.write_text(
+        __import__("yaml").safe_dump(raw_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.app.state.services = None
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "state": "invalid",
+        "message": "Group default integration is required.",
     }
-    assert group_path.is_dir()
+
+
+def test_setup_status_returns_incomplete_when_config_has_no_groups(
+    tmp_path, monkeypatch, raw_config
+):
+    config_path = tmp_path / "config.yaml"
+    raw_config["agency"]["default_group"] = ""
+    raw_config["groups"] = {}
+    config_path.write_text(
+        __import__("yaml").safe_dump(raw_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.app.state.services = None
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"state": "incomplete"}
+
+
+def test_setup_status_redirect_target_is_dashboard_when_ready(
+    tmp_path, monkeypatch, raw_config
+):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        __import__("yaml").safe_dump(raw_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.app.state.services = None
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"state": "ready", "redirect": "/"}

@@ -8,7 +8,6 @@ import yaml
 from fastapi.testclient import TestClient
 
 from agency.configuration.store import ConfigStore
-from agency.configuration.store import config_revision
 from agency import app as app_mod
 
 
@@ -35,6 +34,23 @@ def _parse_forms(html: str):
     parser = _FormParser()
     parser.feed(html)
     return parser.forms
+
+
+class _LauncherIntegration:
+    name = "copilot"
+    display_name = "GitHub Copilot"
+
+    def __init__(self, fallback_command: str = "copilot -C C:\\project") -> None:
+        self.fallback_command = fallback_command
+        self.requests = []
+
+    def launch_interactive_setup(self, request):
+        self.requests.append(request)
+        return type(
+            "LaunchResult",
+            (),
+            {"fallback_command": self.fallback_command},
+        )()
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -154,52 +170,35 @@ def test_stale_group_create_returns_conflict_without_writing_group(
     assert "new-group" not in store.load().config.groups
 
 
-def test_setup_post_creates_current_group_without_scanning_agents(monkeypatch, tmp_path):
+def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
+    original = b"agency:\n  title: Agency\ngroups: {}\n"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    config_path.write_text(
-        "agency:\n  title: Agency\n  default_group: ''\ngroups: {}\n",
-        encoding="utf-8",
-    )
+    config_path.write_bytes(original)
     app_mod.refresh_services()
 
-    group_path = tmp_path / "groups" / "newsletter"
-    library = tmp_path / "agent-library"
-    cache = tmp_path / "compiled-agents"
-    memory = tmp_path / "memory-store"
-    group_path.mkdir(parents=True)
-    library.mkdir(parents=True)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    integration = _LauncherIntegration()
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.launchable_integrations",
+        lambda integrations, project_dir: (integration,),
+    )
     client = TestClient(app_mod.app)
-    revision = ConfigStore(config_path).inspect().revision
 
     response = client.post(
-        "/setup",
+        "/setup/launch",
         data={
-            "expected_revision": revision,
-            "group_key": "newsletter",
-            "group_name": "Newsletter",
-            "path": str(group_path),
-            "agent_library": str(library),
-            "compilation_cache": str(cache),
-            "memory_store": str(memory),
-            "workspace_name": "Terminal Grid",
-            "workspace_type": "tmux",
-            "workspace_config": '{"script_path": "tmux-agents.sh"}',
+            "project_dir": str(project_dir.resolve()),
+            "integration": "copilot",
         },
         follow_redirects=False,
     )
 
-    assert response.status_code == 303
-    assert response.headers["location"] == "/newsletter/agents"
-
-    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert "schema_version" not in saved
-    assert saved["agency"]["default_group"] == "newsletter"
-    assert saved["agency"]["agent_library"] == str(library)
-    assert saved["agency"]["compilation_cache"] == str(cache)
-    assert saved["agency"]["memory_store"] == str(memory)
-    assert saved["groups"]["newsletter"]["agents"] == []
-    assert group_path.is_dir()
+    assert response.status_code == 200
+    assert "Waiting for setup to complete" in response.text
+    assert config_path.read_bytes() == original
+    assert integration.requests[0].config_path == config_path.resolve()
 
 
 def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_path):
@@ -212,18 +211,17 @@ def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_pat
     response = client.get("/setup")
 
     assert response.status_code == 200
-    assert "schema_version" not in response.text
-    assert "agent_library" in response.text
-    assert "compilation_cache" in response.text
-    assert "memory_store" in response.text
+    assert "Startup diagnostics" in response.text
+    assert "project folder" in response.text.lower()
+    assert 'name="agent_library"' not in response.text
+    assert 'name="workspace_config"' not in response.text
 
 
-def test_setup_page_includes_expected_revision_for_existing_bootstrap_config(
+def test_setup_page_includes_launcher_fields_for_existing_bootstrap_config(
     monkeypatch, tmp_path
 ):
     config_path = tmp_path / "config.yaml"
-    original = b"agency:\n  title: Agency\ngroups: {}\n"
-    config_path.write_bytes(original)
+    config_path.write_bytes(b"agency:\n  title: Agency\ngroups: {}\n")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     client = TestClient(app_mod.app)
@@ -231,16 +229,17 @@ def test_setup_page_includes_expected_revision_for_existing_bootstrap_config(
     response = client.get("/setup")
 
     assert response.status_code == 200
-    assert 'name="expected_revision"' in response.text
-    assert f'value="{config_revision(original)}"' in response.text
+    assert 'action="/setup/launch"' in response.text
+    assert 'name="project_dir"' in response.text
+    assert 'name="integration"' in response.text
+    assert 'name="expected_revision"' not in response.text
 
 
-def test_setup_form_has_distinct_group_key_and_expected_revision_inputs(
+def test_setup_form_posts_only_launcher_inputs(
     monkeypatch, tmp_path
 ):
     config_path = tmp_path / "config.yaml"
-    original = b"agency:\n  title: Agency\ngroups: {}\n"
-    config_path.write_bytes(original)
+    config_path.write_bytes(b"agency:\n  title: Agency\ngroups: {}\n")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     client = TestClient(app_mod.app)
@@ -248,112 +247,15 @@ def test_setup_form_has_distinct_group_key_and_expected_revision_inputs(
     response = client.get("/setup")
 
     assert response.status_code == 200
-    forms = [form for form in _parse_forms(response.text) if form["attrs"].get("action") == "/setup"]
+    forms = [
+        form
+        for form in _parse_forms(response.text)
+        if form["attrs"].get("action") == "/setup/launch"
+    ]
     assert len(forms) == 1
     setup_form = forms[0]
     inputs = {input_["name"]: input_ for input_ in setup_form["inputs"] if input_.get("name")}
 
-    assert inputs["group_key"]["value"] == ""
-    assert inputs["expected_revision"]["value"] == config_revision(original)
-    assert inputs["group_key"] is not inputs["expected_revision"]
-
-    (tmp_path / "groups" / "newsletter").mkdir(parents=True)
-    (tmp_path / "agent-library").mkdir(parents=True)
-
-    payload = {
-        "expected_revision": inputs["expected_revision"]["value"],
-        "group_key": "newsletter",
-        "group_name": "Newsletter",
-        "path": str(tmp_path / "groups" / "newsletter"),
-        "agent_library": str(tmp_path / "agent-library"),
-        "compilation_cache": str(tmp_path / "compiled-agents"),
-        "memory_store": str(tmp_path / "memory-store"),
-        "workspace_name": "Terminal Grid",
-        "workspace_type": "tmux",
-        "workspace_config": '{"script_path": "tmux-agents.sh"}',
-    }
-
-    first = client.post("/setup", data=payload, follow_redirects=False)
-    assert first.status_code == 303
-
-    second = client.post("/setup", data=payload, follow_redirects=False)
-    assert second.status_code == 409
-    assert "Configuration changed" in second.text
-
-
-def test_setup_post_write_failure_preserves_existing_bytes(
-    monkeypatch, tmp_path
-):
-    config_path = tmp_path / "config.yaml"
-    original = b"agency:\n  title: Agency\ngroups: {}\n"
-    config_path.write_bytes(original)
-    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.refresh_services()
-
-    original_encode = ConfigStore._encode
-
-    def boom(self, raw):
-        raise RuntimeError("encode failed")
-
-    monkeypatch.setattr(ConfigStore, "_encode", boom)
-    client = TestClient(app_mod.app, raise_server_exceptions=False)
-
-    response = client.post(
-        "/setup",
-        data={
-            "expected_revision": config_revision(original),
-            "group_key": "newsletter",
-            "group_name": "Newsletter",
-            "path": str(tmp_path / "groups" / "newsletter"),
-            "agent_library": str(tmp_path / "agent-library"),
-            "compilation_cache": str(tmp_path / "compiled-agents"),
-            "memory_store": str(tmp_path / "memory-store"),
-            "workspace_name": "Terminal Grid",
-            "workspace_type": "tmux",
-            "workspace_config": '{"script_path": "tmux-agents.sh"}',
-        },
-        follow_redirects=False,
-    )
-
-    monkeypatch.setattr(ConfigStore, "_encode", original_encode)
-
-    assert response.status_code == 500
-    assert config_path.read_bytes() == original
-
-
-def test_setup_post_conflict_returns_409_and_preserves_concurrent_bytes(
-    monkeypatch, tmp_path
-):
-    config_path = tmp_path / "config.yaml"
-    original = b"agency:\n  title: Agency\ngroups: {}\n"
-    concurrent = b"agency:\n  title: Changed elsewhere\ngroups: {}\n"
-    config_path.write_bytes(original)
-    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.refresh_services()
-    client = TestClient(app_mod.app)
-
-    get_response = client.get("/setup")
-    assert get_response.status_code == 200
-    assert 'name="expected_revision"' in get_response.text
-
-    config_path.write_bytes(concurrent)
-
-    response = client.post(
-        "/setup",
-        data={
-            "expected_revision": config_revision(original),
-            "group_key": "newsletter",
-            "group_name": "Newsletter",
-            "path": str(tmp_path / "groups" / "newsletter"),
-            "agent_library": str(tmp_path / "agent-library"),
-            "compilation_cache": str(tmp_path / "compiled-agents"),
-            "memory_store": str(tmp_path / "memory-store"),
-            "workspace_name": "Terminal Grid",
-            "workspace_type": "tmux",
-            "workspace_config": '{"script_path": "tmux-agents.sh"}',
-        },
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 409
-    assert config_path.read_bytes() == concurrent
+    assert "project_dir" in inputs
+    assert "group_key" not in inputs
+    assert "expected_revision" not in inputs

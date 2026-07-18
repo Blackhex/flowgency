@@ -48,16 +48,28 @@
       <span class="text-2xl font-bold text-white tracking-tight">{{ agency_title }}</span>
     </div>
 
-    <div class="bg-white rounded-2xl shadow-xl p-8">
-      <h1 class="text-xl font-bold text-gray-900 mb-2">Agency setup</h1>
-      <p class="text-sm text-gray-500 mb-6">Create the control-plane config first. Agent instances are added later from the roster page.</p>
+    <div class="bg-white rounded-2xl shadow-xl p-8 space-y-6">
+      <div>
+        <h1 class="text-xl font-bold text-gray-900 mb-2">Agency setup</h1>
+        <p class="text-sm text-gray-500">
+          {% if waiting %}
+          Agency is waiting for your setup session to finish writing a complete configuration.
+          {% else %}
+          Pick the project folder and launch-capable integration, then continue setup in an interactive session.
+          {% endif %}
+        </p>
+      </div>
 
       {% if error %}
-      <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{{ error | safe }}</div>
+      <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ error }}</div>
+      {% endif %}
+
+      {% if launch_notice %}
+      <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{{ launch_notice }}</div>
       {% endif %}
 
       {% if issues %}
-      <div class="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+      <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
         <div class="text-sm font-semibold text-amber-900">Startup diagnostics</div>
         {% for issue in issues %}
         <div class="text-sm text-amber-900">
@@ -71,79 +83,160 @@
       </div>
       {% endif %}
 
-      <form method="POST" action="/setup" class="space-y-5">
+      {% if waiting %}
+      <div class="space-y-5">
         <div class="grid gap-4 md:grid-cols-2">
-          <div>
-            <label for="group_key" class="block text-sm font-medium text-gray-700 mb-1.5">Group Key</label>
-            <input type="text" name="group_key" id="group_key" value="{{ group_key }}"
-                   placeholder="newsletter"
-                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Project</div>
+            <div class="mt-1 font-mono text-sm text-gray-900 break-all">{{ project_dir_value }}</div>
           </div>
-          <div>
-            <label for="group_name" class="block text-sm font-medium text-gray-700 mb-1.5">Group Name</label>
-            <input type="text" name="group_name" id="group_name" value="{{ group_name }}"
-                   placeholder="Newsletter"
-                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+          <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Integration</div>
+            <div class="mt-1 text-sm font-medium text-gray-900">{{ selected_integration_name }}</div>
           </div>
         </div>
 
-        <input type="hidden" name="expected_revision" value="{{ expected_revision }}">
+        <div class="rounded-xl border border-agency-200 bg-agency-50 p-4 space-y-2">
+          <div class="text-sm font-semibold text-agency-900">Waiting for setup to complete…</div>
+          <p id="status-message" class="text-sm text-agency-900">
+            {% if status_message %}
+            {{ status_message }}
+            {% else %}
+            We’ll keep checking for a complete configuration.
+            {% endif %}
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <label for="fallback-command" class="block text-sm font-medium text-gray-700">Fallback command</label>
+          <textarea id="fallback-command" readonly class="w-full min-h-28 px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50">{{ fallback_command }}</textarea>
+          <div class="flex flex-wrap gap-3">
+            <button type="button" id="copy-fallback" class="px-4 py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-lg hover:bg-gray-800 transition-colors">Copy command</button>
+            <span id="copy-feedback" class="text-sm text-gray-500"></span>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-3">
+          <form method="POST" action="/setup/launch">
+            <input type="hidden" name="project_dir" value="{{ project_dir_value }}">
+            <input type="hidden" name="integration" value="{{ selected_integration }}">
+            <button type="submit" class="px-4 py-2.5 bg-agency-600 text-white text-sm font-semibold rounded-lg hover:bg-agency-700 transition-colors">
+              Relaunch {{ selected_integration_name }}
+            </button>
+          </form>
+        </div>
+      </div>
+      {% else %}
+      <form method="POST" action="/setup/launch" class="space-y-5">
+        <div>
+          <label for="project_dir" class="block text-sm font-medium text-gray-700 mb-1.5">Project folder</label>
+          <div class="flex flex-col gap-3 md:flex-row">
+            <input name="project_dir" id="project_dir" autocomplete="off" value="{{ project_dir_value }}"
+                   placeholder="C:\Projects\your-project"
+                   class="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+            <button type="button" id="browse-project" class="px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
+              Browse…
+            </button>
+          </div>
+        </div>
 
         <div>
-          <label for="path" class="block text-sm font-medium text-gray-700 mb-1.5">Group Workspace Path</label>
-          <input type="text" name="path" id="path" value="{{ path_value }}"
-                 placeholder="/path/to/group/workspace"
-                 class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
-        </div>
-
-        <div class="grid gap-4 md:grid-cols-3">
-          <div>
-            <label for="agent_library" class="block text-sm font-medium text-gray-700 mb-1.5">agent_library</label>
-            <input type="text" name="agent_library" id="agent_library" value="{{ agent_library_value }}"
-                   placeholder="/path/to/agent-library"
-                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
-          </div>
-          <div>
-            <label for="compilation_cache" class="block text-sm font-medium text-gray-700 mb-1.5">compilation_cache</label>
-            <input type="text" name="compilation_cache" id="compilation_cache" value="{{ compilation_cache_value }}"
-                   placeholder="/path/to/compiled-agents"
-                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
-          </div>
-          <div>
-            <label for="memory_store" class="block text-sm font-medium text-gray-700 mb-1.5">memory_store</label>
-            <input type="text" name="memory_store" id="memory_store" value="{{ memory_store_value }}"
-                   placeholder="/path/to/memory-store"
-                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
-          </div>
-        </div>
-
-        <div class="grid gap-4 md:grid-cols-3">
-          <div>
-            <label for="workspace_name" class="block text-sm font-medium text-gray-700 mb-1.5">Workspace Name</label>
-            <input type="text" name="workspace_name" id="workspace_name" value="{{ workspace_name }}"
-                   placeholder="Terminal Grid"
-                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
-          </div>
-          <div>
-            <label for="workspace_type" class="block text-sm font-medium text-gray-700 mb-1.5">Workspace Type</label>
-            <input type="text" name="workspace_type" id="workspace_type" value="{{ workspace_type }}"
-                   placeholder="tmux"
-                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
-          </div>
-          <div>
-            <label for="workspace_config" class="block text-sm font-medium text-gray-700 mb-1.5">Workspace Config JSON</label>
-            <input type="text" name="workspace_config" id="workspace_config" value="{{ workspace_config }}"
-                   placeholder='{"script_path":"tmux-agents.sh"}'
-                   class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
-          </div>
+          <label for="integration" class="block text-sm font-medium text-gray-700 mb-1.5">Integration</label>
+          <select name="integration" id="integration"
+                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-agency-500 focus:border-agency-500"
+                  {% if not integrations %}disabled{% endif %}>
+            {% for integration in integrations %}
+            <option value="{{ integration.name }}" {% if integration.name == selected_integration %}selected{% endif %}>{{ integration.display_name }}</option>
+            {% endfor %}
+          </select>
+          {% if not integrations %}
+          <p class="mt-2 text-sm text-amber-700">No integrations on this host can launch guided setup yet.</p>
+          {% endif %}
         </div>
 
         <button type="submit"
-                class="w-full py-2.5 bg-agency-600 text-white text-sm font-semibold rounded-lg hover:bg-agency-700 transition-colors">
-          Set Up
+                class="w-full py-2.5 bg-agency-600 text-white text-sm font-semibold rounded-lg hover:bg-agency-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                {% if not integrations %}disabled{% endif %}>
+          Continue in <span id="integration-name">{{ selected_integration_name or "integration" }}</span>
         </button>
       </form>
+      {% endif %}
     </div>
   </div>
+
+  <script>
+    (() => {
+      const browseButton = document.getElementById("browse-project");
+      const projectInput = document.getElementById("project_dir");
+      const integrationSelect = document.getElementById("integration");
+      const integrationName = document.getElementById("integration-name");
+      const copyButton = document.getElementById("copy-fallback");
+      const copyFeedback = document.getElementById("copy-feedback");
+      const fallbackCommand = document.getElementById("fallback-command");
+      const statusMessage = document.getElementById("status-message");
+
+      if (integrationSelect && integrationName) {
+        const syncIntegrationName = () => {
+          const selected = integrationSelect.selectedOptions[0];
+          integrationName.textContent = selected ? selected.textContent : "integration";
+        };
+        integrationSelect.addEventListener("change", syncIntegrationName);
+        syncIntegrationName();
+      }
+
+      if (browseButton && projectInput) {
+        browseButton.addEventListener("click", async () => {
+          browseButton.disabled = true;
+          try {
+            const response = await fetch("/setup/browse", { method: "POST" });
+            const payload = await response.json();
+            if (payload.path) {
+              projectInput.value = payload.path;
+            }
+          } finally {
+            browseButton.disabled = false;
+          }
+        });
+      }
+
+      if (copyButton && fallbackCommand && copyFeedback) {
+        copyButton.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(fallbackCommand.value);
+            copyFeedback.textContent = "Copied.";
+          } catch (error) {
+            fallbackCommand.focus();
+            fallbackCommand.select();
+            copyFeedback.textContent = "Copy failed. Select the command and copy it manually.";
+          }
+        });
+      }
+
+      if (statusMessage) {
+        const defaultMessages = {
+          waiting: "We’ll keep checking for a complete configuration.",
+          invalid: "Setup wrote an invalid configuration. Fix the setup session, then wait for the next refresh.",
+          incomplete: "Setup is not finished yet. Complete the configuration in the launched session.",
+        };
+
+        const pollStatus = async () => {
+          try {
+            const response = await fetch("/setup/status", { cache: "no-store" });
+            const payload = await response.json();
+            if (payload.state === "ready" && payload.redirect) {
+              window.location.assign(payload.redirect);
+              return;
+            }
+            statusMessage.textContent = payload.message || defaultMessages[payload.state] || "";
+          } catch (error) {
+            statusMessage.textContent = "Status check failed. Finish setup, then refresh this page.";
+          }
+        };
+
+        window.setInterval(pollStatus, 1500);
+        pollStatus();
+      }
+    })();
+  </script>
 </body>
 </html>

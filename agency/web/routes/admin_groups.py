@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import platform
+import shlex
+import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from agency.configuration import (
-    ABSENT_REVISION,
     ConfigConflictError,
     delete_group,
     GroupCreateStatePatch,
@@ -15,11 +18,17 @@ from agency.configuration import (
     ValidationFailed,
     create_group_state,
     patch_group_settings_state,
-    validate_config,
 )
-from agency.integrations import REGISTRY
+from agency.integrations import BaseIntegration, REGISTRY
+from agency.integrations.models import InteractiveSetupRequest
 from agency.jobs.store import revision_bound_group_operation
 from agency.web.dependencies import AgencyServices, get_services
+from agency.web.folder_picker import pick_directory
+from agency.web.setup_flow import (
+    build_setup_prompt,
+    inspect_setup_status,
+    launchable_integrations,
+)
 
 
 router = APIRouter()
@@ -83,11 +92,17 @@ def _setup_response(
     request: Request,
     services: AgencyServices,
     *,
-    values=None,
-    error="",
+    status,
+    waiting: bool = False,
+    project_dir_value: str = "",
+    selected_integration: str = "",
+    selected_integration_name: str = "",
+    integrations: tuple[BaseIntegration, ...] = (),
+    fallback_command: str = "",
+    launch_notice: str = "",
+    error: str = "",
     status_code: int = 200,
 ):
-    values = values or {}
     return _templates(request).TemplateResponse(
         request,
         "setup.html",
@@ -95,19 +110,18 @@ def _setup_response(
             "request": request,
             "agency_title": "Agency",
             "error": error,
-            "issues": _diagnostic_issues(services),
-            "group_key": values.get("group_key", ""),
-            "group_name": values.get("group_name", ""),
-            "path_value": values.get("path", ""),
-            "agent_library_value": values.get("agent_library", ""),
-            "compilation_cache_value": values.get("compilation_cache", ""),
-            "memory_store_value": values.get("memory_store", ""),
-            "workspace_name": values.get("workspace_name", ""),
-            "workspace_type": values.get("workspace_type", "tmux"),
-            "workspace_config": values.get("workspace_config", "{}"),
-            "expected_revision": values.get(
-                "expected_revision", ABSENT_REVISION
+            "issues": (
+                _diagnostic_issues(services) if status.state == "invalid" else []
             ),
+            "status_state": status.state,
+            "status_message": status.message,
+            "waiting": waiting,
+            "project_dir_value": project_dir_value,
+            "selected_integration": selected_integration,
+            "selected_integration_name": selected_integration_name,
+            "integrations": integrations,
+            "fallback_command": fallback_command,
+            "launch_notice": launch_notice,
         },
         status_code=status_code,
     )
@@ -174,147 +188,200 @@ def _canonical_group_path(config_path: Path, value: str) -> Path:
     return candidate.resolve()
 
 
+def _setup_project_seed(services: AgencyServices, project_dir_value: str) -> Path:
+    candidate = (
+        Path(project_dir_value).expanduser()
+        if project_dir_value
+        else services.config_path.parent
+    )
+    try:
+        return candidate.resolve()
+    except OSError:
+        return services.config_path.parent.resolve()
+
+
+def _setup_integrations(
+    services: AgencyServices,
+    project_dir_value: str,
+) -> tuple[BaseIntegration, ...]:
+    return tuple(
+        launchable_integrations(
+            services.integrations,
+            _setup_project_seed(services, project_dir_value),
+        )
+    )
+
+
+def _select_integration(
+    integrations: tuple[BaseIntegration, ...],
+    requested_name: str,
+) -> tuple[str, str]:
+    if requested_name:
+        for integration in integrations:
+            if integration.name == requested_name:
+                return integration.name, integration.display_name
+    if integrations:
+        return integrations[0].name, integrations[0].display_name
+    return "", ""
+
+
+def _fallback_setup_command(
+    integration_name: str,
+    project_dir: Path,
+    prompt: str,
+    launch_error: Exception | None = None,
+) -> str:
+    if integration_name == "copilot":
+        command = [
+            "copilot",
+            "-C",
+            str(project_dir.resolve()),
+            "-i",
+            prompt,
+            "--name",
+            "Agency setup",
+        ]
+        if platform.system() == "Windows":
+            return subprocess.list2cmdline(command)
+        return shlex.join(command)
+    if launch_error is None:
+        return ""
+    return str(launch_error).strip()
+
+
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page(
     request: Request,
     services: AgencyServices = Depends(get_services),
 ):
-    file_snapshot = services.config_store.inspect()
-    if services.startup_error is None:
-        try:
-            snapshot = services.config_store.load()
-            if snapshot.config.groups:
-                return RedirectResponse("/", status_code=303)
-        except Exception:
-            pass
+    status = inspect_setup_status(services.config_store)
+    if status.state == "ready":
+        return RedirectResponse("/", status_code=303)
+    integrations = _setup_integrations(services, "")
+    selected_integration, selected_integration_name = _select_integration(
+        integrations,
+        "",
+    )
     return _setup_response(
         request,
         services,
-        values={"expected_revision": file_snapshot.revision},
+        status=status,
+        integrations=integrations,
+        selected_integration=selected_integration,
+        selected_integration_name=selected_integration_name,
     )
 
 
-@router.post("/setup", response_class=HTMLResponse)
-async def setup_process(
+@router.post("/setup/launch", response_class=HTMLResponse)
+async def setup_launch(
     request: Request,
     services: AgencyServices = Depends(get_services),
 ):
+    status = inspect_setup_status(services.config_store)
+    if status.state == "ready":
+        return RedirectResponse("/", status_code=303)
     form = await request.form()
-    values = {
-        "expected_revision": (
-            str(form.get("expected_revision", ABSENT_REVISION)).strip()
-            or ABSENT_REVISION
-        ),
-        "group_key": str(form.get("group_key", "")).strip().lower(),
-        "group_name": str(form.get("group_name", "")).strip(),
-        "path": str(form.get("path", "")).strip(),
-        "agent_library": str(form.get("agent_library", "")).strip(),
-        "compilation_cache": str(form.get("compilation_cache", "")).strip(),
-        "memory_store": str(form.get("memory_store", "")).strip(),
-        "workspace_name": str(form.get("workspace_name", "")).strip(),
-        "workspace_type": (
-            str(form.get("workspace_type", "tmux")).strip() or "tmux"
-        ),
-        "workspace_config": (
-            str(form.get("workspace_config", "{}")).strip() or "{}"
-        ),
-    }
-    required_fields = (
-        "group_key",
-        "group_name",
-        "path",
-        "agent_library",
-        "compilation_cache",
-        "memory_store",
+    project_dir_value = str(form.get("project_dir", "")).strip()
+    requested_integration = str(form.get("integration", "")).strip()
+    integrations = _setup_integrations(services, project_dir_value)
+    selected_integration, selected_integration_name = _select_integration(
+        integrations,
+        requested_integration,
     )
-    if any(not values[key] for key in required_fields):
-        return _setup_response(
-            request,
-            services,
-            values=values,
-            error="All setup fields are required for the canonical configuration.",
-        )
-    try:
-        workspace_config = json.loads(values["workspace_config"])
-        if not isinstance(workspace_config, dict):
-            raise TypeError
-    except (json.JSONDecodeError, TypeError):
-        return _setup_response(
-            request,
-            services,
-            values=values,
-            error="Workspace config must be a JSON object.",
-        )
 
-    raw = {
-        "agency": {
-            "title": "Agency",
-            "default_group": values["group_key"],
-            "ai_backend": "claude-code",
-            "agent_library": values["agent_library"],
-            "compilation_cache": values["compilation_cache"],
-            "memory_store": values["memory_store"],
-        },
-        "memory": {"channels": {}},
-        "groups": {
-            values["group_key"]: {
-                "name": values["group_name"],
-                "path": values["path"],
-                "default_integration": "claude-code",
-                "dispatch": {"enabled": False, "daily_limit": 20},
-                "workspaces": [
-                    {
-                        "name": values["workspace_name"] or "Workspace",
-                        "type": values["workspace_type"],
-                        "config": workspace_config,
-                    }
-                ],
-                "agents": [],
-            }
-        },
-    }
-    issues = validate_config(raw, services.config_path)
-    if issues:
-        return _templates(request).TemplateResponse(
-            request,
-            "setup.html",
-            {
-                "request": request,
-                "agency_title": "Agency",
-                "error": "Setup values do not satisfy the canonical schema.",
-                "issues": [
-                    {
-                        "field": issue.field,
-                        "message": issue.message,
-                        "corrective_hint": issue.corrective_hint,
-                    }
-                    for issue in issues
-                ],
-                "group_key": values["group_key"],
-                "group_name": values["group_name"],
-                "path_value": values["path"],
-                "agent_library_value": values["agent_library"],
-                "compilation_cache_value": values["compilation_cache"],
-                "memory_store_value": values["memory_store"],
-                "workspace_name": values["workspace_name"],
-                "workspace_type": values["workspace_type"],
-                "workspace_config": values["workspace_config"],
-            },
-        )
-
-    try:
-        services.config_store.replace(values["expected_revision"], raw)
-    except ConfigConflictError:
-        current = services.config_store.inspect()
+    project_dir = Path(project_dir_value).expanduser() if project_dir_value else None
+    if (
+        project_dir is None
+        or not project_dir.is_absolute()
+        or not project_dir.exists()
+        or not project_dir.is_dir()
+    ):
         return _setup_response(
             request,
             services,
-            values={**values, "expected_revision": current.revision},
-            error="Configuration changed. Reload before saving setup.",
-            status_code=409,
+            status=status,
+            project_dir_value=project_dir_value,
+            integrations=integrations,
+            selected_integration=selected_integration,
+            selected_integration_name=selected_integration_name,
+            error="Select an absolute existing project folder.",
         )
-    request.app.state.refresh_services()
-    return RedirectResponse(f"/{values['group_key']}/agents", status_code=303)
+    launchable_by_name = {item.name: item for item in integrations}
+    if requested_integration not in launchable_by_name:
+        return _setup_response(
+            request,
+            services,
+            status=status,
+            project_dir_value=str(project_dir.resolve()),
+            integrations=integrations,
+            selected_integration=selected_integration,
+            selected_integration_name=selected_integration_name,
+            error="Choose an available integration.",
+        )
+    resolved_project_dir = project_dir.resolve()
+    integration = launchable_by_name[requested_integration]
+    prompt = build_setup_prompt(resolved_project_dir, services.config_path)
+    fallback_command = ""
+    launch_notice = ""
+    try:
+        result = integration.launch_interactive_setup(
+            InteractiveSetupRequest(
+                project_dir=resolved_project_dir,
+                config_path=services.config_path.resolve(),
+                prompt=prompt,
+            )
+        )
+        fallback_command = result.fallback_command
+    except Exception as exc:
+        fallback_command = _fallback_setup_command(
+            integration.name,
+            resolved_project_dir,
+            prompt,
+            exc,
+        )
+        launch_notice = str(exc).strip()
+    if not fallback_command:
+        fallback_command = _fallback_setup_command(
+            requested_integration,
+            resolved_project_dir,
+            prompt,
+        )
+    return _setup_response(
+        request,
+        services,
+        status=status,
+        waiting=True,
+        project_dir_value=str(resolved_project_dir),
+        integrations=integrations,
+        selected_integration=requested_integration,
+        selected_integration_name=launchable_by_name[requested_integration].display_name,
+        fallback_command=fallback_command,
+        launch_notice=launch_notice,
+    )
+
+
+@router.post("/setup/browse")
+async def setup_browse() -> JSONResponse:
+    selected = await run_in_threadpool(pick_directory)
+    return JSONResponse(
+        {
+            "path": None if selected is None else str(selected),
+        }
+    )
+
+
+@router.get("/setup/status")
+async def setup_status(
+    services: AgencyServices = Depends(get_services),
+) -> JSONResponse:
+    status = inspect_setup_status(services.config_store)
+    payload: dict[str, str] = {"state": status.state}
+    if status.state == "ready":
+        payload["redirect"] = "/"
+        return JSONResponse(payload)
+    if status.message:
+        payload["message"] = status.message
+    return JSONResponse(payload)
 
 
 @router.get("/admin/orgs/{org}/edit", response_class=HTMLResponse)
@@ -324,7 +391,11 @@ async def admin_org_edit(
     services: AgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
-        return _setup_response(request, services)
+        return _setup_response(
+            request,
+            services,
+            status=inspect_setup_status(services.config_store),
+        )
     snapshot = services.config_store.load()
     if org not in snapshot.config.groups:
         raise HTTPException(status_code=404, detail=f"Unknown org: {org}")
@@ -338,7 +409,11 @@ async def admin_org_save(
     services: AgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
-        return _setup_response(request, services)
+        return _setup_response(
+            request,
+            services,
+            status=inspect_setup_status(services.config_store),
+        )
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     name = str(form.get("name", "")).strip()
@@ -416,7 +491,11 @@ async def admin_org_create(
     services: AgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
-        return _setup_response(request, services)
+        return _setup_response(
+            request,
+            services,
+            status=inspect_setup_status(services.config_store),
+        )
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     key = str(form.get("key", "")).strip().lower().replace(" ", "-")
@@ -551,7 +630,11 @@ async def admin_org_delete(
     services: AgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
-        return _setup_response(request, services)
+        return _setup_response(
+            request,
+            services,
+            status=inspect_setup_status(services.config_store),
+        )
     snapshot = services.config_store.load()
     revision = str((await request.form()).get("revision", "")).strip()
     try:
