@@ -19,12 +19,13 @@ from agency.configuration import (
 from agency.integrations import BaseIntegration, REGISTRY
 from agency.integrations.models import InteractiveSetupRequest
 from agency.jobs.store import revision_bound_group_operation
-from agency.web.dependencies import AgencyServices, get_services
+from agency.web.dependencies import AgencyServices, build_services, get_services
 from agency.web.folder_picker import pick_directory
 from agency.web.setup_flow import (
     build_setup_prompt,
     inspect_setup_status,
     launchable_integrations,
+    startup_error_status,
 )
 
 
@@ -222,12 +223,35 @@ def _select_integration(
     return "", ""
 
 
+def _rebuild_services(request: Request, services: AgencyServices) -> AgencyServices:
+    builder = getattr(request.app.state, "build_services", build_services)
+    refreshed = builder(services.config_path)
+    request.app.state.services = refreshed
+    return refreshed
+
+
+def _setup_status_with_fresh_services(
+    request: Request,
+    services: AgencyServices,
+):
+    status = inspect_setup_status(services.config_store)
+    if status.state != "ready":
+        return services, status
+    if services.startup_error is None and services.instances is not None:
+        return services, status
+    refreshed = _rebuild_services(request, services)
+    if refreshed.startup_error is None and refreshed.instances is not None:
+        return refreshed, status
+    error = refreshed.startup_error or RuntimeError("services are unavailable")
+    return refreshed, startup_error_status(error)
+
+
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page(
     request: Request,
     services: AgencyServices = Depends(get_services),
 ):
-    status = inspect_setup_status(services.config_store)
+    services, status = _setup_status_with_fresh_services(request, services)
     if status.state == "ready":
         return RedirectResponse("/", status_code=303)
     integrations = _setup_integrations(services, "")
@@ -342,9 +366,10 @@ async def setup_browse() -> JSONResponse:
 
 @router.get("/setup/status")
 async def setup_status(
+    request: Request,
     services: AgencyServices = Depends(get_services),
 ) -> JSONResponse:
-    status = inspect_setup_status(services.config_store)
+    services, status = _setup_status_with_fresh_services(request, services)
     payload: dict[str, str] = {"state": status.state}
     if status.state == "ready":
         payload["redirect"] = "/"

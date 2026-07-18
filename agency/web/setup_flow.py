@@ -73,6 +73,15 @@ def inspect_setup_status(store: ConfigStore) -> SetupStatus:
     return SetupStatus(state="ready")
 
 
+def startup_error_status(error: Exception) -> SetupStatus:
+    if isinstance(error, ValidationFailed):
+        return SetupStatus(state="invalid", message=_concise_validation_error(error))
+    return SetupStatus(
+        state="invalid",
+        message=f"Services could not start: {_concise_error_message(error)}",
+    )
+
+
 def _concise_validation_error(exc: ValidationFailed) -> str:
     if exc.issues:
         return exc.issues[0].message

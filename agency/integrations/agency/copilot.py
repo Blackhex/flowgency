@@ -62,15 +62,19 @@ class CopilotIntegration(BaseIntegration):
         self._write_sidecar_identity(agent_dir, self._identity_file(agent_dir), identity)
 
     def interactive_setup_available(self) -> bool:
-        return terminal_available() and Path(self._find_cmd()).exists()
+        cmd = self._resolve_real_cmd(self._find_cmd())
+        return terminal_available() and (
+            Path(cmd).exists() or shutil.which(cmd) is not None
+        )
 
     def _interactive_setup_command(
         self,
         request: InteractiveSetupRequest,
     ) -> Sequence[str]:
         project_dir = request.project_dir.resolve(strict=True)
+        cmd = self._resolve_real_cmd(self._find_cmd())
         return (
-            self._find_cmd(),
+            cmd,
             "-C",
             str(project_dir),
             "-i",

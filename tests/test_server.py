@@ -1,5 +1,6 @@
 """Tests for web server startup and reload configuration."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -298,6 +299,27 @@ def test_setup_get_redirects_to_dashboard_when_setup_is_ready(
     assert response.headers["location"] == "/"
 
 
+def test_setup_get_rebuilds_services_before_redirect_when_config_appears_out_of_band(
+    tmp_path,
+    monkeypatch,
+    raw_config,
+):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+
+    with TestClient(app_mod.app) as client:
+        assert app_mod.app.state.services.startup_error is not None
+        config_path.write_text(
+            __import__("yaml").safe_dump(raw_config, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        response = client.get("/setup", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert app_mod.app.state.services.startup_error is None
+
+
 def test_setup_launch_requires_absolute_existing_project_dir(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
     client = TestClient(app_mod.app)
@@ -518,3 +540,64 @@ def test_setup_status_redirect_target_is_dashboard_when_ready(
 
     assert response.status_code == 200
     assert response.json() == {"state": "ready", "redirect": "/"}
+
+
+def test_setup_status_rebuilds_services_after_out_of_band_config_write(
+    tmp_path,
+    monkeypatch,
+    raw_config,
+):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+
+    with TestClient(app_mod.app) as client:
+        assert app_mod.app.state.services.startup_error is not None
+        config_path.write_text(
+            __import__("yaml").safe_dump(raw_config, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        status = client.get("/setup/status")
+        root = client.get("/", follow_redirects=False)
+
+    assert status.status_code == 200
+    assert status.json() == {"state": "ready", "redirect": "/"}
+    assert app_mod.app.state.services.startup_error is None
+    assert root.status_code == 303
+    assert root.headers["location"] == "/newsletter/"
+
+
+def test_setup_status_returns_non_ready_when_rebuilt_services_still_fail(
+    tmp_path,
+    monkeypatch,
+    raw_config,
+):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+
+    with TestClient(app_mod.app) as client:
+        assert app_mod.app.state.services.startup_error is not None
+        config_path.write_text(
+            __import__("yaml").safe_dump(raw_config, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        def fake_build_services(path: Path):
+            fresh = app_mod.build_services(path)
+            return replace(
+                fresh,
+                blueprint_library=None,
+                compilation_cache=None,
+                memory_store=None,
+                job_store=None,
+                instances=None,
+                startup_error=RuntimeError("services still unavailable"),
+            )
+
+        monkeypatch.setattr(app_mod.app.state, "build_services", fake_build_services)
+
+        response = client.get("/setup/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "state": "invalid",
+        "message": "Services could not start: services still unavailable",
+    }

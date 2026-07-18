@@ -43,7 +43,12 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
     monkeypatch.setattr(
         CopilotIntegration,
         "_find_cmd",
-        lambda self: "copilot.exe",
+        lambda self: r"C:\shim\copilot.cmd",
+    )
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_resolve_real_cmd",
+        staticmethod(lambda cmd: r"C:\Program Files\GitHub Copilot\copilot.exe"),
     )
 
     integration = CopilotIntegration()
@@ -56,7 +61,7 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
     result = integration.launch_interactive_setup(request)
 
     assert captured["command"] == (
-        "copilot.exe",
+        r"C:\Program Files\GitHub Copilot\copilot.exe",
         "-C",
         str(tmp_path.resolve()),
         "-i",
@@ -75,7 +80,12 @@ def test_copilot_builds_fallback_command_without_launch(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(platform, "system", lambda: "Windows")
-    monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot.exe")
+    monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: r"C:\shim\copilot.cmd")
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_resolve_real_cmd",
+        staticmethod(lambda cmd: r"C:\Program Files\GitHub Copilot\copilot.exe"),
+    )
 
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
@@ -85,17 +95,10 @@ def test_copilot_builds_fallback_command_without_launch(
     )
 
     assert integration.interactive_setup_fallback_command(request) == (
-        subprocess.list2cmdline(
-            [
-                "copilot.exe",
-                "-C",
-                str(tmp_path.resolve()),
-                "-i",
-                "Use the agency-setup skill.",
-                "--name",
-                "Agency setup",
-            ]
-        )
+        "& 'C:\\Program Files\\GitHub Copilot\\copilot.exe' "
+        f"'-C' '{tmp_path.resolve()}' "
+        "'-i' 'Use the agency-setup skill.' "
+        "'--name' 'Agency setup'"
     )
 
 
@@ -157,22 +160,13 @@ def test_copilot_interactive_setup_unavailable_without_executable(
     assert integration.interactive_setup_available() is False
 
 
-def test_terminal_available_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(platform, "system", lambda: "Windows")
-    monkeypatch.setattr(shutil, "which", lambda name: "C:\\Windows\\System32\\cmd.exe" if name == "cmd.exe" else None)
-
-    from agency.integrations.interactive import terminal_available
-
-    assert terminal_available() is True
-
-
-def test_terminal_available_on_windows_without_cmd(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_terminal_available_on_windows_does_not_require_cmd(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
     from agency.integrations.interactive import terminal_available
 
-    assert terminal_available() is False
+    assert terminal_available() is True
 
 
 def test_terminal_available_on_posix_positive(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,8 +178,13 @@ def test_terminal_available_on_posix_positive(monkeypatch: pytest.MonkeyPatch) -
     assert terminal_available() is True
 
 
-def test_spawn_interactive_terminal_windows_uses_cmd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_spawn_interactive_terminal_windows_launches_direct_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     calls: list[tuple[list[str], dict[str, object]]] = []
+    project_dir = tmp_path / "project & docs"
+    project_dir.mkdir()
 
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(
@@ -196,29 +195,45 @@ def test_spawn_interactive_terminal_windows_uses_cmd(monkeypatch: pytest.MonkeyP
 
     from agency.integrations.interactive import spawn_interactive_terminal
 
-    command = ["copilot", "-C", str(tmp_path), "-i", "Set up Agency."]
-    result = spawn_interactive_terminal(command, tmp_path)
+    command = [
+        r"C:\Program Files\GitHub Copilot\copilot.exe",
+        "-C",
+        str(project_dir.resolve()),
+        "-i",
+        "Set up Agency.",
+    ]
+    result = spawn_interactive_terminal(command, project_dir)
 
-    assert result == subprocess.list2cmdline(command)
+    assert result == (
+        "& 'C:\\Program Files\\GitHub Copilot\\copilot.exe' "
+        f"'-C' '{project_dir.resolve()}' "
+        "'-i' 'Set up Agency.'"
+    )
     assert calls == [
         (
-            ["cmd.exe", "/k", subprocess.list2cmdline(command)],
+            command,
             {
-                "cwd": str(tmp_path.resolve()),
+                "cwd": str(project_dir.resolve()),
                 "creationflags": getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010),
             },
         )
     ]
+    assert "cmd.exe" not in calls[0][0]
+    assert calls[0][0][2] == str(project_dir.resolve())
 
 
-def test_spawn_interactive_terminal_posix_uses_x_terminal_emulator(
+def test_spawn_interactive_terminal_posix_uses_separate_argv_for_xterm_like_terminals(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     calls: list[tuple[list[str], dict[str, object]]] = []
 
     monkeypatch.setattr(platform, "system", lambda: "Linux")
-    monkeypatch.setattr(shutil, "which", lambda name: "x-terminal-emulator" if name == "x-terminal-emulator" else None)
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name: "/usr/bin/xterm" if name == "xterm" else None,
+    )
     monkeypatch.setattr(
         subprocess,
         "Popen",
@@ -233,7 +248,77 @@ def test_spawn_interactive_terminal_posix_uses_x_terminal_emulator(
     assert result == shlex.join(command)
     assert calls == [
         (
-            ["x-terminal-emulator", "-e", shlex.join(command)],
+            ["/usr/bin/xterm", "-e", *command],
+            {
+                "cwd": str(tmp_path.resolve()),
+                "start_new_session": True,
+            },
+        )
+    ]
+
+
+def test_spawn_interactive_terminal_posix_uses_double_dash_for_gnome_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name: "/usr/bin/gnome-terminal" if name == "gnome-terminal" else None,
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda args, **kwargs: calls.append((list(args), kwargs)),
+    )
+
+    from agency.integrations.interactive import spawn_interactive_terminal
+
+    command = ["copilot", "-i", "Set up Agency."]
+    result = spawn_interactive_terminal(command, tmp_path)
+
+    assert result == shlex.join(command)
+    assert calls == [
+        (
+            ["/usr/bin/gnome-terminal", "--", *command],
+            {
+                "cwd": str(tmp_path.resolve()),
+                "start_new_session": True,
+            },
+        )
+    ]
+
+
+def test_spawn_interactive_terminal_posix_quotes_joined_command_for_string_e_terminals(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name: "/usr/bin/xfce4-terminal" if name == "xfce4-terminal" else None,
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda args, **kwargs: calls.append((list(args), kwargs)),
+    )
+
+    from agency.integrations.interactive import spawn_interactive_terminal
+
+    command = ["copilot", "-i", "Set up Agency."]
+    result = spawn_interactive_terminal(command, tmp_path)
+
+    assert result == shlex.join(command)
+    assert calls == [
+        (
+            ["/usr/bin/xfce4-terminal", "-e", shlex.join(command)],
             {
                 "cwd": str(tmp_path.resolve()),
                 "start_new_session": True,
