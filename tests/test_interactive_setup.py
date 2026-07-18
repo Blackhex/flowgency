@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from agency.integrations import BaseIntegration, IntegrationError
+from agency.integrations.agency.copilot import CopilotIntegration
 from agency.integrations.models import InteractiveSetupRequest
 
 
@@ -25,6 +26,80 @@ def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -
                 prompt="Set up Agency.",
             )
         )
+
+
+def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "agency.integrations.agency.copilot.spawn_interactive_terminal",
+        lambda command, cwd: captured.update(command=tuple(command), cwd=cwd) or "copilot command",
+    )
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_find_cmd",
+        lambda self: "copilot.exe",
+    )
+
+    integration = CopilotIntegration()
+    request = InteractiveSetupRequest(
+        project_dir=tmp_path,
+        config_path=tmp_path / "agency.yaml",
+        prompt="Use the agency-setup skill.",
+    )
+
+    result = integration.launch_interactive_setup(request)
+
+    assert captured["command"] == (
+        "copilot.exe",
+        "-C",
+        str(tmp_path.resolve()),
+        "-i",
+        "Use the agency-setup skill.",
+        "--name",
+        "Agency setup",
+    )
+    assert captured["cwd"] == tmp_path.resolve()
+    assert result.fallback_command == "copilot command"
+
+
+def test_copilot_interactive_setup_unavailable_without_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_find_cmd",
+        lambda self: str(tmp_path / "copilot.exe"),
+    )
+    (tmp_path / "copilot.exe").write_text("")
+
+    integration = CopilotIntegration()
+
+    assert integration.interactive_setup_available() is False
+
+
+def test_copilot_interactive_setup_unavailable_without_executable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name: "x-terminal-emulator" if name == "x-terminal-emulator" else None,
+    )
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_find_cmd",
+        lambda self: str(tmp_path / "copilot.exe"),
+    )
+
+    integration = CopilotIntegration()
+
+    assert integration.interactive_setup_available() is False
 
 
 def test_terminal_available_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:

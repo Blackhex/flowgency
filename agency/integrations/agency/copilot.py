@@ -10,9 +10,21 @@ from pathlib import Path
 
 from agency.blueprints.projectors import get_projector
 from agency.integrations import (
-    BaseIntegration, RunResult, FileChange, AgentIdentity, IntegrationError, _register,
+    AgentIdentity,
+    BaseIntegration,
+    FileChange,
+    IntegrationError,
+    RunResult,
+    _register,
+    spawn_interactive_terminal,
+    terminal_available,
 )
-from agency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
+from agency.integrations.models import (
+    IntegrationRunRequest,
+    InteractiveSetupRequest,
+    InteractiveSetupResult,
+    RuntimeCapabilities,
+)
 
 
 class CopilotIntegration(BaseIntegration):
@@ -46,6 +58,23 @@ class CopilotIntegration(BaseIntegration):
     def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
         self.prepare_agent_dir(agent_dir)
         self._write_sidecar_identity(agent_dir, self._identity_file(agent_dir), identity)
+
+    def interactive_setup_available(self) -> bool:
+        return terminal_available() and Path(self._find_cmd()).exists()
+
+    def launch_interactive_setup(self, request: InteractiveSetupRequest) -> InteractiveSetupResult:
+        project_dir = request.project_dir.resolve(strict=True)
+        command = [
+            self._find_cmd(),
+            "-C",
+            str(project_dir),
+            "-i",
+            request.prompt,
+            "--name",
+            "Agency setup",
+        ]
+        fallback_command = spawn_interactive_terminal(command, project_dir)
+        return InteractiveSetupResult(fallback_command=fallback_command)
 
     # Copilot native file-edit tools that mutate the filesystem. Read-only
     # tools like "view" are intentionally excluded. Shell edits are not

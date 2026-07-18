@@ -8,6 +8,10 @@ import yaml
 
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.integrations.errors import IntegrationError
+from agency.integrations.interactive import (
+    spawn_interactive_terminal,
+    terminal_available,
+)
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
@@ -267,11 +271,6 @@ class BaseIntegration:
         Raises IntegrationError on failure.
         """
         raise NotImplementedError
-
-
-from agency.integrations.interactive import spawn_interactive_terminal, terminal_available
-
-
 # ── Sidecar Helpers ───────────────────────────────────────────────────────────
 
 def read_sidecar(agent_dir: Path) -> dict:
