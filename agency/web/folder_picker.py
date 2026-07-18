@@ -16,4 +16,7 @@ def pick_directory(initial: Path | None = None) -> Path | None:
         return None
     if not selection:
         return None
-    return Path(selection).expanduser().resolve(strict=True)
+    try:
+        return Path(selection).expanduser().resolve(strict=True)
+    except FileNotFoundError:
+        return None

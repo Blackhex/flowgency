@@ -35,7 +35,7 @@ def launchable_integrations(
     project_dir: Path,
 ) -> tuple[BaseIntegration, ...]:
     resolved_project_dir = Path(project_dir).expanduser().resolve()
-    candidates: list[tuple[bool, int, str, BaseIntegration]] = []
+    candidates: list[tuple[bool, int, str, str, BaseIntegration]] = []
     for integration in integrations.values():
         if not integration.interactive_setup_available():
             continue
@@ -79,5 +79,6 @@ def _concise_validation_error(exc: ValidationFailed) -> str:
 
 
 def _concise_error_message(exc: Exception) -> str:
-    message = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
+    message = str(exc).strip()
+    message = message.splitlines()[0] if message else exc.__class__.__name__
     return message[:160]

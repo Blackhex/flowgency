@@ -94,6 +94,17 @@ def test_launchable_integrations_filter_and_order(tmp_path: Path) -> None:
     assert tuple(item.name for item in result) == ("copilot", "alpha", "beta")
 
 
+def test_launchable_integrations_prefers_lower_priority_for_nondetected(tmp_path: Path) -> None:
+    integrations = {
+        "later": _Integration("later", "Later", 10, interactive=True, detected=False),
+        "earlier": _Integration("earlier", "Earlier", 5, interactive=True, detected=False),
+    }
+
+    result = launchable_integrations(integrations, tmp_path)
+
+    assert tuple(item.name for item in result) == ("earlier", "later")
+
+
 def test_pick_directory_returns_none_when_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_filedialog = types.ModuleType("tkinter.filedialog")
     fake_filedialog.askdirectory = lambda **kwargs: ""
@@ -131,6 +142,40 @@ def test_pick_directory_returns_none_when_graphical_picker_is_unavailable(
     fake_tkinter = types.ModuleType("tkinter")
     fake_tkinter.filedialog = fake_filedialog
     fake_tkinter.TclError = NoPickerError
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tkinter)
+    monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
+
+    assert pick_directory() is None
+
+
+def test_pick_directory_returns_none_when_resolved_directory_disappears(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    selected = tmp_path / "vanishing"
+    selected.mkdir()
+    fake_filedialog = types.ModuleType("tkinter.filedialog")
+    fake_filedialog.askdirectory = lambda **kwargs: str(selected)
+    fake_tkinter = types.ModuleType("tkinter")
+    fake_tkinter.filedialog = fake_filedialog
+    fake_tkinter.TclError = RuntimeError
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tkinter)
+    monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
+    selected.rmdir()
+
+    assert pick_directory() is None
+
+
+def test_pick_directory_returns_none_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_filedialog = types.ModuleType("tkinter.filedialog")
+
+    def raise_oserror(**kwargs: object) -> str:
+        raise OSError("picker unavailable")
+
+    fake_filedialog.askdirectory = raise_oserror
+    fake_tkinter = types.ModuleType("tkinter")
+    fake_tkinter.filedialog = fake_filedialog
+    fake_tkinter.TclError = RuntimeError
     monkeypatch.setitem(sys.modules, "tkinter", fake_tkinter)
     monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
 
