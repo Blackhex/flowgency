@@ -17,7 +17,7 @@ import yaml
 
 from agency.cli_output import ExitCode, render_error
 from agency.blueprints import BlueprintLibrary
-from agency.configuration import ConfigSnapshot, ConfigStore, ValidationFailed, ValidationIssue, config_revision, parse_config_canonical
+from agency.configuration import ConfigSnapshot, ConfigStore, ValidationFailed, ValidationIssue, config_revision, parse_config
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
 from agency.dispatch.install import get_timer_status, install_timer, uninstall_timer
@@ -138,7 +138,7 @@ def _snapshot_read_only(path: Path) -> ConfigSnapshot:
     payload = path.read_bytes()
     loaded = yaml.safe_load(payload.decode("utf-8"))
     raw = loaded if isinstance(loaded, dict) else {}
-    parsed = parse_config_canonical(raw, path)
+    parsed = parse_config(raw, path)
     return ConfigSnapshot(
         path=path,
         revision=config_revision(payload),

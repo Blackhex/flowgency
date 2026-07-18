@@ -1,23 +1,23 @@
 """Strict canonical configuration re-exports."""
 
 from agency.configuration import (
-    AgencyConfigcanonical,
+    AgencyConfig,
     ConfigConflictError,
     ConfigSnapshot,
     ConfigStore,
     ValidationFailed,
     ValidationIssue,
-    parse_config_canonical,
-    validate_config_canonical,
+    parse_config,
+    validate_config,
 )
 
 __all__ = [
-    "AgencyConfigcanonical",
+    "AgencyConfig",
     "ConfigConflictError",
     "ConfigSnapshot",
     "ConfigStore",
     "ValidationFailed",
     "ValidationIssue",
-    "parse_config_canonical",
-    "validate_config_canonical",
+    "parse_config",
+    "validate_config",
 ]

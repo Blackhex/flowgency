@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from .issues import ValidationIssue
-from .models import AgencyConfigcanonical
+from .models import AgencyConfig
 
 
 def job_store_root(memory_store: Path) -> Path:
@@ -100,7 +100,7 @@ def _validate_control_directory(path: Path, field: str) -> list[ValidationIssue]
     return []
 
 
-def validate_resolved_paths(config: AgencyConfigcanonical) -> tuple[ValidationIssue, ...]:
+def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
     library = Path(config.agency.agent_library).resolve()
     cache = Path(config.agency.compilation_cache).resolve()
@@ -204,7 +204,7 @@ def validate_resolved_paths(config: AgencyConfigcanonical) -> tuple[ValidationIs
     )
 
 
-def initialize_control_directories(config: AgencyConfigcanonical) -> None:
+def initialize_control_directories(config: AgencyConfig) -> None:
     for path in (
         Path(config.agency.compilation_cache),
         Path(config.agency.memory_store),

@@ -21,7 +21,6 @@ def test_runtime_config_module_exposes_no_superseded_agent_helper_surface():
 
 def test_runtime_group_exposes_resolved_canonical_agent_instances_without_mutating_raw_input():
     raw_config = {
-        "schema_version": 2,
         "agency": {
             "title": "Agency",
             "default_group": "team",

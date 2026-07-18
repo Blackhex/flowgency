@@ -44,7 +44,6 @@ def canonical_paths(tmp_path):
 @pytest.fixture
 def canonical_raw_config(canonical_paths):
     return {
-        "schema_version": 2,
         "agency": {
             "title": "Agency",
             "default_group": "newsletter",

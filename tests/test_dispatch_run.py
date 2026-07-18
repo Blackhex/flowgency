@@ -110,7 +110,6 @@ def _write_canonical_config(
         for routine in routines
     )
     config_path.write_text(
-        "schema_version: 2\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"

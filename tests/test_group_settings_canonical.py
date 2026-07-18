@@ -193,7 +193,7 @@ def test_setup_post_creates_strict_canonical_group_without_scanning_agents(monke
     assert response.headers["location"] == "/newsletter/agents"
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["schema_version"] == 2
+    assert "schema_version" not in saved
     assert saved["agency"]["default_group"] == "newsletter"
     assert saved["agency"]["agent_library"] == str(library)
     assert saved["agency"]["compilation_cache"] == str(cache)
@@ -212,8 +212,10 @@ def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_pat
     response = client.get("/setup")
 
     assert response.status_code == 200
-    assert "schema_version" in response.text
-    assert "Only schema_version 2 is supported" in response.text
+    assert "schema_version" not in response.text
+    assert "agent_library" in response.text
+    assert "compilation_cache" in response.text
+    assert "memory_store" in response.text
 
 
 def test_setup_page_includes_expected_revision_for_existing_bootstrap_config(

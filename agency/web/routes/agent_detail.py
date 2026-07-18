@@ -16,7 +16,7 @@ from agency.configuration import (
     ConfigConflictError,
     ToolPolicy,
     ValidationFailed,
-    parse_config_canonical,
+    parse_config,
     patch_agent_profile,
     replace_agent_routines,
 )
@@ -689,7 +689,7 @@ async def agent_detail_runtime_save(request: Request, group: str, agent: str, se
         current = services.config_store.load()
         raw = deepcopy(current.raw)
         _apply_runtime_patch(raw, group, agent, patch)
-        parsed = parse_config_canonical(raw, current.path).resolved
+        parsed = parse_config(raw, current.path).resolved
         resolve_effective_policy(parsed, group, agent)
         services.config_store.replace(revision, raw)
     except ValueError as exc:
@@ -772,7 +772,7 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
                 raise ConfigConflictError("config.yaml changed; reload before saving")
             raw = deepcopy(snapshot.raw)
             _patch_default_memory(raw, group, agent, selector)
-            parse_config_canonical(raw, snapshot.path)
+            parse_config(raw, snapshot.path)
             services.config_store.replace(revision, raw)
         elif action == "content":
             _, instance = _get_snapshot_instance(snapshot, group, agent)

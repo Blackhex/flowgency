@@ -15,6 +15,7 @@ SandboxMode = Literal["restricted", "unrestricted"]
 ScheduleKind = Literal["at", "every"]
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+_ROOT_KEYS = {"agency", "memory", "groups"}
 
 
 class AgencyDispatch(BaseModel):
@@ -146,9 +147,8 @@ class GroupConfig(BaseModel):
     workspaces: tuple[WorkspaceConfig, ...] = ()
 
 
-class AgencyConfigcanonical(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
-    schema_version: Literal[2]
+class AgencyConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
     agency: AgencySettings
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     groups: dict[str, GroupConfig]
@@ -157,11 +157,7 @@ class AgencyConfigcanonical(BaseModel):
 class ParsedConfig(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     raw: dict[str, Any]
-    resolved: AgencyConfigcanonical
-
-    @property
-    def schema_version(self) -> Literal[2]:
-        return self.resolved.schema_version
+    resolved: AgencyConfig
 
     @property
     def agency(self) -> AgencySettings:
@@ -876,17 +872,19 @@ def _sorted_issues(issues: list[ValidationIssue]) -> tuple[ValidationIssue, ...]
 
 
 def _collect_schema_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
-    if raw.get("schema_version") == 2:
-        return []
-    return [
-        _build_issue(
-            code="invalid-schema-version",
-            scope="schema_version",
-            field="schema_version",
-            message="Only schema_version 2 is supported.",
-            hint="Run the canonical migration utility before loading config.",
-        )
-    ]
+    issues: list[ValidationIssue] = []
+    for key in raw:
+        if key not in _ROOT_KEYS:
+            issues.append(
+                _build_issue(
+                    code="invalid-config",
+                    scope="config",
+                    field=key,
+                    message="Extra inputs are not permitted.",
+                    hint="Remove the unsupported top-level key.",
+                )
+            )
+    return issues
 
 
 def _prepare_runtime(runtime: Any, base_path: Path | None) -> dict[str, Any]:
@@ -1018,7 +1016,7 @@ def _build_pipeline_result(raw: dict[str, Any], config_path: Path) -> _PipelineR
 
     prepared = _prepare_for_model(raw, config_path)
     try:
-        resolved = AgencyConfigcanonical.model_validate(prepared)
+        resolved = AgencyConfig.model_validate(prepared)
     except ValidationError as exc:
         issues.extend(_collect_pydantic_issues(exc))
         return _PipelineResult(parsed=None, issues=_sorted_issues(issues))
@@ -1029,7 +1027,7 @@ def _build_pipeline_result(raw: dict[str, Any], config_path: Path) -> _PipelineR
     return _PipelineResult(parsed=parsed if not sorted_issues else None, issues=sorted_issues)
 
 
-def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConfig:
+def parse_config(raw: dict[str, Any], config_path: Path) -> ParsedConfig:
     result = _build_pipeline_result(raw, config_path)
     if result.issues:
         raise ValidationFailed(result.issues)
@@ -1037,5 +1035,5 @@ def parse_config_canonical(raw: dict[str, Any], config_path: Path) -> ParsedConf
     return result.parsed
 
 
-def validate_config_canonical(raw: dict[str, Any], config_path: Path) -> tuple[ValidationIssue, ...]:
+def validate_config(raw: dict[str, Any], config_path: Path) -> tuple[ValidationIssue, ...]:
     return _build_pipeline_result(raw, config_path).issues

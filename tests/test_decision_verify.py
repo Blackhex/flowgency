@@ -37,7 +37,6 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 2,
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",

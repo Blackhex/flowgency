@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from agency.configuration.issues import ValidationFailed, ValidationIssue
-from agency.configuration.models import AgencyConfigcanonical, AgentInstance, GroupConfig
+from agency.configuration.models import AgencyConfig, AgentInstance, GroupConfig
 from agency.integrations import get_integration
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
 
@@ -34,7 +34,7 @@ def _merge_roots(*root_sets: tuple[Path, ...]) -> tuple[Path, ...]:
     return tuple(ordered)
 
 
-def _get_group(config: AgencyConfigcanonical, group_id: str) -> GroupConfig:
+def _get_group(config: AgencyConfig, group_id: str) -> GroupConfig:
     try:
         return config.groups[group_id]
     except KeyError as exc:
@@ -94,7 +94,7 @@ def _resolve_sandbox(
 
 
 def resolve_effective_policy(
-    config: AgencyConfigcanonical,
+    config: AgencyConfig,
     group_id: str,
     agent_id: str,
     *,

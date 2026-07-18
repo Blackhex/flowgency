@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from agency.configuration import (
     ConfigConflictError,
     ValidationFailed,
-    parse_config_canonical,
+    parse_config,
 )
 from agency.configuration.models import MemorySelector
 from agency.fs import ResourceBusyError
@@ -336,7 +336,7 @@ async def admin_memory_channel_create(
             )
         channels[channel_key] = {"display_name": display_name or channel_key}
         _patch_channels(raw, channels)
-        parse_config_canonical(raw, snapshot.path)
+        parse_config(raw, snapshot.path)
         services.config_store.replace(revision, raw)
     except ValidationFailed as exc:
         return _render_channel_list(
@@ -453,7 +453,7 @@ async def admin_memory_channel_save(
                     ordered.append((key, value))
             channels = dict(ordered)
         _patch_channels(raw, channels)
-        parse_config_canonical(raw, snapshot.path)
+        parse_config(raw, snapshot.path)
         services.config_store.replace(revision, raw)
     except ValidationFailed as exc:
         return _render_channel_detail(
@@ -551,7 +551,7 @@ async def admin_memory_channel_delete(
                     )
                     del channels[channel_key]
                     _patch_channels(raw, channels)
-                    parse_config_canonical(raw, refreshed.path)
+                    parse_config(raw, refreshed.path)
                     services.config_store.replace(refreshed.revision, raw)
                 services.memory_store.try_locked(resolved, archive_and_patch)
             except (ConfigConflictError, ValidationFailed) as exc:

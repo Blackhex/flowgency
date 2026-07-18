@@ -15,7 +15,7 @@ from agency.configuration import (
     ValidationFailed,
     create_group_state,
     patch_group_settings_state,
-    validate_config_canonical,
+    validate_config,
 )
 from agency.integrations import REGISTRY
 from agency.jobs.store import revision_bound_group_operation
@@ -232,7 +232,7 @@ async def setup_process(
             request,
             services,
             values=values,
-            error="All setup fields are required for strict canonical configuration.",
+            error="All setup fields are required for the canonical configuration.",
         )
     try:
         workspace_config = json.loads(values["workspace_config"])
@@ -247,7 +247,6 @@ async def setup_process(
         )
 
     raw = {
-        "schema_version": 2,
         "agency": {
             "title": "Agency",
             "default_group": values["group_key"],
@@ -274,7 +273,7 @@ async def setup_process(
             }
         },
     }
-    issues = validate_config_canonical(raw, services.config_path)
+    issues = validate_config(raw, services.config_path)
     if issues:
         return _templates(request).TemplateResponse(
             request,
@@ -282,7 +281,7 @@ async def setup_process(
             {
                 "request": request,
                 "agency_title": "Agency",
-                "error": "Setup values do not satisfy the strict canonical schema.",
+                "error": "Setup values do not satisfy the canonical schema.",
                 "issues": [
                     {
                         "field": issue.field,

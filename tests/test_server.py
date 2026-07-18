@@ -211,7 +211,7 @@ def test_run_server_reports_first_run_before_starting_uvicorn(
     assert not config_path.exists()
     output = capsys.readouterr().out
     assert (
-        f"First run — strict schema_version: 2 config not found in {tmp_path}"
+        f"First run — canonical config not found in {tmp_path}"
         in output
     )
     assert "Visit http://localhost:8602/admin/" in output
@@ -249,7 +249,7 @@ def test_setup_post_invalid_and_empty_agent_paths_render_errors(tmp_path, monkey
     )
 
     assert invalid_response.status_code == 200
-    assert "All setup fields are required for strict canonical configuration." in invalid_response.text
+    assert "All setup fields are required for the canonical configuration." in invalid_response.text
     assert empty_response.status_code == 200
     assert "Workspace config must be a JSON object." in empty_response.text
 
@@ -282,7 +282,6 @@ def test_setup_post_valid_path_creates_group_and_redirects(tmp_path, monkeypatch
     assert response.status_code == 303
     assert response.headers["location"] == "/newsletter/agents"
     assert yaml.safe_load(config_path.read_text(encoding="utf-8")) == {
-        "schema_version": 2,
         "agency": {
             "title": "Agency",
             "default_group": "newsletter",

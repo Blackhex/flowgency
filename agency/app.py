@@ -111,7 +111,7 @@ def _has_config_file() -> bool:
 def _config_error_message(error: Exception) -> str:
     return (
         f"Configuration is not available: {error}. "
-        "Create or migrate a strict schema_version: 2 config and reload."
+        "Create or migrate a canonical config and reload."
     )
 
 
@@ -2468,7 +2468,7 @@ def _run_reload_server(host: str, port: int) -> None:
 def run_server(host: str, port: int, reload: bool = False) -> None:
     """Initialize Agency and run the web server."""
     if not CONFIG_PATH.exists():
-        print(f"First run — strict schema_version: 2 config not found in {CONFIG_PATH.parent}")
+        print(f"First run — canonical config not found in {CONFIG_PATH.parent}")
         print(f"Visit http://localhost:{port}/admin/ to set up your first agent group.")
 
     refresh_services()

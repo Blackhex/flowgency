@@ -36,7 +36,6 @@ def _setup_group(tmp_path: Path) -> Path:
     )
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 2\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"

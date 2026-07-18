@@ -100,7 +100,6 @@ def _superseded_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 2,
                 "agency": {
                     "title": "Agency",
                     "default_group": "newsletter",
@@ -279,13 +278,13 @@ def test_active_docs_state_canonical_surfaces_and_exact_migration_commands():
 
 def test_setup_skill_strict_canonical_yaml_is_parseable_and_structurally_current():
     skill = (REPO_ROOT / "skills" / "agency-setup" / "SKILL.md").read_text(encoding="utf-8")
-    match = re.search(r"Use this strict-canonical shape:\s*```yaml\n(?P<yaml>.*?)\n```", skill, re.DOTALL)
+    match = re.search(r"Use this canonical shape:\s*```yaml\n(?P<yaml>.*?)\n```", skill, re.DOTALL)
     assert match is not None
     yaml_text = match.group("yaml")
     assert "\t" not in yaml_text
 
     config = yaml.safe_load(yaml_text)
-    assert config["schema_version"] == 2
+    assert "schema_version" not in config
     assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
     group = config["groups"]["example"]

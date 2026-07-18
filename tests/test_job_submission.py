@@ -96,7 +96,6 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 2\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: newsletter\n"

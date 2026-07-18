@@ -254,7 +254,7 @@ def test_filechange_fields():
 
 
 def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, canonical_paths):
-    from agency.configuration import ValidationFailed, parse_config_canonical
+    from agency.configuration import ValidationFailed, parse_config
 
     group = canonical_raw_config["groups"]["newsletter"]
     group["runtime"] = {
@@ -265,7 +265,7 @@ def test_integration_rejects_policy_it_cannot_enforce(canonical_raw_config, cano
     agent["name"] = "builder"
     agent["integration"] = "claude-code"
 
-    parsed = parse_config_canonical(canonical_raw_config, canonical_paths["config_path"])
+    parsed = parse_config(canonical_raw_config, canonical_paths["config_path"])
 
     with pytest.raises(ValidationFailed) as excinfo:
         resolve_effective_policy(parsed.resolved, "newsletter", "builder")

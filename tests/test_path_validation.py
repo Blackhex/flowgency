@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.configuration.models import parse_config_canonical
+from agency.configuration.models import parse_config
 from agency.configuration.paths import job_store_root, validate_resolved_paths
 
 
@@ -27,7 +27,7 @@ def _resolved_config(tmp_path: Path, canonical_raw_config: dict):
     group["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": [str(restricted)]}
     }
-    return raw, parse_config_canonical(raw, tmp_path / "config.yaml").resolved
+    return raw, parse_config(raw, tmp_path / "config.yaml").resolved
 
 
 def test_job_store_is_under_memory_control_plane(tmp_path, canonical_raw_config):
@@ -44,7 +44,7 @@ def test_missing_or_non_directory_group_path_fails_closed(tmp_path, canonical_ra
     if kind == "file":
         group_path.write_text("not a directory", encoding="utf-8")
     raw["groups"]["newsletter"]["path"] = str(group_path)
-    config = parse_config_canonical(raw, tmp_path / "config.yaml").resolved
+    config = parse_config(raw, tmp_path / "config.yaml").resolved
 
     issues = validate_resolved_paths(config)
 
@@ -56,7 +56,7 @@ def test_missing_restricted_root_fails_closed(tmp_path, canonical_raw_config):
     raw["groups"]["newsletter"]["runtime"]["sandbox"]["roots"] = [
         str(tmp_path / "missing-root")
     ]
-    config = parse_config_canonical(raw, tmp_path / "config.yaml").resolved
+    config = parse_config(raw, tmp_path / "config.yaml").resolved
 
     issues = validate_resolved_paths(config)
 
@@ -77,7 +77,7 @@ def test_control_and_runtime_overlap_is_rejected_in_both_directions(
     runtime.mkdir(parents=True)
     Path(raw["agency"]["memory_store"]).mkdir(parents=True, exist_ok=True)
     raw["groups"]["newsletter"]["path"] = str(runtime)
-    config = parse_config_canonical(raw, tmp_path / "config.yaml").resolved
+    config = parse_config(raw, tmp_path / "config.yaml").resolved
 
     issues = validate_resolved_paths(config)
 
@@ -93,7 +93,7 @@ def test_unwritable_nearest_parent_is_rejected_where_portable(tmp_path, canonica
     parent.chmod(0o500)
     try:
         raw["agency"]["compilation_cache"] = str(parent / "missing-cache")
-        config = parse_config_canonical(raw, tmp_path / "config.yaml").resolved
+        config = parse_config(raw, tmp_path / "config.yaml").resolved
         issues = validate_resolved_paths(config)
     finally:
         parent.chmod(0o700)

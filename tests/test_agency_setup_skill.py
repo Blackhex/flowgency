@@ -24,7 +24,8 @@ def test_setup_creates_standard_global_agent_library_blueprints():
 
 def test_setup_registers_explicit_canonical_instances_routines_and_memory():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    assert "schema_version: 2" in skill
+    assert "one authoritative canonical Agency config" in skill
+    assert "agency.agent_library" in skill
     assert "blueprint:" in skill
     assert "integration:" in skill
     assert "routines:" in skill
@@ -48,7 +49,7 @@ def test_setup_hands_superseded_config_to_migration_skill():
 def test_setup_maintains_one_authoritative_strict_canonical_config():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     assert "one authoritative" in skill
-    assert "schema_version == 2" in skill
+    assert "canonical Agency config" in skill
     assert "revision" in skill
     assert "atomically" in skill
 

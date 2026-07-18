@@ -32,7 +32,6 @@ def _setup_jobs_group(
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 2,
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",
@@ -248,7 +247,7 @@ def test_serve_missing_config_bootstraps_selected_path_not_cwd(tmp_path):
 
     assert result.returncode == 0
     output = result.stdout + result.stderr
-    assert "strict schema_version: 2 config not found" in output
+    assert "canonical config not found" in output
     assert "/admin/" in output
     assert not selected_path.exists()
     assert not (tmp_path / "config.yaml").exists()
@@ -280,7 +279,6 @@ def _write_dispatch_config(path):
     path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 2,
                 "agency": {
                     "agent_library": "agent-library",
                     "compilation_cache": "compiled-agents",

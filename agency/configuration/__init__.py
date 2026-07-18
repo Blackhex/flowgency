@@ -2,10 +2,10 @@
 
 from .issues import ValidationFailed, ValidationIssue
 from .models import (
-    AgencyConfigcanonical,
+    AgencyConfig,
     ParsedConfig,
-    parse_config_canonical,
-    validate_config_canonical,
+    parse_config,
+    validate_config,
 )
 from .patches import (
     AgencySettingsPatch,
@@ -43,7 +43,7 @@ from .store import (
 )
 
 __all__ = [
-    "AgencyConfigcanonical",
+    "AgencyConfig",
     "ABSENT_REVISION",
     "AgencySettingsPatch",
     "AgentProfilePatch",
@@ -75,8 +75,8 @@ __all__ = [
     "patch_group_settings",
     "patch_group_settings_state",
     "patch_memory_channels",
-    "parse_config_canonical",
+    "parse_config",
     "remove_agent_instance",
     "replace_agent_routines",
-    "validate_config_canonical",
+    "validate_config",
 ]

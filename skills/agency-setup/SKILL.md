@@ -6,7 +6,7 @@ user_invocable: true
 
 # Agency Setup
 
-Create a standards-based global Agent Library and register explicit agent instances in one authoritative strict-canonical Agency config. Do not create physical per-agent runtime directories.
+Create a standards-based global Agent Library and register explicit agent instances in one authoritative canonical Agency config. Do not create physical per-agent runtime directories.
 
 ## 1. Inspect
 
@@ -16,9 +16,9 @@ Ask the user to approve the team, each role's routine tasks, runtime integration
 
 ## 2. Resolve Agency
 
-Find one authoritative config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where `schema_version == 2` and the required `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store` paths are present.
+Find one authoritative config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where the required `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store` paths are present.
 
-If a candidate is superseded or lacks `schema_version: 2`, stop registration and invoke the `agency-migration` skill. Do not migrate superseded configuration in this skill and do not create a second config. If multiple strict-canonical configs remain, ask the user which is authoritative; never choose implicitly.
+If a candidate is superseded or otherwise incompatible, stop registration and invoke the `agency-migration` skill. Do not migrate superseded configuration in this skill and do not create a second config. If multiple canonical configs remain, ask the user which is authoritative; never choose implicitly.
 
 Load the config revision before editing. Re-read and compare the revision immediately before replacement, preserve unrelated keys and groups, validate the complete canonical result, write atomically, then parse and verify the file from disk.
 
@@ -42,10 +42,9 @@ Blueprint files contain reusable instructions only. They do not contain identity
 
 Upsert one group that points `path` at the project workspace. Preserve existing group workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the group; instance roots are additive and an instance tool policy is a complete override.
 
-Use this strict-canonical shape:
+Use this canonical shape:
 
 ```yaml
-schema_version: 2
 agency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
