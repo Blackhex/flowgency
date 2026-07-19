@@ -12,6 +12,8 @@ The `agency-setup` skill owns the one authoritative canonical Agency config. Aft
 
 Read project instructions, README, dependency manifests, source layout, tests, deployment files, and recent git history. Detect the host OS and available agent CLI. Summarize the project, then propose three to five distinct roles. Exactly one builder normally receives write capability; observational roles remain fail-closed.
 
+Before registration, ask the user how many agents to create for the first team and which proposed roles to create now. Do not infer extra instances beyond the approved count and selected roles.
+
 Ask the user to approve the team, each role's routine tasks, schedules, workspace definitions, and any shared memory channels. When the launch prompt contains `Selected integration:`, use that registered integration for `group.default_integration` and the initial agent instances unless the user explicitly approves a different registered integration.
 
 ## 2. Resolve Agency
@@ -134,3 +136,4 @@ christag-agency dispatch status --config "{config_path}"
 There must be exactly one Agency dashboard and one singleton scheduler; do not create a fallback project scheduler.
 
 Report blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.
+

@@ -40,6 +40,14 @@ def test_setup_registers_explicit_instances_routines_and_memory():
     assert "dispatch.agents" not in skill
 
 
+
+def test_setup_requires_user_selected_agent_count_and_roles():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split()).lower()
+
+    assert "how many agents to create" in normalized
+    assert "which proposed roles to create now" in normalized
+    assert "do not infer extra instances" in normalized
 def test_setup_skill_owns_group_naming_storage_workspaces_and_atomic_write():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split()).lower()
@@ -204,3 +212,4 @@ def test_docs_clarify_execution_agent_blocks_not_skips():
     # Prohibited: obsolete skip row implying missing executor creates a skipped decision
     assert "No writable `execution_agent` is available | `skipped`" not in data_formats, \
         "data-formats.md must not contain the inaccurate obsolete skip table row"
+
