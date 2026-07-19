@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import copy
-import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -10,7 +8,7 @@ import yaml
 
 from agency.configuration import ConfigStore
 from agency.integrations import BaseIntegration
-from agency.web.folder_picker import pick_directory
+from agency.web.directory_browser import DirectoryBrowseError, list_directories
 from agency.web.setup_flow import (
     build_setup_prompt,
     inspect_setup_status,
@@ -120,78 +118,54 @@ def test_launchable_integrations_prefers_lower_priority_for_nondetected(tmp_path
     assert tuple(item.name for item in result) == ("earlier", "later")
 
 
-def test_pick_directory_returns_none_when_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_filedialog = types.ModuleType("tkinter.filedialog")
-    fake_filedialog.askdirectory = lambda **kwargs: ""
-    fake_tkinter = types.ModuleType("tkinter")
-    fake_tkinter.filedialog = fake_filedialog
-    fake_tkinter.TclError = RuntimeError
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tkinter)
-    monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
-
-    assert pick_directory() is None
-
-
-def test_pick_directory_returns_resolved_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    selected = tmp_path / "nested"
-    selected.mkdir()
-    fake_filedialog = types.ModuleType("tkinter.filedialog")
-    fake_filedialog.askdirectory = lambda **kwargs: str(selected)
-    fake_tkinter = types.ModuleType("tkinter")
-    fake_tkinter.filedialog = fake_filedialog
-    fake_tkinter.TclError = RuntimeError
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tkinter)
-    monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
-
-    assert pick_directory() == selected.resolve()
-
-
-def test_pick_directory_returns_none_when_graphical_picker_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
+def test_list_directories_returns_only_sorted_child_directories(
+    tmp_path: Path,
 ) -> None:
-    class NoPickerError(RuntimeError):
-        pass
+    (tmp_path / "zeta").mkdir()
+    (tmp_path / "Alpha").mkdir()
+    (tmp_path / "notes.txt").write_text("not a directory", encoding="utf-8")
 
-    fake_filedialog = types.ModuleType("tkinter.filedialog")
-    fake_filedialog.askdirectory = lambda **kwargs: (_ for _ in ()).throw(NoPickerError("no display"))
-    fake_tkinter = types.ModuleType("tkinter")
-    fake_tkinter.filedialog = fake_filedialog
-    fake_tkinter.TclError = NoPickerError
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tkinter)
-    monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
+    listing = list_directories(str(tmp_path), default_path=tmp_path)
 
-    assert pick_directory() is None
+    assert listing.path == tmp_path.resolve()
+    assert listing.parent == tmp_path.resolve().parent
+    assert [item.name for item in listing.directories] == ["Alpha", "zeta"]
+    assert [item.path for item in listing.directories] == [
+        (tmp_path / "Alpha").resolve(),
+        (tmp_path / "zeta").resolve(),
+    ]
 
 
-def test_pick_directory_returns_none_when_resolved_directory_disappears(
+def test_list_directories_uses_default_path_when_request_is_empty(
+    tmp_path: Path,
+) -> None:
+    listing = list_directories("", default_path=tmp_path)
+
+    assert listing.path == tmp_path.resolve()
+
+
+def test_list_directories_rejects_relative_or_missing_paths(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(DirectoryBrowseError, match="absolute"):
+        list_directories("relative", default_path=tmp_path)
+    with pytest.raises(DirectoryBrowseError, match="does not exist"):
+        list_directories(str(tmp_path / "missing"), default_path=tmp_path)
+
+
+def test_list_directories_reports_permission_denied_during_resolution(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    selected = tmp_path / "vanishing"
-    selected.mkdir()
-    fake_filedialog = types.ModuleType("tkinter.filedialog")
-    fake_filedialog.askdirectory = lambda **kwargs: str(selected)
-    fake_tkinter = types.ModuleType("tkinter")
-    fake_tkinter.filedialog = fake_filedialog
-    fake_tkinter.TclError = RuntimeError
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tkinter)
-    monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
-    selected.rmdir()
+    restricted = tmp_path / "restricted"
+    original_resolve = Path.resolve
 
-    assert pick_directory() is None
+    def deny_restricted_path(self: Path, *args, **kwargs):
+        if self == restricted:
+            raise PermissionError("access denied")
+        return original_resolve(self, *args, **kwargs)
 
+    monkeypatch.setattr(Path, "resolve", deny_restricted_path)
 
-def test_pick_directory_returns_none_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_filedialog = types.ModuleType("tkinter.filedialog")
-
-    def raise_oserror(**kwargs: object) -> str:
-        raise OSError("picker unavailable")
-
-    fake_filedialog.askdirectory = raise_oserror
-    fake_tkinter = types.ModuleType("tkinter")
-    fake_tkinter.filedialog = fake_filedialog
-    fake_tkinter.TclError = RuntimeError
-    monkeypatch.setitem(sys.modules, "tkinter", fake_tkinter)
-    monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
-
-    assert pick_directory() is None
+    with pytest.raises(DirectoryBrowseError, match="cannot be accessed"):
+        list_directories(str(restricted), default_path=tmp_path)

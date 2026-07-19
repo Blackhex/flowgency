@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from agency import app as app_mod
 from agency.integrations import IntegrationError
-from agency.web.folder_picker import pick_directory
 
 
 def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
@@ -279,6 +278,14 @@ def test_setup_get_renders_only_project_and_integration_fields(tmp_path, monkeyp
     assert 'name="integration"' in response.text
     assert 'name="group_name"' not in response.text
     assert 'name="workspace_config"' not in response.text
+    assert 'id="browse-feedback"' in response.text
+    assert 'id="directory-browser"' in response.text
+    assert 'id="choose-current-directory"' in response.text
+    assert "document.createElement" in response.text
+    assert ".textContent =" in response.text
+    assert "chooseCurrentDirectory.disabled = true" in response.text
+    assert "chooseCurrentDirectory.disabled = false" in response.text
+    assert "if (!currentDirectory)" in response.text
 
 
 def test_setup_get_redirects_to_dashboard_when_setup_is_ready(
@@ -432,46 +439,56 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
     assert integration.fallback_requests == integration.requests
 
 
-def test_setup_browse_returns_null_when_cancelled(tmp_path, monkeypatch):
-    _configure_missing_config(tmp_path, monkeypatch)
-
-    async def fake_run_in_threadpool(func, *args, **kwargs):
-        assert func is pick_directory
-        assert args == ()
-        return None
-
-    monkeypatch.setattr(
-        "agency.web.routes.admin_groups.run_in_threadpool",
-        fake_run_in_threadpool,
-    )
-    client = TestClient(app_mod.app)
-
-    response = client.post("/setup/browse")
-
-    assert response.status_code == 200
-    assert response.json() == {"path": None}
-
-
-def test_setup_browse_returns_selected_path(tmp_path, monkeypatch):
+def test_setup_browse_returns_directory_listing(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
     selected = tmp_path / "chosen"
     selected.mkdir()
+    (selected / "Beta").mkdir()
+    (selected / "alpha").mkdir()
+    client = TestClient(app_mod.app, client=("127.0.0.1", 50000))
 
-    async def fake_run_in_threadpool(func, *args, **kwargs):
-        assert func is pick_directory
-        assert args == ()
-        return selected.resolve()
-
-    monkeypatch.setattr(
-        "agency.web.routes.admin_groups.run_in_threadpool",
-        fake_run_in_threadpool,
-    )
-    client = TestClient(app_mod.app)
-
-    response = client.post("/setup/browse")
+    response = client.post("/setup/browse", data={"path": str(selected)})
 
     assert response.status_code == 200
-    assert response.json() == {"path": str(selected.resolve())}
+    assert response.json() == {
+        "path": str(selected.resolve()),
+        "parent": str(selected.resolve().parent),
+        "roots": [str(selected.resolve().anchor)],
+        "directories": [
+            {
+                "name": "alpha",
+                "path": str((selected / "alpha").resolve()),
+            },
+            {
+                "name": "Beta",
+                "path": str((selected / "Beta").resolve()),
+            },
+        ],
+    }
+
+
+def test_setup_browse_rejects_invalid_path(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    client = TestClient(app_mod.app, client=("127.0.0.1", 50000))
+
+    response = client.post("/setup/browse", data={"path": "relative"})
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "Choose an absolute directory.",
+    }
+
+
+def test_setup_browse_rejects_non_loopback_clients(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    client = TestClient(app_mod.app, client=("192.0.2.1", 50000))
+
+    response = client.post("/setup/browse", data={"path": str(tmp_path)})
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "error": "Folder browsing is available only from this computer.",
+    }
 
 
 def test_setup_status_returns_waiting_when_config_is_absent(tmp_path, monkeypatch):

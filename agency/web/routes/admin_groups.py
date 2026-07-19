@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from ipaddress import ip_address
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -20,7 +21,7 @@ from agency.integrations import BaseIntegration, REGISTRY
 from agency.integrations.models import InteractiveSetupRequest
 from agency.jobs.store import revision_bound_group_operation
 from agency.web.dependencies import AgencyServices, build_services, get_services
-from agency.web.folder_picker import pick_directory
+from agency.web.directory_browser import DirectoryBrowseError, list_directories
 from agency.web.setup_flow import (
     build_setup_prompt,
     inspect_setup_status,
@@ -355,11 +356,50 @@ async def setup_launch(
 
 
 @router.post("/setup/browse")
-async def setup_browse() -> JSONResponse:
-    selected = await run_in_threadpool(pick_directory)
+async def setup_browse(
+    request: Request,
+    services: AgencyServices = Depends(get_services),
+) -> JSONResponse:
+    client_host = request.client.host if request.client is not None else ""
+    try:
+        is_loopback = ip_address(client_host).is_loopback
+    except ValueError:
+        is_loopback = False
+    if not is_loopback:
+        return JSONResponse(
+            {
+                "error": "Folder browsing is available only from this computer.",
+            },
+            status_code=403,
+        )
+
+    form = await request.form()
+    requested_path = str(form.get("path", "")).strip()
+    try:
+        listing = await run_in_threadpool(
+            list_directories,
+            requested_path,
+            default_path=services.config_path.parent,
+        )
+    except DirectoryBrowseError as exc:
+        return JSONResponse(
+            {
+                "error": str(exc),
+            },
+            status_code=400,
+        )
     return JSONResponse(
         {
-            "path": None if selected is None else str(selected),
+            "path": str(listing.path),
+            "parent": str(listing.parent),
+            "roots": [str(root) for root in listing.roots],
+            "directories": [
+                {
+                    "name": directory.name,
+                    "path": str(directory.path),
+                }
+                for directory in listing.directories
+            ],
         }
     )
 

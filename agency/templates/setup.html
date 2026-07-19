@@ -138,6 +138,7 @@
               Browse…
             </button>
           </div>
+          <p id="browse-feedback" class="mt-2 text-sm text-gray-500" aria-live="polite"></p>
         </div>
 
         <div>
@@ -164,10 +165,40 @@
     </div>
   </div>
 
+  <div id="directory-browser" class="hidden fixed inset-0 z-50 bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="directory-browser-title">
+    <div class="mx-auto mt-16 w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h2 id="directory-browser-title" class="text-lg font-bold text-gray-900">Choose project folder</h2>
+          <p id="directory-current-path" class="mt-1 break-all font-mono text-xs text-gray-500"></p>
+        </div>
+        <button type="button" id="close-directory-browser" class="rounded-lg px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100">Close</button>
+      </div>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <button type="button" id="directory-root" class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Root</button>
+        <button type="button" id="directory-up" class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Up</button>
+      </div>
+      <p id="directory-browser-feedback" class="mt-3 text-sm text-red-700" aria-live="polite"></p>
+      <div id="directory-list" class="mt-3 max-h-80 overflow-y-auto rounded-xl border border-gray-200 p-2"></div>
+      <div class="mt-4 flex justify-end">
+        <button type="button" id="choose-current-directory" disabled class="rounded-lg bg-agency-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-agency-700 disabled:cursor-not-allowed disabled:bg-gray-300">Choose this folder</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     (() => {
       const browseButton = document.getElementById("browse-project");
+      const browseFeedback = document.getElementById("browse-feedback");
       const projectInput = document.getElementById("project_dir");
+      const directoryBrowser = document.getElementById("directory-browser");
+      const directoryCurrentPath = document.getElementById("directory-current-path");
+      const directoryBrowserFeedback = document.getElementById("directory-browser-feedback");
+      const directoryList = document.getElementById("directory-list");
+      const directoryRoot = document.getElementById("directory-root");
+      const directoryUp = document.getElementById("directory-up");
+      const closeDirectoryBrowser = document.getElementById("close-directory-browser");
+      const chooseCurrentDirectory = document.getElementById("choose-current-directory");
       const integrationSelect = document.getElementById("integration");
       const integrationName = document.getElementById("integration-name");
       const copyButton = document.getElementById("copy-fallback");
@@ -185,16 +216,83 @@
       }
 
       if (browseButton && projectInput) {
-        browseButton.addEventListener("click", async () => {
-          browseButton.disabled = true;
+        let currentDirectory = "";
+        let parentDirectory = "";
+        let rootDirectory = "";
+
+        const closeBrowser = () => {
+          directoryBrowser.classList.add("hidden");
+          browseButton.focus();
+        };
+
+        const loadDirectory = async (path) => {
+          currentDirectory = "";
+          chooseCurrentDirectory.disabled = true;
+          directoryBrowserFeedback.textContent = "";
+          directoryList.replaceChildren();
+          const loading = document.createElement("p");
+          loading.className = "px-3 py-2 text-sm text-gray-500";
+          loading.textContent = "Loading folders…";
+          directoryList.appendChild(loading);
           try {
-            const response = await fetch("/setup/browse", { method: "POST" });
+            const body = new FormData();
+            body.set("path", path || "");
+            const response = await fetch("/setup/browse", {
+              method: "POST",
+              body,
+            });
             const payload = await response.json();
-            if (payload.path) {
-              projectInput.value = payload.path;
+            if (!response.ok) {
+              throw new Error(payload.error || "The directory cannot be opened.");
             }
-          } finally {
-            browseButton.disabled = false;
+            currentDirectory = payload.path;
+            parentDirectory = payload.parent;
+            rootDirectory = payload.roots[0] || payload.path;
+            chooseCurrentDirectory.disabled = false;
+            directoryCurrentPath.textContent = payload.path;
+            directoryUp.disabled = payload.parent === payload.path;
+            directoryList.replaceChildren();
+            if (!payload.directories.length) {
+              const empty = document.createElement("p");
+              empty.className = "px-3 py-2 text-sm text-gray-500";
+              empty.textContent = "No child folders.";
+              directoryList.appendChild(empty);
+            }
+            for (const directory of payload.directories) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-800 hover:bg-agency-50";
+              button.textContent = directory.name;
+              button.addEventListener("click", () => loadDirectory(directory.path));
+              directoryList.appendChild(button);
+            }
+          } catch (error) {
+            directoryList.replaceChildren();
+            directoryBrowserFeedback.textContent = error instanceof Error
+              ? error.message
+              : "The directory cannot be opened.";
+          }
+        };
+
+        browseButton.addEventListener("click", () => {
+          directoryBrowser.classList.remove("hidden");
+          browseFeedback.textContent = "";
+          loadDirectory(projectInput.value);
+        });
+        directoryRoot.addEventListener("click", () => loadDirectory(rootDirectory));
+        directoryUp.addEventListener("click", () => loadDirectory(parentDirectory));
+        closeDirectoryBrowser.addEventListener("click", closeBrowser);
+        chooseCurrentDirectory.addEventListener("click", () => {
+          if (!currentDirectory) {
+            return;
+          }
+          projectInput.value = currentDirectory;
+          browseFeedback.textContent = "Project folder selected.";
+          closeBrowser();
+        });
+        directoryBrowser.addEventListener("click", (event) => {
+          if (event.target === directoryBrowser) {
+            closeBrowser();
           }
         });
       }
