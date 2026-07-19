@@ -59,6 +59,36 @@ def test_setup_skill_owns_group_naming_storage_workspaces_and_atomic_write():
         assert phrase in normalized
 
 
+def test_first_run_uses_exact_prompt_path_and_selected_integration():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "Authoritative config:" in normalized
+    assert "use that exact path" in normalized
+    assert "do not search for or choose another config" in normalized
+    assert "Selected integration:" in normalized
+    assert "group.default_integration" in normalized
+    assert "initial agent instances" in normalized
+
+
+def test_setup_defers_the_only_config_write_until_final_verification():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "defer creation and replacement until Section 5" in normalized
+    assert "Do not write a placeholder or partial config" in normalized
+    assert normalized.count("Write one complete configuration atomically.") == 1
+
+
+def test_setup_persists_every_approved_workspace():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+
+    assert "Write every approved workspace under the group's `workspaces` list." in skill
+    assert "workspaces:" in skill
+    assert "type: ide" in skill
+    assert "project_path: C:/Projects/example" in skill
+
+
 def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_skills():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     kb = SETUP_KB_PATH.read_text(encoding="utf-8")
@@ -73,6 +103,7 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
         assert phrase in combined
     assert "agency-migration" not in combined
     assert "tools/migrate_agent_model.py" not in combined
+    assert "schema_version" not in combined
 
 
 def test_setup_maintains_one_authoritative_canonical_config():

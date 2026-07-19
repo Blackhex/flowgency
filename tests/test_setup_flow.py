@@ -17,13 +17,21 @@ from agency.web.setup_flow import (
 
 
 def test_build_setup_prompt_names_project_and_config(tmp_path: Path) -> None:
-    prompt = build_setup_prompt(tmp_path, tmp_path / "config.yaml")
+    prompt = build_setup_prompt(
+        tmp_path,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
 
     assert "agency-setup" in prompt
     assert "Discuss and obtain approval for the group name" in prompt
     assert "storage paths" in prompt
     assert str(tmp_path.resolve()) in prompt
     assert str((tmp_path / "config.yaml").resolve()) in prompt
+    assert "Selected integration: copilot." in prompt
+    assert "group.default_integration" in prompt
+    assert "initial agent instances" in prompt
+    assert "unless the user explicitly approves a different registered integration" in prompt
     assert "one complete configuration" in prompt
     assert "validation" in prompt.lower()
     assert "one atomic write" in prompt.lower()

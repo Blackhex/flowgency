@@ -8,6 +8,8 @@ import yaml
 from fastapi.testclient import TestClient
 
 from agency import app as app_mod
+from agency.configuration import parse_config, validate_config
+from agency.configuration.paths import validate_resolved_paths
 
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -200,7 +202,7 @@ def test_retired_templates_are_deleted_and_navigation_uses_current_surfaces():
         assert mobile_contract in navigation
 
 
-def test_setup_skill_yaml_is_parseable_and_structurally_current():
+def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     skill = (REPO_ROOT / "skills" / "agency-setup" / "SKILL.md").read_text(encoding="utf-8")
     match = re.search(r"Use this canonical shape:\s*```yaml\n(?P<yaml>.*?)\n```", skill, re.DOTALL)
     assert match is not None
@@ -220,6 +222,31 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current():
     selectors = [routine["memory"] for routine in builder["routines"]]
     assert {selector["scope"] for selector in selectors} == {"routine", "channel"}
     assert next(selector for selector in selectors if selector["scope"] == "channel")["channel"] == "project-strategy"
+    assert group["workspaces"] == [
+        {
+            "name": "Main workspace",
+            "type": "ide",
+            "config": {
+                "ide_name": "VS Code",
+                "project_path": "C:/Projects/example",
+            },
+        }
+    ]
+
+    library = tmp_path / "library"
+    library.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config["agency"]["agent_library"] = str(library)
+    config["agency"]["compilation_cache"] = str(tmp_path / "cache")
+    config["agency"]["memory_store"] = str(tmp_path / "memory")
+    config["groups"]["example"]["path"] = str(workspace)
+    config["groups"]["example"]["runtime"]["sandbox"]["roots"] = [str(workspace)]
+    config_path = tmp_path / "config.yaml"
+
+    assert validate_config(config, config_path) == ()
+    parsed = parse_config(config, config_path)
+    assert validate_resolved_paths(parsed.resolved) == ()
 
 
 def test_active_documentation_omits_unexpected_ascii_control_characters():

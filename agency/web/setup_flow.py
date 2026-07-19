@@ -19,11 +19,19 @@ class SetupStatus:
     message: str = ""
 
 
-def build_setup_prompt(project_dir: Path, config_path: Path) -> str:
+def build_setup_prompt(
+    project_dir: Path,
+    config_path: Path,
+    *,
+    selected_integration: str,
+) -> str:
     return (
         "Use the agency-setup skill to configure Agency for this project. "
         f"Project workspace: {project_dir.resolve()}. "
         f"Authoritative config: {config_path.resolve()}. "
+        f"Selected integration: {selected_integration}. "
+        "Use it for group.default_integration and the initial agent instances unless "
+        "the user explicitly approves a different registered integration. "
         "Discuss and obtain approval for the group name, storage paths, agent team, "
         "integrations, routines, runtime policy, workspaces, and memory. Perform "
         "validation on the final config and make one atomic write for one complete configuration. Do not "

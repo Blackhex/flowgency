@@ -394,6 +394,7 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     assert integration.requests[0].project_dir == project_dir.resolve()
     assert integration.requests[0].config_path == config_path.resolve()
     assert "agency-setup" in integration.requests[0].prompt
+    assert "Selected integration: copilot." in integration.requests[0].prompt
     assert integration.fallback_requests == []
 
 def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(

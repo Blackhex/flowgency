@@ -12,15 +12,15 @@ The `agency-setup` skill owns the one authoritative canonical Agency config. Aft
 
 Read project instructions, README, dependency manifests, source layout, tests, deployment files, and recent git history. Detect the host OS and available agent CLI. Summarize the project, then propose three to five distinct roles. Exactly one builder normally receives write capability; observational roles remain fail-closed.
 
-Ask the user to approve the team, each role's routine tasks, runtime integration, schedules, workspace paths, and any shared memory channels.
+Ask the user to approve the team, each role's routine tasks, schedules, workspace definitions, and any shared memory channels. When the launch prompt contains `Selected integration:`, use that registered integration for `group.default_integration` and the initial agent instances unless the user explicitly approves a different registered integration.
 
 ## 2. Resolve Agency
 
-Find one authoritative config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where the required `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store` paths are present.
+When the launch prompt contains `Authoritative config:`, use that exact path and do not search for or choose another config. When the skill is invoked manually without an explicit authoritative path, find one config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where the required `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store` paths are present.
 
-If no config exists, create the canonical config at the authoritative path. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill, never scan or convert superseded authority, and never convert old layouts. If multiple canonical configs remain, ask the user which is authoritative; never choose implicitly.
+If no config exists, record the absent revision and defer creation and replacement until Section 5. Do not write a placeholder or partial config. If an existing candidate is invalid or superseded, report validation errors and stop; never invoke another skill, never scan or convert superseded authority, and never convert old layouts. During manual invocation, if multiple canonical configs remain, ask the user which is authoritative; never choose implicitly.
 
-Load the config revision before editing. Re-read and compare the revision immediately before replacement, preserve unrelated keys and groups, validate the complete config result, write atomically, then parse and verify the file from disk.
+Load the current revision before editing, or use the absent revision when the file does not exist. Preserve unrelated keys and groups while building the complete candidate in memory. Do not replace the authoritative config during inspection, blueprint creation, or instance registration.
 
 ## 3. Build The Agent Library
 
@@ -46,6 +46,9 @@ Use this canonical shape:
 
 ```yaml
 agency:
+  title: Agency
+  default_group: example
+  ai_backend: copilot
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
@@ -105,15 +108,23 @@ groups:
         integration: copilot
         capabilities:
           write: false
+    workspaces:
+      - name: Main workspace
+        type: ide
+        config:
+          ide_name: VS Code
+          project_path: C:/Projects/example
 ```
 
 Record each approved Phase 2 routine assignment under that instance's `routines`. A routine selects one standard skill, one schedule (`at`, `every`, or supported condition), optional arguments, and optional semantic memory. Never write prompt filenames or per-agent dispatch maps.
 
 Set `capabilities.write: true` only for an explicitly approved implementation role and `capabilities.write: false` otherwise. Never infer write authority for an existing agent; ask the user when a newly generated role is ambiguous.
 
+Write every approved workspace under the group's `workspaces` list. For a new group, do not omit the list after the user approves a workspace. Keep workspace configuration group-owned and non-authoritative.
+
 ## 5. Verify And Schedule
 
-Validate every blueprint and Agent Skill, config cross-reference, explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path. Write one complete configuration atomically. Then parse the final config from disk and confirm it is still the revision just written. Then offer the singleton scheduler setup:
+Validate every blueprint and Agent Skill, config cross-reference, registered explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path. Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Agency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write. Then parse the final config from disk and confirm it is still the revision just written. Then offer the singleton scheduler setup:
 
 ```text
 christag-agency dispatch install --config "{config_path}"

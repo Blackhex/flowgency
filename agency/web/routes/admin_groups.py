@@ -321,7 +321,11 @@ async def setup_launch(
     setup_request = InteractiveSetupRequest(
         project_dir=resolved_project_dir,
         config_path=services.config_path.resolve(),
-        prompt=build_setup_prompt(resolved_project_dir, services.config_path),
+        prompt=build_setup_prompt(
+            resolved_project_dir,
+            services.config_path,
+            selected_integration=requested_integration,
+        ),
     )
     fallback_command = ""
     launch_notice = ""

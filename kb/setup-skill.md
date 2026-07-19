@@ -24,14 +24,14 @@ New-Item -ItemType Junction `
 
 ## Run
 
-Invoke `agency-setup` from the project workspace after the first-run page launches it with the project folder and supported AI integration. If no config exists, create the canonical config at the authoritative path. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
+Invoke `agency-setup` from the project workspace after the first-run page launches it with the project folder, exact authoritative config path, and supported AI integration. The skill uses that exact config path and selected integration unless the user explicitly approves another registered integration. If no config exists, it builds the complete candidate first and performs one revision-checked atomic write after approval and validation. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
 
 1. Inspects project instructions, source, tests, deployment, and available integrations.
 2. Proposes reusable roles, Agent Skills, schedules, runtime policy, workspaces, and semantic memory for approval.
-3. Resolves exactly one config and accepts only `schema_version: 2` with `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store`.
+3. Resolves exactly one canonical config with only the supported root sections (`agency`, `memory`, and `groups`) and requires `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store`.
 4. Writes each approved blueprint as global `AGENTS.md` source plus standard Agent Skills under `.agents/skills/<skill>/SKILL.md`.
-5. Registers explicit group-owned instances. Every instance pins a blueprint and integration; routines select skills and semantic memory selectors.
-6. Validates group naming, storage paths, cross-references, and revision safety, writes atomically, reparses from disk, and optionally verifies the singleton dispatcher.
+5. Registers explicit group-owned instances and every approved group workspace. Every instance pins a blueprint and integration; routines select skills and semantic memory selectors.
+6. Validates group naming, storage paths, integrations, cross-references, and revision safety, performs one atomic config write, reparses from disk, and optionally verifies the singleton dispatcher.
 
 ## Result
 
