@@ -175,8 +175,10 @@ def test_submit_request_persists_validated_current_snapshot(tmp_path):
 
     record = read_job(handle.path)
     assert record.spec.config_revision not in {"compat-unresolved", "compat-submission-resolved"}
-    assert record.spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
-    assert record.spec.agent_dir == record.spec.workspace_path
+    assert record.spec.workspace_root == str((tmp_path / "workspaces" / "newsletter").resolve())
+    assert record.spec.group_root == str((tmp_path / "agents" / "newsletter").resolve())
+    assert not hasattr(record.spec, "agent_dir")
+    assert not hasattr(record.spec, "workspace_path")
     assert record.spec.runtime_policy.sandbox_roots == (
         str((tmp_path / "workspaces" / "newsletter").resolve()),
         str((tmp_path / "agents" / "newsletter").resolve()),
@@ -386,8 +388,10 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
     assert spec.integration_config == {"command": "echo first"}
     assert spec.blueprint.source_digest
     assert spec.memory.selector["scope"] == "agent"
-    assert spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
-    assert spec.agent_dir == spec.workspace_path
+    assert spec.workspace_root == str((tmp_path / "workspaces" / "newsletter").resolve())
+    assert spec.group_root == str((tmp_path / "agents" / "newsletter").resolve())
+    assert not hasattr(spec, "agent_dir")
+    assert not hasattr(spec, "workspace_path")
     assert spec.runtime_policy.sandbox_roots == (
         str((tmp_path / "workspaces" / "newsletter").resolve()),
         str((tmp_path / "agents" / "newsletter").resolve()),
@@ -439,14 +443,14 @@ def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
     config = _write_config(tmp_path)
     _write_blueprint(tmp_path / "agent-library")
     return JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id="decision-job",
         config_path=str(config.resolve()),
         config_revision="cfg-1",
         group_key="newsletter",
-        group_path=str((tmp_path / "agents" / "newsletter").resolve()),
+        group_root=str((tmp_path / "agents" / "newsletter").resolve()),
         agent_name="builder",
-        workspace_dir=str((tmp_path / "agents" / "newsletter").resolve()),
+        workspace_root=str((tmp_path / "agents" / "newsletter").resolve()),
         trigger="decision",
         integration_name="copilot",
         integration_config={"command": "echo ok"},
@@ -481,7 +485,7 @@ def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
     )
 
 
-def test_resolve_job_request_snapshots_workspace_dir_despite_external_agent_path_inputs(tmp_path):
+def test_resolve_job_request_snapshots_distinct_configured_roots(tmp_path):
     config = _write_config(tmp_path)
     _write_blueprint(tmp_path / "agent-library")
 
@@ -500,8 +504,10 @@ def test_resolve_job_request_snapshots_workspace_dir_despite_external_agent_path
         integrations={"copilot": FakeIntegration()},
     )
 
-    assert spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
-    assert spec.agent_dir == spec.workspace_path
+    assert spec.workspace_root == str((tmp_path / "workspaces" / "newsletter").resolve())
+    assert spec.group_root == str((tmp_path / "agents" / "newsletter").resolve())
+    assert not hasattr(spec, "agent_dir")
+    assert not hasattr(spec, "workspace_path")
 
 
 def test_submit_releases_cache_pin_when_launch_fails(tmp_path):

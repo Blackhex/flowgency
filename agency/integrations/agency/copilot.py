@@ -403,7 +403,7 @@ class CopilotIntegration(BaseIntegration):
                 creationflags=creationflags,
             )
             duration = time.monotonic() - start
-            parse_root = request.workspace_dir
+            parse_root = request.workspace_root
             parsed_text, changed_files = self._parse_jsonl_output(result.stdout, parse_root)
             usage_summary = self._usage_summary(result.stdout)
             stderr = result.stderr
@@ -428,7 +428,7 @@ class CopilotIntegration(BaseIntegration):
                 partial_stdout = partial_stdout.decode(errors="replace")
             if isinstance(partial_stderr, bytes):
                 partial_stderr = partial_stderr.decode(errors="replace")
-            parse_root = request.workspace_dir
+            parse_root = request.workspace_root
             parsed_text, changed_files = self._parse_jsonl_output(partial_stdout, parse_root)
             timeout_message = f"Timed out after {request.timeout} seconds."
             stderr = (

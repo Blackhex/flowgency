@@ -120,14 +120,14 @@ def _all_route_paths() -> list[str]:
 
 def _roster_job_spec(tmp_path: Path, group_root: Path, *, job_id: str, created_at: str) -> JobSpec:
     return JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=job_id,
         config_path=str((tmp_path / "config.yaml").resolve()),
         config_revision="cfg-1",
         group_key="newsletter",
-        group_path=str(group_root.resolve()),
+        group_root=str(group_root.resolve()),
         agent_name="advisor",
-        workspace_dir=str(group_root.resolve()),
+        workspace_root=str(group_root.resolve()),
         trigger="manual_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},

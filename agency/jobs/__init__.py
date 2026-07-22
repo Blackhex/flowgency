@@ -18,7 +18,7 @@ from .models import (
     RuntimePolicySnapshot,
 )
 from .resolution import JobValidationError, resolve_job_request
-from .store import active_jobs, cancel_job
+from .store import active_jobs, cancel_job, group_operation_lock_path
 from .submission import JobSubmissionError, submit_job_request
 
 
@@ -36,6 +36,7 @@ __all__ = [
     "active_jobs",
     "BlueprintRef",
     "cancel_job",
+    "group_operation_lock_path",
     "create_launch_view",
     "default_launcher",
     "JobArtifact",

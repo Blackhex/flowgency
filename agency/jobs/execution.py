@@ -252,8 +252,8 @@ def resolve_job_context(spec):
     if hasattr(integration, "with_config") and spec.integration_config:
         integration = integration.with_config(spec.integration_config)
     return SimpleNamespace(
-        group_path=Path(spec.workspace_dir),
-        workspace_dir=Path(spec.workspace_dir),
+        group_root=spec.resolved_group_root,
+        workspace_root=spec.resolved_workspace_root,
         integration=integration,
         timeout=spec.runtime_policy.timeout,
         runtime_policy=runtime_policy,
@@ -314,7 +314,6 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
         worker_pid=os.getpid(),
     )
 
-    prompt_path = Path(job_path).with_suffix(".prompt")
     base_sha = None
     started = None
     launch_view = None
@@ -381,27 +380,23 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     git_root = Path(context.sandbox_root.roots[0])
                 elif runtime_policy.sandbox_roots:
                     git_root = Path(runtime_policy.sandbox_roots[0])
-                elif getattr(context, "workspace_dir", None):
-                    git_root = Path(context.workspace_dir)
+                elif getattr(context, "workspace_root", None):
+                    git_root = Path(context.workspace_root)
                 base_sha = capture_base_sha(git_root)
-                log_dir = (
-                    Path(context.group_path)
-                    / "shared"
-                    / "logs"
-                    / started.strftime("%Y-%m-%d")
-                )
+                log_dir = Path(context.group_root) / "logs" / started.strftime("%Y-%m-%d")
                 log_dir.mkdir(parents=True, exist_ok=True)
                 stem = (
                     f"{record.spec.agent_name}-{record.spec.trigger}-"
                     f"{record.spec.job_id}"
                 )
+                prompt_path = log_dir / f"{stem}.prompt"
                 stdout_path = log_dir / f"{stem}.out"
                 stderr_path = log_dir / f"{stem}.err"
                 prompt_path.write_text(
                     record.spec.task_input, encoding="utf-8"
                 )
                 request = IntegrationRunRequest(
-                    workspace_dir=Path(spec.workspace_dir),
+                    workspace_root=spec.resolved_workspace_root,
                     launch_dir=launch_view,
                     task_file=prompt_path,
                     timeout=getattr(
@@ -564,7 +559,6 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
             base_sha=base_sha,
         )
     finally:
-        prompt_path.unlink(missing_ok=True)
         try:
             release_pin(
                 record.spec.blueprint.cache_root,

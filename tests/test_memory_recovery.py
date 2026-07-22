@@ -19,8 +19,8 @@ from agency.memory.recovery import recover_publications
 class RecoveryFixture:
     def __init__(self, tmp_path: Path, *, group_key: str = "news"):
         self.group_key = group_key
-        self.group_path = tmp_path / "group"
-        self.group_path.mkdir(parents=True)
+        self.group_root = tmp_path / "group"
+        self.group_root.mkdir(parents=True)
         config_path = tmp_path / "config.yaml"
         config_path.write_text("groups: {}\n", encoding="utf-8")
         self.store_root = tmp_path / "memory-store"
@@ -36,14 +36,14 @@ class RecoveryFixture:
             store_root=self.store_root,
         )
         spec = JobSpec(
-            schema_version=2,
+            schema_version=3,
             job_id="recovery-job",
             config_path=str(config_path.resolve()),
             config_revision="cfg-1",
             group_key=group_key,
-            group_path=str(self.group_path.resolve()),
+            group_root=str(self.group_root.resolve()),
             agent_name="writer",
-            workspace_dir=str(self.group_path.resolve()),
+            workspace_root=str(self.group_root.resolve()),
             trigger="manual_prompt",
             integration_name="script",
             integration_config={},
@@ -100,7 +100,7 @@ class RecoveryFixture:
         return {
             self.group_key: {
                 "job_store": self.job_store,
-                "group_path": self.group_path,
+                "group_root": self.group_root,
             }
         }
 
@@ -158,7 +158,7 @@ def test_recovery_rejects_corrupted_absolute_paths_without_touching_sentinel(
     recovery_fixture,
 ):
     recovery_fixture.crash_at("backed_up")
-    sentinel = recovery_fixture.group_path / "sentinel.txt"
+    sentinel = recovery_fixture.group_root / "sentinel.txt"
     sentinel.write_text("do-not-touch", encoding="utf-8")
     journal_path = next(
         (recovery_fixture.store_root / ".journals").glob("*/*.yaml")
@@ -247,7 +247,7 @@ def test_recovery_rejects_job_owned_by_wrong_configured_group(tmp_path):
 
     result = recover_publications(
         forged.store_root,
-        {"news": {"job_store": forged.job_store, "group_path": forged.group_path}},
+        {"news": {"job_store": forged.job_store, "group_root": forged.group_root}},
     )
 
     assert result.recovered == 0
@@ -489,11 +489,11 @@ def test_duplicate_job_id_across_allowed_stores_establishes_barrier(
         {
             "news": {
                 "job_store": recovery_fixture.job_store,
-                "group_path": recovery_fixture.group_path,
+                "group_root": recovery_fixture.group_root,
             },
             "other": {
                 "job_store": duplicate_store,
-                "group_path": tmp_path / "other-group",
+                "group_root": tmp_path / "other-group",
             },
         },
     )

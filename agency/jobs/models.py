@@ -11,7 +11,7 @@ from agency.blueprints.cache import CacheRef, CompiledArtifact
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 VALID_TRIGGERS = {
     "scheduled_prompt",
     "manual_prompt",
@@ -132,9 +132,9 @@ class JobSpec:
     config_path: str
     config_revision: str
     group_key: str
-    group_path: str
+    workspace_root: str
+    group_root: str
     agent_name: str
-    workspace_dir: str
     trigger: str
     integration_name: str
     integration_config: dict[str, Any]
@@ -157,9 +157,9 @@ class JobSpec:
             "job_id": self.job_id,
             "config_revision": self.config_revision,
             "group_key": self.group_key,
-            "group_path": self.group_path,
+            "workspace_root": self.workspace_root,
+            "group_root": self.group_root,
             "agent_name": self.agent_name,
-            "workspace_dir": self.workspace_dir,
             "trigger": self.trigger,
             "integration_name": self.integration_name,
             "task_input": self.task_input,
@@ -195,9 +195,9 @@ class JobSpec:
             "config_path": self.config_path,
             "config_revision": self.config_revision,
             "group_key": self.group_key,
-            "group_path": self.group_path,
+            "workspace_root": self.workspace_root,
+            "group_root": self.group_root,
             "agent_name": self.agent_name,
-            "workspace_dir": self.workspace_dir,
             "trigger": self.trigger,
             "integration_name": self.integration_name,
             "integration_config": dict(self.integration_config),
@@ -226,9 +226,11 @@ class JobSpec:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "JobSpec":
         values = dict(data)
-        agent_dir_value = values.pop("agent_dir", None)
-        if agent_dir_value is not None:
-            raise ValueError("agent_dir is not accepted in strict schema_version: 2 jobs")
+        for obsolete in ("workspace_dir", "group_path", "agent_dir"):
+            if obsolete in values:
+                raise ValueError(
+                    f"{obsolete} is not accepted in strict schema_version: 3 jobs"
+                )
         values["integration_config"] = dict(values.get("integration_config") or {})
         values["blueprint"] = BlueprintRef(**values["blueprint"])
         runtime_policy = dict(values["runtime_policy"])
@@ -250,12 +252,12 @@ class JobSpec:
         return self.trigger_context
 
     @property
-    def workspace_path(self) -> Path:
-        return Path(self.workspace_dir)
+    def resolved_workspace_root(self) -> Path:
+        return Path(self.workspace_root).resolve(strict=False)
 
     @property
-    def agent_dir(self) -> Path:
-        return self.workspace_path
+    def resolved_group_root(self) -> Path:
+        return Path(self.group_root).resolve(strict=False)
 
 
 @dataclass

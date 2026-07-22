@@ -76,15 +76,26 @@ class ScriptIntegration(BaseIntegration):
     def validate_run(self, request: IntegrationRunRequest):
         issues = list(super().validate_run(request))
         command = self._config.get("command", "")
-        required = ("{runtime_dir}", "{workspace_dir}", "{skill}")
+        for obsolete in ("{workspace_dir}", "{agent_dir}"):
+            if obsolete in command:
+                issues.append(
+                    ValidationIssue(
+                        code="script-obsolete-placeholder",
+                        scope="integrations.script",
+                        field="integration_config.command",
+                        message=f"Script integration does not support {obsolete}.",
+                        corrective_hint="Use {workspace_root} instead.",
+                    )
+                )
+        required = ("{runtime_dir}", "{workspace_root}", "{skill}")
         if request.skill is not None and not all(token in command for token in required):
             issues.append(
                 ValidationIssue(
                     code="script-missing-runtime-placeholders",
                     scope="integrations.script",
                     field="integration_config.command",
-                    message="Script integration requires runtime_dir, workspace_dir, and skill placeholders for routine skill activation.",
-                    corrective_hint="Add {runtime_dir}, {workspace_dir}, and {skill} placeholders or run without a routine skill.",
+                    message="Script integration requires runtime_dir, workspace_root, and skill placeholders for routine skill activation.",
+                    corrective_hint="Add {runtime_dir}, {workspace_root}, and {skill} placeholders or run without a routine skill.",
                 )
             )
         return tuple(issues)
@@ -98,9 +109,8 @@ class ScriptIntegration(BaseIntegration):
         if not command:
             raise IntegrationError("No command configured for script integration")
         command = command.replace("{prompt_file}", str(request.task_file))
-        command = command.replace("{agent_dir}", str(request.workspace_dir))
         command = command.replace("{runtime_dir}", str(request.launch_dir))
-        command = command.replace("{workspace_dir}", str(request.workspace_dir))
+        command = command.replace("{workspace_root}", str(request.workspace_root))
         command = command.replace("{skill}", request.skill or "")
         start = time.monotonic()
         try:

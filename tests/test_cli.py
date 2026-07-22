@@ -67,14 +67,14 @@ def _setup_jobs_group(
     )
 
     spec = JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key="test",
-        group_path=str(group.resolve()),
+        group_root=str(group.resolve()),
         agent_name="engineer",
-        workspace_dir=str(group.resolve()),
+        workspace_root=str(group.resolve()),
         trigger="decision",
         integration_name="script",
         integration_config={},
@@ -442,14 +442,14 @@ def test_cmd_jobs_and_logs_ignore_forged_shared_jobs_records(tmp_path, monkeypat
     forged_path.parent.mkdir(parents=True, exist_ok=True)
     forged_record = JobRecord.from_spec(
         JobSpec(
-            schema_version=2,
+            schema_version=3,
             job_id="forged-job",
             config_path=spec.config_path,
             config_revision=spec.config_revision,
             group_key="test",
-            group_path=spec.group_path,
+            group_root=spec.group_root,
             agent_name=spec.agent_name,
-            workspace_dir=spec.workspace_dir,
+            workspace_root=spec.workspace_root,
             trigger=spec.trigger,
             integration_name=spec.integration_name,
             integration_config=spec.integration_config,

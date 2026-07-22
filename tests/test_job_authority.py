@@ -19,14 +19,14 @@ def _spec(tmp_path: Path) -> JobSpec:
     workspace.mkdir(exist_ok=True)
     memory_root = tmp_path / "memory"
     return JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id="authority-job",
         config_path=str((tmp_path / "config.yaml").resolve()),
         config_revision="cfg-1",
         group_key="test",
-        group_path=str(workspace.resolve()),
+        group_root=str(workspace.resolve()),
         agent_name="builder",
-        workspace_dir=str(workspace.resolve()),
+        workspace_root=str(workspace.resolve()),
         trigger="manual_prompt",
         integration_name="script",
         integration_config={"command": "echo safe"},
@@ -81,7 +81,7 @@ def test_job_store_is_external_and_canonical(tmp_path):
     "mutate",
     [
         lambda spec: spec["integration_config"].update({"command": "echo hostile"}),
-        lambda spec: spec.update({"workspace_dir": "C:/hostile"}),
+        lambda spec: spec.update({"workspace_root": "C:/hostile"}),
         lambda spec: spec["blueprint"].update({"cache_path": "C:/hostile-cache"}),
         lambda spec: spec["runtime_policy"].update({"sandbox_roots": ["C:/hostile-root"], "tool_names": ["all"]}),
         lambda spec: spec["memory"].update({"path": "C:/hostile-memory", "memory_hash": "b" * 64}),

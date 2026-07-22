@@ -48,14 +48,14 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
         store_root=tmp_path / ".compat-memory-root",
     )
     spec = JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=f"decision-{decision_name.replace('.', '-')}",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key="grp",
-        group_path=str(group_path.resolve()),
+        group_root=str(group_path.resolve()),
         agent_name="worker",
-        workspace_dir=str(group_path.resolve()),
+        workspace_root=str(group_path.resolve()),
         trigger="decision",
         integration_name="script",
         integration_config={},
@@ -130,13 +130,13 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
             )
 
     context = SimpleNamespace(
-        group_path=group_path,
-        workspace_dir=group_path / "worker",
+        group_root=group_path,
+        workspace_root=group_path / "worker",
         timeout=30,
         sandbox_root=SimpleNamespace(roots=(repo,), allowed_tools=()),
         integration=FakeIntegration(),
     )
-    context.workspace_dir.mkdir(parents=True)
+    context.workspace_root.mkdir(parents=True)
     monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     execute_job(_authority(spec))
@@ -160,8 +160,8 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
     group_path, decision, spec = queued_decision_job(tmp_path, decision_name="retry.md")
 
     context = SimpleNamespace(
-        group_path=group_path,
-        workspace_dir=group_path / "worker",
+        group_root=group_path,
+        workspace_root=group_path / "worker",
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(
@@ -174,7 +174,7 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
             )
         ),
     )
-    context.workspace_dir.mkdir(parents=True)
+    context.workspace_root.mkdir(parents=True)
     monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     execute_job(_authority(spec))
@@ -188,8 +188,8 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
     group_path, decision, spec = queued_decision_job(tmp_path, decision_name="failed.md")
 
     context = SimpleNamespace(
-        group_path=group_path,
-        workspace_dir=group_path / "worker",
+        group_root=group_path,
+        workspace_root=group_path / "worker",
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(
@@ -202,7 +202,7 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
             )
         ),
     )
-    context.workspace_dir.mkdir(parents=True)
+    context.workspace_root.mkdir(parents=True)
     monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     execute_job(_authority(spec))

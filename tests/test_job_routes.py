@@ -93,14 +93,14 @@ def _write_job_record(group_root: Path, config_path: Path, *, job_id: str = "job
     group_id = "research" if group_root.name == "research" else "newsletter"
     job_store = JobStore(group_root.parent.parent / "memory-store")
     spec = JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key=group_id,
-        group_path=str(group_root.resolve()),
+        group_root=str(group_root.resolve()),
         agent_name="advisor",
-        workspace_dir=str(group_root.resolve()),
+        workspace_root=str(group_root.resolve()),
         trigger="scheduled_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},

@@ -31,14 +31,14 @@ def _write_job(tmp_path, status):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
     spec = JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=f"job-{status}",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key="grp",
-        group_path=str(tmp_path.resolve()),
+        group_root=str(tmp_path.resolve()),
         agent_name="product",
-        workspace_dir=str(tmp_path.resolve()),
+        workspace_root=str(tmp_path.resolve()),
         trigger="manual_prompt",
         integration_name="script",
         integration_config={},

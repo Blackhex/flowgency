@@ -85,14 +85,14 @@ def _seed_group_scaffold(group: Path) -> None:
 def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
     group = runtime / "groups" / "newsletter"
     return JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="ui-gate-revision",
         group_key="newsletter",
-        group_path=str(group.resolve()),
+        group_root=str(group.resolve()),
         agent_name="advisor",
-        workspace_dir=str(group.resolve()),
+        workspace_root=str(group.resolve()),
         trigger="scheduled_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},

@@ -164,14 +164,14 @@ def _write_channel_job(
         store_root=snapshot.config.agency.memory_store,
     )
     spec = JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=job_id or uuid4().hex,
         config_path=str(config_path.resolve()),
         config_revision=snapshot.revision,
         group_key="newsletter",
-        group_path=str(group.path.resolve()),
+        group_root=str(group.path.resolve()),
         agent_name="advisor",
-        workspace_dir=str(group.path.resolve()),
+        workspace_root=str(group.path.resolve()),
         trigger="manual_prompt",
         integration_name="copilot",
         integration_config={},

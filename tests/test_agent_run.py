@@ -167,14 +167,14 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
     group_store.mkdir(parents=True, exist_ok=True)
     for status in ("queued", "running"):
         spec = JobSpec(
-            schema_version=2,
+            schema_version=3,
             job_id=f"job-{status}",
             config_path=str((tmp_path / "config.yaml").resolve()),
             config_revision="cfg-1",
             group_key="test",
-            group_path=str(group_path.resolve()),
+            group_root=str(group_path.resolve()),
             agent_name="product",
-            workspace_dir=str(group_path.resolve()),
+            workspace_root=str(group_path.resolve()),
             trigger="manual_prompt",
             integration_name="script",
             integration_config={},
@@ -331,14 +331,14 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
     group_store = job_store.group_root("test")
     group_store.mkdir(parents=True, exist_ok=True)
     spec = JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id="job-running",
         config_path=str((tmp_path / "config.yaml").resolve()),
         config_revision=ConfigStore(tmp_path / "config.yaml").load().revision,
         group_key="test",
-        group_path=str((tmp_path / "grp").resolve()),
+        group_root=str((tmp_path / "grp").resolve()),
         agent_name="product",
-        workspace_dir=str((tmp_path / "grp").resolve()),
+        workspace_root=str((tmp_path / "grp").resolve()),
         trigger="manual_prompt",
         integration_name="script",
         integration_config={},

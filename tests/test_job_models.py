@@ -23,6 +23,7 @@ from agency.jobs.store import (
     InvalidJobTransition,
     active_jobs,
     cancel_job,
+    group_operation_lock_path,
     job_path,
     read_job,
     transition_job,
@@ -38,15 +39,17 @@ def _canonical_group_store(tmp_path: Path) -> Path:
 def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
+    workspace_root = tmp_path / "workspace"
+    group_root = tmp_path / "group"
     return JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=uuid4().hex,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key="newsletter",
-        group_path=str(tmp_path.resolve()),
+        group_root=str(group_root.resolve()),
         agent_name=agent,
-        workspace_dir=str(tmp_path.resolve()),
+        workspace_root=str(workspace_root.resolve()),
         trigger="manual_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},
@@ -276,14 +279,14 @@ def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_p
     for trigger in ("manual_prompt", "scheduled_prompt"):
         with pytest.raises(ValueError, match="routine_id and skill"):
             JobSpec(
-                schema_version=2,
+                schema_version=3,
                 job_id=uuid4().hex,
                 config_path=str(config_path.resolve()),
                 config_revision="cfg-1",
                 group_key="newsletter",
-                group_path=str(tmp_path.resolve()),
+                group_root=str(tmp_path.resolve()),
                 agent_name="product",
-                workspace_dir=str(tmp_path.resolve()),
+                workspace_root=str(tmp_path.resolve()),
                 trigger=trigger,
                 integration_name="copilot",
                 integration_config={},
@@ -318,36 +321,48 @@ def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_p
             ).validate()
 
 
-def test_job_spec_exposes_workspace_dir_as_authoritative_path(tmp_path):
+def test_job_spec_serializes_distinct_workspace_and_group_roots(tmp_path):
     spec = make_spec(tmp_path)
 
-    assert spec.workspace_dir == spec.group_path
-    assert spec.workspace_path == Path(spec.workspace_dir)
+    payload = spec.to_dict()
+
+    assert payload["workspace_root"] == str(spec.resolved_workspace_root)
+    assert payload["group_root"] == str(spec.resolved_group_root)
+    assert "workspace_dir" not in payload
+    assert "group_path" not in payload
+    assert spec.resolved_workspace_root == Path(spec.workspace_root).resolve()
+    assert spec.resolved_group_root == Path(spec.group_root).resolve()
 
 
-def test_job_spec_serialization_omits_agent_dir_and_property_remains_compat_alias(tmp_path):
+def test_operation_lock_is_under_group_locks(tmp_path):
+    assert group_operation_lock_path(tmp_path) == (
+        tmp_path / "locks" / ".operations.lock"
+    )
+
+
+def test_job_spec_does_not_expose_compatibility_aliases(tmp_path):
     spec = make_spec(tmp_path)
 
     payload = spec.to_dict()
 
     assert "agent_dir" not in payload
-    assert spec.agent_dir == spec.workspace_path
+    assert not hasattr(spec, "agent_dir")
+    assert not hasattr(spec, "workspace_path")
 
 
-def test_job_spec_constructor_rejects_agent_dir_input(tmp_path):
+def test_job_spec_constructor_rejects_obsolete_root_inputs(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")
 
-    with pytest.raises(TypeError):
-        JobSpec(
-            schema_version=2,
+    base = dict(
+            schema_version=3,
             job_id="job-123",
             config_path=str(config_path.resolve()),
             config_revision="cfg-1",
             group_key="newsletter",
-            group_path=str(tmp_path.resolve()),
+            group_root=str(tmp_path.resolve()),
             agent_name="product",
-            workspace_dir=str(tmp_path.resolve()),
+            workspace_root=str(tmp_path.resolve()),
             trigger="manual_prompt",
             integration_name="copilot",
             integration_config={},
@@ -379,8 +394,10 @@ def test_job_spec_constructor_rejects_agent_dir_input(tmp_path):
             prompt_source={"type": "routine", "routine_id": "routine-1"},
             timeout_override=None,
             created_at="2026-07-15T00:00:00+00:00",
-            agent_dir=tmp_path / "agent",
-        )
+    )
+    for obsolete in ("workspace_dir", "group_path", "agent_dir"):
+        with pytest.raises(TypeError):
+            JobSpec(**base, **{obsolete: str(tmp_path / "obsolete")})
 
 
 def test_job_request_no_longer_accepts_extra_prompt_source(tmp_path):
@@ -403,22 +420,14 @@ def test_job_spec_no_longer_exposes_create_constructor():
     assert not hasattr(JobSpec, "create")
 
 
-def test_job_spec_from_dict_rejects_agent_dir_even_when_workspace_matches(tmp_path):
+def test_job_spec_from_dict_rejects_obsolete_root_inputs(tmp_path):
     spec = make_spec(tmp_path)
     payload = spec.to_dict()
-    payload["agent_dir"] = payload["workspace_dir"]
-
-    with pytest.raises(ValueError, match="agent_dir is not accepted"):
-        JobSpec.from_dict(payload)
-
-
-def test_job_spec_from_dict_rejects_agent_dir_mismatch(tmp_path):
-    spec = make_spec(tmp_path)
-    payload = spec.to_dict()
-    payload["agent_dir"] = str((tmp_path / "different").resolve())
-
-    with pytest.raises(ValueError, match="agent_dir is not accepted"):
-        JobSpec.from_dict(payload)
+    for obsolete in ("workspace_dir", "group_path", "agent_dir"):
+        payload[obsolete] = str((tmp_path / "obsolete").resolve())
+        with pytest.raises(ValueError, match=f"{obsolete} is not accepted"):
+            JobSpec.from_dict(payload)
+        payload.pop(obsolete)
 
 
 def test_decision_jobs_require_null_routine_and_skill(tmp_path):
@@ -426,14 +435,14 @@ def test_decision_jobs_require_null_routine_and_skill(tmp_path):
     config_path.write_text("groups: {}\n", encoding="utf-8")
 
     spec = JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id="job-456",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key="newsletter",
-        group_path=str(tmp_path.resolve()),
+        group_root=str(tmp_path.resolve()),
         agent_name="product",
-        workspace_dir=str(tmp_path.resolve()),
+        workspace_root=str(tmp_path.resolve()),
         trigger="decision",
         integration_name="copilot",
         integration_config={},

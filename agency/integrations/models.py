@@ -32,12 +32,12 @@ class RuntimeCapabilities:
 
 @dataclass(frozen=True)
 class IntegrationRunRequest:
-    workspace_dir: Path
+    workspace_root: Path
     launch_dir: Path
     task_file: Path
     timeout: int
     runtime_policy: EffectiveRuntimePolicy
-    skill: str | None
+    skill: str | None = None
     skill_arguments: tuple[str, ...] = ()
     enforce_validation: bool = True
     memory_working_dir: Path | None = None

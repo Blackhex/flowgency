@@ -25,7 +25,7 @@ def test_run_returns_error_for_external_bridge_request(integration, tmp_agent_di
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Do something")
     request = IntegrationRunRequest(
-        workspace_dir=tmp_agent_dir,
+        workspace_root=tmp_agent_dir,
         launch_dir=tmp_agent_dir,
         task_file=prompt,
         timeout=60,
@@ -47,7 +47,7 @@ def test_run_returns_error_for_external_bridge_request(integration, tmp_agent_di
 def test_validate_run_rejects_execution(tmp_path):
     integration = SdkIntegration()
     request = IntegrationRunRequest(
-        workspace_dir=tmp_path / "workspace",
+        workspace_root=tmp_path / "workspace",
         launch_dir=tmp_path / "runtime",
         task_file=tmp_path / "runtime" / "task.md",
         timeout=60,
@@ -73,7 +73,7 @@ def test_validate_run_rejects_execution(tmp_path):
 def test_run_raises_validation_failed_before_fabricating_result(tmp_path):
     integration = SdkIntegration()
     request = IntegrationRunRequest(
-        workspace_dir=tmp_path / "workspace",
+        workspace_root=tmp_path / "workspace",
         launch_dir=tmp_path / "runtime",
         task_file=tmp_path / "runtime" / "missing-task.md",
         timeout=60,

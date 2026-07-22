@@ -65,7 +65,7 @@ class TestGemini:
 
     def test_validate_run_rejects_skill_activation_until_cli_contract_is_verified(self, integration, tmp_path):
         request = IntegrationRunRequest(
-            workspace_dir=tmp_path / "workspace",
+            workspace_root=tmp_path / "workspace",
             launch_dir=tmp_path / "launch",
             task_file=tmp_path / "launch" / "task.md",
             timeout=60,
@@ -452,7 +452,7 @@ class TestCopilot:
         prompt_file = tmp_agent_dir / "prompt.md"
         prompt_file.write_text("Do the thing")
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=prompt_file,
             timeout=30,
@@ -476,7 +476,7 @@ class TestCopilot:
 
     def test_run_rejects_invalid_typed_request_before_reading_prompt(self, integration, tmp_agent_dir):
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=tmp_agent_dir / "runtime" / "missing-task.md",
             timeout=30,
@@ -543,7 +543,7 @@ class TestCopilot:
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=prompt,
             timeout=60,
@@ -589,7 +589,7 @@ class TestCopilot:
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=prompt,
             timeout=60,
@@ -638,7 +638,7 @@ class TestCopilot:
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=prompt,
             timeout=60,
@@ -691,7 +691,7 @@ class TestCopilot:
         monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
 
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=prompt,
             timeout=60,
@@ -838,7 +838,7 @@ class TestCopilot:
         prompt_file = tmp_agent_dir / "prompt.md"
         prompt_file.write_text("Do the thing")
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=prompt_file,
             timeout=30,
@@ -883,7 +883,7 @@ class TestCopilot:
         prompt_file.write_text("Do the thing")
 
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=prompt_file,
             timeout=30,
@@ -1005,7 +1005,7 @@ class TestCopilot:
         prompt_file.write_text("Do the thing")
 
         request = IntegrationRunRequest(
-            workspace_dir=tmp_agent_dir,
+            workspace_root=tmp_agent_dir,
             launch_dir=tmp_agent_dir / "runtime",
             task_file=prompt_file,
             timeout=30,

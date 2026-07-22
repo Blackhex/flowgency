@@ -37,28 +37,28 @@ _WINDOWS_READ_RETRIES = 200
 _WINDOWS_READ_DELAY_SECONDS = 0.01
 
 
-def job_path(group_path: Path, job_id: str) -> Path:
-    return Path(group_path) / f"{job_id}.yaml"
+def job_path(group_root: Path, job_id: str) -> Path:
+    return Path(group_root) / f"{job_id}.yaml"
 
 
-def group_operation_lock_path(group_path: Path) -> Path:
-    return Path(group_path) / "shared" / "jobs" / ".operations.lock"
+def group_operation_lock_path(group_root: Path) -> Path:
+    return Path(group_root) / "locks" / ".operations.lock"
 
 
 def canonical_group_operation_lock_paths(
-    *group_paths: Path,
+    *group_roots: Path,
 ) -> tuple[Path, ...]:
     unique: dict[str, Path] = {}
-    for group_path in group_paths:
-        lock_path = group_operation_lock_path(group_path).resolve(strict=False)
+    for group_root in group_roots:
+        lock_path = group_operation_lock_path(group_root).resolve(strict=False)
         unique[str(lock_path).lower()] = lock_path
     return tuple(unique[key] for key in sorted(unique))
 
 
-def acquire_group_operation_locks(*group_paths: Path) -> ExitStack:
+def acquire_group_operation_locks(*group_roots: Path) -> ExitStack:
     stack = ExitStack()
     try:
-        for lock_path in canonical_group_operation_lock_paths(*group_paths):
+        for lock_path in canonical_group_operation_lock_paths(*group_roots):
             stack.enter_context(exclusive_lock(lock_path, wait=True))
     except Exception:
         stack.close()

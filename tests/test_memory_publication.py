@@ -23,14 +23,14 @@ def publication_fixture(tmp_path):
     config_path.write_text("groups: {}\n", encoding="utf-8")
     memory_root = tmp_path / "memory-store"
     spec = JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id="publication-job",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key="news",
-        group_path=str(group_path.resolve()),
+        group_root=str(group_path.resolve()),
         agent_name="writer",
-        workspace_dir=str(group_path.resolve()),
+        workspace_root=str(group_path.resolve()),
         trigger="manual_prompt",
         integration_name="script",
         integration_config={},
@@ -92,7 +92,7 @@ def publication_fixture(tmp_path):
     )
     stage = store.stage(resolved, job_id=spec.job_id)
     return {
-        "group_path": group_path,
+        "group_root": group_path,
         "job_path": job_path,
         "job_store": group_job_store,
         "job_id": spec.job_id,
@@ -198,7 +198,7 @@ def test_publication_rejects_hostile_external_job_path_and_preserves_sentinel(
 ):
     stage = publication_fixture["stage"]
     job_store = publication_fixture["job_store"]
-    hostile_group = publication_fixture["group_path"].parent / "hostile"
+    hostile_group = publication_fixture["group_root"].parent / "hostile"
     hostile_job_store = hostile_group / ".jobs" / "hostile"
     hostile_job_store.mkdir(parents=True)
     hostile_job_path = hostile_job_store / f"{publication_fixture['job_id']}.yaml"
@@ -223,7 +223,7 @@ def test_publication_rejects_symlinked_jobs_directory(
 ):
     stage = publication_fixture["stage"]
     job_store = publication_fixture["job_store"]
-    linked_jobs = publication_fixture["group_path"].parent / "linked-group" / ".jobs" / "linked-group"
+    linked_jobs = publication_fixture["group_root"].parent / "linked-group" / ".jobs" / "linked-group"
     linked_jobs.parent.mkdir(parents=True)
     with pytest.raises(MemoryPublicationError, match="unsafe|job store"):
         prepare_publication(stage, job_store=linked_jobs)

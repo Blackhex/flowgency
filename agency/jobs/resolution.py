@@ -9,6 +9,7 @@ from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import AgentInstance, Routine
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.configuration.paths import validate_resolved_paths
+from agency.configuration.group_paths import resolve_group_paths
 from agency.configuration.store import ConfigSnapshot, ConfigStore
 from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import IntegrationRunRequest
@@ -78,6 +79,7 @@ def resolve_job_request(
         group = snapshot.config.groups[request.group_key]
     except KeyError as exc:
         raise JobValidationError(f"Unknown group: {request.group_key}") from exc
+    paths = resolve_group_paths(group)
 
     agent = _find_agent(group, request.agent_name)
     routine = _find_routine(agent, request.routine_id)
@@ -125,10 +127,10 @@ def resolve_job_request(
         store_root=snapshot.config.agency.memory_store,
     )
 
-    validation_task_file = group.path.resolve() / "shared" / "logs" / f"{request.job_id}.prompt"
+    validation_task_file = paths.logs / f"{request.job_id}.prompt"
     integration.require_valid_run(
         IntegrationRunRequest(
-            workspace_dir=group.path.resolve(),
+            workspace_root=paths.workspace_root,
             launch_dir=artifact.runtime_path.resolve(),
             task_file=validation_task_file,
             timeout=runtime_policy.timeout,
@@ -150,14 +152,14 @@ def resolve_job_request(
         prompt_source = {"type": "decision_retry"}
 
     return JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=request.job_id,
         config_path=str(snapshot.path),
         config_revision=snapshot.revision,
         group_key=request.group_key,
-        group_path=str(group.path.resolve()),
+        workspace_root=str(paths.workspace_root),
+        group_root=str(paths.group_root),
         agent_name=request.agent_name,
-        workspace_dir=str(group.path.resolve()),
         trigger=request.trigger,
         integration_name=agent.integration,
         integration_config=dict(agent.integration_config),

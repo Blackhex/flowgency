@@ -97,14 +97,14 @@ def _make_spec(
 ) -> JobSpec:
     config_path = group_path.parent / "config.yaml"
     return JobSpec(
-        schema_version=2,
+        schema_version=3,
         job_id=uuid4().hex,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         group_key=group_key,
-        group_path=str(group_path.resolve()),
+        group_root=str(group_path.resolve()),
         agent_name=agent_name,
-        workspace_dir=str(group_path.resolve()),
+        workspace_root=str(group_path.resolve()),
         trigger="manual_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},
@@ -699,7 +699,7 @@ def test_create_blocks_on_group_operation_lock_until_release(instance_env):
         display_name="Advisor",
     )
     result: dict[str, object] = {}
-    group_lock = instance_env["newsletter_path"] / "shared" / "jobs" / ".operations.lock"
+    group_lock = instance_env["newsletter_path"] / "locks" / ".operations.lock"
 
     with exclusive_lock(group_lock, wait=True):
         thread = threading.Thread(

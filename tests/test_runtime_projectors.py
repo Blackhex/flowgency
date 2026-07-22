@@ -156,7 +156,7 @@ def test_compatible_projector_discovers_instructions_and_selected_skill(
     repository_root = Path(__file__).resolve().parents[1]
     repository_before = _repository_state(repository_root)
     request = IntegrationRunRequest(
-        workspace_dir=workspace_dir,
+        workspace_root=workspace_dir,
         launch_dir=launch_dir,
         task_file=task_file,
         timeout=180,

@@ -72,7 +72,7 @@ class TestIntegrationContract:
 
     def test_validate_run_returns_validation_issues(self, integration, tmp_path):
         request = IntegrationRunRequest(
-            workspace_dir=tmp_path / "workspace",
+            workspace_root=tmp_path / "workspace",
             launch_dir=tmp_path / "launch",
             task_file=tmp_path / "task.md",
             timeout=1800,
@@ -151,7 +151,7 @@ def test_registry_projector_skill_support_is_fail_closed_except_verified_integra
 def test_decision_run_allows_null_skill():
     integration = REGISTRY["copilot"]
     request = IntegrationRunRequest(
-        workspace_dir=Path("workspace"),
+        workspace_root=Path("workspace"),
         launch_dir=Path("launch"),
         task_file=Path("launch/task.md"),
         timeout=60,
@@ -169,7 +169,7 @@ def test_decision_run_allows_null_skill():
 
 def test_execution_integrations_enforce_validate_run_before_subprocess_or_prompt_read(tmp_path, monkeypatch):
     request = IntegrationRunRequest(
-        workspace_dir=tmp_path / "workspace",
+        workspace_root=tmp_path / "workspace",
         launch_dir=tmp_path / "launch",
         task_file=tmp_path / "launch" / "task.md",
         timeout=60,
@@ -216,7 +216,7 @@ def test_execution_integrations_enforce_validate_run_before_subprocess_or_prompt
 
 def test_non_executable_integrations_reject_before_any_result_is_fabricated(tmp_path):
     request = IntegrationRunRequest(
-        workspace_dir=tmp_path / "workspace",
+        workspace_root=tmp_path / "workspace",
         launch_dir=tmp_path / "launch",
         task_file=tmp_path / "launch" / "task.md",
         timeout=60,

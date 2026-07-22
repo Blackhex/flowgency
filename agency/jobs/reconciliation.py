@@ -74,10 +74,10 @@ def reconcile_jobs(
     job_stores = {
         group_id: {
             "job_store": (job_store.root / group_id),
-            "group_path": group["path"],
+            "group_root": group["group_root"],
         }
         for group_id, group in sorted(groups.items())
-        if group.get("path")
+        if group.get("group_root")
     }
     blocked_job_ids: set[str] = set()
     recovery_unavailable = False
@@ -96,7 +96,7 @@ def reconcile_jobs(
             error,
         )
     for group_id, group in groups.items():
-        if not group.get("path"):
+        if not group.get("group_root"):
             continue
         records: list[tuple[Path, object]] = []
         for path in job_store.paths(group_id):
