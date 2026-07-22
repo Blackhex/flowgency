@@ -353,7 +353,9 @@ async def lifespan(app: FastAPI):
         snapshot = services.config_store.load()
         reconcile_jobs(
             {
-                group_id: {"group_root": str(group.path)}
+                group_id: {
+                    "group_root": str(resolve_group_paths(group).group_root)
+                }
                 for group_id, group in snapshot.config.groups.items()
             },
             memory_store_root=snapshot.config.agency.memory_store,

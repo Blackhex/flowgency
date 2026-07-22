@@ -46,6 +46,20 @@ def _workspace_types_json(request: Request) -> str:
     return request.app.state.workspace_types_json_getter()
 
 
+def _group_summary(key: str, group) -> dict:
+    paths = resolve_group_paths(group)
+    return {
+        "key": key,
+        "name": group.name,
+        "path": str(group.path),
+        "agents": list(group.agents.keys()),
+        "agent_count": len(group.agents),
+        "initialized": all(path.is_dir() for path in paths.record_directories),
+        "path_exists": paths.workspace_root.exists(),
+        "dispatch_enabled": group.dispatch.enabled,
+    }
+
+
 def _base_admin_context(request: Request, snapshot=None) -> dict:
     groups = {}
     title = "Agency"
@@ -707,16 +721,7 @@ async def admin_org_delete(
             {
                 **_base_admin_context(request, current),
                 "orgs": [
-                    {
-                        "key": key,
-                        "name": group.name,
-                        "path": str(group.path),
-                        "agents": list(group.agents.keys()),
-                        "agent_count": len(group.agents),
-                        "initialized": resolve_group_paths(group).group_root.exists(),
-                        "path_exists": resolve_group_paths(group).group_root.exists(),
-                        "dispatch_enabled": group.dispatch.enabled,
-                    }
+                    _group_summary(key, group)
                     for key, group in current.config.groups.items()
                 ],
                 "revision": current.revision,

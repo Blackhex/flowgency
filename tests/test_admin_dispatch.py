@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import yaml
@@ -251,6 +252,24 @@ def test_admin_groups_card_layout_stacks_on_mobile(tmp_path, monkeypatch):
     # Actions must not have margin-left on mobile (only at sm+)
     assert 'sm:ml-4' in response.text
     assert 'class="flex items-start justify-between"' not in response.text  # Old layout
+
+
+def test_admin_group_conflict_lists_workspace_without_group_state_as_not_initialized(
+    tmp_path,
+    monkeypatch,
+):
+    client = _configure_admin(tmp_path, monkeypatch, _status())
+    assert client.get("/admin/groups").status_code == 200
+    shutil.rmtree(tmp_path / "groups" / "test")
+
+    response = client.post(
+        "/admin/orgs/test/delete",
+        data={"revision": "stale-revision"},
+    )
+
+    assert response.status_code == 409
+    assert "Not initialized (group state missing)" in response.text
+    assert "Path does not exist" not in response.text
 
 
 def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monkeypatch):
