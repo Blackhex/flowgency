@@ -1588,6 +1588,7 @@ async def admin_org_new(request: Request):
         "mode": "create",
         "org_key": "",
         "org_name": "",
+        "org_workspace_path": "",
         "org_path": "",
         "default_integration": "claude-code",
         "org_agents": "",

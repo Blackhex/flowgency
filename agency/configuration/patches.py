@@ -30,6 +30,7 @@ class AgencySettingsPatch:
 @dataclass(frozen=True)
 class GroupSettingsPatch:
     name: str
+    workspace_path: str
     path: str
     default_integration: str
 
@@ -43,6 +44,7 @@ class GroupDispatchPatch:
 @dataclass(frozen=True)
 class GroupSettingsStatePatch:
     name: str
+    workspace_path: str
     path: str
     default_integration: str
     runtime_timeout: int
@@ -58,6 +60,7 @@ class GroupSettingsStatePatch:
 @dataclass(frozen=True)
 class GroupCreateStatePatch:
     name: str
+    workspace_path: str
     path: str
     default_integration: str
     runtime_timeout: int
@@ -164,7 +167,7 @@ def create_group(
             raise ValueError(f"Group already exists: {group_id}")
         groups[group_id] = {
             "name": patch.name,
-            "workspace_path": patch.path,
+            "workspace_path": patch.workspace_path,
             "path": patch.path,
             "default_integration": patch.default_integration,
             "agents": [],
@@ -185,7 +188,7 @@ def create_group_state(
             raise ValueError(f"Group already exists: {group_id}")
         groups[group_id] = {
             "name": patch.name,
-            "workspace_path": patch.path,
+            "workspace_path": patch.workspace_path,
             "path": patch.path,
             "default_integration": patch.default_integration,
             "runtime": {
@@ -219,7 +222,7 @@ def patch_group_settings(
     def apply(raw: dict[str, Any]) -> None:
         group = _group(raw, group_id)
         group["name"] = patch.name
-        group["workspace_path"] = patch.path
+        group["workspace_path"] = patch.workspace_path
         group["path"] = patch.path
         group["default_integration"] = patch.default_integration
 
@@ -251,7 +254,7 @@ def patch_group_settings_state(
     def apply(raw: dict[str, Any]) -> None:
         group = _group(raw, group_id)
         group["name"] = patch.name
-        group["workspace_path"] = patch.path
+        group["workspace_path"] = patch.workspace_path
         group["path"] = patch.path
         group["default_integration"] = patch.default_integration
 

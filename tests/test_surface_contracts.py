@@ -79,6 +79,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "source.md").write_text("unchanged\n", encoding="utf-8")
+    group_state = tmp_path / "groups" / "newsletter"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
@@ -97,7 +98,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
                     "newsletter": {
                         "name": "Newsletter",
                         "workspace_path": str(workspace),
-                        "path": str(workspace),
+                        "path": str(group_state),
                         "default_integration": "claude-code",
                         "agents": [
                             {
@@ -216,6 +217,13 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
     group = config["groups"]["example"]
+    assert group["workspace_path"] == "C:/Projects/example"
+    assert group["path"] == "C:/Agency/groups/example"
+    skill_text = (
+        REPO_ROOT / "skills" / "agency-setup" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert "`workspace_path` points to the project workspace" in skill_text
+    assert "`path` points to the Agency-owned group-state root" in skill_text
     assert "agents" not in group["dispatch"]
     assert group["runtime"]["sandbox"]["roots"]
     assert all({"name", "blueprint", "integration"} <= set(instance) for instance in group["agents"])
@@ -239,11 +247,12 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     library.mkdir()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    group_state = tmp_path / "groups" / "example"
     config["agency"]["agent_library"] = str(library)
     config["agency"]["compilation_cache"] = str(tmp_path / "cache")
     config["agency"]["memory_store"] = str(tmp_path / "memory")
     config["groups"]["example"]["workspace_path"] = str(workspace)
-    config["groups"]["example"]["path"] = str(workspace)
+    config["groups"]["example"]["path"] = str(group_state)
     config["groups"]["example"]["runtime"]["sandbox"]["roots"] = [str(workspace)]
     config_path = tmp_path / "config.yaml"
 

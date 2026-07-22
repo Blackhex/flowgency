@@ -182,3 +182,70 @@ Result:
 ## Concerns
 
 - Admin/group patch flows currently mirror the single submitted path into both `workspace_path` and `path` so existing UI flows remain valid under schema v3. This is intentional for Task 1, but later storage-redesign tasks should introduce fully separate edit/create inputs once the UI and workflows are ready.
+
+## Review-fix addendum
+
+Addressed the review findings by removing all `workspace_path = path` mirroring from group patch helpers and admin group create/save flows, splitting the admin form into explicit workspace-vs-group-state fields, correcting the setup-skill prose, and updating contract/route tests so workspace and group-state paths stay distinct.
+
+### Review-fix RED
+
+Command:
+
+```powershell
+.venv\Scripts\python -m pytest tests\test_config_patches.py tests\test_group_settings.py tests\test_config.py tests\test_surface_contracts.py -q
+```
+
+Result:
+
+- `5 failed, 126 passed in 2.31s`
+- expected failures proved the missing review-fix behavior:
+  - `GroupSettingsPatch.__init__() got an unexpected keyword argument 'workspace_path'`
+  - `GroupSettingsStatePatch.__init__() got an unexpected keyword argument 'workspace_path'`
+  - `GroupCreateStatePatch.__init__() got an unexpected keyword argument 'workspace_path'`
+  - group settings page still lacked `name="workspace_path"`
+  - setup-skill prose still described the old meaning
+
+### Review-fix GREEN
+
+Focused covering validation:
+
+```powershell
+.venv\Scripts\python -m pytest tests\test_config_patches.py tests\test_group_settings.py tests\test_config.py tests\test_surface_contracts.py tests\test_admin_org_sandbox.py -q
+```
+
+Result:
+
+- `145 passed in 4.90s`
+
+Full-suite verification:
+
+```powershell
+.venv\Scripts\python -m pytest tests\ -q
+```
+
+Result:
+
+- `1205 passed, 3 skipped in 132.21s`
+
+### Review-fix files changed
+
+- `agency/app.py`
+- `agency/configuration/patches.py`
+- `agency/templates/admin_org_edit.html`
+- `agency/web/routes/admin_groups.py`
+- `skills/agency-setup/SKILL.md`
+- `tests/test_admin_org_sandbox.py`
+- `tests/test_config_patches.py`
+- `tests/test_group_settings.py`
+- `tests/test_surface_contracts.py`
+
+### Review-fix self-review
+
+- Confirmed group create/save now require and persist distinct explicit `workspace_path` and `path` values.
+- Confirmed no compatibility aliases or path inference were added.
+- Confirmed schema-version-3 strictness and unrelated extension-key preservation remain intact.
+- Confirmed setup skill prose, surface contracts, and admin UI now describe the split roots consistently.
+
+### Review-fix concerns
+
+- None beyond the existing branch scope; the original path-mirroring concern is resolved.

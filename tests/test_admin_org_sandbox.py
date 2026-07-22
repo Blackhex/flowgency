@@ -47,7 +47,8 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 def _make_client(monkeypatch, tmp_path, raw_config):
     raw = deepcopy(raw_config)
     (tmp_path / "library").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "workspace").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
     raw["agency"]["title"] = "Agency"
     raw["agency"]["default_group"] = "grp"
     raw["agency"]["agent_library"] = str(tmp_path / "library")
@@ -56,8 +57,8 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     raw["groups"] = {
         "grp": {
             "name": "Grp",
-            "workspace_path": str(tmp_path / "agents"),
-            "path": str(tmp_path / "agents"),
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
             "default_integration": "copilot",
             "agents": [],
             "workspaces": [],
@@ -79,7 +80,8 @@ def test_admin_org_save_persists_sandbox_root(tmp_path, monkeypatch, raw_config)
         data={
             "revision": revision,
             "name": "Grp",
-            "path": str(tmp_path / "agents"),
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
             "workspaces_json": "[]",
             "default_integration": "copilot",
             "runtime_timeout": "1800",
@@ -94,6 +96,8 @@ def test_admin_org_save_persists_sandbox_root(tmp_path, monkeypatch, raw_config)
 
     assert response.status_code == 303
     saved = store.load().raw
+    assert saved["groups"]["grp"]["workspace_path"] == str(tmp_path / "workspace")
+    assert saved["groups"]["grp"]["path"] == str(tmp_path / "groups" / "grp-state")
     assert saved["groups"]["grp"]["runtime"]["sandbox"] == {
         "mode": "restricted",
         "roots": [str(tmp_path / "repo")],
@@ -114,7 +118,8 @@ def test_admin_org_save_clears_sandbox_root_when_empty(tmp_path, monkeypatch, ra
         data={
             "revision": revision,
             "name": "Grp",
-            "path": str(tmp_path / "agents"),
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
             "workspaces_json": "[]",
             "default_integration": "copilot",
             "runtime_timeout": "1800",
@@ -135,6 +140,7 @@ def test_admin_org_save_clears_sandbox_root_when_empty(tmp_path, monkeypatch, ra
 def test_admin_org_create_persists_sandbox_root(tmp_path, monkeypatch, raw_config):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
+    (tmp_path / "new-workspace").mkdir()
     (tmp_path / "repo").mkdir()
 
     response = client.post(
@@ -143,6 +149,7 @@ def test_admin_org_create_persists_sandbox_root(tmp_path, monkeypatch, raw_confi
             "revision": store.load().revision,
             "key": "new",
             "name": "New Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": "[]",
             "sandbox_root": str(tmp_path / "repo"),
@@ -152,6 +159,10 @@ def test_admin_org_create_persists_sandbox_root(tmp_path, monkeypatch, raw_confi
 
     assert response.status_code == 303
     saved = store.load().raw
+    assert saved["groups"]["new"]["workspace_path"] == str(
+        tmp_path / "new-workspace"
+    )
+    assert saved["groups"]["new"]["path"] == str(tmp_path / "new-agents")
     assert saved["groups"]["new"]["runtime"]["sandbox"] == {
         "mode": "restricted",
         "roots": [str(tmp_path / "repo")],
@@ -161,6 +172,7 @@ def test_admin_org_create_persists_sandbox_root(tmp_path, monkeypatch, raw_confi
 def test_admin_org_create_omits_sandbox_root_when_empty(tmp_path, monkeypatch, raw_config):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
+    (tmp_path / "new-workspace").mkdir()
 
     response = client.post(
         "/admin/orgs/create",
@@ -168,6 +180,7 @@ def test_admin_org_create_omits_sandbox_root_when_empty(tmp_path, monkeypatch, r
             "revision": store.load().revision,
             "key": "new",
             "name": "New Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": "[]",
             "sandbox_root": "",
@@ -177,6 +190,10 @@ def test_admin_org_create_omits_sandbox_root_when_empty(tmp_path, monkeypatch, r
 
     assert response.status_code == 303
     saved = store.load().raw
+    assert saved["groups"]["new"]["workspace_path"] == str(
+        tmp_path / "new-workspace"
+    )
+    assert saved["groups"]["new"]["path"] == str(tmp_path / "new-agents")
     assert saved["groups"]["new"]["runtime"]["sandbox"] == {
         "mode": "unrestricted",
         "roots": [],
@@ -194,7 +211,8 @@ def test_admin_org_save_persists_multiline_sandbox_root_as_list(tmp_path, monkey
         data={
             "revision": revision,
             "name": "Grp",
-            "path": str(tmp_path / "agents"),
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
             "workspaces_json": "[]",
             "default_integration": "copilot",
             "runtime_timeout": "1800",
@@ -225,7 +243,8 @@ def test_admin_org_save_single_line_sandbox_root_stays_string(tmp_path, monkeypa
         data={
             "revision": revision,
             "name": "Grp",
-            "path": str(tmp_path / "agents"),
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
             "workspaces_json": "[]",
             "default_integration": "copilot",
             "runtime_timeout": "1800",
@@ -256,7 +275,8 @@ def test_admin_org_save_persists_allowed_tools(tmp_path, monkeypatch, raw_config
         data={
             "revision": revision,
             "name": "Grp",
-            "path": str(tmp_path / "agents"),
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
             "workspaces_json": "[]",
             "default_integration": "copilot",
             "runtime_timeout": "1800",
@@ -286,7 +306,8 @@ def test_admin_org_save_clears_allowed_tools_when_none_checked(tmp_path, monkeyp
         data={
             "revision": revision,
             "name": "Grp",
-            "path": str(tmp_path / "agents"),
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
             "workspaces_json": "[]",
             "default_integration": "copilot",
             "runtime_timeout": "1800",
@@ -335,7 +356,8 @@ def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_p
         data={
             "revision": revision,
             "name": "Grp",
-            "path": str(tmp_path / "agents"),
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
             "workspaces_json": '[{"name":"Primary","type":"tmux","config":{"script_path":"primary.sh"},"workspace_extension":{"preserve":true}}]',
             "default_integration": "copilot",
             "runtime_timeout": "1800",
@@ -361,6 +383,7 @@ def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_p
 def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch, raw_config):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
+    (tmp_path / "new-workspace").mkdir()
     (tmp_path / "repo").mkdir()
     (tmp_path / "cowork").mkdir()
 
@@ -370,6 +393,7 @@ def test_admin_org_create_persists_multiline_and_tools(tmp_path, monkeypatch, ra
             "revision": store.load().revision,
             "key": "new",
             "name": "New Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": "[]",
             "sandbox_root": f"{tmp_path / 'repo'}\n{tmp_path / 'cowork'}",
@@ -395,6 +419,7 @@ def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
 ):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
+    (tmp_path / "new-workspace").mkdir()
 
     response = client.post(
         "/admin/orgs/create",
@@ -402,6 +427,7 @@ def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
             "revision": store.load().revision,
             "key": "copilot-group",
             "name": "Copilot Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": "[]",
             "default_integration": "copilot",
@@ -417,6 +443,7 @@ def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
         data={
             "key": "bad-group",
             "name": "Bad Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": "[]",
             "default_integration": "not-registered",
@@ -449,6 +476,7 @@ def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
 ):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
     (tmp_path / "new-agents").mkdir()
+    (tmp_path / "new-workspace").mkdir()
     (tmp_path / "repo").mkdir()
     (tmp_path / "cowork").mkdir()
     calls = 0
@@ -468,6 +496,7 @@ def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
             "revision": store.load().revision,
             "key": "new",
             "name": "New Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": '[{"name":"Primary","type":"tmux","config":{"script_path":"tmux-agents.sh"}}]',
             "sandbox_root": f"{tmp_path / 'repo'}\n{tmp_path / 'cowork'}",
@@ -481,6 +510,7 @@ def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
 
     saved = store.load().raw["groups"]["new"]
     assert saved["name"] == "New Group"
+    assert saved["workspace_path"] == str(tmp_path / "new-workspace")
     assert saved["path"] == str(tmp_path / "new-agents")
     assert saved["default_integration"] == "claude-code"
     assert saved["dispatch"] == {"enabled": False, "daily_limit": 20}

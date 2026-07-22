@@ -64,14 +64,20 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 def _make_client(monkeypatch, tmp_path, raw_config):
     raw = deepcopy(raw_config)
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "groups" / "newsletter").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "workspace" / "newsletter").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "groups" / "newsletter-state").mkdir(parents=True, exist_ok=True)
     (tmp_path / "repo-root").mkdir(parents=True, exist_ok=True)
     raw["agency"]["title"] = "Agency"
     raw["agency"]["default_group"] = "newsletter"
     raw["agency"]["agent_library"] = str(tmp_path / "agent-library")
     raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
-    raw["groups"]["newsletter"]["path"] = str(tmp_path / "groups" / "newsletter")
+    raw["groups"]["newsletter"]["workspace_path"] = str(
+        tmp_path / "workspace" / "newsletter"
+    )
+    raw["groups"]["newsletter"]["path"] = str(
+        tmp_path / "groups" / "newsletter-state"
+    )
     raw["groups"]["newsletter"]["runtime"] = {
         "timeout": 2400,
         "sandbox": {"mode": "restricted", "roots": [str(tmp_path / "repo-root")]},
@@ -92,6 +98,8 @@ def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_pat
     assert response.status_code == 200
     assert "Runtime defaults" in response.text
     assert 'href="/newsletter/agents"' in response.text
+    assert 'name="workspace_path"' in response.text
+    assert 'name="path"' in response.text
     assert "Agent Roster" not in response.text
     assert "Dispatch Schedule" not in response.text
     assert "Auto-detect" not in response.text
@@ -111,8 +119,8 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):
         data={
             "revision": stale,
             "name": "Newsletter",
-            "workspace_path": str(tmp_path / "groups" / "newsletter"),
-            "path": str(tmp_path / "groups" / "newsletter"),
+            "workspace_path": str(tmp_path / "workspace" / "newsletter"),
+            "path": str(tmp_path / "groups" / "newsletter-state"),
             "default_integration": "claude-code",
             "runtime_timeout": "1800",
             "sandbox_mode": "restricted",
@@ -159,8 +167,8 @@ def test_stale_group_create_returns_conflict_without_writing_group(
             "revision": stale,
             "key": "new-group",
             "name": "New Group",
-            "workspace_path": str(tmp_path / "groups" / "new-group"),
-            "path": str(tmp_path / "groups" / "new-group"),
+            "workspace_path": str(tmp_path / "workspace" / "new-group"),
+            "path": str(tmp_path / "groups" / "new-group-state"),
             "default_integration": "copilot",
             "workspaces_json": "[]",
         },

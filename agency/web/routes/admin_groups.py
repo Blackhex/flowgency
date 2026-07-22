@@ -147,6 +147,7 @@ def _group_settings_response(
             "mode": "edit",
             "org_key": group_id,
             "org_name": group.name,
+            "org_workspace_path": str(group.workspace_path),
             "org_path": str(group.path),
             "org_workspaces_json": json.dumps(
                 [
@@ -456,6 +457,7 @@ async def admin_org_save(
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     name = str(form.get("name", "")).strip()
+    workspace_path = str(form.get("workspace_path", "")).strip()
     path = str(form.get("path", "")).strip()
     default_integration = str(form.get("default_integration", "")).strip()
     runtime_timeout = int(str(form.get("runtime_timeout", "1800")) or "1800")
@@ -498,6 +500,7 @@ async def admin_org_save(
                 org,
                 GroupSettingsStatePatch(
                     name=name,
+                    workspace_path=workspace_path,
                     path=path,
                     default_integration=default_integration,
                     runtime_timeout=runtime_timeout,
@@ -539,8 +542,9 @@ async def admin_org_create(
     revision = str(form.get("revision", "")).strip()
     key = str(form.get("key", "")).strip().lower().replace(" ", "-")
     name = str(form.get("name", "")).strip()
+    workspace_path = str(form.get("workspace_path", "")).strip()
     path = str(form.get("path", "")).strip()
-    if not key or not name or not path:
+    if not key or not name or not workspace_path or not path:
         snapshot = services.config_store.load()
         return _templates(request).TemplateResponse(
             request,
@@ -550,13 +554,14 @@ async def admin_org_create(
                 "mode": "create",
                 "org_key": key,
                 "org_name": name,
+                "org_workspace_path": workspace_path,
                 "org_path": path,
                 "default_integration": str(
                     form.get("default_integration", "")
                 ).strip(),
                 "org_workspaces_json": str(form.get("workspaces_json", "[]")),
                 "workspace_types_json": _workspace_types_json(request),
-                "warning": "Key, name, and path are required.",
+                "warning": "Key, name, workspace path, and path are required.",
                 "integration_names": _integration_names(),
                 "revision": snapshot.revision,
             },
@@ -573,6 +578,7 @@ async def admin_org_create(
                 "mode": "create",
                 "org_key": key,
                 "org_name": name,
+                "org_workspace_path": workspace_path,
                 "org_path": path,
                 "default_integration": default_integration,
                 "org_workspaces_json": str(form.get("workspaces_json", "[]")),
@@ -602,6 +608,7 @@ async def admin_org_create(
                 "mode": "create",
                 "org_key": key,
                 "org_name": name,
+                "org_workspace_path": workspace_path,
                 "org_path": path,
                 "default_integration": default_integration,
                 "org_workspaces_json": workspaces_json,
@@ -626,6 +633,7 @@ async def admin_org_create(
                 key,
                 GroupCreateStatePatch(
                     name=name,
+                    workspace_path=workspace_path,
                     path=path,
                     default_integration=default_integration or "claude-code",
                     runtime_timeout=1800,
@@ -648,6 +656,7 @@ async def admin_org_create(
                 "mode": "create",
                 "org_key": key,
                 "org_name": name,
+                "org_workspace_path": workspace_path,
                 "org_path": path,
                 "default_integration": default_integration,
                 "org_workspaces_json": workspaces_json,

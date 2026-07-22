@@ -138,6 +138,9 @@ def test_patch_group_settings_preserves_unowned_group_fields(config_store):
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
+    (snapshot.path.parent / "workspace" / "editorial").mkdir(
+        parents=True, exist_ok=True
+    )
     (snapshot.path.parent / "agents" / "editorial").mkdir(parents=True, exist_ok=True)
 
     refreshed = config_store.load()
@@ -147,7 +150,8 @@ def test_patch_group_settings_preserves_unowned_group_fields(config_store):
         "newsletter",
         GroupSettingsPatch(
             name="Editorial",
-            path=str(refreshed.path.parent / "agents" / "editorial"),
+            workspace_path=str(refreshed.path.parent / "workspace" / "editorial"),
+            path=str(refreshed.path.parent / "groups" / "editorial"),
             default_integration="copilot",
         ),
     )
@@ -155,6 +159,12 @@ def test_patch_group_settings_preserves_unowned_group_fields(config_store):
     assert updated.raw["groups"]["newsletter"]["ui_extension"] == {
         "theme": "sunset"
     }
+    assert updated.raw["groups"]["newsletter"]["workspace_path"] == str(
+        refreshed.path.parent / "workspace" / "editorial"
+    )
+    assert updated.raw["groups"]["newsletter"]["path"] == str(
+        refreshed.path.parent / "groups" / "editorial"
+    )
     assert (
         updated.raw["groups"]["newsletter"]["runtime"]
         == refreshed.raw["groups"]["newsletter"]["runtime"]
@@ -191,7 +201,9 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
-    (snapshot.path.parent / "agents" / "editorial" / "repo").mkdir(parents=True, exist_ok=True)
+    (snapshot.path.parent / "workspace" / "editorial" / "repo").mkdir(
+        parents=True, exist_ok=True
+    )
 
     refreshed = config_store.load()
     updated = patch_group_settings_state(
@@ -200,7 +212,8 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
         "newsletter",
         GroupSettingsStatePatch(
             name="Editorial",
-            path=str(refreshed.path.parent / "agents" / "editorial"),
+            workspace_path=str(refreshed.path.parent / "workspace" / "editorial"),
+            path=str(refreshed.path.parent / "groups" / "editorial"),
             default_integration="copilot",
             runtime_timeout=2400,
             sandbox_mode="restricted",
@@ -221,6 +234,10 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
     )
 
     group = updated.raw["groups"]["newsletter"]
+    assert group["workspace_path"] == str(
+        refreshed.path.parent / "workspace" / "editorial"
+    )
+    assert group["path"] == str(refreshed.path.parent / "groups" / "editorial")
     assert group["group_extension"] == {"theme": "sunset"}
     assert group["runtime"]["runtime_extension"] == {"preserve": True}
     assert group["runtime"]["sandbox"]["sandbox_extension"] == {"preserve": True}
@@ -271,7 +288,8 @@ def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_stor
             "research",
             GroupCreateStatePatch(
                 name="Research",
-                path=str(snapshot.path.parent / "agents" / "research"),
+                workspace_path=str(snapshot.path.parent / "workspace" / "research"),
+                path=str(snapshot.path.parent / "groups" / "research"),
                 default_integration="copilot",
                 runtime_timeout=2400,
                 sandbox_mode="restricted",
