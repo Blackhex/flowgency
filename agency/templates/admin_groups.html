@@ -15,7 +15,10 @@
       <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div class="min-w-0 space-y-1.5">
           <h3 class="text-lg font-semibold text-gray-900">{{ org.name }}</h3>
-          <p class="text-sm text-gray-500 font-mono break-all">{{ org.path }}</p>
+          <div class="space-y-1 text-sm text-gray-500 font-mono break-all">
+            <p><span class="font-semibold text-gray-700">Workspace path:</span> {{ org.workspace_path }}</p>
+            <p><span class="font-semibold text-gray-700">Group path:</span> {{ org.group_path }}</p>
+          </div>
           <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600">
             <span>{{ org.agent_count }} agent{{ 's' if org.agent_count != 1 else '' }}</span>
             <span class="text-gray-300">|</span>
@@ -24,10 +27,10 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
               Initialized
             </span>
-            {% elif org.path_exists %}
-            <span class="text-amber-600">Not initialized (group state missing)</span>
+            {% elif org.workspace_exists %}
+            <span class="text-amber-600">Record directories missing</span>
             {% else %}
-            <span class="text-red-600">Path does not exist</span>
+            <span class="text-red-600">Workspace path does not exist</span>
             {% endif %}
             {% if org.dispatch_enabled %}
             <span class="text-gray-300">|</span>
@@ -43,12 +46,6 @@
              class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
             Edit
           </a>
-          <form method="post" action="/admin/orgs/{{ org.key }}/initialize" class="inline">
-            <button type="submit"
-                    class="px-3 py-1.5 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
-              Initialize
-            </button>
-          </form>
           <form method="post" action="/admin/orgs/{{ org.key }}/delete" class="inline"
                 onsubmit="return confirm('Delete group \'{{ org.name }}\'? This only removes it from config — files on disk are not deleted.')">
             <input type="hidden" name="revision" value="{{ revision }}">

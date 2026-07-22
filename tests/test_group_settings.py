@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from copy import deepcopy
 from html.parser import HTMLParser
 from pathlib import Path
@@ -100,9 +101,34 @@ def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_pat
     assert 'href="/newsletter/agents"' in response.text
     assert 'name="workspace_path"' in response.text
     assert 'name="path"' in response.text
+    assert "Workspace path" in response.text
+    assert "Group path" in response.text
+    assert "shared/" not in response.text
+    assert "/initialize" not in response.text
     assert "Agent Roster" not in response.text
     assert "Dispatch Schedule" not in response.text
     assert "Auto-detect" not in response.text
+
+
+def test_admin_groups_lists_workspace_and_group_paths_without_initialize_action(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, _ = _make_client(monkeypatch, tmp_path, raw_config)
+    group_root = tmp_path / "groups" / "newsletter-state"
+    shutil.rmtree(group_root)
+
+    response = client.get("/admin/groups")
+
+    assert response.status_code == 200
+    assert "Workspace path" in response.text
+    assert "Group path" in response.text
+    assert str(tmp_path / "workspace" / "newsletter") in response.text
+    assert str(group_root) in response.text
+    assert "/initialize" not in response.text
+    assert "Record directories missing" in response.text
+    assert "Path does not exist" not in response.text
 
 
 def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):

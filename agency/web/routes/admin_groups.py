@@ -51,11 +51,12 @@ def _group_summary(key: str, group) -> dict:
     return {
         "key": key,
         "name": group.name,
-        "path": str(group.path),
+        "workspace_path": str(group.workspace_path),
+        "group_path": str(group.path),
         "agents": list(group.agents.keys()),
         "agent_count": len(group.agents),
         "initialized": all(path.is_dir() for path in paths.record_directories),
-        "path_exists": paths.workspace_root.exists(),
+        "workspace_exists": paths.workspace_root.exists(),
         "dispatch_enabled": group.dispatch.enabled,
     }
 

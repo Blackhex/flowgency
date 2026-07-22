@@ -32,6 +32,10 @@ def test_build_setup_prompt_names_project_and_config(tmp_path: Path) -> None:
     assert "group.default_integration" in prompt
     assert "initial agent instances" in prompt
     assert "unless the user explicitly approves a different registered integration" in prompt
+    assert "Configure schema_version: 3." in prompt
+    assert "workspace_path to the project execution workspace" in prompt
+    assert "path to a disjoint Agency-owned group root" in prompt
+    assert "Never create or reference a project-local shared directory." in prompt
     assert "one complete configuration" in prompt
     assert "validation" in prompt.lower()
     assert "one atomic write" in prompt.lower()

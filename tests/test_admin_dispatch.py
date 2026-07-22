@@ -268,8 +268,8 @@ def test_admin_group_conflict_lists_workspace_without_group_state_as_not_initial
     )
 
     assert response.status_code == 409
-    assert "Not initialized (group state missing)" in response.text
-    assert "Path does not exist" not in response.text
+    assert "Record directories missing" in response.text
+    assert "Workspace path does not exist" not in response.text
 
 
 def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monkeypatch):

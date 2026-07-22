@@ -1308,11 +1308,12 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
         orgs.append({
             "key": key,
             "name": group.name,
-            "path": str(group.path),
+            "workspace_path": str(group.workspace_path),
+            "group_path": str(group.path),
             "agents": list(group.agents.keys()),
             "agent_count": len(group.agents),
             "initialized": all(path.is_dir() for path in paths.record_directories),
-            "path_exists": paths.group_root.exists(),
+            "workspace_exists": paths.workspace_root.exists(),
             "dispatch_enabled": dispatch_cfg.enabled,
         })
     return {

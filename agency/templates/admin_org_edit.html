@@ -40,14 +40,16 @@
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
       </div>
       <div>
-        <label for="workspace_path" class="block text-sm font-medium text-gray-700 mb-1">Workspace Path</label>
+        <label for="workspace_path" class="block text-sm font-medium text-gray-700 mb-1">Workspace path</label>
         <input type="text" name="workspace_path" id="workspace_path" value="{{ org_workspace_path }}" required
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+        <p class="mt-1 text-xs text-gray-500">Project source and agent execution location.</p>
       </div>
       <div class="md:col-span-2">
-        <label for="path" class="block text-sm font-medium text-gray-700 mb-1">Group State Path</label>
+        <label for="path" class="block text-sm font-medium text-gray-700 mb-1">Group path</label>
         <input type="text" name="path" id="path" value="{{ org_path }}" required
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+        <p class="mt-1 text-xs text-gray-500">Agency-owned observations, proposals, decisions, locks, and logs.</p>
       </div>
     </div>
 
