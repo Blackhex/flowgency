@@ -68,29 +68,21 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
     ]:
         paths = create_group_environment(tmp_path, key)
         group_root = paths.state_root
-        (group_root / "shared" / "jobs").mkdir(
+        (group_root / "logs").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "shared" / "logs").mkdir(
+        (group_root / "observations").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "shared" / "observations").mkdir(
+        (group_root / "proposals").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "shared" / "proposals").mkdir(
+        (group_root / "decisions").mkdir(
             parents=True,
             exist_ok=True,
-        )
-        (group_root / "shared" / "decisions").mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-        (group_root / "shared" / "memory.md").write_text(
-            "# Shared\n",
-            encoding="utf-8",
         )
         groups[key] = apply_group_paths({
             "name": group_name,
@@ -208,10 +200,7 @@ def _write_channel_job(
             path=str(resolved.directory.resolve()),
         ),
         trigger_context=None,
-        prompt_source={
-            "type": "saved_prompt",
-            "path": "shared/prompts/daily-review.md",
-        },
+        prompt_source={"type": "routine", "routine_id": "daily-review"},
         timeout_override=None,
         created_at="2026-07-16T00:00:00+00:00",
     )

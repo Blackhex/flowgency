@@ -36,7 +36,7 @@ def _authority(spec: JobSpec):
 
 def queued_job(tmp_path: Path, *, decision_context=None):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     cache_path = tmp_path / ".compat-cache" / "script" / "v1" / "unresolved"
     runtime_path = cache_path / "runtime"
     runtime_path.mkdir(parents=True, exist_ok=True)
@@ -101,7 +101,7 @@ def queued_job(tmp_path: Path, *, decision_context=None):
 def memory_bound_job(tmp_path: Path):
     group_path = tmp_path / "group"
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     cache_path = tmp_path / "compiled-agents" / "script" / "v1" / "digest"
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
@@ -149,7 +149,7 @@ def memory_bound_job(tmp_path: Path):
             path=str(resolved.directory.resolve()),
         ),
         trigger_context=None,
-        prompt_source={"type": "saved_prompt", "path": "shared/prompts/routine.md"},
+        prompt_source={"type": "routine", "routine_id": "daily-review"},
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
@@ -546,12 +546,12 @@ def test_execute_job_uses_resolved_skill_from_current_snapshot(tmp_path, monkeyp
 
 def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
-    workspace_dir = tmp_path / "group"
-    workspace_dir.mkdir(parents=True, exist_ok=True)
+    workspace_root = tmp_path / "group"
+    workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            workspace_root=workspace_dir,
+            workspace_root=workspace_root,
             integration=SimpleNamespace(
                 run=lambda request: RunResult(0, "done", "", 0.1)
             ),
@@ -591,7 +591,7 @@ def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
 
 
 def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
-    decisions = tmp_path / "group" / "shared" / "decisions"
+    decisions = tmp_path / "group" / "decisions"
     decisions.mkdir(parents=True)
     decision = decisions / "proposal.md"
     decision.write_text(

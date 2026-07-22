@@ -21,7 +21,7 @@ def test_agent_roots_are_additive_and_ordered(raw_config, config_paths):
     agent["runtime"] = {
         "sandbox": {
             "mode": "restricted",
-            "additional_roots": ["C:/Research/editorial", "c:/shared/RESEARCH"],
+            "additional_roots": ["C:/Research/editorial", "c:/Research/RESEARCH"],
         }
     }
 
@@ -35,6 +35,7 @@ def test_agent_roots_are_additive_and_ordered(raw_config, config_paths):
         Path("C:/Projects/newsletter").resolve(strict=False),
         Path("C:/Shared/research").resolve(strict=False),
         Path("C:/Research/editorial").resolve(strict=False),
+        Path("C:/Research/RESEARCH").resolve(strict=False),
     )
 
 

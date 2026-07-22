@@ -19,21 +19,26 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
 
 2. Add the group to your Agency `config.yaml`:
    ```yaml
+   schema_version: 3
    groups:
      content:
        name: Content Team
-       path: /path/to/your/content-agents
+       workspace_path: /path/to/your/project
+       path: /path/to/agency/groups/content
        default_integration: claude-code  # or whichever tool you use
        agents:
        - name: writer
+         blueprint: writer
          integration: claude-code
          capabilities:
            write: true
        - name: editor
+         blueprint: editor
          integration: claude-code
          capabilities:
            write: false
        - name: researcher
+         blueprint: researcher
          integration: claude-code
          capabilities:
            write: false
@@ -41,24 +46,31 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
 
 3. Edit each agent's `CLAUDE.md` (or your tool's identity file) to match your project's context — what you publish, where, and your voice/tone guidelines.
 
-4. Customize the dispatch prompts in `shared/prompts/` for your publishing cadence.
+4. Assign standard Agent Skills and schedules under each instance's `routines` in `config.yaml`.
 
 5. Restart Agency and your new group appears in the sidebar.
 
-## Dispatch Schedule (Suggested)
+## Routine Schedule (Suggested)
 
 ```yaml
-dispatch:
-  agents:
-    researcher:
-      - prompt: research-scan.md
-        every: 12h
-    writer:
-      - prompt: content-review.md
-        at: "09:00"
-    editor:
-      - prompt: quality-check.md
-        at: "14:00"
+groups:
+  content:
+    agents:
+      - name: researcher
+        routines:
+          - id: research-scan
+            skill: research-scan
+            schedule: {every: 12h}
+      - name: writer
+        routines:
+          - id: content-review
+            skill: content-review
+            schedule: {at: "09:00"}
+      - name: editor
+        routines:
+          - id: quality-check
+            skill: quality-check
+            schedule: {at: "14:00"}
 ```
 
 ## Adapting This Template

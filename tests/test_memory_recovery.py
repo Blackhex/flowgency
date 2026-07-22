@@ -22,7 +22,7 @@ class RecoveryFixture:
         self.group_root = tmp_path / "group"
         self.group_root.mkdir(parents=True)
         config_path = tmp_path / "config.yaml"
-        config_path.write_text("groups: {}\n", encoding="utf-8")
+        config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
         self.store_root = tmp_path / "memory-store"
         self.job_store_root = JobStore(self.store_root)
         self.store = MemoryStore(self.store_root)
@@ -73,8 +73,8 @@ class RecoveryFixture:
             ),
             trigger_context=None,
             prompt_source={
-                "type": "saved_prompt",
-                "path": "shared/prompts/routine.md",
+                "type": "routine",
+                "routine_id": "daily-review",
             },
             timeout_override=None,
             created_at="2026-07-15T00:00:00+00:00",

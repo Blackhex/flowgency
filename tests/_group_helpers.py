@@ -10,10 +10,6 @@ class TestGroupPaths:
     workspace_root: Path
     state_root: Path
 
-    @property
-    def shared_root(self) -> Path:
-        return self.state_root / "shared"
-
 
 def group_paths(tmp_path: Path, key: str) -> TestGroupPaths:
     return TestGroupPaths(
@@ -27,8 +23,8 @@ def create_group_environment(
     tmp_path: Path,
     key: str,
     *,
-    workspace_dirs: tuple[str, ...] = (),
-    shared_dirs: tuple[str, ...] = (),
+    workspace_entries: tuple[str, ...] = (),
+    group_dirs: tuple[str, ...] = (),
     create_workspace: bool = True,
     create_state: bool = False,
 ) -> TestGroupPaths:
@@ -37,10 +33,10 @@ def create_group_environment(
         paths.workspace_root.mkdir(parents=True, exist_ok=True)
     if create_state:
         paths.state_root.mkdir(parents=True, exist_ok=True)
-    for relative in workspace_dirs:
+    for relative in workspace_entries:
         (paths.workspace_root / relative).mkdir(parents=True, exist_ok=True)
-    for relative in shared_dirs:
-        (paths.shared_root / relative).mkdir(parents=True, exist_ok=True)
+    for relative in group_dirs:
+        (paths.state_root / relative).mkdir(parents=True, exist_ok=True)
     return paths
 
 

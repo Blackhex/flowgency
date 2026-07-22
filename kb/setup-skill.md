@@ -2,6 +2,8 @@
 
 The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces.
 
+Every generated config uses `schema_version: 3` and requires `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store`. Each group has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned group root). The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
+
 ## Install
 
 ### Claude Code on Linux
@@ -39,4 +41,3 @@ Invoke `agency-setup` from the project workspace after the first-run page launch
 After setup, the Agents page lists the configured group instances. Agent Detail provides `Profile/Blueprint/Runtime/Routines/Memory/Activity`; identity is the config display name, title, and emoji. Agent Library owns reusable instructions and Agent Skills. Memory Channels own named shared memory. Group Settings continues to manage defaults only.
 
 The skill reports blueprint keys, instance names, routines, memory scopes and channels, the authoritative config path, and scheduler status.
-

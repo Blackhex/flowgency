@@ -50,15 +50,6 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     research_paths = create_group_environment(tmp_path, "research")
     group_root = newsletter_paths.state_root
     target_root = research_paths.state_root
-    for path in [
-        group_root / "shared" / "jobs",
-        group_root / "shared" / "prompts",
-        target_root / "shared" / "jobs",
-        target_root / "shared" / "prompts",
-    ]:
-        path.mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "memory.md").write_text("# Shared\n", encoding="utf-8")
-    (target_root / "shared" / "memory.md").write_text("# Shared\n", encoding="utf-8")
     _write_blueprint(library_root, "advisor", "Advisor")
     _write_blueprint(library_root, "builder-blueprint", "Builder")
 

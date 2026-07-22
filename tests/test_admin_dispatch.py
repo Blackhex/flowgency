@@ -40,14 +40,14 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     paths = create_group_environment(
         tmp_path,
         "test",
-        workspace_dirs=("shared",),
-        shared_dirs=("prompts",),
+        workspace_entries=("prompts",),
+        group_dirs=("prompts",),
     )
     group_path = paths.state_root
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    (group_path / "shared" / "prompts" / "routine.md").write_text(
+    (group_path / "prompts" / "routine.md").write_text(
         "# Routine\n",
         encoding="utf-8",
     )
@@ -74,7 +74,7 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
                     "timeout": 1800,
                     "sandbox": {
                         "mode": "restricted",
-                        "roots": [str(paths.workspace_root / "shared")],
+                        "roots": [str(paths.workspace_root)],
                     },
                     "tools": {"mode": "allowlist", "names": ["shell"]},
                 },

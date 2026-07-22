@@ -39,8 +39,8 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
     group_root = tmp_path / "groups" / "newsletter"
-    (tmp_path / "Research" / "shared").mkdir(parents=True, exist_ok=True)
     (tmp_path / "Research" / "editorial").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "Research" / "additional").mkdir(parents=True, exist_ok=True)
     (group_root / "logs").mkdir(parents=True, exist_ok=True)
     (group_root / "observations").mkdir(parents=True, exist_ok=True)
     (group_root / "proposals").mkdir(parents=True, exist_ok=True)
@@ -58,7 +58,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
         "timeout": 2400,
         "sandbox": {
             "mode": "restricted",
-            "roots": [str((tmp_path / "Research" / "shared").resolve())],
+            "roots": [str((tmp_path / "Research" / "editorial").resolve())],
         },
         "tools": {"mode": "allowlist", "names": ["shell", "write"]},
     }
@@ -77,7 +77,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
                 "timeout": 1200,
                 "sandbox": {
                     "additional_roots": [
-                        str((tmp_path / "Research" / "editorial").resolve())
+                        str((tmp_path / "Research" / "additional").resolve())
                     ]
                 },
                 "tools": {"mode": "allowlist", "names": ["shell"]},
@@ -193,18 +193,18 @@ def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_pat
     assert response.status_code == 200
     assert "Group default" in response.text
     assert "Agent addition" in response.text
-    assert "Research/shared" in response.text.replace("\\", "/")
     assert "Research/editorial" in response.text.replace("\\", "/")
+    assert "Research/additional" in response.text.replace("\\", "/")
 
 
 def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    shared_root = str((tmp_path / "Research" / "shared").resolve())
-    editorial_root = str((tmp_path / "Research" / "editorial").resolve())
+    default_root = str((tmp_path / "Research" / "editorial").resolve())
+    additional_root = str((tmp_path / "Research" / "additional").resolve())
     raw["groups"]["newsletter"]["agents"][0]["runtime"]["sandbox"]["additional_roots"] = [
-        shared_root,
-        editorial_root,
+        default_root,
+        additional_root,
     ]
     config_path.write_text(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
@@ -216,9 +216,9 @@ def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch
 
     assert response.status_code == 200
     body = response.text.replace("\\", "/")
-    assert body.count(f"Group default: <span class=\"font-mono break-all\">{shared_root.replace('\\', '/')}</span>") == 2
-    assert f"Agent addition: <span class=\"font-mono break-all\">{shared_root.replace('\\', '/')}</span>" not in body
-    assert f"Agent addition: <span class=\"font-mono break-all\">{editorial_root.replace('\\', '/')}</span>" in body
+    assert body.count(f"Group default: <span class=\"font-mono break-all\">{default_root.replace('\\', '/')}</span>") == 2
+    assert f"Agent addition: <span class=\"font-mono break-all\">{default_root.replace('\\', '/')}</span>" not in body
+    assert f"Agent addition: <span class=\"font-mono break-all\">{additional_root.replace('\\', '/')}</span>" in body
 
 
 def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, raw_config):

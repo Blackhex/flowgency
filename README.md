@@ -16,13 +16,22 @@ On POSIX, use `.venv/bin/python`. The dashboard listens on `http://127.0.0.1:850
 
 ## Current configuration model
 
-Agency accepts one current `config.yaml` shape headed by `schema_version: 2`. `config.yaml` owns groups, explicit instances, runtime policy, routines, integration selection, identity, capabilities, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
+Agency accepts one current `config.yaml` shape headed by `schema_version: 3`. `config.yaml` owns groups, explicit instances, runtime policy, routines, integration selection, identity, capabilities, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
 
 Global paths separate reusable and mutable data:
 
 - `agency.agent_library` contains standard blueprints.
 - `agency.compilation_cache` contains disposable immutable runtime projections.
 - `agency.memory_store` contains semantic mutable Markdown memory.
+
+Each group separates its source repository from Agency-owned state:
+
+- `workspace_path` is the execution workspace and source repository.
+- `path` is the Agency-owned group root.
+- The group root is automatically available to restricted agents.
+- Durable jobs live in `agency.memory_store/.jobs`.
+- Operation locks live in `<group.path>/locks`.
+- Agency never loads or creates `<workspace_path>/shared`.
 
 Each immediate Agent Library child is a blueprint with `AGENTS.md` and optional Agent Skills under `.agents/skills/<skill>/SKILL.md`. An instance belongs to one group and explicitly selects one blueprint and integration. Runtime projectors create disposable native layouts without changing source bytes.
 
@@ -38,7 +47,7 @@ Routines replace prompt files and per-agent schedule maps. Each routine has a st
 - Memory Channels and semantic selectors own mutable memory.
 - Routines submit durable jobs; Jobs shows queued, waiting, running, completed, failed, and cancelled work.
 - Group Settings manages defaults only. It does not discover folders, initialize physical agents, or own instance CRUD.
-- Observations, proposals, decisions, logs, and workspaces remain group-scoped.
+- Observations, proposals, decisions, logs, locks, and workspaces remain group-scoped.
 
 Workspace launchers are optional frontends. They start configured instances in the group workspace and do not own configuration or source.
 

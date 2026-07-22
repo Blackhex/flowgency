@@ -11,20 +11,6 @@ def tmp_agent_dir(tmp_path):
 
 
 @pytest.fixture
-def tmp_group_path(tmp_path):
-    """Create a temporary group directory with shared/ structure."""
-    group = tmp_path / "group"
-    group.mkdir()
-    (group / "shared" / "observations").mkdir(parents=True)
-    (group / "shared" / "proposals").mkdir(parents=True)
-    (group / "shared" / "decisions").mkdir(parents=True)
-    (group / "shared" / "prompts").mkdir(parents=True)
-    (group / "shared" / "logs").mkdir(parents=True)
-    (group / "shared" / "memory.md").write_text("# Shared Memory\n")
-    return group
-
-
-@pytest.fixture
 def config_paths(tmp_path):
     config_path = tmp_path / "config.yaml"
     agent_library = tmp_path / "agent-library"

@@ -76,17 +76,6 @@ class ScriptIntegration(BaseIntegration):
     def validate_run(self, request: IntegrationRunRequest):
         issues = list(super().validate_run(request))
         command = self._config.get("command", "")
-        for obsolete in ("{workspace_dir}", "{agent_dir}"):
-            if obsolete in command:
-                issues.append(
-                    ValidationIssue(
-                        code="script-obsolete-placeholder",
-                        scope="integrations.script",
-                        field="integration_config.command",
-                        message=f"Script integration does not support {obsolete}.",
-                        corrective_hint="Use {workspace_root} instead.",
-                    )
-                )
         required = ("{runtime_dir}", "{workspace_root}", "{skill}")
         if request.skill is not None and not all(token in command for token in required):
             issues.append(

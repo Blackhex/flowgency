@@ -235,9 +235,6 @@ class TestWorkspaceRoutes:
         import agency.app as app_mod
 
         (tmp_path / "tmux.sh").write_text("#!/bin/bash\ntmux new-session")
-        (tmp_path / "shared" / "observations").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "shared" / "proposals").mkdir(parents=True, exist_ok=True)
-
         config_path = tmp_path / "config.yaml"
         config_path.write_text(
             yaml.safe_dump(

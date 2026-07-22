@@ -38,7 +38,7 @@ def _canonical_group_store(tmp_path: Path) -> Path:
 
 def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     workspace_root = tmp_path / "workspace"
     group_root = tmp_path / "group"
     return JobSpec(
@@ -274,7 +274,7 @@ def test_transition_job_requires_expected_status(tmp_path):
 
 def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
 
     for trigger in ("manual_prompt", "scheduled_prompt"):
         with pytest.raises(ValueError, match="routine_id and skill"):
@@ -328,8 +328,6 @@ def test_job_spec_serializes_distinct_workspace_and_group_roots(tmp_path):
 
     assert payload["workspace_root"] == str(spec.resolved_workspace_root)
     assert payload["group_root"] == str(spec.resolved_group_root)
-    assert "workspace_dir" not in payload
-    assert "group_path" not in payload
     assert spec.resolved_workspace_root == Path(spec.workspace_root).resolve()
     assert spec.resolved_group_root == Path(spec.group_root).resolve()
 
@@ -340,69 +338,9 @@ def test_operation_lock_is_under_group_locks(tmp_path):
     )
 
 
-def test_job_spec_does_not_expose_compatibility_aliases(tmp_path):
-    spec = make_spec(tmp_path)
-
-    payload = spec.to_dict()
-
-    assert "agent_dir" not in payload
-    assert not hasattr(spec, "agent_dir")
-    assert not hasattr(spec, "workspace_path")
-
-
-def test_job_spec_constructor_rejects_obsolete_root_inputs(tmp_path):
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
-
-    base = dict(
-            schema_version=3,
-            job_id="job-123",
-            config_path=str(config_path.resolve()),
-            config_revision="cfg-1",
-            group_key="newsletter",
-            group_root=str(tmp_path.resolve()),
-            agent_name="product",
-            workspace_root=str(tmp_path.resolve()),
-            trigger="manual_prompt",
-            integration_name="copilot",
-            integration_config={},
-            blueprint=BlueprintRef(
-                key="writer",
-                source_digest="digest-1",
-                integration="copilot",
-                projector_version="v1",
-                cache_path="C:/cache/copilot/v1/digest-1",
-            ),
-            runtime_policy=RuntimePolicySnapshot(
-                timeout=1800,
-                sandbox_mode="restricted",
-                sandbox_roots=("C:/repo",),
-                tool_mode="allowlist",
-                tool_names=("shell",),
-            ),
-            memory=MemoryBinding(
-                selector={"scope": "run", "version": 1, "job": "placeholder"},
-                canonical_json='{"job":"placeholder","scope":"run","version":1}',
-                memory_hash="memory-hash-1",
-                path="C:/memory/memory-hash-1",
-            ),
-            routine_id="routine-1",
-            skill="daily-review",
-            skill_arguments=(),
-            task_input="run",
-            trigger_context={"source": "test"},
-            prompt_source={"type": "routine", "routine_id": "routine-1"},
-            timeout_override=None,
-            created_at="2026-07-15T00:00:00+00:00",
-    )
-    for obsolete in ("workspace_dir", "group_path", "agent_dir"):
-        with pytest.raises(TypeError):
-            JobSpec(**base, **{obsolete: str(tmp_path / "obsolete")})
-
-
 def test_job_request_no_longer_accepts_extra_prompt_source(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
 
     with pytest.raises(TypeError):
         JobRequest(
@@ -420,19 +358,9 @@ def test_job_spec_no_longer_exposes_create_constructor():
     assert not hasattr(JobSpec, "create")
 
 
-def test_job_spec_from_dict_rejects_obsolete_root_inputs(tmp_path):
-    spec = make_spec(tmp_path)
-    payload = spec.to_dict()
-    for obsolete in ("workspace_dir", "group_path", "agent_dir"):
-        payload[obsolete] = str((tmp_path / "obsolete").resolve())
-        with pytest.raises(ValueError, match=f"{obsolete} is not accepted"):
-            JobSpec.from_dict(payload)
-        payload.pop(obsolete)
-
-
 def test_decision_jobs_require_null_routine_and_skill(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
 
     spec = JobSpec(
         schema_version=3,

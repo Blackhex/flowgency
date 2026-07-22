@@ -1,4 +1,4 @@
-
+schema_version: 3
 agency:
   title: Agency
   default_group: my-project
@@ -17,7 +17,8 @@ memory:
 groups:
   my-project:
     name: My Project
-    path: C:/Projects/my-project
+    workspace_path: C:/Projects/my-project
+    path: C:/Agency/groups/my-project
     default_integration: copilot
     runtime:
       timeout: 1800

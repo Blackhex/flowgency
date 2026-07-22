@@ -134,10 +134,10 @@ def test_compatible_projector_discovers_instructions_and_selected_skill(
     )
     snapshot = TreeSnapshot(files=files, digest=compute_source_digest(files))
     launch_dir = tmp_path / "launch"
-    workspace_dir = tmp_path / "workspace"
+    workspace_root = tmp_path / "workspace"
     task_dir = tmp_path / "task"
     launch_dir.mkdir()
-    workspace_dir.mkdir()
+    workspace_root.mkdir()
     task_dir.mkdir()
 
     integration.projector.project(snapshot, launch_dir)
@@ -156,7 +156,7 @@ def test_compatible_projector_discovers_instructions_and_selected_skill(
     repository_root = Path(__file__).resolve().parents[1]
     repository_before = _repository_state(repository_root)
     request = IntegrationRunRequest(
-        workspace_root=workspace_dir,
+        workspace_root=workspace_root,
         launch_dir=launch_dir,
         task_file=task_file,
         timeout=180,
@@ -178,7 +178,7 @@ def test_compatible_projector_discovers_instructions_and_selected_skill(
     assert instruction_token in result.stdout
     assert skill_token in result.stdout
     assert _tree_bytes(launch_dir) == projected_before
-    assert list(workspace_dir.rglob("*")) == []
+    assert list(workspace_root.rglob("*")) == []
     assert task_file.read_bytes() == task_before
     assert _repository_state(repository_root) == repository_before
 

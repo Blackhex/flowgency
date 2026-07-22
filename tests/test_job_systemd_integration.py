@@ -55,15 +55,28 @@ def test_systemd_worker_survives_submitter_exit(tmp_path):
         "pathlib.Path(sys.argv[2]).write_text('done')\n"
     )
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(yaml.safe_dump({"groups": {"test": {
-        "name": "Test", "path": str(group_path),
-        "agents": [{
-            "name": "product", "integration": "script",
-            "integration_config": {
-                "command": _shell_command([sys.executable, helper, gate, sentinel]),
-            },
-        }],
-    }}}))
+    config_path.write_text(yaml.safe_dump({
+        "schema_version": 3,
+        "agency": {
+            "agent_library": str((tmp_path / "agent-library").resolve()),
+            "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
+            "memory_store": str((tmp_path / "memory").resolve()),
+        },
+        "groups": {"test": {
+            "name": "Test",
+            "workspace_path": str((tmp_path / "workspace").resolve()),
+            "path": str(group_path.resolve()),
+            "default_integration": "script",
+            "agents": [{
+                "name": "product",
+                "blueprint": "product",
+                "integration": "script",
+                "integration_config": {
+                    "command": _shell_command([sys.executable, helper, gate, sentinel]),
+                },
+            }],
+        }},
+    }))
     job_id_file = tmp_path / "job-id"
     submitter_script = tmp_path / "submitter.py"
     submitter_script.write_text(
@@ -86,7 +99,7 @@ def test_systemd_worker_survives_submitter_exit(tmp_path):
     job_id = job_id_file.read_text().strip()
 
     # Submitter has exited. The systemd transient service should still be running.
-    job_path = group_path / "shared" / "jobs" / f"{job_id}.yaml"
+    job_path = tmp_path / "memory" / ".jobs" / "test" / f"{job_id}.yaml"
     deadline = time.monotonic() + 5
     while not job_path.exists() and time.monotonic() < deadline:
         time.sleep(0.1)

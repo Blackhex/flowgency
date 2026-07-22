@@ -145,9 +145,9 @@ def test_setup_verification_protocol_orders_atomic_write_before_revision_check()
 def test_setup_does_not_generate_project_scheduler_artifacts():
     combined = SKILL_PATH.read_text(encoding="utf-8") + DISPATCH_TEMPLATES_PATH.read_text(encoding="utf-8")
     forbidden = [
-        "agents/shared/dispatch.ps1",
-        "agents/shared/install-dispatch.ps1",
-        "agents/shared/dispatch.sh",
+        "agents/dispatch.ps1",
+        "agents/install-dispatch.ps1",
+        "agents/dispatch.sh",
         "## Windows Scheduled Task Installer Template",
         "## Systemd Timer Template",
         "## Systemd Service Template",

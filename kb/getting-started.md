@@ -29,6 +29,8 @@ Runtime projectors compile blueprint source into disposable native layouts for e
 
 A group owns a project workspace, runtime defaults, dispatch limits, workspaces, and explicit instances. Group Settings changes defaults only. The Agents page owns the roster; Agent Detail exposes `Profile/Blueprint/Runtime/Routines/Memory/Activity`.
 
+`workspace_path` is the execution workspace and source repository. `path` is the Agency-owned group root, which is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`; operation locks live in `<group.path>/locks`.
+
 ### Routines, jobs, and memory
 
 A routine selects one Agent Skill, schedule, optional arguments, and optional semantic memory. Routine and decision submissions create durable jobs. Memory uses selectors such as `scope: routine`, `scope: agent`, or `scope: channel`; Memory Channels define named cross-instance memory.

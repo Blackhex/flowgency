@@ -20,7 +20,7 @@ def publication_fixture(tmp_path):
     group_path = tmp_path / "group"
     group_path.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     memory_root = tmp_path / "memory-store"
     spec = JobSpec(
         schema_version=3,
@@ -60,8 +60,8 @@ def publication_fixture(tmp_path):
         ),
         trigger_context=None,
         prompt_source={
-            "type": "saved_prompt",
-            "path": "shared/prompts/routine.md",
+            "type": "routine",
+            "routine_id": "daily-review",
         },
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",

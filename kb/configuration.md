@@ -1,6 +1,6 @@
 # Configuration
 
-Agency uses one authoritative YAML document. The top-level `schema_version: 2`, `agency`, and `groups` fields are required. `memory.channels` may be empty.
+Agency uses one authoritative YAML document. The top-level `schema_version: 3`, `agency`, and `groups` fields are required. `memory.channels` may be empty.
 
 ## Global paths
 
@@ -8,11 +8,13 @@ Agency uses one authoritative YAML document. The top-level `schema_version: 2`, 
 
 ## Groups and instances
 
-A group owns its workspace path, runtime defaults, dispatch limits, workspaces, and explicit instances. `default_integration` initializes new instances only. Every existing instance pins its own `blueprint` and `integration`.
+A group owns its execution `workspace_path`, Agency-owned state `path`, runtime defaults, dispatch limits, workspaces, and explicit instances. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned group root. `default_integration` initializes new instances only. Every existing instance pins its own `blueprint` and `integration`.
 
 Group runtime defaults include timeout, sandbox policy, and tool policy. Restricted sandbox roots are inherited. Instance `additional_roots` are additive and cannot remove a group root. An instance tool policy is a complete override with mode `all`, `allowlist`, or `none`; omission inherits the entire group policy.
 
 Identity and `capabilities.write` live in the instance record. Omitted write capability is false.
+
+The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
 
 ## Routines and memory
 

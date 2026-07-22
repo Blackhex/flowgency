@@ -20,13 +20,13 @@ def _setup_group(tmp_path: Path) -> Path:
     paths = create_group_environment(
         tmp_path,
         "test",
-        shared_dirs=("prompts", "logs"),
+        group_dirs=("prompts", "logs"),
     )
     group_path = paths.state_root
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory"
-    prompts = paths.shared_root / "prompts"
+    prompts = paths.state_root / "prompts"
     (prompts / "routine.md").write_text("# Routine\n")
     (prompts / "product-routine.md").write_text("# Product routine\n")
     (prompts / "other-routine.md").write_text("# Other routine\n")
@@ -210,7 +210,7 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
         record = replace(JobRecord.from_spec(spec), status=status)
         write_job(job_store.path("test", spec.job_id), record)
 
-    assert not (group_path / "shared" / "logs" / ".running-product").exists()
+    assert not (group_path / "logs" / ".running-product").exists()
     assert is_agent_running(app_mod.get_group("test"), "product") is True
 
 
@@ -310,7 +310,7 @@ def test_agents_page_does_not_render_retired_schedule_links(
 
 def test_agents_page_keeps_roster_layout_when_logs_exist(tmp_path):
     group_path = _setup_group(tmp_path)
-    day = group_path / "shared" / "logs" / "2026-07-11"
+    day = group_path / "logs" / "2026-07-11"
     day.mkdir()
     (day / "product-error.err").write_text("run failure")
     client = TestClient(app)

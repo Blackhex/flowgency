@@ -357,7 +357,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         encoding="utf-8",
     )
     workspace_root = Path(snapshot.raw["groups"]["newsletter"]["workspace_path"])
-    (workspace_root / "shared").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "editorial").mkdir(parents=True, exist_ok=True)
     (workspace_root / "assets").mkdir(parents=True, exist_ok=True)
 
     refreshed = config_store.load()
@@ -368,7 +368,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         "builder",
         AgentRuntimePatch(
             timeout=1200,
-            additional_roots=("shared", "assets"),
+            additional_roots=("editorial", "assets"),
             tools=ToolPolicy(mode="allowlist", names=("shell", "write")),
         ),
     )
@@ -376,7 +376,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
     runtime = updated.raw["groups"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1200
     assert runtime["sandbox"]["mode"] == "restricted"
-    assert runtime["sandbox"]["additional_roots"] == ["shared", "assets"]
+    assert runtime["sandbox"]["additional_roots"] == ["editorial", "assets"]
     assert runtime["sandbox"]["sandbox_extension"] == {"preserve": True}
     assert runtime["tools"] == {
         "mode": "allowlist",

@@ -45,29 +45,21 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
     newsletter_paths = create_group_environment(tmp_path, "newsletter")
     product_paths = create_group_environment(tmp_path, "product")
     for group_root in (newsletter_paths.state_root, product_paths.state_root):
-        (group_root / "shared" / "jobs").mkdir(
+        (group_root / "logs").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "shared" / "logs").mkdir(
+        (group_root / "observations").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "shared" / "observations").mkdir(
+        (group_root / "proposals").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "shared" / "proposals").mkdir(
+        (group_root / "decisions").mkdir(
             parents=True,
             exist_ok=True,
-        )
-        (group_root / "shared" / "decisions").mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-        (group_root / "shared" / "memory.md").write_text(
-            "# Shared\n",
-            encoding="utf-8",
         )
     _write_blueprint(library_root, "advisor", "Advisor")
 

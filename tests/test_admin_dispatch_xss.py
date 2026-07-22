@@ -12,7 +12,7 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
     paths = create_group_environment(
         tmp_path,
         "test",
-        shared_dirs=("prompts",),
+        group_dirs=("prompts",),
     )
     group_path = paths.state_root
     (group_path / "product").mkdir(parents=True, exist_ok=True)

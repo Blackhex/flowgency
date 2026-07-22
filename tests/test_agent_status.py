@@ -29,7 +29,7 @@ def _group(tmp_path):
 def _write_job(tmp_path, status):
     memory_root = tmp_path.parent / "memory" if tmp_path.name == "grp" else tmp_path / "memory"
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     spec = JobSpec(
         schema_version=3,
         job_id=f"job-{status}",

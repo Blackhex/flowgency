@@ -1,3 +1,4 @@
+schema_version: 3
 agency:
   title: Agency UI Gate
   default_group: newsletter
@@ -12,6 +13,7 @@ memory:
 groups:
   newsletter:
     name: Newsletter
+    workspace_path: __RUNTIME__/workspaces/newsletter
     path: __RUNTIME__/groups/newsletter
     default_integration: copilot
     runtime:
@@ -19,7 +21,7 @@ groups:
       sandbox:
         mode: restricted
         roots:
-          - __RUNTIME__/groups/newsletter/shared
+          - __RUNTIME__/workspaces/newsletter
       tools:
         mode: allowlist
         names: [shell, write]
@@ -71,9 +73,10 @@ groups:
       - name: Editorial Terminal
         type: tmux
         config:
-          script_path: shared/pipeline/tmux-agents.sh
+          script_path: pipeline/tmux-agents.sh
   research:
     name: Research
+    workspace_path: __RUNTIME__/workspaces/research
     path: __RUNTIME__/groups/research
     default_integration: copilot
     agents: []

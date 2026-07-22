@@ -23,10 +23,10 @@ def running_decision_job(
     memory_store_root: Path | None = None,
 ):
     group = tmp_path / "group"
-    decision = group / "shared" / "decisions" / "change.md"
+    decision = group / "decisions" / "change.md"
     decision.parent.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     spec = JobSpec(
         schema_version=3,
         job_id="decision-job",
@@ -265,7 +265,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
 
     group = tmp_path / "group"
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     memory_binding = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="placeholder",
@@ -312,7 +312,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
             path=str(memory_binding.directory.resolve()),
         ),
         trigger_context=None,
-        prompt_source={"type": "saved_prompt", "path": "shared/prompts/routine.md"},
+        prompt_source={"type": "routine", "routine_id": "daily-review"},
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
@@ -355,7 +355,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
 
 def test_running_decision_without_job_id_is_not_failed(tmp_path):
     group = tmp_path / "group"
-    decision = group / "shared" / "decisions" / "orphan.md"
+    decision = group / "decisions" / "orphan.md"
     decision.parent.mkdir(parents=True)
     decision.write_text("---\nexecution_status: running\n---\n")
     reconcile_for_test({"test": {"group_root": str(group)}}, tmp_path)

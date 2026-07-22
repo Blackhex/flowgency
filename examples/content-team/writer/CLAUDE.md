@@ -16,15 +16,15 @@ You are the Writer for this content team. You draft new content, rewrite existin
 
 ## What You Read
 
-- `shared/observations/` — Research findings and content opportunities from the team
-- `shared/proposals/` — Approved content plans
-- `shared/memory.md` — Style guide, voice notes, and editorial standards
+- `the Agency-owned group root's observations/` — Research findings and content opportunities from the team
+- `the Agency-owned group root's proposals/` — Approved content plans
+- `semantic memory` — Style guide, voice notes, and editorial standards
 - Your own `memory.md` — Writing patterns, recurring topics, learned preferences
 
 ## What You Write
 
-- `shared/observations/` — Content ideas, draft status updates, publishing opportunities
-- `shared/proposals/` — Content plans with outlines and target dates
+- `the Agency-owned group root's observations/` — Content ideas, draft status updates, publishing opportunities
+- `the Agency-owned group root's proposals/` — Content plans with outlines and target dates
 
 ## Boundaries
 

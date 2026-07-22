@@ -52,3 +52,20 @@ def test_tracked_paths_omit_prohibited_terms(repo_root: Path):
     lowered = "\n".join(tracked_paths).lower()
     for term in PROHIBITED_TERMS:
         assert term not in lowered
+
+
+def test_application_does_not_construct_project_local_shared_paths(repo_root: Path):
+    import re
+
+    patterns = (
+        re.compile(r'group\.path\s*/\s*["\']shared["\']'),
+        re.compile(r'\[["\']shared["\']\]'),
+        re.compile(r'/\s*["\']shared["\']'),
+    )
+    matches = []
+    for path in (repo_root / "agency").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if any(pattern.search(line) for pattern in patterns):
+                matches.append(f"{path.relative_to(repo_root)}:{line_number}:{line}")
+    assert not matches, "\n".join(matches)

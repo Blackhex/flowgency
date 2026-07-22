@@ -4,11 +4,12 @@ Agency is a FastAPI and Jinja2 application with filesystem-backed canonical conf
 
 ## Authority boundaries
 
-- `config.yaml` with `schema_version: 2` is the sole control-plane authority.
+- `config.yaml` with `schema_version: 3` is the sole control-plane authority.
 - `agency.agent_library` contains reusable blueprint source: `AGENTS.md` and `.agents/skills/<name>/SKILL.md`.
 - `agency.compilation_cache` contains disposable immutable integration projections.
 - `agency.memory_store` contains hash-addressed mutable Markdown selected by semantic scope.
-- A group `path` is the execution workspace and pipeline-record root, not an agent-definition root.
+- A group `workspace_path` is the execution workspace and source repository.
+- A group `path` is the Agency-owned group root for pipeline records, locks, and logs.
 - Every group agent entry is an explicit instance with `name`, `blueprint`, and `integration`.
 
 Do not add runtime directory-shape loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup conversion.
@@ -16,7 +17,7 @@ Do not add runtime directory-shape loaders, native-file integration detection fo
 ## Configuration
 
 ```yaml
-schema_version: 2
+schema_version: 3
 agency:
   title: Agency
   default_group: newsletter
@@ -31,7 +32,8 @@ memory:
 groups:
   newsletter:
     name: Newsletter
-    path: C:/Projects/newsletter
+    workspace_path: C:/Projects/newsletter
+    path: C:/Agency/groups/newsletter
     default_integration: copilot
     runtime:
       timeout: 1800
@@ -78,6 +80,8 @@ groups:
 ```
 
 Relative global and group paths resolve against the config directory. Relative sandbox roots resolve against the group workspace. Agent roots are additive. Agent tools are a complete override, not an addition. Omitted runtime defaults are timeout 1800, unrestricted sandbox, tools `all`, dispatch disabled, and daily limit 20.
+
+The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`; operation locks live in `<group.path>/locks`.
 
 ## Execution
 

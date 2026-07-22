@@ -226,11 +226,6 @@ class JobSpec:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "JobSpec":
         values = dict(data)
-        for obsolete in ("workspace_dir", "group_path", "agent_dir"):
-            if obsolete in values:
-                raise ValueError(
-                    f"{obsolete} is not accepted in strict schema_version: 3 jobs"
-                )
         values["integration_config"] = dict(values.get("integration_config") or {})
         values["blueprint"] = BlueprintRef(**values["blueprint"])
         runtime_policy = dict(values["runtime_policy"])

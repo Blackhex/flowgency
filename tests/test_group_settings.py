@@ -208,7 +208,7 @@ def test_stale_group_create_returns_conflict_without_writing_group(
 
 def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
-    original = b"agency:\n  title: Agency\ngroups: {}\n"
+    original = b"schema_version: 3\nagency:\n  title: Agency\ngroups: {}\n"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     config_path.write_bytes(original)
     app_mod.refresh_services()
@@ -239,7 +239,7 @@ def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path)
 
 def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("agency:\n  title: Agency\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\nagency:\n  title: Agency\ngroups: {}\n", encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     client = TestClient(app_mod.app)
@@ -257,7 +257,7 @@ def test_setup_page_includes_launcher_fields_for_existing_bootstrap_config(
     monkeypatch, tmp_path
 ):
     config_path = tmp_path / "config.yaml"
-    config_path.write_bytes(b"agency:\n  title: Agency\ngroups: {}\n")
+    config_path.write_bytes(b"schema_version: 3\nagency:\n  title: Agency\ngroups: {}\n")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     client = TestClient(app_mod.app)
@@ -275,7 +275,7 @@ def test_setup_form_posts_only_launcher_inputs(
     monkeypatch, tmp_path
 ):
     config_path = tmp_path / "config.yaml"
-    config_path.write_bytes(b"agency:\n  title: Agency\ngroups: {}\n")
+    config_path.write_bytes(b"schema_version: 3\nagency:\n  title: Agency\ngroups: {}\n")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     client = TestClient(app_mod.app)

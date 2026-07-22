@@ -16,7 +16,7 @@ from agency.integrations import IntegrationError
 def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "agency:\n  title: Agency\n  default_group: ''\ngroups: {}\n",
+        "schema_version: 3\nagency:\n  title: Agency\n  default_group: ''\ngroups: {}\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
@@ -167,7 +167,6 @@ def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
         root / "deep" / ".pytest_cache" / "state.json",
         root / "deep" / ".mypy_cache" / "state.json",
         root / "deep" / ".ruff_cache" / "state.json",
-        root / "deep" / "shared" / "jobs" / "job.yaml",
         root / "deep" / "package.egg-info" / "metadata.json",
     ]
     for path in [*watched_paths, *excluded_paths]:
@@ -181,6 +180,11 @@ def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
 
     assert not supervisor.watch_filter((tmp_path / "outside.py").resolve())
     assert not supervisor.watch_filter((root / "README.md").resolve())
+
+    external_group_log = tmp_path / "agency-data" / "groups" / "newsletter" / "logs" / "run.out"
+    external_group_log.parent.mkdir(parents=True)
+    external_group_log.write_text("probe", encoding="utf-8")
+    assert not supervisor.watch_filter(external_group_log.resolve())
 
 
 def test_reload_filter_uses_directory_components_not_name_fragments(tmp_path):

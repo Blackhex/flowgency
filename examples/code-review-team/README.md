@@ -19,21 +19,26 @@ A 3-agent team for software projects: automated code review, security scanning, 
 
 2. Add the group to your Agency `config.yaml`:
    ```yaml
+   schema_version: 3
    groups:
      review:
        name: Code Review Team
-       path: /path/to/your/review-agents
+       workspace_path: /path/to/your/project
+       path: /path/to/agency/groups/review
        default_integration: claude-code
        agents:
        - name: reviewer
+         blueprint: reviewer
          integration: claude-code
          capabilities:
            write: false
        - name: security
+         blueprint: security
          integration: claude-code
          capabilities:
            write: false
        - name: docs
+         blueprint: docs
          integration: claude-code
          capabilities:
            write: false
@@ -41,24 +46,31 @@ A 3-agent team for software projects: automated code review, security scanning, 
 
 3. Edit each agent's `CLAUDE.md` to reference your project's specific tech stack, coding conventions, and security requirements.
 
-4. Customize the dispatch prompts in `shared/prompts/` for your review cadence.
+4. Assign standard Agent Skills and schedules under each instance's `routines` in `config.yaml`.
 
 5. Restart Agency and your new group appears in the sidebar.
 
-## Dispatch Schedule (Suggested)
+## Routine Schedule (Suggested)
 
 ```yaml
-dispatch:
-  agents:
-    reviewer:
-      - prompt: review-recent.md
-        every: 6h
-    security:
-      - prompt: security-scan.md
-        at: "06:00"
-    docs:
-      - prompt: doc-check.md
-        at: "10:00"
+groups:
+  review:
+    agents:
+      - name: reviewer
+        routines:
+          - id: review-recent
+            skill: review-recent
+            schedule: {every: 6h}
+      - name: security
+        routines:
+          - id: security-scan
+            skill: security-scan
+            schedule: {at: "06:00"}
+      - name: docs
+        routines:
+          - id: doc-check
+            skill: doc-check
+            schedule: {at: "10:00"}
 ```
 
 ## Adapting This Template

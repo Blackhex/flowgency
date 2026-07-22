@@ -58,32 +58,30 @@ def _seed_blueprint(library: Path, key: str, title: str, skill: str) -> None:
 
 
 def _seed_pipeline(group: Path) -> None:
-    for directory in ("jobs", "logs/2026-07-16", "observations", "proposals", "decisions", "pipeline"):
-        (group / "shared" / directory).mkdir(parents=True, exist_ok=True)
-    (group / "editorial").mkdir(parents=True, exist_ok=True)
-    _write(group / "shared" / "memory.md", "# Newsletter shared memory\n")
+    for directory in ("logs/2026-07-16", "observations", "proposals", "decisions", "locks"):
+        (group / directory).mkdir(parents=True, exist_ok=True)
     _write(
-        group / "shared" / "observations" / "audience-signal.md",
+        group / "observations" / "audience-signal.md",
         "---\nagent: advisor\nstatus: open\ndate: 2026-07-16T09:00:00+00:00\nfloat: true\n---\n\n# Audience signal\n\nReaders want shorter releases.\n",
     )
     _write(
-        group / "shared" / "proposals" / "weekly-brief.md",
+        group / "proposals" / "weekly-brief.md",
         "---\norigin_agent: advisor\nstatus: proposed\ndate: 2026-07-16T10:00:00+00:00\nquestions:\n  - Approve the weekly brief?\n---\n\n# Weekly brief\n\nPublish a concise weekly brief.\n",
     )
     _write(
-        group / "shared" / "decisions" / "approve-brief.md",
+        group / "decisions" / "approve-brief.md",
         "---\ndecided_by: editor\ndate: 2026-07-16T11:00:00+00:00\nanswers:\n  approve: approved\n---\n\n# Approve brief\n",
     )
 
 
 def _seed_group_scaffold(group: Path) -> None:
-    for directory in ("jobs", "logs/2026-07-16", "observations", "proposals", "decisions", "pipeline"):
-        (group / "shared" / directory).mkdir(parents=True, exist_ok=True)
-    _write(group / "shared" / "memory.md", f"# {group.name.title()} shared memory\n")
+    for directory in ("logs/2026-07-16", "observations", "proposals", "decisions", "locks"):
+        (group / directory).mkdir(parents=True, exist_ok=True)
 
 
 def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
     group = runtime / "groups" / "newsletter"
+    workspace = runtime / "workspaces" / "newsletter"
     return JobSpec(
         schema_version=3,
         job_id=job_id,
@@ -92,7 +90,7 @@ def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
         group_key="newsletter",
         group_root=str(group.resolve()),
         agent_name="advisor",
-        workspace_root=str(group.resolve()),
+        workspace_root=str(workspace.resolve()),
         trigger="scheduled_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},
@@ -110,7 +108,7 @@ def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
         runtime_policy=RuntimePolicySnapshot(
             timeout=1200,
             sandbox_mode="restricted",
-            sandbox_roots=(str((group / "shared").resolve()), str((group / "editorial").resolve())),
+            sandbox_roots=(str(workspace.resolve()), str(group.resolve()), str((workspace / "editorial").resolve())),
             tool_mode="allowlist",
             tool_names=("shell",),
         ),
@@ -144,8 +142,8 @@ def _seed_jobs(runtime: Path, config_path: Path) -> None:
     failed.memory_publication = {
         "failed_artifacts": [{"name": "memory.md", "path": str(artifact.resolve()), "size": artifact.stat().st_size}]
     }
-    failed.stdout_path = str((runtime / "groups" / "newsletter" / "shared" / "logs" / "2026-07-16" / "advisor-job-failed.out").resolve())
-    failed.stderr_path = str((runtime / "groups" / "newsletter" / "shared" / "logs" / "2026-07-16" / "advisor-job-failed.err").resolve())
+    failed.stdout_path = str((runtime / "groups" / "newsletter" / "logs" / "2026-07-16" / "advisor-job-failed.out").resolve())
+    failed.stderr_path = str((runtime / "groups" / "newsletter" / "logs" / "2026-07-16" / "advisor-job-failed.err").resolve())
     _write(Path(failed.stdout_path), "deterministic stdout\n")
     _write(Path(failed.stderr_path), "deterministic stderr\n")
     _set_mtime(Path(failed.stdout_path), "2026-07-16T11:30:00+00:00")
@@ -186,6 +184,7 @@ def _prepare_runtime() -> tuple[Path, Path]:
     config_path = runtime / "config.yaml"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     group = runtime / "groups" / "newsletter"
+    (runtime / "workspaces" / "newsletter" / "editorial").mkdir(parents=True, exist_ok=True)
     _seed_pipeline(group)
     _seed_group_scaffold(runtime / "groups" / "research")
     _seed_blueprint(runtime / "agent-library", "advisor", "Advisor", "daily-review")

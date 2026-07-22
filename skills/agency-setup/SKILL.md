@@ -42,7 +42,7 @@ Blueprint files contain reusable instructions only. They do not contain identity
 
 ## 4. Register Instances
 
-Upsert one group whose `workspace_path` points to the project workspace and whose `path` points to the Agency-owned group-state root. Preserve existing group workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the group; instance roots are additive and an instance tool policy is a complete override.
+Upsert one group whose `workspace_path` points to the project workspace and whose `path` points to the Agency-owned group-state root. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned group root. The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`. Preserve existing group workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the group; instance roots are additive and an instance tool policy is a complete override.
 
 Use this canonical shape:
 

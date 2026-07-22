@@ -40,17 +40,14 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     memory_root = tmp_path / "memory-store"
     paths = create_group_environment(tmp_path, "newsletter")
     group_root = paths.state_root
-    (tmp_path / "Research" / "shared").mkdir(parents=True, exist_ok=True)
     for rel in [
-        ("shared", "jobs"),
-        ("shared", "logs", "2026-07-16"),
-        ("shared", "observations"),
-        ("shared", "proposals"),
-        ("shared", "decisions"),
-        ("shared", "prompts"),
+        ("logs", "2026-07-16"),
+        ("observations",),
+        ("proposals",),
+        ("decisions",),
+        ("locks",),
     ]:
         group_root.joinpath(*rel).mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "memory.md").write_text("# Shared\n", encoding="utf-8")
     _write_blueprint(library_root, "advisor", "Advisor")
 
     raw["agency"]["agent_library"] = str(library_root)
@@ -89,9 +86,16 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     return TestClient(app_mod.app), config_path, group_root
 
 
-def _write_job_record(group_root: Path, config_path: Path, *, job_id: str = "job-1", status: str = "queued") -> Path:
-    group_id = "research" if group_root.name == "research" else "newsletter"
+def _write_job_record(
+    group_root: Path,
+    config_path: Path,
+    *,
+    group_id: str = "newsletter",
+    job_id: str = "job-1",
+    status: str = "queued",
+) -> Path:
     job_store = JobStore(group_root.parent.parent / "memory-store")
+    workspace_root = group_root.parent.parent / "workspaces" / group_id
     spec = JobSpec(
         schema_version=3,
         job_id=job_id,
@@ -100,7 +104,7 @@ def _write_job_record(group_root: Path, config_path: Path, *, job_id: str = "job
         group_key=group_id,
         group_root=str(group_root.resolve()),
         agent_name="advisor",
-        workspace_root=str(group_root.resolve()),
+        workspace_root=str(workspace_root.resolve()),
         trigger="scheduled_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},
@@ -118,7 +122,7 @@ def _write_job_record(group_root: Path, config_path: Path, *, job_id: str = "job
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
             sandbox_mode="restricted",
-            sandbox_roots=(str(group_root.resolve()),),
+            sandbox_roots=(str(workspace_root.resolve()), str(group_root.resolve())),
             tool_mode="allowlist",
             tool_names=("shell",),
         ),
@@ -145,10 +149,10 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(group_root, config_path, job_id="job-1", status="queued")
 
-    other_group = group_root.parent / "research"
-    other_group.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True, exist_ok=True)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     research_paths = create_group_environment(tmp_path, "research")
+    other_group = research_paths.state_root
+    (other_group / "logs" / "2026-07-16").mkdir(parents=True, exist_ok=True)
     raw["groups"]["research"] = {
         **apply_group_paths({}, research_paths),
         "name": "Research",
@@ -158,7 +162,7 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    _write_job_record(other_group, config_path, job_id="job-2", status="queued")
+    _write_job_record(other_group, config_path, group_id="research", job_id="job-2", status="queued")
 
     response = client.get("/newsletter/jobs")
 
@@ -176,8 +180,8 @@ def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, ra
         spec=record.spec,
         authority_digest=record.authority_digest,
         status="failed",
-        stdout_path=str((group_root / "shared" / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.out").resolve()),
-        stderr_path=str((group_root / "shared" / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.err").resolve()),
+        stdout_path=str((group_root / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.out").resolve()),
+        stderr_path=str((group_root / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.err").resolve()),
         changed_files=[{"path": "docs/brief.md", "status": "modified", "lines_added": 3, "lines_removed": 1}],
         execution_summary="Memory publication failed.",
         memory_publication={
@@ -250,7 +254,7 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
     advisor = raw["groups"]["newsletter"]["agents"].pop()
     moved_paths = create_group_environment(tmp_path, "research")
     moved_root = moved_paths.state_root
-    moved_root.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True)
+    moved_root.joinpath("logs", "2026-07-16").mkdir(parents=True)
     raw["groups"]["research"] = apply_group_paths({
         "name": "Research",
         "default_integration": "copilot",

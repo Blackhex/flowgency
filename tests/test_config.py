@@ -271,7 +271,7 @@ def test_parse_config_raises_validation_failed_for_missing_group_path_with_addit
 
     del raw_config["groups"]["newsletter"]["workspace_path"]
     raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
-        "sandbox": {"additional_roots": ["shared"]}
+        "sandbox": {"additional_roots": ["editorial"]}
     }
 
     with pytest.raises(ValidationFailed):
@@ -444,7 +444,7 @@ def test_rejects_group_additional_roots(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": ["shared"], "additional_roots": ["tmp"]}
+        "sandbox": {"mode": "restricted", "roots": ["editorial"], "additional_roots": ["tmp"]}
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -483,7 +483,7 @@ def test_accepts_restricted_group_roots(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
     raw_config["groups"]["newsletter"]["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": ["shared"]}
+        "sandbox": {"mode": "restricted", "roots": ["editorial"]}
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -491,7 +491,7 @@ def test_accepts_restricted_group_roots(raw_config, config_paths):
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     assert parsed.groups["newsletter"].runtime.sandbox.mode == "restricted"
-    assert parsed.groups["newsletter"].runtime.sandbox.roots[0].name == "shared"
+    assert parsed.groups["newsletter"].runtime.sandbox.roots[0].name == "editorial"
 
 
 def test_accepts_agent_additions(raw_config, config_paths):
@@ -652,7 +652,7 @@ def test_parse_validate_parity_for_sandbox_ownership(raw_config, config_paths):
 
     candidate = _clone_config(raw_config)
     candidate["groups"]["newsletter"]["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": ["shared"], "additional_roots": ["tmp"]}
+        "sandbox": {"mode": "restricted", "roots": ["editorial"], "additional_roots": ["tmp"]}
     }
     candidate["groups"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": ["tmp"]}

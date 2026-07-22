@@ -149,14 +149,6 @@ def instance_env(tmp_path, raw_config):
     other_paths = create_group_environment(tmp_path, "other")
     newsletter_path = newsletter_paths.state_root
     other_path = other_paths.state_root
-    for group_path in (newsletter_path, other_path):
-        (group_path / "shared" / "jobs").mkdir(parents=True, exist_ok=True)
-        (group_path / "shared" / "prompts").mkdir(parents=True, exist_ok=True)
-        (group_path / "shared" / "memory.md").write_text(
-            "# Shared Memory\n",
-            encoding="utf-8",
-        )
-
     raw = deepcopy(raw_config)
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
@@ -795,7 +787,7 @@ def test_submit_cannot_slip_past_create_group_lock(
     assert submit_thread.is_alive()
     assert not submit_resolve_started.is_set()
 
-    jobs_dir = instance_env["newsletter_path"] / "shared" / "jobs"
+    jobs_dir = instance_env["memory_store"].root / ".jobs" / "newsletter"
     assert not any(jobs_dir.glob("*.yaml"))
     release_create.set()
     create_thread.join(timeout=5)
@@ -878,7 +870,7 @@ def test_move_holds_group_lock_and_concurrent_submit_re_resolves_after_move(
     assert "snapshot" in move_outcome
     assert isinstance(submit_outcome.get("error"), JobValidationError)
     assert "Unknown agent: builder" in str(submit_outcome["error"])
-    source_jobs_dir = instance_env["newsletter_path"] / "shared" / "jobs"
+    source_jobs_dir = instance_env["memory_store"].root / ".jobs" / "newsletter"
     assert not source_jobs_dir.exists() or not any(
         source_jobs_dir.glob("*.yaml")
     )

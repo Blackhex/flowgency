@@ -56,7 +56,7 @@ def cli_config(tmp_path):
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),
         },
-        "memory": {"channels": {"support": {"display_name": "Support Desk"}}        },
+        "memory": {"channels": {"support": {"display_name": "Support Desk"}}},
         "groups": {
             "newsletter": apply_group_paths({
                 "name": "Newsletter",

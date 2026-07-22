@@ -1,6 +1,6 @@
 # Data Formats
 
-Agency is a read/write dashboard for managing AI agents. Agents write observations, proposals, and logs to the `shared/` directory as markdown files with YAML frontmatter. Agency reads those files and presents them in the UI. When decisions are made, Agency dispatches agents to act on the answers via their configured integration.
+Agency is a read/write dashboard for managing AI agents. Agents write observations, proposals, decisions, and logs under the Agency-owned group root (`groups/<group-id>/`) as markdown files with YAML frontmatter. Agency reads those files and presents them in the UI. When decisions are made, Agency dispatches agents to act on the answers via their configured integration. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned group root. The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
 
 ## Observation Format
 

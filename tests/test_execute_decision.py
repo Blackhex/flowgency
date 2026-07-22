@@ -33,7 +33,7 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
     decision_path = group_path / "decisions" / decision_name
     decision_path.parent.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("groups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     cache_path = tmp_path / ".compat-cache" / "script" / "v1" / "unresolved"
     runtime_path = cache_path / "runtime"
     runtime_path.mkdir(parents=True, exist_ok=True)

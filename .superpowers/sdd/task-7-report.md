@@ -60,7 +60,7 @@
 
 - Verified normal `/admin/groups` path semantics in `agency/app.py`.
 - Verified conflict `/admin/groups` path semantics in `agency/web/routes/admin_groups.py`.
-- Confirmed initialization status is based on canonical record directories, not legacy shared-state assumptions.
+- Confirmed initialization status is based on canonical record directories, not obsolete shared-state assumptions.
 - Confirmed form labels and help text match the new workspace/group split.
 - Confirmed the setup prompt states schema v3, disjoint roots, and no project-local shared directory.
 - Confirmed targeted and full pytest coverage pass without unrelated file changes.

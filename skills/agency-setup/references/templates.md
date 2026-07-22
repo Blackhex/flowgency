@@ -32,6 +32,24 @@ You are a {ROLE_NAME} for projects that use {LANGUAGE_OR_DOMAIN}.
 
 Keep project-specific identity, integration, runtime policy, schedules, and mutable memory out of this file.
 
+## Canonical Group Registration
+
+When registering a blueprint in config, use the schema version 3 shape and keep the execution workspace separate from Agency-owned state:
+
+```yaml
+schema_version: 3
+agency:
+  agent_library: C:/Agency/agent-library
+  compilation_cache: C:/Agency/compiled-agents
+  memory_store: C:/Agency/memory
+groups:
+  example:
+    workspace_path: C:/Projects/example
+    path: C:/Agency/groups/example
+```
+
+`workspace_path` is the execution workspace and source repository. `path` is the Agency-owned group root. The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
+
 ## Standard Agent Skill
 
 Create each routine capability at `{agent_library}/{blueprint}/.agents/skills/{skill}/SKILL.md`:
