@@ -338,8 +338,9 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
-    (snapshot.path.parent / "agents" / "newsletter" / "shared").mkdir(parents=True, exist_ok=True)
-    (snapshot.path.parent / "agents" / "newsletter" / "assets").mkdir(parents=True, exist_ok=True)
+    workspace_root = Path(snapshot.raw["groups"]["newsletter"]["workspace_path"])
+    (workspace_root / "shared").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "assets").mkdir(parents=True, exist_ok=True)
 
     refreshed = config_store.load()
     updated = patch_agent_runtime(

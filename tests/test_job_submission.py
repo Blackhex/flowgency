@@ -96,6 +96,7 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
+        "schema_version: 3\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: newsletter\n"
@@ -106,6 +107,7 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "groups:\n"
         "  newsletter:\n"
         "    name: Newsletter\n"
+        "    workspace_path: agents/newsletter\n"
         "    path: agents/newsletter\n"
         "    default_integration: copilot\n"
         f"    runtime:\n      timeout: {timeout}\n"
@@ -278,6 +280,7 @@ def test_submit_blocks_move_and_move_then_observes_active_job(
             {
                 "other": {
                     "name": "Other",
+                    "workspace_path": str((tmp_path / "agents" / "other").resolve()),
                     "path": str((tmp_path / "agents" / "other").resolve()),
                     "default_integration": "copilot",
                     "agents": [],

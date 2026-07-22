@@ -59,6 +59,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         encoding="utf-8",
     )
     config_path.write_text(yaml.safe_dump({
+        "schema_version": 3,
         "agency": {
             "title": "Agency",
             "default_group": "test",
@@ -69,6 +70,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         },
         "groups": {"test": {
             "name": "Test",
+            "workspace_path": str(group_path),
             "path": str(group_path),
             "default_integration": "script",
             "runtime": {

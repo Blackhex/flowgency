@@ -121,6 +121,7 @@ Decision body
     config_path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 3,
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",
@@ -133,6 +134,7 @@ Decision body
                 "groups": {
                     "test": {
                         "name": "Test Group",
+                        "workspace_path": str(group_path),
                         "path": str(group_path),
                         "default_integration": "script",
                         "agents": [
@@ -212,6 +214,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     raw["groups"] = {
         "newsletter": {
             "name": "Newsletter",
+            "workspace_path": str(group_root),
             "path": str(group_root),
             "default_integration": "copilot",
             "agents": [
@@ -480,6 +483,7 @@ def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw
     raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
     raw["groups"]["research"] = {
         "name": "Research",
+        "workspace_path": str(other_group),
         "path": str(other_group),
         "default_integration": "copilot",
         "agents": [

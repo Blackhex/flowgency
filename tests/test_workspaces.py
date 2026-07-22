@@ -242,6 +242,8 @@ class TestWorkspaceRoutes:
         config_path.write_text(
             yaml.safe_dump(
                 {
+                    "schema_version": 3,
+
                     "agency": {
                         "title": "Test",
                         "default_group": "test",
@@ -253,6 +255,7 @@ class TestWorkspaceRoutes:
                     "groups": {
                         "test": {
                             "name": "Test Group",
+                            "workspace_path": str(tmp_path.resolve()),
                             "path": str(tmp_path.resolve()),
                             "default_integration": "claude-code",
                             "agents": [],

@@ -46,6 +46,7 @@ def cli_config(tmp_path):
     _write_blueprint(tmp_path / "agent-library")
     group_path.mkdir(parents=True, exist_ok=True)
     raw = {
+        "schema_version": 3,
         "agency": {
             "title": "Contract Agency",
             "default_group": "newsletter",
@@ -57,6 +58,7 @@ def cli_config(tmp_path):
         "groups": {
             "newsletter": {
                 "name": "Newsletter",
+                "workspace_path": str(group_path.resolve()),
                 "path": str(group_path.resolve()),
                 "default_integration": "script",
                 "runtime": {

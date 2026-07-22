@@ -16,14 +16,15 @@ def _resolved_config(tmp_path: Path, raw_config: dict):
     workspace = tmp_path / "workspace"
     restricted = tmp_path / "restricted"
     for path in (library, cache, memory, workspace, restricted):
-        path.mkdir()
+        path.mkdir(exist_ok=True)
     raw["agency"].update(
         agent_library=str(library),
         compilation_cache=str(cache),
         memory_store=str(memory),
     )
     group = raw["groups"]["newsletter"]
-    group["path"] = str(workspace)
+    group["workspace_path"] = str(workspace)
+    group["path"] = str(tmp_path / "groups" / "newsletter")
     group["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": [str(restricted)]}
     }
@@ -38,12 +39,12 @@ def test_job_store_is_under_memory_control_plane(tmp_path, raw_config):
 
 
 @pytest.mark.parametrize("kind", ["missing", "file"])
-def test_missing_or_non_directory_group_path_fails_closed(tmp_path, raw_config, kind):
+def test_missing_or_non_directory_group_workspace_path_fails_closed(tmp_path, raw_config, kind):
     raw, _ = _resolved_config(tmp_path, raw_config)
-    group_path = tmp_path / "bad-group"
+    workspace_path = tmp_path / "bad-workspace"
     if kind == "file":
-        group_path.write_text("not a directory", encoding="utf-8")
-    raw["groups"]["newsletter"]["path"] = str(group_path)
+        workspace_path.write_text("not a directory", encoding="utf-8")
+    raw["groups"]["newsletter"]["workspace_path"] = str(workspace_path)
     config = parse_config(raw, tmp_path / "config.yaml").resolved
 
     issues = validate_resolved_paths(config)

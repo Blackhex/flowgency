@@ -28,13 +28,15 @@ def tmp_group_path(tmp_path):
 def config_paths(tmp_path):
     config_path = tmp_path / "config.yaml"
     agent_library = tmp_path / "agent-library"
-    group_path = tmp_path / "agents" / "newsletter"
-    agent_library.mkdir(parents=True, exist_ok=True)
-    group_path.mkdir(parents=True, exist_ok=True)
+    workspace_path = tmp_path / "workspace"
+    group_path = tmp_path / "groups" / "newsletter"
+    agent_library.mkdir(parents=True)
+    workspace_path.mkdir()
     return {
         "config_path": config_path,
         "config_dir": config_path.parent,
         "agent_library": agent_library,
+        "workspace_path": workspace_path,
         "group_path": group_path,
         "compilation_cache": tmp_path / "compiled-agents",
         "memory_store": tmp_path / "memory",
@@ -44,6 +46,7 @@ def config_paths(tmp_path):
 @pytest.fixture
 def raw_config(config_paths):
     return {
+        "schema_version": 3,
         "agency": {
             "title": "Agency",
             "default_group": "newsletter",
@@ -60,6 +63,7 @@ def raw_config(config_paths):
         "groups": {
             "newsletter": {
                 "name": "Newsletter",
+                "workspace_path": str(config_paths["workspace_path"]),
                 "path": str(config_paths["group_path"]),
                 "default_integration": "claude-code",
                 "agents": [

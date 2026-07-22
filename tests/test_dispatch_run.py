@@ -110,6 +110,7 @@ def _write_config(
         for routine in routines
     )
     config_path.write_text(
+        "schema_version: 3\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"
@@ -122,6 +123,7 @@ def _write_config(
         "groups:\n"
         "  test:\n"
         "    name: Test\n"
+        f"    workspace_path: {group_path.as_posix()}\n"
         f"    path: {group_path.as_posix()}\n"
         "    default_integration: copilot\n"
         "    dispatch:\n"

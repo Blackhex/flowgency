@@ -47,6 +47,7 @@ Upsert one group that points `path` at the project workspace. Preserve existing 
 Use this canonical shape:
 
 ```yaml
+schema_version: 3
 agency:
   title: Agency
   default_group: example
@@ -61,7 +62,8 @@ memory:
 groups:
   example:
     name: Example
-    path: C:/Projects/example
+    workspace_path: C:/Projects/example
+    path: C:/Agency/groups/example
     default_integration: copilot
     runtime:
       timeout: 1800
@@ -136,4 +138,3 @@ christag-agency dispatch status --config "{config_path}"
 There must be exactly one Agency dashboard and one singleton scheduler; do not create a fallback project scheduler.
 
 Report blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.
-

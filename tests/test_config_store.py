@@ -70,7 +70,7 @@ def test_config_store_round_trips_canonical_config(tmp_path, raw_config):
     snapshot = ConfigStore(path).create(raw_config)
 
     assert snapshot.raw == raw_config
-    assert "schema_version" not in snapshot.raw
+    assert snapshot.raw["schema_version"] == 3
 
 
 def test_create_requires_absent_file(raw_config, config_paths):
@@ -212,6 +212,7 @@ def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
         store.replace(
             snapshot.revision,
             {
+                "schema_version": 3,
                 "agency": {"title": "Agency"},
                 "groups": {},
             },

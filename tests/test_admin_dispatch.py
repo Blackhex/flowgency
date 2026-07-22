@@ -44,6 +44,8 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     _write_blueprint(library_root, "advisor", "Advisor")
     config_path = tmp_path / "config.yaml"
     config = {
+        "schema_version": 3,
+
         "agency": {
             "title": "Agency",
             "default_group": "test",
@@ -57,6 +59,7 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
         "groups": {
             "test": {
                 "name": "Test Agents",
+                "workspace_path": str(group_path),
                 "path": str(group_path),
                 "default_integration": "copilot",
                 "runtime": {

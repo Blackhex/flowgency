@@ -76,13 +76,19 @@ def _validate_existing_directory(
     return issues
 
 
-def _validate_control_directory(path: Path, field: str) -> list[ValidationIssue]:
+def _validate_control_directory(
+    path: Path,
+    field: str,
+    *,
+    scope: str = "agency",
+    code: str = "invalid-control-directory",
+) -> list[ValidationIssue]:
     path = path.resolve(strict=False)
     if path.exists():
         return _validate_existing_directory(
             path,
-            code="invalid-control-directory",
-            scope="agency",
+            code=code,
+            scope=scope,
             field=field,
             writable=True,
         )
@@ -91,7 +97,7 @@ def _validate_control_directory(path: Path, field: str) -> list[ValidationIssue]
         return [
             _issue(
                 "unwritable-control-parent",
-                "agency",
+                scope,
                 field,
                 f"No writable existing parent can create configured directory: {path}",
                 "Choose a local path whose nearest existing parent is writable.",
@@ -124,14 +130,23 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
         scope = f"groups.{group_id}"
         issues.extend(
             _validate_existing_directory(
-                group.path,
+                group.workspace_path,
                 code="invalid-group-workspace",
                 scope=scope,
-                field="path",
+                field="workspace_path",
                 writable=True,
             )
         )
-        runtime_paths.append((scope, "path", group.path.resolve()))
+        issues.extend(
+            _validate_control_directory(
+                group.path,
+                "path",
+                scope=scope,
+                code="invalid-group-path",
+            )
+        )
+        runtime_paths.append((scope, "workspace_path", group.workspace_path.resolve()))
+        runtime_paths.append((scope, "path", group.path.resolve(strict=False)))
         if group.runtime.sandbox.mode == "restricted":
             for index, root in enumerate(group.runtime.sandbox.roots):
                 issues.extend(
@@ -209,6 +224,7 @@ def initialize_control_directories(config: AgencyConfig) -> None:
         Path(config.agency.compilation_cache),
         Path(config.agency.memory_store),
         job_store_root(Path(config.agency.memory_store)),
+        *(Path(group.path) for group in config.groups.values()),
     ):
         path.mkdir(parents=True, exist_ok=True)
 

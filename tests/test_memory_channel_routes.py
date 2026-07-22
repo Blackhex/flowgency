@@ -92,6 +92,7 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
         )
         groups[key] = {
             "name": group_name,
+            "workspace_path": str(group_root),
             "path": str(group_root),
             "default_integration": "copilot",
             "agents": [

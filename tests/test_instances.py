@@ -183,6 +183,7 @@ def instance_env(tmp_path, raw_config):
     ]
     raw["groups"]["other"] = {
         "name": "Other",
+        "workspace_path": str(other_path),
         "path": str(other_path),
         "default_integration": "copilot",
         "agents": [],

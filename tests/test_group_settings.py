@@ -111,6 +111,7 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):
         data={
             "revision": stale,
             "name": "Newsletter",
+            "workspace_path": str(tmp_path / "groups" / "newsletter"),
             "path": str(tmp_path / "groups" / "newsletter"),
             "default_integration": "claude-code",
             "runtime_timeout": "1800",
@@ -158,6 +159,7 @@ def test_stale_group_create_returns_conflict_without_writing_group(
             "revision": stale,
             "key": "new-group",
             "name": "New Group",
+            "workspace_path": str(tmp_path / "groups" / "new-group"),
             "path": str(tmp_path / "groups" / "new-group"),
             "default_integration": "copilot",
             "workspaces_json": "[]",

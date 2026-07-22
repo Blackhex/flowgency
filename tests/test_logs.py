@@ -86,6 +86,8 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     config_path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 3,
+
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",
@@ -97,6 +99,7 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
                 "groups": {
                     "test": {
                         "name": "Test Group",
+                        "workspace_path": str(group_path.resolve()),
                         "path": str(group_path.resolve()),
                         "default_integration": "script",
                         "agents": [

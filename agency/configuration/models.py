@@ -15,7 +15,8 @@ SandboxMode = Literal["restricted", "unrestricted"]
 ScheduleKind = Literal["at", "every"]
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
-_ROOT_KEYS = {"agency", "memory", "groups"}
+CONFIG_SCHEMA_VERSION = 3
+_ROOT_KEYS = {"schema_version", "agency", "memory", "groups"}
 
 
 class AgencyDispatch(BaseModel):
@@ -139,6 +140,7 @@ class GroupRuntime(BaseModel):
 class GroupConfig(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     name: str
+    workspace_path: Path
     path: Path
     default_integration: str
     runtime: GroupRuntime = Field(default_factory=GroupRuntime)
@@ -149,6 +151,7 @@ class GroupConfig(BaseModel):
 
 class AgencyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    schema_version: Literal[3]
     agency: AgencySettings
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     groups: dict[str, GroupConfig]
@@ -684,6 +687,16 @@ def _validate_default_group(default_group: Any, groups: Mapping[str, Any]) -> li
 
 def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    if raw.get("schema_version") != CONFIG_SCHEMA_VERSION:
+        issues.append(
+            _build_issue(
+                code="unsupported-schema-version",
+                scope="config",
+                field="schema_version",
+                message="schema_version must be 3.",
+                hint="Create a fresh schema_version: 3 configuration.",
+            )
+        )
     agency = raw.get("agency") if _is_mapping(raw.get("agency")) else {}
     memory = raw.get("memory") if _is_mapping(raw.get("memory")) else {}
     channels = memory.get("channels") if _is_mapping(memory.get("channels")) else {}
@@ -721,16 +734,17 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     hint="Set group.default_integration to a non-empty integration name.",
                 )
             )
-        if not str(group.get("path", "")).strip():
-            issues.append(
-                _build_issue(
-                    code="missing-group-path",
-                    scope=f"groups.{group_name}",
-                    field="path",
-                    message="Group path is required.",
-                    hint="Set group.path relative to config.yaml.",
+        for field_name in ("workspace_path", "path"):
+            if not str(group.get(field_name, "")).strip():
+                issues.append(
+                    _build_issue(
+                        code=f"missing-group-{field_name.replace('_', '-')}",
+                        scope=f"groups.{group_name}",
+                        field=f"groups.{group_name}.{field_name}",
+                        message=f"Group {field_name} is required.",
+                        hint=f"Set groups.{group_name}.{field_name} relative to config.yaml.",
+                    )
                 )
-            )
         runtime = group.get("runtime") or {}
         issues.extend(_validate_group_runtime(runtime, f"groups.{group_name}"))
         agents = group.get("agents") if _is_list(group.get("agents")) else []
@@ -929,10 +943,14 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
         if not _is_mapping(group):
             continue
         resolved_group = dict(group)
+        if resolved_group.get("workspace_path") is not None:
+            resolved_group["workspace_path"] = _path_from_config(
+                resolved_group["workspace_path"], config_dir
+            )
         if resolved_group.get("path") is not None:
             resolved_group["path"] = _path_from_config(resolved_group["path"], config_dir)
-        group_path = resolved_group.get("path")
-        group_root = Path(group_path) if group_path is not None else None
+        workspace_path = resolved_group.get("workspace_path")
+        group_root = Path(workspace_path) if workspace_path is not None else None
         resolved_group["runtime"] = _prepare_runtime(resolved_group.get("runtime") or {}, group_root)
         agents = {}
         for agent in resolved_group.get("agents") or []:
@@ -989,16 +1007,17 @@ def _collect_post_parse_issues(parsed: ParsedConfig) -> list[ValidationIssue]:
                 )
             )
     for group_name, group in parsed.groups.items():
-        if not group.path.is_absolute():
-            issues.append(
-                _build_issue(
-                    code="missing-group-path",
-                    scope=f"groups.{group_name}",
-                    field="path",
-                    message="Group path is required.",
-                    hint="Set group.path relative to config.yaml.",
+        for field_name in ("workspace_path", "path"):
+            if not getattr(group, field_name).is_absolute():
+                issues.append(
+                    _build_issue(
+                        code=f"missing-group-{field_name.replace('_', '-')}",
+                        scope=f"groups.{group_name}",
+                        field=f"groups.{group_name}.{field_name}",
+                        message=f"Group {field_name} is required.",
+                        hint=f"Set groups.{group_name}.{field_name} relative to config.yaml.",
+                    )
                 )
-            )
     return issues
 
 

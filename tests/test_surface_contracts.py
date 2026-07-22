@@ -83,6 +83,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     config_path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 3,
                 "agency": {
                     "title": "Agency",
                     "default_group": "newsletter",
@@ -95,6 +96,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
                 "groups": {
                     "newsletter": {
                         "name": "Newsletter",
+                        "workspace_path": str(workspace),
                         "path": str(workspace),
                         "default_integration": "claude-code",
                         "agents": [
@@ -210,7 +212,7 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert "\t" not in yaml_text
 
     config = yaml.safe_load(yaml_text)
-    assert "schema_version" not in config
+    assert config["schema_version"] == 3
     assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
     group = config["groups"]["example"]
@@ -240,6 +242,7 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     config["agency"]["agent_library"] = str(library)
     config["agency"]["compilation_cache"] = str(tmp_path / "cache")
     config["agency"]["memory_store"] = str(tmp_path / "memory")
+    config["groups"]["example"]["workspace_path"] = str(workspace)
     config["groups"]["example"]["path"] = str(workspace)
     config["groups"]["example"]["runtime"]["sandbox"]["roots"] = [str(workspace)]
     config_path = tmp_path / "config.yaml"

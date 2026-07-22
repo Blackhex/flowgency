@@ -14,6 +14,8 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
     (tmp_path / "agent-library").mkdir()
     config_path = tmp_path / "config.yaml"
     config = {
+        "schema_version": 3,
+
         "agency": {
             "title": "Agency",
             "default_group": "test",
@@ -25,6 +27,7 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
         "groups": {
             "test": {
                 "name": "Test",
+                "workspace_path": str(group_path),
                 "path": str(group_path),
                 "default_integration": "claude-code",
                 "agents": [

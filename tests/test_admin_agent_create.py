@@ -33,6 +33,7 @@ def _seed_client(monkeypatch, tmp_path, raw_config):
     raw["groups"] = {
         "grp": {
             "name": "Group",
+            "workspace_path": str(group_root),
             "path": str(group_root),
             "default_integration": "copilot",
             "agents": [],

@@ -37,6 +37,8 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
     config_path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 3,
+
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",
@@ -49,6 +51,7 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
                 "groups": {
                     "test": {
                         "name": "Test",
+                        "workspace_path": str(group.resolve()),
                         "path": str(group.resolve()),
                         "default_integration": "script",
                         "agents": [

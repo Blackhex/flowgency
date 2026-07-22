@@ -76,6 +76,7 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
     raw["groups"] = {
         "newsletter": {
             "name": "Newsletter",
+            "workspace_path": str(newsletter_root),
             "path": str(newsletter_root),
             "default_integration": "copilot",
             "agents": [
@@ -98,6 +99,7 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
         },
         "product": {
             "name": "Product",
+            "workspace_path": str(product_root),
             "path": str(product_root),
             "default_integration": "copilot",
             "agents": [

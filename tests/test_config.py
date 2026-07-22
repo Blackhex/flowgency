@@ -18,15 +18,23 @@ def test_parse_config_accepts_canonical_root(raw_config, config_paths):
 
     assert parsed.raw == raw_config
     assert parsed.resolved.agency.title == "Agency"
+    assert parsed.resolved.schema_version == 3
 
 
-def test_validate_config_rejects_unknown_root_key(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+def test_parse_config_requires_schema_version_three(raw_config, config_paths):
+    from agency.configuration.models import parse_config, validate_config
 
-    raw_config["schema_version"] = 2
-    issues = validate_config(raw_config, config_paths["config_path"])
+    parsed = parse_config(raw_config, config_paths["config_path"])
+    assert parsed.resolved.schema_version == 3
 
-    assert any(issue.field == "schema_version" for issue in issues)
+    for value in (None, 1, 2, 4):
+        candidate = _clone_config(raw_config)
+        if value is None:
+            candidate.pop("schema_version")
+        else:
+            candidate["schema_version"] = value
+        issues = validate_config(candidate, config_paths["config_path"])
+        assert any(issue.field == "schema_version" for issue in issues)
 
 
 def test_current_defaults_are_explicit(raw_config, config_paths):
@@ -232,20 +240,28 @@ def test_allows_omitted_default_group(raw_config, config_paths):
     assert parsed.agency.default_group == ""
 
 
-def test_validate_config_rejects_unknown_root_key_schema_version(raw_config, config_paths):
+def test_group_requires_workspace_and_state_paths(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["schema_version"] = 1
-    issues = validate_config(raw_config, config_paths["config_path"])
-    assert any(issue.field == "schema_version" for issue in issues)
+    for field in ("workspace_path", "path"):
+        candidate = _clone_config(raw_config)
+        del candidate["groups"]["newsletter"][field]
+        issues = validate_config(candidate, config_paths["config_path"])
+        assert any(
+            issue.field == f"groups.newsletter.{field}"
+            for issue in issues
+        )
 
 
-def test_requires_control_plane_paths(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+def test_relative_group_paths_resolve_from_config_directory(raw_config, config_paths):
+    from agency.configuration.models import parse_config
 
-    del raw_config["groups"]["newsletter"]["path"]
-    issues = validate_config(raw_config, config_paths["config_path"])
-    assert any(issue.code == "missing-group-path" for issue in issues)
+    raw_config["groups"]["newsletter"]["workspace_path"] = "workspace"
+    raw_config["groups"]["newsletter"]["path"] = "groups/newsletter"
+    parsed = parse_config(raw_config, config_paths["config_path"])
+    group = parsed.groups["newsletter"]
+    assert group.workspace_path == (config_paths["config_dir"] / "workspace").resolve()
+    assert group.path == (config_paths["config_dir"] / "groups/newsletter").resolve()
 
 
 def test_parse_config_raises_validation_failed_for_missing_group_path_with_additional_roots(
@@ -253,7 +269,7 @@ def test_parse_config_raises_validation_failed_for_missing_group_path_with_addit
 ):
     from agency.configuration.models import parse_config
 
-    del raw_config["groups"]["newsletter"]["path"]
+    del raw_config["groups"]["newsletter"]["workspace_path"]
     raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"additional_roots": ["shared"]}
     }

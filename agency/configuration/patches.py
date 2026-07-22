@@ -164,6 +164,7 @@ def create_group(
             raise ValueError(f"Group already exists: {group_id}")
         groups[group_id] = {
             "name": patch.name,
+            "workspace_path": patch.path,
             "path": patch.path,
             "default_integration": patch.default_integration,
             "agents": [],
@@ -184,6 +185,7 @@ def create_group_state(
             raise ValueError(f"Group already exists: {group_id}")
         groups[group_id] = {
             "name": patch.name,
+            "workspace_path": patch.path,
             "path": patch.path,
             "default_integration": patch.default_integration,
             "runtime": {
@@ -217,6 +219,7 @@ def patch_group_settings(
     def apply(raw: dict[str, Any]) -> None:
         group = _group(raw, group_id)
         group["name"] = patch.name
+        group["workspace_path"] = patch.path
         group["path"] = patch.path
         group["default_integration"] = patch.default_integration
 
@@ -248,6 +251,7 @@ def patch_group_settings_state(
     def apply(raw: dict[str, Any]) -> None:
         group = _group(raw, group_id)
         group["name"] = patch.name
+        group["workspace_path"] = patch.path
         group["path"] = patch.path
         group["default_integration"] = patch.default_integration
 

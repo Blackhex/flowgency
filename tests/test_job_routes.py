@@ -57,6 +57,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["groups"] = {
         "newsletter": {
             "name": "Newsletter",
+            "workspace_path": str(group_root),
             "path": str(group_root),
             "default_integration": "copilot",
             "agents": [
@@ -149,6 +150,7 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["groups"]["research"] = {
         "name": "Research",
+        "workspace_path": str(other_group),
         "path": str(other_group),
         "default_integration": "copilot",
         "agents": deepcopy(raw["groups"]["newsletter"]["agents"]),
@@ -250,6 +252,7 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
     moved_root.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True)
     raw["groups"]["research"] = {
         "name": "Research",
+        "workspace_path": str(moved_root),
         "path": str(moved_root),
         "default_integration": "copilot",
         "agents": [advisor],

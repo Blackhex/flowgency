@@ -56,6 +56,7 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     raw["groups"] = {
         "grp": {
             "name": "Grp",
+            "workspace_path": str(tmp_path / "agents"),
             "path": str(tmp_path / "agents"),
             "default_integration": "copilot",
             "agents": [],

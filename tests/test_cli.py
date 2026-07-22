@@ -32,6 +32,7 @@ def _setup_jobs_group(
     config_path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 3,
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",
@@ -43,6 +44,7 @@ def _setup_jobs_group(
                 "groups": {
                     "test": {
                         "name": "Test",
+                        "workspace_path": str(group.resolve()),
                         "path": str(group.resolve()),
                         "default_integration": "script",
                         "agents": [
@@ -280,6 +282,7 @@ def _write_dispatch_config(path):
     path.write_text(
         yaml.safe_dump(
             {
+                "schema_version": 3,
                 "agency": {
                     "agent_library": "agent-library",
                     "compilation_cache": "compiled-agents",

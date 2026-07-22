@@ -157,6 +157,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
     ]
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
+        "schema_version: 3\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"
@@ -167,6 +168,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         "groups:\n"
         "  test:\n"
         "    name: Test\n"
+        f"    workspace_path: {group.as_posix()}\n"
         f"    path: {group.as_posix()}\n"
         "    default_integration: script\n"
         "    agents:\n"

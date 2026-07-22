@@ -111,7 +111,7 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
         assert phrase in combined
     assert "agency-migration" not in combined
     assert "tools/migrate_agent_model.py" not in combined
-    assert "schema_version" not in combined
+    assert "schema_version: 3" in skill
 
 
 def test_setup_maintains_one_authoritative_canonical_config():
@@ -212,4 +212,3 @@ def test_docs_clarify_execution_agent_blocks_not_skips():
     # Prohibited: obsolete skip row implying missing executor creates a skipped decision
     assert "No writable `execution_agent` is available | `skipped`" not in data_formats, \
         "data-formats.md must not contain the inaccurate obsolete skip table row"
-

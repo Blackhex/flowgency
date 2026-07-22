@@ -75,6 +75,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     ]
     raw["groups"]["research"] = {
         "name": "Research",
+        "workspace_path": str(target_root),
         "path": str(target_root),
         "default_integration": "copilot",
         "agents": [],
