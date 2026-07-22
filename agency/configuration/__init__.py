@@ -1,5 +1,6 @@
 """Configuration models, store, and validation primitives."""
 
+from .group_paths import ResolvedGroupPaths, resolve_group_paths
 from .issues import ValidationFailed, ValidationIssue
 from .models import (
     AgencyConfig,
@@ -57,6 +58,7 @@ __all__ = [
     "GroupSettingsPatch",
     "GroupSettingsStatePatch",
     "ParsedConfig",
+    "ResolvedGroupPaths",
     "ToolPolicy",
     "ValidationFailed",
     "ValidationIssue",
@@ -78,5 +80,6 @@ __all__ = [
     "parse_config",
     "remove_agent_instance",
     "replace_agent_routines",
+    "resolve_group_paths",
     "validate_config",
 ]

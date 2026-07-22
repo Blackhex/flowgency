@@ -90,7 +90,10 @@ def _write_blueprint(root: Path, key: str = "builder-blueprint") -> None:
 
 
 def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo ok") -> Path:
+    workspace = tmp_path / "workspaces" / "newsletter"
     group = tmp_path / "agents" / "newsletter"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "repo").mkdir(parents=True, exist_ok=True)
     (group / "builder").mkdir(parents=True, exist_ok=True)
     (group / "repo").mkdir(parents=True, exist_ok=True)
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
@@ -107,7 +110,7 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "groups:\n"
         "  newsletter:\n"
         "    name: Newsletter\n"
-        "    workspace_path: agents/newsletter\n"
+        "    workspace_path: workspaces/newsletter\n"
         "    path: agents/newsletter\n"
         "    default_integration: copilot\n"
         f"    runtime:\n      timeout: {timeout}\n"
@@ -273,6 +276,7 @@ def test_submit_blocks_move_and_move_then_observes_active_job(
     request = configured_request(tmp_path)
     config_store = ConfigStore(request.config_path)
     snapshot = config_store.load()
+    (tmp_path / "workspaces" / "other").mkdir(parents=True, exist_ok=True)
     (tmp_path / "agents" / "other").mkdir(parents=True, exist_ok=True)
     config_store.patch(
         snapshot.revision,
@@ -280,7 +284,7 @@ def test_submit_blocks_move_and_move_then_observes_active_job(
             {
                 "other": {
                     "name": "Other",
-                    "workspace_path": str((tmp_path / "agents" / "other").resolve()),
+                    "workspace_path": str((tmp_path / "workspaces" / "other").resolve()),
                     "path": str((tmp_path / "agents" / "other").resolve()),
                     "default_integration": "copilot",
                     "agents": [],

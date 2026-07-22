@@ -9,7 +9,10 @@ from fastapi import Request
 
 from agency.blueprints import BlueprintLibrary, CompilationCache
 from agency.configuration import ConfigStore, ValidationFailed
-from agency.configuration.paths import initialize_control_directories, validate_resolved_paths
+from agency.configuration.paths import (
+    initialize_storage_directories,
+    validate_resolved_paths,
+)
 from agency.integrations import REGISTRY, BaseIntegration
 from agency.instances import InstanceService
 from agency.jobs.authority import JobStore
@@ -39,10 +42,10 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
     config_store = ConfigStore(resolved)
     try:
         snapshot = config_store.load()
-        initialize_control_directories(snapshot.config)
         issues = validate_resolved_paths(snapshot.config)
         if issues:
             raise ValidationFailed(issues)
+        initialize_storage_directories(snapshot.config)
         agency = snapshot.config.agency
         library_root = agency.agent_library
         cache_root = agency.compilation_cache

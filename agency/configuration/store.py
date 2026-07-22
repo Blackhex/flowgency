@@ -14,7 +14,7 @@ from agency.fs.locks import exclusive_lock
 
 from .issues import ValidationFailed
 from .models import AgencyConfig, parse_config
-from .paths import initialize_control_directories, validate_resolved_paths
+from .paths import initialize_storage_directories, validate_resolved_paths
 
 
 ABSENT_REVISION = "absent"
@@ -152,10 +152,10 @@ class ConfigStore:
 
     def _encode(self, raw: dict[str, Any]) -> bytes:
         parsed = parse_config(raw, self.path)
-        initialize_control_directories(parsed.resolved)
         issues = validate_resolved_paths(parsed.resolved)
         if issues:
             raise ValidationFailed(issues)
+        initialize_storage_directories(parsed.resolved)
         return yaml.safe_dump(
             raw, sort_keys=False, allow_unicode=True
         ).encode("utf-8")

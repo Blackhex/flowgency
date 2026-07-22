@@ -3,7 +3,10 @@ from pathlib import Path
 from agency.blueprints.cache import active_pins
 from agency.blueprints import BlueprintLibrary, CompilationCache
 from agency.configuration import ConfigStore, ValidationFailed
-from agency.configuration.paths import initialize_control_directories, validate_resolved_paths
+from agency.configuration.paths import (
+    initialize_storage_directories,
+    validate_resolved_paths,
+)
 from agency.configuration.store import ConfigConflictError, ConfigSnapshot
 from agency.integrations import REGISTRY
 
@@ -109,10 +112,10 @@ def submit_job_request(
                 config_store,
                 group_ids=(request.group_key,),
             ) as locked_snapshot:
-                initialize_control_directories(locked_snapshot.config)
                 issues = validate_resolved_paths(locked_snapshot.config)
                 if issues:
                     raise ValidationFailed(issues)
+                initialize_storage_directories(locked_snapshot.config)
                 job_store = JobStore(locked_snapshot.config.agency.memory_store)
                 return _submit_resolved(
                     _resolve_request(request, locked_snapshot),

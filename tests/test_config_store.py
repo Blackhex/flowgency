@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 from multiprocessing import Event, Process, Queue
 from pathlib import Path
@@ -268,3 +269,23 @@ def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
     assert first.raw["agency"]["title"] == "Mutated in memory"
     assert second.raw["agency"]["title"] == raw_config["agency"]["title"]
     assert updated.raw["agency"]["title"] == "Patched"
+
+
+def test_create_validates_before_initializing_storage(raw_config, config_paths):
+    from agency.configuration import ValidationFailed
+    from agency.configuration.paths import job_store_root
+    from agency.configuration.store import ConfigStore
+
+    raw = deepcopy(raw_config)
+    raw["groups"]["newsletter"]["workspace_path"] = str(
+        config_paths["config_dir"] / "missing-workspace"
+    )
+
+    with pytest.raises(ValidationFailed):
+        ConfigStore(config_paths["config_path"]).create(raw)
+
+    assert not config_paths["compilation_cache"].exists()
+    assert not config_paths["memory_store"].exists()
+    assert not job_store_root(config_paths["memory_store"]).exists()
+    assert not config_paths["group_path"].exists()
+    assert not config_paths["config_path"].exists()

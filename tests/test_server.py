@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 import uvicorn
 from fastapi.testclient import TestClient
+import yaml
 
 from agency import app as app_mod
+from agency.configuration import ValidationFailed
 from agency.integrations import IntegrationError
 
 
@@ -619,3 +621,27 @@ def test_setup_status_returns_non_ready_when_rebuilt_services_still_fail(
         "state": "invalid",
         "message": "Services could not start: services still unavailable",
     }
+
+
+def test_build_services_validates_before_initializing_storage(
+    tmp_path, raw_config
+):
+    raw = dict(raw_config)
+    raw["agency"] = dict(raw_config["agency"])
+    raw["groups"] = dict(raw_config["groups"])
+    raw["groups"]["newsletter"] = dict(raw_config["groups"]["newsletter"])
+    raw["groups"]["newsletter"]["workspace_path"] = str(
+        tmp_path / "missing-workspace"
+    )
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+    services = app_mod.build_services(config_path)
+
+    assert isinstance(services.startup_error, ValidationFailed)
+    assert not (tmp_path / "compiled-agents").exists()
+    assert not (tmp_path / "memory").exists()
+    assert not (tmp_path / "groups" / "newsletter").exists()
