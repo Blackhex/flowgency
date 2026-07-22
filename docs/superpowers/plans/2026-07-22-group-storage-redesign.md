@@ -45,6 +45,8 @@
 - `agency/jobs/reconciliation.py` — carry the group root for decision and recovery projection.
 - `agency/jobs/submission.py` — initialize all configured storage before submission.
 - `agency/dispatch/run.py` — write scheduler output and markers under group `logs`.
+- `agency/integrations/models.py` — expose `IntegrationRunRequest.workspace_root`.
+- `agency/integrations/agency/copilot.py`, `agency/integrations/agency/script.py` — consume the renamed execution root and script placeholder.
 
 ### Web and CLI consumers
 
@@ -668,12 +670,17 @@ git commit -m "feat(runtime): expose workspace and group roots"
 - Modify: `agency/jobs/store.py`
 - Modify: `agency/jobs/reconciliation.py`
 - Modify: `agency/app.py`
+- Modify: `agency/integrations/models.py`
+- Modify: `agency/integrations/agency/copilot.py`
+- Modify: `agency/integrations/agency/script.py`
 - Modify: `tests/test_job_models.py`
 - Modify: `tests/test_job_submission.py`
 - Modify: `tests/test_job_execution.py`
 - Modify: `tests/test_job_reconciliation.py`
 - Modify: `tests/test_job_authority.py`
 - Modify: `tests/test_instances.py`
+- Modify: `tests/test_integration_contract.py`
+- Modify: `tests/test_integration_script.py`
 
 **Interfaces:**
 - Consumes: `ResolvedGroupPaths`
@@ -735,7 +742,7 @@ def test_operation_lock_is_under_group_locks(tmp_path):
 In execution tests, assert:
 
 ```python
-assert request.workspace_dir == workspace.resolve()
+assert request.workspace_root == workspace.resolve()
 assert Path(record.stdout_path).is_relative_to(group_root / "logs")
 assert Path(record.stderr_path).is_relative_to(group_root / "logs")
 assert not (workspace / "shared").exists()
@@ -834,7 +841,36 @@ return SimpleNamespace(
 )
 ```
 
-Use `context.workspace_root` for change capture fallback and `IntegrationRunRequest.workspace_dir`.
+Rename the integration request contract in `agency/integrations/models.py`:
+
+```python
+@dataclass(frozen=True)
+class IntegrationRunRequest:
+    workspace_root: Path
+    launch_dir: Path
+    task_file: Path
+    timeout: int
+    runtime_policy: EffectiveRuntimePolicy
+    skill: str | None = None
+    skill_arguments: tuple[str, ...] = ()
+    enforce_validation: bool = True
+    memory_working_dir: Path | None = None
+```
+
+Use `context.workspace_root` for change capture fallback and
+`IntegrationRunRequest.workspace_root`. Update Copilot parsing roots to
+`request.workspace_root`.
+
+In the script integration, replace the required and supported template token
+`{workspace_dir}` with `{workspace_root}`:
+
+```python
+required = ("{runtime_dir}", "{workspace_root}", "{skill}")
+command = command.replace("{workspace_root}", str(request.workspace_root))
+```
+
+Remove support for `{workspace_dir}` and `{agent_dir}` because the redesign has no
+compatibility aliases.
 
 Create all run files together:
 
@@ -884,7 +920,7 @@ Update memory recovery context keys consistently where reconciliation projects d
 Run:
 
 ```powershell
-.venv\Scripts\python -m pytest tests\test_job_models.py tests\test_job_submission.py tests\test_job_execution.py tests\test_job_reconciliation.py tests\test_job_authority.py tests\test_instances.py tests\test_memory_recovery.py tests\test_memory_publication.py -q
+.venv\Scripts\python -m pytest tests\test_job_models.py tests\test_job_submission.py tests\test_job_execution.py tests\test_job_reconciliation.py tests\test_job_authority.py tests\test_instances.py tests\test_memory_recovery.py tests\test_memory_publication.py tests\test_integration_contract.py tests\test_integration_script.py -q
 ```
 
 Expected: all selected tests pass with strict job schema version 3.
@@ -892,7 +928,7 @@ Expected: all selected tests pass with strict job schema version 3.
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add agency\jobs\models.py agency\jobs\resolution.py agency\jobs\execution.py agency\jobs\store.py agency\jobs\reconciliation.py agency\app.py tests\test_job_models.py tests\test_job_submission.py tests\test_job_execution.py tests\test_job_reconciliation.py tests\test_job_authority.py tests\test_instances.py tests\test_memory_recovery.py tests\test_memory_publication.py
+git add agency\jobs\models.py agency\jobs\resolution.py agency\jobs\execution.py agency\jobs\store.py agency\jobs\reconciliation.py agency\integrations\models.py agency\integrations\agency\copilot.py agency\integrations\agency\script.py agency\app.py tests\test_job_models.py tests\test_job_submission.py tests\test_job_execution.py tests\test_job_reconciliation.py tests\test_job_authority.py tests\test_instances.py tests\test_memory_recovery.py tests\test_memory_publication.py tests\test_integration_contract.py tests\test_integration_script.py
 git commit -m "feat(jobs): separate execution and group roots"
 ```
 

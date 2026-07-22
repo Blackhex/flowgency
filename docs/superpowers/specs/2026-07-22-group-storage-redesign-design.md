@@ -255,6 +255,11 @@ context where required. Change capture remains tied to `workspace_path`. Pipelin
 projection and logs use `group_root`. Semantic memory publication continues to
 use `memory_store`.
 
+The runtime execution contract uses `workspace_root` consistently. Job snapshots,
+resolved execution contexts, `IntegrationRunRequest`, and script-integration
+command templates use `workspace_root` rather than the previous `workspace_dir`
+name. This is a strict green-field rename with no field or template alias.
+
 Any stored or displayed log path is validated against the resolved `logs`
 directory. Decision and proposal references are validated against their resolved
 group directories. Moving records outside the project must not weaken traversal,
