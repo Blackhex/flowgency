@@ -4,6 +4,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 import agency.app as app_mod
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def _write_blueprint(root: Path, key: str, title: str) -> None:
@@ -35,12 +36,20 @@ def _status(state="inactive", installed=False, conflict=False, mismatches=None):
 
 
 def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
-    group_path = tmp_path / "agents"
+    paths = create_group_environment(
+        tmp_path,
+        "test",
+        workspace_dirs=("shared",),
+        shared_dirs=("prompts",),
+    )
+    group_path = paths.state_root
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    (group_path / "shared" / "prompts").mkdir(parents=True)
-    (group_path / "shared" / "prompts" / "routine.md").write_text("# Routine\n", encoding="utf-8")
+    (group_path / "shared" / "prompts" / "routine.md").write_text(
+        "# Routine\n",
+        encoding="utf-8",
+    )
     _write_blueprint(library_root, "advisor", "Advisor")
     config_path = tmp_path / "config.yaml"
     config = {
@@ -57,14 +66,15 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
         },
         "memory": {"channels": {}},
         "groups": {
-            "test": {
+            "test": apply_group_paths({
                 "name": "Test Agents",
-                "workspace_path": str(group_path),
-                "path": str(group_path),
                 "default_integration": "copilot",
                 "runtime": {
                     "timeout": 1800,
-                    "sandbox": {"mode": "restricted", "roots": [str(group_path / "shared")]},
+                    "sandbox": {
+                        "mode": "restricted",
+                        "roots": [str(paths.workspace_root / "shared")],
+                    },
                     "tools": {"mode": "allowlist", "names": ["shell"]},
                 },
                 "agents": [
@@ -79,7 +89,7 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
                     "daily_limit": 15,
                 },
                 "workspaces": [],
-            },
+            }, paths),
         },
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")

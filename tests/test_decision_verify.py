@@ -12,14 +12,18 @@ from fastapi.testclient import TestClient
 
 import agency.app as app_mod
 from agency.app import app
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def _setup_group(tmp_path, monkeypatch, *, decision_meta):
-    group = tmp_path / "group"
+    paths = create_group_environment(
+        tmp_path,
+        "test",
+        shared_dirs=("proposals", "decisions", "observations", "logs", "prompts"),
+    )
+    group = paths.state_root
     (group / "engineer").mkdir(parents=True)
-    shared = group / "shared"
-    for name in ("proposals", "decisions", "observations", "logs", "prompts"):
-        (shared / name).mkdir(parents=True)
+    shared = paths.shared_root
 
     proposal_meta = {"origin_agent": "product", "status": "decided"}
     (shared / "proposals" / "change.md").write_text(
@@ -49,10 +53,8 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
                     "memory_store": str((tmp_path / "memory").resolve()),
                 },
                 "groups": {
-                    "test": {
+                    "test": apply_group_paths({
                         "name": "Test",
-                        "workspace_path": str(group.resolve()),
-                        "path": str(group.resolve()),
                         "default_integration": "script",
                         "agents": [
                             {
@@ -62,7 +64,7 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
                                 "integration_config": {"command": "echo ok"},
                             }
                         ],
-                    }
+                    }, paths)
                 },
             },
             sort_keys=False,

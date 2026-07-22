@@ -26,6 +26,7 @@ from agency.jobs.resolution import JobValidationError
 from agency.jobs.store import transition_job, write_job
 from agency.jobs.submission import submit_job_request
 from agency.memory import MemoryStore, resolve_memory_selector
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -144,8 +145,10 @@ def instance_env(tmp_path, raw_config):
     _write_blueprint(library_root, "builder-blueprint")
     _write_blueprint(library_root, "advisor")
 
-    newsletter_path = tmp_path / "groups" / "newsletter"
-    other_path = tmp_path / "groups" / "other"
+    newsletter_paths = create_group_environment(tmp_path, "newsletter")
+    other_paths = create_group_environment(tmp_path, "other")
+    newsletter_path = newsletter_paths.state_root
+    other_path = other_paths.state_root
     for group_path in (newsletter_path, other_path):
         (group_path / "shared" / "jobs").mkdir(parents=True, exist_ok=True)
         (group_path / "shared" / "prompts").mkdir(parents=True, exist_ok=True)
@@ -158,7 +161,7 @@ def instance_env(tmp_path, raw_config):
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
     raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
-    raw["groups"]["newsletter"]["path"] = str(newsletter_path)
+    apply_group_paths(raw["groups"]["newsletter"], newsletter_paths)
     agent = raw["groups"]["newsletter"]["agents"][0]
     agent["default_memory"] = {"scope": "agent"}
     agent["routines"] = [
@@ -182,9 +185,8 @@ def instance_env(tmp_path, raw_config):
         },
     ]
     raw["groups"]["other"] = {
+        **apply_group_paths({}, other_paths),
         "name": "Other",
-        "workspace_path": str(other_path),
-        "path": str(other_path),
         "default_integration": "copilot",
         "agents": [],
     }

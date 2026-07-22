@@ -17,6 +17,7 @@ from agency.jobs.models import (
     RuntimePolicySnapshot,
 )
 from agency.jobs.store import write_job
+from tests._group_helpers import apply_group_paths, create_group_environment
 from agency.configuration import ConfigStore
 from agency import app as app_mod
 
@@ -45,8 +46,10 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    group_root = tmp_path / "groups" / "newsletter"
-    target_root = tmp_path / "groups" / "research"
+    newsletter_paths = create_group_environment(tmp_path, "newsletter")
+    research_paths = create_group_environment(tmp_path, "research")
+    group_root = newsletter_paths.state_root
+    target_root = research_paths.state_root
     for path in [
         group_root / "shared" / "jobs",
         group_root / "shared" / "prompts",
@@ -63,7 +66,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["groups"]["newsletter"]["name"] = "Newsletter"
-    raw["groups"]["newsletter"]["path"] = str(group_root)
+    apply_group_paths(raw["groups"]["newsletter"], newsletter_paths)
     raw["groups"]["newsletter"]["default_integration"] = "copilot"
     raw["groups"]["newsletter"]["agents"] = [
         {
@@ -74,9 +77,8 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
         }
     ]
     raw["groups"]["research"] = {
+        **apply_group_paths({}, research_paths),
         "name": "Research",
-        "workspace_path": str(target_root),
-        "path": str(target_root),
         "default_integration": "copilot",
         "agents": [],
     }

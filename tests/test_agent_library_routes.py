@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from agency import app as app_mod
 from agency.configuration import ConfigStore
 from agency.fs.snapshot import compute_source_digest
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -41,9 +42,9 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    newsletter_root = tmp_path / "groups" / "newsletter"
-    product_root = tmp_path / "groups" / "product"
-    for group_root in (newsletter_root, product_root):
+    newsletter_paths = create_group_environment(tmp_path, "newsletter")
+    product_paths = create_group_environment(tmp_path, "product")
+    for group_root in (newsletter_paths.state_root, product_paths.state_root):
         (group_root / "shared" / "jobs").mkdir(
             parents=True,
             exist_ok=True,
@@ -74,10 +75,8 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["groups"] = {
-        "newsletter": {
+        "newsletter": apply_group_paths({
             "name": "Newsletter",
-            "workspace_path": str(newsletter_root),
-            "path": str(newsletter_root),
             "default_integration": "copilot",
             "agents": [
                 {
@@ -96,11 +95,9 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
                 }
             ],
             "workspaces": [],
-        },
-        "product": {
+        }, newsletter_paths),
+        "product": apply_group_paths({
             "name": "Product",
-            "workspace_path": str(product_root),
-            "path": str(product_root),
             "default_integration": "copilot",
             "agents": [
                 {
@@ -111,7 +108,7 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
                 }
             ],
             "workspaces": [],
-        },
+        }, product_paths),
     }
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)

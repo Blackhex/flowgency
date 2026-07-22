@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import agency.app as app_mod
 from agency.configuration import ConfigStore
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def _write_blueprint(root, key, title):
@@ -21,24 +22,22 @@ def _write_blueprint(root, key, title):
 def _seed_client(monkeypatch, tmp_path, raw_config):
     raw = deepcopy(raw_config)
     config_path = tmp_path / "config.yaml"
-    group_root = tmp_path / "agents"
+    paths = create_group_environment(tmp_path, "grp")
+    group_root = paths.state_root
     library_root = tmp_path / "library"
     cache_root = tmp_path / "cache"
     memory_root = tmp_path / "memory"
-    group_root.mkdir(exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["groups"] = {
-        "grp": {
+        "grp": apply_group_paths({
             "name": "Group",
-            "workspace_path": str(group_root),
-            "path": str(group_root),
             "default_integration": "copilot",
             "agents": [],
             "workspaces": [],
-        }
+        }, paths)
     }
     raw["agency"]["default_group"] = "grp"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")

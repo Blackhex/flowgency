@@ -23,6 +23,7 @@ from agency.jobs.models import (
 from agency.jobs.store import read_job, write_job
 from dataclasses import replace
 from agency.memory import resolve_memory_selector
+from tests._group_helpers import apply_group_paths, create_group_environment
 from tests._lock_helpers import hold_exclusive_lock
 
 
@@ -65,7 +66,8 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
         ("newsletter", "Newsletter", "advisor", "Advisor"),
         ("product", "Product", "strategist", "Strategist"),
     ]:
-        group_root = tmp_path / "groups" / key
+        paths = create_group_environment(tmp_path, key)
+        group_root = paths.state_root
         (group_root / "shared" / "jobs").mkdir(
             parents=True,
             exist_ok=True,
@@ -90,10 +92,8 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
             "# Shared\n",
             encoding="utf-8",
         )
-        groups[key] = {
+        groups[key] = apply_group_paths({
             "name": group_name,
-            "workspace_path": str(group_root),
-            "path": str(group_root),
             "default_integration": "copilot",
             "agents": [
                 {
@@ -108,7 +108,7 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
                 }
             ],
             "workspaces": [],
-        }
+        }, paths)
     raw["groups"] = groups
 
     authority = JobStore(memory_root)

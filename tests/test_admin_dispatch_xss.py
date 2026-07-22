@@ -3,14 +3,19 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 import agency.app as app_mod
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypatch):
     """Prove conflict config path is not interpolated into onsubmit JS string."""
     # Create test environment
-    group_path = tmp_path / "agents"
-    (group_path / "shared" / "prompts").mkdir(parents=True)
-    (group_path / "product").mkdir()
+    paths = create_group_environment(
+        tmp_path,
+        "test",
+        shared_dirs=("prompts",),
+    )
+    group_path = paths.state_root
+    (group_path / "product").mkdir(parents=True, exist_ok=True)
     (tmp_path / "agent-library").mkdir()
     config_path = tmp_path / "config.yaml"
     config = {
@@ -25,10 +30,8 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
             "memory_store": str((tmp_path / "memory").resolve()),
         },
         "groups": {
-            "test": {
+            "test": apply_group_paths({
                 "name": "Test",
-                "workspace_path": str(group_path),
-                "path": str(group_path),
                 "default_integration": "claude-code",
                 "agents": [
                     {
@@ -37,7 +40,7 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
                         "integration": "claude-code",
                     }
                 ],
-            },
+            }, paths),
         },
     }
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")

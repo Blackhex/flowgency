@@ -9,6 +9,7 @@ import yaml
 
 from agency.jobs.authority import JobStore
 from agency.jobs.store import read_job
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def _read_job_eventually(path: Path, *, deadline: float):
@@ -32,7 +33,8 @@ def _shell_command(arguments):
 
 def test_detached_worker_survives_submitter_exit(tmp_path):
     repository = Path(__file__).resolve().parents[1]
-    group_path = tmp_path / "group"
+    paths = create_group_environment(tmp_path, "test")
+    group_path = paths.state_root
     agent_dir = group_path / "product"
     agent_dir.mkdir(parents=True)
     gate = tmp_path / "continue"
@@ -68,10 +70,8 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
             "compilation_cache": str(tmp_path / "compiled-agents"),
             "memory_store": str(tmp_path / "memory"),
         },
-        "groups": {"test": {
+        "groups": {"test": apply_group_paths({
             "name": "Test",
-            "workspace_path": str(group_path),
-            "path": str(group_path),
             "default_integration": "script",
             "runtime": {
                 "timeout": 1800,
@@ -87,7 +87,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
                 },
                 "routines": [],
             }],
-        }},
+        }, paths)},
     }), encoding="utf-8")
     job_id_file = tmp_path / "job-id"
     parent_pid_file = tmp_path / "parent-pid"

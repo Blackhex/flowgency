@@ -11,6 +11,7 @@ from agency import app as app_mod
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import read_job, transition_job, write_job
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -37,7 +38,8 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    group_root = tmp_path / "groups" / "newsletter"
+    paths = create_group_environment(tmp_path, "newsletter")
+    group_root = paths.state_root
     (tmp_path / "Research" / "shared").mkdir(parents=True, exist_ok=True)
     for rel in [
         ("shared", "jobs"),
@@ -55,10 +57,8 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["groups"] = {
-        "newsletter": {
+        "newsletter": apply_group_paths({
             "name": "Newsletter",
-            "workspace_path": str(group_root),
-            "path": str(group_root),
             "default_integration": "copilot",
             "agents": [
                 {
@@ -79,7 +79,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
                     ],
                 }
             ],
-        }
+        }, paths)
     }
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
@@ -148,10 +148,10 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
     other_group = group_root.parent / "research"
     other_group.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True, exist_ok=True)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    research_paths = create_group_environment(tmp_path, "research")
     raw["groups"]["research"] = {
+        **apply_group_paths({}, research_paths),
         "name": "Research",
-        "workspace_path": str(other_group),
-        "path": str(other_group),
         "default_integration": "copilot",
         "agents": deepcopy(raw["groups"]["newsletter"]["agents"]),
     }
@@ -248,15 +248,14 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
     _write_job_record(group_root, config_path, job_id="job-moved", status="failed")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["groups"]["newsletter"]["agents"].pop()
-    moved_root = group_root.parent / "research"
+    moved_paths = create_group_environment(tmp_path, "research")
+    moved_root = moved_paths.state_root
     moved_root.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True)
-    raw["groups"]["research"] = {
+    raw["groups"]["research"] = apply_group_paths({
         "name": "Research",
-        "workspace_path": str(moved_root),
-        "path": str(moved_root),
         "default_integration": "copilot",
         "agents": [advisor],
-    }
+    }, moved_paths)
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)

@@ -18,6 +18,7 @@ from agency.fs.locks import exclusive_lock
 from agency.jobs import JobHandle, JobSubmissionError
 from agency.memory import resolve_memory_selector
 from agency.web.dependencies import build_services
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 @dataclass(frozen=True)
@@ -40,11 +41,13 @@ def _write_blueprint(root: Path) -> None:
 
 @pytest.fixture
 def cli_config(tmp_path):
-    group_path = tmp_path / "newsletter"
-    for name in ("observations", "proposals", "decisions", "logs"):
-        (group_path / "shared" / name).mkdir(parents=True)
+    paths = create_group_environment(
+        tmp_path,
+        "newsletter",
+        shared_dirs=("observations", "proposals", "decisions", "logs"),
+    )
+    group_path = paths.state_root
     _write_blueprint(tmp_path / "agent-library")
-    group_path.mkdir(parents=True, exist_ok=True)
     raw = {
         "schema_version": 3,
         "agency": {
@@ -54,12 +57,10 @@ def cli_config(tmp_path):
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),
         },
-        "memory": {"channels": {"support": {"display_name": "Support Desk"}}},
+        "memory": {"channels": {"support": {"display_name": "Support Desk"}}        },
         "groups": {
-            "newsletter": {
+            "newsletter": apply_group_paths({
                 "name": "Newsletter",
-                "workspace_path": str(group_path.resolve()),
-                "path": str(group_path.resolve()),
                 "default_integration": "script",
                 "runtime": {
                     "timeout": 321,
@@ -85,7 +86,7 @@ def cli_config(tmp_path):
                         ],
                     }
                 ],
-            }
+            }, paths)
         },
     }
     config_path = tmp_path / "config.yaml"

@@ -13,6 +13,7 @@ from agency.app import app, build_activity_feed, build_dashboard_fleet, build_pi
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import transition_job, write_job
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 class TestBuildPipelineStats:
@@ -86,11 +87,16 @@ def test_decision_detail_shows_agent_log_and_changes(tmp_path, monkeypatch):
     from agency.app import app
 
     # Set up group with decision directory
-    group_path = tmp_path / "grp"
-    decisions_path = group_path / "shared" / "decisions"
-    logs_path = group_path / "shared" / "logs" / "2026-07-10"
-    decisions_path.mkdir(parents=True)
-    logs_path.mkdir(parents=True)
+    paths = create_group_environment(
+        tmp_path,
+        "test",
+        shared_dirs=("decisions", "logs\\2026-07-10"),
+    )
+    group_path = paths.state_root
+    decisions_path = paths.shared_root / "decisions"
+    logs_path = paths.shared_root / "logs" / "2026-07-10"
+    decisions_path.mkdir(parents=True, exist_ok=True)
+    logs_path.mkdir(parents=True, exist_ok=True)
 
     # Create decision with execution metadata
     log_file = logs_path / "worker-exec-12345.out"
@@ -132,10 +138,8 @@ Decision body
                 },
                 "memory": {"channels": {}},
                 "groups": {
-                    "test": {
+                    "test": apply_group_paths({
                         "name": "Test Group",
-                        "workspace_path": str(group_path),
-                        "path": str(group_path),
                         "default_integration": "script",
                         "agents": [
                             {
@@ -144,7 +148,7 @@ Decision body
                                 "integration": "script",
                             }
                         ],
-                    }
+                    }, paths)
                 },
             },
             sort_keys=False,
@@ -195,7 +199,8 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    group_root = tmp_path / "groups" / "newsletter"
+    paths = create_group_environment(tmp_path, "newsletter")
+    group_root = paths.state_root
     for rel in [
         ("shared", "jobs"),
         ("shared", "logs", "2026-07-16"),
@@ -212,10 +217,8 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["groups"] = {
-        "newsletter": {
+        "newsletter": apply_group_paths({
             "name": "Newsletter",
-            "workspace_path": str(group_root),
-            "path": str(group_root),
             "default_integration": "copilot",
             "agents": [
                 {
@@ -237,7 +240,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
                     ],
                 }
             ],
-        }
+        }, paths)
     }
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
@@ -475,16 +478,15 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
 
 def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw_config):
     client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
-    other_group = group_root.parent / "research"
+    other_paths = create_group_environment(tmp_path, "research")
+    other_group = other_paths.state_root
     for rel in [("shared", "jobs"), ("shared", "logs"), ("shared", "observations"), ("shared", "proposals"), ("shared", "decisions")]:
         other_group.joinpath(*rel).mkdir(parents=True, exist_ok=True)
     other_group.joinpath("shared", "memory.md").write_text("# Shared\n", encoding="utf-8")
 
     raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
-    raw["groups"]["research"] = {
+    raw["groups"]["research"] = apply_group_paths({
         "name": "Research",
-        "workspace_path": str(other_group),
-        "path": str(other_group),
         "default_integration": "copilot",
         "agents": [
             {
@@ -494,7 +496,7 @@ def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw
                 "identity": {"display_name": "Analyst"},
             }
         ],
-    }
+    }, other_paths)
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(tmp_path / "config.yaml")

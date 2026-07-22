@@ -15,6 +15,7 @@ from agency import cli
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import write_job
+from tests._group_helpers import apply_group_paths, create_group_environment
 
 
 def _setup_jobs_group(
@@ -26,8 +27,12 @@ def _setup_jobs_group(
 ):
     """Create a group with one complete job that has changed files, and wire it
     into the app registry the CLI reads through get_group."""
-    group = tmp_path / "group"
-    (group / "shared" / "logs").mkdir(parents=True, exist_ok=True)
+    paths = create_group_environment(
+        tmp_path,
+        "test",
+        shared_dirs=("logs",),
+    )
+    group = paths.state_root
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
@@ -42,10 +47,8 @@ def _setup_jobs_group(
                     "memory_store": str((tmp_path / "memory").resolve()),
                 },
                 "groups": {
-                    "test": {
+                    "test": apply_group_paths({
                         "name": "Test",
-                        "workspace_path": str(group.resolve()),
-                        "path": str(group.resolve()),
                         "default_integration": "script",
                         "agents": [
                             {
@@ -55,7 +58,7 @@ def _setup_jobs_group(
                                 "integration_config": {"command": "echo ok"},
                             }
                         ],
-                    }
+                    }, paths)
                 },
             },
             sort_keys=False,

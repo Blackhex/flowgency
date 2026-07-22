@@ -13,20 +13,24 @@ from agency.jobs import JobRequest
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import write_job
+from tests._group_helpers import create_group_environment
 
 
 def _setup_group(tmp_path: Path) -> Path:
-    group_path = tmp_path / "grp"
+    paths = create_group_environment(
+        tmp_path,
+        "test",
+        shared_dirs=("prompts", "logs"),
+    )
+    group_path = paths.state_root
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory"
-    prompts = group_path / "shared" / "prompts"
-    prompts.mkdir(parents=True)
+    prompts = paths.shared_root / "prompts"
     (prompts / "routine.md").write_text("# Routine\n")
     (prompts / "product-routine.md").write_text("# Product routine\n")
     (prompts / "other-routine.md").write_text("# Other routine\n")
     (prompts / "_observation-system-steps.md").write_text("# System\n")
-    (group_path / "shared" / "logs").mkdir(parents=True)
     skill = library_root / "builder-blueprint" / ".agents" / "skills" / "daily-review"
     skill.mkdir(parents=True, exist_ok=True)
     (library_root / "builder-blueprint" / "AGENTS.md").write_text("# Builder\n", encoding="utf-8")
@@ -47,7 +51,7 @@ def _setup_group(tmp_path: Path) -> Path:
         "groups:\n"
         "  test:\n"
         "    name: Test\n"
-        f"    workspace_path: {group_path.as_posix()}\n"
+        f"    workspace_path: {paths.workspace_root.as_posix()}\n"
         f"    path: {group_path.as_posix()}\n"
         "    default_integration: script\n"
         "    agents:\n"
