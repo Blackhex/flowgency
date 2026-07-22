@@ -14,11 +14,13 @@ from agency.configuration import (
     AgentProfilePatch,
     AgentRuntimePatch,
     ConfigConflictError,
+    ResolvedGroupPaths,
     ToolPolicy,
     ValidationFailed,
     parse_config,
     patch_agent_profile,
     replace_agent_routines,
+    resolve_group_paths,
 )
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
@@ -192,8 +194,12 @@ def _list_markdown_items(directory: Path) -> list[dict[str, Any]]:
     return items
 
 
-def _recent_log_rows(group_id: str, group_path: Path, agent_id: str) -> list[dict[str, str]]:
-    logs_root = group_path / "shared" / "logs"
+def _recent_log_rows(
+    group_id: str,
+    paths: ResolvedGroupPaths,
+    agent_id: str,
+) -> list[dict[str, str]]:
+    logs_root = paths.logs
     rows: list[dict[str, str]] = []
     if not logs_root.exists():
         return rows
@@ -215,7 +221,12 @@ def _recent_log_rows(group_id: str, group_path: Path, agent_id: str) -> list[dic
     return rows
 
 
-def _activity_items(group_id: str, group_path: Path, agent_id: str, job_store: JobStore | None) -> dict[str, Any]:
+def _activity_items(
+    group_id: str,
+    paths: ResolvedGroupPaths,
+    agent_id: str,
+    job_store: JobStore | None,
+) -> dict[str, Any]:
     observations = [
         _ActivityItem(
             kind="Observation",
@@ -223,7 +234,7 @@ def _activity_items(group_id: str, group_path: Path, agent_id: str, job_store: J
             href=f"/{group_id}/observations/{item['_slug']}",
             meta=str(item.get("status", "open")),
         )
-        for item in _list_markdown_items(group_path / "shared" / "observations")
+        for item in _list_markdown_items(paths.observations)
         if item.get("agent") == agent_id
     ]
     proposals = [
@@ -233,7 +244,7 @@ def _activity_items(group_id: str, group_path: Path, agent_id: str, job_store: J
             href=f"/{group_id}/proposals/{item['_slug']}",
             meta=str(item.get("status", "proposed")),
         )
-        for item in _list_markdown_items(group_path / "shared" / "proposals")
+        for item in _list_markdown_items(paths.proposals)
         if item.get("origin_agent") == agent_id
     ]
     jobs = [
@@ -248,7 +259,7 @@ def _activity_items(group_id: str, group_path: Path, agent_id: str, job_store: J
         "observations": observations[:8],
         "proposals": proposals[:8],
         "jobs": jobs[:8],
-        "logs": _recent_log_rows(group_id, group_path, agent_id),
+        "logs": _recent_log_rows(group_id, paths, agent_id),
     }
 
 
@@ -620,7 +631,14 @@ def _detail_context(
     elif tab == "memory":
         context.update(_memory_context(snapshot, services, group_id, agent_id))
     elif tab == "activity":
-        context.update(_activity_items(group_id, group.path, agent_id, services.job_store))
+        context.update(
+            _activity_items(
+                group_id,
+                resolve_group_paths(group),
+                agent_id,
+                services.job_store,
+            )
+        )
     if overrides:
         context.update(overrides)
     return _templates(request).TemplateResponse(request, "agent_detail.html", context, status_code=status_code)

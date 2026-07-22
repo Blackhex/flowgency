@@ -83,3 +83,13 @@ def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_inp
         }
     ]
     assert runtime["job_paths"] == ()
+    root = Path("/groups/team").resolve(strict=False)
+    assert runtime["workspace_root"] == root
+    assert runtime["group_root"] == root
+    assert runtime["observations"] == root / "observations"
+    assert runtime["proposals"] == root / "proposals"
+    assert runtime["decisions"] == root / "decisions"
+    assert runtime["locks"] == root / "locks"
+    assert runtime["logs"] == root / "logs"
+    assert "path" not in runtime
+    assert "shared" not in runtime

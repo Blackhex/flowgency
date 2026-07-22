@@ -19,19 +19,20 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
     paths = create_group_environment(
         tmp_path,
         "test",
-        shared_dirs=("proposals", "decisions", "observations", "logs", "prompts"),
+        create_state=True,
     )
     group = paths.state_root
     (group / "engineer").mkdir(parents=True)
-    shared = paths.shared_root
+    for name in ("proposals", "decisions", "observations", "logs", "locks"):
+        (group / name).mkdir(parents=True, exist_ok=True)
 
     proposal_meta = {"origin_agent": "product", "status": "decided"}
-    (shared / "proposals" / "change.md").write_text(
+    (group / "proposals" / "change.md").write_text(
         "---\n" + yaml.safe_dump(proposal_meta, sort_keys=False) + "---\n\nProposal body\n",
         encoding="utf-8",
     )
 
-    decision_path = shared / "decisions" / "change.md"
+    decision_path = group / "decisions" / "change.md"
     decision_path.write_text(
         "---\n" + yaml.safe_dump(decision_meta, sort_keys=False) + "---\n\nDecision body\n",
         encoding="utf-8",
@@ -73,7 +74,7 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
-    return TestClient(app), decision_path, shared
+    return TestClient(app), decision_path, group
 
 
 def _meta(path):

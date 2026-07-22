@@ -10,18 +10,18 @@ from agency.app import build_agent_timeline, collect_logs, get_agent_logs
 
 
 def test_collect_logs_omits_empty_error_files(tmp_path):
-    logs_dir = tmp_path / "shared" / "logs" / "2026-07-12"
+    logs_dir = tmp_path / "logs" / "2026-07-12"
     logs_dir.mkdir(parents=True)
     (logs_dir / "agent-run.out").write_text("completed")
     (logs_dir / "agent-run.err").write_text("")
 
-    logs = collect_logs({"shared": tmp_path / "shared"})
+    logs = collect_logs({"logs": tmp_path / "logs"})
 
     assert [entry["name"] for entry in logs["2026-07-12"]] == ["agent-run.out"]
 
 
 def test_collect_logs_orders_by_mtime_and_prefers_out_for_ties(tmp_path):
-    logs_dir = tmp_path / "shared" / "logs" / "2026-07-12"
+    logs_dir = tmp_path / "logs" / "2026-07-12"
     logs_dir.mkdir(parents=True)
 
     older = logs_dir / "agent-z-older.out"
@@ -38,7 +38,7 @@ def test_collect_logs_orders_by_mtime_and_prefers_out_for_ties(tmp_path):
     os.utime(newer_out, (newer_mtime, newer_mtime))
     os.utime(newer_err, (newer_mtime, newer_mtime))
 
-    logs = collect_logs({"shared": tmp_path / "shared"})
+    logs = collect_logs({"logs": tmp_path / "logs"})
     entries = logs["2026-07-12"]
 
     assert [entry["name"] for entry in entries] == [
@@ -54,11 +54,11 @@ def test_collect_logs_orders_by_mtime_and_prefers_out_for_ties(tmp_path):
 
 
 def test_agent_log_views_omit_empty_error_files(tmp_path):
-    logs_dir = tmp_path / "shared" / "logs" / "2026-07-12"
+    logs_dir = tmp_path / "logs" / "2026-07-12"
     logs_dir.mkdir(parents=True)
     (logs_dir / "agent-run.out").write_text("completed")
     (logs_dir / "agent-run.err").write_text("")
-    group = {"shared": tmp_path / "shared"}
+    group = {"logs": tmp_path / "logs"}
 
     recent = get_agent_logs(group, "agent")
     timeline = build_agent_timeline(group, "agent", agent_observations=[])
@@ -68,14 +68,15 @@ def test_agent_log_views_omit_empty_error_files(tmp_path):
 
 
 def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
-    group_path = tmp_path / "test"
-    logs_dir = group_path / "shared" / "logs" / "2026-07-12"
+    workspace_path = tmp_path / "workspace" / "test"
+    group_root = tmp_path / "groups" / "test"
+    workspace_path.mkdir(parents=True)
+    logs_dir = group_root / "logs" / "2026-07-12"
     logs_dir.mkdir(parents=True)
-    (group_path / "shared" / "observations").mkdir(parents=True)
-    (group_path / "shared" / "proposals").mkdir(parents=True)
-    (group_path / "shared" / "decisions").mkdir(parents=True)
-    (group_path / "shared" / "prompts").mkdir(parents=True)
-    (group_path / "shared" / "memory.md").write_text("# Shared Memory\n", encoding="utf-8")
+    (group_root / "observations").mkdir(parents=True)
+    (group_root / "proposals").mkdir(parents=True)
+    (group_root / "decisions").mkdir(parents=True)
+    (group_root / "locks").mkdir(parents=True)
 
     log_file = logs_dir / "agent-run.out"
     log_file.write_text("completed", encoding="utf-8")
@@ -99,8 +100,8 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
                 "groups": {
                     "test": {
                         "name": "Test Group",
-                        "workspace_path": str(group_path.resolve()),
-                        "path": str(group_path.resolve()),
+                        "workspace_path": str(workspace_path.resolve()),
+                        "path": str(group_root.resolve()),
                         "default_integration": "script",
                         "agents": [
                             {
@@ -126,3 +127,59 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     time_pos = response.text.index("20:06")
     badge_pos = response.text.index(">OUT<", time_pos)
     assert time_pos < badge_pos
+
+
+def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatch):
+    workspace_path = tmp_path / "workspace" / "test"
+    group_root = tmp_path / "groups" / "test"
+    workspace_path.mkdir(parents=True)
+    (group_root / "logs" / "2026-07-12").mkdir(parents=True)
+    for name in ("observations", "proposals", "decisions", "locks"):
+        (group_root / name).mkdir(parents=True)
+    log_file = group_root / "logs" / "2026-07-12" / "agent-run.out"
+    log_file.write_text("completed", encoding="utf-8")
+    workspace_file = workspace_path / "notes.out"
+    workspace_file.write_text("workspace data", encoding="utf-8")
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 3,
+                "agency": {
+                    "title": "Agency",
+                    "default_group": "test",
+                    "ai_backend": "claude-code",
+                    "agent_library": str((tmp_path / "agent-library").resolve()),
+                    "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
+                    "memory_store": str((tmp_path / "memory").resolve()),
+                },
+                "groups": {
+                    "test": {
+                        "name": "Test Group",
+                        "workspace_path": str(workspace_path.resolve()),
+                        "path": str(group_root.resolve()),
+                        "default_integration": "script",
+                        "agents": [
+                            {
+                                "name": "agent",
+                                "blueprint": "agent-blueprint",
+                                "integration": "script",
+                            }
+                        ],
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.refresh_services()
+
+    client = TestClient(app_mod.app)
+    allowed = client.get(f"/test/logs/view?path={log_file}")
+    denied = client.get(f"/test/logs/view?path={workspace_file}")
+
+    assert allowed.status_code == 200
+    assert denied.status_code == 403

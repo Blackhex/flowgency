@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from agency.configuration import resolve_group_paths
 from agency.configuration.store import ConfigStore
 from agency.jobs import JobRequest, JobSubmissionError, JobValidationError, submit_job_request
 from agency.jobs.prompts import build_routine_task_input
@@ -70,10 +71,10 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
             continue
 
         log.info("Processing group: %s", group_key)
-        group_path = group.path
+        paths = resolve_group_paths(group)
         daily_limit = group.dispatch.daily_limit
 
-        logs_root = group_path / "shared" / "logs"
+        logs_root = paths.logs
         today = datetime.now().strftime("%Y-%m-%d")
         log_dir = logs_root / today
         log_dir.mkdir(parents=True, exist_ok=True)

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Any
 
-from agency.configuration import ConfigSnapshot
+from agency.configuration import ConfigSnapshot, resolve_group_paths
 from agency.jobs.authority import JobStore
 
 
@@ -45,6 +44,7 @@ def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
 
 def runtime_group(snapshot: ConfigSnapshot, group_id: str) -> dict[str, Any]:
     group = snapshot.config.groups[group_id]
+    paths = resolve_group_paths(group)
     job_store = JobStore(snapshot.config.agency.memory_store)
     agents_full = [
         instance.model_dump(mode="json") for instance in group.agents.values()
@@ -52,8 +52,13 @@ def runtime_group(snapshot: ConfigSnapshot, group_id: str) -> dict[str, Any]:
     return {
         "key": group_id,
         "name": group.name,
-        "path": Path(group.path),
-        "shared": Path(group.path) / "shared",
+        "workspace_root": paths.workspace_root,
+        "group_root": paths.group_root,
+        "observations": paths.observations,
+        "proposals": paths.proposals,
+        "decisions": paths.decisions,
+        "locks": paths.locks,
+        "logs": paths.logs,
         "job_paths": job_store.paths(group_id),
         "agents": list(group.agents.keys()),
         "agents_full": agents_full,

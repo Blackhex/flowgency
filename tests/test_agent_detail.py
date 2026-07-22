@@ -41,12 +41,11 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     group_root = tmp_path / "groups" / "newsletter"
     (tmp_path / "Research" / "shared").mkdir(parents=True, exist_ok=True)
     (tmp_path / "Research" / "editorial").mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "jobs").mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "logs").mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "observations").mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "proposals").mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "decisions").mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "memory.md").write_text("# Shared\n", encoding="utf-8")
+    (group_root / "logs").mkdir(parents=True, exist_ok=True)
+    (group_root / "observations").mkdir(parents=True, exist_ok=True)
+    (group_root / "proposals").mkdir(parents=True, exist_ok=True)
+    (group_root / "decisions").mkdir(parents=True, exist_ok=True)
+    (group_root / "locks").mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
 
     raw["agency"]["agent_library"] = str(library_root)
@@ -126,17 +125,16 @@ def _seed_activity_app(monkeypatch, tmp_path, raw_config):
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
-    group_root.joinpath("shared", "jobs").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("shared", "logs", "2026-07-16").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("shared", "observations").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("shared", "proposals").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("shared", "decisions").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("shared", "memory.md").write_text("# Shared\n", encoding="utf-8")
-    group_root.joinpath("shared", "observations", "status.md").write_text(
+    group_root.joinpath("logs", "2026-07-16").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("observations").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("proposals").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("decisions").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("locks").mkdir(parents=True, exist_ok=True)
+    group_root.joinpath("observations", "status.md").write_text(
         "---\nagent: advisor\nstatus: open\n---\n\nObservation.\n",
         encoding="utf-8",
     )
-    log_file = group_root.joinpath("shared", "logs", "2026-07-16", "advisor-run.out")
+    log_file = group_root.joinpath("logs", "2026-07-16", "advisor-run.out")
     log_file.write_text("# log\n", encoding="utf-8")
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)

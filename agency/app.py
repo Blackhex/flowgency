@@ -28,6 +28,7 @@ from agency.configuration import (
     dismiss_tip,
     hide_all_tips,
     patch_agency_settings,
+    resolve_group_paths,
 )
 from agency.integrations import get_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
@@ -587,8 +588,8 @@ def extract_display_title(body: str | None, slug: str) -> str:
 
 
 def list_markdown_items(g: dict, subdir: str, apply_ttl: bool = False) -> list[dict]:
-    """List markdown files from a shared subdirectory with parsed frontmatter."""
-    item_dir = g["shared"] / subdir
+    """List markdown files from a mapped group directory with parsed frontmatter."""
+    item_dir = Path(g[subdir])
     if not item_dir.exists():
         return []
     items = []
@@ -712,7 +713,7 @@ def _is_empty_error_log(path: Path, size: int | None = None) -> bool:
 
 def collect_logs(g: dict) -> dict[str, list[dict]]:
     """Collect log files grouped by date."""
-    logs_dir = g["shared"] / "logs"
+    logs_dir = Path(g["logs"])
     if not logs_dir.exists():
         return {}
     result = {}
@@ -814,7 +815,7 @@ def execution_agent_options(g: dict) -> list[str]:
 
 def get_agent_last_run(g: dict, agent_name: str) -> dict | None:
     """Return the newest stdout log path and timestamp for an agent."""
-    logs_dir = g["shared"] / "logs"
+    logs_dir = Path(g["logs"])
     if not logs_dir.exists():
         return None
 
@@ -842,7 +843,7 @@ def get_agent_last_run(g: dict, agent_name: str) -> dict | None:
 
 def get_agent_last_seen(g: dict, agent_name: str) -> datetime | None:
     """Scan log date directories newest-first, return mtime of first matching file."""
-    logs_dir = g["shared"] / "logs"
+    logs_dir = Path(g["logs"])
     if not logs_dir.exists():
         return None
     for date_dir in sorted(logs_dir.iterdir(), reverse=True):
@@ -876,7 +877,7 @@ def compute_next_run_detail(
         return None
 
     now = clock_now()
-    logs_root = g["shared"] / "logs"
+    logs_root = Path(g["logs"])
     candidates: list[dict] = []
 
     for rule_index, rule in enumerate(rules):
@@ -1153,7 +1154,7 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
 
 def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:
     """Get recent log files for an agent, newest first."""
-    logs_dir = g["shared"] / "logs"
+    logs_dir = Path(g["logs"])
     if not logs_dir.exists():
         return []
     results = []
@@ -1177,7 +1178,7 @@ def build_agent_timeline(g: dict, agent_name: str, agent_observations: list[dict
     events = []
 
     # Add logs
-    logs_dir = g["shared"] / "logs"
+    logs_dir = Path(g["logs"])
     if logs_dir.exists():
         for date_dir in sorted(logs_dir.iterdir(), reverse=True):
             if not date_dir.is_dir():
@@ -1300,9 +1301,7 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
     agency = agency_settings(snapshot)
     orgs = []
     for key, group in snapshot.config.groups.items():
-        org_path = Path(group.path)
-        shared_exists = (org_path / "shared").exists()
-        path_exists = org_path.exists()
+        paths = resolve_group_paths(group)
         dispatch_cfg = group.dispatch
         orgs.append({
             "key": key,
@@ -1310,8 +1309,8 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
             "path": str(group.path),
             "agents": list(group.agents.keys()),
             "agent_count": len(group.agents),
-            "initialized": shared_exists,
-            "path_exists": path_exists,
+            "initialized": all(path.is_dir() for path in paths.record_directories),
+            "path_exists": paths.group_root.exists(),
             "dispatch_enabled": dispatch_cfg.enabled,
         })
     return {
@@ -1731,7 +1730,7 @@ async def observations_list(request: Request, group: str, agent: str = "", statu
 async def observation_detail(request: Request, group: str, slug: str):
     """View a single observation."""
     g = get_group(group)
-    path = g["shared"] / "observations" / f"{slug}.md"
+    path = Path(g["observations"]) / f"{slug}.md"
     if not path.exists():
         raise HTTPException(404, "Observation not found")
     raw = path.read_text()
@@ -1742,10 +1741,10 @@ async def observation_detail(request: Request, group: str, slug: str):
     linked_proposal_slug = meta.get("linked_proposal", "")
     if linked_proposal_slug:
         proposal_slug = linked_proposal_slug.replace(".md", "")
-        proposal_path = g["shared"] / "proposals" / f"{proposal_slug}.md"
+        proposal_path = Path(g["proposals"]) / f"{proposal_slug}.md"
         pipeline = {"proposal_slug": proposal_slug, "proposal_exists": proposal_path.exists()}
         # Check for a decision on that proposal
-        decision_path = g["shared"] / "decisions" / f"{proposal_slug}.md"
+        decision_path = Path(g["decisions"]) / f"{proposal_slug}.md"
         if decision_path.exists():
             dmeta, _ = parse_frontmatter(decision_path.read_text())
             pipeline["decision_slug"] = proposal_slug
@@ -1770,7 +1769,7 @@ async def observation_detail(request: Request, group: str, slug: str):
 async def observation_update_status(request: Request, group: str, slug: str):
     """Update an observation's status via form submission."""
     g = get_group(group)
-    path = g["shared"] / "observations" / f"{slug}.md"
+    path = Path(g["observations"]) / f"{slug}.md"
     if not path.exists():
         raise HTTPException(404, "Observation not found")
 
@@ -1810,9 +1809,9 @@ def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
                             decision_error: str = "", status_code: int = 200):
     """Build the proposal_detail template response. Shared by the GET route and
     the POST /decide route so validation errors can re-render the same page."""
-    proposals_dir = g["shared"] / "proposals"
-    observations_dir = g["shared"] / "observations"
-    decisions_dir = g["shared"] / "decisions"
+    proposals_dir = Path(g["proposals"])
+    observations_dir = Path(g["observations"])
+    decisions_dir = Path(g["decisions"])
 
     path = proposals_dir / f"{slug}.md"
     if not path.exists():
@@ -1883,8 +1882,8 @@ async def proposal_decide(request: Request, group: str, slug: str):
     """Create a decision by answering a proposal's questions and submitting a
     durable job for the selected execution agent."""
     g = get_group(group)
-    decisions_dir = g["shared"] / "decisions"
-    proposals_dir = g["shared"] / "proposals"
+    decisions_dir = Path(g["decisions"])
+    proposals_dir = Path(g["proposals"])
 
     # Read proposal to get questions
     cpath = proposals_dir / f"{slug}.md"
@@ -2034,7 +2033,7 @@ def render_decision_detail(request: Request, g: dict, group: str, slug: str,
     """Build the decision_detail template response. Shared by the GET route and
     the POST /retry route so validation/submission errors can re-render the
     same page instead of returning a bare JSON error."""
-    path = g["shared"] / "decisions" / f"{slug}.md"
+    path = Path(g["decisions"]) / f"{slug}.md"
     if not path.exists():
         raise HTTPException(404, "Decision not found")
     raw = path.read_text()
@@ -2045,12 +2044,12 @@ def render_decision_detail(request: Request, g: dict, group: str, slug: str,
     proposal_slug = (meta.get("proposal", "") or "").replace(".md", "")
     pmeta = {}
     if proposal_slug:
-        proposal_path = g["shared"] / "proposals" / f"{proposal_slug}.md"
+        proposal_path = Path(g["proposals"]) / f"{proposal_slug}.md"
         if proposal_path.exists():
             pmeta, _ = parse_frontmatter(proposal_path.read_text())
             for obs_file in pmeta.get("observations", []):
                 obs_slug = obs_file.replace(".md", "")
-                obs_path = g["shared"] / "observations" / obs_file
+                obs_path = Path(g["observations"]) / obs_file
                 if obs_path.exists():
                     pipeline_observations.append({"slug": obs_slug, "filename": obs_file})
 
@@ -2104,7 +2103,7 @@ def render_decision_detail(request: Request, g: dict, group: str, slug: str,
 async def decision_retry(request: Request, group: str, slug: str):
     """Retry execution of a failed decision by submitting a new durable job."""
     g = get_group(group)
-    decision_path = g["shared"] / "decisions" / f"{slug}.md"
+    decision_path = Path(g["decisions"]) / f"{slug}.md"
     if not decision_path.exists():
         raise HTTPException(404, "Decision not found")
 
@@ -2121,7 +2120,7 @@ async def decision_retry(request: Request, group: str, slug: str):
         )
 
     proposal_slug = (meta.get("proposal", "") or "").replace(".md", "")
-    proposal_path = g["shared"] / "proposals" / f"{proposal_slug}.md"
+    proposal_path = Path(g["proposals"]) / f"{proposal_slug}.md"
     if not proposal_slug or not proposal_path.exists():
         raise HTTPException(400, "Decision has no linked proposal")
     pmeta, proposal_body = parse_frontmatter(proposal_path.read_text())
@@ -2194,7 +2193,7 @@ async def decision_verify(request: Request, group: str, slug: str):
     (floated, linked back to the decision) so the loop stays connected.
     """
     g = get_group(group)
-    decision_path = g["shared"] / "decisions" / f"{slug}.md"
+    decision_path = Path(g["decisions"]) / f"{slug}.md"
     if not decision_path.exists():
         raise HTTPException(404, "Decision not found")
 
@@ -2237,7 +2236,7 @@ async def decision_verify(request: Request, group: str, slug: str):
 def _create_follow_up_observation(g: dict, decision_slug: str, meta: dict, body: str) -> str:
     """Create a floated follow-up observation linked back to a decision whose
     outcome did not satisfy its proposal. Returns the new observation slug."""
-    observations_dir = g["shared"] / "observations"
+    observations_dir = Path(g["observations"])
     observations_dir.mkdir(parents=True, exist_ok=True)
 
     stamp = clock_now().strftime("%Y%m%d-%H%M%S")
@@ -2291,7 +2290,7 @@ async def log_view(request: Request, group: str, path: str):
     """View a log file."""
     g = get_group(group)
     fpath = Path(path)
-    logs_dir = g["shared"] / "logs"
+    logs_dir = Path(g["logs"]).resolve()
     validate_file_access(fpath, logs_dir)
     if not fpath.exists():
         raise HTTPException(404, "Log not found")

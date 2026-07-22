@@ -30,7 +30,7 @@ def _authority(spec: JobSpec):
 
 def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tuple[Path, Path, JobSpec]:
     group_path = tmp_path / "agents"
-    decision_path = group_path / "shared" / "decisions" / decision_name
+    decision_path = group_path / "decisions" / decision_name
     decision_path.parent.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text("groups: {}\n", encoding="utf-8")

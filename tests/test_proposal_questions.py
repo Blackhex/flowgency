@@ -132,16 +132,15 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
     group = tmp_path / "group"
     for agent in ("product", "engineer", "sdk-agent"):
         (group / agent).mkdir(parents=True)
-    shared = group / "shared"
-    for name in ("proposals", "decisions", "observations", "logs", "prompts"):
-        (shared / name).mkdir(parents=True)
+    for name in ("proposals", "decisions", "observations", "logs", "locks"):
+        (group / name).mkdir(parents=True)
     metadata = {
         "origin_agent": "product", "status": "proposed",
         "questions": [{"id": "approve", "type": "boolean", "prompt": "Proceed?"}],
     }
     if explicit_executor:
         metadata["execution_agent"] = "engineer"
-    proposal_path = shared / "proposals" / "change.md"
+    proposal_path = group / "proposals" / "change.md"
     proposal_path.write_text(
         "---\n" + yaml.safe_dump(metadata, sort_keys=False) + "---\n\nProposal body\n"
     )
@@ -188,7 +187,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     (tmp_path / "agent-library").mkdir()
     app_mod.refresh_services()
-    return TestClient(app), proposal_path, shared / "decisions" / "change.md"
+    return TestClient(app), proposal_path, group / "decisions" / "change.md"
 
 
 def test_executor_options_exclude_agents_without_explicit_write_capability(tmp_path, monkeypatch):

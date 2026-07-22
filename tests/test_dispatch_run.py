@@ -56,19 +56,22 @@ def test_check_every_rule_minutes(tmp_path):
 
 
 def _make_group(tmp_path):
-    """Create a current group and config path; return (group_path, config_path, log_dir)."""
-    group_path = tmp_path / "grp"
-    agent_dir = group_path / "product"
+    """Create separate workspace and group roots for dispatch tests."""
+    workspace_path = tmp_path / "workspaces" / "grp"
+    group_root = tmp_path / "groups" / "grp"
+    agent_dir = group_root / "product"
     agent_dir.mkdir(parents=True)
     (agent_dir / "AGENTS.md").write_text("# Product\n", encoding="utf-8")
-    log_dir = group_path / "shared" / "logs" / "2026-07-03"
+    workspace_path.mkdir(parents=True)
+    log_dir = group_root / "logs" / "2026-07-03"
     log_dir.mkdir(parents=True)
-    return group_path, tmp_path / "config.yaml", log_dir
+    return workspace_path, group_root, tmp_path / "config.yaml", log_dir
 
 
 def _write_config(
     config_path: Path,
-    group_path: Path,
+    workspace_path: Path,
+    group_root: Path,
     *,
     routines: list[dict],
     enabled: bool = True,
@@ -123,8 +126,8 @@ def _write_config(
         "groups:\n"
         "  test:\n"
         "    name: Test\n"
-        f"    workspace_path: {group_path.as_posix()}\n"
-        f"    path: {group_path.as_posix()}\n"
+        f"    workspace_path: {workspace_path.as_posix()}\n"
+        f"    path: {group_root.as_posix()}\n"
         "    default_integration: copilot\n"
         "    dispatch:\n"
         f"      enabled: {str(enabled).lower()}\n"
@@ -154,10 +157,11 @@ def _request_summary(request):
 
 
 def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monkeypatch):
-    group_path, config_path, _ = _make_group(tmp_path)
+    workspace_path, group_root, config_path, _ = _make_group(tmp_path)
     _write_config(
         config_path,
-        group_path,
+        workspace_path,
+        group_root,
         routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}],
     )
     captured = []
@@ -178,14 +182,17 @@ def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monk
         "memory_override": None,
         "timeout_override": None,
     }
-    assert (group_path / "shared" / "logs" / ".last-product-daily-review").exists()
+    assert (group_root / "logs").is_dir()
+    assert (group_root / "logs" / ".last-product-daily-review").exists()
+    assert not (workspace_path / "shared").exists()
 
 
 def test_due_schedule_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
-    group_path, config_path, _ = _make_group(tmp_path)
+    workspace_path, group_root, config_path, _ = _make_group(tmp_path)
     _write_config(
         config_path,
-        group_path,
+        workspace_path,
+        group_root,
         routines=[
             {
                 "id": "daily-review",
@@ -208,10 +215,11 @@ def test_due_schedule_renders_routine_arguments_in_task_input(tmp_path, monkeypa
 
 
 def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypatch):
-    group_path, config_path, _ = _make_group(tmp_path)
+    workspace_path, group_root, config_path, _ = _make_group(tmp_path)
     _write_config(
         config_path,
-        group_path,
+        workspace_path,
+        group_root,
         routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}],
     )
 
@@ -224,14 +232,15 @@ def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypa
 
     run_dispatch_cycle({}, config_path)
 
-    assert not (group_path / "shared" / "logs" / ".last-product-daily-review").exists()
+    assert not (group_root / "logs" / ".last-product-daily-review").exists()
 
 
 def test_schedule_skips_condition_rules(tmp_path, monkeypatch):
-    group_path, config_path, _ = _make_group(tmp_path)
+    workspace_path, group_root, config_path, _ = _make_group(tmp_path)
     _write_config(
         config_path,
-        group_path,
+        workspace_path,
+        group_root,
         routines=[
             {
                 "id": "daily-review",
@@ -251,7 +260,7 @@ def test_schedule_skips_condition_rules(tmp_path, monkeypatch):
     run_dispatch_cycle({}, config_path)
 
     assert submit_calls == []
-    assert not (group_path / "shared" / "logs" / ".last-product-daily-review").exists()
+    assert not (group_root / "logs" / ".last-product-daily-review").exists()
 
 
 def test_check_every_rule_days(tmp_path):
@@ -263,10 +272,10 @@ def test_check_every_rule_days(tmp_path):
 
 
 def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, monkeypatch):
-    first_path, first_config, _ = _make_group(tmp_path / "first")
-    second_path, second_config, _ = _make_group(tmp_path / "second")
-    _write_config(first_config, first_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
-    _write_config(second_config, second_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    first_workspace, first_group, first_config, _ = _make_group(tmp_path / "first")
+    second_workspace, second_group, second_config, _ = _make_group(tmp_path / "second")
+    _write_config(first_config, first_workspace, first_group, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    _write_config(second_config, second_workspace, second_group, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
     submitted = []
     monkeypatch.setattr(
         "agency.dispatch.run.submit_job_request",
@@ -282,7 +291,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
 
     Uses fixed datetime to prevent rare midnight-crossing flakes.
     """
-    group_path, config_path, log_dir = _make_group(tmp_path)
+    workspace_path, group_root, config_path, log_dir = _make_group(tmp_path)
 
     # Fixed time: 2026-07-03 09:15:00 (within window of 09:00 at rule)
     fixed_dt = datetime(2026, 7, 3, 9, 15, 0)
@@ -305,7 +314,8 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
 
     _write_config(
         config_path,
-        group_path,
+        workspace_path,
+        group_root,
         routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"at": "09:00"}}],
     )
     submitted = []
@@ -323,10 +333,10 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
 
 
 def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
-    enabled_path, enabled_config, _ = _make_group(tmp_path / "enabled")
-    disabled_path, disabled_config, _ = _make_group(tmp_path / "disabled")
-    _write_config(enabled_config, enabled_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
-    _write_config(disabled_config, disabled_path, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}], enabled=False)
+    enabled_workspace, enabled_group, enabled_config, _ = _make_group(tmp_path / "enabled")
+    disabled_workspace, disabled_group, disabled_config, _ = _make_group(tmp_path / "disabled")
+    _write_config(enabled_config, enabled_workspace, enabled_group, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    _write_config(disabled_config, disabled_workspace, disabled_group, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}], enabled=False)
     submitted = []
     monkeypatch.setattr(
         "agency.dispatch.run.submit_job_request",
@@ -338,10 +348,11 @@ def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
 
 
 def test_disabled_routine_is_never_submitted_or_marked(tmp_path, monkeypatch):
-    group_path, config_path, _ = _make_group(tmp_path)
+    workspace_path, group_root, config_path, _ = _make_group(tmp_path)
     _write_config(
         config_path,
-        group_path,
+        workspace_path,
+        group_root,
         routines=[
             {
                 "id": "daily-review",
@@ -360,4 +371,4 @@ def test_disabled_routine_is_never_submitted_or_marked(tmp_path, monkeypatch):
     run_dispatch_cycle({}, config_path)
 
     assert submitted == []
-    assert not (group_path / "shared" / "logs" / ".last-product-daily-review").exists()
+    assert not (group_root / "logs" / ".last-product-daily-review").exists()

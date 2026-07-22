@@ -21,9 +21,9 @@ from agency.jobs.store import job_path, write_job
 
 
 def _group(tmp_path):
-    shared = tmp_path / "shared"
-    (shared / "logs").mkdir(parents=True)
-    return {"key": "grp", "path": tmp_path, "shared": shared}
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True)
+    return {"key": "grp", "logs": logs}
 
 
 def _write_job(tmp_path, status):
@@ -99,14 +99,14 @@ def test_no_active_job_reports_agent_not_running(tmp_path):
 
 
 def _group_with_logs(tmp_path):
-    shared = tmp_path / "shared"
-    (shared / "logs").mkdir(parents=True)
-    return {"key": "grp", "path": tmp_path, "shared": shared}
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True)
+    return {"key": "grp", "logs": logs}
 
 
 def test_agent_last_run_uses_newest_stdout_mtime(tmp_path):
     g = _group_with_logs(tmp_path)
-    day = g["shared"] / "logs" / "2026-07-11"
+    day = g["logs"] / "2026-07-11"
     day.mkdir()
     older = day / "product-z-manual_prompt.out"
     newer = day / "product-a-manual_prompt.out"
@@ -130,7 +130,7 @@ def test_agent_last_run_uses_newest_stdout_mtime(tmp_path):
 
 def test_agent_last_run_ignores_stderr_and_other_agents(tmp_path):
     g = _group_with_logs(tmp_path)
-    day = g["shared"] / "logs" / "2026-07-11"
+    day = g["logs"] / "2026-07-11"
     day.mkdir()
     (day / "product-failed.err").write_text("failed")
     (day / "editor-manual_prompt.out").write_text("other agent")
@@ -140,7 +140,7 @@ def test_agent_last_run_ignores_stderr_and_other_agents(tmp_path):
 
 def test_agent_last_run_stats_each_candidate_once(tmp_path, monkeypatch):
     g = _group_with_logs(tmp_path)
-    day = g["shared"] / "logs" / "2026-07-11"
+    day = g["logs"] / "2026-07-11"
     day.mkdir()
     candidates = {
         day / "product-older.out",
@@ -212,7 +212,7 @@ def test_next_run_every_no_marker_due_now(tmp_path):
 
 def test_next_run_every_with_marker(tmp_path):
     g = _group_with_logs(tmp_path)
-    marker = g["shared"] / "logs" / ".last-product-r"
+    marker = g["logs"] / ".last-product-r"
     marker.touch()
     two_hours_ago = time.time() - 2 * 3600
     os.utime(marker, (two_hours_ago, two_hours_ago))
@@ -318,24 +318,26 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
     agent_dir = group_path / "product"
     agent_dir.mkdir(parents=True)
     (agent_dir / "CLAUDE.md").write_text("# Product\n")
-    shared = group_path / "shared"
-    for sub in ("observations", "proposals", "decisions", "prompts", "logs"):
-        (shared / sub).mkdir(parents=True)
+    for sub in ("observations", "proposals", "decisions", "locks", "logs"):
+        (group_path / sub).mkdir(parents=True)
 
-    stdout_dir = shared / "logs" / "2026-07-11"
+    stdout_dir = group_path / "logs" / "2026-07-11"
     stdout_dir.mkdir()
     stdout_path = stdout_dir / "product-manual_prompt-job-1.out"
     stdout_path.write_text("")
 
     g = {
-        "key": "grp", "name": "Grp", "path": group_path,
+        "key": "grp", "name": "Grp",
         "agents": ["product"],
         "agents_full": [{
             "name": "product",
             "integration": "claude-code",
             "routines": [{"id": "r", "skill": "r", "schedule": {"every": "6h"}}],
         }],
-        "shared": shared,
+        "observations": group_path / "observations",
+        "proposals": group_path / "proposals",
+        "decisions": group_path / "decisions",
+        "logs": group_path / "logs",
         "job_paths": tuple(JobStore(memory_root).paths("grp")),
         "dispatch": {"enabled": True, "routines": {"product": [{"id": "r", "every": "6h"}]}},
     }
@@ -352,4 +354,3 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
     assert product["next_run"] == product["next_run_detail"]["when"]
     assert product["next_run_detail"]["routine_id"] == "r"
     assert product["next_run_detail"]["rule_index"] == 0
-

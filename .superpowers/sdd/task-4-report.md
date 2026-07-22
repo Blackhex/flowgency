@@ -39,4 +39,4 @@ Tests updated for strict schema-3/root contracts across job, execution, integrat
 
 ## Concerns
 
-None blocking. The strict cutover intentionally rejects legacy job payload keys and legacy script placeholders.
+None blocking. The strict cutover intentionally rejects retired job payload keys and obsolete script placeholders.

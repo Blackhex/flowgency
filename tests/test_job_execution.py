@@ -564,7 +564,7 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
     result = execute_job(_authority(spec))
 
     assert result.stderr_path is None
-    assert not list((tmp_path / "group" / "shared" / "logs").rglob("*.err"))
+    assert not list((tmp_path / "group" / "logs").rglob("*.err"))
 
 
 def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):

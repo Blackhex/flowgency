@@ -90,11 +90,11 @@ def test_decision_detail_shows_agent_log_and_changes(tmp_path, monkeypatch):
     paths = create_group_environment(
         tmp_path,
         "test",
-        shared_dirs=("decisions", "logs\\2026-07-10"),
+        create_state=True,
     )
     group_path = paths.state_root
-    decisions_path = paths.shared_root / "decisions"
-    logs_path = paths.shared_root / "logs" / "2026-07-10"
+    decisions_path = group_path / "decisions"
+    logs_path = group_path / "logs" / "2026-07-10"
     decisions_path.mkdir(parents=True, exist_ok=True)
     logs_path.mkdir(parents=True, exist_ok=True)
 
@@ -202,15 +202,13 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     paths = create_group_environment(tmp_path, "newsletter")
     group_root = paths.state_root
     for rel in [
-        ("shared", "jobs"),
-        ("shared", "logs", "2026-07-16"),
-        ("shared", "observations"),
-        ("shared", "proposals"),
-        ("shared", "decisions"),
-        ("shared", "prompts"),
+        ("logs", "2026-07-16"),
+        ("observations",),
+        ("proposals",),
+        ("decisions",),
+        ("locks",),
     ]:
         (group_root.joinpath(*rel)).mkdir(parents=True, exist_ok=True)
-    (group_root / "shared" / "memory.md").write_text("# Shared\n", encoding="utf-8")
     _write_blueprint(library_root, "advisor", "Advisor")
 
     raw["agency"]["agent_library"] = str(library_root)
@@ -439,7 +437,7 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
         elif spec.job_id == "job-running":
             transition_job(path, "queued", "running")
 
-    writer_log = group_root / "shared" / "logs" / "2026-07-16" / "writer-run.out"
+    writer_log = group_root / "logs" / "2026-07-16" / "writer-run.out"
     writer_log.write_text("recent activity\n", encoding="utf-8")
     if fallback_mode == "absent":
         monkeypatch.delattr(app_mod.app.state, "services", raising=False)
@@ -480,9 +478,8 @@ def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw
     client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     other_paths = create_group_environment(tmp_path, "research")
     other_group = other_paths.state_root
-    for rel in [("shared", "jobs"), ("shared", "logs"), ("shared", "observations"), ("shared", "proposals"), ("shared", "decisions")]:
+    for rel in [("logs",), ("observations",), ("proposals",), ("decisions",), ("locks",)]:
         other_group.joinpath(*rel).mkdir(parents=True, exist_ok=True)
-    other_group.joinpath("shared", "memory.md").write_text("# Shared\n", encoding="utf-8")
 
     raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
     raw["groups"]["research"] = apply_group_paths({
