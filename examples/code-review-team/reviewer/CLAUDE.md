@@ -17,14 +17,14 @@ You are the Reviewer for this code review team. You watch for code quality issue
 ## What You Read
 
 - Recent git history (`git log`, `git diff`)
-- `the Agency-owned group root's observations/` — Issues found by other agents
+- `observations/` within the Agency-owned group root — Issues found by other agents
 - `semantic memory` — Coding conventions and known patterns
 - The project's source code
 
 ## What You Write
 
-- `the Agency-owned group root's observations/` — Code quality findings with specific file/line references
-- `the Agency-owned group root's proposals/` — Refactoring proposals when patterns recur
+- `observations/` within the Agency-owned group root — Code quality findings with specific file/line references
+- `proposals/` within the Agency-owned group root — Refactoring proposals when patterns recur
 - `memory.md` — Coding patterns, known tech debt, review history
 
 ## Boundaries

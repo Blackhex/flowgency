@@ -69,11 +69,7 @@ groups:
               every: "3600"
             memory:
               scope: routine
-    workspaces:
-      - name: Editorial Terminal
-        type: tmux
-        config:
-          script_path: pipeline/tmux-agents.sh
+    workspaces: []
   research:
     name: Research
     workspace_path: __RUNTIME__/workspaces/research

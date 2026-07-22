@@ -7,7 +7,7 @@ Implemented and self-reviewed.
 ## RED/GREEN evidence
 
 - RED: `.venv\Scripts\python -m pytest tests\test_agency_setup_skill.py tests\test_repository_boundaries.py tests\test_server.py -q`
-  - `43 passed, 1 failed`; the failure was the pre-existing tracked `task-7-report.md` `legacy` reference.
+  - `43 passed, 1 failed`; the failure was a pre-existing tracked wording reference in `task-7-report.md`.
 - GREEN: `.venv\Scripts\python -m pytest tests\test_agency_setup_skill.py tests\test_repository_boundaries.py tests\test_server.py tests\test_cli_contract.py tests\test_setup_flow.py -q`
   - `99 passed`.
 - Final full suite: `.venv\Scripts\python -m pytest tests\ -q`
@@ -48,3 +48,21 @@ Implemented and self-reviewed.
 ## Commit
 
 - Final Task 8 commit: `docs(storage): adopt external group roots` (hash reported in completion status).
+
+## Review remediation evidence
+
+- Focused: `.venv\Scripts\python -m pytest tests\test_repository_boundaries.py tests\test_server.py tests\test_admin_dispatch.py -q`
+  - `40 passed in 5.83s`.
+- Full suite: `.venv\Scripts\python -m pytest tests\ -q`
+  - `1220 passed, 3 skipped in 126.11s`.
+- Requested repository-wide blocked-token grep:
+  - No active matches; exit code `1`.
+- Fixture validation: `.venv\Scripts\python -c "from pathlib import Path; from agency.configuration import ConfigStore; ConfigStore(Path('tests/ui/fixtures/config.yaml')).load(); print('valid')"`
+  - `valid`.
+- Stale-reference search:
+  - `rg -n 'schema_version:\s*2|group\.path.*/.*shared|\["shared"\]|shared/(observations|proposals|decisions|jobs|logs)|workspace_dir|group_path=' agency tests CLAUDE.md README.md kb skills examples`
+  - No matches.
+- `git diff --check`
+  - Passed.
+- `git status --short`
+  - Only the intended review-remediation files are staged; generated fixture locks are excluded.

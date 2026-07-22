@@ -40,17 +40,11 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     paths = create_group_environment(
         tmp_path,
         "test",
-        workspace_entries=("prompts",),
-        group_dirs=("prompts",),
     )
     group_path = paths.state_root
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    (group_path / "prompts" / "routine.md").write_text(
-        "# Routine\n",
-        encoding="utf-8",
-    )
     _write_blueprint(library_root, "advisor", "Advisor")
     config_path = tmp_path / "config.yaml"
     config = {
