@@ -2,6 +2,7 @@ from copy import deepcopy
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pytest
 import yaml
 from fastapi.testclient import TestClient
 
@@ -558,3 +559,109 @@ def test_admin_org_save_invalid_workspaces_is_all_or_nothing(tmp_path, monkeypat
     assert response.status_code == 409
     after = store.load().raw
     assert after == before.raw
+
+
+@pytest.mark.parametrize(
+    ("workspace_path", "group_path", "diagnostic"),
+    [
+        (
+            "missing-workspace",
+            "groups/grp-state",
+            "Configured path must exist as a directory",
+        ),
+        (
+            "workspace",
+            "workspace",
+            "overlaps",
+        ),
+    ],
+)
+def test_admin_org_save_invalid_paths_rerender_submitted_form_without_writing(
+    tmp_path,
+    monkeypatch,
+    raw_config,
+    workspace_path,
+    group_path,
+    diagnostic,
+):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
+    before = store.load()
+    submitted_workspace = tmp_path / workspace_path
+    submitted_group = tmp_path / group_path
+
+    response = client.post(
+        "/admin/orgs/grp/save",
+        data={
+            "revision": before.revision,
+            "name": "Submitted Name",
+            "workspace_path": str(submitted_workspace),
+            "path": str(submitted_group),
+            "workspaces_json": "[]",
+            "default_integration": "claude-code",
+            "runtime_timeout": "1800",
+            "sandbox_mode": "unrestricted",
+            "sandbox_roots": "",
+            "tool_mode": "all",
+            "tool_names": "",
+            "daily_limit": "20",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert str(submitted_workspace) in response.text
+    assert str(submitted_group) in response.text
+    assert f'name="revision" value="{before.revision}"' in response.text
+    assert diagnostic in response.text
+    assert store.load().raw == before.raw
+
+
+@pytest.mark.parametrize(
+    ("workspace_path", "group_path", "diagnostic"),
+    [
+        (
+            "missing-new-workspace",
+            "new-group-state",
+            "Configured path must exist as a directory",
+        ),
+        (
+            "workspace",
+            "workspace",
+            "overlaps",
+        ),
+    ],
+)
+def test_admin_org_create_invalid_paths_rerender_submitted_form_without_writing(
+    tmp_path,
+    monkeypatch,
+    raw_config,
+    workspace_path,
+    group_path,
+    diagnostic,
+):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
+    before = store.load()
+    submitted_workspace = tmp_path / workspace_path
+    submitted_group = tmp_path / group_path
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "revision": before.revision,
+            "key": "submitted-group",
+            "name": "Submitted Group",
+            "workspace_path": str(submitted_workspace),
+            "path": str(submitted_group),
+            "default_integration": "copilot",
+            "workspaces_json": "[]",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert str(submitted_workspace) in response.text
+    assert str(submitted_group) in response.text
+    assert f'name="revision" value="{before.revision}"' in response.text
+    assert diagnostic in response.text
+    assert "submitted-group" not in store.load().raw["groups"]
+    assert store.load().raw == before.raw

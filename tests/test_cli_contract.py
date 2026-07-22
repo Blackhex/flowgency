@@ -45,7 +45,6 @@ def cli_config(tmp_path):
         tmp_path,
         "newsletter",
     )
-    group_path = paths.state_root
     _write_blueprint(tmp_path / "agent-library")
     raw = {
         "schema_version": 3,

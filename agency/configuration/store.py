@@ -91,6 +91,8 @@ class ConfigStore:
             if self.path.exists():
                 raise FileExistsError(self.path)
             payload = self._encode(raw)
+            candidate = self._validated_config(raw)
+            initialize_storage_directories(candidate)
             atomic_write_bytes(self.path, payload)
         return self._snapshot(payload)
 
@@ -116,6 +118,8 @@ class ConfigStore:
                 raise ConfigConflictError(
                     "config.yaml changed outside the Agency lock"
                 )
+            candidate = self._validated_config(raw)
+            initialize_storage_directories(candidate)
             atomic_write_bytes(self.path, updated)
         return self._snapshot(updated)
 
@@ -137,6 +141,8 @@ class ConfigStore:
                 raise ConfigConflictError(
                     "config.yaml changed outside the Agency lock"
                 )
+            candidate = self._validated_config(raw)
+            initialize_storage_directories(candidate)
             atomic_write_bytes(self.path, updated)
         return self._snapshot(updated)
 
@@ -151,11 +157,14 @@ class ConfigStore:
         )
 
     def _encode(self, raw: dict[str, Any]) -> bytes:
+        self._validated_config(raw)
+        return yaml.safe_dump(
+            raw, sort_keys=False, allow_unicode=True
+        ).encode("utf-8")
+
+    def _validated_config(self, raw: dict[str, Any]) -> AgencyConfig:
         parsed = parse_config(raw, self.path)
         issues = validate_resolved_paths(parsed.resolved)
         if issues:
             raise ValidationFailed(issues)
-        initialize_storage_directories(parsed.resolved)
-        return yaml.safe_dump(
-            raw, sort_keys=False, allow_unicode=True
-        ).encode("utf-8")
+        return parsed.resolved

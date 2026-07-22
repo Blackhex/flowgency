@@ -103,6 +103,14 @@ def _diagnostic_issues(services: AgencyServices) -> list[dict]:
     ]
 
 
+def _validation_warning(error: ValidationFailed) -> str:
+    details = "; ".join(
+        f"{issue.field}: {issue.message} {issue.corrective_hint}"
+        for issue in error.issues
+    )
+    return f"Configuration is invalid. {details}"
+
+
 def _setup_response(
     request: Request,
     services: AgencyServices,
@@ -148,6 +156,8 @@ def _group_settings_response(
     group_id: str,
     *,
     warning: str = "",
+    form_values: dict[str, Any] | None = None,
+    revision: str | None = None,
     status_code: int = 200,
 ):
     group = snapshot.config.groups[group_id]
@@ -155,6 +165,11 @@ def _group_settings_response(
     sandbox = runtime.sandbox
     tools = runtime.tools
     dispatch = group.dispatch
+    values = form_values or {}
+
+    def value(key: str, default):
+        return values[key] if key in values else default
+
     return _templates(request).TemplateResponse(
         request,
         "admin_org_edit.html",
@@ -162,28 +177,76 @@ def _group_settings_response(
             **_base_admin_context(request, snapshot),
             "mode": "edit",
             "org_key": group_id,
-            "org_name": group.name,
-            "org_workspace_path": str(group.workspace_path),
-            "org_path": str(group.path),
-            "org_workspaces_json": json.dumps(
-                [
-                    workspace.model_dump(mode="json")
-                    for workspace in group.workspaces
-                ]
+            "org_name": value("name", group.name),
+            "org_workspace_path": value("workspace_path", str(group.workspace_path)),
+            "org_path": value("path", str(group.path)),
+            "org_workspaces_json": value(
+                "workspaces_json",
+                json.dumps(
+                    [
+                        workspace.model_dump(mode="json")
+                        for workspace in group.workspaces
+                    ]
+                ),
             ),
             "workspace_types_json": _workspace_types_json(request),
-            "default_integration": group.default_integration,
-            "runtime_timeout": runtime.timeout,
-            "sandbox_mode": sandbox.mode,
-            "sandbox_roots": "\n".join(str(root) for root in sandbox.roots),
-            "tool_mode": tools.mode,
-            "tool_names": "\n".join(tools.names),
-            "dispatch_enabled": dispatch.enabled,
-            "dispatch_daily_limit": dispatch.daily_limit,
+            "default_integration": value(
+                "default_integration", group.default_integration
+            ),
+            "runtime_timeout": value("runtime_timeout", runtime.timeout),
+            "sandbox_mode": value("sandbox_mode", sandbox.mode),
+            "sandbox_roots": value(
+                "sandbox_roots", "\n".join(str(root) for root in sandbox.roots)
+            ),
+            "tool_mode": value("tool_mode", tools.mode),
+            "tool_names": value("tool_names", "\n".join(tools.names)),
+            "dispatch_enabled": value("dispatch_enabled", dispatch.enabled),
+            "dispatch_daily_limit": value(
+                "daily_limit", dispatch.daily_limit
+            ),
             "agent_count": len(group.agents),
             "manage_agents_href": f"/{group_id}/agents",
             "warning": warning,
-            "revision": snapshot.revision,
+            "revision": (
+                revision
+                if revision is not None
+                else value("revision", snapshot.revision)
+            ),
+        },
+        status_code=status_code,
+    )
+
+
+def _group_create_response(
+    request: Request,
+    snapshot,
+    *,
+    key: str,
+    name: str,
+    workspace_path: str,
+    path: str,
+    default_integration: str,
+    workspaces_json: str,
+    warning: str,
+    revision: str,
+    status_code: int,
+):
+    return _templates(request).TemplateResponse(
+        request,
+        "admin_org_edit.html",
+        {
+            **_base_admin_context(request, snapshot),
+            "mode": "create",
+            "org_key": key,
+            "org_name": name,
+            "org_workspace_path": workspace_path,
+            "org_path": path,
+            "default_integration": default_integration,
+            "org_workspaces_json": workspaces_json,
+            "workspace_types_json": _workspace_types_json(request),
+            "warning": warning,
+            "integration_names": _integration_names(),
+            "revision": revision,
         },
         status_code=status_code,
     )
@@ -538,6 +601,31 @@ async def admin_org_save(
             warning="Configuration changed. Reload before saving.",
             status_code=409,
         )
+    except ValidationFailed as exc:
+        snapshot = services.config_store.load()
+        return _group_settings_response(
+            request,
+            snapshot,
+            org,
+            warning=_validation_warning(exc),
+            form_values={
+                "revision": revision,
+                "name": name,
+                "workspace_path": workspace_path,
+                "path": path,
+                "default_integration": default_integration,
+                "runtime_timeout": runtime_timeout,
+                "sandbox_mode": sandbox_mode,
+                "sandbox_roots": str(form.get("sandbox_roots", "")),
+                "tool_mode": tool_mode,
+                "tool_names": str(form.get("tool_names", "")),
+                "dispatch_enabled": dispatch_enabled,
+                "daily_limit": daily_limit,
+                "workspaces_json": workspaces_json,
+            },
+            revision=revision,
+            status_code=422,
+        )
 
     request.app.state.refresh_services()
     return RedirectResponse(f"/admin/orgs/{org}/edit", status_code=303)
@@ -682,6 +770,21 @@ async def admin_org_create(
                 "revision": current.revision,
             },
             status_code=409,
+        )
+    except ValidationFailed as exc:
+        current = services.config_store.load()
+        return _group_create_response(
+            request,
+            current,
+            key=key,
+            name=name,
+            workspace_path=workspace_path,
+            path=path,
+            default_integration=default_integration,
+            workspaces_json=workspaces_json,
+            warning=_validation_warning(exc),
+            revision=revision,
+            status_code=422,
         )
     request.app.state.refresh_services()
     return RedirectResponse("/admin/groups", status_code=303)

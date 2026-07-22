@@ -950,8 +950,12 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
         if resolved_group.get("path") is not None:
             resolved_group["path"] = _path_from_config(resolved_group["path"], config_dir)
         workspace_path = resolved_group.get("workspace_path")
-        group_root = Path(workspace_path) if workspace_path is not None else None
-        resolved_group["runtime"] = _prepare_runtime(resolved_group.get("runtime") or {}, group_root)
+        workspace_root = (
+            Path(workspace_path) if workspace_path is not None else None
+        )
+        resolved_group["runtime"] = _prepare_runtime(
+            resolved_group.get("runtime") or {}, workspace_root
+        )
         agents = {}
         for agent in resolved_group.get("agents") or []:
             if not isinstance(agent, dict):
@@ -960,7 +964,9 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
             if not isinstance(name, str) or not name.strip():
                 continue
             agent_entry = dict(agent)
-            agent_entry["runtime"] = _prepare_runtime(agent_entry.get("runtime") or {}, group_root)
+            agent_entry["runtime"] = _prepare_runtime(
+                agent_entry.get("runtime") or {}, workspace_root
+            )
             if agent_entry.get("routines") is not None:
                 routines = []
                 for routine in agent_entry.get("routines") or []:

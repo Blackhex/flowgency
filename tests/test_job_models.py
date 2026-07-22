@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import inspect
 import io
@@ -22,6 +23,7 @@ from agency.jobs.models import (
 from agency.jobs.store import (
     InvalidJobTransition,
     active_jobs,
+    canonical_group_operation_lock_paths,
     cancel_job,
     group_operation_lock_path,
     job_path,
@@ -336,6 +338,30 @@ def test_operation_lock_is_under_group_locks(tmp_path):
     assert group_operation_lock_path(tmp_path) == (
         tmp_path / "locks" / ".operations.lock"
     )
+
+
+def test_operation_lock_paths_use_platform_case_normalization(
+    tmp_path, monkeypatch
+):
+    normalized = []
+    monkeypatch.setattr(Path, "resolve", lambda self, strict=False: self)
+
+    def record_normcase(value):
+        normalized.append(value)
+        return value.lower() if os.name == "nt" else value
+
+    monkeypatch.setattr(store_module.os.path, "normcase", record_normcase)
+    paths = canonical_group_operation_lock_paths(
+        tmp_path / "Group",
+        tmp_path / "group",
+    )
+
+    assert normalized
+    if os.name == "nt":
+        assert len(paths) == 1
+    else:
+        assert len(paths) == 2
+        assert {path.parent.parent.name for path in paths} == {"Group", "group"}
 
 
 def test_job_request_no_longer_accepts_extra_prompt_source(tmp_path):

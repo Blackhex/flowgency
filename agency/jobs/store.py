@@ -37,8 +37,8 @@ _WINDOWS_READ_RETRIES = 200
 _WINDOWS_READ_DELAY_SECONDS = 0.01
 
 
-def job_path(group_root: Path, job_id: str) -> Path:
-    return Path(group_root) / f"{job_id}.yaml"
+def job_path(jobs_dir: Path, job_id: str) -> Path:
+    return Path(jobs_dir) / f"{job_id}.yaml"
 
 
 def group_operation_lock_path(group_root: Path) -> Path:
@@ -51,7 +51,7 @@ def canonical_group_operation_lock_paths(
     unique: dict[str, Path] = {}
     for group_root in group_roots:
         lock_path = group_operation_lock_path(group_root).resolve(strict=False)
-        unique[str(lock_path).lower()] = lock_path
+        unique[os.path.normcase(str(lock_path))] = lock_path
     return tuple(unique[key] for key in sorted(unique))
 
 

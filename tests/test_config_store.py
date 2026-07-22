@@ -243,6 +243,48 @@ def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
     assert path.read_bytes() == newer
 
 
+@pytest.mark.parametrize("operation", ["replace", "patch"])
+def test_late_conflict_does_not_initialize_candidate_group_storage(
+    tmp_path,
+    raw_config,
+    config_paths,
+    monkeypatch,
+    operation,
+):
+    from agency.configuration.store import ConfigConflictError, ConfigStore
+
+    candidate_group = tmp_path / "candidate-group"
+    raw = deepcopy(raw_config)
+    raw["groups"]["newsletter"]["path"] = str(candidate_group)
+    path = _write_yaml(config_paths["config_path"], raw)
+    store = ConfigStore(path)
+    snapshot = store.load()
+    original_encode = ConfigStore._encode
+
+    def encode_and_induce_conflict(self, value):
+        payload = original_encode(self, value)
+        path.write_bytes(path.read_bytes() + b"\n")
+        return payload
+
+    monkeypatch.setattr(ConfigStore, "_encode", encode_and_induce_conflict)
+
+    with pytest.raises(
+        ConfigConflictError,
+        match="changed outside the Agency lock",
+    ):
+        if operation == "replace":
+            store.replace(snapshot.revision, raw)
+        else:
+            store.patch(
+                snapshot.revision,
+                lambda current: current["groups"]["newsletter"].__setitem__(
+                    "path", str(candidate_group)
+                ),
+            )
+
+    assert not candidate_group.exists()
+
+
 def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
     raw_config, config_paths
 ):

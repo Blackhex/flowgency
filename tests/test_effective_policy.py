@@ -59,8 +59,8 @@ def test_restricted_policy_starts_with_workspace_and_group_roots(
     policy = resolve_effective_policy(config, "newsletter", "builder")
 
     assert policy.sandbox_roots[:2] == (
-        config.groups["newsletter"].workspace_path,
-        config.groups["newsletter"].path,
+        config.groups["newsletter"].workspace_path.resolve(strict=False),
+        config.groups["newsletter"].path.resolve(strict=False),
     )
     assert policy.sandbox_roots[2:] == (extra.resolve(),)
 
