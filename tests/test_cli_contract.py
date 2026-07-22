@@ -44,7 +44,6 @@ def cli_config(tmp_path):
     paths = create_group_environment(
         tmp_path,
         "newsletter",
-        shared_dirs=("observations", "proposals", "decisions", "logs"),
     )
     group_path = paths.state_root
     _write_blueprint(tmp_path / "agent-library")
@@ -92,6 +91,22 @@ def cli_config(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return config_path
+
+
+def test_cli_reads_group_records_without_workspace_shared(cli_config, cli_runner):
+    group_root = cli_config.parent / "groups" / "newsletter"
+    observation = group_root / "observations" / "signal.md"
+    observation.parent.mkdir(parents=True, exist_ok=True)
+    observation.write_text(
+        "---\nagent: builder\nstatus: open\n---\n# Signal\n",
+        encoding="utf-8",
+    )
+
+    result = cli_runner("observations", "--group", "newsletter", "--json", config=cli_config)
+
+    assert result.exit_code == 0
+    assert "signal" in result.stdout
+    assert not (group_root / "shared").exists()
 
 
 @pytest.fixture

@@ -16,6 +16,7 @@ from agency.configuration import (
     ValidationFailed,
     create_group_state,
     patch_group_settings_state,
+    resolve_group_paths,
 )
 from agency.integrations import BaseIntegration, REGISTRY
 from agency.integrations.models import InteractiveSetupRequest
@@ -712,8 +713,8 @@ async def admin_org_delete(
                         "path": str(group.path),
                         "agents": list(group.agents.keys()),
                         "agent_count": len(group.agents),
-                        "initialized": (Path(group.path) / "shared").exists(),
-                        "path_exists": Path(group.path).exists(),
+                        "initialized": resolve_group_paths(group).group_root.exists(),
+                        "path_exists": resolve_group_paths(group).group_root.exists(),
                         "dispatch_enabled": group.dispatch.enabled,
                     }
                     for key, group in current.config.groups.items()

@@ -30,7 +30,7 @@ def _setup_jobs_group(
     paths = create_group_environment(
         tmp_path,
         "test",
-        shared_dirs=("logs",),
+        create_state=True,
     )
     group = paths.state_root
     config_path = tmp_path / "config.yaml"
@@ -113,7 +113,7 @@ def _setup_jobs_group(
     record.started_at = started_at
     record.completed_at = "2026-07-11T10:00:05+00:00"
     record.changed_files = [{"path": "a.txt", "status": "modified", "lines_added": 2, "lines_removed": 1}]
-    stdout_path = group / "shared" / "logs" / f"{spec.job_id}.out"
+    stdout_path = group / "logs" / f"{spec.job_id}.out"
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stdout_path.write_text("line one\nline two\nline three\n", encoding="utf-8")
     record.stdout_path = str(stdout_path)
@@ -489,11 +489,10 @@ from agency.jobs import JobSubmissionError  # noqa: E402
 
 def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", questions=None):
     group = tmp_path / "group"
-    shared = group / "shared"
     for directory in ("proposals", "decisions", "jobs", "logs"):
-        (shared / directory).mkdir(parents=True, exist_ok=True)
+        (group / directory).mkdir(parents=True, exist_ok=True)
     (group / "builder").mkdir()
-    proposal_path = shared / "proposals" / "change.md"
+    proposal_path = group / "proposals" / "change.md"
     proposal_meta = {
         "origin_agent": "observer",
         "execution_agent": execution_agent,
@@ -517,13 +516,17 @@ def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", ques
     runtime_group = {
         "key": "test",
         "name": "Test",
-        "path": group,
-        "shared": shared,
+        "workspace_root": group,
+        "group_root": group,
+        "observations": group / "observations",
+        "proposals": group / "proposals",
+        "decisions": group / "decisions",
+        "logs": group / "logs",
         "agents": ["builder"],
         "_agents_normalized": agents,
     }
     monkeypatch.setattr(cli, "_resolve_group", lambda args: runtime_group)
-    return Namespace(group="test", slug="change", config=str(tmp_path / "config.yaml")), shared / "decisions" / "change.md", proposal_path
+    return Namespace(group="test", slug="change", config=str(tmp_path / "config.yaml")), group / "decisions" / "change.md", proposal_path
 
 
 def test_cmd_decide_rejects_invalid_proposal_schema(tmp_path, monkeypatch, capsys):

@@ -9,7 +9,13 @@ import yaml
 from fastapi.testclient import TestClient
 
 from agency import app as app_mod
-from agency.app import app, build_activity_feed, build_dashboard_fleet, build_pipeline_stats
+from agency.app import (
+    app,
+    build_activity_feed,
+    build_dashboard_fleet,
+    build_pipeline_stats,
+    list_markdown_items,
+)
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import transition_job, write_job
@@ -52,6 +58,19 @@ class TestBuildPipelineStats:
         decisions = [{"answers": {"approve": "approved"}}] * 2
         result = build_pipeline_stats(observations, proposals, decisions)
         assert result["flow_status"] == "healthy"
+
+
+def test_list_markdown_items_reads_the_explicit_group_directory(tmp_path):
+    observations = tmp_path / "observations"
+    observations.mkdir()
+    (observations / "signal.md").write_text(
+        "---\nagent: scout\nstatus: open\n---\n\n**Signal**\n",
+        encoding="utf-8",
+    )
+
+    items = list_markdown_items(observations, apply_ttl=True)
+
+    assert [item["_slug"] for item in items] == ["signal"]
 
 
 class TestBuildActivityFeed:

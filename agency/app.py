@@ -587,9 +587,9 @@ def extract_display_title(body: str | None, slug: str) -> str:
     return slug.replace("-", " ")
 
 
-def list_markdown_items(g: dict, subdir: str, apply_ttl: bool = False) -> list[dict]:
-    """List markdown files from a mapped group directory with parsed frontmatter."""
-    item_dir = Path(g[subdir])
+def list_markdown_items(item_dir: Path, apply_ttl: bool = False) -> list[dict]:
+    """List markdown files from an explicit group directory with parsed frontmatter."""
+    item_dir = Path(item_dir)
     if not item_dir.exists():
         return []
     items = []
@@ -609,15 +609,15 @@ def list_markdown_items(g: dict, subdir: str, apply_ttl: bool = False) -> list[d
 
 
 def list_observations(g: dict) -> list[dict]:
-    return list_markdown_items(g, "observations", apply_ttl=True)
+    return list_markdown_items(g["observations"], apply_ttl=True)
 
 
 def list_proposals(g: dict) -> list[dict]:
-    return list_markdown_items(g, "proposals", apply_ttl=True)
+    return list_markdown_items(g["proposals"], apply_ttl=True)
 
 
 def list_decisions(g: dict) -> list[dict]:
-    return list_markdown_items(g, "decisions")
+    return list_markdown_items(g["decisions"])
 
 
 def build_pipeline_stats(observations: list[dict], proposals: list[dict],

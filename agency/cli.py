@@ -17,7 +17,15 @@ import yaml
 
 from agency.cli_output import ExitCode, render_error
 from agency.blueprints import BlueprintLibrary
-from agency.configuration import ConfigSnapshot, ConfigStore, ValidationFailed, ValidationIssue, config_revision, parse_config
+from agency.configuration import (
+    ConfigSnapshot,
+    ConfigStore,
+    ValidationFailed,
+    ValidationIssue,
+    config_revision,
+    parse_config,
+    resolve_group_paths,
+)
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
 from agency.dispatch.install import get_timer_status, install_timer, uninstall_timer
@@ -174,11 +182,16 @@ def _group(args: Namespace):
 
 def _resolve_group(args: Namespace) -> dict[str, Any]:
     snapshot, group_id, group = _group(args)
+    paths = resolve_group_paths(group)
     return {
         "key": group_id,
         "name": group.name,
-        "path": group.path,
-        "shared": group.path / "shared",
+        "workspace_root": paths.workspace_root,
+        "group_root": paths.group_root,
+        "observations": paths.observations,
+        "proposals": paths.proposals,
+        "decisions": paths.decisions,
+        "logs": paths.logs,
         "agents": list(group.agents),
         "_agents_normalized": [
             {
@@ -251,8 +264,7 @@ def _extract_title(body: str, fallback: str) -> str:
     return fallback.replace("-", " ")
 
 
-def _markdown_items(group_path: Path, kind: str) -> list[dict[str, Any]]:
-    directory = group_path / "shared" / kind
+def _markdown_items(directory: Path) -> list[dict[str, Any]]:
     if not directory.is_dir():
         return []
     items = []
@@ -396,9 +408,10 @@ def cmd_status(args: Namespace) -> int:
     job_store = JobStore(snapshot.config.agency.memory_store)
     result = {}
     for group_id, group in snapshot.config.groups.items():
-        observations = _markdown_items(group.path, "observations")
-        proposals = _markdown_items(group.path, "proposals")
-        decisions = _markdown_items(group.path, "decisions")
+        paths = resolve_group_paths(group)
+        observations = _markdown_items(paths.observations)
+        proposals = _markdown_items(paths.proposals)
+        decisions = _markdown_items(paths.decisions)
         result[group_id] = {
             "name": group.name,
             "observations": len(observations),
@@ -527,8 +540,8 @@ def cmd_agent_run(args: Namespace) -> int:
 
 
 def _list_command(args: Namespace, kind: str) -> int:
-    _, _, group = _group(args)
-    items = _markdown_items(group.path, kind)
+    group = _resolve_group(args)
+    items = _markdown_items(group[kind])
     if getattr(args, "status", None):
         items = [item for item in items if item.get("status") == args.status]
     agent_key = "origin_agent" if kind == "proposals" else "agent"
@@ -547,7 +560,7 @@ def _list_command(args: Namespace, kind: str) -> int:
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold(kind.title())} - {group.name} ({len(payload)} total)\n")
+        print(f"\n{bold(kind.title())} - {group['name']} ({len(payload)} total)\n")
         for item in payload:
             print(f"  {item['agent'][:16].rjust(16)}  {item['title'][:60]}  {dim(item['status'])}")
         print()
@@ -563,8 +576,8 @@ def cmd_proposals(args: Namespace) -> int:
 
 
 def cmd_decisions(args: Namespace) -> int:
-    _, _, group = _group(args)
-    items = _markdown_items(group.path, "decisions")
+    group = _resolve_group(args)
+    items = _markdown_items(group["decisions"])
     payload = [
         {
             "slug": item["_slug"],
@@ -577,7 +590,7 @@ def cmd_decisions(args: Namespace) -> int:
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold('Decisions')} - {group.name} ({len(payload)} total)\n")
+        print(f"\n{bold('Decisions')} - {group['name']} ({len(payload)} total)\n")
         for item in payload:
             print(f"  decided  {item['title'][:60]}  {dim(item['date'])}")
         print()
@@ -585,10 +598,12 @@ def cmd_decisions(args: Namespace) -> int:
 
 
 def cmd_inbox(args: Namespace) -> int:
-    snapshot, group_id, group = _group(args)
-    observations = _markdown_items(group.path, "observations")
-    proposals = _markdown_items(group.path, "proposals")
-    decisions = _markdown_items(group.path, "decisions")
+    group = _resolve_group(args)
+    snapshot = group["_snapshot"]
+    group_id = group["key"]
+    observations = _markdown_items(group["observations"])
+    proposals = _markdown_items(group["proposals"])
+    decisions = _markdown_items(group["decisions"])
     actionable = [item for item in proposals if item.get("status") in {"proposed", "investigating"}]
     floated = [item for item in observations if item.get("float") and item.get("status") == "open"]
     open_items = [item for item in observations if item.get("status") == "open"]
@@ -608,7 +623,7 @@ def cmd_inbox(args: Namespace) -> int:
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold(snapshot.config.agency.title)} - {group.name}\n")
+        print(f"\n{bold(snapshot.config.agency.title)} - {group['name']}\n")
         print(f"  Needs decision: {len(actionable)}")
         print(f"  Floated signals: {len(floated)}")
         print(f"  Open observations: {len(open_items)}\n")
@@ -866,8 +881,8 @@ def _cmd_decide_inner(args: Namespace) -> int:
     runtime_group = _resolve_group(args)
     snapshot = runtime_group.get("_snapshot")
     group_id = runtime_group["key"]
-    proposal_path = runtime_group["shared"] / "proposals" / f"{args.slug}.md"
-    decision_path = runtime_group["shared"] / "decisions" / f"{args.slug}.md"
+    proposal_path = runtime_group["proposals"] / f"{args.slug}.md"
+    decision_path = runtime_group["decisions"] / f"{args.slug}.md"
     if not proposal_path.is_file():
         raise CliFailure(ExitCode.OPERATIONAL_FAILURE, "proposal-not-found", f"Proposal '{args.slug}' not found.")
     metadata, body = _parse_frontmatter(proposal_path.read_text(encoding="utf-8"))
@@ -983,7 +998,7 @@ def _cmd_decide_inner(args: Namespace) -> int:
         decision.update(execution_status="skipped", execution_summary=SKIP_EXECUTION_SUMMARY)
         _write_frontmatter(decision_path, decision)
     _update_frontmatter_field(proposal_path, "status", "decided")
-    print(f"Decision saved: shared/decisions/{args.slug}.md")
+    print(f"Decision saved: decisions/{args.slug}.md")
     return 0
 
 

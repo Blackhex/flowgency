@@ -103,7 +103,7 @@ def test_verify_marks_decision_verified(tmp_path, monkeypatch):
 
 
 def test_verify_needs_follow_up_creates_linked_observation(tmp_path, monkeypatch):
-    client, decision_path, shared = _setup_group(
+    client, decision_path, group_root = _setup_group(
         tmp_path, monkeypatch,
         decision_meta={"proposal": "change.md", "execution_status": "complete", "executed_by": "engineer"},
     )
@@ -119,7 +119,7 @@ def test_verify_needs_follow_up_creates_linked_observation(tmp_path, monkeypatch
     follow_up = meta["follow_up_observation"]
     assert follow_up.endswith(".md")
 
-    obs_path = shared / "observations" / follow_up
+    obs_path = group_root / "observations" / follow_up
     assert obs_path.exists()
     obs_meta = _meta(obs_path)
     assert obs_meta["follow_up_of_decision"] == "change.md"
