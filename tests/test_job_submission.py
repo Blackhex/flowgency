@@ -177,6 +177,11 @@ def test_submit_request_persists_validated_current_snapshot(tmp_path):
     assert record.spec.config_revision not in {"compat-unresolved", "compat-submission-resolved"}
     assert record.spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
     assert record.spec.agent_dir == record.spec.workspace_path
+    assert record.spec.runtime_policy.sandbox_roots == (
+        str((tmp_path / "workspaces" / "newsletter").resolve()),
+        str((tmp_path / "agents" / "newsletter").resolve()),
+        str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()),
+    )
     assert record.spec.skill == "daily-review"
     assert record.spec.routine_id == "daily-review"
 
@@ -383,6 +388,11 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
     assert spec.memory.selector["scope"] == "agent"
     assert spec.workspace_dir == str((tmp_path / "agents" / "newsletter").resolve())
     assert spec.agent_dir == spec.workspace_path
+    assert spec.runtime_policy.sandbox_roots == (
+        str((tmp_path / "workspaces" / "newsletter").resolve()),
+        str((tmp_path / "agents" / "newsletter").resolve()),
+        str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()),
+    )
     assert spec.skill_arguments == ("--mode=review", "literal value")
     assert spec.task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
 

@@ -5,16 +5,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agency.blueprints import BlueprintLibrary, CompilationCache
+from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import AgentInstance, Routine
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.configuration.paths import validate_resolved_paths
 from agency.configuration.store import ConfigSnapshot, ConfigStore
 from agency.integrations import BaseIntegration, get_integration
-from agency.integrations.models import (
-    EffectiveRuntimePolicy,
-    IntegrationRunRequest,
-    ResolvedToolPolicy,
-)
+from agency.integrations.models import IntegrationRunRequest
 from agency.memory.selectors import (
     resolve_memory_selector,
     select_effective_memory,
@@ -64,52 +61,6 @@ def _bind_integration(
     return integration
 
 
-def _resolve_runtime_policy(
-    *,
-    group,
-    agent: AgentInstance,
-    group_key: str,
-    agent_name: str,
-    timeout_override: int | None,
-    integration: BaseIntegration,
-) -> EffectiveRuntimePolicy:
-    if timeout_override is not None:
-        timeout = timeout_override
-    elif "timeout" in agent.runtime.model_fields_set:
-        timeout = agent.runtime.timeout
-    else:
-        timeout = group.runtime.timeout
-
-    if "tools" in agent.runtime.model_fields_set:
-        tools = agent.runtime.tools
-    else:
-        tools = group.runtime.tools
-
-    agent_sandbox = agent.runtime.sandbox
-    group_sandbox = group.runtime.sandbox
-    if "mode" in agent_sandbox.model_fields_set:
-        sandbox_mode = agent_sandbox.mode
-    else:
-        sandbox_mode = group_sandbox.mode
-    if sandbox_mode == "unrestricted":
-        sandbox_roots = ()
-    else:
-        sandbox_roots = tuple(group_sandbox.roots) + tuple(
-            agent_sandbox.additional_roots
-        )
-
-    policy = EffectiveRuntimePolicy(
-        timeout=timeout,
-        sandbox_mode=sandbox_mode,
-        sandbox_roots=sandbox_roots,
-        tools=ResolvedToolPolicy(mode=tools.mode, names=tuple(tools.names)),
-    )
-    issues = integration.validate_runtime_policy(policy)
-    if issues:
-        raise ValidationFailed(issues)
-    return policy
-
-
 def resolve_job_request(
     request: JobRequest,
     *,
@@ -149,11 +100,10 @@ def resolve_job_request(
         agent.integration_config,
         integrations,
     )
-    runtime_policy = _resolve_runtime_policy(
-        group=group,
-        agent=agent,
-        group_key=request.group_key,
-        agent_name=request.agent_name,
+    runtime_policy = resolve_effective_policy(
+        snapshot.config,
+        request.group_key,
+        request.agent_name,
         timeout_override=request.timeout_override,
         integration=integration,
     )

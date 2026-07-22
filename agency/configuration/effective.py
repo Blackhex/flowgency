@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from agency.configuration.group_paths import resolve_group_paths
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.configuration.models import AgencyConfig, AgentInstance, GroupConfig
-from agency.integrations import get_integration
+from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
 
 
@@ -75,7 +76,6 @@ def _resolve_sandbox(
     group_sandbox = group.runtime.sandbox
     agent_overrides_mode = "mode" in agent_sandbox.model_fields_set
     mode = agent_sandbox.mode if agent_overrides_mode else group_sandbox.mode
-    group_roots = tuple(group_sandbox.roots)
     additional_roots = tuple(agent_sandbox.additional_roots)
 
     if mode == "unrestricted":
@@ -90,7 +90,12 @@ def _resolve_sandbox(
             raise ValidationFailed((issue,))
         return mode, ()
 
-    return mode, _merge_roots(group_roots, additional_roots)
+    paths = resolve_group_paths(group)
+    return mode, _merge_roots(
+        (paths.workspace_root, paths.group_root),
+        tuple(group_sandbox.roots),
+        additional_roots,
+    )
 
 
 def resolve_effective_policy(
@@ -99,6 +104,7 @@ def resolve_effective_policy(
     agent_id: str,
     *,
     timeout_override: int | None = None,
+    integration: BaseIntegration | None = None,
 ) -> EffectiveRuntimePolicy:
     group = _get_group(config, group_id)
     agent = _get_agent(group, agent_id)
@@ -115,17 +121,18 @@ def resolve_effective_policy(
         tools=_resolve_tools(group, agent),
     )
 
-    try:
-        integration = get_integration(agent.integration)
-    except KeyError as exc:
-        issue = _build_issue(
-            code="unknown-integration",
-            scope=f"groups.{group_id}.agents.{agent_id}",
-            field="integration",
-            message=f"Integration '{agent.integration}' is not registered.",
-            hint="Choose an installed integration or register it before running this agent.",
-        )
-        raise ValidationFailed((issue,)) from exc
+    if integration is None:
+        try:
+            integration = get_integration(agent.integration)
+        except KeyError as exc:
+            issue = _build_issue(
+                code="unknown-integration",
+                scope=f"groups.{group_id}.agents.{agent_id}",
+                field="integration",
+                message=f"Integration '{agent.integration}' is not registered.",
+                hint="Choose an installed integration or register it before running this agent.",
+            )
+            raise ValidationFailed((issue,)) from exc
 
     issues = integration.validate_runtime_policy(policy)
     if issues:

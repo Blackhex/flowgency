@@ -31,10 +31,50 @@ def test_agent_roots_are_additive_and_ordered(raw_config, config_paths):
 
     assert policy.sandbox_mode == "restricted"
     assert policy.sandbox_roots == (
+        config_paths["workspace_path"].resolve(strict=False),
         Path("C:/Projects/newsletter").resolve(strict=False),
         Path("C:/Shared/research").resolve(strict=False),
         Path("C:/Research/editorial").resolve(strict=False),
     )
+
+
+def test_restricted_policy_starts_with_workspace_and_group_roots(
+    raw_config,
+    config_paths,
+):
+    from agency.configuration import parse_config
+    from agency.configuration.effective import resolve_effective_policy
+
+    extra = config_paths["config_dir"] / "research"
+    extra.mkdir()
+    group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {
+        "sandbox": {"mode": "restricted", "roots": [str(extra)]}
+    }
+    group["agents"][0]["integration"] = "copilot"
+
+    config = parse_config(raw_config, config_paths["config_path"]).resolved
+
+    policy = resolve_effective_policy(config, "newsletter", "builder")
+
+    assert policy.sandbox_roots[:2] == (
+        config.groups["newsletter"].workspace_path,
+        config.groups["newsletter"].path,
+    )
+    assert policy.sandbox_roots[2:] == (extra.resolve(),)
+
+
+def test_unrestricted_policy_has_no_root_list(raw_config, config_paths):
+    from agency.configuration import parse_config
+    from agency.configuration.effective import resolve_effective_policy
+
+    raw_config["groups"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    config = parse_config(raw_config, config_paths["config_path"]).resolved
+
+    policy = resolve_effective_policy(config, "newsletter", "builder")
+
+    assert policy.sandbox_mode == "unrestricted"
+    assert policy.sandbox_roots == ()
 
 
 def test_agent_tool_policy_replaces_group(raw_config, config_paths):
