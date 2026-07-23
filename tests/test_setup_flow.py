@@ -42,6 +42,34 @@ def test_build_setup_prompt_names_project_and_config(tmp_path: Path) -> None:
     assert "Do not write a partial configuration" in prompt
 
 
+def test_build_setup_prompt_requires_root_first_storage_flow(tmp_path: Path) -> None:
+    prompt = build_setup_prompt(
+        tmp_path,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
+
+    for phrase in (
+        "Agency data root the first user-facing question",
+        "separate home for reusable agent blueprints",
+        "project workspace remains source",
+        "authoritative config remains at the supplied path",
+        "existing directory or a new absolute path",
+        "nearest existing parent is writable",
+        r"C:\\Agency",
+        "~/Agency",
+        "agency.agent_library as <root>/agent-library",
+        "agency.compilation_cache as <root>/compiled-agents",
+        "agency.memory_store as <root>/memory",
+        "groups.<group-id>.path as <root>/groups/<group-id>",
+        "Customize the derived storage paths?",
+        "review all four derived paths together",
+        "do not ask about individual storage paths",
+        "before creating any directory or blueprint",
+    ):
+        assert phrase in prompt
+
+
 def test_status_waits_when_config_is_absent(tmp_path: Path) -> None:
     status = inspect_setup_status(ConfigStore(tmp_path / "config.yaml"))
 
