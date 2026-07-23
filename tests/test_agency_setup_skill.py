@@ -70,7 +70,7 @@ def test_setup_derives_canonical_paths_from_one_data_root():
     for phrase in (
         "separate home for Agency-owned data",
         "existing directory or a new absolute path",
-        "nearest existing parent is a writable real directory",
+        "nearest existing parent is a writable real directory that can safely create it",
         r"C:\Agency",
         "~/Agency",
         "agency.agent_library = <root>/agent-library",

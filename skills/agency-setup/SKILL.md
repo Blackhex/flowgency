@@ -14,7 +14,7 @@ Consume the launch context before asking questions. Read project instructions, R
 
 After inspection, ask for the Agency data root as the first user-facing question. Explain that it is a separate home for Agency-owned data: reusable agent blueprints, disposable compiled projections, semantic memory and durable jobs, and per-group records. The project workspace remains the source and execution location, and `config.yaml` remains at the authoritative path supplied by the launcher.
 
-Accept an existing directory or a new absolute path. Expand user-home syntax. A missing root is valid when its nearest existing parent is a writable real directory. Give `C:\Agency` and `~/Agency` as examples. Derive these paths in memory without creating them:
+Accept an existing directory or a new absolute path. Expand user-home syntax. A missing root is valid when its nearest existing parent is a writable real directory that can safely create it. Give `C:\Agency` and `~/Agency` as examples. Derive these paths in memory without creating them:
 
 ```text
 agency.agent_library = <root>/agent-library
