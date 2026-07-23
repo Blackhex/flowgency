@@ -53,9 +53,9 @@ Workspace launchers are optional frontends. They start configured instances in t
 
 ## Quick start
 
-Start Agency, choose the project folder and supported AI integration, complete the agency-setup conversation, and return to the dashboard automatically. The [Agency Setup Skill](kb/setup-skill.md) owns group naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
+Start Agency, choose the project folder and supported AI integration, complete the agency-setup conversation, and return to the dashboard automatically. The first question chooses an existing or new Agency data root for all Agency-owned runtime data. The [Agency Setup Skill](kb/setup-skill.md) then owns group naming, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
 
-On first run, open `/setup` and hand off the project folder and supported integration to `agency-setup`. After setup, create reusable blueprints and Agent Skills in Agent Library, then create explicit instances from the group roster and assign routines and semantic memory.
+On first run, open `/setup` and hand off the project folder and supported integration to `agency-setup`. Setup derives `agent-library`, `compiled-agents`, `memory`, and `groups/<group-id>` beneath the approved root. Advanced users can opt into one grouped path review; the default flow asks no individual storage-path questions.
 
 ## Pipeline and execution
 
