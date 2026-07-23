@@ -102,6 +102,17 @@ Preserve observation, proposal, decision, log, job, dashboard, and workspace beh
 
 Routes use async FastAPI handlers, POST plus 303 redirects, shared domain validators, revision-checked config patches, and path validation. Config writes must lock, compare the expected revision, preserve unrelated data, validate the current config, and replace atomically.
 
+### Development workflow
+
+- Develop every new feature on a named feature branch in an ignored project-local `.worktrees/<feature>/` worktree. Do not implement features directly on `master`.
+- Run commands and tests from the active worktree root. Running tests from another checkout can resolve the wrong local `tests` package.
+- Establish a clean full-suite baseline in the worktree before implementation. Use focused tests while iterating, then run the complete suite before review and completion.
+- Prefer test-driven changes and add regression coverage for every corrected failure path, especially validation, concurrency, path traversal, and filesystem-safety behavior.
+- Review each implementation task before starting dependent work, and perform a whole-branch review before integrating a feature.
+- After implementation, move `master` to the reviewed feature tip with a fast-forward only. Do not create a merge commit, squash, or rebase unless explicitly requested.
+- Re-run the complete suite on the fast-forwarded `master`, remove the completed worktree, and keep the feature branch unless explicitly asked to delete it.
+- Preserve unrelated and runtime-local files. In particular, do not stage, delete, or rewrite `config.yaml`, `config.yaml.lock`, group-state directories, logs, or other untracked runtime data unless the task explicitly requires it.
+
 ## Superseded layout handling
 
 Only the current control-plane shape is accepted at runtime. Directory-coupled agent folders, native identity sidecars, prompt schedules, per-agent memory files, or `tmux_config` must not be loaded by the application.
