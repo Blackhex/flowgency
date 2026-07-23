@@ -6,17 +6,37 @@ user_invocable: true
 
 # Agency Setup
 
-The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates it when absent, and reports validation errors directly. It does not create runtime-native identities, physical per-agent runtime directories, memory files, prompt schedules, or conversion surfaces.
+The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill first asks for one Agency data root, derives the canonical storage paths, and then takes over group naming, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates it when absent, and reports validation errors directly. It does not create runtime-native identities, physical per-agent runtime directories, memory files, prompt schedules, or conversion surfaces.
 
-## 1. Inspect
+## 1. Inspect And Choose The Data Root
 
-Read project instructions, README, dependency manifests, source layout, tests, deployment files, and recent git history. Detect the host OS and available agent CLI. Summarize the project, then propose three to five distinct roles. Exactly one builder normally receives write capability; observational roles remain fail-closed.
+Consume the launch context before asking questions. Read project instructions, README, dependency manifests, source layout, tests, deployment files, and recent git history. Detect the host OS and available agent CLI. Keep this inspection read-only and do not ask about the group, agents, roles, routines, workspaces, memory channels, or individual storage paths yet.
 
-Before registration, ask the user how many agents to create for the first team and which proposed roles to create now. Do not infer extra instances beyond the approved count and selected roles.
+After inspection, ask for the Agency data root as the first user-facing question. Explain that it is a separate home for Agency-owned data: reusable agent blueprints, disposable compiled projections, semantic memory and durable jobs, and per-group records. The project workspace remains the source and execution location, and `config.yaml` remains at the authoritative path supplied by the launcher.
 
-Ask the user to approve the team, each role's routine tasks, schedules, workspace definitions, and any shared memory channels. When the launch prompt contains `Selected integration:`, use that registered integration for `group.default_integration` and the initial agent instances unless the user explicitly approves a different registered integration.
+Accept an existing directory or a new absolute path. Expand user-home syntax. A missing root is valid when its nearest existing parent is a writable real directory. Give `C:\Agency` and `~/Agency` as examples. Derive these paths in memory without creating them:
 
-## 2. Resolve Agency
+```text
+agency.agent_library = <root>/agent-library
+agency.compilation_cache = <root>/compiled-agents
+agency.memory_store = <root>/memory
+groups.<group-id>.path = <root>/groups/<group-id>
+groups.<group-id>.workspace_path = <project workspace>
+```
+
+The group path remains pending until the group ID is approved. Do not create any derived directory during this section.
+
+## 2. Plan The Team And Resolve Agency
+
+After the root is selected, summarize the project and propose three to five distinct roles. Exactly one builder normally receives write capability; observational roles remain fail-closed.
+
+Before registration, ask the user how many agents to create for the first team and which proposed roles to create now. Do not infer extra instances beyond the approved count and selected roles. Ask the user to approve the group name and ID, team, each role's routine tasks, schedules, workspace definitions, and any shared memory channels. When the launch prompt contains `Selected integration:`, use that registered integration for `group.default_integration` and the initial agent instances unless the user explicitly approves a different registered integration.
+
+After the group ID is approved, derive `groups.<group-id>.path`. Ask exactly once: `Customize the derived storage paths?` If declined, keep every derived path. Do not ask about individual storage paths in the default flow. If accepted, present all four storage paths in one grouped review and allow any of them to be replaced.
+
+Resolve every effective path before creation. Require real writable parents, reject files, symlinks, and unsafe Windows reparse points, keep the global stores mutually disjoint, and keep every Agency-owned path disjoint from the project workspace. If validation fails, name the conflicting fields and resolved paths and return to the root choice or grouped review. Never choose a fallback location or project-local storage.
+
+Show one consolidated path summary containing the project workspace, authoritative config path, Agency data root, and four effective storage paths. No directory or blueprint may be created before the user approves this summary.
 
 When the launch prompt contains `Authoritative config:`, use that exact path and do not search for or choose another config. When the skill is invoked manually without an explicit authoritative path, find one config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where the required `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store` paths are present.
 
@@ -26,7 +46,7 @@ Load the current revision before editing, or use the absent revision when the fi
 
 ## 3. Build The Agent Library
 
-Use the configured global `agency.agent_library`; do not place blueprints under the project workspace. For each approved role, create:
+After the consolidated path summary is approved, create the approved `agency.agent_library` through safe directory operations; do not place blueprints under the project workspace. For each approved role, create:
 
 ```text
 {agent_library}/{blueprint}/
@@ -128,7 +148,7 @@ Write every approved workspace under the group's `workspaces` list. For a new gr
 
 ## 5. Verify And Schedule
 
-Validate every blueprint and Agent Skill, config cross-reference, registered explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path. Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Agency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write. Then parse the final config from disk and confirm it is still the revision just written. Then offer the singleton scheduler setup:
+Validate every blueprint and Agent Skill, config cross-reference, registered explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path. Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Agency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, group, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written. Then offer the singleton scheduler setup:
 
 ```text
 christag-agency dispatch install --config "{config_path}"
@@ -137,4 +157,4 @@ christag-agency dispatch status --config "{config_path}"
 
 There must be exactly one Agency dashboard and one singleton scheduler; do not create a fallback project scheduler.
 
-Report blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.
+Report the Agency data root, effective storage paths, blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.

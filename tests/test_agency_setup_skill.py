@@ -48,6 +48,46 @@ def test_setup_requires_user_selected_agent_count_and_roles():
     assert "how many agents to create" in normalized
     assert "which proposed roles to create now" in normalized
     assert "do not infer extra instances" in normalized
+
+
+def test_setup_asks_for_data_root_before_team_questions():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split()).lower()
+
+    root_question = normalized.index(
+        "ask for the agency data root as the first user-facing question"
+    )
+    team_question = normalized.index("how many agents to create")
+
+    assert root_question < team_question
+
+
+def test_setup_derives_canonical_paths_from_one_data_root():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+
+    for phrase in (
+        "separate home for Agency-owned data",
+        "existing directory or a new absolute path",
+        "nearest existing parent is a writable real directory",
+        r"C:\Agency",
+        "~/Agency",
+        "agency.agent_library = <root>/agent-library",
+        "agency.compilation_cache = <root>/compiled-agents",
+        "agency.memory_store = <root>/memory",
+        "groups.<group-id>.path = <root>/groups/<group-id>",
+        "groups.<group-id>.workspace_path = <project workspace>",
+    ):
+        assert phrase in skill
+
+
+def test_setup_keeps_path_overrides_behind_one_grouped_review():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+
+    assert "Ask exactly once: `Customize the derived storage paths?`" in skill
+    assert "one grouped review" in skill
+    assert "Do not ask about individual storage paths in the default flow." in skill
+    assert "one consolidated path summary" in skill
+    assert "No directory or blueprint may be created before" in skill
 def test_setup_skill_owns_group_naming_storage_workspaces_and_atomic_write():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split()).lower()
