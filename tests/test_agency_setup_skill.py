@@ -7,6 +7,8 @@ DISCOVERY_SKILL_DIR = REPO_ROOT / ".github" / "skills" / "agency-setup"
 SKILL_PATH = CANONICAL_SKILL_DIR / "SKILL.md"
 DISPATCH_TEMPLATES_PATH = CANONICAL_SKILL_DIR / "references" / "dispatch-templates.md"
 SETUP_KB_PATH = REPO_ROOT / "kb" / "setup-skill.md"
+TEMPLATES_PATH = CANONICAL_SKILL_DIR / "references" / "templates.md"
+README_PATH = REPO_ROOT / "README.md"
 
 
 def test_copilot_skill_discovery_resolves_to_canonical_source():
@@ -78,6 +80,32 @@ def test_setup_derives_canonical_paths_from_one_data_root():
         "groups.<group-id>.workspace_path = <project workspace>",
     ):
         assert phrase in skill
+
+
+def test_setup_docs_present_one_data_root_default():
+    templates = TEMPLATES_PATH.read_text(encoding="utf-8")
+    guide = SETUP_KB_PATH.read_text(encoding="utf-8")
+    readme = README_PATH.read_text(encoding="utf-8")
+
+    for document_name, text in {
+        "templates": templates,
+        "guide": guide,
+        "readme": readme,
+    }.items():
+        assert "Agency data root" in text, document_name
+
+    for path in (
+        "C:/Agency/agent-library",
+        "C:/Agency/compiled-agents",
+        "C:/Agency/memory",
+        "C:/Agency/groups/example",
+    ):
+        assert path in templates
+        assert path in guide
+
+    assert "first question" in guide.lower()
+    assert "first question" in readme.lower()
+    assert "`Customize the derived storage paths?`" in guide
 
 
 def test_setup_keeps_path_overrides_behind_one_grouped_review():
