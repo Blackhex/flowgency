@@ -56,7 +56,7 @@ def test_build_setup_prompt_requires_root_first_storage_flow(tmp_path: Path) -> 
         "authoritative config remains at the supplied path",
         "existing directory or a new absolute path",
         "nearest existing parent is writable",
-        r"C:\\Agency",
+        r"C:\Agency",
         "~/Agency",
         "agency.agent_library as <root>/agent-library",
         "agency.compilation_cache as <root>/compiled-agents",
