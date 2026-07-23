@@ -103,6 +103,21 @@ def test_setup_docs_present_one_data_root_default():
         assert path in templates
         assert path in guide
 
+    assert (
+        templates.count("Default setup starts from one user-selected Agency data root.") == 1
+    )
+    assert templates.count("## Standard Agent Skill") == 1
+    for marker in (
+        "Create each routine capability as a standard Agent Skill",
+        "name: {skill}",
+        "description: Use when {CONCRETE_TRIGGER_CONDITION}.",
+    ):
+        assert marker in templates
+
+    for document_name, text in {"guide": guide, "readme": readme}.items():
+        assert "~/Agency" in text, document_name
+        assert "expands" in text.lower(), document_name
+
     assert "first question" in guide.lower()
     assert "first question" in readme.lower()
     assert "`Customize the derived storage paths?`" in guide

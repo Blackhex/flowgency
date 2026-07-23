@@ -18,6 +18,8 @@ C:/Agency/
 `-- groups/example/      -> C:/Agency/groups/example
 ```
 
+Users may enter home syntax such as `~/Agency`; setup expands it to the user's home directory before deriving and storing the canonical paths.
+
 Setup then asks `Customize the derived storage paths?` once. Declining keeps the complete derived layout without individual path questions. Accepting opens one grouped review of all four paths. Nothing is created until the consolidated path summary is approved.
 
 ## Install
