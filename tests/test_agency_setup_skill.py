@@ -106,6 +106,14 @@ def test_setup_docs_present_one_data_root_default():
     assert (
         templates.count("Default setup starts from one user-selected Agency data root.") == 1
     )
+    for phrase in (
+        "workspace_path is project source and execution",
+        "path is Agency-owned group state",
+        "Agency never loads or creates <workspace_path>/shared",
+        "durable jobs live in agency.memory_store/.jobs",
+        "operation locks live in <group.path>/locks",
+    ):
+        assert phrase in templates
     assert templates.count("## Standard Agent Skill") == 1
     for marker in (
         "Create each routine capability as a standard Agent Skill",

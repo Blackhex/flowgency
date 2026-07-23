@@ -8,7 +8,7 @@ Every generated config uses `schema_version: 3` and requires `agency.agent_libra
 
 After read-only project inspection, the first question asks for one Agency data root. This is a separate home for reusable agent blueprints, disposable compiled projections, semantic memory and durable jobs, and per-group records. The project workspace remains source code and execution context, while `config.yaml` remains at its authoritative path.
 
-The root may be an existing directory or a new absolute path whose nearest existing parent is writable. For a root at `C:/Agency` and group ID `example`, setup derives:
+The root may be an existing directory or a new absolute path whose nearest existing parent is a writable real directory that can safely create it. For a root at `C:/Agency` and group ID `example`, setup derives:
 
 ```text
 C:/Agency/
