@@ -66,7 +66,6 @@ def test_setup_asks_for_data_root_before_team_questions():
 
 def test_setup_derives_canonical_paths_from_one_data_root():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-
     for phrase in (
         "separate home for Agency-owned data",
         "existing directory or a new absolute path",
@@ -80,6 +79,13 @@ def test_setup_derives_canonical_paths_from_one_data_root():
         "groups.<group-id>.workspace_path = <project workspace>",
     ):
         assert phrase in skill
+
+    # Ensure the later contiguous effective-path contract is present
+    normalized = " ".join(skill.split()).lower()
+    expected = (
+        "resolve every effective path before creation. require that each missing effective path's nearest existing parent is a writable real directory that can safely create it"
+    )
+    assert expected in normalized, "Effective-path contiguous contract is missing or altered"
 
 
 def test_setup_docs_present_one_data_root_default():
