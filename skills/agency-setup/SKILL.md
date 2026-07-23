@@ -34,7 +34,7 @@ Before registration, ask the user how many agents to create for the first team a
 
 After the group ID is approved, derive `groups.<group-id>.path`. Ask exactly once: `Customize the derived storage paths?` If declined, keep every derived path. Do not ask about individual storage paths in the default flow. If accepted, present all four storage paths in one grouped review and allow any of them to be replaced.
 
-Resolve every effective path before creation. Require real writable parents, reject files, symlinks, and unsafe Windows reparse points, keep the global stores mutually disjoint, and keep every Agency-owned path disjoint from the project workspace. If validation fails, name the conflicting fields and resolved paths and return to the root choice or grouped review. Never choose a fallback location or project-local storage.
+Resolve every effective path before creation. Require that each missing effective path's nearest existing parent is a writable real directory that can safely create it, reject files, symlinks, and unsafe Windows reparse points, keep the global stores mutually disjoint, and keep every Agency-owned path disjoint from the project workspace. If validation fails, name the conflicting fields and resolved paths and return to the root choice or grouped review. Never choose a fallback location or project-local storage.
 
 Show one consolidated path summary containing the project workspace, authoritative config path, Agency data root, and four effective storage paths. No directory or blueprint may be created before the user approves this summary.
 
