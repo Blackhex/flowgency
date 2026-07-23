@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import threading
 import shutil
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
 import yaml
 from fastapi.testclient import TestClient
 
@@ -229,6 +231,83 @@ def test_library_source_write_keeps_infra_outside_source_root(
         .blueprint_library.inspect("advisor")
         .snapshot.files,
     ) != digest
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path-budget regression")
+def test_library_source_write_supports_long_windows_path(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    target_root_length = 90
+    name_prefix = f"lp-{tmp_path.name[-5:]}-"
+    component_length = target_root_length - len(str(tmp_path.parent)) - 1
+    assert component_length >= len(name_prefix)
+    long_tmp_path = tmp_path.parent / (
+        name_prefix + "x" * (component_length - len(name_prefix))
+    )
+    assert len(str(long_tmp_path)) == target_root_length
+
+    full_hash_stage_directory = (
+        long_tmp_path
+        / ".agency-agent-library"
+        / ("a" * 64)
+        / "staging"
+        / f".{('b' * 64)}.stage-12345678"
+        / "advisor"
+        / ".agents"
+        / "skills"
+    )
+    compact_stage_file = (
+        long_tmp_path
+        / ".agency-agent-library"
+        / ("a" * 24)
+        / "staging"
+        / f".{('b' * 24)}.stage-12345678"
+        / "advisor"
+        / ".agents"
+        / "skills"
+        / "daily-review"
+        / "checklist.md"
+    )
+    assert len(str(full_hash_stage_directory)) >= 248
+    assert len(str(compact_stage_file)) < 248
+
+    client = None
+    try:
+        client, _, library_root, _ = _seed_library_app(
+            monkeypatch,
+            long_tmp_path,
+            raw_config,
+        )
+        inspection = app_mod.build_services(
+            long_tmp_path / "config.yaml"
+        ).blueprint_library.inspect("advisor")
+
+        response = client.post(
+            "/admin/agent-library/blueprints/advisor/source",
+            data={
+                "path": "AGENTS.md",
+                "expected_digest": inspection.snapshot.digest,
+                "content": "# Advisor\n\nLong path update.\n",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert (library_root / "advisor" / "AGENTS.md").read_text(
+            encoding="utf-8"
+        ) == "# Advisor\n\nLong path update.\n"
+        infrastructure_roots = list(
+            (long_tmp_path / ".agency-agent-library").iterdir()
+        )
+        assert len(infrastructure_roots) == 1
+        assert not any((infrastructure_roots[0] / "staging").iterdir())
+        assert not any((infrastructure_roots[0] / "backups").iterdir())
+    finally:
+        if client is not None:
+            client.close()
+        shutil.rmtree(long_tmp_path, ignore_errors=True)
 
 
 def test_library_skill_write_rejects_nonstandard_path(

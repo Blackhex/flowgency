@@ -23,6 +23,7 @@ from agency.web.dependencies import AgencyServices, get_services
 router = APIRouter()
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_INFRA_TOKEN_LENGTH = 24  # 96 bits leaves room for staged files on Windows.
 
 
 def _templates(request: Request):
@@ -87,6 +88,10 @@ def _safe_key_hash(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
+def _infra_token(value: str) -> str:
+    return _safe_key_hash(value)[:_INFRA_TOKEN_LENGTH]
+
+
 def _library_infra_root(services: AgencyServices) -> Path:
     library_root = _require_library(services).root.resolve()
     infra_root = _ensure_child_directory(
@@ -96,7 +101,7 @@ def _library_infra_root(services: AgencyServices) -> Path:
     )
     return _ensure_child_directory(
         infra_root,
-        hashlib.sha256(str(library_root).encode("utf-8")).hexdigest(),
+        _infra_token(str(library_root)),
         label="Agent Library infrastructure root",
     )
 
@@ -661,14 +666,14 @@ async def admin_blueprint_source_save(
                 )
             stage_parent = _create_verified_tempdir(
                 _infra_bucket(services, "staging"),
-                prefix=f".{_safe_key_hash(key)}.stage-",
+                prefix=f".{_infra_token(key)}.stage-",
                 label="Agent Library staging",
             )
             stage_root = stage_parent / key
             stage_root.mkdir(parents=True, exist_ok=True)
             backup_parent = _create_verified_tempdir(
                 _infra_bucket(services, "backups"),
-                prefix=f".{_safe_key_hash(key)}.backup-",
+                prefix=f".{_infra_token(key)}.backup-",
                 label="Agent Library backup",
             )
             try:
