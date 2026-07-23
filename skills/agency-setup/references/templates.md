@@ -41,7 +41,7 @@ C:/Agency/
 |-- compiled-agents/
 |-- memory/
 `-- groups/
-  `-- example/
+    `-- example/
 ```
 
 Map those derived paths to the unchanged schema version 3 fields and keep the execution workspace separate from Agency-owned state:
@@ -58,16 +58,17 @@ groups:
     path: C:/Agency/groups/example
 ```
 
-Default setup starts from one user-selected Agency data root. For an Agency data root at `C:/Agency` and a group ID of `example`, derive:
+The project workspace stays at `groups.<group-id>.workspace_path`, while the derived root-backed fields remain Agency-owned storage.
 
-```text
-C:/Agency/
-|-- agent-library/
-|-- compiled-agents/
-|-- memory/
-`-- groups/
-    `-- example/
-```
+## Standard Agent Skill
+
+Create each routine capability as a standard Agent Skill at `{agent_library}/{blueprint}/.agents/skills/{skill}/SKILL.md`:
+
+```markdown
+---
+name: {skill}
+description: Use when {CONCRETE_TRIGGER_CONDITION}.
+---
 
 # {Skill Title}
 
