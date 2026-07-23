@@ -58,6 +58,8 @@ groups:
     path: C:/Agency/groups/example
 ```
 
+workspace_path is project source and execution. path is Agency-owned group state. Agency never loads or creates <workspace_path>/shared. durable jobs live in agency.memory_store/.jobs, and operation locks live in <group.path>/locks.
+
 The project workspace stays at `groups.<group-id>.workspace_path`, while the derived root-backed fields remain Agency-owned storage.
 
 ## Standard Agent Skill

@@ -55,7 +55,7 @@ def test_build_setup_prompt_requires_root_first_storage_flow(tmp_path: Path) -> 
         "project workspace remains source",
         "authoritative config remains at the supplied path",
         "existing directory or a new absolute path",
-        "nearest existing parent is writable",
+        "nearest existing parent is a writable real directory that can safely create it",
         r"C:\Agency",
         "~/Agency",
         "agency.agent_library as <root>/agent-library",
