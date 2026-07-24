@@ -81,11 +81,7 @@ class TestGemini:
 
         issues = integration.validate_run(request)
 
-        assert [issue.code for issue in issues] == [
-            "unsupported-path-policy",
-            "unsupported-tool-policy",
-            "unsupported-skill-activation",
-        ]
+        assert [issue.code for issue in issues] == ["unsupported-skill-activation"]
 
     def test_detect(self, integration, tmp_agent_dir):
         (tmp_agent_dir / "GEMINI.md").write_text("# Agent\n")
@@ -540,7 +536,11 @@ class TestCopilot:
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
-        monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
+        monkeypatch.setattr(
+            CopilotIntegration,
+            "resolve_executable",
+            lambda self: "copilot",
+        )
 
         request = IntegrationRunRequest(
             workspace_root=tmp_agent_dir,
@@ -586,7 +586,11 @@ class TestCopilot:
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
-        monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
+        monkeypatch.setattr(
+            CopilotIntegration,
+            "resolve_executable",
+            lambda self: "copilot",
+        )
 
         request = IntegrationRunRequest(
             workspace_root=tmp_agent_dir,
@@ -635,7 +639,11 @@ class TestCopilot:
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
-        monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
+        monkeypatch.setattr(
+            CopilotIntegration,
+            "resolve_executable",
+            lambda self: "copilot",
+        )
 
         request = IntegrationRunRequest(
             workspace_root=tmp_agent_dir,
@@ -688,7 +696,11 @@ class TestCopilot:
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
-        monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: "copilot")
+        monkeypatch.setattr(
+            CopilotIntegration,
+            "resolve_executable",
+            lambda self: "copilot",
+        )
 
         request = IntegrationRunRequest(
             workspace_root=tmp_agent_dir,
@@ -750,6 +762,31 @@ class TestCopilot:
 
         monkeypatch.setattr(copilot_mod.sys, "platform", "linux")
         assert CopilotIntegration._resolve_real_cmd("copilot") == "copilot"
+
+    def test_copilot_public_resolver_returns_real_windows_executable(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        wrapper = tmp_path / "copilot.cmd"
+        executable = tmp_path / "copilot.exe"
+        wrapper.write_text("", encoding="utf-8")
+        executable.write_bytes(b"")
+        executable.chmod(0o755)
+        integration = CopilotIntegration()
+        monkeypatch.setattr(copilot_mod.sys, "platform", "win32")
+        monkeypatch.setattr(integration, "_find_cmd", lambda: str(wrapper))
+        monkeypatch.setattr(
+            copilot_mod.shutil,
+            "which",
+            lambda name, path=None: (
+                str(executable) if name == "copilot.exe" else None
+            ),
+        )
+
+        assert integration.resolve_executable() == str(executable.resolve())
 
     def test_parse_jsonl_extracts_native_edits(self):
         import json

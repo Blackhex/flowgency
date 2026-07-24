@@ -1,6 +1,5 @@
 """Google Gemini CLI integration."""
 
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -10,16 +9,21 @@ from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     read_sidecar, write_sidecar,
 )
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
 
 
 class GeminiIntegration(BaseIntegration):
     name = "gemini"
     display_name = "Google Gemini CLI"
+    cli_command = "gemini"
     supports_execution = True
     supports_ai_backend = False
     detect_priority = 10
     projector = get_projector("gemini")
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"unrestricted"}),
+        tool_modes=frozenset({"all"}),
+    )
 
     def identity_filename(self) -> str:
         return "GEMINI.md"
@@ -36,7 +40,7 @@ class GeminiIntegration(BaseIntegration):
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
         prompt_text = request.task_file.read_text()
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         start = time.monotonic()
         try:
             result = subprocess.run(
@@ -56,9 +60,6 @@ class GeminiIntegration(BaseIntegration):
             return RunResult(exit_code=124, stdout="", stderr="Timed out", duration_seconds=duration)
         except FileNotFoundError:
             raise IntegrationError(f"Gemini CLI not found. Looked for: {cmd}")
-
-    def _find_cmd(self) -> str:
-        return self._resolve_cmd("gemini")
 
 
 _register(GeminiIntegration())

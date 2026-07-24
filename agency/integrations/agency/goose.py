@@ -1,6 +1,5 @@
 """Goose CLI integration."""
 
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -9,16 +8,21 @@ from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     read_sidecar, write_sidecar,
 )
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
 
 
 class GooseIntegration(BaseIntegration):
     name = "goose"
     display_name = "Goose"
+    cli_command = "goose"
     supports_execution = True
     supports_ai_backend = True
     detect_priority = 10
     projector = BaseIntegration._default_projector(".goosehints")
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"unrestricted"}),
+        tool_modes=frozenset({"all"}),
+    )
 
     def identity_filename(self) -> str:
         return ".goosehints"
@@ -35,7 +39,7 @@ class GooseIntegration(BaseIntegration):
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
         prompt_text = request.task_file.read_text()
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         start = time.monotonic()
         try:
             result = subprocess.run(
@@ -55,9 +59,6 @@ class GooseIntegration(BaseIntegration):
             return RunResult(exit_code=124, stdout="", stderr="Timed out", duration_seconds=duration)
         except FileNotFoundError:
             raise IntegrationError(f"Goose CLI not found. Looked for: {cmd}")
-
-    def _find_cmd(self) -> str:
-        return self._resolve_cmd("goose")
 
 
 _register(GooseIntegration())

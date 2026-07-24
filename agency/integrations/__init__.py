@@ -1,5 +1,6 @@
 """Integration plugin system for Agency."""
 
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -73,6 +74,7 @@ class BaseIntegration:
     """Base class for all integrations. Subclass and register to add a new one."""
     name: str = ""
     display_name: str = ""
+    cli_command: str | None = None
     supports_execution: bool = True
     supports_ai_backend: bool = False
     supports_sandbox: bool = False
@@ -118,6 +120,37 @@ class BaseIntegration:
             if candidate.exists():
                 return str(candidate)
         return name
+
+    def _find_cmd(self) -> str:
+        if self.cli_command is None:
+            raise IntegrationError(
+                f"{self.display_name or self.name or 'Integration'} has no external CLI command."
+            )
+        return self._resolve_cmd(self.cli_command)
+
+    def _resolve_launch_command(self, command: str) -> str:
+        return command
+
+    def resolve_executable(self) -> str | None:
+        if self.cli_command is None:
+            return None
+        command = self._resolve_launch_command(self._find_cmd())
+        candidate = Path(command).expanduser()
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
+        located = shutil.which(command)
+        if located is None:
+            return None
+        return str(Path(located).resolve())
+
+    def require_executable(self) -> str:
+        command = self.resolve_executable()
+        if command is None:
+            label = self.display_name or self.name or "Integration"
+            raise IntegrationError(
+                f"{label} CLI is unavailable. Looked for: {self.cli_command}"
+            )
+        return command
 
     def detect(self, agent_dir: Path) -> bool:
         """Does this directory look like an agent managed by this tool?"""

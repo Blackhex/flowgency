@@ -33,6 +33,7 @@ from agency.integrations.models import (
 class CopilotIntegration(BaseIntegration):
     name = "copilot"
     display_name = "GitHub Copilot"
+    cli_command = "copilot"
     supports_execution = True
     supports_ai_backend = True
     supports_sandbox = True
@@ -356,7 +357,7 @@ class CopilotIntegration(BaseIntegration):
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
         prompt_text = request.task_file.read_text()
-        cmd = self._resolve_real_cmd(self._find_cmd())
+        cmd = self.require_executable()
 
         roots = request.runtime_policy.sandbox_roots
         tools = request.runtime_policy.tools
@@ -447,7 +448,7 @@ class CopilotIntegration(BaseIntegration):
             raise IntegrationError(f"GitHub Copilot CLI not found. Looked for: {cmd}")
 
     def prompt(self, text: str, timeout: int = 60) -> str:
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         try:
             result = subprocess.run(
                 [cmd, "-p", text, "--autopilot", "--experimental"],
@@ -461,8 +462,8 @@ class CopilotIntegration(BaseIntegration):
         except subprocess.TimeoutExpired:
             raise IntegrationError(f"copilot timed out after {timeout}s")
 
-    def _find_cmd(self) -> str:
-        return self._resolve_cmd("copilot")
+    def _resolve_launch_command(self, command: str) -> str:
+        return self._resolve_real_cmd(command)
 
     @staticmethod
     def _resolve_real_cmd(cmd: str) -> str:
