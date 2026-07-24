@@ -1,6 +1,5 @@
 """Claude Code CLI integration."""
 
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -12,7 +11,7 @@ from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     parse_identity_frontmatter,
 )
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
 
 # Keep backward-compat alias for any external importers
 _parse_frontmatter = parse_identity_frontmatter
@@ -21,10 +20,15 @@ _parse_frontmatter = parse_identity_frontmatter
 class ClaudeCodeIntegration(BaseIntegration):
     name = "claude-code"
     display_name = "Claude Code"
+    cli_command = "claude"
     supports_execution = True
     supports_ai_backend = True
     detect_priority = 10
     projector = get_projector("claude-code")
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"unrestricted"}),
+        tool_modes=frozenset({"all"}),
+    )
 
     def identity_filename(self) -> str:
         return "CLAUDE.md"
@@ -71,7 +75,7 @@ class ClaudeCodeIntegration(BaseIntegration):
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
         prompt_text = request.task_file.read_text()
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         start = time.monotonic()
         try:
             result = subprocess.run(
@@ -93,7 +97,7 @@ class ClaudeCodeIntegration(BaseIntegration):
             raise IntegrationError(f"Claude Code CLI not found. Looked for: {cmd}")
 
     def prompt(self, text: str, timeout: int = 60) -> str:
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         try:
             result = subprocess.run(
                 [cmd, "-p", text],
@@ -106,9 +110,6 @@ class ClaudeCodeIntegration(BaseIntegration):
             raise IntegrationError(f"Claude Code CLI not found. Looked for: {cmd}")
         except subprocess.TimeoutExpired:
             raise IntegrationError(f"claude timed out after {timeout}s")
-
-    def _find_cmd(self) -> str:
-        return self._resolve_cmd("claude")
 
 
 _register(ClaudeCodeIntegration())

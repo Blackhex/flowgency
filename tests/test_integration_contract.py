@@ -8,7 +8,14 @@ import pytest
 from agency.configuration import ValidationFailed
 from agency.configuration.issues import ValidationIssue
 from agency.configuration.effective import resolve_effective_policy
-from agency.integrations import REGISTRY, AgentIdentity, BaseIntegration, FileChange, RunResult
+from agency.integrations import (
+    REGISTRY,
+    AgentIdentity,
+    BaseIntegration,
+    FileChange,
+    IntegrationError,
+    RunResult,
+)
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
@@ -16,6 +23,33 @@ from agency.integrations.models import (
     ResolvedToolPolicy,
     RuntimeCapabilities,
 )
+
+
+AI_CLI_COMMANDS = {
+    "copilot": "copilot",
+    "claude-code": "claude",
+    "gemini": "gemini",
+    "codex": "codex",
+    "aider": "aider",
+    "goose": "goose",
+    "opencode": "opencode",
+    "pi": "pi",
+}
+
+UNCONFINED_CAPABILITIES = RuntimeCapabilities(
+    path_modes=frozenset({"unrestricted"}),
+    tool_modes=frozenset({"all"}),
+)
+
+AI_CLI_RUN_ARGUMENTS = {
+    "claude-code": ["--dangerously-skip-permissions", "-p", "Run probe"],
+    "gemini": ["-p", "Run probe"],
+    "codex": ["exec", "--yolo", "Run probe"],
+    "aider": ["--message-file", "{task_file}"],
+    "goose": ["run", "Run probe"],
+    "opencode": ["run", "Run probe"],
+    "pi": ["-p", "Run probe"],
+}
 
 
 def all_integration_names():
@@ -101,16 +135,78 @@ class TestIntegrationContract:
 
 
 def test_registry_runtime_capabilities_surface_is_fail_closed():
-    for name, integration in REGISTRY.items():
-        if name == "copilot":
-            assert integration.runtime_capabilities.path_modes == frozenset({"restricted", "unrestricted"})
-            assert integration.runtime_capabilities.tool_modes == frozenset({"all", "allowlist"})
-        elif name == "script":
-            assert integration.runtime_capabilities.path_modes == frozenset({"unrestricted"})
-            assert integration.runtime_capabilities.tool_modes == frozenset({"all"})
-        else:
-            assert integration.runtime_capabilities.path_modes == frozenset()
-            assert integration.runtime_capabilities.tool_modes == frozenset()
+    expected = {
+        "copilot": RuntimeCapabilities(
+            path_modes=frozenset({"restricted", "unrestricted"}),
+            tool_modes=frozenset({"all", "allowlist"}),
+        ),
+        "script": RuntimeCapabilities(
+            path_modes=frozenset({"unrestricted"}),
+            tool_modes=frozenset({"all"}),
+        ),
+        "sdk": RuntimeCapabilities(),
+        "claude-code": UNCONFINED_CAPABILITIES,
+        "gemini": UNCONFINED_CAPABILITIES,
+        "codex": UNCONFINED_CAPABILITIES,
+        "aider": UNCONFINED_CAPABILITIES,
+        "goose": UNCONFINED_CAPABILITIES,
+        "opencode": UNCONFINED_CAPABILITIES,
+        "pi": UNCONFINED_CAPABILITIES,
+    }
+
+    assert {name: integration.runtime_capabilities for name, integration in REGISTRY.items()} == expected
+
+
+def test_builtin_ai_cli_integrations_declare_canonical_commands():
+    declared = {
+        name: integration.cli_command
+        for name, integration in REGISTRY.items()
+        if integration.cli_command is not None
+    }
+
+    assert declared == AI_CLI_COMMANDS
+    assert REGISTRY["script"].cli_command is None
+    assert REGISTRY["sdk"].cli_command is None
+
+
+def test_builtin_ai_cli_runtime_capabilities_are_truthful():
+    assert REGISTRY["copilot"].runtime_capabilities == RuntimeCapabilities(
+        path_modes=frozenset({"restricted", "unrestricted"}),
+        tool_modes=frozenset({"all", "allowlist"}),
+    )
+    for name in AI_CLI_COMMANDS.keys() - {"copilot"}:
+        assert REGISTRY[name].runtime_capabilities == UNCONFINED_CAPABILITIES
+
+
+def test_public_executable_resolver_returns_launchable_path(tmp_path, monkeypatch):
+    executable = tmp_path / "probe.exe"
+    executable.write_bytes(b"")
+    executable.chmod(0o755)
+
+    class ProbeIntegration(BaseIntegration):
+        name = "probe"
+        display_name = "Probe"
+        cli_command = "probe"
+
+    monkeypatch.setattr(
+        "agency.integrations.shutil.which",
+        lambda command: str(executable) if command == "probe" else None,
+    )
+
+    assert ProbeIntegration().resolve_executable() == str(executable.resolve())
+
+
+def test_public_executable_resolver_returns_none_when_missing(monkeypatch):
+    class ProbeIntegration(BaseIntegration):
+        name = "probe"
+        display_name = "Probe"
+        cli_command = "probe"
+
+    monkeypatch.setattr("agency.integrations.shutil.which", lambda command: None)
+
+    assert ProbeIntegration().resolve_executable() is None
+    with pytest.raises(IntegrationError, match="Probe CLI is unavailable"):
+        ProbeIntegration().require_executable()
 
 
 def test_all_execution_integrations_run_accepts_sandbox_root():
@@ -212,6 +308,66 @@ def test_execution_integrations_enforce_validate_run_before_subprocess_or_prompt
         "pi",
         "script",
     ]
+
+
+@pytest.mark.parametrize(
+    ("integration_name", "expected_tail"),
+    AI_CLI_RUN_ARGUMENTS.items(),
+)
+def test_ai_cli_run_uses_declared_command_and_validated_request(
+    integration_name,
+    expected_tail,
+    tmp_path,
+    monkeypatch,
+):
+    integration = REGISTRY[integration_name]
+    launch_dir = tmp_path / "launch"
+    workspace_root = tmp_path / "workspace"
+    task_file = tmp_path / "task.md"
+    launch_dir.mkdir()
+    workspace_root.mkdir()
+    task_file.write_text("Run probe", encoding="utf-8")
+    request = IntegrationRunRequest(
+        workspace_root=workspace_root,
+        launch_dir=launch_dir,
+        task_file=task_file,
+        timeout=30,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=30,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tools=ResolvedToolPolicy("all", ()),
+        ),
+        skill=None,
+        skill_arguments=(),
+    )
+    captured = {}
+
+    def fake_run(arguments, **kwargs):
+        captured["arguments"] = arguments
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(arguments, 0, "ok", "")
+
+    monkeypatch.setattr(
+        integration,
+        "resolve_executable",
+        lambda: "C:/runtime/agent.exe",
+    )
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = integration.run(request)
+
+    normalized_tail = [
+        str(task_file) if value == "{task_file}" else value
+        for value in expected_tail
+    ]
+    assert captured["arguments"] == [
+        "C:/runtime/agent.exe",
+        *normalized_tail,
+    ]
+    assert captured["kwargs"]["cwd"] == str(launch_dir)
+    assert captured["kwargs"]["timeout"] == 30
+    assert result.exit_code == 0
 
 
 def test_non_executable_integrations_reject_before_any_result_is_fabricated(tmp_path):

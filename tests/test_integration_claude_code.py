@@ -94,11 +94,7 @@ def test_validate_run_rejects_skill_activation_until_cli_contract_is_verified(in
 
     issues = integration.validate_run(request)
 
-    assert [issue.code for issue in issues] == [
-        "unsupported-path-policy",
-        "unsupported-tool-policy",
-        "unsupported-skill-activation",
-    ]
+    assert [issue.code for issue in issues] == ["unsupported-skill-activation"]
 
 
 def test_run_rejects_invalid_typed_request_before_reading_task_file(integration, tmp_path):
@@ -123,7 +119,5 @@ def test_run_rejects_invalid_typed_request_before_reading_task_file(integration,
         integration.run(request)
 
     assert [issue.code for issue in excinfo.value.issues] == [
-        "unsupported-path-policy",
-        "unsupported-tool-policy",
-        "unsupported-skill-activation",
+        "unsupported-skill-activation"
     ]

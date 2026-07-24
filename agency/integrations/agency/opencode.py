@@ -7,16 +7,21 @@ from pathlib import Path
 from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
 )
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
 
 
 class OpenCodeIntegration(BaseIntegration):
     name = "opencode"
     display_name = "OpenCode"
+    cli_command = "opencode"
     supports_execution = True
     supports_ai_backend = False
     detect_priority = 8
     projector = BaseIntegration._default_projector("AGENTS.md")
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"unrestricted"}),
+        tool_modes=frozenset({"all"}),
+    )
 
     def identity_filename(self) -> str:
         return "AGENTS.md"
@@ -33,7 +38,7 @@ class OpenCodeIntegration(BaseIntegration):
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
         prompt_text = request.task_file.read_text()
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         start = time.monotonic()
         try:
             result = subprocess.run(
@@ -53,9 +58,6 @@ class OpenCodeIntegration(BaseIntegration):
             return RunResult(exit_code=124, stdout="", stderr="Timed out", duration_seconds=duration)
         except FileNotFoundError:
             raise IntegrationError(f"OpenCode CLI not found. Looked for: {cmd}")
-
-    def _find_cmd(self) -> str:
-        return self._resolve_cmd("opencode")
 
 
 _register(OpenCodeIntegration())

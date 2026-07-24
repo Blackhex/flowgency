@@ -1,6 +1,5 @@
 """OpenAI Codex CLI integration."""
 
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -9,16 +8,21 @@ from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     read_sidecar, write_sidecar,
 )
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
 
 
 class CodexIntegration(BaseIntegration):
     name = "codex"
     display_name = "OpenAI Codex"
+    cli_command = "codex"
     supports_execution = True
     supports_ai_backend = True
     detect_priority = 10
     projector = BaseIntegration._default_projector("AGENTS.md")
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"unrestricted"}),
+        tool_modes=frozenset({"all"}),
+    )
 
     def identity_filename(self) -> str:
         return "AGENTS.md"
@@ -35,7 +39,7 @@ class CodexIntegration(BaseIntegration):
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
         prompt_text = request.task_file.read_text()
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         start = time.monotonic()
         try:
             result = subprocess.run(
@@ -57,7 +61,7 @@ class CodexIntegration(BaseIntegration):
             raise IntegrationError(f"Codex CLI not found. Looked for: {cmd}")
 
     def prompt(self, text: str, timeout: int = 60) -> str:
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         try:
             result = subprocess.run(
                 [cmd, "exec", "--full-auto", text],
@@ -70,9 +74,6 @@ class CodexIntegration(BaseIntegration):
             raise IntegrationError(f"Codex CLI not found. Looked for: {cmd}")
         except subprocess.TimeoutExpired:
             raise IntegrationError(f"codex timed out after {timeout}s")
-
-    def _find_cmd(self) -> str:
-        return self._resolve_cmd("codex")
 
 
 _register(CodexIntegration())

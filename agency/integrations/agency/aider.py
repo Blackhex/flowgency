@@ -1,6 +1,5 @@
 """Aider CLI integration."""
 
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -9,16 +8,21 @@ from agency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
     read_sidecar, write_sidecar,
 )
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
 
 
 class AiderIntegration(BaseIntegration):
     name = "aider"
     display_name = "Aider"
+    cli_command = "aider"
     supports_execution = True
     supports_ai_backend = False
     detect_priority = 10
     projector = BaseIntegration._default_projector("CONVENTIONS.md")
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"unrestricted"}),
+        tool_modes=frozenset({"all"}),
+    )
 
     def identity_filename(self) -> str:
         return "CONVENTIONS.md"
@@ -34,7 +38,7 @@ class AiderIntegration(BaseIntegration):
 
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
-        cmd = self._find_cmd()
+        cmd = self.require_executable()
         start = time.monotonic()
         try:
             result = subprocess.run(
@@ -54,9 +58,6 @@ class AiderIntegration(BaseIntegration):
             return RunResult(exit_code=124, stdout="", stderr="Timed out", duration_seconds=duration)
         except FileNotFoundError:
             raise IntegrationError(f"Aider CLI not found. Looked for: {cmd}")
-
-    def _find_cmd(self) -> str:
-        return self._resolve_cmd("aider")
 
 
 _register(AiderIntegration())
