@@ -217,6 +217,9 @@ def test_projector_relocates_without_rewriting(
 ):
     projector = get_projector(integration)
 
+    # Root instruction discovery must be explicit for AI CLI projectors
+    assert projector.capabilities.discovers_instructions is True
+
     projector.project(blueprint_snapshot, tmp_path)
 
     assert (

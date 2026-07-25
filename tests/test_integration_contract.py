@@ -244,6 +244,13 @@ def test_registry_projector_skill_support_is_fail_closed_except_verified_integra
             assert caps.activates_selected_skill is False
 
 
+def test_builtin_ai_cli_projectors_declare_instruction_discovery():
+    for name in AI_CLI_COMMANDS:
+        assert REGISTRY[name].projector.capabilities.discovers_instructions is True
+    assert REGISTRY["script"].projector.capabilities.discovers_instructions is False
+    assert REGISTRY["sdk"].projector.capabilities.discovers_instructions is False
+
+
 def test_decision_run_allows_null_skill():
     integration = REGISTRY["copilot"]
     request = IntegrationRunRequest(

@@ -266,7 +266,11 @@ class BaseIntegration:
         )
 
     @staticmethod
-    def _default_projector(instruction_name: str) -> "RuntimeProjector":
+    def _default_projector(
+        instruction_name: str,
+        *,
+        discovers_instructions: bool = False,
+    ) -> "RuntimeProjector":
         from agency.blueprints.projectors import StaticRuntimeProjector
 
         return StaticRuntimeProjector(
@@ -274,6 +278,7 @@ class BaseIntegration:
             capabilities=ProjectorCapabilities(
                 instruction_target=PurePosixPath(instruction_name),
                 skills_target=PurePosixPath(".agents/skills"),
+                discovers_instructions=discovers_instructions,
                 discovers_skills=False,
                 activates_selected_skill=False,
             ),
