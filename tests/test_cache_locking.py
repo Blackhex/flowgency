@@ -31,6 +31,7 @@ def _projector() -> StaticRuntimeProjector:
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("AGENTS.md"),
             skills_target=PurePosixPath(".agents/skills"),
+            discovers_instructions=True,
             discovers_skills=True,
             activates_selected_skill=True,
         ),
@@ -73,6 +74,7 @@ def _compile_once(
                 capabilities=ProjectorCapabilities(
                     instruction_target=PurePosixPath("AGENTS.md"),
                     skills_target=PurePosixPath(".agents/skills"),
+                    discovers_instructions=True,
                     discovers_skills=True,
                     activates_selected_skill=True,
                 ),

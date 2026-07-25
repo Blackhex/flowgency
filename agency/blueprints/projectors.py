@@ -113,6 +113,7 @@ PROJECTORS: dict[str, StaticRuntimeProjector] = {
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("AGENTS.md"),
             skills_target=PurePosixPath(".agents/skills"),
+            discovers_instructions=True,
             discovers_skills=True,
             activates_selected_skill=True,
         ),
@@ -122,6 +123,7 @@ PROJECTORS: dict[str, StaticRuntimeProjector] = {
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("CLAUDE.md"),
             skills_target=PurePosixPath(".claude/skills"),
+            discovers_instructions=True,
             discovers_skills=False,
             activates_selected_skill=False,
         ),
@@ -131,6 +133,7 @@ PROJECTORS: dict[str, StaticRuntimeProjector] = {
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("GEMINI.md"),
             skills_target=PurePosixPath(".agents/skills"),
+            discovers_instructions=True,
             discovers_skills=False,
             activates_selected_skill=False,
         ),

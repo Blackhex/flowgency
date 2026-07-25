@@ -18,7 +18,7 @@ class CodexIntegration(BaseIntegration):
     supports_execution = True
     supports_ai_backend = True
     detect_priority = 10
-    projector = BaseIntegration._default_projector("AGENTS.md")
+    projector = BaseIntegration._default_projector("AGENTS.md", discovers_instructions=True)
     runtime_capabilities = RuntimeCapabilities(
         path_modes=frozenset({"unrestricted"}),
         tool_modes=frozenset({"all"}),

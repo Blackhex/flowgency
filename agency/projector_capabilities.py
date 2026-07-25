@@ -8,5 +8,6 @@ from pathlib import PurePosixPath
 class ProjectorCapabilities:
     instruction_target: PurePosixPath
     skills_target: PurePosixPath
+    discovers_instructions: bool
     discovers_skills: bool
     activates_selected_skill: bool
