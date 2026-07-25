@@ -22,6 +22,8 @@ from tests._runtime_probe_helpers import (
     capture_protected_state,
     create_probe_directories,
     installed_ai_cli_runtimes,
+    selected_skill_supported,
+    write_boundary_supported,
 )
 
 
@@ -46,6 +48,20 @@ def test_live_scenario_contract_covers_all_builtin_ai_clis():
         "write-boundary",
     )
     assert {name: REGISTRY[name].cli_command for name in AI_CLI_COMMANDS} == AI_CLI_COMMANDS
+
+
+def test_all_builtin_ai_clis_have_four_capability_aware_scenarios():
+    for name in AI_CLI_COMMANDS:
+        integration = REGISTRY[name]
+        assert integration.projector.capabilities.discovers_instructions is True
+        assert isinstance(selected_skill_supported(integration), bool)
+        assert isinstance(write_boundary_supported(integration), bool)
+    assert LIVE_SCENARIOS == (
+        "basic",
+        "root-instructions",
+        "selected-skill",
+        "write-boundary",
+    )
 
 
 def test_installed_runtime_collection_omits_unavailable_clis(monkeypatch):
