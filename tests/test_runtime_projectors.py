@@ -5,14 +5,27 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from agency.blueprints.projectors import get_projector
+from agency.integrations import RunResult
 from agency.fs.snapshot import (
     SnapshotFile,
     TreeSnapshot,
     compute_source_digest,
 )
 from agency.integrations import REGISTRY
-from tests._runtime_probe_helpers import AI_CLI_COMMANDS, LIVE_SCENARIOS
-from tests._runtime_probe_helpers import InstalledRuntime, installed_ai_cli_runtimes
+from tests._runtime_probe_helpers import (
+    AI_CLI_COMMANDS,
+    LIVE_SCENARIOS,
+    InstalledRuntime,
+    assert_live_success,
+    assert_projection_valid,
+    assert_protected_state_unchanged,
+    capture_protected_state,
+    create_probe_directories,
+    installed_ai_cli_runtimes,
+)
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_live_scenario_contract_covers_all_builtin_ai_clis():
@@ -120,3 +133,64 @@ def test_projector_validation_rejects_missing_and_extra_projection_paths(
         "projector-missing-path",
         "projector-unexpected-path",
     }
+
+
+def test_live_success_failure_uses_full_runtime_label():
+    runtime = InstalledRuntime("copilot", "C:/bin/copilot.exe")
+    result = RunResult(
+        exit_code=1,
+        stdout="",
+        stderr="boom",
+        duration_seconds=0.1,
+    )
+
+    with pytest.raises(AssertionError, match=r"copilot/basic \(C:/bin/copilot\.exe\)"):
+        assert_live_success(result, runtime, "basic", "AGENCY_TOKEN")
+
+
+def test_projection_validation_failure_reports_full_label_and_issues(
+    blueprint_snapshot: TreeSnapshot, tmp_path
+):
+    runtime = InstalledRuntime("copilot", "C:/bin/copilot.exe")
+    projector = get_projector("copilot")
+    projector.project(blueprint_snapshot, tmp_path)
+    (tmp_path / ".agents" / "skills" / "daily-review" / "SKILL.md").unlink()
+    (tmp_path / ".agents" / "skills" / "unexpected.txt").write_text(
+        "extra", encoding="utf-8"
+    )
+
+    with pytest.raises(AssertionError) as excinfo:
+        assert_projection_valid(projector, blueprint_snapshot, tmp_path, runtime, "basic")
+
+    assert "copilot/basic (C:/bin/copilot.exe)" in str(excinfo.value)
+    assert "projector-missing-path" in str(excinfo.value)
+    assert "projector-unexpected-path" in str(excinfo.value)
+
+
+def test_protected_state_failure_uses_full_runtime_label(tmp_path):
+    runtime = InstalledRuntime("copilot", "C:/bin/copilot.exe")
+    launch_dir, workspace_root, task_dir = create_probe_directories(tmp_path)
+    projected_file = launch_dir / "AGENTS.md"
+    projected_file.write_text("instructions\n", encoding="utf-8")
+    workspace_file = workspace_root / "notes.txt"
+    workspace_file.write_text("before\n", encoding="utf-8")
+    task_file = task_dir / "task.md"
+    task_file.write_text("task\n", encoding="utf-8")
+    before = capture_protected_state(
+        launch_dir,
+        workspace_root,
+        task_file,
+        REPOSITORY_ROOT,
+    )
+    workspace_file.write_text("after\n", encoding="utf-8")
+
+    with pytest.raises(AssertionError, match=r"copilot/root-instructions \(C:/bin/copilot\.exe\): workspace changed"):
+        assert_protected_state_unchanged(
+            before,
+            launch_dir,
+            workspace_root,
+            task_file,
+            REPOSITORY_ROOT,
+            runtime=runtime,
+            scenario="root-instructions",
+        )
