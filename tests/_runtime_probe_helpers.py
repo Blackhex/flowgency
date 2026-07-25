@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 import subprocess
 from uuid import uuid4
 
+from agency.configuration import ValidationFailed
 from agency.fs.snapshot import SnapshotFile, TreeSnapshot, compute_source_digest
 from agency.integrations import REGISTRY, RunResult
 from agency.integrations.models import (
@@ -75,13 +76,17 @@ def unique_token(label: str) -> str:
     return f"AGENCY_{label}_{uuid4().hex.upper()}"
 
 
+def runtime_probe_label(runtime: InstalledRuntime, scenario: str) -> str:
+    return f"{runtime.name}/{scenario} ({runtime.command})"
+
+
 def assert_live_success(
     result: RunResult,
     runtime: InstalledRuntime,
     scenario: str,
     token: str,
 ) -> None:
-    label = f"{runtime.name}/{scenario} ({runtime.command})"
+    label = runtime_probe_label(runtime, scenario)
     assert result.exit_code == 0, (
         f"{label}: exit={result.exit_code}; stderr={result.stderr!r}"
     )
@@ -92,6 +97,18 @@ def assert_live_success(
     assert result.changed_files == [], (
         f"{label}: unexpected changed files: {result.changed_files!r}"
     )
+
+
+def assert_projection_valid(
+    projector,
+    source: TreeSnapshot,
+    launch_dir: Path,
+    runtime: InstalledRuntime,
+    scenario: str,
+) -> None:
+    issues = projector.validate_output(source, launch_dir)
+    label = runtime_probe_label(runtime, scenario)
+    assert issues == (), f"{label}: projection validation failed: {ValidationFailed(issues)!r}; issues={issues!r}"
 
 
 def tree_bytes(root: Path) -> dict[PurePosixPath, bytes]:
@@ -196,7 +213,8 @@ def assert_protected_state_unchanged(
     task_file: Path,
     repository_root: Path,
     *,
-    label: str,
+    runtime: InstalledRuntime,
+    scenario: str,
 ) -> None:
     after = capture_protected_state(
         launch_dir,
@@ -204,6 +222,7 @@ def assert_protected_state_unchanged(
         task_file,
         repository_root,
     )
+    label = runtime_probe_label(runtime, scenario)
     assert after.projection == before.projection, f"{label}: projection changed"
     assert after.workspace == before.workspace, f"{label}: workspace changed"
     assert after.task == before.task, f"{label}: task changed"

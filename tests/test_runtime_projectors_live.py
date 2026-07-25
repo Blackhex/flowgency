@@ -7,6 +7,7 @@ from agency.integrations import REGISTRY
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
     assert_live_success,
+    assert_projection_valid,
     assert_protected_state_unchanged,
     capture_protected_state,
     create_probe_directories,
@@ -42,7 +43,13 @@ else:
         launch_dir, workspace_root, task_dir = create_probe_directories(tmp_path)
         source = snapshot("# Neutral runtime probe\n")
         integration.projector.project(source, launch_dir)
-        assert integration.projector.validate_output(source, launch_dir) == ()
+        assert_projection_valid(
+            integration.projector,
+            source,
+            launch_dir,
+            runtime,
+            "basic",
+        )
         task_file = task_dir / "basic.md"
         task_file.write_text(
             f"Reply with exactly {token}. Do not use tools or modify files.\n",
@@ -64,7 +71,8 @@ else:
             workspace_root,
             task_file,
             REPOSITORY_ROOT,
-            label=f"{runtime.name}/basic",
+            runtime=runtime,
+            scenario="basic",
         )
 
 
@@ -79,7 +87,13 @@ else:
             f"{token}\n"
         )
         integration.projector.project(source, launch_dir)
-        assert integration.projector.validate_output(source, launch_dir) == ()
+        assert_projection_valid(
+            integration.projector,
+            source,
+            launch_dir,
+            runtime,
+            "root-instructions",
+        )
         task_file = task_dir / "instructions.md"
         task_file.write_text(
             "Follow the projected root instructions and return their exact token. "
@@ -102,5 +116,6 @@ else:
             workspace_root,
             task_file,
             REPOSITORY_ROOT,
-            label=f"{runtime.name}/root-instructions",
+            runtime=runtime,
+            scenario="root-instructions",
         )
