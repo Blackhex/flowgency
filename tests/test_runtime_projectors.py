@@ -235,3 +235,14 @@ def test_live_runtime_marker_and_docs_describe_automatic_installed_probes(
         assert "credentials" in text.lower()
         assert "network" in text.lower()
         assert "quota" in text.lower()
+        assert "timeout" in text.lower()
+        assert "runtime" in text.lower()
+        # assert docs name the four required scenarios
+        assert "basic execution" in text.lower() or "basic" in text.lower()
+        assert "native root instructions" in text.lower() or "root-instructions" in text.lower() or "root instructions" in text.lower()
+        assert "selected skill" in text.lower() or "selected-skill" in text.lower()
+        assert "write boundary" in text.lower() or "write-boundary" in text.lower()
+    # contributor doc must name integration contract pieces
+    assert "cli_command" in contributing_doc
+    assert "ProjectorCapabilities.discovers_instructions" in contributing_doc
+    assert "activates_selected_skill" in contributing_doc or "selected skill" in contributing_doc
