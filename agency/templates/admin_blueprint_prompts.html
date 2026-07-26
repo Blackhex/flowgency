@@ -2,10 +2,16 @@
 {% block title %}{{ blueprint.title }} Prompts - Agent Library{% endblock %}
 {% block content %}
 <div class="max-w-6xl space-y-6">
-  <div>
-    <a href="/admin/agent-library/blueprints/{{ blueprint.key }}" class="text-sm text-indigo-600 hover:text-indigo-800">← {{ blueprint.title }}</a>
-    <h1 class="mt-2 text-2xl font-bold text-gray-900">Shared prompt source editor</h1>
-    <p class="mt-1 text-sm text-gray-500">Create, edit, and remove blueprint-shared prompts under .agents/prompts.</p>
+  <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <div>
+      <a href="/admin/agent-library/blueprints/{{ blueprint.key }}" class="text-sm text-indigo-600 hover:text-indigo-800">← {{ blueprint.title }}</a>
+      <h1 class="mt-2 text-2xl font-bold text-gray-900">Shared prompt source editor</h1>
+      <p class="mt-1 text-sm text-gray-500">Create, edit, and remove blueprint-shared prompts under .agents/prompts.</p>
+    </div>
+    <div class="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+      <div class="font-medium text-gray-900">Source digest</div>
+      <div class="mt-1 font-mono text-xs break-all">{{ blueprint.snapshot.digest }}</div>
+    </div>
   </div>
 
   {% if warning %}
