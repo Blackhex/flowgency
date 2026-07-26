@@ -37,6 +37,7 @@ from agency.memory.store import (
     memory_content_revision,
 )
 from agency.memory.publication import _save_direct_locked
+from agency.prompts import PromptConflictError, PromptNotFoundError, PromptStore
 
 
 MemoryMode = Literal["copy", "empty"]
@@ -68,6 +69,7 @@ class InstanceMutationResult:
 class RemoveInstanceResult:
     snapshot: ConfigSnapshot
     orphaned_memories: tuple[ResolvedMemory, ...]
+    orphaned_prompt_namespace: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,7 @@ class MovePreview:
     config_revision: str
     source_revisions: tuple[tuple[str, str | None], ...]
     memory_pairs: tuple[tuple[ResolvedMemory, ResolvedMemory], ...]
+    source_prompts: tuple[tuple[str, str], ...] = ()
 
 
 class InstanceMoveConflict(RuntimeError):
@@ -158,12 +161,18 @@ def remove_instance(
 def preview_move(
     snapshot: ConfigSnapshot,
     memory_store: MemoryStore,
+    prompt_store: PromptStore,
     source_group: str,
     agent_id: str,
     target_group: str,
     memory_mode: MemoryMode,
 ) -> MovePreview:
     source = get_instance(snapshot, source_group, agent_id)
+    source_prompts = _registered_prompt_entries(
+        prompt_store,
+        source_group,
+        source,
+    )
     memory_pairs = _resolve_owned_memory_pairs(
         snapshot,
         memory_store,
@@ -182,6 +191,8 @@ def preview_move(
             target_group,
             agent_id,
             destination_memories,
+            prompt_store,
+            source_prompts,
         )
     )
     source_revisions = tuple(
@@ -202,12 +213,14 @@ def preview_move(
         config_revision=snapshot.revision,
         source_revisions=source_revisions,
         memory_pairs=memory_pairs,
+        source_prompts=source_prompts,
     )
 
 
 def move_instance(
     store: ConfigStore,
     memory_store: MemoryStore,
+    prompt_store: PromptStore,
     preview: MovePreview,
 ) -> ConfigSnapshot:
     if preview.blocked_by:
@@ -232,6 +245,11 @@ def move_instance(
             preview.source_group,
             preview.agent_name,
         )
+        source_prompts = _registered_prompt_entries(
+            prompt_store,
+            preview.source_group,
+            source_agent,
+        )
         memory_pairs = _resolve_owned_memory_pairs(
             refreshed,
             memory_store,
@@ -250,6 +268,8 @@ def move_instance(
                 preview.target_group,
                 preview.agent_name,
                 destination_memories,
+                prompt_store,
+                source_prompts,
             )
         )
         if blocked:
@@ -303,6 +323,15 @@ def move_instance(
                             lease=leases[target_resolved.memory_hash],
                         )
 
+            if source_prompts:
+                prompt_store.copy_namespace(
+                    preview.source_group,
+                    preview.agent_name,
+                    preview.target_group,
+                    preview.agent_name,
+                    registered=source_prompts,
+                )
+
             updated = store.patch(
                 refreshed.revision,
                 lambda raw: _apply_move_patch(
@@ -324,7 +353,27 @@ def move_instance(
                 raise InstanceMoveRollbackError(
                     tuple(rollback_errors)
                 ) from exc
+            if source_prompts:
+                try:
+                    prompt_store.delete_namespace(
+                        preview.target_group,
+                        preview.agent_name,
+                        registered=source_prompts,
+                    )
+                except Exception as cleanup_exc:
+                    raise RuntimeError(
+                        "move failed after copying target prompts and prompt rollback failed"
+                    ) from cleanup_exc
             raise
+        if source_prompts:
+            try:
+                prompt_store.delete_namespace(
+                    preview.source_group,
+                    preview.agent_name,
+                    registered=source_prompts,
+                )
+            except Exception:
+                pass
     return updated
 
 
@@ -334,10 +383,15 @@ class InstanceService:
         config_store: ConfigStore,
         library: BlueprintLibrary,
         memory_store: MemoryStore,
+        prompt_store: PromptStore | None = None,
     ):
         self.config_store = config_store
         self.library = library
         self.memory_store = memory_store
+        if prompt_store is None:
+            snapshot = config_store.load()
+            prompt_store = PromptStore(snapshot.config.agency.prompt_store)
+        self.prompt_store = prompt_store
 
     def list(self, group_id: str) -> tuple[AgentInstance, ...]:
         snapshot = self.config_store.load()
@@ -384,15 +438,39 @@ class InstanceService:
             group_id=group_id,
             agent=agent,
         )
+        registered_prompts = _registered_prompt_entries(
+            self.prompt_store,
+            group_id,
+            agent,
+        )
         updated = remove_instance(
             self.config_store,
             expected_revision,
             group_id,
             agent_id,
         )
+        orphaned_prompt_namespace: Path | None = None
+        if registered_prompts:
+            namespace = self.prompt_store.path(
+                group_id,
+                agent_id,
+                registered_prompts[0][0],
+            ).parent
+            try:
+                self.prompt_store.delete_namespace(
+                    group_id,
+                    agent_id,
+                    registered=registered_prompts,
+                )
+            except Exception:
+                orphaned_prompt_namespace = namespace
+            else:
+                if namespace.exists() and any(namespace.iterdir()):
+                    orphaned_prompt_namespace = namespace
         return RemoveInstanceResult(
             snapshot=updated,
             orphaned_memories=orphaned,
+            orphaned_prompt_namespace=orphaned_prompt_namespace,
         )
 
     def preview_move(
@@ -413,6 +491,7 @@ class InstanceService:
         return preview_move(
             snapshot,
             self.memory_store,
+            self.prompt_store,
             source_group,
             agent_id,
             target_group,
@@ -420,7 +499,12 @@ class InstanceService:
         )
 
     def move(self, preview: MovePreview) -> ConfigSnapshot:
-        return move_instance(self.config_store, self.memory_store, preview)
+        return move_instance(
+            self.config_store,
+            self.memory_store,
+            self.prompt_store,
+            preview,
+        )
 
 
 def _validate_integration(name: str) -> None:
@@ -593,6 +677,8 @@ def _preview_blocks(
     target_group: str,
     agent_id: str,
     destination_memories: tuple[ResolvedMemory, ...],
+    prompt_store: PromptStore,
+    source_prompts: tuple[tuple[str, str], ...],
 ):
     if agent_id in snapshot.config.groups[target_group].agents:
         yield "target-instance-exists"
@@ -602,6 +688,14 @@ def _preview_blocks(
         return
     if any(resolved.directory.exists() for resolved in destination_memories):
         yield "destination-memory-exists"
+        return
+    if _prompt_namespace_exists(
+        prompt_store,
+        target_group,
+        agent_id,
+        source_prompts[0][0] if source_prompts else "placeholder",
+    ):
+        yield "destination-prompt-namespace-exists"
 
 
 def _has_active_jobs(
@@ -641,6 +735,27 @@ def _apply_move_patch(
     if moved is None:
         raise KeyError(agent_name)
     target_agents.append(moved)
+
+
+def _registered_prompt_entries(
+    prompt_store: PromptStore,
+    group_id: str,
+    agent: AgentInstance,
+) -> tuple[tuple[str, str], ...]:
+    entries: list[tuple[str, str]] = []
+    for name in agent.prompts:
+        stored = prompt_store.read(group_id, agent.name, name)
+        entries.append((name, stored.document.digest))
+    return tuple(entries)
+
+
+def _prompt_namespace_exists(
+    prompt_store: PromptStore,
+    group_id: str,
+    agent_id: str,
+    sample_prompt_name: str,
+) -> bool:
+    return prompt_store.path(group_id, agent_id, sample_prompt_name).parent.exists()
 
 
 __all__ = [

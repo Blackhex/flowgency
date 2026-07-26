@@ -392,6 +392,49 @@ def replace_agent_routines(
     return store.patch(expected_revision, apply)
 
 
+def register_agent_prompt(
+    store: ConfigStore,
+    expected_revision: str,
+    group_id: str,
+    agent_id: str,
+    prompt_name: str,
+) -> ConfigSnapshot:
+    def apply(raw: dict[str, Any]) -> None:
+        agent = _agent(_group(raw, group_id), agent_id)
+        prompts = agent.setdefault("prompts", [])
+        if not isinstance(prompts, list):
+            raise TypeError(
+                f"groups.{group_id}.agents.{agent_id}.prompts must be a list"
+            )
+        if prompt_name in prompts:
+            raise ValueError(f"Prompt already registered: {prompt_name}")
+        prompts.append(prompt_name)
+
+    return store.patch(expected_revision, apply)
+
+
+def unregister_agent_prompt(
+    store: ConfigStore,
+    expected_revision: str,
+    group_id: str,
+    agent_id: str,
+    prompt_name: str,
+) -> ConfigSnapshot:
+    def apply(raw: dict[str, Any]) -> None:
+        agent = _agent(_group(raw, group_id), agent_id)
+        prompts = agent.setdefault("prompts", [])
+        if not isinstance(prompts, list):
+            raise TypeError(
+                f"groups.{group_id}.agents.{agent_id}.prompts must be a list"
+            )
+        try:
+            prompts.remove(prompt_name)
+        except ValueError as exc:
+            raise KeyError(prompt_name) from exc
+
+    return store.patch(expected_revision, apply)
+
+
 def remove_agent_instance(
     store: ConfigStore,
     expected_revision: str,

@@ -329,6 +329,37 @@ def test_patch_memory_channels_rejects_unknown_root_key_on_load(config_store):
     assert any(issue.field == "extensions" for issue in excinfo.value.issues)
 
 
+def test_register_and_unregister_agent_prompt(config_store):
+    from agency.configuration.patches import (
+        register_agent_prompt,
+        unregister_agent_prompt,
+    )
+
+    snapshot = config_store.load()
+
+    registered = register_agent_prompt(
+        config_store,
+        snapshot.revision,
+        "newsletter",
+        "builder",
+        "local-triage",
+    )
+
+    assert registered.raw["groups"]["newsletter"]["agents"][0]["prompts"] == [
+        "local-triage"
+    ]
+
+    unregistered = unregister_agent_prompt(
+        config_store,
+        registered.revision,
+        "newsletter",
+        "builder",
+        "local-triage",
+    )
+
+    assert unregistered.raw["groups"]["newsletter"]["agents"][0]["prompts"] == []
+
+
 def test_patch_agent_runtime_preserves_extension_keys(config_store):
     from agency.configuration.patches import (
         AgentRuntimePatch,

@@ -26,6 +26,7 @@ from agency.jobs.resolution import JobValidationError
 from agency.jobs.store import transition_job, write_job
 from agency.jobs.submission import submit_job_request
 from agency.memory import MemoryStore, resolve_memory_selector
+from agency.prompts import PromptNotFoundError, PromptStore
 from tests._group_helpers import apply_group_paths, create_group_environment
 
 
@@ -65,6 +66,15 @@ def _write_blueprint(root: Path, key: str) -> None:
         "---\nname: daily-review\ndescription: Review daily editorial work.\n---\n\nRun the review.\n",
         encoding="utf-8",
     )
+
+
+def _private_prompt_bytes(
+    name: str = "local-triage",
+    body: str = "Review private work.\n",
+) -> bytes:
+    return (
+        f"---\nname: {name}\ndescription: Private prompt.\n---\n\n{body}"
+    ).encode("utf-8")
 
 
 def _resolved_memory(
@@ -190,10 +200,12 @@ def instance_env(tmp_path, raw_config):
     }
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
+    prompt_store = PromptStore(tmp_path / "prompts")
     return {
         "config_store": ConfigStore(config_path),
         "library": BlueprintLibrary(library_root),
         "memory_store": MemoryStore(tmp_path / "memory-store"),
+        "prompt_store": prompt_store,
         "newsletter_path": newsletter_path,
         "other_path": other_path,
         "memory_root": tmp_path / "memory-store",
@@ -208,6 +220,7 @@ def instance_service(instance_env):
         config_store=instance_env["config_store"],
         library=instance_env["library"],
         memory_store=instance_env["memory_store"],
+        prompt_store=instance_env["prompt_store"],
     )
 
 
@@ -682,6 +695,228 @@ def test_move_revalidates_revision_and_rolls_back_new_target_memory(
     assert not target_routine.directory.exists()
 
 
+def test_preview_move_includes_registered_private_prompt_digests(
+    instance_service,
+    instance_env,
+):
+    created = instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    snapshot = instance_env["config_store"].load()
+    instance_env["config_store"].patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+
+    preview = instance_service.preview_move(
+        "newsletter",
+        "builder",
+        "other",
+        "copy",
+    )
+
+    assert preview.source_prompts == (("local-triage", created.document.digest),)
+
+
+def test_move_copies_registered_prompts_only_and_removes_registered_source(
+    instance_service,
+    instance_env,
+):
+    registered = instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "unregistered",
+        _private_prompt_bytes("unregistered", "Leave me behind.\n"),
+    )
+    snapshot = instance_env["config_store"].load()
+    instance_env["config_store"].patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+
+    preview = instance_service.preview_move(
+        "newsletter",
+        "builder",
+        "other",
+        "copy",
+    )
+    updated = instance_service.move(preview)
+
+    assert updated.config.groups["other"].agents["builder"].prompts == (
+        "local-triage",
+    )
+    assert (
+        instance_env["prompt_store"]
+        .read("other", "builder", "local-triage")
+        .document.digest
+        == registered.document.digest
+    )
+    with pytest.raises(PromptNotFoundError):
+        instance_env["prompt_store"].read(
+            "newsletter", "builder", "local-triage"
+        )
+    assert (
+        instance_env["prompt_store"]
+        .read("newsletter", "builder", "unregistered")
+        .document.name
+        == "unregistered"
+    )
+    with pytest.raises(PromptNotFoundError):
+        instance_env["prompt_store"].read("other", "builder", "unregistered")
+
+
+def test_move_blocks_when_target_prompt_namespace_exists(
+    instance_service,
+    instance_env,
+):
+    instance_env["prompt_store"].create(
+        "other",
+        "builder",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+
+    preview = instance_service.preview_move(
+        "newsletter",
+        "builder",
+        "other",
+        "copy",
+    )
+
+    assert preview.blocked_by == ("destination-prompt-namespace-exists",)
+
+
+def test_move_rolls_back_copied_prompts_when_config_patch_fails(
+    instance_service,
+    instance_env,
+    monkeypatch,
+):
+    created = instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    snapshot = instance_env["config_store"].load()
+    instance_env["config_store"].patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+    preview = instance_service.preview_move(
+        "newsletter",
+        "builder",
+        "other",
+        "copy",
+    )
+
+    class InjectedPromptPatchFailure(RuntimeError):
+        pass
+
+    def fail_patch(expected_revision, patcher):
+        assert (
+            instance_env["prompt_store"]
+            .read("other", "builder", "local-triage")
+            .document.digest
+            == created.document.digest
+        )
+        raise InjectedPromptPatchFailure("fail after prompt copy")
+
+    monkeypatch.setattr(instance_env["config_store"], "patch", fail_patch)
+
+    with pytest.raises(InjectedPromptPatchFailure):
+        instance_service.move(preview)
+
+    assert (
+        instance_env["prompt_store"]
+        .read("newsletter", "builder", "local-triage")
+        .document.digest
+        == created.document.digest
+    )
+    with pytest.raises(PromptNotFoundError):
+        instance_env["prompt_store"].read("other", "builder", "local-triage")
+
+
+def test_remove_instance_deletes_registered_private_prompts_and_reports_none(
+    instance_service,
+    instance_env,
+):
+    created = instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    snapshot = instance_env["config_store"].load()
+    instance_env["config_store"].patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+
+    result = instance_service.remove("newsletter", "builder")
+
+    assert result.orphaned_prompt_namespace is None
+    with pytest.raises(PromptNotFoundError):
+        instance_env["prompt_store"].read(
+            "newsletter", "builder", "local-triage"
+        )
+
+
+def test_remove_instance_reports_orphaned_prompt_namespace_when_files_remain(
+    instance_service,
+    instance_env,
+):
+    instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "unregistered",
+        _private_prompt_bytes("unregistered", "Keep me.\n"),
+    )
+    snapshot = instance_env["config_store"].load()
+    instance_env["config_store"].patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+
+    result = instance_service.remove("newsletter", "builder")
+
+    assert result.orphaned_prompt_namespace == (
+        instance_env["prompt_store"].path(
+            "newsletter", "builder", "local-triage"
+        ).parent
+    )
+    assert (
+        instance_env["prompt_store"]
+        .read("newsletter", "builder", "unregistered")
+        .document.name
+        == "unregistered"
+    )
+
+
 def test_create_blocks_on_group_operation_lock_until_release(instance_env):
     from agency.instances import AgentInstanceCreate, InstanceService
 
@@ -689,6 +924,7 @@ def test_create_blocks_on_group_operation_lock_until_release(instance_env):
         config_store=instance_env["config_store"],
         library=instance_env["library"],
         memory_store=instance_env["memory_store"],
+        prompt_store=instance_env["prompt_store"],
     )
     request = AgentInstanceCreate(
         name="advisor",
@@ -730,6 +966,7 @@ def test_submit_cannot_slip_past_create_group_lock(
         config_store=instance_env["config_store"],
         library=instance_env["library"],
         memory_store=instance_env["memory_store"],
+        prompt_store=instance_env["prompt_store"],
     )
     request = AgentInstanceCreate(
         name="advisor",
@@ -891,6 +1128,7 @@ def test_opposite_direction_move_lock_order_avoids_deadlock(instance_env):
         config_store=instance_env["config_store"],
         library=instance_env["library"],
         memory_store=instance_env["memory_store"],
+        prompt_store=instance_env["prompt_store"],
     )
     service.create(
         "other",

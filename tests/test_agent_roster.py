@@ -41,6 +41,15 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
     )
 
 
+def _private_prompt_bytes(
+    name: str = "local-triage",
+    body: str = "Review private work.\n",
+) -> bytes:
+    return (
+        f"---\nname: {name}\ndescription: Private prompt.\n---\n\n{body}"
+    ).encode("utf-8")
+
+
 def _seed_app(monkeypatch, tmp_path, raw_config):
     raw = deepcopy(raw_config)
     library_root = tmp_path / "agent-library"
@@ -56,6 +65,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
+    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["groups"]["newsletter"]["name"] = "Newsletter"
     apply_group_paths(raw["groups"]["newsletter"], newsletter_paths)
     raw["groups"]["newsletter"]["default_integration"] = "copilot"
@@ -229,6 +239,52 @@ def test_remove_instance_updates_config_only(monkeypatch, tmp_path, raw_config):
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["groups"]["newsletter"]["agents"] == []
     assert preexisting_dir.is_dir()
+
+
+def test_remove_instance_warns_when_prompt_namespace_is_orphaned(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    store = ConfigStore(config_path)
+    snapshot = store.load()
+    from agency.prompts import PromptStore
+
+    prompt_store = PromptStore(Path(snapshot.raw["agency"]["prompt_store"]))
+    prompt_store.create(
+        "newsletter",
+        "advisor",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    prompt_store.create(
+        "newsletter",
+        "advisor",
+        "unregistered",
+        _private_prompt_bytes("unregistered", "Leave this behind.\n"),
+    )
+    store.patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+    revision = _revision(config_path)
+
+    response = client.post(
+        "/newsletter/agents/advisor/remove",
+        data={"confirm": "true", "revision": revision},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["groups"]["newsletter"]["agents"] == []
+    assert "local-triage" not in response.text
+    assert "orphaned prompt namespace" in response.text.lower()
+    assert "newsletter" in response.text
+    assert "advisor" in response.text
 
 
 def test_move_preview_and_apply(monkeypatch, tmp_path, raw_config):

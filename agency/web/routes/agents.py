@@ -225,12 +225,22 @@ async def agent_remove(request: Request, group: str, agent: str, services: Agenc
     try:
         if not expected_revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
-        services.instances.remove(group, agent, expected_revision)
+        result = services.instances.remove(group, agent, expected_revision)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ConfigConflictError as exc:
         return _render_roster(request, services, group, warning=str(exc), status_code=409)
     request.app.state.refresh_services()
+    if result.orphaned_prompt_namespace is not None:
+        return _render_roster(
+            request,
+            request.app.state.services,
+            group,
+            warning=(
+                f"Orphaned prompt namespace remains at {result.orphaned_prompt_namespace}"
+            ),
+            status_code=409,
+        )
     return RedirectResponse(f"/{group}/agents", status_code=303)
 
 

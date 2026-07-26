@@ -18,7 +18,7 @@ from agency.instances import InstanceService
 from agency.jobs.authority import JobStore
 from agency.jobs.submission import _projector_registry
 from agency.memory import MemoryStore
-from agency.prompts import PromptStore, validate_prompt_catalogs
+from agency.prompts import PromptService, PromptStore, validate_prompt_catalogs
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,7 @@ class AgencyServices:
     instances: InstanceService | None
     integrations: Mapping[str, BaseIntegration]
     startup_error: Exception | None = None
+    prompt_service: PromptService | None = None
 
 
 def build_services(config_path: Path | None = None) -> AgencyServices:
@@ -59,6 +60,11 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
         compilation_cache = CompilationCache(Path(cache_root), _projector_registry())
         memory_store = MemoryStore(Path(memory_root))
         prompt_store = PromptStore(Path(prompt_root))
+        prompt_service = PromptService(
+            config_store=config_store,
+            library=blueprint_library,
+            store=prompt_store,
+        )
         catalog_issues = validate_prompt_catalogs(snapshot, blueprint_library, prompt_store)
         if catalog_issues:
             raise ValidationFailed(catalog_issues)
@@ -67,6 +73,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             config_store=config_store,
             library=blueprint_library,
             memory_store=memory_store,
+            prompt_store=prompt_store,
         )
         return AgencyServices(
             config_path=resolved,
@@ -75,6 +82,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             compilation_cache=compilation_cache,
             memory_store=memory_store,
             prompt_store=prompt_store,
+            prompt_service=prompt_service,
             job_store=job_store,
             instances=instances,
             integrations=REGISTRY,
@@ -88,6 +96,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             compilation_cache=None,
             memory_store=None,
             prompt_store=None,
+            prompt_service=None,
             job_store=None,
             instances=None,
             integrations=REGISTRY,
