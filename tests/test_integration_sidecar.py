@@ -672,6 +672,109 @@ class TestCopilot:
         assert "--autopilot" in args
         assert "--allow-tool" not in args
 
+    def test_copilot_run_injects_selected_skill_contract_before_task_text(
+        self,
+        tmp_agent_dir,
+        monkeypatch,
+    ):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        prompt = tmp_agent_dir / "p.prompt"
+        prompt.write_text("Immutable task text.\n", encoding="utf-8")
+
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(args, **kwargs):
+            captured["args"] = args
+            return FakeCompleted()
+
+        monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            CopilotIntegration,
+            "resolve_executable",
+            lambda self: "copilot",
+        )
+
+        request = IntegrationRunRequest(
+            workspace_root=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill="runtime-probe",
+            skill_arguments=("alpha", "two words"),
+        )
+
+        CopilotIntegration().run(request)
+
+        prompt_text = captured["args"][captured["args"].index("-p") + 1]
+        expected_prefix = (
+            "Explicitly invoke and use the 'runtime-probe' skill before "
+            "completing this task.\n"
+            "Do not complete the task until that selected skill has been "
+            "applied.\n"
+            "Skill arguments: alpha, two words\n\n"
+        )
+        assert prompt_text == expected_prefix + "Immutable task text.\n"
+
+    def test_copilot_run_without_skill_leaves_prompt_text_unchanged(
+        self,
+        tmp_agent_dir,
+        monkeypatch,
+    ):
+        import agency.integrations.agency.copilot as copilot_mod
+
+        prompt = tmp_agent_dir / "p.prompt"
+        prompt.write_text("Immutable task text.\n", encoding="utf-8")
+
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(args, **kwargs):
+            captured["args"] = args
+            return FakeCompleted()
+
+        monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            CopilotIntegration,
+            "resolve_executable",
+            lambda self: "copilot",
+        )
+
+        request = IntegrationRunRequest(
+            workspace_root=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+
+        CopilotIntegration().run(request)
+
+        prompt_text = captured["args"][captured["args"].index("-p") + 1]
+        assert prompt_text == "Immutable task text.\n"
+
     def test_copilot_run_roots_and_tools_least_privilege(self, tmp_agent_dir, monkeypatch):
         import agency.integrations.agency.copilot as copilot_mod
 

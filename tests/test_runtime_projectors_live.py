@@ -153,7 +153,7 @@ else:
         )
         task_file = task_dir / "selected-skill.md"
         task_file.write_text(
-            "Use the explicitly selected runtime-probe skill and return its exact "
+            "Use the explicitly selected skill and return its exact "
             "token. Do not use tools or modify files.\n",
             encoding="utf-8",
         )

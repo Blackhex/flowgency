@@ -356,9 +356,31 @@ class CopilotIntegration(BaseIntegration):
         except (ValueError, OSError):
             return path
 
+    @staticmethod
+    def _build_runtime_prompt(
+        task_text: str,
+        skill: str | None,
+        skill_arguments: Sequence[str],
+    ) -> str:
+        if not skill:
+            return task_text
+
+        parts = [
+            f"Explicitly invoke and use the '{skill}' skill before completing this task.",
+            "Do not complete the task until that selected skill has been applied.",
+        ]
+        if skill_arguments:
+            parts.append(f"Skill arguments: {', '.join(skill_arguments)}")
+        return "\n".join(parts) + "\n\n" + task_text
+
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
-        prompt_text = request.task_file.read_text()
+        task_text = request.task_file.read_text()
+        prompt_text = self._build_runtime_prompt(
+            task_text,
+            request.skill,
+            request.skill_arguments,
+        )
         cmd = self.require_executable()
 
         roots = request.runtime_policy.sandbox_roots
