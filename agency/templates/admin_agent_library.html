@@ -28,6 +28,9 @@
         {% for skill in blueprint.skills %}
         <span class="rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700">{{ skill }}</span>
         {% endfor %}
+        {% for prompt in blueprint.prompts %}
+        <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">{{ prompt }}.prompt.md</span>
+        {% endfor %}
       </div>
       <p class="mt-4 font-mono text-xs text-gray-500 break-all">{{ blueprint.digest }}</p>
     </a>

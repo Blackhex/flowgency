@@ -42,6 +42,10 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
         "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
         encoding="utf-8",
     )
+    (prompt_dir / "pr-review.prompt.md").write_text(
+        "---\nname: pr-review\ndescription: Review pull requests\nargument-hint: PR URL\n---\n\nReview this pull request in detail.\n",
+        encoding="utf-8",
+    )
     (skill / "checklist.md").write_text("- one\n", encoding="utf-8")
 
 
@@ -89,7 +93,7 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
                     "routines": [
                         {
                             "id": "daily-review",
-                            "prompt": {"scope": "blueprint", "name": "daily-review"},
+                            "prompt": {"scope": "blueprint", "name": "pr-review"},
                             "schedule": {"at": "09:00"},
                             "memory": {"scope": "routine"},
                         }
@@ -402,3 +406,243 @@ def test_integrations_page_shows_projector_compatibility(
     assert "Instruction target" in response.text
     assert "Skills target" in response.text
     assert "Routine compatibility" in response.text
+
+
+def test_blueprint_prompts_page_lists_and_edits_canonical_source(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, _, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+
+    response = client.get("/admin/agent-library/blueprints/advisor/prompts")
+
+    assert response.status_code == 200
+    assert "pr-review.prompt.md" in response.text
+    assert ".agents/prompts/pr-review.prompt.md" in response.text
+
+    inspection = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    )
+    save_response = client.post(
+        "/admin/agent-library/blueprints/advisor/source",
+        data={
+            "path": ".agents/prompts/pr-review.prompt.md",
+            "expected_digest": inspection.snapshot.digest,
+            "content": "---\nname: pr-review\ndescription: Updated\n---\n\nUpdated body.\n",
+        },
+        follow_redirects=False,
+    )
+
+    assert save_response.status_code == 303
+    assert save_response.headers["location"] == (
+        "/admin/agent-library/blueprints/advisor/prompts?"
+        "path=.agents/prompts/pr-review.prompt.md"
+    )
+
+
+def test_blueprint_prompt_create_from_slug(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    inspection = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    )
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/source",
+        data={
+            "slug": "retro",
+            "expected_digest": inspection.snapshot.digest,
+            "content": "---\nname: retro\ndescription: Sprint retro\n---\n\nDiscuss wins and risks.\n",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert (
+        library_root / "advisor" / ".agents" / "prompts" / "retro.prompt.md"
+    ).is_file()
+
+
+def test_blueprint_prompt_create_rejects_invalid_path(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    inspection = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    )
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/source",
+        data={
+            "path": ".agents/prompts/retro.md",
+            "expected_digest": inspection.snapshot.digest,
+            "content": "---\nname: retro\ndescription: Retro\n---\n\nBody\n",
+        },
+    )
+
+    assert response.status_code == 409
+    assert not (library_root / "advisor" / ".agents" / "prompts" / "retro.md").exists()
+
+
+def test_blueprint_prompt_create_rejects_path_traversal(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    inspection = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    )
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/source",
+        data={
+            "path": ".agents/prompts/../../escape.prompt.md",
+            "expected_digest": inspection.snapshot.digest,
+            "content": "---\nname: escape\ndescription: Escape\n---\n\nEscape\n",
+        },
+    )
+
+    assert response.status_code == 409
+    assert not (library_root / "advisor" / "escape.prompt.md").exists()
+
+
+def test_blueprint_prompt_save_rejects_invalid_frontmatter_and_keeps_source(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    inspection = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    )
+    prompt_path = (
+        library_root / "advisor" / ".agents" / "prompts" / "pr-review.prompt.md"
+    )
+    previous = prompt_path.read_text(encoding="utf-8")
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/source",
+        data={
+            "path": ".agents/prompts/pr-review.prompt.md",
+            "expected_digest": inspection.snapshot.digest,
+            "content": "---\nname: wrong-name\ndescription: Bad\n---\n\nBody\n",
+        },
+    )
+
+    assert response.status_code == 409
+    assert "must exactly match" in response.text
+    assert prompt_path.read_text(encoding="utf-8") == previous
+
+
+def test_blueprint_prompt_delete_blocks_configured_routine(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    digest = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    ).snapshot.digest
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/prompts/pr-review/delete",
+        data={"expected_digest": digest},
+    )
+
+    assert response.status_code == 409
+    assert "prompt is used by" in response.text.lower()
+    assert (
+        library_root
+        / "advisor"
+        / ".agents"
+        / "prompts"
+        / "pr-review.prompt.md"
+    ).is_file()
+
+
+def test_blueprint_prompt_delete_rejects_stale_digest(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, _, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/prompts/daily-review/delete",
+        data={"expected_digest": compute_source_digest(())},
+    )
+
+    assert response.status_code == 409
+    assert (
+        library_root
+        / "advisor"
+        / ".agents"
+        / "prompts"
+        / "daily-review.prompt.md"
+    ).is_file()
+
+
+def test_blueprint_prompt_delete_removes_unreferenced_prompt(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    digest = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    ).snapshot.digest
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/prompts/daily-review/delete",
+        data={"expected_digest": digest},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/agent-library/blueprints/advisor/prompts"
+    assert not (
+        library_root
+        / "advisor"
+        / ".agents"
+        / "prompts"
+        / "daily-review.prompt.md"
+    ).exists()
