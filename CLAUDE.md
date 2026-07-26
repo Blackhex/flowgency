@@ -107,6 +107,7 @@ Routes use async FastAPI handlers, POST plus 303 redirects, shared domain valida
 - Develop every new feature on a named feature branch in an ignored project-local `.worktrees/<feature>/` worktree. Do not implement features directly on `master`.
 - Run commands and tests from the active worktree root. Running tests from another checkout can resolve the wrong local `tests` package.
 - Establish a clean full-suite baseline in the worktree before implementation. Use focused tests while iterating, then run the complete suite before review and completion.
+- Commit each approved design specification and implementation plan in its own documentation-only commit before implementation. Keep the specification and plan in separate commits, and do not combine either with implementation changes.
 - Prefer test-driven changes and add regression coverage for every corrected failure path, especially validation, concurrency, path traversal, and filesystem-safety behavior.
 - Review each implementation task before starting dependent work, and perform a whole-branch review before integrating a feature.
 - After implementation, move `master` to the reviewed feature tip with a fast-forward only. Do not create a merge commit, squash, or rebase unless explicitly requested.
