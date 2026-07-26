@@ -26,13 +26,14 @@ def config_paths(tmp_path):
         "group_path": group_path,
         "compilation_cache": tmp_path / "compiled-agents",
         "memory_store": tmp_path / "memory",
+        "prompt_store": tmp_path / "prompts",
     }
 
 
 @pytest.fixture
 def raw_config(config_paths):
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "agency": {
             "title": "Agency",
             "default_group": "newsletter",
@@ -40,6 +41,7 @@ def raw_config(config_paths):
             "agent_library": str(config_paths["agent_library"]),
             "compilation_cache": str(config_paths["compilation_cache"]),
             "memory_store": str(config_paths["memory_store"]),
+            "prompt_store": str(config_paths["prompt_store"]),
         },
         "memory": {
             "channels": {
@@ -57,10 +59,11 @@ def raw_config(config_paths):
                         "name": "builder",
                         "blueprint": "builder-blueprint",
                         "integration": "claude-code",
+                        "prompts": [],
                         "routines": [
                             {
                                 "id": "daily-review",
-                                "skill": "daily-review",
+                                "prompt": {"scope": "blueprint", "name": "daily-review"},
                                 "schedule": {"at": "09:00"},
                                 "memory": {"scope": "routine"},
                             }

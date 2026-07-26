@@ -56,7 +56,7 @@ def test_setup_registers_explicit_instances_routines_and_memory():
     assert "blueprint:" in skill
     assert "integration:" in skill
     assert "routines:" in skill
-    assert "skill:" in skill
+    assert "prompt:" in skill
     assert "default_memory:" in skill
     assert "scope: agent" in skill
     assert "scope: routine" in skill
@@ -99,6 +99,7 @@ def test_setup_derives_canonical_paths_from_one_data_root():
         "agency.agent_library = <root>/agent-library",
         "agency.compilation_cache = <root>/compiled-agents",
         "agency.memory_store = <root>/memory",
+        "agency.prompt_store = <root>/prompts",
         "groups.<group-id>.path = <root>/groups/<group-id>",
         "groups.<group-id>.workspace_path = <project workspace>",
     ):
@@ -128,6 +129,7 @@ def test_setup_docs_present_one_data_root_default():
         "C:/Agency/agent-library",
         "C:/Agency/compiled-agents",
         "C:/Agency/memory",
+        "C:/Agency/prompts",
         "C:/Agency/groups/example",
     ):
         assert path in templates
@@ -232,7 +234,7 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
         assert phrase in combined
     assert "agency-migration" not in combined
     assert "tools/migrate_agent_model.py" not in combined
-    assert "schema_version: 3" in skill
+    assert "schema_version: 4" in skill
 
 
 def test_setup_maintains_one_authoritative_canonical_config():

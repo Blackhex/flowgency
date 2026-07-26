@@ -62,6 +62,13 @@ def _make_group(tmp_path):
     agent_dir = group_root / "product"
     agent_dir.mkdir(parents=True)
     (agent_dir / "AGENTS.md").write_text("# Product\n", encoding="utf-8")
+    prompt_dir = tmp_path / "agent-library" / "builder-blueprint" / ".agents" / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "agent-library" / "builder-blueprint" / "AGENTS.md").write_text("# Product\n", encoding="utf-8")
+    (prompt_dir / "daily-review.prompt.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
     workspace_path.mkdir(parents=True)
     log_dir = group_root / "logs" / "2026-07-03"
     log_dir.mkdir(parents=True)
@@ -80,7 +87,9 @@ def _write_config(
     routine_yaml = "".join(
         (
             "          - id: {id}\n"
-            "            skill: {skill}\n"
+            "            prompt:\n"
+            "              scope: blueprint\n"
+            "              name: {prompt_name}\n"
         ).format(**routine)
         + (
             "            arguments:\n"
@@ -113,7 +122,7 @@ def _write_config(
         for routine in routines
     )
     config_path.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"
@@ -121,6 +130,7 @@ def _write_config(
         "  agent_library: agent-library\n"
         "  compilation_cache: compiled-agents\n"
         "  memory_store: memory\n"
+        "  prompt_store: prompts\n"
         "  dispatch:\n"
         "    interval: 15\n"
         "groups:\n"
@@ -162,7 +172,7 @@ def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monk
         config_path,
         workspace_path,
         group_root,
-        routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}],
+        routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}],
     )
     captured = []
 
@@ -178,7 +188,7 @@ def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monk
         "agent_name": "product",
         "trigger": "scheduled_prompt",
         "routine_id": "daily-review",
-        "task_input": "Run routine 'daily-review'.",
+        "task_input": "",
         "memory_override": None,
         "timeout_override": None,
     }
@@ -196,7 +206,7 @@ def test_due_schedule_renders_routine_arguments_in_task_input(tmp_path, monkeypa
         routines=[
             {
                 "id": "daily-review",
-                "skill": "daily-review",
+                "prompt_name": "daily-review",
                 "arguments": ["--mode=review", "literal value"],
                 "schedule": {"every": "1h"},
             }
@@ -211,7 +221,7 @@ def test_due_schedule_renders_routine_arguments_in_task_input(tmp_path, monkeypa
 
     run_dispatch_cycle({}, config_path)
 
-    assert captured[0].task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
+    assert captured[0].task_input == ""
 
 
 def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypatch):
@@ -220,7 +230,7 @@ def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypa
         config_path,
         workspace_path,
         group_root,
-        routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}],
+        routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}],
     )
 
     monkeypatch.setattr(
@@ -244,7 +254,7 @@ def test_schedule_skips_condition_rules(tmp_path, monkeypatch):
         routines=[
             {
                 "id": "daily-review",
-                "skill": "daily-review",
+                "prompt_name": "daily-review",
                 "schedule": {"every": "1h"},
                 "condition": "pre-send",
             }
@@ -274,8 +284,8 @@ def test_check_every_rule_days(tmp_path):
 def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, monkeypatch):
     first_workspace, first_group, first_config, _ = _make_group(tmp_path / "first")
     second_workspace, second_group, second_config, _ = _make_group(tmp_path / "second")
-    _write_config(first_config, first_workspace, first_group, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
-    _write_config(second_config, second_workspace, second_group, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
+    _write_config(first_config, first_workspace, first_group, routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}])
+    _write_config(second_config, second_workspace, second_group, routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}])
     submitted = []
     monkeypatch.setattr(
         "agency.dispatch.run.submit_job_request",
@@ -316,7 +326,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
         config_path,
         workspace_path,
         group_root,
-        routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"at": "09:00"}}],
+        routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"at": "09:00"}}],
     )
     submitted = []
     monkeypatch.setattr(
@@ -335,8 +345,8 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
 def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
     enabled_workspace, enabled_group, enabled_config, _ = _make_group(tmp_path / "enabled")
     disabled_workspace, disabled_group, disabled_config, _ = _make_group(tmp_path / "disabled")
-    _write_config(enabled_config, enabled_workspace, enabled_group, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}])
-    _write_config(disabled_config, disabled_workspace, disabled_group, routines=[{"id": "daily-review", "skill": "daily-review", "schedule": {"every": "1h"}}], enabled=False)
+    _write_config(enabled_config, enabled_workspace, enabled_group, routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}])
+    _write_config(disabled_config, disabled_workspace, disabled_group, routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}], enabled=False)
     submitted = []
     monkeypatch.setattr(
         "agency.dispatch.run.submit_job_request",
@@ -356,7 +366,7 @@ def test_disabled_routine_is_never_submitted_or_marked(tmp_path, monkeypatch):
         routines=[
             {
                 "id": "daily-review",
-                "skill": "daily-review",
+                "prompt_name": "daily-review",
                 "schedule": {"every": "1h"},
                 "enabled": False,
             }

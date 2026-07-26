@@ -178,6 +178,7 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
     library = Path(config.agency.agent_library).resolve(strict=False)
     cache = Path(config.agency.compilation_cache).resolve(strict=False)
     memory = Path(config.agency.memory_store).resolve(strict=False)
+    prompt_store = Path(config.agency.prompt_store).resolve(strict=False)
     control_authorities = (
         _Authority("agency", "agent_library", "agency.agent_library", library),
         _Authority(
@@ -187,6 +188,7 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
             cache,
         ),
         _Authority("agency", "memory_store", "agency.memory_store", memory),
+        _Authority("agency", "prompt_store", "agency.prompt_store", prompt_store),
     )
     group_paths = {
         group_id: resolve_group_paths(group)
@@ -216,6 +218,14 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
             code="invalid-control-directory",
             scope="agency",
             field="memory_store",
+        )
+    )
+    issues.extend(
+        _validate_creatable_directory(
+            prompt_store,
+            code="invalid-control-directory",
+            scope="agency",
+            field="prompt_store",
         )
     )
 
@@ -367,6 +377,7 @@ def initialize_storage_directories(config: AgencyConfig) -> None:
     directories = [
         Path(config.agency.compilation_cache),
         Path(config.agency.memory_store),
+        Path(config.agency.prompt_store),
         job_store_root(Path(config.agency.memory_store)),
     ]
     for group in config.groups.values():

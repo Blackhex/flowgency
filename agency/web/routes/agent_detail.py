@@ -28,6 +28,7 @@ from agency.fs import ResourceBusyError
 from agency.integrations import get_integration
 from agency.jobs.authority import JobStore
 from agency.memory import MemoryConflictError, resolve_memory_selector
+from agency.prompts.catalog import effective_prompt_catalog
 from agency.web.dependencies import AgencyServices, get_services
 
 
@@ -391,7 +392,7 @@ def _parse_memory_selector_from_form(form, channels) -> MemorySelector | None:
     return selector
 
 
-def _parse_routines_payload(form, blueprint_skills: tuple[str, ...]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+def _parse_routines_payload(form, available_prompts: tuple[tuple[str, str], ...]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     raw = str(form.get("routines_json", "")).strip()
     if not raw:
         return [], []
@@ -407,17 +408,22 @@ def _parse_routines_payload(form, blueprint_skills: tuple[str, ...]) -> tuple[li
     for index, item in enumerate(decoded):
         field_prefix = f"routines[{index}]"
         if not isinstance(item, dict):
-            issues.append({"field": field_prefix, "message": "Routine entry must be a mapping.", "hint": "Provide id, skill, schedule, and optional arguments."})
+            issues.append({"field": field_prefix, "message": "Routine entry must be a mapping.", "hint": "Provide id, prompt, schedule, and optional arguments."})
             continue
         routine_id = str(item.get("id", "")).strip()
-        skill = str(item.get("skill", "")).strip()
+        prompt = item.get("prompt")
+        prompt_scope = ""
+        prompt_name = ""
+        if isinstance(prompt, dict):
+            prompt_scope = str(prompt.get("scope", "")).strip()
+            prompt_name = str(prompt.get("name", "")).strip()
         if not routine_id:
             issues.append({"field": f"{field_prefix}.id", "message": "Routine id is required.", "hint": "Provide a stable routine slug."})
         if routine_id in seen_ids:
             issues.append({"field": f"{field_prefix}.id", "message": f"Duplicate routine id: {routine_id}", "hint": "Keep each routine id unique within the agent."})
         seen_ids.add(routine_id)
-        if skill not in blueprint_skills:
-            issues.append({"field": f"{field_prefix}.skill", "message": "Routine skill must be selected from the blueprint.", "hint": "Choose one of the blueprint skills."})
+        if (prompt_scope, prompt_name) not in available_prompts:
+            issues.append({"field": f"{field_prefix}.prompt", "message": "Routine prompt must be selected from the effective prompt catalog.", "hint": "Choose one of the available blueprint or instance prompts."})
         arguments = item.get("arguments", [])
         if not isinstance(arguments, list) or any(not isinstance(arg, str) or not arg.strip() for arg in arguments):
             issues.append({"field": f"{field_prefix}.arguments", "message": "Routine arguments must be an ordered list of non-empty strings.", "hint": "Provide each argument as its own string."})
@@ -446,7 +452,7 @@ def _parse_routines_payload(form, blueprint_skills: tuple[str, ...]) -> tuple[li
         routines.append(
             {
                 "id": routine_id,
-                "skill": skill,
+                "prompt": {"scope": prompt_scope, "name": prompt_name},
                 "enabled": enabled,
                 "arguments": [arg.strip() for arg in arguments if isinstance(arg, str) and arg.strip()],
                 "schedule": {"at": str(schedule.get("at", "")).strip()} if has_at else {"every": str(schedule.get("every", "")).strip()} if has_every else {},
@@ -454,6 +460,21 @@ def _parse_routines_payload(form, blueprint_skills: tuple[str, ...]) -> tuple[li
             }
         )
     return routines, issues
+
+
+def _available_prompts(services: AgencyServices, snapshot, group_id: str, agent_id: str) -> tuple[tuple[str, str], ...]:
+    if services.blueprint_library is None or services.prompt_store is None:
+        return ()
+    return tuple(
+        (item.scope, item.document.name)
+        for item in effective_prompt_catalog(
+            snapshot,
+            services.blueprint_library,
+            services.prompt_store,
+            group_id,
+            agent_id,
+        )
+    )
 
 
 def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
@@ -537,18 +558,14 @@ def _blueprint_context(services: AgencyServices, snapshot, group_id: str, agent_
 
 def _routines_context(services: AgencyServices, snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
     _, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
-    inspection = (
-        services.blueprint_library.inspect(instance.blueprint)
-        if services.blueprint_library is not None
-        else None
-    )
     routines_yaml = yaml.safe_dump(
         [routine.model_dump(mode="json", exclude_none=True) for routine in instance.routines],
         sort_keys=False,
         allow_unicode=True,
     ).strip()
+    prompt_options = _available_prompts(services, snapshot, group_id, agent_id)
     return {
-        "blueprint_skills": inspection.skills if inspection is not None else (),
+        "available_prompts": tuple(f"{scope}:{name}" for scope, name in prompt_options),
         "routines_yaml": routines_yaml,
         "supports_enabled": True,
     }
@@ -748,23 +765,18 @@ async def agent_detail_routines_save(request: Request, group: str, agent: str, s
     revision = str(form.get("revision", "")).strip()
     snapshot = services.config_store.load()
     _, instance = _get_snapshot_instance(snapshot, group, agent)
-    inspection = (
-        services.blueprint_library.inspect(instance.blueprint)
-        if services.blueprint_library is not None
-        else None
-    )
-    skills = inspection.skills if inspection is not None else ()
-    routines, parse_issues = _parse_routines_payload(form, skills)
+    prompt_options = _available_prompts(services, snapshot, group, agent)
+    routines, parse_issues = _parse_routines_payload(form, prompt_options)
     if parse_issues:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": True})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_prompts": tuple(f"{scope}:{name}" for scope, name in prompt_options), "supports_enabled": True})
     try:
         if not revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
         replace_agent_routines(services.config_store, revision, group, agent, routines)
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": True})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_prompts": tuple(f"{scope}:{name}" for scope, name in prompt_options), "supports_enabled": True})
     except ConfigConflictError as exc:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "blueprint_skills": skills, "supports_enabled": True})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_prompts": tuple(f"{scope}:{name}" for scope, name in prompt_options), "supports_enabled": True})
     request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents/{agent}/routines", status_code=303)
 

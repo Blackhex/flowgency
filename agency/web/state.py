@@ -39,6 +39,7 @@ def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
         "agent_library": str(resolved.agent_library or ""),
         "compilation_cache": str(resolved.compilation_cache or ""),
         "memory_store": str(resolved.memory_store or ""),
+        "prompt_store": str(resolved.prompt_store or ""),
     }
 
 

@@ -141,12 +141,15 @@ Decision body
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
+    prompt_root = tmp_path / "prompts"
     library_root.mkdir()
+    (library_root / "worker").mkdir(parents=True, exist_ok=True)
+    (library_root / "worker" / "AGENTS.md").write_text("# Worker\n", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",
@@ -154,6 +157,7 @@ Decision body
                     "agent_library": str(library_root),
                     "compilation_cache": str(cache_root),
                     "memory_store": str(memory_root),
+                    "prompt_store": str(prompt_root),
                 },
                 "memory": {"channels": {}},
                 "groups": {
@@ -205,9 +209,15 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 def _write_blueprint(root: Path, key: str, title: str) -> None:
     blueprint = root / key
     skill = blueprint / ".agents" / "skills" / "daily-review"
+    prompt_dir = blueprint / ".agents" / "prompts"
     skill.mkdir(parents=True, exist_ok=True)
+    prompt_dir.mkdir(parents=True, exist_ok=True)
     (blueprint / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
     (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
+    (prompt_dir / "daily-review.prompt.md").write_text(
         "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
         encoding="utf-8",
     )
@@ -218,6 +228,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
+    prompt_root = tmp_path / "prompts"
     paths = create_group_environment(tmp_path, "newsletter")
     group_root = paths.state_root
     for rel in [
@@ -233,6 +244,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
+    raw["agency"]["prompt_store"] = str(prompt_root)
     raw["groups"] = {
         "newsletter": apply_group_paths({
             "name": "Newsletter",
@@ -250,7 +262,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
                     "routines": [
                         {
                             "id": "daily-review",
-                            "skill": "daily-review",
+                            "prompt": {"scope": "blueprint", "name": "daily-review"},
                             "schedule": {"at": "09:00"},
                             "memory": {"scope": "channel", "channel": "support"},
                         }

@@ -61,7 +61,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         encoding="utf-8",
     )
     config_path.write_text(yaml.safe_dump({
-        "schema_version": 3,
+        "schema_version": 4,
         "agency": {
             "title": "Agency",
             "default_group": "test",
@@ -69,6 +69,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
             "agent_library": str(agent_library),
             "compilation_cache": str(tmp_path / "compiled-agents"),
             "memory_store": str(tmp_path / "memory"),
+            "prompt_store": str(tmp_path / "prompts"),
         },
         "groups": {"test": apply_group_paths({
             "name": "Test",

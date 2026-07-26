@@ -16,10 +16,13 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
     )
     group_path = paths.state_root
     (group_path / "product").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "agent-library").mkdir()
+    blueprint_root = tmp_path / "agent-library" / "product-blueprint"
+    blueprint_root.mkdir(parents=True)
+    (blueprint_root / "AGENTS.md").write_text("# Product\n", encoding="utf-8")
+    (tmp_path / "prompts").mkdir()
     config_path = tmp_path / "config.yaml"
     config = {
-        "schema_version": 3,
+        "schema_version": 4,
 
         "agency": {
             "title": "Agency",
@@ -28,6 +31,7 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
             "agent_library": str((tmp_path / "agent-library").resolve()),
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),
+            "prompt_store": str((tmp_path / "prompts").resolve()),
         },
         "groups": {
             "test": apply_group_paths({

@@ -18,16 +18,54 @@ def test_parse_config_accepts_canonical_root(raw_config, config_paths):
 
     assert parsed.raw == raw_config
     assert parsed.resolved.agency.title == "Agency"
-    assert parsed.resolved.schema_version == 3
+    assert parsed.resolved.schema_version == 4
 
 
-def test_parse_config_requires_schema_version_three(raw_config, config_paths):
+def test_schema_four_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
+    from agency.configuration.models import PromptSelector, parse_config
+
+    raw_config["schema_version"] = 4
+    raw_config["agency"]["prompt_store"] = str(config_paths["prompt_store"])
+    raw_config["groups"]["newsletter"]["agents"][0]["routines"][0] = {
+        "id": "daily-review",
+        "prompt": {"scope": "blueprint", "name": "daily-review"},
+        "schedule": {"at": "09:00"},
+        "memory": {"scope": "routine"},
+    }
+
+    parsed = parse_config(raw_config, config_paths["config_path"])
+
+    routine = parsed.resolved.groups["newsletter"].agents["builder"].routines[0]
+    assert routine.prompt == PromptSelector(scope="blueprint", name="daily-review")
+    assert not hasattr(routine, "skill")
+
+
+def test_schema_three_is_rejected_with_fresh_v4_hint(raw_config, config_paths):
+    from agency.configuration.models import parse_config
+
+    raw_config["schema_version"] = 3
+    raw_config["agency"]["prompt_store"] = str(config_paths["prompt_store"])
+    raw_config["groups"]["newsletter"]["agents"][0]["routines"][0] = {
+        "id": "daily-review",
+        "prompt": {"scope": "blueprint", "name": "daily-review"},
+        "schedule": {"at": "09:00"},
+        "memory": {"scope": "routine"},
+    }
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        parse_config(raw_config, config_paths["config_path"])
+
+    assert excinfo.value.issues[0].code == "unsupported-schema-version"
+    assert "schema_version: 4" in excinfo.value.issues[0].corrective_hint
+
+
+def test_parse_config_requires_schema_version_four(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.resolved.schema_version == 3
+    assert parsed.resolved.schema_version == 4
 
-    for value in (None, 1, 2, 4):
+    for value in (None, 1, 2, 3):
         candidate = _clone_config(raw_config)
         if value is None:
             candidate.pop("schema_version")
@@ -569,7 +607,7 @@ def test_rejects_schedule_without_one_of(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [
-        {"id": "daily", "skill": "daily", "schedule": {}},
+        {"id": "daily", "prompt": {"scope": "blueprint", "name": "daily"}, "schedule": {}},
     ]
     issues = validate_config(raw_config, config_paths["config_path"])
     assert any(issue.code == "invalid-dispatch-rule" for issue in issues)
@@ -580,7 +618,7 @@ def test_rejects_non_mapping_schedule_values(raw_config, config_paths, schedule_
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [
-        {"id": "daily", "skill": "daily", "schedule": schedule_value},
+        {"id": "daily", "prompt": {"scope": "blueprint", "name": "daily"}, "schedule": schedule_value},
     ]
 
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -729,7 +767,7 @@ def test_preserves_supported_workspace_fields(raw_config, config_paths):
             lambda raw: raw["groups"]["newsletter"]["agents"][0]["routines"].append(
                 {
                     "id": "daily-review",
-                    "skill": "daily-review-2",
+                    "prompt": {"scope": "blueprint", "name": "daily-review-2"},
                     "schedule": {"every": "6h"},
                 }
             ),

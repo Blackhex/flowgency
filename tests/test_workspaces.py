@@ -235,11 +235,12 @@ class TestWorkspaceRoutes:
         import agency.app as app_mod
 
         (tmp_path / "tmux.sh").write_text("#!/bin/bash\ntmux new-session")
+        (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
         config_path = tmp_path / "config.yaml"
         config_path.write_text(
             yaml.safe_dump(
                 {
-                    "schema_version": 3,
+                    "schema_version": 4,
 
                     "agency": {
                         "title": "Test",
@@ -248,6 +249,7 @@ class TestWorkspaceRoutes:
                         "agent_library": str((tmp_path / "agent-library").resolve()),
                         "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
                         "memory_store": str((tmp_path / "memory").resolve()),
+                        "prompt_store": str((tmp_path / "prompts").resolve()),
                     },
                     "groups": {
                         "test": {

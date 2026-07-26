@@ -1,9 +1,12 @@
 from pathlib import Path, PurePosixPath
+from copy import deepcopy
 import threading
 import subprocess
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+import yaml
 
 from agency.blueprints import CompilationCache
 from agency.blueprints.library import BlueprintLibrary
@@ -14,9 +17,11 @@ from agency.integrations.models import ProjectorCapabilities, RuntimeCapabilitie
 import agency.jobs as jobs_package
 from agency.jobs import JobSpec, JobSubmissionError, submit_job_request
 from agency.jobs.authority import JobStore
-from agency.jobs.prompts import build_routine_task_input
 from agency.jobs.resolution import JobRequest, resolve_job_request
 from agency.jobs.models import BlueprintRef, MemoryBinding, RuntimePolicySnapshot
+from agency.prompts import build_prompt_task_input
+from agency.prompts.catalog import effective_prompt_catalog, resolve_catalog_prompt
+from agency.prompts.store import PromptStore
 from agency.jobs.launcher import (
     CREATE_NEW_PROCESS_GROUP,
     DETACHED_PROCESS,
@@ -29,6 +34,212 @@ from agency.jobs.launcher import (
 )
 from agency.jobs.store import read_job
 from agency.memory import MemoryStore
+
+
+@pytest.fixture
+def prompt_env(tmp_path, raw_config):
+    raw = deepcopy(raw_config)
+    library_root = Path(raw["agency"]["agent_library"])
+    blueprint = library_root / "reviewer"
+    prompt_dir = blueprint / ".agents" / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_text("# Reviewer\n", encoding="utf-8")
+    (prompt_dir / "pr-review.prompt.md").write_text(
+        "---\nname: pr-review\ndescription: Review PRs.\n---\n\nReview pull requests.\n",
+        encoding="utf-8",
+    )
+    agent = raw["groups"]["newsletter"]["agents"][0]
+    agent["name"] = "reviewer"
+    agent["blueprint"] = "reviewer"
+    agent["prompts"] = ["local-triage"]
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    store = PromptStore(Path(raw["agency"]["prompt_store"]))
+    store.create(
+        "newsletter",
+        "reviewer",
+        "local-triage",
+        (
+            "---\nname: local-triage\ndescription: Local triage.\n---\n\n"
+            "Review local work.\n"
+        ).encode("utf-8"),
+    )
+    snapshot = ConfigStore(config_path).load()
+    return SimpleNamespace(
+        snapshot=snapshot,
+        library=BlueprintLibrary(library_root),
+        store=store,
+    )
+
+
+def test_effective_catalog_contains_shared_and_only_registered_private_prompts(prompt_env):
+    catalog = effective_prompt_catalog(
+        prompt_env.snapshot,
+        prompt_env.library,
+        prompt_env.store,
+        "newsletter",
+        "reviewer",
+    )
+
+    assert [(item.scope, item.document.name) for item in catalog] == [
+        ("blueprint", "pr-review"),
+        ("instance", "local-triage"),
+    ]
+    assert "unregistered" not in {item.document.name for item in catalog}
+
+
+def test_effective_catalog_ignores_unregistered_private_files(prompt_env):
+    prompt_env.store.create(
+        "newsletter",
+        "reviewer",
+        "unregistered",
+        (
+            "---\nname: unregistered\ndescription: Hidden.\n---\n\n"
+            "Ignore this prompt.\n"
+        ).encode("utf-8"),
+    )
+
+    catalog = effective_prompt_catalog(
+        prompt_env.snapshot,
+        prompt_env.library,
+        prompt_env.store,
+        "newsletter",
+        "reviewer",
+    )
+
+    assert [item.document.name for item in catalog] == ["pr-review", "local-triage"]
+
+
+def test_effective_catalog_rejects_shared_private_name_collisions(prompt_env):
+    prompt_env.store.create(
+        "newsletter",
+        "reviewer",
+        "pr-review",
+        (
+            "---\nname: pr-review\ndescription: Collision.\n---\n\n"
+            "Review local work.\n"
+        ).encode("utf-8"),
+    )
+    prompt_env.snapshot = ConfigStore(prompt_env.snapshot.path).patch(
+        prompt_env.snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update({"prompts": ["local-triage", "pr-review"]}),
+    )
+
+    with pytest.raises(ValueError, match="exists in both blueprint and instance scopes"):
+        effective_prompt_catalog(
+            prompt_env.snapshot,
+            prompt_env.library,
+            prompt_env.store,
+            "newsletter",
+            "reviewer",
+        )
+
+
+def test_resolve_catalog_prompt_requires_matching_explicit_scope(prompt_env):
+    prompt = resolve_catalog_prompt(
+        prompt_env.snapshot,
+        prompt_env.library,
+        prompt_env.store,
+        "newsletter",
+        "reviewer",
+        scope="instance",
+        name="local-triage",
+    )
+
+    assert prompt.scope == "instance"
+    assert prompt.document.name == "local-triage"
+
+    with pytest.raises(KeyError):
+        resolve_catalog_prompt(
+            prompt_env.snapshot,
+            prompt_env.library,
+            prompt_env.store,
+            "newsletter",
+            "reviewer",
+            scope="instance",
+            name="pr-review",
+        )
+
+
+def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_path):
+    library_root = tmp_path / "agent-library"
+    blueprint = library_root / "builder-blueprint"
+    prompt_dir = blueprint / ".agents" / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    (blueprint / "AGENTS.md").write_text("# Builder\n", encoding="utf-8")
+    (prompt_dir / "daily-review.prompt.md").write_text(
+        "---\nname: daily-review\ndescription: Review daily work.\n---\n\nRun it.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "workspaces" / "newsletter" / "repo").mkdir(parents=True, exist_ok=True)
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "schema_version: 4\n"
+        "agency:\n"
+        "  title: Agency\n"
+        "  default_group: newsletter\n"
+        "  ai_backend: claude-code\n"
+        "  agent_library: agent-library\n"
+        "  compilation_cache: compiled-agents\n"
+        "  memory_store: memory\n"
+        "  prompt_store: prompts\n"
+        "groups:\n"
+        "  newsletter:\n"
+        "    name: Newsletter\n"
+        "    workspace_path: workspaces/newsletter\n"
+        "    path: agents/newsletter\n"
+        "    default_integration: copilot\n"
+        "    runtime:\n"
+        "      timeout: 1800\n"
+        "      sandbox:\n"
+        "        mode: restricted\n"
+        "        roots:\n"
+        "          - repo\n"
+        "      tools:\n"
+        "        mode: allowlist\n"
+        "        names:\n"
+        "          - shell\n"
+        "          - write\n"
+        "    agents:\n"
+        "      - name: builder\n"
+        "        blueprint: builder-blueprint\n"
+        "        integration: copilot\n"
+        "        integration_config:\n"
+        "          command: echo ok\n"
+        "        default_memory:\n"
+        "          scope: agent\n"
+        "        routines:\n"
+        "          - id: daily-review\n"
+        "            prompt:\n"
+        "              scope: blueprint\n"
+        "              name: daily-review\n"
+        "            arguments:\n"
+        "              - --mode=review\n"
+        "              - literal value\n"
+        "            schedule:\n"
+        "              at: '09:00'\n",
+        encoding="utf-8",
+    )
+
+    spec = resolve_job_request(
+        JobRequest(
+            config_path=config,
+            group_key="newsletter",
+            agent_name="builder",
+            trigger="manual_prompt",
+            routine_id="daily-review",
+        ),
+        config_store=ConfigStore(config),
+        library=BlueprintLibrary(library_root),
+        cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+        prompt_store=PromptStore(tmp_path / "prompts"),
+        integrations={"copilot": FakeIntegration()},
+    )
+
+    assert spec.skill is None
+    assert spec.skill_arguments == ()
+    assert spec.prompt_source["type"] == "blueprint_prompt"
+    assert "Run it." in spec.task_input
 
 
 def _projector(version: str = "v-test") -> StaticRuntimeProjector:
@@ -88,10 +299,10 @@ class NoSkillIntegration(FakeIntegration):
 
 def _write_blueprint(root: Path, key: str = "builder-blueprint") -> None:
     blueprint = root / key
-    skill = blueprint / ".agents" / "skills" / "daily-review"
-    skill.mkdir(parents=True)
+    prompt_dir = blueprint / ".agents" / "prompts"
+    prompt_dir.mkdir(parents=True)
     (blueprint / "AGENTS.md").write_text("# Builder\n", encoding="utf-8")
-    (skill / "SKILL.md").write_text(
+    (prompt_dir / "daily-review.prompt.md").write_text(
         "---\nname: daily-review\ndescription: Review daily work.\n---\n\nRun it.\n",
         encoding="utf-8",
     )
@@ -107,7 +318,7 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: newsletter\n"
@@ -115,6 +326,7 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "  agent_library: agent-library\n"
         "  compilation_cache: compiled-agents\n"
         "  memory_store: memory\n"
+        "  prompt_store: prompts\n"
         "groups:\n"
         "  newsletter:\n"
         "    name: Newsletter\n"
@@ -133,7 +345,9 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "        default_memory:\n          scope: agent\n"
         "        routines:\n"
         "          - id: daily-review\n"
-        "            skill: daily-review\n"
+        "            prompt:\n"
+        "              scope: blueprint\n"
+        "              name: daily-review\n"
         "            arguments:\n"
         "              - --mode=review\n"
         "              - literal value\n"
@@ -153,7 +367,7 @@ def configured_request(tmp_path: Path) -> JobRequest:
         agent_name="builder",
         trigger="manual_prompt",
         routine_id="daily-review",
-        task_input="Run it",
+        task_input="",
         trigger_context={"source": "test"},
     )
 
@@ -192,8 +406,9 @@ def test_submit_request_persists_validated_current_snapshot(tmp_path):
         str((tmp_path / "agents" / "newsletter").resolve()),
         str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()),
     )
-    assert record.spec.skill == "daily-review"
+    assert record.spec.skill is None
     assert record.spec.routine_id == "daily-review"
+    assert record.spec.prompt_source["type"] == "blueprint_prompt"
 
 
 def test_submit_resolves_from_locked_second_snapshot_without_third_load(
@@ -226,7 +441,7 @@ def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
         group_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
-        task_input="Run it",
+        task_input="",
         routine_id="missing-routine",
     )
     launcher = Mock()
@@ -242,7 +457,7 @@ def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
     assert launcher.launch.call_count == 0
 
 
-def test_full_run_validation_rejects_unsupported_skill_before_pin_or_job(
+def test_full_run_validation_does_not_require_skill_activation_for_prompt_jobs(
     tmp_path,
 ):
     config = _write_config(tmp_path)
@@ -253,19 +468,16 @@ def test_full_run_validation_rejects_unsupported_skill_before_pin_or_job(
         agent_name="builder",
         trigger="manual_prompt",
         routine_id="daily-review",
-        task_input="Run it",
+        task_input="",
     )
     launcher = Mock()
+    launcher.launch.return_value = LaunchResult(worker_pid=4321)
 
     with patch.dict("agency.jobs.submission.REGISTRY", {"copilot": NoSkillIntegration()}, clear=True):
-        with pytest.raises(Exception, match="activate routine skills|unsupported-skill"):
-            submit_job_request(request, launcher)
+        handle = submit_job_request(request, launcher)
 
-    jobs_dir = JobStore(tmp_path / "memory").group_root("newsletter")
-    assert not jobs_dir.exists() or not any(jobs_dir.glob("*.yaml"))
-    pins_root = tmp_path / "compiled-agents" / "_pins"
-    assert not pins_root.exists() or not any(pins_root.rglob("*"))
-    assert launcher.launch.call_count == 0
+    assert handle.worker_pid == 4321
+    assert launcher.launch.call_count == 1
 
 
 def test_submit_marks_record_failed_when_launch_fails(tmp_path):
@@ -378,7 +590,7 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
         group_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
-        task_input=build_routine_task_input("daily-review", ("--mode=review", "literal value")),
+        task_input="",
         routine_id="daily-review",
     )
 
@@ -387,6 +599,7 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
         config_store=ConfigStore(config),
         library=BlueprintLibrary(tmp_path / "agent-library"),
         cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+        prompt_store=PromptStore(tmp_path / "prompts"),
         integrations={"copilot": FakeIntegration()},
     )
 
@@ -405,8 +618,11 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
         str((tmp_path / "agents" / "newsletter").resolve()),
         str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()),
     )
-    assert spec.skill_arguments == ("--mode=review", "literal value")
-    assert spec.task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
+    assert spec.skill_arguments == ()
+    assert spec.task_input == build_prompt_task_input(
+        "Run it.\n",
+        arguments=("--mode=review", "literal value"),
+    )
 
 
 def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
@@ -417,7 +633,7 @@ def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
         group_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
-        task_input="Run routine 'daily-review' with arguments: --mode=review, literal value",
+        task_input="",
         routine_id="daily-review",
     )
 
@@ -435,8 +651,11 @@ def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
     )
 
     record = read_job(handle.path)
-    assert record.spec.skill_arguments == ("--mode=review", "literal value")
-    assert record.spec.task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value"
+    assert record.spec.skill_arguments == ()
+    assert record.spec.task_input == build_prompt_task_input(
+        "Run it.\n",
+        arguments=("--mode=review", "literal value"),
+    )
 
 
 def test_decision_jobs_keep_empty_skill_arguments(tmp_path):
@@ -451,7 +670,7 @@ def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
     config = _write_config(tmp_path)
     _write_blueprint(tmp_path / "agent-library")
     return JobSpec(
-        schema_version=3,
+        schema_version=4,
         job_id="decision-job",
         config_path=str(config.resolve()),
         config_revision="cfg-1",
@@ -490,6 +709,7 @@ def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
         prompt_source={"type": "decision"},
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
+        private_prompts=(),
     )
 
 
@@ -503,12 +723,13 @@ def test_resolve_job_request_snapshots_distinct_configured_roots(tmp_path):
             group_key="newsletter",
             agent_name="builder",
             trigger="manual_prompt",
-            task_input="Run it",
+            task_input="",
             routine_id="daily-review",
         ),
         config_store=ConfigStore(config),
         library=BlueprintLibrary(tmp_path / "agent-library"),
         cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+        prompt_store=PromptStore(tmp_path / "prompts"),
         integrations={"copilot": FakeIntegration()},
     )
 
@@ -528,12 +749,13 @@ def test_submit_releases_cache_pin_when_launch_fails(tmp_path):
             group_key="newsletter",
             agent_name="builder",
             trigger="manual_prompt",
-            task_input="Run it",
+            task_input="",
             routine_id="daily-review",
         ),
         config_store=ConfigStore(config),
         library=BlueprintLibrary(tmp_path / "agent-library"),
         cache=cache,
+        prompt_store=PromptStore(tmp_path / "prompts"),
         integrations={"copilot": FakeIntegration()},
     )
     launcher = Mock()
@@ -722,14 +944,18 @@ def test_resolution_does_not_infer_routine_or_skill_from_prompt_source_path(tmp_
         group_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
-        task_input="Run it",
+        task_input="",
     )
 
-    with pytest.raises(ValueError, match="existing routine"):
+    with pytest.raises(
+        ValueError,
+        match="routine, saved prompt, or nonblank task_input",
+    ):
         resolve_job_request(
             request,
             config_store=ConfigStore(config),
             library=BlueprintLibrary(tmp_path / "agent-library"),
             cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+            prompt_store=PromptStore(tmp_path / "prompts"),
             integrations={"copilot": FakeIntegration()},
         )

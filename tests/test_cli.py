@@ -37,7 +37,7 @@ def _setup_jobs_group(
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",
@@ -45,6 +45,7 @@ def _setup_jobs_group(
                     "agent_library": str((tmp_path / "agent-library").resolve()),
                     "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
                     "memory_store": str((tmp_path / "memory").resolve()),
+                    "prompt_store": str((tmp_path / "prompts").resolve()),
                 },
                 "groups": {
                     "test": apply_group_paths({
@@ -282,14 +283,16 @@ def _dispatch_status(state="active", installed=True, error=None):
 def _write_dispatch_config(path):
     (path.parent / "agent-library").mkdir(parents=True, exist_ok=True)
     (path.parent / "memory").mkdir(parents=True, exist_ok=True)
+    (path.parent / "prompts").mkdir(parents=True, exist_ok=True)
     path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "agency": {
                     "agent_library": "agent-library",
                     "compilation_cache": "compiled-agents",
                     "memory_store": "memory",
+                    "prompt_store": "prompts",
                     "dispatch": {"interval": 15},
                 },
                 "groups": {},

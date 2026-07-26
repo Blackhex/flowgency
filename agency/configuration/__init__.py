@@ -5,6 +5,7 @@ from .issues import ValidationFailed, ValidationIssue
 from .models import (
     AgencyConfig,
     ParsedConfig,
+    PromptSelector,
     parse_config,
     validate_config,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "GroupSettingsPatch",
     "GroupSettingsStatePatch",
     "ParsedConfig",
+    "PromptSelector",
     "ResolvedGroupPaths",
     "ToolPolicy",
     "ValidationFailed",

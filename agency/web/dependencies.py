@@ -18,6 +18,7 @@ from agency.instances import InstanceService
 from agency.jobs.authority import JobStore
 from agency.jobs.submission import _projector_registry
 from agency.memory import MemoryStore
+from agency.prompts import PromptStore, validate_prompt_catalogs
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class AgencyServices:
     blueprint_library: BlueprintLibrary | None
     compilation_cache: CompilationCache | None
     memory_store: MemoryStore | None
+    prompt_store: PromptStore | None
     job_store: JobStore | None
     instances: InstanceService | None
     integrations: Mapping[str, BaseIntegration]
@@ -50,11 +52,16 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
         library_root = agency.agent_library
         cache_root = agency.compilation_cache
         memory_root = agency.memory_store
-        if library_root is None or cache_root is None or memory_root is None:
-            raise ValueError("Agency services require agent_library, compilation_cache, and memory_store.")
+        prompt_root = agency.prompt_store
+        if library_root is None or cache_root is None or memory_root is None or prompt_root is None:
+            raise ValueError("Agency services require agent_library, compilation_cache, memory_store, and prompt_store.")
         blueprint_library = BlueprintLibrary(Path(library_root))
         compilation_cache = CompilationCache(Path(cache_root), _projector_registry())
         memory_store = MemoryStore(Path(memory_root))
+        prompt_store = PromptStore(Path(prompt_root))
+        catalog_issues = validate_prompt_catalogs(snapshot, blueprint_library, prompt_store)
+        if catalog_issues:
+            raise ValidationFailed(catalog_issues)
         job_store = JobStore(Path(memory_root))
         instances = InstanceService(
             config_store=config_store,
@@ -67,6 +74,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             blueprint_library=blueprint_library,
             compilation_cache=compilation_cache,
             memory_store=memory_store,
+            prompt_store=prompt_store,
             job_store=job_store,
             instances=instances,
             integrations=REGISTRY,
@@ -79,6 +87,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             blueprint_library=None,
             compilation_cache=None,
             memory_store=None,
+            prompt_store=None,
             job_store=None,
             instances=None,
             integrations=REGISTRY,

@@ -25,9 +25,15 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 def _write_blueprint(root: Path, key: str, title: str) -> None:
     blueprint = root / key
     skill = blueprint / ".agents" / "skills" / "daily-review"
+    prompt_dir = blueprint / ".agents" / "prompts"
     skill.mkdir(parents=True, exist_ok=True)
+    prompt_dir.mkdir(parents=True, exist_ok=True)
     (blueprint / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
     (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
+    (prompt_dir / "daily-review.prompt.md").write_text(
         "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
         encoding="utf-8",
     )
@@ -38,6 +44,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
+    prompt_root = tmp_path / "prompts"
     group_root = tmp_path / "groups" / "newsletter"
     (tmp_path / "Research" / "editorial").mkdir(parents=True, exist_ok=True)
     (tmp_path / "Research" / "additional").mkdir(parents=True, exist_ok=True)
@@ -51,6 +58,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
+    raw["agency"]["prompt_store"] = str(prompt_root)
     raw["groups"]["newsletter"]["name"] = "Newsletter"
     raw["groups"]["newsletter"]["path"] = str(group_root)
     raw["groups"]["newsletter"]["default_integration"] = "copilot"
@@ -86,7 +94,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
             "routines": [
                 {
                     "id": "daily-review",
-                    "skill": "daily-review",
+                    "prompt": {"scope": "blueprint", "name": "daily-review"},
                     "arguments": ["--brief"],
                     "schedule": {"at": "09:00"},
                     "memory": {"scope": "routine"},
@@ -367,7 +375,7 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):
         [
             {
                 "id": "triage",
-                "skill": "daily-review",
+                "prompt": {"scope": "blueprint", "name": "daily-review"},
                 "enabled": False,
                 "arguments": ["--triage"],
                 "schedule": {"every": "6h"},
@@ -375,7 +383,7 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):
             },
             {
                 "id": "digest",
-                "skill": "daily-review",
+                "prompt": {"scope": "blueprint", "name": "daily-review"},
                 "arguments": ["--digest"],
                 "schedule": {"at": "17:30"},
             },
@@ -417,8 +425,8 @@ def test_routines_post_rejects_duplicate_ids(monkeypatch, tmp_path, raw_config):
     revision = _revision(config_path)
     routines_yaml = yaml.safe_dump(
         [
-            {"id": "dup", "skill": "daily-review", "arguments": [], "schedule": {"at": "09:00"}},
-            {"id": "dup", "skill": "daily-review", "arguments": [], "schedule": {"every": "6h"}},
+            {"id": "dup", "prompt": {"scope": "blueprint", "name": "daily-review"}, "arguments": [], "schedule": {"at": "09:00"}},
+            {"id": "dup", "prompt": {"scope": "blueprint", "name": "daily-review"}, "arguments": [], "schedule": {"every": "6h"}},
         ],
         sort_keys=False,
     )

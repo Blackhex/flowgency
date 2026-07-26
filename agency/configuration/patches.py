@@ -25,6 +25,7 @@ class AgencySettingsPatch:
     agent_library: str
     compilation_cache: str
     memory_store: str
+    prompt_store: str
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,7 @@ def patch_agency_settings(
         agency["agent_library"] = patch.agent_library
         agency["compilation_cache"] = patch.compilation_cache
         agency["memory_store"] = patch.memory_store
+        agency["prompt_store"] = patch.prompt_store
         dispatch = agency.setdefault("dispatch", {})
         dispatch["interval"] = patch.dispatch_interval
 

@@ -17,8 +17,9 @@ from agency.memory.selectors import (
     resolve_memory_selector,
     select_effective_memory,
 )
+from agency.prompts import PromptStore, build_prompt_task_input, resolve_catalog_prompt
 
-from .models import BlueprintRef, JobRequest, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from .models import BlueprintRef, JobRequest, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
 
 
 class JobValidationError(ValueError):
@@ -68,6 +69,7 @@ def resolve_job_request(
     config_store: ConfigStore,
     library: BlueprintLibrary,
     cache: CompilationCache,
+    prompt_store: PromptStore,
     integrations: Mapping[str, BaseIntegration],
     snapshot: ConfigSnapshot | None = None,
 ) -> JobSpec:
@@ -84,11 +86,14 @@ def resolve_job_request(
     agent = _find_agent(group, request.agent_name)
     routine = _find_routine(agent, request.routine_id)
 
-    if request.trigger in {"scheduled_prompt", "manual_prompt"} and routine is None:
+    if request.routine_id is not None and routine is None:
+        raise JobValidationError("scheduled and manual jobs require an existing routine")
+
+    if request.trigger == "scheduled_prompt" and routine is None:
         raise JobValidationError(
-            "scheduled and manual jobs require an existing routine"
+            "scheduled jobs require an existing routine"
         )
-    if request.trigger in {"scheduled_prompt", "manual_prompt"} and not routine.enabled:
+    if request.trigger in {"scheduled_prompt", "manual_prompt"} and routine is not None and not routine.enabled:
         raise JobValidationError(
             f"Routine '{routine.id}' is disabled; enable it before running"
         )
@@ -135,24 +140,60 @@ def resolve_job_request(
             task_file=validation_task_file,
             timeout=runtime_policy.timeout,
             runtime_policy=runtime_policy,
-            skill=routine.skill if routine is not None else None,
-            skill_arguments=(
-                routine.arguments if routine is not None else ()
-            ),
+            skill=None,
+            skill_arguments=(),
             enforce_validation=True,
             memory_working_dir=None,
         )
     )
 
+    private_prompts = tuple(
+        PromptSnapshot(
+            name=name,
+            content=prompt_store.read(request.group_key, request.agent_name, name).document.source.decode("utf-8"),
+            source_digest=prompt_store.read(request.group_key, request.agent_name, name).document.digest,
+        )
+        for name in agent.prompts
+    )
+
     if request.trigger in {"manual_prompt", "scheduled_prompt"}:
-        prompt_source = {"type": "routine", "routine_id": routine.id if routine else None}
+        selector = routine.prompt if routine is not None else request.prompt
+        if selector is not None:
+            catalog_prompt = resolve_catalog_prompt(
+                snapshot,
+                library,
+                prompt_store,
+                request.group_key,
+                request.agent_name,
+                scope=selector.scope,
+                name=selector.name,
+            )
+            task_input = build_prompt_task_input(
+                catalog_prompt.document.body,
+                arguments=routine.arguments if routine is not None else (),
+                invocation_input=request.invocation_input,
+            )
+            prompt_source = {
+                "type": "blueprint_prompt" if catalog_prompt.scope == "blueprint" else "instance_prompt",
+                "scope": catalog_prompt.scope,
+                "name": catalog_prompt.document.name,
+                "source_path": catalog_prompt.source_path,
+                "source_digest": catalog_prompt.document.digest,
+            }
+        elif request.task_input.strip():
+            task_input = request.task_input
+            prompt_source = {"type": "ad_hoc"}
+        else:
+            raise JobValidationError("manual prompt jobs require a routine, saved prompt, or nonblank task_input")
     elif request.trigger == "decision":
+        task_input = request.task_input
         prompt_source = {"type": "decision"}
     else:
+        task_input = request.task_input
         prompt_source = {"type": "decision_retry"}
 
     return JobSpec(
-        schema_version=3,
+        schema_version=4,
         job_id=request.job_id,
         config_path=str(snapshot.path),
         config_revision=snapshot.revision,
@@ -171,9 +212,9 @@ def resolve_job_request(
             cache_path=str(artifact.entry_path.resolve()),
         ),
         routine_id=routine.id if routine is not None else None,
-        skill=routine.skill if routine is not None else None,
-        skill_arguments=routine.arguments if routine is not None else (),
-        task_input=request.task_input,
+        skill=None,
+        skill_arguments=(),
+        task_input=task_input,
         runtime_policy=RuntimePolicySnapshot.from_effective_policy(runtime_policy),
         memory=MemoryBinding(
             selector=resolved_memory.selector.model_dump(mode="python"),
@@ -185,4 +226,5 @@ def resolve_job_request(
         prompt_source=prompt_source,
         timeout_override=request.timeout_override,
         created_at=datetime.now(timezone.utc).isoformat(),
+        private_prompts=private_prompts,
     )
