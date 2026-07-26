@@ -2,13 +2,14 @@ from .assets import PromptDocument, build_prompt_task_input, parse_prompt_docume
 from .catalog import CatalogPrompt, effective_prompt_catalog, resolve_catalog_prompt, validate_prompt_catalogs
 from .projection import PromptProjectionFormat, render_prompt
 from .service import PromptMutationResult, PromptService
-from .store import PromptConflictError, PromptNotFoundError, PromptStore, StoredPrompt
+from .store import PromptConflictError, PromptNamespaceLease, PromptNotFoundError, PromptStore, StoredPrompt
 
 __all__ = [
     "CatalogPrompt",
     "PromptDocument",
     "PromptConflictError",
     "PromptMutationResult",
+    "PromptNamespaceLease",
     "PromptNotFoundError",
     "PromptProjectionFormat",
     "PromptService",

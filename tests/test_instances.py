@@ -26,7 +26,7 @@ from agency.jobs.resolution import JobValidationError
 from agency.jobs.store import transition_job, write_job
 from agency.jobs.submission import submit_job_request
 from agency.memory import MemoryStore, resolve_memory_selector
-from agency.prompts import PromptNotFoundError, PromptStore
+from agency.prompts import PromptNotFoundError, PromptService, PromptStore
 from tests._group_helpers import apply_group_paths, create_group_environment
 
 
@@ -828,12 +828,11 @@ def test_move_rolls_back_copied_prompts_when_config_patch_fails(
         pass
 
     def fail_patch(expected_revision, patcher):
-        assert (
-            instance_env["prompt_store"]
-            .read("other", "builder", "local-triage")
-            .document.digest
-            == created.document.digest
-        )
+        assert instance_env["prompt_store"].path(
+            "other",
+            "builder",
+            "local-triage",
+        ).read_bytes() == _private_prompt_bytes()
         raise InjectedPromptPatchFailure("fail after prompt copy")
 
     monkeypatch.setattr(instance_env["config_store"], "patch", fail_patch)
@@ -849,6 +848,161 @@ def test_move_rolls_back_copied_prompts_when_config_patch_fails(
     )
     with pytest.raises(PromptNotFoundError):
         instance_env["prompt_store"].read("other", "builder", "local-triage")
+
+
+def test_move_blocks_private_prompt_update_in_copy_to_delete_window(
+    instance_service,
+    instance_env,
+    monkeypatch,
+):
+    created = instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    snapshot = instance_env["config_store"].load()
+    instance_env["config_store"].patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+    preview = instance_service.preview_move(
+        "newsletter",
+        "builder",
+        "other",
+        "copy",
+    )
+    prompt_service = PromptService(
+        config_store=instance_env["config_store"],
+        library=instance_env["library"],
+        store=instance_env["prompt_store"],
+    )
+    original_patch = instance_env["config_store"].patch
+    patch_entered = threading.Event()
+    release_patch = threading.Event()
+    update_attempted = threading.Event()
+    update_finished = threading.Event()
+    move_outcome: dict[str, object] = {}
+    update_outcome: dict[str, object] = {}
+
+    def patched_patch(expected_revision, patcher):
+        patch_entered.set()
+        assert release_patch.wait(timeout=5)
+        return original_patch(expected_revision, patcher)
+
+    def run_move() -> None:
+        try:
+            move_outcome["result"] = instance_service.move(preview)
+        except Exception as exc:  # pragma: no cover - asserted below
+            move_outcome["error"] = exc
+
+    def run_update() -> None:
+        update_attempted.set()
+        try:
+            update_outcome["result"] = prompt_service.update_private(
+                "newsletter",
+                "builder",
+                "local-triage",
+                _private_prompt_bytes(body="Changed in window.\n"),
+                expected_digest=created.document.digest,
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            update_outcome["error"] = exc
+        finally:
+            update_finished.set()
+
+    monkeypatch.setattr(instance_env["config_store"], "patch", patched_patch)
+
+    move_thread = threading.Thread(target=run_move)
+    move_thread.start()
+    assert patch_entered.wait(timeout=5)
+
+    update_thread = threading.Thread(target=run_update)
+    update_thread.start()
+    assert update_attempted.wait(timeout=5)
+    assert not update_finished.wait(timeout=0.2)
+
+    release_patch.set()
+    move_thread.join(timeout=5)
+    update_thread.join(timeout=5)
+
+    assert "error" not in move_outcome
+    assert move_outcome["result"].orphaned_prompt_namespace is None
+    assert isinstance(update_outcome.get("error"), PromptNotFoundError)
+    assert (
+        instance_env["prompt_store"]
+        .read("other", "builder", "local-triage")
+        .document.digest
+        == created.document.digest
+    )
+    with pytest.raises(PromptNotFoundError):
+        instance_env["prompt_store"].read(
+            "newsletter", "builder", "local-triage"
+        )
+
+
+def test_move_reports_orphaned_prompt_namespace_when_source_cleanup_fails(
+    instance_service,
+    instance_env,
+    monkeypatch,
+):
+    created = instance_env["prompt_store"].create(
+        "newsletter",
+        "builder",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    snapshot = instance_env["config_store"].load()
+    instance_env["config_store"].patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+    preview = instance_service.preview_move(
+        "newsletter",
+        "builder",
+        "other",
+        "copy",
+    )
+    original_delete_namespace_locked = instance_env["prompt_store"]._delete_namespace_locked
+
+    def fail_source_cleanup(group, instance, *, registered):
+        if (group, instance) == ("newsletter", "builder"):
+            raise OSError("simulated source cleanup failure")
+        return original_delete_namespace_locked(
+            group,
+            instance,
+            registered=registered,
+        )
+
+    monkeypatch.setattr(
+        instance_env["prompt_store"],
+        "_delete_namespace_locked",
+        fail_source_cleanup,
+    )
+
+    result = instance_service.move(preview)
+
+    assert result.snapshot.config.groups["newsletter"].agents == {}
+    assert result.snapshot.config.groups["other"].agents["builder"].prompts == (
+        "local-triage",
+    )
+    assert result.orphaned_prompt_namespace == (
+        instance_env["prompt_store"].path(
+            "newsletter",
+            "builder",
+            "local-triage",
+        ).parent
+    )
+    assert (
+        instance_env["prompt_store"]
+        .read("newsletter", "builder", "local-triage")
+        .document.digest
+        == created.document.digest
+    )
 
 
 def test_remove_instance_deletes_registered_private_prompts_and_reports_none(
