@@ -12,6 +12,7 @@ from agency.configuration import ConfigStore, PromptSelector
 from agency.jobs import JobRequest
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from agency.prompts import PromptStore
 from agency.jobs.store import write_job
 from tests._group_helpers import create_group_environment
 
@@ -180,6 +181,85 @@ def test_run_invalid_routine_id_400(tmp_path, monkeypatch):
     )
 
     assert resp.status_code == 400
+
+
+def test_run_returns_400_when_blueprint_prompt_disappears_after_validation(tmp_path, monkeypatch):
+    _setup_group(tmp_path)
+    prompt_path = (
+        tmp_path / "agent-library" / "builder-blueprint" / ".agents" / "prompts" / "daily-review.prompt.md"
+    )
+    prompt_path.unlink()
+    monkeypatch.setattr(
+        app_mod,
+        "resolve_catalog_prompt",
+        lambda *args, **kwargs: SimpleNamespace(
+            scope="blueprint",
+            document=SimpleNamespace(name="daily-review"),
+            source_path=".agents/prompts/daily-review.prompt.md",
+        ),
+    )
+    client = TestClient(app)
+
+    resp = client.post(
+        "/test/agents/product/run",
+        data={
+            "routine_id": "daily-review",
+            "mode": "saved",
+            "prompt_scope": "blueprint",
+            "prompt_name": "daily-review",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "daily-review" in resp.json()["detail"]
+
+
+def test_run_returns_400_when_private_prompt_disappears_after_validation(tmp_path, monkeypatch):
+    _setup_group(tmp_path)
+    config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
+    config["groups"]["test"]["agents"][0]["prompts"] = ["local-triage"]
+    app_mod.CONFIG_PATH.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    prompt_store = PromptStore(tmp_path / "prompt-store")
+    created = prompt_store.create(
+        "test",
+        "product",
+        "local-triage",
+        (
+            "---\nname: local-triage\ndescription: Local triage.\n---\n\n"
+            "Review local work.\n"
+        ).encode("utf-8"),
+    )
+    app_mod.refresh_services()
+    prompt_store.delete(
+        "test",
+        "product",
+        "local-triage",
+        expected_digest=created.document.digest,
+    )
+    monkeypatch.setattr(
+        app_mod,
+        "resolve_catalog_prompt",
+        lambda *args, **kwargs: SimpleNamespace(
+            scope="instance",
+            document=SimpleNamespace(name="local-triage"),
+            source_path=str(prompt_store.path("test", "product", "local-triage")),
+        ),
+    )
+    client = TestClient(app)
+
+    resp = client.post(
+        "/test/agents/product/run",
+        data={
+            "mode": "saved",
+            "prompt_scope": "instance",
+            "prompt_name": "local-triage",
+            "invocation_input": "triage the update",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "local-triage" in resp.json()["detail"]
 
 
 def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
