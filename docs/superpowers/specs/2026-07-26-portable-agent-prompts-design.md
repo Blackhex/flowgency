@@ -287,7 +287,7 @@ submission cannot alter a queued or running job.
 
 New prompt-backed jobs do not select or explicitly activate a skill. Skills are
 projected independently according to each integration's existing skill
-capabilities. Legacy nullable skill fields may remain readable in historical
+capabilities. Historical nullable skill fields may remain readable in historical
 durable job records, but new schema-v4 submissions leave them unset.
 
 The existing `scheduled_prompt` and `manual_prompt` trigger names remain. Their
