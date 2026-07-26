@@ -366,7 +366,8 @@ def test_agents_page_lists_prompts_with_run(tmp_path):
     assert resp.status_code == 200
     assert "Instances assigned to Test" in resp.text
     assert "Blueprint: builder-blueprint" in resp.text
-    assert "product-routine" not in resp.text
+    assert "product-routine" in resp.text
+    assert "Run prompt" in resp.text
     assert "/test/prompts/" not in resp.text
 
 

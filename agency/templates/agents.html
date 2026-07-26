@@ -9,46 +9,70 @@
     <h1 class="text-2xl font-bold text-gray-900">Instances assigned to {{ group_name }}</h1>
     <p class="text-sm text-gray-600 mt-1">This roster is sourced from config records only.</p>
   </div>
-  <span class="text-sm text-gray-500">{{ instances|length }} instance{{ 's' if instances|length != 1 else '' }}</span>
+  <div class="flex items-center gap-3 flex-wrap">
+    <span class="text-sm text-gray-500">{{ instances|length }} instance{{ 's' if instances|length != 1 else '' }}</span>
+    <button type="button" data-action="open-add-agent" class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add agent</button>
+  </div>
 </div>
 
 {% if warning %}
 <div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{{ warning }}</div>
 {% endif %}
 
-<div class="bg-white rounded-xl border border-gray-200 p-5 mb-8">
-  <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-4">Create Instance</h2>
-  <form method="post" action="/{{ group }}/agents/create" class="grid gap-4 md:grid-cols-4">
-    <input type="hidden" name="revision" value="{{ config_revision }}">
-    <label class="block">
-      <span class="sr-only">Instance name</span>
-      <input type="text" name="name" placeholder="instance name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">
-    </label>
-    <label class="block">
-      <span class="sr-only">Blueprint</span>
-      <select name="blueprint" aria-label="Blueprint" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-mono">
-      {% for blueprint in available_blueprints %}
-      <option value="{{ blueprint }}">{{ blueprint }}</option>
-      {% endfor %}
-      </select>
-    </label>
-    <label class="block">
-      <span class="sr-only">Integration</span>
-      <select name="integration" aria-label="Integration" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
-      {% for integration in available_integrations %}
-      <option value="{{ integration }}">{{ integration }}</option>
-      {% endfor %}
-      </select>
-    </label>
-    <label class="block">
-      <span class="sr-only">Display name</span>
-      <input type="text" name="display_name" placeholder="Display name" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-    </label>
-    <div class="md:col-span-4 flex justify-end">
-      <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add Instance</button>
+<dialog id="add-agent-dialog" {% if creation_open %}open {% endif %}class="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-0 shadow-2xl backdrop:bg-slate-900/60 dark:border-gray-700 dark:bg-slate-900">
+  <div class="p-6 sm:p-7">
+    <div class="flex items-start justify-between gap-4 mb-5">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Add agent</h2>
+        <p class="text-sm text-gray-600 mt-1">Create a new configured instance for {{ group_name }}.</p>
+      </div>
+      <button type="button" data-action="close-add-agent" class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors" aria-label="Close add agent dialog">&times;</button>
     </div>
-  </form>
-</div>
+
+    {% if creation_issues %}
+    <div class="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-100">
+      {% for issue in creation_issues %}
+      <p>{{ issue.message }}</p>
+      {% if issue.hint %}
+      <p class="mt-1 text-xs opacity-80">{{ issue.hint }}</p>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/{{ group }}/agents/create" class="grid gap-4 md:grid-cols-4">
+      <input type="hidden" name="revision" value="{{ config_revision }}">
+      <label class="block md:col-span-2">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Instance name</span>
+        <input type="text" name="name" value="{{ creation_values.name }}" placeholder="instance name" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono">
+      </label>
+      <label class="block md:col-span-1">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Blueprint</span>
+        <select name="blueprint" aria-label="Blueprint" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-mono">
+        {% for blueprint in available_blueprints %}
+        <option value="{{ blueprint }}" {% if creation_values.blueprint == blueprint %}selected{% endif %}>{{ blueprint }}</option>
+        {% endfor %}
+        </select>
+      </label>
+      <label class="block md:col-span-1">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Integration</span>
+        <select name="integration" aria-label="Integration" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+        {% for integration in available_integrations %}
+        <option value="{{ integration }}" {% if creation_values.integration == integration %}selected{% endif %}>{{ integration }}</option>
+        {% endfor %}
+        </select>
+      </label>
+      <label class="block md:col-span-4">
+        <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Display name</span>
+        <input type="text" name="display_name" value="{{ creation_values.display_name }}" placeholder="Display name" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+      </label>
+      <div class="md:col-span-4 flex justify-end gap-3 pt-2">
+        <button type="button" data-action="close-add-agent" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Add agent</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 <div class="space-y-4 mb-8">
   {% for instance in instances %}
@@ -65,9 +89,6 @@
           </div>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">Blueprint: {{ instance.blueprint }}</span>
           {{ instance.integration | integration_badge }}
-          {% if instance.job_status %}
-          <a href="{{ instance.job_href }}" title="{{ instance.job_status_title }}" class="inline-flex min-w-[8.75rem] justify-center items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap {{ instance.job_status_classes }}">{{ instance.job_status }}</a>
-          {% endif %}
         </div>
         {% if instance.title %}
         <div class="mt-2 text-sm text-gray-600">{{ instance.title }}</div>
@@ -101,6 +122,136 @@
         </form>
       </div>
     </div>
+
+    <div class="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(16rem,0.9fr)]">
+      <form method="post" action="{{ instance.run_href }}" data-launch-form class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:bg-slate-950/40 dark:border-slate-700">
+        <input type="hidden" name="routine_id" value="">
+        <input type="hidden" name="prompt_scope" value="{{ instance.default_prompt_scope }}" data-prompt-scope>
+        <input type="hidden" name="prompt_name" value="{{ instance.default_prompt_name }}" data-prompt-name>
+
+        <div class="flex items-center justify-between gap-3 flex-wrap mb-4">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900">Manual launcher</h3>
+            <p class="text-xs text-gray-600 mt-1">Start saved prompts or one-off tasks without leaving the roster.</p>
+          </div>
+          <div class="inline-flex rounded-xl bg-white p-1 border border-gray-200 dark:bg-slate-900 dark:border-slate-700">
+            <label class="cursor-pointer">
+              <input type="radio" name="mode" value="saved" {% if instance.default_mode == 'saved' %}checked{% endif %} {% if not instance.has_saved_prompts %}disabled{% endif %} class="sr-only" data-mode-toggle>
+              <span class="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 data-[active=true]:bg-indigo-600 data-[active=true]:text-white" data-mode-pill="saved">Saved prompt</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="mode" value="one-off" {% if instance.default_mode == 'one-off' %}checked{% endif %} class="sr-only" data-mode-toggle>
+              <span class="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 data-[active=true]:bg-indigo-600 data-[active=true]:text-white" data-mode-pill="one-off">One-off</span>
+            </label>
+          </div>
+        </div>
+
+        <section data-saved-panel {% if instance.default_mode != 'saved' %}hidden{% endif %} class="space-y-4">
+          {% if instance.has_saved_prompts %}
+          <div>
+            <label class="block">
+              <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Saved prompt catalog</span>
+              <select class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white font-mono" data-prompt-select aria-label="Saved prompt">
+                {% if instance.shared_prompts %}
+                <optgroup label="Shared from blueprint">
+                  {% for prompt in instance.shared_prompts %}
+                  <option value="{{ prompt.scope }}:{{ prompt.name }}" data-scope="{{ prompt.scope }}" data-name="{{ prompt.name }}" data-description="{{ prompt.description }}" data-argument-hint="{{ prompt.argument_hint }}" {% if instance.default_prompt_scope == prompt.scope and instance.default_prompt_name == prompt.name %}selected{% endif %}>{{ prompt.name }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
+                {% if instance.private_prompts %}
+                <optgroup label="Private to this instance">
+                  {% for prompt in instance.private_prompts %}
+                  <option value="{{ prompt.scope }}:{{ prompt.name }}" data-scope="{{ prompt.scope }}" data-name="{{ prompt.name }}" data-description="{{ prompt.description }}" data-argument-hint="{{ prompt.argument_hint }}" {% if instance.default_prompt_scope == prompt.scope and instance.default_prompt_name == prompt.name %}selected{% endif %}>{{ prompt.name }}</option>
+                  {% endfor %}
+                </optgroup>
+                {% endif %}
+              </select>
+            </label>
+            <div class="mt-3 rounded-xl border border-gray-200 bg-white p-3 dark:bg-slate-900 dark:border-slate-700">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Description</p>
+              <p class="mt-1 text-sm text-gray-700" data-prompt-description>
+                {% if instance.default_prompt_name %}
+                  {% set default_prompt = (instance.shared_prompts + instance.private_prompts) | selectattr('name', 'equalto', instance.default_prompt_name) | list | first %}
+                  {{ default_prompt.description if default_prompt else 'Select a saved prompt.' }}
+                {% else %}
+                  Select a saved prompt.
+                {% endif %}
+              </p>
+              <p class="mt-2 text-xs text-gray-500" data-prompt-hint {% if not instance.default_prompt_name %}hidden{% endif %}>
+                {% if instance.default_prompt_name and default_prompt and default_prompt.argument_hint %}{{ default_prompt.argument_hint }}{% endif %}
+              </p>
+            </div>
+          </div>
+          {% else %}
+          <div class="rounded-xl border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-600 dark:bg-slate-900 dark:border-slate-700">No saved prompts available for this instance.</div>
+          {% endif %}
+        </section>
+
+        <section data-one-off-panel {% if instance.default_mode != 'one-off' %}hidden{% endif %} class="space-y-4">
+          <label class="block">
+            <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">One-off task</span>
+            <textarea name="task_input" rows="5" placeholder="Describe the one-off task to run." class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"></textarea>
+          </label>
+        </section>
+
+        <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(15rem,0.9fr)]">
+          <label class="block">
+            <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Invocation input</span>
+            <textarea name="invocation_input" rows="3" placeholder="Optional invocation input" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></textarea>
+          </label>
+          <div class="space-y-3">
+            <label class="block">
+              <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Memory target</span>
+              <select name="memory_scope" data-memory-scope class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                {% for option in memory_scope_options %}
+                <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="block" data-memory-channel-row hidden>
+              <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Memory channel</span>
+              <select name="memory_channel" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                <option value="">Select channel</option>
+                {% for option in memory_channel_options %}
+                <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="mt-4 flex items-center gap-3 flex-wrap">
+          <button type="submit" data-submit-saved {% if instance.default_mode != 'saved' or not instance.has_saved_prompts %}hidden{% endif %} class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Run prompt</button>
+          <button type="submit" data-submit-one-off {% if instance.default_mode != 'one-off' %}hidden{% endif %} class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors">Run one-off</button>
+          <span class="text-xs text-gray-500" data-launch-status></span>
+        </div>
+
+        <div class="mt-3 hidden rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/30 dark:border-red-800 dark:text-red-100" data-launch-error role="alert"></div>
+      </form>
+
+      <div class="space-y-4">
+        <div data-active-jobs-summary {% if not instance.active_job_count %}hidden{% endif %} class="rounded-2xl border border-gray-200 bg-white p-4 dark:bg-slate-950/30 dark:border-slate-700">
+          <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <h3 class="text-sm font-semibold text-gray-900">Active jobs</h3>
+            <span class="text-xs font-semibold uppercase tracking-wide text-gray-500" title="{{ instance.active_job_count }} active job{{ 's' if instance.active_job_count != 1 else '' }}"><span data-active-job-count>{{ instance.active_job_count }}</span> active job<span data-active-job-plural>{% if instance.active_job_count != 1 %}s{% endif %}</span></span>
+          </div>
+          <div class="flex gap-2 flex-wrap" data-active-jobs-list>
+            {% for job in instance.active_jobs %}
+            <a href="{{ job.href }}" title="{{ job.title }}" class="inline-flex min-w-[8.75rem] justify-center items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap {{ job.classes }}">{{ job.status }}</a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="rounded-2xl border border-gray-200 bg-white p-4 dark:bg-slate-950/30 dark:border-slate-700">
+          <h3 class="text-sm font-semibold text-gray-900">Operations</h3>
+          <p class="mt-1 text-xs text-gray-600">Move, review, or remove this configured instance.</p>
+          <div class="mt-3 flex gap-2 flex-wrap">
+            <a href="{{ instance.activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
+            <a href="{{ instance.profile_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Configure</a>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
   {% endfor %}
 </div>
@@ -108,4 +259,261 @@
 {% if not instances %}
 <div class="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500 mb-8">No instances configured yet.</div>
 {% endif %}
+
+<script>
+  (function () {
+    const dialog = document.getElementById('add-agent-dialog');
+    const openButton = document.querySelector('[data-action="open-add-agent"]');
+    const closeButtons = document.querySelectorAll('[data-action="close-add-agent"]');
+    let returnFocusTarget = null;
+
+    function focusAddAgentField() {
+      const field = dialog?.querySelector('input[name="name"]');
+      if (field) {
+        field.focus();
+        field.select();
+      }
+    }
+
+    function openDialog(trigger) {
+      if (!dialog) {
+        return;
+      }
+      returnFocusTarget = trigger || document.activeElement;
+      if (typeof dialog.showModal === 'function') {
+        if (dialog.open) {
+          dialog.close();
+        }
+        dialog.showModal();
+      } else {
+        dialog.setAttribute('open', 'open');
+      }
+      focusAddAgentField();
+    }
+
+    function closeDialog() {
+      if (!dialog) {
+        return;
+      }
+      if (dialog.open && typeof dialog.close === 'function') {
+        dialog.close();
+      } else {
+        dialog.removeAttribute('open');
+      }
+      if (returnFocusTarget && typeof returnFocusTarget.focus === 'function') {
+        returnFocusTarget.focus();
+      }
+    }
+
+    if (openButton) {
+      openButton.addEventListener('click', function () {
+        openDialog(openButton);
+      });
+    }
+
+    closeButtons.forEach(function (button) {
+      button.addEventListener('click', closeDialog);
+    });
+
+    if (dialog) {
+      dialog.addEventListener('click', function (event) {
+        if (event.target === dialog) {
+          closeDialog();
+        }
+      });
+      if (dialog.hasAttribute('open')) {
+        openDialog(openButton);
+      }
+    }
+
+    function updatePlural(summary) {
+      const countNode = summary.querySelector('[data-active-job-count]');
+      const pluralNode = summary.querySelector('[data-active-job-plural]');
+      const count = Number(countNode?.textContent || '0');
+      if (pluralNode) {
+        pluralNode.textContent = count === 1 ? '' : 's';
+      }
+    }
+
+    function appendQueuedBadge(form, jobId) {
+      const card = form.closest('.bg-white');
+      const summary = card?.querySelector('[data-active-jobs-summary]');
+      const list = card?.querySelector('[data-active-jobs-list]');
+      const countNode = card?.querySelector('[data-active-job-count]');
+      if (!summary || !list || !countNode) {
+        return;
+      }
+      summary.hidden = false;
+      countNode.textContent = String(Number(countNode.textContent || '0') + 1);
+      updatePlural(summary);
+
+      const badge = document.createElement('a');
+      badge.href = `/${encodeURIComponent('{{ group }}')}/jobs/${encodeURIComponent(jobId)}`;
+      badge.title = 'Queued job awaiting execution';
+      badge.className = 'inline-flex min-w-[8.75rem] justify-center items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700';
+      badge.textContent = 'Queued';
+      list.prepend(badge);
+    }
+
+    document.querySelectorAll('[data-launch-form]').forEach(function (form) {
+      const modeInputs = Array.from(form.querySelectorAll('[data-mode-toggle]'));
+      const pills = {
+        saved: form.querySelector('[data-mode-pill="saved"]'),
+        'one-off': form.querySelector('[data-mode-pill="one-off"]'),
+      };
+      const savedPanel = form.querySelector('[data-saved-panel]');
+      const oneOffPanel = form.querySelector('[data-one-off-panel]');
+      const savedButton = form.querySelector('[data-submit-saved]');
+      const oneOffButton = form.querySelector('[data-submit-one-off]');
+      const promptSelect = form.querySelector('[data-prompt-select]');
+      const promptScope = form.querySelector('[data-prompt-scope]');
+      const promptName = form.querySelector('[data-prompt-name]');
+      const description = form.querySelector('[data-prompt-description]');
+      const hint = form.querySelector('[data-prompt-hint]');
+      const memoryScope = form.querySelector('[data-memory-scope]');
+      const memoryChannelRow = form.querySelector('[data-memory-channel-row]');
+      const errorBox = form.querySelector('[data-launch-error]');
+      const status = form.querySelector('[data-launch-status]');
+
+      function selectedMode() {
+        const current = form.querySelector('input[name="mode"]:checked');
+        return current ? current.value : 'one-off';
+      }
+
+      function syncPromptSelection() {
+        const option = promptSelect?.options[promptSelect.selectedIndex];
+        if (!option) {
+          if (promptScope) {
+            promptScope.value = '';
+          }
+          if (promptName) {
+            promptName.value = '';
+          }
+          if (description) {
+            description.textContent = 'Select a saved prompt.';
+          }
+          if (hint) {
+            hint.hidden = true;
+            hint.textContent = '';
+          }
+          return;
+        }
+        if (promptScope) {
+          promptScope.value = option.dataset.scope || '';
+        }
+        if (promptName) {
+          promptName.value = option.dataset.name || '';
+        }
+        if (description) {
+          description.textContent = option.dataset.description || 'Select a saved prompt.';
+        }
+        if (hint) {
+          hint.textContent = option.dataset.argumentHint || '';
+          hint.hidden = !hint.textContent;
+        }
+      }
+
+      function syncMode() {
+        const mode = selectedMode();
+        if (savedPanel) {
+          savedPanel.hidden = mode !== 'saved';
+        }
+        if (oneOffPanel) {
+          oneOffPanel.hidden = mode !== 'one-off';
+        }
+        if (savedButton) {
+          savedButton.hidden = mode !== 'saved' || !(promptSelect && promptSelect.options.length);
+        }
+        if (oneOffButton) {
+          oneOffButton.hidden = mode !== 'one-off';
+        }
+        Object.entries(pills).forEach(function ([modeName, pill]) {
+          if (pill) {
+            pill.dataset.active = String(modeName === mode);
+          }
+        });
+      }
+
+      function syncMemoryScope() {
+        if (!memoryScope || !memoryChannelRow) {
+          return;
+        }
+        const isChannel = memoryScope.value === 'channel';
+        memoryChannelRow.hidden = !isChannel;
+        if (!isChannel) {
+          const channel = memoryChannelRow.querySelector('select');
+          if (channel) {
+            channel.value = '';
+          }
+        }
+      }
+
+      modeInputs.forEach(function (input) {
+        input.addEventListener('change', syncMode);
+      });
+      promptSelect?.addEventListener('change', syncPromptSelection);
+      memoryScope?.addEventListener('change', syncMemoryScope);
+
+      syncPromptSelection();
+      syncMode();
+      syncMemoryScope();
+
+      form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        syncPromptSelection();
+        syncMode();
+        syncMemoryScope();
+        if (errorBox) {
+          errorBox.hidden = true;
+          errorBox.textContent = '';
+        }
+        if (status) {
+          status.textContent = 'Launching...';
+        }
+
+        let response;
+        try {
+          response = await fetch(form.action, {
+            method: 'POST',
+            body: new FormData(form),
+            headers: { 'Accept': 'application/json' },
+          });
+        } catch (error) {
+          if (status) {
+            status.textContent = '';
+          }
+          if (errorBox) {
+            errorBox.hidden = false;
+            errorBox.textContent = error instanceof Error ? error.message : 'Request failed.';
+          }
+          return;
+        }
+
+        let payload = null;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          payload = await response.json();
+        } else {
+          payload = { detail: await response.text() };
+        }
+
+        if (response.status === 202 && payload && payload.job_id) {
+          appendQueuedBadge(form, payload.job_id);
+          if (status) {
+            status.textContent = 'Queued';
+          }
+          return;
+        }
+
+        if (status) {
+          status.textContent = '';
+        }
+        if (errorBox) {
+          errorBox.hidden = false;
+          errorBox.textContent = payload?.detail || 'Launch failed.';
+        }
+      });
+    });
+  }());
+</script>
 {% endblock %}
