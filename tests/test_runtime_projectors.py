@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import tomllib
 from pathlib import Path, PurePosixPath
 
@@ -7,9 +8,10 @@ import pytest
 
 from agency.blueprints.projectors import get_projector
 from agency.blueprints.library import inspect_blueprint
+from agency.jobs.models import PromptSnapshot
 from agency.integrations import RunResult
 from agency.prompts import parse_prompt_document
-from agency.prompts.projection import render_prompt
+from agency.prompts.projection import project_prompt_snapshots, render_prompt
 from agency.fs.snapshot import (
     SnapshotFile,
     TreeSnapshot,
@@ -348,6 +350,75 @@ def test_prompt_gemini_renderer_uses_structured_toml():
         "description": "Review pull requests.",
         "prompt": "Review the pull request.\n",
     }
+
+
+def test_project_prompt_snapshots_projects_projector_native_targets(tmp_path):
+    projector = get_projector("copilot")
+    content = (
+        "---\n"
+        "name: local-triage\n"
+        "description: Local triage.\n"
+        "---\n\n"
+        "Original private task.\n"
+    )
+    snapshots = (
+        PromptSnapshot(
+            name="local-triage",
+            content=content,
+            source_digest=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        ),
+    )
+
+    projected = project_prompt_snapshots(projector, snapshots, tmp_path)
+
+    assert projected == (PurePosixPath(".github/prompts/local-triage.prompt.md"),)
+    assert (
+        tmp_path / ".github" / "prompts" / "local-triage.prompt.md"
+    ).read_text(encoding="utf-8") == snapshots[0].content
+
+
+def test_project_prompt_snapshots_rejects_digest_mismatch(tmp_path):
+    projector = get_projector("copilot")
+    snapshots = (
+        PromptSnapshot(
+            name="local-triage",
+            content=(
+                "---\n"
+                "name: local-triage\n"
+                "description: Local triage.\n"
+                "---\n\n"
+                "Original private task.\n"
+            ),
+            source_digest="0" * 64,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="digest mismatch"):
+        project_prompt_snapshots(projector, snapshots, tmp_path)
+
+
+def test_project_prompt_snapshots_rejects_collisions(tmp_path):
+    projector = get_projector("copilot")
+    target = tmp_path / ".github" / "prompts" / "local-triage.prompt.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("shared prompt\n", encoding="utf-8")
+    content = (
+        "---\n"
+        "name: local-triage\n"
+        "description: Local triage.\n"
+        "---\n\n"
+        "Original private task.\n"
+    )
+    snapshots = (
+        PromptSnapshot(
+            name="local-triage",
+            content=content,
+            source_digest=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="already exists"):
+        project_prompt_snapshots(projector, snapshots, tmp_path)
 
 
 def test_live_runtime_marker_and_docs_describe_automatic_installed_probes(
