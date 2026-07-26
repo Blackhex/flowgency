@@ -177,12 +177,17 @@ class CopilotIntegration(BaseIntegration):
     }
 
     @staticmethod
-    def _parse_jsonl_output(raw: str, root: "Path | None") -> "tuple[str, list[FileChange]]":
-        """Parse Copilot --output-format json (JSONL) into (text, changes).
+    def _parse_jsonl_output_details(
+        raw: str,
+        root: "Path | None",
+    ) -> "tuple[str, list[FileChange], list[str]]":
+        """Parse Copilot --output-format json (JSONL) into text, changes, attempts.
 
         Reconstructs human-readable text from assistant messages and extracts
-        per-file changes from native file-edit tool calls. Any structural
-        problem falls back to (raw, []); a run must never break on parsing.
+        per-file changes from native file-edit tool calls. Records normalized
+        write-attempt paths for native write tools that reached
+        tool.execution_start, even when completion later fails. Any structural
+        problem falls back to (raw, [], []); a run must never break on parsing.
         """
         try:
             tool_names: dict[str, str] = {}
@@ -190,6 +195,8 @@ class CopilotIntegration(BaseIntegration):
             # path -> {"status": str, "added": int, "removed": int}
             files: dict[str, dict] = {}
             texts: list[str] = []
+            write_attempts: list[str] = []
+            seen_attempts: set[str] = set()
             saw_json = False
 
             for line in raw.splitlines():
@@ -206,11 +213,17 @@ class CopilotIntegration(BaseIntegration):
 
                 if etype == "tool.execution_start":
                     tcid = data.get("toolCallId")
+                    tool_name = data.get("toolName", "")
                     if tcid:
-                        tool_names[tcid] = data.get("toolName", "")
+                        tool_names[tcid] = tool_name
                         path = (data.get("arguments") or {}).get("path")
                         if path:
                             tool_paths[tcid] = path
+                            if tool_name in CopilotIntegration._WRITE_TOOLS:
+                                rel = CopilotIntegration._relativize(path, root)
+                                if rel not in seen_attempts:
+                                    seen_attempts.add(rel)
+                                    write_attempts.append(rel)
                 elif etype == "tool.execution_complete":
                     tcid = data.get("toolCallId")
                     telemetry = data.get("toolTelemetry") or {}
@@ -251,7 +264,7 @@ class CopilotIntegration(BaseIntegration):
                             files[rel] = {"status": "modified", "added": 0, "removed": 0}
 
             if not saw_json:
-                return raw, []
+                return raw, [], []
 
             changes = [
                 FileChange(
@@ -263,9 +276,18 @@ class CopilotIntegration(BaseIntegration):
                 for path, info in files.items()
             ]
             text = "\n".join(texts) if texts else raw
-            return text, changes
+            return text, changes, write_attempts
         except Exception:
-            return raw, []
+            return raw, [], []
+
+    @staticmethod
+    def _parse_jsonl_output(raw: str, root: "Path | None") -> "tuple[str, list[FileChange]]":
+        """Parse Copilot --output-format json (JSONL) into (text, changes)."""
+        text, changes, _write_attempts = CopilotIntegration._parse_jsonl_output_details(
+            raw,
+            root,
+        )
+        return text, changes
 
     @staticmethod
     def _compact_number(value: int | float) -> str:
@@ -429,7 +451,10 @@ class CopilotIntegration(BaseIntegration):
             )
             duration = time.monotonic() - start
             parse_root = request.workspace_root
-            parsed_text, changed_files = self._parse_jsonl_output(result.stdout, parse_root)
+            parsed_text, changed_files, write_attempts = self._parse_jsonl_output_details(
+                result.stdout,
+                parse_root,
+            )
             usage_summary = self._usage_summary(result.stdout)
             stderr = result.stderr
             if usage_summary:
@@ -444,6 +469,7 @@ class CopilotIntegration(BaseIntegration):
                 stderr=stderr,
                 duration_seconds=duration,
                 changed_files=changed_files,
+                write_attempts=write_attempts,
             )
         except subprocess.TimeoutExpired as error:
             duration = time.monotonic() - start
@@ -454,7 +480,10 @@ class CopilotIntegration(BaseIntegration):
             if isinstance(partial_stderr, bytes):
                 partial_stderr = partial_stderr.decode(errors="replace")
             parse_root = request.workspace_root
-            parsed_text, changed_files = self._parse_jsonl_output(partial_stdout, parse_root)
+            parsed_text, changed_files, write_attempts = self._parse_jsonl_output_details(
+                partial_stdout,
+                parse_root,
+            )
             timeout_message = f"Timed out after {request.timeout} seconds."
             stderr = (
                 f"{partial_stderr.rstrip()}\n{timeout_message}"
@@ -467,6 +496,7 @@ class CopilotIntegration(BaseIntegration):
                 stderr=stderr,
                 duration_seconds=duration,
                 changed_files=changed_files,
+                write_attempts=write_attempts,
             )
         except FileNotFoundError:
             raise IntegrationError(f"GitHub Copilot CLI not found. Looked for: {cmd}")

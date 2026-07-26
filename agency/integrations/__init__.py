@@ -43,6 +43,7 @@ class RunResult:
     stderr: str
     duration_seconds: float
     changed_files: list["FileChange"] = field(default_factory=list)
+    write_attempts: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -269,7 +270,7 @@ class BaseIntegration:
     def _default_projector(
         instruction_name: str,
         *,
-        discovers_instructions: bool = False,
+        discovers_instructions: bool,
     ) -> "RuntimeProjector":
         from agency.blueprints.projectors import StaticRuntimeProjector
 

@@ -923,6 +923,33 @@ class TestCopilot:
         assert by_path["existing.txt"].lines_added == 1
         assert by_path["existing.txt"].lines_removed == 1
 
+    def test_parse_jsonl_records_failed_write_attempt_without_changed_file(self):
+        import json
+        from pathlib import Path
+        from agency.integrations.agency.copilot import CopilotIntegration
+
+        root = Path("/repo")
+        lines = [
+            {"type": "tool.execution_start",
+             "data": {"toolCallId": "t1", "toolName": "create",
+                      "arguments": {"path": str(root / "write-probe.txt")}}},
+            {"type": "tool.execution_complete",
+             "data": {"toolCallId": "t1", "success": False,
+                      "toolTelemetry": {"properties": {"command": "create"},
+                                        "metrics": {"linesAdded": 0, "linesRemoved": 0}}}},
+            {"type": "assistant.message", "data": {"content": "Denied, but replying anyway."}},
+        ]
+        raw = "\n".join(json.dumps(line) for line in lines)
+
+        text, changes = CopilotIntegration._parse_jsonl_output(raw, root)
+        detailed_text, detailed_changes, write_attempts = CopilotIntegration._parse_jsonl_output_details(raw, root)
+
+        assert text == "Denied, but replying anyway."
+        assert detailed_text == text
+        assert changes == []
+        assert detailed_changes == []
+        assert write_attempts == ["write-probe.txt"]
+
     def test_parse_jsonl_skips_readonly_view(self):
         import json
         from pathlib import Path
@@ -938,7 +965,9 @@ class TestCopilot:
         ]
         raw = "\n".join(json.dumps(l) for l in lines)
         _text, changes = CopilotIntegration._parse_jsonl_output(raw, Path("/repo"))
+        _detailed_text, _detailed_changes, write_attempts = CopilotIntegration._parse_jsonl_output_details(raw, Path("/repo"))
         assert changes == []
+        assert write_attempts == []
 
     def test_parse_jsonl_malformed_falls_back(self):
         from pathlib import Path
@@ -1000,15 +1029,29 @@ class TestCopilot:
         assert result.changed_files[0].path == "new.txt"
         assert result.changed_files[0].status == "added"
         assert result.changed_files[0].lines_added == 3
+        assert result.write_attempts == ["new.txt"]
 
     def test_run_timeout_preserves_partial_output(self, integration, tmp_agent_dir, monkeypatch):
         import json
         import agency.integrations.agency.copilot as mod
 
-        jsonl = json.dumps({
-            "type": "assistant.message",
-            "data": {"content": "Implemented the first part."},
-        }).encode()
+        jsonl = "\n".join(
+            json.dumps(line)
+            for line in [
+                {
+                    "type": "tool.execution_start",
+                    "data": {
+                        "toolCallId": "t1",
+                        "toolName": "create",
+                        "arguments": {"path": str(tmp_agent_dir / "partial.txt")},
+                    },
+                },
+                {
+                    "type": "assistant.message",
+                    "data": {"content": "Implemented the first part."},
+                },
+            ]
+        ).encode()
 
         def time_out(cmd, **kwargs):
             raise mod.subprocess.TimeoutExpired(
@@ -1042,6 +1085,7 @@ class TestCopilot:
         assert result.stdout == "Implemented the first part."
         assert "Work was still in progress." in result.stderr
         assert "Timed out after 30 seconds." in result.stderr
+        assert result.write_attempts == ["partial.txt"]
 
     def test_parse_jsonl_result_event_fallback(self):
         """M2: result event with filesModified falls back when no per-tool edits parsed."""

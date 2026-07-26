@@ -17,7 +17,7 @@ class SdkIntegration(BaseIntegration):
     supports_execution = False
     supports_ai_backend = False
     detect_priority = 999  # Last resort
-    projector = BaseIntegration._default_projector("agent.md")
+    projector = BaseIntegration._default_projector("agent.md", discovers_instructions=False)
 
     def identity_filename(self) -> str:
         return "agent.md"

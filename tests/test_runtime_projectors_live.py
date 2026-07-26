@@ -257,6 +257,11 @@ else:
         if write_boundary_supported(integration):
             result = integration.run(probe_request)
             assert_live_success(result, runtime, "write-boundary", token)
+            assert result.write_attempts == ["write-probe.txt"], (
+                f"{runtime.name}/write-boundary ({runtime.command}): expected denied write attempt "
+                f"['write-probe.txt']; actual attempts={result.write_attempts!r}; "
+                f"changed_files={result.changed_files!r}; stdout={result.stdout!r}; stderr={result.stderr!r}"
+            )
         else:
             integration_module = importlib.import_module(type(integration).__module__)
 
