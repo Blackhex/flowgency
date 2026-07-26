@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from agency.blueprints.projectors import get_projector
+from agency.blueprints.library import inspect_blueprint
 from agency.integrations import RunResult
 from agency.fs.snapshot import (
     SnapshotFile,
@@ -93,6 +94,34 @@ def blueprint_snapshot() -> TreeSnapshot:
         SnapshotFile(PurePosixPath("notes/ignored.md"), b"keep source only\n"),
     )
     return TreeSnapshot(files=files, digest=compute_source_digest(files))
+
+
+@pytest.mark.parametrize(
+    ("integration", "instruction_target"),
+    [
+        ("copilot", "AGENTS.md"),
+        ("claude-code", "CLAUDE.md"),
+        ("gemini", "GEMINI.md"),
+    ],
+)
+def test_projector_emits_only_instruction_for_blueprint_without_skills(
+    tmp_path, integration: str, instruction_target: str
+):
+    library_root = tmp_path / "library"
+    blueprint_root = library_root / "advisor"
+    blueprint_root.mkdir(parents=True)
+    instruction = b"# Advisor\n"
+    (blueprint_root / "AGENTS.md").write_bytes(instruction)
+    inspection = inspect_blueprint(library_root, "advisor")
+    destination = tmp_path / f"runtime-{integration}"
+    projector = get_projector(integration)
+
+    projector.project(inspection.snapshot, destination)
+
+    assert (destination / instruction_target).read_bytes() == instruction
+    skills_target = destination / Path(*projector.capabilities.skills_target.parts)
+    assert not skills_target.exists()
+    assert projector.validate_output(inspection.snapshot, destination) == ()
 
 
 @pytest.mark.parametrize(
