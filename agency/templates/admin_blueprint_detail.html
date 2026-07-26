@@ -33,7 +33,10 @@
     <section class="rounded-xl border border-gray-200 bg-white p-5">
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold text-gray-900">AGENTS.md</h2>
-        <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/skills" class="text-sm text-indigo-600 hover:text-indigo-800">View skills</a>
+        <div class="flex items-center gap-3 text-sm">
+          <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/skills" class="text-indigo-600 hover:text-indigo-800">View skills</a>
+          <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/prompts" class="text-emerald-700 hover:text-emerald-900">View prompts</a>
+        </div>
       </div>
       <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/source" class="mt-4 space-y-4">
         <input type="hidden" name="path" value="{{ form_path }}">
@@ -49,6 +52,14 @@
         <h2 class="text-lg font-semibold text-gray-900">Standard files</h2>
         <ul class="mt-4 space-y-2 text-sm text-gray-600">
           <li class="font-mono">AGENTS.md</li>
+          <li>
+            <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/prompts" class="text-emerald-700 hover:text-emerald-900">Shared prompts</a>
+            <ul class="mt-1 space-y-1 pl-4">
+              {% for prompt in blueprint.prompts %}
+              <li class="font-mono text-xs text-gray-500">{{ prompt.name }}.prompt.md</li>
+              {% endfor %}
+            </ul>
+          </li>
           {% for item in skill_resources %}
           <li>
             <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/skills/{{ item.skill }}" class="text-indigo-600 hover:text-indigo-800">{{ item.skill }}</a>
@@ -83,7 +94,9 @@
             <th class="px-3 py-2">Projector version</th>
             <th class="px-3 py-2">Instruction target</th>
             <th class="px-3 py-2">Skills target</th>
-            <th class="px-3 py-2">Discovery</th>
+            <th class="px-3 py-2">Prompt target</th>
+            <th class="px-3 py-2">Skill discovery</th>
+            <th class="px-3 py-2">Prompt discovery</th>
             <th class="px-3 py-2">Activation</th>
             <th class="px-3 py-2">Routine compatibility</th>
             <th class="px-3 py-2">Cache status</th>
@@ -96,7 +109,9 @@
             <td class="px-3 py-2 font-mono text-xs">{{ row.projector_version }}</td>
             <td class="px-3 py-2 font-mono text-xs">{{ row.instruction_target }}</td>
             <td class="px-3 py-2 font-mono text-xs">{{ row.skills_target }}</td>
+            <td class="px-3 py-2 font-mono text-xs">{{ row.prompt_target }}</td>
             <td class="px-3 py-2">{{ row.discovers_skills }}</td>
+            <td class="px-3 py-2">{{ row.discovers_prompts }}</td>
             <td class="px-3 py-2">{{ row.activates_selected_skill }}</td>
             <td class="px-3 py-2">{{ row.routine_compatibility }}</td>
             <td class="px-3 py-2">{{ row.cache_state }}</td>
