@@ -25,6 +25,21 @@ def test_setup_creates_standard_global_agent_library_blueprints():
         assert forbidden not in skill
 
 
+def test_setup_guidance_keeps_blueprint_skills_optional():
+    documents = {
+        "skill": SKILL_PATH.read_text(encoding="utf-8"),
+        "guide": SETUP_KB_PATH.read_text(encoding="utf-8"),
+    }
+    required = (
+        "Blueprints may contain zero or more standard Agent Skills.",
+        "Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities.",
+    )
+
+    for document_name, text in documents.items():
+        for phrase in required:
+            assert phrase in text, document_name
+
+
 def test_setup_registers_explicit_instances_routines_and_memory():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     assert "one authoritative canonical Agency config" in skill
