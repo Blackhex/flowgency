@@ -55,6 +55,10 @@ def _seed_blueprint(library: Path, key: str, title: str, skill: str) -> None:
         f"---\nname: {skill}\ndescription: Release gate skill\n---\n\nRun the deterministic workflow.\n",
     )
     _write(library / key / ".agents" / "skills" / skill / "checklist.md", "- Verify content\n")
+    _write(
+        library / key / ".agents" / "prompts" / f"{skill}.prompt.md",
+        f"---\nname: {skill}\ndescription: Release gate prompt\n---\n\nRun the deterministic workflow.\n",
+    )
 
 
 def _seed_pipeline(group: Path) -> None:

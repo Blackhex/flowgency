@@ -332,7 +332,7 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
         "agents_full": [{
             "name": "product",
             "integration": "claude-code",
-            "routines": [{"id": "r", "skill": "r", "schedule": {"every": "6h"}}],
+            "routines": [{"id": "r", "prompt": {"scope": "blueprint", "name": "r"}, "schedule": {"every": "6h"}}],
         }],
         "observations": group_path / "observations",
         "proposals": group_path / "proposals",

@@ -15,6 +15,7 @@ from .models import (
     JobRequest,
     JobSpec,
     MemoryBinding,
+    PromptSnapshot,
     RuntimePolicySnapshot,
 )
 from .resolution import JobValidationError, resolve_job_request
@@ -49,6 +50,7 @@ __all__ = [
     "JobValidationError",
     "LaunchResult",
     "MemoryBinding",
+    "PromptSnapshot",
     "reconcile_jobs",
     "resolve_job_request",
     "retain_failed_stage",

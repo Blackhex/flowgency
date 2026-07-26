@@ -32,7 +32,7 @@ def test_build_setup_prompt_names_project_and_config(tmp_path: Path) -> None:
     assert "group.default_integration" in prompt
     assert "initial agent instances" in prompt
     assert "unless the user explicitly approves a different registered integration" in prompt
-    assert "Configure schema_version: 3." in prompt
+    assert "Configure schema_version: 4." in prompt
     assert "workspace_path to the project execution workspace" in prompt
     assert "path to a disjoint Agency-owned group root" in prompt
     assert "Never create or reference a project-local shared directory." in prompt
@@ -61,9 +61,10 @@ def test_build_setup_prompt_requires_root_first_storage_flow(tmp_path: Path) -> 
         "agency.agent_library as <root>/agent-library",
         "agency.compilation_cache as <root>/compiled-agents",
         "agency.memory_store as <root>/memory",
+        "agency.prompt_store as <root>/prompts",
         "groups.<group-id>.path as <root>/groups/<group-id>",
         "Customize the derived storage paths?",
-        "review all four derived paths together",
+        "review all five derived paths together",
         "do not ask about individual storage paths",
         "before creating any directory or blueprint",
     ):

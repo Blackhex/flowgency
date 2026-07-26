@@ -8,10 +8,12 @@ from typing import Any
 from uuid import uuid4
 
 from agency.blueprints.cache import CacheRef, CompiledArtifact
+from agency.configuration.models import PromptSelector
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+SUPPORTED_SCHEMA_VERSIONS = frozenset({3, 4})
 VALID_TRIGGERS = {
     "scheduled_prompt",
     "manual_prompt",
@@ -104,12 +106,21 @@ class MemoryBinding:
 
 
 @dataclass(frozen=True)
+class PromptSnapshot:
+    name: str
+    content: str
+    source_digest: str
+
+
+@dataclass(frozen=True)
 class JobRequest:
     config_path: Path
     group_key: str
     agent_name: str
     trigger: str
-    task_input: str
+    task_input: str = ""
+    prompt: PromptSelector | None = None
+    invocation_input: str = ""
     job_id: str = field(default_factory=lambda: uuid4().hex)
     routine_id: str | None = None
     memory_override: Any | None = None
@@ -149,9 +160,10 @@ class JobSpec:
     prompt_source: dict[str, Any] | None
     timeout_override: int | None
     created_at: str
+    private_prompts: tuple[PromptSnapshot, ...] = ()
 
     def validate(self) -> None:
-        if self.schema_version != SCHEMA_VERSION:
+        if self.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
             raise ValueError(f"Unsupported job schema version: {self.schema_version}")
         string_fields = {
             "job_id": self.job_id,
@@ -177,6 +189,12 @@ class JobSpec:
             raise ValueError("Agent name is required")
         if not self.task_input.strip():
             raise ValueError("Prompt content must not be blank")
+        if self.schema_version == 3:
+            self._validate_v3_prompt_contract()
+        else:
+            self._validate_v4_prompt_contract()
+
+    def _validate_v3_prompt_contract(self) -> None:
         if self.trigger in {"scheduled_prompt", "manual_prompt"}:
             if not self.routine_id or not self.skill:
                 raise ValueError(
@@ -188,8 +206,21 @@ class JobSpec:
                     "decision jobs require routine_id and skill to be null"
                 )
 
+    def _validate_v4_prompt_contract(self) -> None:
+        if self.skill is not None:
+            raise ValueError("schema v4 jobs must not set skill")
+        if self.skill_arguments != ():
+            raise ValueError("schema v4 jobs must keep skill_arguments empty")
+        if self.trigger in {"scheduled_prompt", "manual_prompt"}:
+            if self.prompt_source is None:
+                raise ValueError("prompt-backed jobs require a prompt_source")
+            if self.trigger == "scheduled_prompt" and not self.routine_id:
+                raise ValueError("scheduled prompt jobs require routine_id")
+        if self.trigger in {"decision", "decision_retry"} and self.routine_id is not None:
+            raise ValueError("decision jobs require routine_id to be null")
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "job_id": self.job_id,
             "config_path": self.config_path,
@@ -213,6 +244,9 @@ class JobSpec:
             "timeout_override": self.timeout_override,
             "created_at": self.created_at,
         }
+        if self.schema_version >= 4:
+            payload["private_prompts"] = [asdict(item) for item in self.private_prompts]
+        return payload
 
     def immutable_digest(self) -> str:
         payload = json.dumps(
@@ -234,6 +268,9 @@ class JobSpec:
         values["runtime_policy"] = RuntimePolicySnapshot(**runtime_policy)
         values["memory"] = MemoryBinding(**values["memory"])
         values["skill_arguments"] = tuple(values.get("skill_arguments") or ())
+        values["private_prompts"] = tuple(
+            PromptSnapshot(**item) for item in (values.get("private_prompts") or ())
+        )
         spec = cls(**values)
         spec.validate()
         return spec

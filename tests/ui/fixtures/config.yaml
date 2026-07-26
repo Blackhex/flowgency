@@ -1,4 +1,4 @@
-schema_version: 3
+schema_version: 4
 agency:
   title: Agency UI Gate
   default_group: newsletter
@@ -6,6 +6,7 @@ agency:
   agent_library: __RUNTIME__/agent-library
   compilation_cache: __RUNTIME__/compiled-agents
   memory_store: __RUNTIME__/memory-store
+  prompt_store: __RUNTIME__/prompts
 memory:
   channels:
     brand-strategy:
@@ -46,7 +47,9 @@ groups:
           channel: brand-strategy
         routines:
           - id: daily-review
-            skill: daily-review
+            prompt:
+              scope: blueprint
+              name: daily-review
             arguments: [--brief]
             schedule:
               at: "09:00"
@@ -64,7 +67,9 @@ groups:
           scope: agent
         routines:
           - id: publish-draft
-            skill: publish-draft
+            prompt:
+              scope: blueprint
+              name: publish-draft
             schedule:
               every: "3600"
             memory:

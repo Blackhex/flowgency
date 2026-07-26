@@ -21,7 +21,7 @@ def test_runtime_config_module_exposes_no_retired_agent_helper_surface():
 
 def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_input():
     raw_config = {
-        "schema_version": 3,
+        "schema_version": 4,
 
         "agency": {
             "title": "Agency",
@@ -30,6 +30,7 @@ def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_inp
             "agent_library": "/library",
             "compilation_cache": "/cache",
             "memory_store": "/memory",
+            "prompt_store": "/prompts",
         },
         "memory": {"channels": {}},
         "groups": {
@@ -71,6 +72,7 @@ def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_inp
             "blueprint": "builder",
             "integration": "copilot",
             "integration_config": {"model": "gpt-5"},
+            "prompts": [],
             "identity": {"display_name": "", "title": "", "emoji": ""},
             "capabilities": {"write": False},
             "runtime": {

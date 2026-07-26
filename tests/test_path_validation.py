@@ -14,14 +14,16 @@ def _resolved_config(tmp_path: Path, raw_config: dict):
     library = tmp_path / "library"
     cache = tmp_path / "cache"
     memory = tmp_path / "memory"
+    prompt_store = tmp_path / "prompts"
     workspace = tmp_path / "workspace"
     restricted = tmp_path / "restricted"
-    for path in (library, cache, memory, workspace, restricted):
+    for path in (library, cache, memory, prompt_store, workspace, restricted):
         path.mkdir(exist_ok=True)
     raw["agency"].update(
         agent_library=str(library),
         compilation_cache=str(cache),
         memory_store=str(memory),
+        prompt_store=str(prompt_store),
     )
     group = raw["groups"]["newsletter"]
     group["workspace_path"] = str(workspace)

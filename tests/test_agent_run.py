@@ -8,7 +8,7 @@ import yaml
 
 import agency.app as app_mod
 from agency.app import app, is_agent_running
-from agency.configuration import ConfigStore
+from agency.configuration import ConfigStore, PromptSelector
 from agency.jobs import JobRequest
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
@@ -26,21 +26,26 @@ def _setup_group(tmp_path: Path) -> Path:
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory"
+    prompt_store = tmp_path / "prompt-store"
     prompts = paths.state_root / "prompts"
     (prompts / "routine.md").write_text("# Routine\n")
     (prompts / "product-routine.md").write_text("# Product routine\n")
     (prompts / "other-routine.md").write_text("# Other routine\n")
     (prompts / "_observation-system-steps.md").write_text("# System\n")
-    skill = library_root / "builder-blueprint" / ".agents" / "skills" / "daily-review"
-    skill.mkdir(parents=True, exist_ok=True)
+    prompt_dir = library_root / "builder-blueprint" / ".agents" / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
     (library_root / "builder-blueprint" / "AGENTS.md").write_text("# Builder\n", encoding="utf-8")
-    (skill / "SKILL.md").write_text(
+    (prompt_dir / "daily-review.prompt.md").write_text(
         "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
+    (prompt_dir / "product-routine.prompt.md").write_text(
+        "---\nname: product-routine\ndescription: Product routine\n---\n\nRun product routine.\n",
         encoding="utf-8",
     )
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"
@@ -48,6 +53,7 @@ def _setup_group(tmp_path: Path) -> Path:
         f"  agent_library: {library_root.as_posix()}\n"
         f"  compilation_cache: {cache_root.as_posix()}\n"
         f"  memory_store: {memory_root.as_posix()}\n"
+        f"  prompt_store: {prompt_store.as_posix()}\n"
         "groups:\n"
         "  test:\n"
         "    name: Test\n"
@@ -60,7 +66,9 @@ def _setup_group(tmp_path: Path) -> Path:
         "        integration: script\n"
         "        routines:\n"
         "          - id: daily-review\n"
-        "            skill: daily-review\n"
+        "            prompt:\n"
+        "              scope: blueprint\n"
+        "              name: daily-review\n"
         "            arguments:\n"
         "              - --mode=review\n"
         "              - literal value\n"
@@ -69,7 +77,9 @@ def _setup_group(tmp_path: Path) -> Path:
         "            memory:\n"
         "              scope: routine\n"
         "          - id: product-routine\n"
-        "            skill: product-routine\n"
+        "            prompt:\n"
+        "              scope: blueprint\n"
+        "              name: product-routine\n"
         "            schedule:\n"
         "              every: 6h\n",
         encoding="utf-8",
@@ -101,7 +111,15 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"routine_id": "daily-review"})
+    resp = client.post(
+        "/test/agents/product/run",
+        data={
+            "routine_id": "daily-review",
+            "mode": "saved",
+            "prompt_scope": "blueprint",
+            "prompt_name": "daily-review",
+        },
+    )
 
     assert resp.status_code == 202
     assert resp.json() == {"status": "started", "job_id": "job-1"}
@@ -112,7 +130,8 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     assert request.group_key == "test"
     assert request.agent_name == "product"
     assert request.routine_id == "daily-review"
-    assert request.task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
+    assert request.task_input == ""
+    assert request.prompt == PromptSelector(scope="blueprint", name="daily-review")
     assert request.timeout_override is None
     assert not (group_path / "product").exists()
 
@@ -123,10 +142,18 @@ def test_run_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"routine_id": "daily-review"})
+    resp = client.post(
+        "/test/agents/product/run",
+        data={
+            "routine_id": "daily-review",
+            "mode": "saved",
+            "prompt_scope": "blueprint",
+            "prompt_name": "daily-review",
+        },
+    )
 
     assert resp.status_code == 202
-    assert calls[0].task_input == "Run routine 'daily-review' with arguments: --mode=review, literal value."
+    assert calls[0].invocation_input == ""
 
 
 def test_run_unknown_routine_404(tmp_path, monkeypatch):
@@ -134,7 +161,10 @@ def test_run_unknown_routine_404(tmp_path, monkeypatch):
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"routine_id": "nope"})
+    resp = client.post(
+        "/test/agents/product/run",
+        data={"routine_id": "nope", "mode": "saved", "prompt_scope": "blueprint", "prompt_name": "daily-review"},
+    )
 
     assert resp.status_code == 404
 
@@ -144,7 +174,10 @@ def test_run_invalid_routine_id_400(tmp_path, monkeypatch):
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"routine_id": "../secret"})
+    resp = client.post(
+        "/test/agents/product/run",
+        data={"routine_id": "../secret", "mode": "saved", "prompt_scope": "blueprint", "prompt_name": "daily-review"},
+    )
 
     assert resp.status_code == 400
 
@@ -155,8 +188,9 @@ def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id=f"job-{len(calls)}"))
     client = TestClient(app)
 
-    assert client.post("/test/agents/product/run", data={"routine_id": "daily-review"}).status_code == 202
-    assert client.post("/test/agents/product/run", data={"routine_id": "daily-review"}).status_code == 202
+    payload = {"routine_id": "daily-review", "mode": "saved", "prompt_scope": "blueprint", "prompt_name": "daily-review"}
+    assert client.post("/test/agents/product/run", data=payload).status_code == 202
+    assert client.post("/test/agents/product/run", data=payload).status_code == 202
     assert len(calls) == 2
 
 
@@ -167,7 +201,7 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
     group_store.mkdir(parents=True, exist_ok=True)
     for status in ("queued", "running"):
         spec = JobSpec(
-            schema_version=3,
+            schema_version=4,
             job_id=f"job-{status}",
             config_path=str((tmp_path / "config.yaml").resolve()),
             config_revision="cfg-1",
@@ -186,7 +220,7 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
                 cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
             ),
             routine_id="daily-review",
-            skill="daily-review",
+            skill=None,
             skill_arguments=(),
             task_input="# Routine\n",
             runtime_policy=RuntimePolicySnapshot(
@@ -203,9 +237,10 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
                 path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
             ),
             trigger_context=None,
-            prompt_source={"type": "prompt", "path": "routine.md"},
+            prompt_source={"type": "blueprint_prompt", "scope": "blueprint", "name": "daily-review", "source_path": ".agents/prompts/daily-review.prompt.md", "source_digest": "digest-1"},
             timeout_override=None,
             created_at="2026-07-15T00:00:00+00:00",
+            private_prompts=(),
         )
         record = replace(JobRecord.from_spec(spec), status=status)
         write_job(job_store.path("test", spec.job_id), record)
@@ -220,7 +255,10 @@ def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"routine_id": "daily-review", "memory_scope": "routine"})
+    resp = client.post(
+        "/test/agents/product/run",
+        data={"routine_id": "daily-review", "mode": "saved", "prompt_scope": "blueprint", "prompt_name": "daily-review", "memory_scope": "routine"},
+    )
 
     assert resp.status_code == 202
     assert calls[0].memory_override == {"scope": "routine"}
@@ -231,7 +269,10 @@ def test_run_rejects_invalid_selector_override_for_routine(tmp_path, monkeypatch
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
-    resp = client.post("/test/agents/product/run", data={"routine_id": "daily-review", "memory_scope": "channel"})
+    resp = client.post(
+        "/test/agents/product/run",
+        data={"routine_id": "daily-review", "mode": "saved", "prompt_scope": "blueprint", "prompt_name": "daily-review", "memory_scope": "channel"},
+    )
 
     assert resp.status_code == 400
 
@@ -331,7 +372,7 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
     group_store = job_store.group_root("test")
     group_store.mkdir(parents=True, exist_ok=True)
     spec = JobSpec(
-        schema_version=3,
+        schema_version=4,
         job_id="job-running",
         config_path=str((tmp_path / "config.yaml").resolve()),
         config_revision=ConfigStore(tmp_path / "config.yaml").load().revision,
@@ -350,7 +391,7 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
             cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
         ),
         routine_id="daily-review",
-        skill="daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
@@ -367,9 +408,10 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
             path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
         ),
         trigger_context=None,
-        prompt_source={"type": "prompt", "path": "routine.md"},
+        prompt_source={"type": "blueprint_prompt", "scope": "blueprint", "name": "daily-review", "source_path": ".agents/prompts/daily-review.prompt.md", "source_digest": "digest-1"},
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
+        private_prompts=(),
     )
     write_job(job_store.path("test", spec.job_id), JobRecord.from_spec(spec))
     client = TestClient(app)

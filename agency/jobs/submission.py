@@ -9,6 +9,7 @@ from agency.configuration.paths import (
 )
 from agency.configuration.store import ConfigConflictError, ConfigSnapshot
 from agency.integrations import REGISTRY
+from agency.prompts import PromptStore
 
 from .authority import JobStore
 from .launcher import JobLauncher, default_launcher
@@ -43,11 +44,15 @@ def _resolve_request(
     cache_root = snapshot.config.agency.compilation_cache or (
         config_dir / "compiled-agents"
     )
+    prompt_root = snapshot.config.agency.prompt_store or (
+        config_dir / "prompts"
+    )
     return resolve_job_request(
         request,
         config_store=config_store,
         library=BlueprintLibrary(Path(library_root)),
         cache=CompilationCache(Path(cache_root), _projector_registry()),
+        prompt_store=PromptStore(Path(prompt_root)),
         integrations=REGISTRY,
         snapshot=snapshot,
     )

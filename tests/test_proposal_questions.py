@@ -154,9 +154,18 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         },
         {"name": "sdk-agent", "integration": "sdk"},
     ]
+    library_root = tmp_path / "agent-library"
+    for blueprint, title in (
+        ("product-blueprint", "Product"),
+        ("engineer-blueprint", "Engineer"),
+        ("sdk-blueprint", "SDK"),
+    ):
+        blueprint_root = library_root / blueprint
+        blueprint_root.mkdir(parents=True, exist_ok=True)
+        (blueprint_root / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 3\n"
+        "schema_version: 4\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"
@@ -164,6 +173,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         f"  agent_library: {(tmp_path / 'agent-library').as_posix()}\n"
         f"  compilation_cache: {(tmp_path / 'compiled-agents').as_posix()}\n"
         f"  memory_store: {(tmp_path / 'memory').as_posix()}\n"
+        f"  prompt_store: {(tmp_path / 'prompts').as_posix()}\n"
         "groups:\n"
         "  test:\n"
         "    name: Test\n"
@@ -185,7 +195,6 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    (tmp_path / "agent-library").mkdir()
     app_mod.refresh_services()
     return TestClient(app), proposal_path, group / "decisions" / "change.md"
 

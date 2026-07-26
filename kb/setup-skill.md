@@ -2,7 +2,7 @@
 
 The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces.
 
-Every generated config uses `schema_version: 3` and requires `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store`. Each group has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned group root). The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
+Every generated config uses `schema_version: 4` and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`. Each group has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned group root). The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
 
 ## Agency Data Root
 
@@ -15,12 +15,13 @@ C:/Agency/
 |-- agent-library/       -> C:/Agency/agent-library
 |-- compiled-agents/     -> C:/Agency/compiled-agents
 |-- memory/              -> C:/Agency/memory
+|-- prompts/             -> C:/Agency/prompts
 `-- groups/example/      -> C:/Agency/groups/example
 ```
 
 Users may enter home syntax such as `~/Agency`; setup expands it to the user's home directory before deriving and storing the canonical paths.
 
-Setup then asks `Customize the derived storage paths?` once. Declining keeps the complete derived layout without individual path questions. Accepting opens one grouped review of all four paths. Nothing is created until the consolidated path summary is approved.
+Setup then asks `Customize the derived storage paths?` once. Declining keeps the complete derived layout without individual path questions. Accepting opens one grouped review of all five paths. Nothing is created until the consolidated path summary is approved.
 
 ## Install
 
@@ -51,9 +52,9 @@ Invoke `agency-setup` from the project workspace after the first-run page launch
 3. Proposes reusable roles and asks how many agents to create plus which roles to create for the first team.
 4. Approves the group ID, derives `groups/<group-id>`, and offers one optional grouped path override.
 5. Plans Agent Skills, schedules, runtime policy, workspaces, and semantic memory for approval.
-6. Resolves exactly one canonical config with only the supported root sections (`agency`, `memory`, and `groups`) and requires `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store`.
+6. Resolves exactly one canonical config with only the supported root sections (`agency`, `memory`, and `groups`) and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`.
 7. Writes each approved blueprint with global `AGENTS.md` source. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, writes `.agents/skills/<skill>/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities.
-8. Registers explicit group-owned instances and every approved group workspace. Every instance pins a blueprint and integration; routines select skills and semantic memory selectors.
+8. Registers explicit group-owned instances and every approved group workspace. Every instance pins a blueprint and integration; routines select scoped prompts and semantic memory selectors.
 9. Validates group naming, storage paths, integrations, cross-references, and revision safety, performs one atomic config write, reparses from disk, and optionally verifies the singleton dispatcher.
 
 ## Result

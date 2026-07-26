@@ -44,14 +44,15 @@ C:/Agency/
     `-- example/
 ```
 
-Map those derived paths to the unchanged schema version 3 fields and keep the execution workspace separate from Agency-owned state:
+Map those derived paths to the schema version 4 fields and keep the execution workspace separate from Agency-owned state:
 
 ```yaml
-schema_version: 3
+schema_version: 4
 agency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
+  prompt_store: C:/Agency/prompts
 groups:
   example:
     workspace_path: C:/Projects/example
@@ -90,4 +91,4 @@ description: Use when {CONCRETE_TRIGGER_CONDITION}.
 - {TASK_SPECIFIC_BOUNDARY}
 ```
 
-Use standard `scripts/`, `references/`, and `assets/` subdirectories when needed. A routine selects the skill by its stable `name`; there are no prompt files.
+Use standard `scripts/`, `references/`, and `assets/` subdirectories when needed. Task prompts live separately under `{agent_library}/{blueprint}/.agents/prompts/{prompt}.prompt.md`, and routines select a scoped prompt rather than a skill.

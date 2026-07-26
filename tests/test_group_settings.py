@@ -64,15 +64,17 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 
 def _make_client(monkeypatch, tmp_path, raw_config):
     raw = deepcopy(raw_config)
-    (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
+    library_root = tmp_path / "agent-library"
+    library_root.mkdir(parents=True, exist_ok=True)
     (tmp_path / "workspace" / "newsletter").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "newsletter-state").mkdir(parents=True, exist_ok=True)
     (tmp_path / "repo-root").mkdir(parents=True, exist_ok=True)
     raw["agency"]["title"] = "Agency"
     raw["agency"]["default_group"] = "newsletter"
-    raw["agency"]["agent_library"] = str(tmp_path / "agent-library")
+    raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
+    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["groups"]["newsletter"]["workspace_path"] = str(
         tmp_path / "workspace" / "newsletter"
     )
@@ -85,6 +87,19 @@ def _make_client(monkeypatch, tmp_path, raw_config):
         "tools": {"mode": "allowlist", "names": ["shell"]},
     }
     raw["groups"]["newsletter"]["dispatch"] = {"enabled": True, "daily_limit": 12}
+    for agent in raw["groups"]["newsletter"].get("agents", []):
+        blueprint_root = library_root / agent["blueprint"]
+        blueprint_root.mkdir(parents=True, exist_ok=True)
+        (blueprint_root / "AGENTS.md").write_text(f"# {agent['blueprint']}\n", encoding="utf-8")
+        prompt_dir = blueprint_root / ".agents" / "prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        for routine in agent.get("routines", []):
+            prompt_name = routine.get("prompt", {}).get("name")
+            if prompt_name:
+                (prompt_dir / f"{prompt_name}.prompt.md").write_text(
+                    f"---\nname: {prompt_name}\ndescription: Routine prompt\n---\n\nRun.\n",
+                    encoding="utf-8",
+                )
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()

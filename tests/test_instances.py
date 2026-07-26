@@ -60,6 +60,11 @@ def _write_blueprint(root: Path, key: str) -> None:
         blueprint / ".agents" / "skills" / "daily-review",
         "daily-review",
     )
+    (blueprint / ".agents" / "prompts").mkdir(parents=True, exist_ok=True)
+    (blueprint / ".agents" / "prompts" / "daily-review.prompt.md").write_text(
+        "---\nname: daily-review\ndescription: Review daily editorial work.\n---\n\nRun the review.\n",
+        encoding="utf-8",
+    )
 
 
 def _resolved_memory(
@@ -153,25 +158,26 @@ def instance_env(tmp_path, raw_config):
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
     raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
+    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
     apply_group_paths(raw["groups"]["newsletter"], newsletter_paths)
     agent = raw["groups"]["newsletter"]["agents"][0]
     agent["default_memory"] = {"scope": "agent"}
     agent["routines"] = [
         {
             "id": "daily-review",
-            "skill": "daily-review",
+            "prompt": {"scope": "blueprint", "name": "daily-review"},
             "schedule": {"at": "09:00"},
             "memory": {"scope": "routine"},
         },
         {
             "id": "group-sync",
-            "skill": "daily-review",
+            "prompt": {"scope": "blueprint", "name": "daily-review"},
             "schedule": {"every": "6h"},
             "memory": {"scope": "group"},
         },
         {
             "id": "announcements",
-            "skill": "daily-review",
+            "prompt": {"scope": "blueprint", "name": "daily-review"},
             "schedule": {"every": "12h"},
             "memory": {"scope": "channel", "channel": "support"},
         },

@@ -30,10 +30,10 @@ class CliResult:
 
 def _write_blueprint(root: Path) -> None:
     blueprint = root / "builder-blueprint"
-    skill = blueprint / ".agents" / "skills" / "daily-review"
-    skill.mkdir(parents=True)
+    prompt_dir = blueprint / ".agents" / "prompts"
+    prompt_dir.mkdir(parents=True)
     (blueprint / "AGENTS.md").write_text("# Builder\n", encoding="utf-8")
-    (skill / "SKILL.md").write_text(
+    (prompt_dir / "daily-review.prompt.md").write_text(
         "---\nname: daily-review\ndescription: Review current work.\n---\n\n# Daily review\n",
         encoding="utf-8",
     )
@@ -47,13 +47,14 @@ def cli_config(tmp_path):
     )
     _write_blueprint(tmp_path / "agent-library")
     raw = {
-        "schema_version": 3,
+        "schema_version": 4,
         "agency": {
             "title": "Contract Agency",
             "default_group": "newsletter",
             "agent_library": str((tmp_path / "agent-library").resolve()),
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),
+            "prompt_store": str((tmp_path / "prompts").resolve()),
         },
         "memory": {"channels": {"support": {"display_name": "Support Desk"}}},
         "groups": {
@@ -76,7 +77,7 @@ def cli_config(tmp_path):
                         "routines": [
                             {
                                 "id": "daily-review",
-                                "skill": "daily-review",
+                                "prompt": {"scope": "blueprint", "name": "daily-review"},
                                 "arguments": ["--brief"],
                                 "schedule": {"every": "6h"},
                                 "memory": {"scope": "routine"},

@@ -10,7 +10,6 @@ from pathlib import Path
 from agency.configuration import resolve_group_paths
 from agency.configuration.store import ConfigStore
 from agency.jobs import JobRequest, JobSubmissionError, JobValidationError, submit_job_request
-from agency.jobs.prompts import build_routine_task_input
 
 log = logging.getLogger("agency.dispatch")
 
@@ -132,7 +131,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                             group_key=group_key,
                             agent_name=agent_name,
                             trigger="scheduled_prompt",
-                            task_input=build_routine_task_input(routine.id, routine.arguments),
+                            task_input="",
                             routine_id=routine.id,
                         )
                         submit_job_request(request, launcher)

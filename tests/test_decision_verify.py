@@ -38,11 +38,15 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
         encoding="utf-8",
     )
 
+    blueprint_root = tmp_path / "agent-library" / "engineer-blueprint"
+    blueprint_root.mkdir(parents=True, exist_ok=True)
+    (blueprint_root / "AGENTS.md").write_text("# Engineer\n", encoding="utf-8")
+
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 3,
+                "schema_version": 4,
 
                 "agency": {
                     "title": "Agency",
@@ -52,6 +56,7 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
                     "agent_library": str((tmp_path / "agent-library").resolve()),
                     "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
                     "memory_store": str((tmp_path / "memory").resolve()),
+                    "prompt_store": str((tmp_path / "prompts").resolve()),
                 },
                 "groups": {
                     "test": apply_group_paths({

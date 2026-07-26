@@ -20,6 +20,7 @@ Accept an existing directory or a new absolute path. Expand user-home syntax. A 
 agency.agent_library = <root>/agent-library
 agency.compilation_cache = <root>/compiled-agents
 agency.memory_store = <root>/memory
+agency.prompt_store = <root>/prompts
 groups.<group-id>.path = <root>/groups/<group-id>
 groups.<group-id>.workspace_path = <project workspace>
 ```
@@ -32,13 +33,13 @@ After the root is selected, summarize the project and propose three to five dist
 
 Before registration, ask the user how many agents to create for the first team and which proposed roles to create now. Do not infer extra instances beyond the approved count and selected roles. Ask the user to approve the group name and ID, team, each role's routine tasks, schedules, workspace definitions, and any shared memory channels. When the launch prompt contains `Selected integration:`, use that registered integration for `group.default_integration` and the initial agent instances unless the user explicitly approves a different registered integration.
 
-After the group ID is approved, derive `groups.<group-id>.path`. Ask exactly once: `Customize the derived storage paths?` If declined, keep every derived path. Do not ask about individual storage paths in the default flow. If accepted, present all four storage paths in one grouped review and allow any of them to be replaced.
+After the group ID is approved, derive `groups.<group-id>.path`. Ask exactly once: `Customize the derived storage paths?` If declined, keep every derived path. Do not ask about individual storage paths in the default flow. If accepted, present all five storage paths in one grouped review and allow any of them to be replaced.
 
 Resolve every effective path before creation. Require that each missing effective path's nearest existing parent is a writable real directory that can safely create it, reject files, symlinks, and unsafe Windows reparse points, keep the global stores mutually disjoint, and keep every Agency-owned path disjoint from the project workspace. If validation fails, name the conflicting fields and resolved paths and return to the root choice or grouped review. Never choose a fallback location or project-local storage.
 
-Show one consolidated path summary containing the project workspace, authoritative config path, Agency data root, and four effective storage paths. No directory or blueprint may be created before the user approves this summary.
+Show one consolidated path summary containing the project workspace, authoritative config path, Agency data root, and five effective storage paths. No directory or blueprint may be created before the user approves this summary.
 
-When the launch prompt contains `Authoritative config:`, use that exact path and do not search for or choose another config. When the skill is invoked manually without an explicit authoritative path, find one config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where the required `agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store` paths are present.
+When the launch prompt contains `Authoritative config:`, use that exact path and do not search for or choose another config. When the skill is invoked manually without an explicit authoritative path, find one config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where the required `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store` paths are present.
 
 If no config exists, record the absent revision and defer creation and replacement until Section 5. Do not write a placeholder or partial config. If an existing candidate is invalid or superseded, report validation errors and stop; never invoke another skill, never scan or convert superseded authority, and never convert old layouts. During manual invocation, if multiple canonical configs remain, ask the user which is authoritative; never choose implicitly.
 
@@ -64,7 +65,7 @@ Upsert one group whose `workspace_path` points to the project workspace and whos
 Use this canonical shape:
 
 ```yaml
-schema_version: 3
+schema_version: 4
 agency:
   title: Agency
   default_group: example
@@ -72,6 +73,7 @@ agency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
+  prompt_store: C:/Agency/prompts
 memory:
   channels:
     project-strategy:
@@ -112,13 +114,17 @@ groups:
           scope: agent
         routines:
           - id: morning-review
-            skill: morning-review
+            prompt:
+              scope: blueprint
+              name: morning-review
             schedule:
               at: "07:00"
             memory:
               scope: routine
           - id: strategy-review
-            skill: strategy-review
+            prompt:
+              scope: blueprint
+              name: strategy-review
             schedule:
               at: "21:00"
             memory:
@@ -137,7 +143,7 @@ groups:
           project_path: C:/Projects/example
 ```
 
-Record each approved Phase 2 routine assignment under that instance's `routines`. A routine selects one standard skill, one schedule (`at`, `every`, or supported condition), optional arguments, and optional semantic memory. Never write prompt filenames or per-agent dispatch maps.
+Record each approved Phase 2 routine assignment under that instance's `routines`. A routine selects one scoped prompt, one schedule (`at`, `every`, or supported condition), optional arguments, and optional semantic memory. Keep optional cross-task Agent Skills separate from routine prompt selection. Never write prompt filenames or per-agent dispatch maps.
 
 Set `capabilities.write: true` only for an explicitly approved implementation role and `capabilities.write: false` otherwise. Never infer write authority for an existing agent; ask the user when a newly generated role is ambiguous.
 

@@ -38,9 +38,15 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 def _write_blueprint(root: Path, key: str) -> None:
     blueprint = root / key
     skill = blueprint / ".agents" / "skills" / "daily-review"
+    prompt_dir = blueprint / ".agents" / "prompts"
     skill.mkdir(parents=True, exist_ok=True)
+    prompt_dir.mkdir(parents=True, exist_ok=True)
     (blueprint / "AGENTS.md").write_text("# Advisor\n", encoding="utf-8")
     (skill / "SKILL.md").write_text(
+        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+        encoding="utf-8",
+    )
+    (prompt_dir / "daily-review.prompt.md").write_text(
         "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
         encoding="utf-8",
     )
@@ -55,6 +61,7 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
+    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["memory"] = {
         "channels": {
             "brand-strategy": {"display_name": "Brand Strategy"},

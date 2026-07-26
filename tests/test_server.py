@@ -15,8 +15,22 @@ from agency.integrations import IntegrationError
 
 def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
     config_path = tmp_path / "config.yaml"
+    (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "compiled-agents").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "memory-store").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "prompts").mkdir(parents=True, exist_ok=True)
     config_path.write_text(
-        "schema_version: 3\nagency:\n  title: Agency\n  default_group: ''\ngroups: {}\n",
+        (
+            "schema_version: 4\n"
+            "agency:\n"
+            "  title: Agency\n"
+            "  default_group: ''\n"
+            f"  agent_library: {(tmp_path / 'agent-library').as_posix()}\n"
+            f"  compilation_cache: {(tmp_path / 'compiled-agents').as_posix()}\n"
+            f"  memory_store: {(tmp_path / 'memory-store').as_posix()}\n"
+            f"  prompt_store: {(tmp_path / 'prompts').as_posix()}\n"
+            "groups: {}\n"
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
@@ -28,6 +42,37 @@ def _configure_missing_config(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.app.state.services = None
     return config_path
+
+
+def _materialize_ready_config(tmp_path: Path, raw_config: dict) -> dict:
+    raw = yaml.safe_load(yaml.safe_dump(raw_config, sort_keys=False))
+    library_root = tmp_path / "agent-library"
+    compiled_root = tmp_path / "compiled-agents"
+    memory_root = tmp_path / "memory-store"
+    prompt_root = tmp_path / "prompts"
+    library_root.mkdir(parents=True, exist_ok=True)
+    compiled_root.mkdir(parents=True, exist_ok=True)
+    memory_root.mkdir(parents=True, exist_ok=True)
+    prompt_root.mkdir(parents=True, exist_ok=True)
+    raw["agency"]["agent_library"] = str(library_root.resolve())
+    raw["agency"]["compilation_cache"] = str(compiled_root.resolve())
+    raw["agency"]["memory_store"] = str(memory_root.resolve())
+    raw["agency"]["prompt_store"] = str(prompt_root.resolve())
+    for group in raw.get("groups", {}).values():
+        for agent in group.get("agents", []):
+            blueprint_root = library_root / agent["blueprint"]
+            blueprint_root.mkdir(parents=True, exist_ok=True)
+            (blueprint_root / "AGENTS.md").write_text(f"# {agent['blueprint']}\n", encoding="utf-8")
+            prompt_dir = blueprint_root / ".agents" / "prompts"
+            prompt_dir.mkdir(parents=True, exist_ok=True)
+            for routine in agent.get("routines", []):
+                prompt_name = routine.get("prompt", {}).get("name")
+                if prompt_name:
+                    (prompt_dir / f"{prompt_name}.prompt.md").write_text(
+                        f"---\nname: {prompt_name}\ndescription: Routine prompt\n---\n\nRun.\n",
+                        encoding="utf-8",
+                    )
+    return raw
 
 
 class _LaunchIntegration:
@@ -299,7 +344,7 @@ def test_setup_get_redirects_to_dashboard_when_setup_is_ready(
 ):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        __import__("yaml").safe_dump(raw_config, sort_keys=False),
+        __import__("yaml").safe_dump(_materialize_ready_config(tmp_path, raw_config), sort_keys=False),
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
@@ -322,7 +367,7 @@ def test_setup_get_rebuilds_services_before_redirect_when_config_appears_out_of_
     with TestClient(app_mod.app) as client:
         assert app_mod.app.state.services.startup_error is not None
         config_path.write_text(
-            __import__("yaml").safe_dump(raw_config, sort_keys=False),
+            __import__("yaml").safe_dump(_materialize_ready_config(tmp_path, raw_config), sort_keys=False),
             encoding="utf-8",
         )
 
@@ -510,6 +555,7 @@ def test_setup_status_returns_waiting_when_config_is_absent(tmp_path, monkeypatc
 
 def test_setup_status_returns_invalid_with_message(tmp_path, monkeypatch, raw_config):
     config_path = tmp_path / "config.yaml"
+    raw_config = _materialize_ready_config(tmp_path, raw_config)
     raw_config["groups"]["newsletter"]["default_integration"] = ""
     config_path.write_text(
         __import__("yaml").safe_dump(raw_config, sort_keys=False),
@@ -532,6 +578,7 @@ def test_setup_status_returns_incomplete_when_config_has_no_groups(
     tmp_path, monkeypatch, raw_config
 ):
     config_path = tmp_path / "config.yaml"
+    raw_config = _materialize_ready_config(tmp_path, raw_config)
     raw_config["agency"]["default_group"] = ""
     raw_config["groups"] = {}
     config_path.write_text(
@@ -553,7 +600,7 @@ def test_setup_status_redirect_target_is_dashboard_when_ready(
 ):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        __import__("yaml").safe_dump(raw_config, sort_keys=False),
+        __import__("yaml").safe_dump(_materialize_ready_config(tmp_path, raw_config), sort_keys=False),
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
@@ -576,7 +623,7 @@ def test_setup_status_rebuilds_services_after_out_of_band_config_write(
     with TestClient(app_mod.app) as client:
         assert app_mod.app.state.services.startup_error is not None
         config_path.write_text(
-            __import__("yaml").safe_dump(raw_config, sort_keys=False),
+            __import__("yaml").safe_dump(_materialize_ready_config(tmp_path, raw_config), sort_keys=False),
             encoding="utf-8",
         )
 
@@ -599,6 +646,7 @@ def test_setup_status_returns_non_ready_when_rebuilt_services_still_fail(
 
     with TestClient(app_mod.app) as client:
         assert app_mod.app.state.services.startup_error is not None
+        raw_config = _materialize_ready_config(tmp_path, raw_config)
         config_path.write_text(
             __import__("yaml").safe_dump(raw_config, sort_keys=False),
             encoding="utf-8",

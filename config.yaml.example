@@ -1,4 +1,4 @@
-schema_version: 3
+schema_version: 4
 agency:
   title: Agency
   default_group: my-project
@@ -8,6 +8,7 @@ agency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
+  prompt_store: C:/Agency/prompts
 
 memory:
   channels:
@@ -52,13 +53,17 @@ groups:
           scope: agent
         routines:
           - id: daily-review
-            skill: daily-review
+            prompt:
+              scope: blueprint
+              name: daily-review
             schedule:
               at: "09:00"
             memory:
               scope: routine
           - id: strategy-review
-            skill: strategy-review
+            prompt:
+              scope: blueprint
+              name: strategy-review
             schedule:
               every: 7d
             memory:

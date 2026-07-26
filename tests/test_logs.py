@@ -83,11 +83,15 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     mtime = datetime(2026, 7, 12, 20, 6).timestamp()
     os.utime(log_file, (mtime, mtime))
 
+    blueprint_root = tmp_path / "agent-library" / "agent-blueprint"
+    blueprint_root.mkdir(parents=True, exist_ok=True)
+    (blueprint_root / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
+
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 3,
+                "schema_version": 4,
 
                 "agency": {
                     "title": "Agency",
@@ -96,6 +100,7 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
                     "agent_library": str((tmp_path / "agent-library").resolve()),
                     "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
                     "memory_store": str((tmp_path / "memory").resolve()),
+                    "prompt_store": str((tmp_path / "prompts").resolve()),
                 },
                 "groups": {
                     "test": {
@@ -141,11 +146,15 @@ def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatc
     workspace_file = workspace_path / "notes.out"
     workspace_file.write_text("workspace data", encoding="utf-8")
 
+    blueprint_root = tmp_path / "agent-library" / "agent-blueprint"
+    blueprint_root.mkdir(parents=True, exist_ok=True)
+    (blueprint_root / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
+
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",
@@ -153,6 +162,7 @@ def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatc
                     "agent_library": str((tmp_path / "agent-library").resolve()),
                     "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
                     "memory_store": str((tmp_path / "memory").resolve()),
+                    "prompt_store": str((tmp_path / "prompts").resolve()),
                 },
                 "groups": {
                     "test": {

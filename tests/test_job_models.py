@@ -16,6 +16,7 @@ from agency.jobs.models import (
     BlueprintRef,
     JobRecord,
     JobRequest,
+    PromptSnapshot,
     JobSpec,
     MemoryBinding,
     RuntimePolicySnapshot,
@@ -40,11 +41,11 @@ def _canonical_group_store(tmp_path: Path) -> Path:
 
 def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 4\ngroups: {}\n", encoding="utf-8")
     workspace_root = tmp_path / "workspace"
     group_root = tmp_path / "group"
     return JobSpec(
-        schema_version=3,
+        schema_version=4,
         job_id=uuid4().hex,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
@@ -63,8 +64,8 @@ def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
             cache_path="C:/cache/copilot/v1/digest-1",
         ),
         routine_id="routine-1",
-        skill="daily-review",
-        skill_arguments=("--fast",),
+        skill=None,
+        skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
@@ -80,9 +81,16 @@ def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
             path="C:/memory/memory-hash-1",
         ),
         trigger_context={"source": "test"},
-        prompt_source={"type": "routine", "routine_id": "routine-1"},
+        prompt_source={
+            "type": "blueprint_prompt",
+            "scope": "blueprint",
+            "name": "daily-review",
+            "source_path": ".agents/prompts/daily-review.prompt.md",
+            "source_digest": "digest-1",
+        },
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
+        private_prompts=(),
     )
 
 
@@ -95,6 +103,29 @@ def test_job_record_round_trips_through_atomic_store(tmp_path):
 
     assert read_job(path) == record
     assert spec.config_path == str((tmp_path / "config.yaml").resolve())
+
+
+def test_job_spec_reads_v3_routine_record_and_writes_v4_prompt_record(tmp_path):
+    current = make_spec(tmp_path)
+    current_data = current.to_dict()
+    historical_data = dict(current_data)
+    historical_data.update(
+        schema_version=3,
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=["--brief"],
+        prompt_source={"type": "routine", "routine_id": "daily-review"},
+    )
+    historical_data.pop("private_prompts", None)
+
+    historical = JobSpec.from_dict(historical_data)
+    reloaded_current = JobSpec.from_dict(current_data)
+
+    assert historical.schema_version == 3
+    assert historical.skill == "daily-review"
+    assert reloaded_current.schema_version == 4
+    assert reloaded_current.skill is None
+    assert reloaded_current.prompt_source["type"] == "blueprint_prompt"
 
 
 def test_read_job_retries_transient_windows_permission_error(

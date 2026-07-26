@@ -34,9 +34,10 @@ from agency.integrations import REGISTRY
 from agency.jobs import JobRequest, JobSubmissionError, submit_job_request
 from agency.jobs.authority import JobStore
 from agency.jobs.atomic import atomic_write_text
-from agency.jobs.prompts import build_decision_prompt, build_routine_task_input
+from agency.jobs.prompts import build_decision_prompt
 from agency.jobs.store import read_job
 from agency.memory import MemoryConflictError, MemoryStore, resolve_memory_selector
+from agency.prompts import PromptStore
 from agency.proposals import (
     SKIP_EXECUTION_SUMMARY,
     question_option_labels,
@@ -464,7 +465,10 @@ def cmd_agent_show(args: Namespace) -> int:
         routines=[
             {
                 "id": routine.id,
-                "skill": routine.skill,
+                "prompt": {
+                    "scope": routine.prompt.scope,
+                    "name": routine.prompt.name,
+                },
                 "arguments": list(routine.arguments),
                 "memory": _memory_label(routine.memory, snapshot.config.memory.channels),
             }
@@ -529,7 +533,7 @@ def cmd_agent_run(args: Namespace) -> int:
         group_key=group_id,
         agent_name=instance.name,
         trigger="manual_prompt",
-        task_input=build_routine_task_input(routine.id, routine.arguments),
+        task_input="",
         routine_id=routine.id,
         memory_override=_memory_override(args, snapshot),
     )
@@ -732,6 +736,7 @@ def cmd_memory_show(args: Namespace) -> int:
         blueprint_library=None,
         compilation_cache=None,
         memory_store=store,
+        prompt_store=PromptStore(Path(snapshot.config.agency.prompt_store)),
         job_store=job_store,
         instances=None,
         integrations=REGISTRY,
@@ -765,6 +770,7 @@ def cmd_memory_save(args: Namespace) -> int:
         blueprint_library=None,
         compilation_cache=None,
         memory_store=store,
+        prompt_store=PromptStore(Path(snapshot.config.agency.prompt_store)),
         job_store=job_store,
         instances=None,
         integrations=REGISTRY,

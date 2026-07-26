@@ -13,9 +13,10 @@ MemoryScope = Literal["run", "routine", "agent", "group", "channel"]
 ToolMode = Literal["all", "allowlist", "none"]
 SandboxMode = Literal["restricted", "unrestricted"]
 ScheduleKind = Literal["at", "every"]
+PromptScope = Literal["blueprint", "instance"]
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
-CONFIG_SCHEMA_VERSION = 3
+CONFIG_SCHEMA_VERSION = 4
 _ROOT_KEYS = {"schema_version", "agency", "memory", "groups"}
 
 
@@ -33,6 +34,7 @@ class AgencySettings(BaseModel):
     agent_library: Path | None = None
     compilation_cache: Path | None = None
     memory_store: Path | None = None
+    prompt_store: Path | None = None
 
 
 class MemoryChannel(BaseModel):
@@ -94,10 +96,16 @@ class ScheduleRule(BaseModel):
     every: str | None = None
 
 
+class PromptSelector(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    scope: PromptScope
+    name: str
+
+
 class Routine(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     id: str
-    skill: str
+    prompt: PromptSelector
     arguments: tuple[str, ...] = ()
     schedule: ScheduleRule
     memory: MemorySelector | None = None
@@ -114,6 +122,7 @@ class AgentInstance(BaseModel):
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
     runtime: AgentRuntime = Field(default_factory=AgentRuntime)
     default_memory: MemorySelector | None = None
+    prompts: tuple[str, ...] = ()
     routines: tuple[Routine, ...] = ()
 
 
@@ -151,7 +160,7 @@ class GroupConfig(BaseModel):
 
 class AgencyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    schema_version: Literal[3]
+    schema_version: Literal[4]
     agency: AgencySettings
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     groups: dict[str, GroupConfig]
@@ -693,8 +702,8 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 code="unsupported-schema-version",
                 scope="config",
                 field="schema_version",
-                message="schema_version must be 3.",
-                hint="Create a fresh schema_version: 3 configuration.",
+                message="schema_version must be 4.",
+                hint="Create a fresh schema_version: 4 configuration.",
             )
         )
     agency = raw.get("agency") if _is_mapping(raw.get("agency")) else {}
@@ -705,7 +714,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
         identifier_issue = _validate_identifier("channel", channel_name, f"memory.channels.{channel_name}")
         if identifier_issue:
             issues.append(identifier_issue)
-    for field_name in ("agent_library", "compilation_cache", "memory_store"):
+    for field_name in ("agent_library", "compilation_cache", "memory_store", "prompt_store"):
         if not str(agency.get(field_name, "")).strip():
             issues.append(
                 _build_issue(
@@ -935,6 +944,8 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
         agency["compilation_cache"] = _path_from_config(agency["compilation_cache"], config_dir)
     if agency.get("memory_store") is not None:
         agency["memory_store"] = _path_from_config(agency["memory_store"], config_dir)
+    if agency.get("prompt_store") is not None:
+        agency["prompt_store"] = _path_from_config(agency["prompt_store"], config_dir)
     prepared["agency"] = agency
 
     groups = dict(prepared.get("groups") or {})
@@ -967,6 +978,8 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
             agent_entry["runtime"] = _prepare_runtime(
                 agent_entry.get("runtime") or {}, workspace_root
             )
+            if agent_entry.get("prompts") is not None:
+                agent_entry["prompts"] = tuple(agent_entry.get("prompts") or ())
             if agent_entry.get("routines") is not None:
                 routines = []
                 for routine in agent_entry.get("routines") or []:
@@ -990,7 +1003,7 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
 
 def _collect_post_parse_issues(parsed: ParsedConfig) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    for field_name in ("agent_library", "compilation_cache", "memory_store"):
+    for field_name in ("agent_library", "compilation_cache", "memory_store", "prompt_store"):
         value = getattr(parsed.agency, field_name)
         if value is None:
             issues.append(

@@ -69,10 +69,10 @@ def repo_root() -> Path:
 def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     library = tmp_path / "agent-library"
     blueprint = library / "advisor"
-    skill = blueprint / ".agents" / "skills" / "daily-review"
-    skill.mkdir(parents=True)
+    prompt_dir = blueprint / ".agents" / "prompts"
+    prompt_dir.mkdir(parents=True)
     (blueprint / "AGENTS.md").write_text("# Advisor\n", encoding="utf-8")
-    (skill / "SKILL.md").write_text(
+    (prompt_dir / "daily-review.prompt.md").write_text(
         "---\nname: daily-review\ndescription: Review current work.\n---\n\nReview it.\n",
         encoding="utf-8",
     )
@@ -84,7 +84,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "agency": {
                     "title": "Agency",
                     "default_group": "newsletter",
@@ -92,6 +92,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
                     "agent_library": str(library),
                     "compilation_cache": str(tmp_path / "cache"),
                     "memory_store": str(tmp_path / "memory-store"),
+                    "prompt_store": str(tmp_path / "prompt-store"),
                 },
                 "memory": {"channels": {}},
                 "groups": {
@@ -213,8 +214,8 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert "\t" not in yaml_text
 
     config = yaml.safe_load(yaml_text)
-    assert config["schema_version"] == 3
-    assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store"}
+    assert config["schema_version"] == 4
+    assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store", "prompt_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
     group = config["groups"]["example"]
     assert group["workspace_path"] == "C:/Projects/example"

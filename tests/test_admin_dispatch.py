@@ -45,10 +45,11 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
+    prompt_root = tmp_path / "prompts"
     _write_blueprint(library_root, "advisor", "Advisor")
     config_path = tmp_path / "config.yaml"
     config = {
-        "schema_version": 3,
+        "schema_version": 4,
 
         "agency": {
             "title": "Agency",
@@ -57,6 +58,7 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
             "agent_library": str(library_root),
             "compilation_cache": str(cache_root),
             "memory_store": str(memory_root),
+            "prompt_store": str(prompt_root),
             "dispatch": {"interval": 15},
         },
         "memory": {"channels": {}},

@@ -25,6 +25,7 @@ from agency.configuration import (
     AgencySettingsPatch,
     ConfigConflictError,
     ConfigStore,
+    PromptSelector,
     dismiss_tip,
     hide_all_tips,
     patch_agency_settings,
@@ -41,7 +42,8 @@ from agency.jobs import (
     submit_job_request,
 )
 from agency.jobs.atomic import atomic_write_text
-from agency.jobs.prompts import build_decision_prompt, build_routine_task_input
+from agency.jobs.prompts import build_decision_prompt
+from agency.prompts import resolve_catalog_prompt
 from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, SKIP_EXECUTION_SUMMARY
 import json as json_module
 from agency.workspaces import REGISTRY as WORKSPACE_REGISTRY
@@ -1508,6 +1510,7 @@ async def admin_save_settings(request: Request):
                 agent_library=settings.get("agent_library", ""),
                 compilation_cache=settings.get("compilation_cache", ""),
                 memory_store=settings.get("memory_store", ""),
+                prompt_store=settings.get("prompt_store", ""),
             ),
         )
     except ConfigConflictError:
@@ -1621,29 +1624,80 @@ async def agent_run(
 
     form = await request.form()
     routine_id = str(form.get("routine_id") or "").strip()
-    if not routine_id or "/" in routine_id or ".." in routine_id:
-        raise HTTPException(status_code=400, detail="Invalid routine")
+    routine = None
+    if routine_id:
+        if "/" in routine_id or ".." in routine_id:
+            raise HTTPException(status_code=400, detail="Invalid routine")
 
-    routine = next(
-        (candidate for candidate in instance.routines if candidate.id == routine_id),
-        None,
-    )
-    if routine is None:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    if not routine.enabled:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Routine '{routine.id}' is disabled; enable it before running.",
+        routine = next(
+            (candidate for candidate in instance.routines if candidate.id == routine_id),
+            None,
         )
+        if routine is None:
+            raise HTTPException(status_code=404, detail="Routine not found")
+        if not routine.enabled:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Routine '{routine.id}' is disabled; enable it before running.",
+            )
+
+    mode = str(form.get("mode") or "").strip()
+    prompt_scope = str(form.get("prompt_scope") or "").strip()
+    prompt_name = str(form.get("prompt_name") or "").strip()
+    invocation_input = str(form.get("invocation_input") or "").strip()
+    one_off_task_input = str(form.get("task_input") or "")
+
+    prompt = None
+    task_input = ""
+    if mode == "saved":
+        if not prompt_scope or not prompt_name:
+            raise HTTPException(status_code=400, detail="Saved runs require prompt_scope and prompt_name")
+        try:
+            prompt = PromptSelector(scope=prompt_scope, name=prompt_name)
+            assert services.blueprint_library is not None
+            assert services.prompt_store is not None
+            resolve_catalog_prompt(
+                snapshot,
+                services.blueprint_library,
+                services.prompt_store,
+                group,
+                agent,
+                scope=prompt.scope,
+                name=prompt.name,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Prompt not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif mode == "one-off":
+        if not one_off_task_input.strip():
+            raise HTTPException(status_code=400, detail="One-off runs require task_input")
+        if routine is not None:
+            raise HTTPException(status_code=400, detail="One-off runs cannot target a saved routine")
+        task_input = one_off_task_input
+    else:
+        raise HTTPException(status_code=400, detail="Run mode must be exactly one of saved or one-off")
 
     memory_scope = str(form.get("memory_scope") or "").strip()
+    memory_channel = str(form.get("memory_channel") or "").strip()
     memory_override = None
     if memory_scope:
         if memory_scope == "channel":
-            raise HTTPException(status_code=400, detail="Channel memory override requires a channel")
-        if memory_scope not in {"run", "routine", "agent", "group"}:
+            if not memory_channel:
+                raise HTTPException(status_code=400, detail="Channel memory override requires a channel")
+            if memory_channel not in snapshot.config.memory.channels:
+                raise HTTPException(status_code=400, detail="Unknown memory channel")
+            memory_override = {"scope": "channel", "channel": memory_channel}
+        elif memory_scope not in {"run", "routine", "agent", "group"}:
             raise HTTPException(status_code=400, detail="Invalid memory override")
-        memory_override = {"scope": memory_scope}
+        else:
+            if memory_channel:
+                raise HTTPException(status_code=400, detail="memory_channel is only valid for channel memory")
+            if memory_scope == "routine" and routine is None:
+                raise HTTPException(status_code=400, detail="Routine memory override requires a selected routine")
+            memory_override = {"scope": memory_scope}
+    elif memory_channel:
+        raise HTTPException(status_code=400, detail="memory_channel is only valid for channel memory")
 
     try:
         request_obj = JobRequest(
@@ -1651,11 +1705,10 @@ async def agent_run(
             group_key=group,
             agent_name=agent,
             trigger="manual_prompt",
-            task_input=build_routine_task_input(
-                routine_id,
-                tuple(routine.arguments or ()),
-            ),
-            routine_id=routine_id,
+            task_input=task_input,
+            prompt=prompt,
+            invocation_input=invocation_input,
+            routine_id=routine_id or None,
             memory_override=memory_override,
         )
         handle = submit_job_request(request_obj)
