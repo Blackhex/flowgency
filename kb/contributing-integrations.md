@@ -24,7 +24,26 @@ Projectors consume a blueprint's standard `AGENTS.md` and complete `.agents/skil
 - The plugin registers under a unique author namespace.
 - Projected instruction and `SKILL.md` bytes are unchanged.
 - Unsupported policies fail before launch.
-- Compatible skill discovery has an opt-in live runtime probe.
+ - The plugin registers under a unique author namespace.
+ - Projected instruction and `SKILL.md` bytes are unchanged.
+ - Unsupported policies fail before launch.
+ - Integrations must declare a `cli_command` and truthful runtime policies, and their projector must explicitly declare root-instruction discovery.
+ - Integrations must truthfully indicate whether selected skills can activate non-interactively and whether a selected-skill scenario is supported.
+ - Integrations must participate in the four static live verification scenarios when their CLI executable is installed: `basic`, `root-instructions`, `selected-skill`, and `write-boundary`.
+
+Live scenarios may consume configured CLI credentials, network access, model quota, and time. Authentication, network, quota, timeout, or runtime execution failures fail the live suite; they are not opt-in or gated by environment variables.
+
+To run only the live probes:
+
+```text
+python -m pytest -m real_runtime -v
+```
+
+To run the deterministic suite excluding live probes:
+
+```text
+python -m pytest -m "not real_runtime" -q
+```
 - Contract and normal test suites pass without requiring a live CLI.
 
 ## Superseded layouts
