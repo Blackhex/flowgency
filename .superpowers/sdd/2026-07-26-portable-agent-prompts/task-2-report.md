@@ -145,7 +145,7 @@ Files in this fix round:
 - .superpowers/sdd/2026-07-26-portable-agent-prompts/task-2-report.md
 
 Commit:
-- Pending (recorded after commit)
+- cc9e1c7 test(projectors): cover prompt projection branch in runtime projector
 
 Self-review:
 - Confirms previously untested runtime branch now executes through projection + inventory validation for all required integrations.
