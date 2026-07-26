@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from multiprocessing import Event, Process
 from pathlib import Path
+import re
 
 import yaml
 from fastapi.testclient import TestClient
@@ -33,9 +34,16 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
         "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
         encoding="utf-8",
     )
-    (prompt_dir / "daily-review.prompt.md").write_text(
-        "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
+    (prompt_dir / "pr-review.prompt.md").write_text(
+        "---\nname: pr-review\ndescription: Review\n---\n\nRun.\n",
         encoding="utf-8",
+    )
+
+
+def _local_triage_source(body: str = "Review local work.\n") -> str:
+    return (
+        "---\nname: local-triage\ndescription: Local triage.\n---\n\n"
+        + body
     )
 
 
@@ -54,6 +62,12 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     (group_root / "decisions").mkdir(parents=True, exist_ok=True)
     (group_root / "locks").mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
+    local_prompt_dir = prompt_root / "newsletter" / "advisor"
+    local_prompt_dir.mkdir(parents=True, exist_ok=True)
+    (local_prompt_dir / "local-triage.prompt.md").write_text(
+        _local_triage_source(),
+        encoding="utf-8",
+    )
 
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(cache_root)
@@ -94,12 +108,13 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
             "routines": [
                 {
                     "id": "daily-review",
-                    "prompt": {"scope": "blueprint", "name": "daily-review"},
+                    "prompt": {"scope": "blueprint", "name": "pr-review"},
                     "arguments": ["--brief"],
                     "schedule": {"at": "09:00"},
                     "memory": {"scope": "routine"},
                 }
             ],
+            "prompts": ["local-triage"],
         }
     ]
 
@@ -169,6 +184,7 @@ def test_agent_detail_tabs_have_stable_urls(monkeypatch, tmp_path, raw_config):
         ("profile", "Profile"),
         ("blueprint", "Blueprint"),
         ("runtime", "Runtime"),
+        ("prompts", "Prompts"),
         ("routines", "Routines"),
         ("memory", "Memory"),
         ("activity", "Activity"),
@@ -242,6 +258,119 @@ def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, raw_config):
     assert "/admin/agent-library/blueprints/advisor" in response.text
     assert "/admin/agent-library/blueprints/advisor/skills" in response.text
     assert '<form' not in response.text
+
+
+def test_agent_prompts_tab_separates_shared_and_private(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/agents/advisor/prompts")
+
+    assert response.status_code == 200
+    assert "Shared from blueprint" in response.text
+    assert "Private to this instance" in response.text
+    assert "pr-review" in response.text
+    assert "local-triage" in response.text
+    assert "/admin/agent-library/blueprints/advisor/prompts" in response.text
+
+
+def test_agent_prompts_create_registers_private_prompt(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+
+    response = client.post(
+        "/newsletter/agents/advisor/prompts/create",
+        data={
+            "revision": revision,
+            "name": "daily-triage",
+            "source": "---\nname: daily-triage\ndescription: Daily triage.\n---\n\nTriage now.\n",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    agent = saved["groups"]["newsletter"]["agents"][0]
+    assert "daily-triage" in agent["prompts"]
+
+
+def test_agent_prompts_create_stale_revision_preserves_source(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    stale_revision = _revision(config_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["agency"]["title"] = "Changed elsewhere"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+
+    source = "---\nname: stale-check\ndescription: stale\n---\n\nKeep me\n"
+    response = client.post(
+        "/newsletter/agents/advisor/prompts/create",
+        data={"revision": stale_revision, "name": "stale-check", "source": source},
+    )
+
+    assert response.status_code == 409
+    assert "config.yaml changed" in response.text
+    assert source in response.text
+
+
+def test_agent_prompts_save_rejects_stale_digest_and_preserves_source(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    source = _local_triage_source("Updated body.\n")
+    response = client.post(
+        "/newsletter/agents/advisor/prompts/local-triage/save",
+        data={"digest": "0" * 64, "source": source},
+    )
+
+    assert response.status_code == 409
+    assert "prompt changed; reload and retry" in response.text
+    assert source in response.text
+
+
+def test_agent_prompts_delete_rejects_prompt_in_use(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["agents"][0]["routines"].append(
+        {
+            "id": "local-review",
+            "prompt": {"scope": "instance", "name": "local-triage"},
+            "schedule": {"every": "6h"},
+        }
+    )
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+    source = client.get("/newsletter/agents/advisor/prompts").text
+    match = re.search(r'name="digest" value="([0-9a-f]{64})"', source)
+    assert match is not None
+
+    response = client.post(
+        "/newsletter/agents/advisor/prompts/local-triage/delete",
+        data={"revision": revision, "digest": match.group(1)},
+    )
+
+    assert response.status_code == 409
+    assert "local-triage" in response.text
+    assert "local-review" in response.text
+
+
+def test_agent_prompts_unknown_agent_and_prompt(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+
+    missing_agent = client.get("/newsletter/agents/missing/prompts")
+    assert missing_agent.status_code == 404
+
+    missing_prompt = client.post(
+        "/newsletter/agents/advisor/prompts/missing/save",
+        data={"digest": "0" * 64, "source": "---\nname: missing\ndescription: missing\n---\n\nMissing\n"},
+    )
+    assert missing_prompt.status_code == 404
+
+    missing_delete = client.post(
+        "/newsletter/agents/advisor/prompts/missing/delete",
+        data={"revision": revision, "digest": "0" * 64},
+    )
+    assert missing_delete.status_code == 404
 
 
 def test_memory_tab_shows_selector_without_hash(monkeypatch, tmp_path, raw_config):
@@ -375,7 +504,7 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):
         [
             {
                 "id": "triage",
-                "prompt": {"scope": "blueprint", "name": "daily-review"},
+                "prompt": {"scope": "blueprint", "name": "pr-review"},
                 "enabled": False,
                 "arguments": ["--triage"],
                 "schedule": {"every": "6h"},
@@ -383,7 +512,7 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):
             },
             {
                 "id": "digest",
-                "prompt": {"scope": "blueprint", "name": "daily-review"},
+                "prompt": {"scope": "instance", "name": "local-triage"},
                 "arguments": ["--digest"],
                 "schedule": {"at": "17:30"},
             },
@@ -425,8 +554,8 @@ def test_routines_post_rejects_duplicate_ids(monkeypatch, tmp_path, raw_config):
     revision = _revision(config_path)
     routines_yaml = yaml.safe_dump(
         [
-            {"id": "dup", "prompt": {"scope": "blueprint", "name": "daily-review"}, "arguments": [], "schedule": {"at": "09:00"}},
-            {"id": "dup", "prompt": {"scope": "blueprint", "name": "daily-review"}, "arguments": [], "schedule": {"every": "6h"}},
+            {"id": "dup", "prompt": {"scope": "blueprint", "name": "pr-review"}, "arguments": [], "schedule": {"at": "09:00"}},
+            {"id": "dup", "prompt": {"scope": "instance", "name": "local-triage"}, "arguments": [], "schedule": {"every": "6h"}},
         ],
         sort_keys=False,
     )
@@ -438,6 +567,75 @@ def test_routines_post_rejects_duplicate_ids(monkeypatch, tmp_path, raw_config):
 
     assert response.status_code == 409
     assert "Duplicate routine id" in response.text
+
+
+def test_routine_editor_accepts_explicit_blueprint_and_instance_prompts(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+
+    response = client.post(
+        "/newsletter/agents/advisor/routines",
+        data={
+            "revision": revision,
+            "routines_json": yaml.safe_dump(
+                [
+                    {
+                        "id": "morning-review",
+                        "prompt": {"scope": "blueprint", "name": "pr-review"},
+                        "schedule": {"at": "09:00"},
+                    },
+                    {
+                        "id": "local-review",
+                        "prompt": {"scope": "instance", "name": "local-triage"},
+                        "enabled": False,
+                        "arguments": ["--focused"],
+                        "schedule": {"every": "6h"},
+                        "memory": {"scope": "channel", "channel": "support"},
+                    },
+                ],
+                sort_keys=False,
+            ),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+
+
+def test_routine_editor_rejects_unknown_scope_name_and_shorthand(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+    payload = yaml.safe_dump(
+        [
+            {
+                "id": "bad-scope",
+                "prompt": {"scope": "group", "name": "pr-review"},
+                "schedule": {"at": "09:00"},
+            },
+            {
+                "id": "bad-name",
+                "prompt": {"scope": "blueprint", "name": "unknown"},
+                "schedule": {"every": "6h"},
+            },
+            {
+                "id": "string-prompt",
+                "prompt": "pr-review",
+                "schedule": {"every": "2h"},
+            },
+        ],
+        sort_keys=False,
+    )
+
+    response = client.post(
+        "/newsletter/agents/advisor/routines",
+        data={"revision": revision, "routines_json": payload},
+    )
+
+    assert response.status_code == 409
+    assert "Routine prompt must be selected from the effective prompt catalog" in response.text
+    assert "bad-scope" in response.text
+    assert "bad-name" in response.text
+    assert "string-prompt" in response.text
 
 
 def test_memory_post_selector_updates_only_config(monkeypatch, tmp_path, raw_config):
