@@ -44,6 +44,12 @@ def prompt_document():
     )
 
 
+PROMPT_SOURCE = (
+    "---\nname: pr-review\ndescription: Review pull requests.\n---\n\n"
+    "Review the pull request.\n"
+).encode("utf-8")
+
+
 def test_live_scenario_contract_covers_all_builtin_ai_clis():
     assert AI_CLI_COMMANDS == {
         "copilot": "copilot",
@@ -255,6 +261,54 @@ def test_protected_state_failure_uses_full_runtime_label(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("integration", "expected_path", "expected_content"),
+    [
+        pytest.param(
+            "copilot",
+            PurePosixPath(".github/prompts/pr-review.prompt.md"),
+            PROMPT_SOURCE,
+            id="prompt-copilot",
+        ),
+        pytest.param(
+            "claude-code",
+            PurePosixPath(".claude/commands/pr-review.md"),
+            PROMPT_SOURCE,
+            id="prompt-claude-code",
+        ),
+        pytest.param(
+            "gemini",
+            PurePosixPath(".gemini/commands/pr-review.toml"),
+            (
+                "description = \"Review pull requests.\"\n"
+                "prompt = \"Review the pull request.\\n\"\n"
+            ).encode("utf-8"),
+            id="prompt-gemini",
+        ),
+    ],
+)
+def test_projector_projects_prompt_assets_and_validates_output(
+    tmp_path,
+    integration: str,
+    expected_path: PurePosixPath,
+    expected_content: bytes,
+):
+    files = (
+        SnapshotFile(PurePosixPath("AGENTS.md"), b"# Shared instructions\n"),
+        SnapshotFile(
+            PurePosixPath(".agents/prompts/pr-review.prompt.md"),
+            PROMPT_SOURCE,
+        ),
+    )
+    snapshot = TreeSnapshot(files=files, digest=compute_source_digest(files))
+    projector = get_projector(integration)
+
+    projector.project(snapshot, tmp_path)
+
+    assert (tmp_path / Path(*expected_path.parts)).read_bytes() == expected_content
+    assert projector.validate_output(snapshot, tmp_path) == ()
+
+
+@pytest.mark.parametrize(
     ("target", "format", "expected_path"),
     [
         (
@@ -282,7 +336,7 @@ def test_markdown_prompt_renderers_preserve_source_bytes(
     assert payload == document.source
 
 
-def test_gemini_renderer_uses_structured_toml():
+def test_prompt_gemini_renderer_uses_structured_toml():
     path, payload = render_prompt(
         prompt_document(),
         target=PurePosixPath(".gemini/commands"),
