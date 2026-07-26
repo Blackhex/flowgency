@@ -67,8 +67,8 @@ class PromptStore:
 
     def read(self, group: str, instance: str, name: str) -> StoredPrompt:
         path = self.path(group, instance, name)
-        with self._prompt_lock(group, instance, name):
-            payload = _read_regular_file(path)
+        with self._namespace_lock(group, instance):
+            payload = _read_prompt_file(self.root, path)
         document = parse_prompt_document(prompt_source_path(name), payload)
         return StoredPrompt(document=document, path=path)
 
@@ -81,7 +81,7 @@ class PromptStore:
     ) -> StoredPrompt:
         path = self.path(group, instance, name)
         document = parse_prompt_document(prompt_source_path(name), payload)
-        with self._prompt_lock(group, instance, name):
+        with self._namespace_lock(group, instance):
             self._ensure_namespace_directory(group, instance)
             if path.exists():
                 _validate_safe_leaf(path, label="prompt")
@@ -101,8 +101,8 @@ class PromptStore:
         path = self.path(group, instance, name)
         expected = _validate_digest(expected_digest)
         document = parse_prompt_document(prompt_source_path(name), payload)
-        with self._prompt_lock(group, instance, name):
-            current = _read_regular_file(path)
+        with self._namespace_lock(group, instance):
+            current = _read_prompt_file(self.root, path)
             current_digest = hashlib.sha256(current).hexdigest()
             if current_digest != expected:
                 raise PromptConflictError("prompt changed; reload and retry")
@@ -119,8 +119,8 @@ class PromptStore:
     ) -> StoredPrompt:
         path = self.path(group, instance, name)
         expected = _validate_digest(expected_digest)
-        with self._prompt_lock(group, instance, name):
-            payload = _read_regular_file(path)
+        with self._namespace_lock(group, instance):
+            payload = _read_prompt_file(self.root, path)
             current_digest = hashlib.sha256(payload).hexdigest()
             if current_digest != expected:
                 raise PromptConflictError("prompt changed; reload and retry")
@@ -143,19 +143,17 @@ class PromptStore:
         _validate_slug("instance", target_instance)
         items = _validate_registered(registered)
 
-        source_key = self._namespace_key(source_group, source_instance)
-        target_key = self._namespace_key(target_group, target_instance)
-        lock_paths = sorted(
-            {self._lock_path_for_key(source_key), self._lock_path_for_key(target_key)},
-            key=lambda item: _path_key(item),
+        lock_paths = self._sorted_namespace_lock_paths(
+            (source_group, source_instance),
+            (target_group, target_instance),
         )
         with self._acquire_locks(lock_paths):
-            self._ensure_namespace_directory(source_group, source_instance)
+            self._require_namespace_directory(source_group, source_instance)
             self._ensure_namespace_directory(target_group, target_instance)
             staged: list[tuple[Path, bytes]] = []
             for name, expected_digest in items:
                 source_path = self.path(source_group, source_instance, name)
-                payload = _read_regular_file(source_path)
+                payload = _read_prompt_file(self.root, source_path)
                 source_document = parse_prompt_document(
                     prompt_source_path(name),
                     payload,
@@ -199,27 +197,32 @@ class PromptStore:
         items = _validate_registered(registered)
 
         with self._namespace_lock(group, instance):
-            staged: list[tuple[Path, PromptDocument]] = []
+            self._require_namespace_directory(group, instance)
+            staged: list[tuple[Path, bytes, PromptDocument]] = []
             for name, expected_digest in items:
                 path = self.path(group, instance, name)
-                payload = _read_regular_file(path)
+                payload = _read_prompt_file(self.root, path)
                 document = parse_prompt_document(prompt_source_path(name), payload)
                 if document.digest != expected_digest:
                     raise PromptConflictError("prompt changed; reload and retry")
-                staged.append((path, document))
+                staged.append((path, payload, document))
 
             deleted: list[Path] = []
-            for path, _document in staged:
-                path.unlink()
-                deleted.append(path)
+            try:
+                for path, _payload, _document in staged:
+                    path.unlink()
+                    deleted.append(path)
+            except Exception as exc:
+                rollback_error = _restore_deleted_prompts(staged, deleted)
+                if rollback_error is not None:
+                    raise RuntimeError(
+                        "namespace delete failed and restore failed: "
+                        f"{exc}; restore error: {rollback_error}"
+                    ) from exc
+                raise RuntimeError(
+                    f"namespace delete failed and restored deleted prompts: {exc}"
+                ) from exc
             return tuple(deleted)
-
-    @contextmanager
-    def _prompt_lock(self, group: str, instance: str, name: str):
-        key = self._prompt_key(group, instance, name)
-        lock_path = self._lock_path_for_key(key)
-        with exclusive_lock(lock_path, wait=True):
-            yield
 
     @contextmanager
     def _namespace_lock(self, group: str, instance: str):
@@ -235,16 +238,21 @@ class PromptStore:
                 stack.enter_context(exclusive_lock(lock_path, wait=True))
             yield
 
-    def _prompt_key(self, group: str, instance: str, name: str) -> str:
-        group_slug = _validate_slug("group", group)
-        instance_slug = _validate_slug("instance", instance)
-        name_slug = _validate_slug("prompt", name)
-        return f"prompt:{group_slug}:{instance_slug}:{name_slug}"
-
     def _namespace_key(self, group: str, instance: str) -> str:
         group_slug = _validate_slug("group", group)
         instance_slug = _validate_slug("instance", instance)
         return f"namespace:{group_slug}:{instance_slug}"
+
+    def _sorted_namespace_lock_paths(
+        self,
+        *namespaces: tuple[str, str],
+    ) -> list[Path]:
+        # One namespace lock domain covers all prompt operations on an instance.
+        lock_paths = {
+            self._lock_path_for_key(self._namespace_key(group, instance))
+            for group, instance in namespaces
+        }
+        return sorted(lock_paths, key=lambda item: _path_key(item))
 
     def _lock_path_for_key(self, key: str) -> Path:
         _ensure_directory_chain(self.root, [], label="prompts")
@@ -264,27 +272,35 @@ class PromptStore:
             label="prompts",
         )
 
+    def _require_namespace_directory(self, group: str, instance: str) -> Path:
+        group_slug = _validate_slug("group", group)
+        instance_slug = _validate_slug("instance", instance)
+        namespace_path = self.root / group_slug / instance_slug
+        exists = _validate_existing_directory_chain(
+            self.root,
+            namespace_path,
+            label="prompts",
+        )
+        if not exists:
+            raise PromptNotFoundError(f"prompt namespace not found: {namespace_path}")
+        return namespace_path
+
 
 def _validate_registered(
     registered: tuple[tuple[str, str], ...],
 ) -> tuple[tuple[str, str], ...]:
     if not isinstance(registered, tuple):
         raise TypeError("registered prompts must be a tuple")
-    seen: dict[str, str] = {}
+    seen: set[str] = set()
     validated: list[tuple[str, str]] = []
     for item in registered:
         if not isinstance(item, tuple) or len(item) != 2:
             raise ValueError("registered prompts must include (name, digest) pairs")
         name = _validate_slug("prompt", item[0])
         digest = _validate_digest(item[1])
-        folded = _normalized_key(name)
-        previous = seen.get(folded)
-        if previous is not None and previous != name:
-            raise ValueError(
-                "registered prompt names must not case-fold collide: "
-                f"{previous}, {name}"
-            )
-        seen[folded] = name
+        if name in seen:
+            raise ValueError(f"registered prompt names must be unique: {name}")
+        seen.add(name)
         validated.append((name, digest))
     return tuple(validated)
 
@@ -323,6 +339,13 @@ def _read_regular_file(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def _read_prompt_file(root: Path, path: Path) -> bytes:
+    exists = _validate_existing_directory_chain(root, path.parent, label="prompts")
+    if not exists:
+        raise PromptNotFoundError(f"prompt not found: {path}")
+    return _read_regular_file(path)
+
+
 def _validate_safe_leaf(path: Path, *, label: str) -> None:
     try:
         stat_result = path.lstat()
@@ -337,6 +360,34 @@ def _ensure_directory_chain(root: Path, parts: list[str], *, label: str) -> Path
     for name in parts:
         current = _ensure_child_directory(current, name, label=label)
     return current
+
+
+def _validate_existing_directory_chain(root: Path, path: Path, *, label: str) -> bool:
+    root = Path(root)
+    path = Path(path)
+    _require_contained(root, path.resolve(strict=False), label=label)
+    try:
+        current = _ensure_real_directory(root, label=label)
+    except ValueError:
+        raise
+    except FileNotFoundError:
+        return False
+
+    if _path_key(path) == _path_key(root):
+        return True
+
+    for child in _paths_from_root(root, path):
+        _validate_safe_leaf(child, label=label)
+        try:
+            stat_result = child.lstat()
+        except FileNotFoundError:
+            return False
+        if _stat_is_symlink_or_reparse(stat_result):
+            raise ValueError(f"unsafe {label} directory: {child}")
+        if not stat.S_ISDIR(stat_result.st_mode):
+            raise ValueError(f"{label} path is not a directory: {child}")
+        current = child
+    return True
 
 
 def _ensure_child_directory(parent: Path, name: str, *, label: str) -> Path:
@@ -380,8 +431,18 @@ def _path_key(path: Path) -> str:
     return os.path.normcase(os.path.abspath(str(Path(path))))
 
 
-def _normalized_key(value: str) -> str:
-    return unicodedata.normalize("NFKC", value).casefold()
+def _paths_from_root(root: Path, path: Path) -> list[Path]:
+    chain: list[Path] = []
+    current = Path(path)
+    root_key = _path_key(root)
+    while _path_key(current) != root_key:
+        chain.append(current)
+        parent = current.parent
+        if _path_key(parent) == _path_key(current):
+            raise ValueError("prompt path escapes store root")
+        current = parent
+    chain.reverse()
+    return chain
 
 
 def _stat_is_symlink_or_reparse(stat_result: os.stat_result) -> bool:
@@ -407,6 +468,19 @@ def _rollback_created_paths(created: list[Path]) -> Exception | None:
         return None
     except Exception as rollback_error:  # noqa: BLE001
         return rollback_error
+
+
+def _restore_deleted_prompts(
+    staged: list[tuple[Path, bytes, PromptDocument]],
+    deleted: list[Path],
+) -> Exception | None:
+    payload_by_path = {path: payload for path, payload, _document in staged}
+    try:
+        for path in reversed(deleted):
+            atomic_write_bytes(path, payload_by_path[path])
+        return None
+    except Exception as restore_error:  # noqa: BLE001
+        return restore_error
 
 
 __all__ = [
