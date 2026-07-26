@@ -15,6 +15,23 @@ def _write_skill(path: Path, name: str, description: str = "Review daily editori
     )
 
 
+def _write_prompt(
+    path: Path,
+    name: str,
+    *,
+    description: str = "Review pull requests.",
+    argument_hint: str = "Optional review focus",
+    body: str = "Review the pull request.\n",
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        (
+            f"---\nname: {name}\ndescription: {description}\n"
+            f"argument-hint: {argument_hint}\n---\n\n{body}"
+        ).encode("utf-8")
+    )
+
+
 def _write_blueprint(root: Path, key: str = "advisor") -> Path:
     blueprint = root / key
     (blueprint / "AGENTS.md").parent.mkdir(parents=True, exist_ok=True)
@@ -47,8 +64,33 @@ def test_blueprint_inspection_includes_standard_skill(tmp_path):
 
     assert inspection.key == "advisor"
     assert inspection.skills == ("daily-review",)
+    assert inspection.prompts == ()
     assert inspection.snapshot.digest == compute_source_digest(inspection.snapshot.files)
     assert inspection.snapshot.file(".agents/agent.md").content == b"ignored"
+
+
+def test_blueprint_inspection_includes_sorted_prompt_documents_and_digest_changes(tmp_path):
+    root = tmp_path / "library"
+    blueprint = _write_blueprint(root)
+    _write_prompt(blueprint / ".agents" / "prompts" / "zeta.prompt.md", "zeta", body="Handle zeta.\n")
+    _write_prompt(blueprint / ".agents" / "prompts" / "alpha.prompt.md", "alpha", body="Handle alpha.\n")
+
+    inspection = inspect_blueprint(root, "advisor")
+
+    assert tuple(prompt.name for prompt in inspection.prompts) == ("alpha", "zeta")
+    assert inspection.prompts[0].body == "Handle alpha.\n"
+    first_digest = inspection.snapshot.digest
+
+    _write_prompt(
+        blueprint / ".agents" / "prompts" / "alpha.prompt.md",
+        "alpha",
+        body="Handle alpha with extra context.\n",
+    )
+
+    refreshed = inspect_blueprint(root, "advisor")
+
+    assert refreshed.snapshot.digest != first_digest
+    assert refreshed.prompts[0].body == "Handle alpha with extra context.\n"
 
 
 def test_inspect_blueprint_requires_root_agents_md(tmp_path):
@@ -106,6 +148,17 @@ def test_inspect_blueprint_rejects_nonstandard_skill_locations(tmp_path):
 
     with pytest.raises(AssetValidationError):
         inspect_blueprint(root, "advisor")
+
+
+def test_inspect_blueprint_rejects_nonstandard_prompt_locations(tmp_path):
+    root = tmp_path / "library"
+    blueprint = _write_blueprint(root)
+    _write_prompt(blueprint / ".agents" / "prompts" / "nested" / "rogue.prompt.md", "rogue")
+
+    with pytest.raises(AssetValidationError) as excinfo:
+        inspect_blueprint(root, "advisor")
+
+    assert excinfo.value.issues[0].code == "invalid-prompt-location"
 
 
 @pytest.mark.parametrize(

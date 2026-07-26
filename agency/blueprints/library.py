@@ -7,6 +7,7 @@ import yaml
 
 from agency.blueprints.models import BlueprintInspection
 from agency.fs.snapshot import AssetValidationError, capture_tree
+from agency.prompts.assets import PROMPT_PREFIX, PROMPT_SUFFIX, PromptDocument, parse_prompt_document
 
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -140,11 +141,27 @@ def inspect_blueprint(root: Path, key: str) -> BlueprintInspection:
     for skill_name in sorted(skills):
         _parse_skill(snapshot, skill_name)
 
+    prompts: list[PromptDocument] = []
+    for item in snapshot.files:
+        parts = item.path.parts
+        if not parts:
+            continue
+        if len(parts) >= 2 and PurePosixPath(*parts[:2]) == PROMPT_PREFIX:
+            if len(parts) != 3:
+                _raise(
+                    item.path.as_posix(),
+                    f"Prompts are only allowed at .agents/prompts/<name>{PROMPT_SUFFIX}: {item.path.as_posix()}.",
+                    "Move prompt files directly under .agents/prompts using the .prompt.md suffix.",
+                    code="invalid-prompt-location",
+                )
+            prompts.append(parse_prompt_document(item.path, item.content))
+
     return BlueprintInspection(
         key=key,
         path=blueprint_root,
         title=_extract_title(snapshot, key),
         skills=tuple(sorted(skills)),
+        prompts=tuple(sorted(prompts, key=lambda item: item.name)),
         snapshot=snapshot,
     )
 
