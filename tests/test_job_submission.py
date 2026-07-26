@@ -17,11 +17,12 @@ from agency.integrations.models import ProjectorCapabilities, RuntimeCapabilitie
 import agency.jobs as jobs_package
 from agency.jobs import JobSpec, JobSubmissionError, submit_job_request
 from agency.jobs.authority import JobStore
-from agency.jobs.resolution import JobRequest, resolve_job_request
+from agency.jobs.resolution import JobRequest, JobValidationError, resolve_job_request
 from agency.jobs.models import BlueprintRef, MemoryBinding, RuntimePolicySnapshot
+from agency.prompts.assets import parse_prompt_document, prompt_source_path
 from agency.prompts import build_prompt_task_input
 from agency.prompts.catalog import effective_prompt_catalog, resolve_catalog_prompt
-from agency.prompts.store import PromptStore
+from agency.prompts.store import PromptStore, StoredPrompt
 from agency.jobs.launcher import (
     CREATE_NEW_PROCESS_GROUP,
     DETACHED_PROCESS,
@@ -158,6 +159,150 @@ def test_resolve_catalog_prompt_requires_matching_explicit_scope(prompt_env):
             "reviewer",
             scope="instance",
             name="pr-review",
+        )
+
+
+def test_resolve_job_request_reads_each_private_prompt_once_for_snapshot(tmp_path):
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["agents"][0]["prompts"] = ["local-triage"]
+    config.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    first_payload = (
+        b"---\nname: local-triage\ndescription: Local triage.\n---\n\n"
+        b"Review local work.\n"
+    )
+    second_payload = (
+        b"---\nname: local-triage\ndescription: Local triage.\n---\n\n"
+        b"Review changed local work.\n"
+    )
+    expected = parse_prompt_document(prompt_source_path("local-triage"), first_payload)
+
+    class ChangingPromptStore:
+        def __init__(self) -> None:
+            self.read_count = 0
+
+        def read(self, group: str, instance: str, name: str) -> StoredPrompt:
+            assert (group, instance, name) == ("newsletter", "builder", "local-triage")
+            self.read_count += 1
+            payload = first_payload if self.read_count == 1 else second_payload
+            return StoredPrompt(
+                document=parse_prompt_document(prompt_source_path(name), payload),
+                path=tmp_path / "prompts" / f"{name}.prompt.md",
+            )
+
+    prompt_store = ChangingPromptStore()
+
+    spec = resolve_job_request(
+        JobRequest(
+            config_path=config,
+            group_key="newsletter",
+            agent_name="builder",
+            trigger="decision",
+            task_input="Decide what changed.",
+        ),
+        config_store=ConfigStore(config),
+        library=BlueprintLibrary(tmp_path / "agent-library"),
+        cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+        prompt_store=prompt_store,
+        integrations={"copilot": FakeIntegration()},
+    )
+
+    assert prompt_store.read_count == 1
+    assert len(spec.private_prompts) == 1
+    assert spec.private_prompts[0].name == "local-triage"
+    assert spec.private_prompts[0].content == expected.source.decode("utf-8")
+    assert spec.private_prompts[0].source_digest == expected.digest
+
+
+def test_resolve_job_request_translates_missing_blueprint_prompt_to_validation_error(tmp_path):
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
+    config_store = ConfigStore(config)
+    library = BlueprintLibrary(tmp_path / "agent-library")
+    prompt_store = PromptStore(tmp_path / "prompts")
+    snapshot = config_store.load()
+
+    assert resolve_catalog_prompt(
+        snapshot,
+        library,
+        prompt_store,
+        "newsletter",
+        "builder",
+        scope="blueprint",
+        name="daily-review",
+    ).document.name == "daily-review"
+
+    prompt_path = (
+        tmp_path / "agent-library" / "builder-blueprint" / ".agents" / "prompts" / "daily-review.prompt.md"
+    )
+    prompt_path.unlink()
+
+    with pytest.raises(JobValidationError, match="daily-review"):
+        resolve_job_request(
+            JobRequest(
+                config_path=config,
+                group_key="newsletter",
+                agent_name="builder",
+                trigger="manual_prompt",
+                task_input="",
+                routine_id="daily-review",
+            ),
+            config_store=config_store,
+            library=library,
+            cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+            prompt_store=prompt_store,
+            integrations={"copilot": FakeIntegration()},
+            snapshot=snapshot,
+        )
+
+
+def test_resolve_job_request_translates_missing_private_prompt_to_validation_error(tmp_path):
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["agents"][0]["prompts"] = ["local-triage"]
+    config.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    config_store = ConfigStore(config)
+    library = BlueprintLibrary(tmp_path / "agent-library")
+    prompt_store = PromptStore(tmp_path / "prompts")
+    created = prompt_store.create(
+        "newsletter",
+        "builder",
+        "local-triage",
+        (
+            "---\nname: local-triage\ndescription: Local triage.\n---\n\n"
+            "Review local work.\n"
+        ).encode("utf-8"),
+    )
+    snapshot = config_store.load()
+
+    assert prompt_store.read("newsletter", "builder", "local-triage").document.name == "local-triage"
+
+    prompt_store.delete(
+        "newsletter",
+        "builder",
+        "local-triage",
+        expected_digest=created.document.digest,
+    )
+
+    with pytest.raises(JobValidationError, match="local-triage"):
+        resolve_job_request(
+            JobRequest(
+                config_path=config,
+                group_key="newsletter",
+                agent_name="builder",
+                trigger="decision",
+                task_input="Decide what changed.",
+            ),
+            config_store=config_store,
+            library=library,
+            cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+            prompt_store=prompt_store,
+            integrations={"copilot": FakeIntegration()},
+            snapshot=snapshot,
         )
 
 

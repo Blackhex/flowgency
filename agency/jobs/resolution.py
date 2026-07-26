@@ -17,7 +17,7 @@ from agency.memory.selectors import (
     resolve_memory_selector,
     select_effective_memory,
 )
-from agency.prompts import PromptStore, build_prompt_task_input, resolve_catalog_prompt
+from agency.prompts import PromptNotFoundError, PromptStore, build_prompt_task_input, resolve_catalog_prompt
 
 from .models import BlueprintRef, JobRequest, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
 
@@ -61,6 +61,74 @@ def _bind_integration(
     if hasattr(integration, "with_config") and integration_config:
         return integration.with_config(dict(integration_config))
     return integration
+
+
+def _missing_prompt_error(
+    *,
+    group_key: str,
+    agent_name: str,
+    scope: str,
+    name: str,
+    action: str,
+) -> JobValidationError:
+    return JobValidationError(
+        f"Configured {scope} prompt '{name}' for {group_key}/{agent_name} is no longer available; {action}."
+    )
+
+
+def _snapshot_private_prompt(
+    prompt_store: PromptStore,
+    *,
+    group_key: str,
+    agent_name: str,
+    name: str,
+) -> PromptSnapshot:
+    try:
+        stored = prompt_store.read(group_key, agent_name, name)
+    except PromptNotFoundError as exc:
+        raise _missing_prompt_error(
+            group_key=group_key,
+            agent_name=agent_name,
+            scope="instance",
+            name=name,
+            action="restore it in the prompt store or remove it from the agent prompt registration",
+        ) from exc
+    return PromptSnapshot(
+        name=name,
+        content=stored.document.source.decode("utf-8"),
+        source_digest=stored.document.digest,
+    )
+
+
+def _resolve_saved_prompt(
+    snapshot: ConfigSnapshot,
+    library: BlueprintLibrary,
+    prompt_store: PromptStore,
+    *,
+    group_key: str,
+    agent_name: str,
+    scope: str,
+    name: str,
+):
+    try:
+        return resolve_catalog_prompt(
+            snapshot,
+            library,
+            prompt_store,
+            group_key,
+            agent_name,
+            scope=scope,
+            name=name,
+        )
+    except (KeyError, PromptNotFoundError) as exc:
+        action = "restore the prompt source or update the saved prompt selector"
+        raise _missing_prompt_error(
+            group_key=group_key,
+            agent_name=agent_name,
+            scope=scope,
+            name=name,
+            action=action,
+        ) from exc
 
 
 def resolve_job_request(
@@ -148,10 +216,11 @@ def resolve_job_request(
     )
 
     private_prompts = tuple(
-        PromptSnapshot(
+        _snapshot_private_prompt(
+            prompt_store,
+            group_key=request.group_key,
+            agent_name=request.agent_name,
             name=name,
-            content=prompt_store.read(request.group_key, request.agent_name, name).document.source.decode("utf-8"),
-            source_digest=prompt_store.read(request.group_key, request.agent_name, name).document.digest,
         )
         for name in agent.prompts
     )
@@ -159,12 +228,12 @@ def resolve_job_request(
     if request.trigger in {"manual_prompt", "scheduled_prompt"}:
         selector = routine.prompt if routine is not None else request.prompt
         if selector is not None:
-            catalog_prompt = resolve_catalog_prompt(
+            catalog_prompt = _resolve_saved_prompt(
                 snapshot,
                 library,
                 prompt_store,
-                request.group_key,
-                request.agent_name,
+                group_key=request.group_key,
+                agent_name=request.agent_name,
                 scope=selector.scope,
                 name=selector.name,
             )
