@@ -11,6 +11,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from agency import app as app_mod
+from agency.web.routes import admin_library as admin_library_routes
 from agency.configuration import ConfigStore
 from agency.fs.snapshot import compute_source_digest
 from tests._group_helpers import apply_group_paths, create_group_environment
@@ -420,14 +421,17 @@ def test_blueprint_prompts_page_lists_and_edits_canonical_source(
     )
 
     response = client.get("/admin/agent-library/blueprints/advisor/prompts")
+    digest = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    ).snapshot.digest
 
     assert response.status_code == 200
     assert "pr-review.prompt.md" in response.text
     assert ".agents/prompts/pr-review.prompt.md" in response.text
+    assert "Source digest" in response.text
+    assert digest in response.text
 
-    inspection = app_mod.build_services(config_path).blueprint_library.inspect(
-        "advisor"
-    )
+    inspection = app_mod.build_services(config_path).blueprint_library.inspect("advisor")
     save_response = client.post(
         "/admin/agent-library/blueprints/advisor/source",
         data={
@@ -577,7 +581,7 @@ def test_blueprint_prompt_delete_blocks_configured_routine(
 
     response = client.post(
         "/admin/agent-library/blueprints/advisor/prompts/pr-review/delete",
-        data={"expected_digest": digest},
+        data={"expected_digest": digest, "confirmation": "pr-review"},
     )
 
     assert response.status_code == 409
@@ -604,7 +608,10 @@ def test_blueprint_prompt_delete_rejects_stale_digest(
 
     response = client.post(
         "/admin/agent-library/blueprints/advisor/prompts/daily-review/delete",
-        data={"expected_digest": compute_source_digest(())},
+        data={
+            "expected_digest": compute_source_digest(()),
+            "confirmation": "daily-review",
+        },
     )
 
     assert response.status_code == 409
@@ -633,7 +640,7 @@ def test_blueprint_prompt_delete_removes_unreferenced_prompt(
 
     response = client.post(
         "/admin/agent-library/blueprints/advisor/prompts/daily-review/delete",
-        data={"expected_digest": digest},
+        data={"expected_digest": digest, "confirmation": "daily-review"},
         follow_redirects=False,
     )
 
@@ -646,3 +653,121 @@ def test_blueprint_prompt_delete_removes_unreferenced_prompt(
         / "prompts"
         / "daily-review.prompt.md"
     ).exists()
+
+
+def test_blueprint_prompt_delete_requires_confirmation(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    digest = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    ).snapshot.digest
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/prompts/daily-review/delete",
+        data={"expected_digest": digest},
+    )
+
+    assert response.status_code == 409
+    assert "type daily-review to confirm" in response.text.lower()
+    assert (
+        library_root
+        / "advisor"
+        / ".agents"
+        / "prompts"
+        / "daily-review.prompt.md"
+    ).is_file()
+
+
+def test_blueprint_prompt_delete_rejects_wrong_confirmation(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    digest = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    ).snapshot.digest
+
+    response = client.post(
+        "/admin/agent-library/blueprints/advisor/prompts/daily-review/delete",
+        data={"expected_digest": digest, "confirmation": "wrong"},
+    )
+
+    assert response.status_code == 409
+    assert "type daily-review to confirm" in response.text.lower()
+    assert (
+        library_root
+        / "advisor"
+        / ".agents"
+        / "prompts"
+        / "daily-review.prompt.md"
+    ).is_file()
+
+
+def test_blueprint_prompt_delete_rolls_back_full_tree_on_publish_failure(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, library_root, _ = _seed_library_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    blueprint_root = library_root / "advisor"
+    digest = app_mod.build_services(config_path).blueprint_library.inspect(
+        "advisor"
+    ).snapshot.digest
+    original_tree = {
+        path.relative_to(blueprint_root).as_posix(): path.read_bytes()
+        for path in blueprint_root.rglob("*")
+        if path.is_file()
+    }
+    real_replace = admin_library_routes.os.replace
+
+    def failing_replace(source, destination):
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if (
+            source_path.name == "advisor"
+            and destination_path == blueprint_root
+            and "staging" in source_path.as_posix()
+        ):
+            raise PermissionError("simulated publish failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(
+        admin_library_routes.os,
+        "replace",
+        failing_replace,
+    )
+
+    with pytest.raises(PermissionError, match="simulated publish failure"):
+        client.post(
+            "/admin/agent-library/blueprints/advisor/prompts/daily-review/delete",
+            data={"expected_digest": digest, "confirmation": "daily-review"},
+        )
+
+    restored_tree = {
+        path.relative_to(blueprint_root).as_posix(): path.read_bytes()
+        for path in blueprint_root.rglob("*")
+        if path.is_file()
+    }
+    assert restored_tree == original_tree
+    assert (
+        blueprint_root / ".agents" / "prompts" / "daily-review.prompt.md"
+    ).is_file()
+    assert (
+        blueprint_root / ".agents" / "prompts" / "pr-review.prompt.md"
+    ).is_file()

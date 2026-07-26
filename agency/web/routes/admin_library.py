@@ -1025,10 +1025,12 @@ async def admin_blueprint_prompt_delete(
     confirmation = str(form.get("confirmation", "")).strip()
     target_path = prompt_source_path(prompt).as_posix()
     try:
-        if confirmation and confirmation != prompt:
+        if confirmation != prompt:
             raise HTTPException(
                 status_code=409,
-                detail="Confirmation did not match prompt slug",
+                detail=(
+                    f"Delete blocked: type {prompt} to confirm prompt deletion."
+                ),
             )
         _validate_source_path(target_path)
         with exclusive_lock(_lock_path(services, key), wait=True):
