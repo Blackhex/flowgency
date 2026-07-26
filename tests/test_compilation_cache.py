@@ -37,6 +37,7 @@ def _inspection(root: Path, key: str = "advisor") -> BlueprintInspection:
         path=blueprint,
         title="Advisor",
         skills=("daily-review",),
+        prompts=(),
         snapshot=snapshot,
     )
 
