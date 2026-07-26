@@ -28,6 +28,7 @@ from agency.fs import ResourceBusyError
 from agency.integrations import get_integration
 from agency.jobs.authority import JobStore
 from agency.memory import MemoryConflictError, resolve_memory_selector
+from agency.prompts import PromptConflictError, PromptNotFoundError
 from agency.prompts.catalog import effective_prompt_catalog
 from agency.web.dependencies import AgencyServices, get_services
 
@@ -38,6 +39,7 @@ _TAB_LABELS = {
     "profile": "Profile",
     "blueprint": "Blueprint",
     "runtime": "Runtime",
+    "prompts": "Prompts",
     "routines": "Routines",
     "memory": "Memory",
     "activity": "Activity",
@@ -115,6 +117,10 @@ def _issue_dicts(exc: ValidationFailed | tuple) -> list[dict[str, str]]:
         }
         for issue in issues
     ]
+
+
+def _single_issue(field: str, message: str, hint: str = "") -> list[dict[str, str]]:
+    return [{"field": field, "message": message, "hint": hint}]
 
 
 def _memory_scope_label(selector: MemorySelector | None, channels) -> str:
@@ -392,7 +398,7 @@ def _parse_memory_selector_from_form(form, channels) -> MemorySelector | None:
     return selector
 
 
-def _parse_routines_payload(form, available_prompts: tuple[tuple[str, str], ...]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+def _parse_routines_payload(form, available_prompts: frozenset[tuple[str, str]]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     raw = str(form.get("routines_json", "")).strip()
     if not raw:
         return [], []
@@ -414,9 +420,13 @@ def _parse_routines_payload(form, available_prompts: tuple[tuple[str, str], ...]
         prompt = item.get("prompt")
         prompt_scope = ""
         prompt_name = ""
-        if isinstance(prompt, dict):
+        if not isinstance(prompt, dict):
+            issues.append({"field": f"{field_prefix}.prompt", "message": "Routine prompt selector must be a mapping with scope and name.", "hint": "Use prompt: {scope: blueprint|instance, name: <slug>}."})
+        else:
             prompt_scope = str(prompt.get("scope", "")).strip()
             prompt_name = str(prompt.get("name", "")).strip()
+            if set(prompt.keys()) != {"scope", "name"} or not prompt_scope or not prompt_name:
+                issues.append({"field": f"{field_prefix}.prompt", "message": "Routine prompt selector must include only scope and name.", "hint": "Use prompt: {scope: blueprint|instance, name: <slug>}."})
         if not routine_id:
             issues.append({"field": f"{field_prefix}.id", "message": "Routine id is required.", "hint": "Provide a stable routine slug."})
         if routine_id in seen_ids:
@@ -475,6 +485,50 @@ def _available_prompts(services: AgencyServices, snapshot, group_id: str, agent_
             agent_id,
         )
     )
+
+
+def _prompts_context(
+    services: AgencyServices,
+    snapshot,
+    group_id: str,
+    agent_id: str,
+    *,
+    create_name: str = "",
+    create_source: str = "",
+    source_overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    _group, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
+    if services.prompt_service is None:
+        raise HTTPException(status_code=409, detail="Prompt service unavailable")
+    overrides = source_overrides or {}
+    catalog = services.prompt_service.catalog(snapshot, group_id, agent_id)
+    shared: list[dict[str, str]] = []
+    private: list[dict[str, str]] = []
+    for item in catalog:
+        row = {
+            "scope": item.scope,
+            "name": item.document.name,
+            "description": item.document.description,
+            "argument_hint": item.document.argument_hint or "",
+            "digest": item.document.digest,
+            "source_path": item.source_path,
+        }
+        if item.scope == "blueprint":
+            row["library_href"] = (
+                f"/admin/agent-library/blueprints/{instance.blueprint}/prompts"
+                f"?path={quote(item.source_path, safe='')}"
+            )
+            shared.append(row)
+            continue
+        source_text = item.document.source.decode("utf-8")
+        row["source"] = overrides.get(item.document.name, source_text)
+        private.append(row)
+    return {
+        "shared_prompts": tuple(shared),
+        "private_prompts": tuple(private),
+        "create_prompt_name": create_name,
+        "create_prompt_source": create_source,
+    }
 
 
 def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
@@ -564,8 +618,11 @@ def _routines_context(services: AgencyServices, snapshot, group_id: str, agent_i
         allow_unicode=True,
     ).strip()
     prompt_options = _available_prompts(services, snapshot, group_id, agent_id)
+    shared = sorted(name for scope, name in prompt_options if scope == "blueprint")
+    private = sorted(name for scope, name in prompt_options if scope == "instance")
     return {
-        "available_prompts": tuple(f"{scope}:{name}" for scope, name in prompt_options),
+        "available_shared_prompts": tuple(shared),
+        "available_private_prompts": tuple(private),
         "routines_yaml": routines_yaml,
         "supports_enabled": True,
     }
@@ -643,6 +700,8 @@ def _detail_context(
         context.update(_blueprint_context(services, snapshot, group_id, agent_id))
     elif tab == "runtime":
         context.update(_runtime_context(snapshot, group_id, agent_id))
+    elif tab == "prompts":
+        context.update(_prompts_context(services, snapshot, group_id, agent_id))
     elif tab == "routines":
         context.update(_routines_context(services, snapshot, group_id, agent_id))
     elif tab == "memory":
@@ -754,6 +813,202 @@ async def agent_detail_runtime_save(request: Request, group: str, agent: str, se
     return RedirectResponse(f"/{group}/agents/{agent}/runtime", status_code=303)
 
 
+@router.get("/{group}/agents/{agent}/prompts", response_class=HTMLResponse)
+async def agent_detail_prompts(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
+    return _detail_context(request, services, group, agent, "prompts")
+
+
+@router.post("/{group}/agents/{agent}/prompts/create", response_class=HTMLResponse)
+async def agent_detail_prompts_create(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
+    form = await request.form()
+    revision = str(form.get("revision", "")).strip()
+    name = str(form.get("name", "")).strip()
+    source = str(form.get("source", ""))
+    try:
+        if services.prompt_service is None:
+            raise HTTPException(status_code=409, detail="Prompt service unavailable")
+        _get_snapshot_instance(services.config_store.load(), group, agent)
+        if not revision:
+            raise ConfigConflictError("config.yaml changed; reload before saving")
+        services.prompt_service.create_private(
+            group,
+            agent,
+            name,
+            source.encode("utf-8"),
+            expected_revision=revision,
+        )
+    except ValidationFailed as exc:
+        return _detail_context(
+            request,
+            services,
+            group,
+            agent,
+            "prompts",
+            status_code=409,
+            issues=_issue_dicts(exc),
+            overrides=_prompts_context(
+                services,
+                services.config_store.load(),
+                group,
+                agent,
+                create_name=name,
+                create_source=source,
+            ),
+        )
+    except ConfigConflictError as exc:
+        return _detail_context(
+            request,
+            services,
+            group,
+            agent,
+            "prompts",
+            status_code=409,
+            issues=_single_issue("revision", str(exc), "Reload and resubmit the prompt."),
+            overrides=_prompts_context(
+                services,
+                services.config_store.load(),
+                group,
+                agent,
+                create_name=name,
+                create_source=source,
+            ),
+        )
+    except PromptConflictError as exc:
+        return _detail_context(
+            request,
+            services,
+            group,
+            agent,
+            "prompts",
+            status_code=409,
+            issues=_single_issue("name", str(exc), "Choose a different prompt name or reload and retry."),
+            overrides=_prompts_context(
+                services,
+                services.config_store.load(),
+                group,
+                agent,
+                create_name=name,
+                create_source=source,
+            ),
+        )
+    request.app.state.refresh_services()
+    return RedirectResponse(f"/{group}/agents/{agent}/prompts", status_code=303)
+
+
+@router.post("/{group}/agents/{agent}/prompts/{name}/save", response_class=HTMLResponse)
+async def agent_detail_prompts_save(
+    request: Request,
+    group: str,
+    agent: str,
+    name: str,
+    services: AgencyServices = Depends(get_services),
+):
+    form = await request.form()
+    digest = str(form.get("digest", "")).strip()
+    source = str(form.get("source", ""))
+    try:
+        if services.prompt_service is None:
+            raise HTTPException(status_code=409, detail="Prompt service unavailable")
+        _get_snapshot_instance(services.config_store.load(), group, agent)
+        services.prompt_service.update_private(
+            group,
+            agent,
+            name,
+            source.encode("utf-8"),
+            expected_digest=digest,
+        )
+    except PromptNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Unknown prompt") from exc
+    except ValidationFailed as exc:
+        return _detail_context(
+            request,
+            services,
+            group,
+            agent,
+            "prompts",
+            status_code=409,
+            issues=_issue_dicts(exc),
+            overrides=_prompts_context(
+                services,
+                services.config_store.load(),
+                group,
+                agent,
+                source_overrides={name: source},
+            ),
+        )
+    except PromptConflictError as exc:
+        return _detail_context(
+            request,
+            services,
+            group,
+            agent,
+            "prompts",
+            status_code=409,
+            issues=_single_issue("digest", str(exc), "Reload the latest prompt source before saving."),
+            overrides=_prompts_context(
+                services,
+                services.config_store.load(),
+                group,
+                agent,
+                source_overrides={name: source},
+            ),
+        )
+    request.app.state.refresh_services()
+    return RedirectResponse(f"/{group}/agents/{agent}/prompts", status_code=303)
+
+
+@router.post("/{group}/agents/{agent}/prompts/{name}/delete", response_class=HTMLResponse)
+async def agent_detail_prompts_delete(
+    request: Request,
+    group: str,
+    agent: str,
+    name: str,
+    services: AgencyServices = Depends(get_services),
+):
+    form = await request.form()
+    revision = str(form.get("revision", "")).strip()
+    digest = str(form.get("digest", "")).strip()
+    try:
+        if services.prompt_service is None:
+            raise HTTPException(status_code=409, detail="Prompt service unavailable")
+        _get_snapshot_instance(services.config_store.load(), group, agent)
+        if not revision:
+            raise ConfigConflictError("config.yaml changed; reload before saving")
+        services.prompt_service.delete_private(
+            group,
+            agent,
+            name,
+            expected_revision=revision,
+            expected_digest=digest,
+        )
+    except PromptNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Unknown prompt") from exc
+    except ValidationFailed as exc:
+        return _detail_context(request, services, group, agent, "prompts", status_code=409, issues=_issue_dicts(exc))
+    except ConfigConflictError as exc:
+        return _detail_context(
+            request,
+            services,
+            group,
+            agent,
+            "prompts",
+            status_code=409,
+            issues=_single_issue("revision", str(exc), "Reload and retry deletion."),
+        )
+    except PromptConflictError as exc:
+        return _detail_context(
+            request,
+            services,
+            group,
+            agent,
+            "prompts",
+            status_code=409,
+            issues=_single_issue("digest", str(exc), "Reload and confirm the prompt digest before deleting."),
+        )
+    request.app.state.refresh_services()
+    return RedirectResponse(f"/{group}/agents/{agent}/prompts", status_code=303)
+
+
 @router.get("/{group}/agents/{agent}/routines", response_class=HTMLResponse)
 async def agent_detail_routines(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
     return _detail_context(request, services, group, agent, "routines")
@@ -766,17 +1021,19 @@ async def agent_detail_routines_save(request: Request, group: str, agent: str, s
     snapshot = services.config_store.load()
     _, instance = _get_snapshot_instance(snapshot, group, agent)
     prompt_options = _available_prompts(services, snapshot, group, agent)
-    routines, parse_issues = _parse_routines_payload(form, prompt_options)
+    routines, parse_issues = _parse_routines_payload(form, frozenset(prompt_options))
+    shared = tuple(sorted(name for scope, name in prompt_options if scope == "blueprint"))
+    private = tuple(sorted(name for scope, name in prompt_options if scope == "instance"))
     if parse_issues:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_prompts": tuple(f"{scope}:{name}" for scope, name in prompt_options), "supports_enabled": True})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
     try:
         if not revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
         replace_agent_routines(services.config_store, revision, group, agent, routines)
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_prompts": tuple(f"{scope}:{name}" for scope, name in prompt_options), "supports_enabled": True})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
     except ConfigConflictError as exc:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_prompts": tuple(f"{scope}:{name}" for scope, name in prompt_options), "supports_enabled": True})
+        return _detail_context(request, services, group, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
     request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents/{agent}/routines", status_code=303)
 
