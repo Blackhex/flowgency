@@ -251,6 +251,13 @@ def test_builtin_ai_cli_projectors_declare_instruction_discovery():
     assert REGISTRY["sdk"].projector.capabilities.discovers_instructions is False
 
 
+def test_default_projector_requires_explicit_instruction_discovery_flag():
+    parameter = inspect.signature(BaseIntegration._default_projector).parameters[
+        "discovers_instructions"
+    ]
+    assert parameter.default is inspect._empty
+
+
 def test_decision_run_allows_null_skill():
     integration = REGISTRY["copilot"]
     request = IntegrationRunRequest(
@@ -406,6 +413,7 @@ def test_non_executable_integrations_reject_before_any_result_is_fabricated(tmp_
 def test_runresult_changed_files_defaults_empty():
     r = RunResult(exit_code=0, stdout="", stderr="", duration_seconds=1.0)
     assert r.changed_files == []
+    assert r.write_attempts == []
 
 
 def test_filechange_fields():

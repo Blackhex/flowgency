@@ -21,7 +21,7 @@ class ScriptIntegration(BaseIntegration):
     supports_execution = True
     supports_ai_backend = False
     detect_priority = 1000  # Never auto-detects
-    projector = BaseIntegration._default_projector("agent.md")
+    projector = BaseIntegration._default_projector("agent.md", discovers_instructions=False)
     runtime_capabilities = RuntimeCapabilities(
         path_modes=frozenset({"unrestricted"}),
         tool_modes=frozenset({"all"}),
