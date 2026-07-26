@@ -13,3 +13,24 @@ Group sandbox roots form the baseline; instance `additional_roots` are additive.
 ## Superseded layouts
 
 Integration auto-detection, sidecar parsing, and directory-coupled runtime hints are not part of the current runtime.
+
+
+## Runtime verification
+
+Normal pytest runs automatically execute four live scenarios for each installed built-in AI CLI: basic execution, native root instructions, selected skill, and write boundary. Missing CLIs do not create per-scenario skips; the installed-only collection omits absent executables instead of producing unavailable-case markers.
+
+Installed runtimes are expected to be authenticated and operational. Live scenarios can consume configured CLI credentials, network access, model quota, and time. Authentication failures, network failures, quota limits, timeouts, and runtime process errors fail the test run; they are not skipped or xfailed.
+
+To run only the live probes:
+
+```text
+python -m pytest -m real_runtime -v
+```
+
+To run the normal deterministic suite excluding live probes:
+
+```text
+python -m pytest -m "not real_runtime" -q
+```
+
+Deterministic integration and projector contracts continue to cover all eight built-in AI CLIs even when their executables are absent on the machine.
