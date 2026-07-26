@@ -48,16 +48,12 @@ Load the current revision before editing, or use the absent revision when the fi
 
 After the consolidated path summary is approved, create the approved `agency.agent_library` through safe directory operations; do not place blueprints under the project workspace. For each approved role, always create:
 
-````markdown
-After the consolidated path summary is approved, create the approved `agency.agent_library` through safe directory operations; do not place blueprints under the project workspace. For each approved role, always create:
-
 ```text
 {agent_library}/{blueprint}/
 `-- AGENTS.md
 ```
 
 Write `{agent_library}/{blueprint}/AGENTS.md` from `references/templates.md`. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, create `{agent_library}/{blueprint}/.agents/skills/{skill}/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities. Skill frontmatter must contain a directory-matching `name` and a trigger-only `description`. Put supporting scripts, references, and assets inside the skill directory.
-````
 
 Blueprint files contain reusable instructions only. They do not contain identity, integration, schedules, runtime policy, or mutable memory. Do not create runtime-native `CLAUDE.md` or `GEMINI.md`; Agency's projector creates disposable native layouts in `agency.compilation_cache`.
 

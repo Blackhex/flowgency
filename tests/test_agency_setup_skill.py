@@ -38,6 +38,15 @@ def test_setup_guidance_keeps_blueprint_skills_optional():
     for document_name, text in documents.items():
         for phrase in required:
             assert phrase in text, document_name
+    # Stronger checks for the canonical skill: ensure a single plain `text` fence
+    skill_text = documents["skill"]
+    exact_tree_fence = "```text\n{agent_library}/{blueprint}/\n`-- AGENTS.md\n```"
+    assert exact_tree_fence in skill_text, "skill"
+    assert skill_text.count(
+        "After the consolidated path summary is approved, create the approved `agency.agent_library`"
+    ) == 1, "skill contains a duplicated opening paragraph"
+    # Fail if someone wrapped the replacement in a nested markdown fence
+    assert "```markdown" not in skill_text, "skill contains unexpected nested markdown fence"
 
 
 def test_setup_registers_explicit_instances_routines_and_memory():
