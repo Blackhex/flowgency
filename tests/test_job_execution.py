@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import threading
 import time
 from types import SimpleNamespace
@@ -10,10 +11,11 @@ import yaml
 
 from agency.integrations import FileChange, RunResult
 from agency.integrations.models import IntegrationRunRequest
+from agency.blueprints.projectors import get_projector
 from agency.jobs.authority import JobStore
 from agency.jobs.artifacts import JobArtifact
 from agency.jobs.execution import execute_job
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
 from agency.jobs.store import cancel_job
 from agency.jobs.reconciliation import worker_alive
 from agency.jobs.store import read_job, write_job
@@ -34,13 +36,16 @@ def _authority(spec: JobSpec):
     )
 
 
-def queued_job(tmp_path: Path, *, decision_context=None):
+def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content: str | None = None):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     cache_path = tmp_path / ".compat-cache" / "script" / "v1" / "unresolved"
     runtime_path = cache_path / "runtime"
     runtime_path.mkdir(parents=True, exist_ok=True)
-    (runtime_path / "agent.md").write_text("run\n", encoding="utf-8")
+    if private_prompt_content is not None:
+        (runtime_path / "AGENTS.md").write_text("# Shared instructions\n", encoding="utf-8")
+    else:
+        (runtime_path / "agent.md").write_text("run\n", encoding="utf-8")
     resolved = resolve_memory_selector(
         MemorySelector(scope="run"),
         job_id="placeholder",
@@ -52,8 +57,19 @@ def queued_job(tmp_path: Path, *, decision_context=None):
     )
     group_root = tmp_path / "group"
     workspace_root = tmp_path / "workspace"
+    private_prompts: tuple[PromptSnapshot, ...] = ()
+    if private_prompt_content is not None:
+        private_prompts = (
+            PromptSnapshot(
+                name="local-triage",
+                content=private_prompt_content,
+                source_digest=hashlib.sha256(
+                    private_prompt_content.encode("utf-8")
+                ).hexdigest(),
+            ),
+        )
     spec = JobSpec(
-        schema_version=3,
+        schema_version=4 if private_prompt_content is not None else 3,
         job_id="queued-job",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
@@ -62,17 +78,17 @@ def queued_job(tmp_path: Path, *, decision_context=None):
         agent_name="product",
         workspace_root=str(workspace_root.resolve()),
         trigger="decision" if decision_context else "manual_prompt",
-        integration_name="script",
+        integration_name="copilot" if private_prompt_content is not None else "script",
         integration_config={},
         blueprint=BlueprintRef(
             key="compat-unresolved",
             source_digest="compat-unresolved",
-            integration="script",
-            projector_version="v1",
+            integration="copilot" if private_prompt_content is not None else "script",
+            projector_version="2" if private_prompt_content is not None else "v1",
             cache_path=str(cache_path.resolve()),
         ),
         routine_id=None if decision_context else "daily-review",
-        skill=None if decision_context else "daily-review",
+        skill=None if (decision_context or private_prompt_content is not None) else "daily-review",
         skill_arguments=(),
         task_input="Immutable instructions",
         runtime_policy=RuntimePolicySnapshot(
@@ -92,6 +108,7 @@ def queued_job(tmp_path: Path, *, decision_context=None):
         prompt_source={"type": "decision" if decision_context else "saved_prompt"},
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
+        private_prompts=private_prompts,
     )
     path = JobStore(tmp_path / ".compat-memory-root").path(spec.group_key, spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
@@ -513,7 +530,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     assert read_job(path) == result
 
 
-def test_execute_job_uses_resolved_skill_from_current_snapshot(tmp_path, monkeypatch):
+def test_execute_job_preserves_historical_v3_selected_skill(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
     seen = {}
 
@@ -542,6 +559,211 @@ def test_execute_job_uses_resolved_skill_from_current_snapshot(tmp_path, monkeyp
 
     assert result.status == "complete"
     assert seen == {"skill": "daily-review", "sandbox_mode": "unrestricted"}
+
+
+def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch):
+    path, spec = queued_job(
+        tmp_path,
+        private_prompt_content=(
+            "---\n"
+            "name: local-triage\n"
+            "description: Local triage.\n"
+            "---\n\n"
+            "Original private task.\n"
+        ),
+    )
+    seen = {}
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+        projector = get_projector("copilot")
+
+        def run(self, request: IntegrationRunRequest):
+            seen["skill"] = request.skill
+            seen["sandbox_mode"] = request.runtime_policy.sandbox_mode
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_root=tmp_path / "group",
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        group_root=tmp_path / "group",
+    )
+    context.workspace_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    result = execute_job(_authority(spec))
+
+    assert result.status == "complete"
+    assert seen == {"skill": None, "sandbox_mode": "unrestricted"}
+
+
+def test_worker_projects_private_prompt_snapshot_without_rereading_source(
+    tmp_path,
+    monkeypatch,
+):
+    path, spec = queued_job(
+        tmp_path,
+        private_prompt_content=(
+            "---\n"
+            "name: local-triage\n"
+            "description: Local triage.\n"
+            "---\n\n"
+            "Original private task.\n"
+        ),
+    )
+    decoy = (
+        tmp_path
+        / "prompt-store"
+        / "test"
+        / "product"
+        / "local-triage.prompt.md"
+    )
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text("Changed after submission.\n", encoding="utf-8")
+    other = (
+        tmp_path
+        / "prompt-store"
+        / "test"
+        / "other-agent"
+        / "private-debug.prompt.md"
+    )
+    other.parent.mkdir(parents=True)
+    other.write_text("Other instance prompt\n", encoding="utf-8")
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+        projector = get_projector("copilot")
+
+        def run(self, request: IntegrationRunRequest):
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_root=Path(spec.workspace_root),
+        group_root=Path(spec.group_root),
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+    )
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: context,
+    )
+
+    record = execute_job(_authority(spec))
+    projected = (
+        path.with_suffix("")
+        / "launch"
+        / ".github"
+        / "prompts"
+        / "local-triage.prompt.md"
+    )
+
+    assert record.status == "complete"
+    payload = projected.read_bytes()
+    assert b"Original private task." in payload
+    assert b"Changed after submission." not in payload
+    assert not (
+        path.with_suffix("") / "launch" / ".github" / "prompts" / "private-debug.prompt.md"
+    ).exists()
+
+
+def test_worker_private_prompt_overlay_does_not_mutate_shared_cache_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    path, spec = queued_job(
+        tmp_path,
+        private_prompt_content=(
+            "---\n"
+            "name: local-triage\n"
+            "description: Local triage.\n"
+            "---\n\n"
+            "Original private task.\n"
+        ),
+    )
+    artifact = spec.blueprint.to_artifact()
+    shared_instruction = artifact.runtime_path / "AGENTS.md"
+    shared_before = shared_instruction.read_bytes()
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+        projector = get_projector("copilot")
+
+        def run(self, request: IntegrationRunRequest):
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_root=Path(spec.workspace_root),
+        group_root=Path(spec.group_root),
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+    )
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: context,
+    )
+
+    record = execute_job(_authority(spec))
+
+    assert record.status == "complete"
+    assert shared_instruction.read_bytes() == shared_before
+    assert not (artifact.runtime_path / ".github").exists()
+
+
+def test_worker_rejects_private_overlay_collision_with_shared_runtime(
+    tmp_path,
+    monkeypatch,
+):
+    path, spec = queued_job(
+        tmp_path,
+        private_prompt_content=(
+            "---\n"
+            "name: local-triage\n"
+            "description: Local triage.\n"
+            "---\n\n"
+            "Original private task.\n"
+        ),
+    )
+    artifact = spec.blueprint.to_artifact()
+    collision_target = artifact.runtime_path / ".github" / "prompts" / "local-triage.prompt.md"
+    collision_target.parent.mkdir(parents=True, exist_ok=True)
+    collision_target.write_text("shared prompt\n", encoding="utf-8")
+    called = {"run": 0}
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+        projector = get_projector("copilot")
+
+        def run(self, request: IntegrationRunRequest):
+            called["run"] += 1
+            return RunResult(0, "done", "", 0.1)
+
+    context = SimpleNamespace(
+        workspace_root=Path(spec.workspace_root),
+        group_root=Path(spec.group_root),
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+    )
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: context,
+    )
+
+    record = execute_job(_authority(spec))
+
+    assert called["run"] == 0
+    assert record.status == "failed"
+    assert "already exists" in (record.execution_summary or "")
 
 
 def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):

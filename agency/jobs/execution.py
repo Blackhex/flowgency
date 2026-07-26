@@ -20,6 +20,7 @@ from agency.integrations.models import (
     ResolvedToolPolicy,
 )
 from agency.memory.models import ResolvedMemory
+from agency.prompts.projection import project_prompt_snapshots
 from agency.memory.publication import (
     MemoryPublicationError,
     apply_publication,
@@ -352,6 +353,17 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                 canonical_files = dict(snapshot.files)
                 if launch_view is None:
                     launch_view = create_launch_view(artifact, launch_dir)
+                if spec.private_prompts:
+                    projector = getattr(integration, "projector", None)
+                    if projector is None:
+                        raise ValueError(
+                            "Integration has no runtime projector for private prompt projection."
+                        )
+                    project_prompt_snapshots(
+                        projector,
+                        spec.private_prompts,
+                        launch_view,
+                    )
                 started = datetime.now(timezone.utc)
                 record = transition_job(
                     job_path,
