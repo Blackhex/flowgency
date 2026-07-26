@@ -316,6 +316,74 @@ def test_move_preview_and_apply(monkeypatch, tmp_path, raw_config):
     assert moved["blueprint"] == "advisor"
 
 
+def test_move_apply_warns_when_prompt_namespace_cleanup_is_orphaned(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    store = ConfigStore(config_path)
+    snapshot = store.load()
+    from agency.prompts import PromptStore
+
+    prompt_store = PromptStore(Path(snapshot.raw["agency"]["prompt_store"]))
+    created = prompt_store.create(
+        "newsletter",
+        "advisor",
+        "local-triage",
+        _private_prompt_bytes(),
+    )
+    store.patch(
+        snapshot.revision,
+        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            prompts=["local-triage"]
+        ),
+    )
+
+    original_delete_namespace_locked = (
+        app_mod.app.state.services.instances.prompt_store._delete_namespace_locked
+    )
+
+    def fail_source_cleanup(group, instance, *, registered):
+        if (group, instance) == ("newsletter", "advisor"):
+            raise OSError("simulated source cleanup failure")
+        return original_delete_namespace_locked(
+            group,
+            instance,
+            registered=registered,
+        )
+
+    monkeypatch.setattr(
+        app_mod.app.state.services.instances.prompt_store,
+        "_delete_namespace_locked",
+        fail_source_cleanup,
+    )
+
+    preview_revision = _revision(config_path)
+    response = client.post(
+        "/newsletter/agents/advisor/move/apply",
+        data={
+            "target_group": "research",
+            "memory_mode": "empty",
+            "preview_revision": preview_revision,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert "Instances assigned to Research" in response.text
+    assert "orphaned prompt namespace remains at" in response.text.lower()
+    assert str(prompt_store.path("newsletter", "advisor", "local-triage").parent) in response.text
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["groups"]["newsletter"]["agents"] == []
+    moved = next(
+        agent for agent in saved["groups"]["research"]["agents"] if agent["name"] == "advisor"
+    )
+    assert moved["prompts"] == ["local-triage"]
+    assert prompt_store.read("research", "advisor", "local-triage").document.digest == created.document.digest
+
+
 @pytest.mark.parametrize(
     ("status", "label"),
     [

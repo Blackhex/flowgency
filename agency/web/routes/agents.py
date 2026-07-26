@@ -307,10 +307,20 @@ async def agent_move_apply(request: Request, group: str, agent: str, services: A
     except ConfigConflictError as exc:
         return _render_roster(request, services, group, warning=str(exc), status_code=409)
     try:
-        services.instances.move(preview)
+        result = services.instances.move(preview)
     except (ConfigConflictError, InstanceMoveConflict) as exc:
         return _render_roster(request, services, group, warning=str(exc), status_code=409)
     request.app.state.refresh_services()
+    if result.orphaned_prompt_namespace is not None:
+        return _render_roster(
+            request,
+            request.app.state.services,
+            preview.target_group,
+            warning=(
+                f"Orphaned prompt namespace remains at {result.orphaned_prompt_namespace}"
+            ),
+            status_code=409,
+        )
     return RedirectResponse(f"/{preview.target_group}/agents", status_code=303)
 
 

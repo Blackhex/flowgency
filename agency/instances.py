@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from dataclasses import dataclass
+from pathlib import Path
 import shutil
 from typing import Literal
 
@@ -70,6 +71,15 @@ class RemoveInstanceResult:
     snapshot: ConfigSnapshot
     orphaned_memories: tuple[ResolvedMemory, ...]
     orphaned_prompt_namespace: Path | None = None
+
+
+@dataclass(frozen=True)
+class MoveInstanceResult:
+    snapshot: ConfigSnapshot
+    orphaned_prompt_namespace: Path | None = None
+
+    def __getattr__(self, name: str):
+        return getattr(self.snapshot, name)
 
 
 @dataclass(frozen=True)
@@ -222,7 +232,7 @@ def move_instance(
     memory_store: MemoryStore,
     prompt_store: PromptStore,
     preview: MovePreview,
-) -> ConfigSnapshot:
+) -> MoveInstanceResult:
     if preview.blocked_by:
         raise InstanceMoveConflict(preview.blocked_by)
 
@@ -230,9 +240,16 @@ def move_instance(
     snapshot = store.load()
     source_group_path = snapshot.config.groups[preview.source_group].path
     target_group_path = snapshot.config.groups[preview.target_group].path
+    orphaned_prompt_namespace: Path | None = None
     with ExitStack() as stack:
         stack.enter_context(
             acquire_group_operation_locks(source_group_path, target_group_path)
+        )
+        prompt_lease = stack.enter_context(
+            prompt_store.namespace_transaction(
+                (preview.source_group, preview.agent_name),
+                (preview.target_group, preview.agent_name),
+            )
         )
 
         refreshed = store.load()
@@ -245,11 +262,13 @@ def move_instance(
             preview.source_group,
             preview.agent_name,
         )
-        source_prompts = _registered_prompt_entries(
-            prompt_store,
+        source_prompts = prompt_lease.registered_entries(
             preview.source_group,
-            source_agent,
+            source_agent.name,
+            tuple(source_agent.prompts),
         )
+        if source_prompts != preview.source_prompts:
+            raise InstanceMoveConflict(("source-prompts-changed",))
         memory_pairs = _resolve_owned_memory_pairs(
             refreshed,
             memory_store,
@@ -324,7 +343,7 @@ def move_instance(
                         )
 
             if source_prompts:
-                prompt_store.copy_namespace(
+                prompt_lease.copy_registered(
                     preview.source_group,
                     preview.agent_name,
                     preview.target_group,
@@ -355,7 +374,7 @@ def move_instance(
                 ) from exc
             if source_prompts:
                 try:
-                    prompt_store.delete_namespace(
+                    prompt_lease.delete_registered(
                         preview.target_group,
                         preview.agent_name,
                         registered=source_prompts,
@@ -367,14 +386,20 @@ def move_instance(
             raise
         if source_prompts:
             try:
-                prompt_store.delete_namespace(
+                prompt_lease.delete_registered(
                     preview.source_group,
                     preview.agent_name,
                     registered=source_prompts,
                 )
             except Exception:
-                pass
-    return updated
+                orphaned_prompt_namespace = prompt_store.namespace_path(
+                    preview.source_group,
+                    preview.agent_name,
+                )
+    return MoveInstanceResult(
+        snapshot=updated,
+        orphaned_prompt_namespace=orphaned_prompt_namespace,
+    )
 
 
 class InstanceService:
@@ -498,7 +523,7 @@ class InstanceService:
             memory_mode,
         )
 
-    def move(self, preview: MovePreview) -> ConfigSnapshot:
+    def move(self, preview: MovePreview) -> MoveInstanceResult:
         return move_instance(
             self.config_store,
             self.memory_store,
@@ -763,6 +788,7 @@ __all__ = [
     "InstanceMoveConflict",
     "InstanceMutationResult",
     "InstanceService",
+    "MoveInstanceResult",
     "MovePreview",
     "RemoveInstanceResult",
     "create_instance",

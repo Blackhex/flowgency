@@ -33,6 +33,69 @@ class StoredPrompt:
     path: Path
 
 
+@dataclass(frozen=True)
+class PromptNamespaceLease:
+    _store: PromptStore
+    _namespace_keys: frozenset[str]
+
+    def registered_entries(
+        self,
+        group: str,
+        instance: str,
+        names: tuple[str, ...],
+    ) -> tuple[tuple[str, str], ...]:
+        self._require_namespace(group, instance)
+        entries: list[tuple[str, str]] = []
+        for name in names:
+            stored, _payload = self._store._load_prompt_locked(
+                group,
+                instance,
+                name,
+            )
+            entries.append((name, stored.document.digest))
+        return tuple(entries)
+
+    def copy_registered(
+        self,
+        source_group: str,
+        source_instance: str,
+        target_group: str,
+        target_instance: str,
+        *,
+        registered: tuple[tuple[str, str], ...],
+    ) -> tuple[Path, ...]:
+        self._require_namespace(source_group, source_instance)
+        self._require_namespace(target_group, target_instance)
+        return self._store._copy_namespace_locked(
+            source_group,
+            source_instance,
+            target_group,
+            target_instance,
+            registered=registered,
+        )
+
+    def delete_registered(
+        self,
+        group: str,
+        instance: str,
+        *,
+        registered: tuple[tuple[str, str], ...],
+    ) -> tuple[Path, ...]:
+        self._require_namespace(group, instance)
+        return self._store._delete_namespace_locked(
+            group,
+            instance,
+            registered=registered,
+        )
+
+    def _require_namespace(self, group: str, instance: str) -> None:
+        key = self._store._namespace_key(group, instance)
+        if key not in self._namespace_keys:
+            raise ValueError(
+                f"namespace is not held by this lease: {group}/{instance}"
+            )
+
+
 class PromptConflictError(RuntimeError):
     pass
 
@@ -65,12 +128,19 @@ class PromptStore:
         _require_contained(self.root, candidate, label="prompt")
         return candidate
 
+    def namespace_path(self, group: str, instance: str) -> Path:
+        group_slug = _validate_slug("group", group)
+        instance_slug = _validate_slug("instance", instance)
+        candidate = Path(
+            os.path.abspath(str(self.root / group_slug / instance_slug))
+        )
+        _require_contained(self.root, candidate, label="prompts")
+        return candidate
+
     def read(self, group: str, instance: str, name: str) -> StoredPrompt:
-        path = self.path(group, instance, name)
         with self._namespace_lock(group, instance):
-            payload = _read_prompt_file(self.root, path)
-        document = parse_prompt_document(prompt_source_path(name), payload)
-        return StoredPrompt(document=document, path=path)
+            stored, _payload = self._load_prompt_locked(group, instance, name)
+        return stored
 
     def create(
         self,
@@ -98,10 +168,10 @@ class PromptStore:
         expected_digest: str,
         payload: bytes,
     ) -> StoredPrompt:
-        path = self.path(group, instance, name)
         expected = _validate_digest(expected_digest)
         document = parse_prompt_document(prompt_source_path(name), payload)
         with self._namespace_lock(group, instance):
+            path = self.path(group, instance, name)
             current = _read_prompt_file(self.root, path)
             current_digest = hashlib.sha256(current).hexdigest()
             if current_digest != expected:
@@ -117,18 +187,79 @@ class PromptStore:
         *,
         expected_digest: str,
     ) -> StoredPrompt:
-        path = self.path(group, instance, name)
         expected = _validate_digest(expected_digest)
         with self._namespace_lock(group, instance):
-            payload = _read_prompt_file(self.root, path)
+            stored, payload = self._load_prompt_locked(group, instance, name)
             current_digest = hashlib.sha256(payload).hexdigest()
             if current_digest != expected:
                 raise PromptConflictError("prompt changed; reload and retry")
-            document = parse_prompt_document(prompt_source_path(name), payload)
+            path = stored.path
             path.unlink()
-        return StoredPrompt(document=document, path=path)
+        return stored
+
+    @contextmanager
+    def namespace_transaction(
+        self,
+        *namespaces: tuple[str, str],
+    ):
+        validated = tuple(
+            (_validate_slug("group", group), _validate_slug("instance", instance))
+            for group, instance in namespaces
+        )
+        lock_paths = self._sorted_namespace_lock_paths(*validated)
+        keys = frozenset(
+            self._namespace_key(group, instance) for group, instance in validated
+        )
+        with self._acquire_locks(lock_paths):
+            yield PromptNamespaceLease(self, keys)
 
     def copy_namespace(
+        self,
+        source_group: str,
+        source_instance: str,
+        target_group: str,
+        target_instance: str,
+        *,
+        registered: tuple[tuple[str, str], ...],
+    ) -> tuple[Path, ...]:
+        with self.namespace_transaction(
+            (source_group, source_instance),
+            (target_group, target_instance),
+        ) as lease:
+            return lease.copy_registered(
+                source_group,
+                source_instance,
+                target_group,
+                target_instance,
+                registered=registered,
+            )
+
+    def delete_namespace(
+        self,
+        group: str,
+        instance: str,
+        *,
+        registered: tuple[tuple[str, str], ...],
+    ) -> tuple[Path, ...]:
+        with self.namespace_transaction((group, instance)) as lease:
+            return lease.delete_registered(
+                group,
+                instance,
+                registered=registered,
+            )
+
+    def _load_prompt_locked(
+        self,
+        group: str,
+        instance: str,
+        name: str,
+    ) -> tuple[StoredPrompt, bytes]:
+        path = self.path(group, instance, name)
+        payload = _read_prompt_file(self.root, path)
+        document = parse_prompt_document(prompt_source_path(name), payload)
+        return StoredPrompt(document=document, path=path), payload
+
+    def _copy_namespace_locked(
         self,
         source_group: str,
         source_instance: str,
@@ -142,50 +273,41 @@ class PromptStore:
         _validate_slug("group", target_group)
         _validate_slug("instance", target_instance)
         items = _validate_registered(registered)
+        self._require_namespace_directory(source_group, source_instance)
+        self._ensure_namespace_directory(target_group, target_instance)
+        staged: list[tuple[Path, bytes]] = []
+        for name, expected_digest in items:
+            stored, payload = self._load_prompt_locked(
+                source_group,
+                source_instance,
+                name,
+            )
+            if stored.document.digest != expected_digest:
+                raise PromptConflictError("prompt changed; reload and retry")
+            target_path = self.path(target_group, target_instance, name)
+            if target_path.exists():
+                _validate_safe_leaf(target_path, label="prompt")
+                raise PromptConflictError(f"prompt already exists: {target_path}")
+            staged.append((target_path, payload))
 
-        lock_paths = self._sorted_namespace_lock_paths(
-            (source_group, source_instance),
-            (target_group, target_instance),
-        )
-        with self._acquire_locks(lock_paths):
-            self._require_namespace_directory(source_group, source_instance)
-            self._ensure_namespace_directory(target_group, target_instance)
-            staged: list[tuple[Path, bytes]] = []
-            for name, expected_digest in items:
-                source_path = self.path(source_group, source_instance, name)
-                payload = _read_prompt_file(self.root, source_path)
-                source_document = parse_prompt_document(
-                    prompt_source_path(name),
-                    payload,
-                )
-                if source_document.digest != expected_digest:
-                    raise PromptConflictError("prompt changed; reload and retry")
-                target_path = self.path(target_group, target_instance, name)
-                if target_path.exists():
-                    _validate_safe_leaf(target_path, label="prompt")
-                    raise PromptConflictError(
-                        f"prompt already exists: {target_path}"
-                    )
-                staged.append((target_path, payload))
-
-            created: list[Path] = []
-            try:
-                for target_path, payload in staged:
-                    atomic_write_bytes(target_path, payload)
-                    created.append(target_path)
-            except Exception as exc:
-                rollback_error = _rollback_created_paths(created)
-                if rollback_error is not None:
-                    raise RuntimeError(
-                        "namespace copy failed and rollback failed: "
-                        f"{exc}; rollback error: {rollback_error}"
-                    ) from exc
+        created: list[Path] = []
+        try:
+            for target_path, payload in staged:
+                atomic_write_bytes(target_path, payload)
+                created.append(target_path)
+        except Exception as exc:
+            rollback_error = _rollback_created_paths(created)
+            if rollback_error is not None:
                 raise RuntimeError(
-                    f"namespace copy failed and rolled back: {exc}"
+                    "namespace copy failed and rollback failed: "
+                    f"{exc}; rollback error: {rollback_error}"
                 ) from exc
-            return tuple(created)
+            raise RuntimeError(
+                f"namespace copy failed and rolled back: {exc}"
+            ) from exc
+        return tuple(created)
 
-    def delete_namespace(
+    def _delete_namespace_locked(
         self,
         group: str,
         instance: str,
@@ -195,34 +317,30 @@ class PromptStore:
         _validate_slug("group", group)
         _validate_slug("instance", instance)
         items = _validate_registered(registered)
+        self._require_namespace_directory(group, instance)
+        staged: list[tuple[Path, bytes, PromptDocument]] = []
+        for name, expected_digest in items:
+            stored, payload = self._load_prompt_locked(group, instance, name)
+            if stored.document.digest != expected_digest:
+                raise PromptConflictError("prompt changed; reload and retry")
+            staged.append((stored.path, payload, stored.document))
 
-        with self._namespace_lock(group, instance):
-            self._require_namespace_directory(group, instance)
-            staged: list[tuple[Path, bytes, PromptDocument]] = []
-            for name, expected_digest in items:
-                path = self.path(group, instance, name)
-                payload = _read_prompt_file(self.root, path)
-                document = parse_prompt_document(prompt_source_path(name), payload)
-                if document.digest != expected_digest:
-                    raise PromptConflictError("prompt changed; reload and retry")
-                staged.append((path, payload, document))
-
-            deleted: list[Path] = []
-            try:
-                for path, _payload, _document in staged:
-                    path.unlink()
-                    deleted.append(path)
-            except Exception as exc:
-                rollback_error = _restore_deleted_prompts(staged, deleted)
-                if rollback_error is not None:
-                    raise RuntimeError(
-                        "namespace delete failed and restore failed: "
-                        f"{exc}; restore error: {rollback_error}"
-                    ) from exc
+        deleted: list[Path] = []
+        try:
+            for path, _payload, _document in staged:
+                path.unlink()
+                deleted.append(path)
+        except Exception as exc:
+            rollback_error = _restore_deleted_prompts(staged, deleted)
+            if rollback_error is not None:
                 raise RuntimeError(
-                    f"namespace delete failed and restored deleted prompts: {exc}"
+                    "namespace delete failed and restore failed: "
+                    f"{exc}; restore error: {rollback_error}"
                 ) from exc
-            return tuple(deleted)
+            raise RuntimeError(
+                f"namespace delete failed and restored deleted prompts: {exc}"
+            ) from exc
+        return tuple(deleted)
 
     @contextmanager
     def _namespace_lock(self, group: str, instance: str):
