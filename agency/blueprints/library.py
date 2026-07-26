@@ -137,9 +137,6 @@ def inspect_blueprint(root: Path, key: str) -> BlueprintInspection:
             if not _IDENTIFIER_PATTERN.fullmatch(skill_name):
                 _raise(item.path.as_posix(), f"Skill directory must be a lowercase stable slug: {item.path.as_posix()}.", "Rename the skill directory to match the Agent Skills identifier contract.", code="invalid-skill-directory")
 
-    if not skills:
-        _raise("skills", f"Blueprint must contain at least one standard Agent Skill: {key}.", "Add .agents/skills/<name>/SKILL.md to the blueprint.", code="missing-blueprint-skills")
-
     for skill_name in sorted(skills):
         _parse_skill(snapshot, skill_name)
 

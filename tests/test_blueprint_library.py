@@ -23,7 +23,22 @@ def _write_blueprint(root: Path, key: str = "advisor") -> Path:
     return blueprint
 
 
-def test_blueprint_requires_agents_md_and_standard_skill(tmp_path):
+def test_inspect_blueprint_accepts_agents_md_without_skills(tmp_path):
+    root = tmp_path / "library"
+    blueprint = root / "advisor"
+    blueprint.mkdir(parents=True)
+    (blueprint / "AGENTS.md").write_bytes(b"# Advisor\n")
+
+    inspection = inspect_blueprint(root, "advisor")
+
+    assert inspection.key == "advisor"
+    assert inspection.skills == ()
+    assert tuple(item.path.as_posix() for item in inspection.snapshot.files) == (
+        "AGENTS.md",
+    )
+
+
+def test_blueprint_inspection_includes_standard_skill(tmp_path):
     root = tmp_path / "library"
     blueprint = _write_blueprint(root)
     (blueprint / ".agents" / "agent.md").write_bytes(b"ignored")
