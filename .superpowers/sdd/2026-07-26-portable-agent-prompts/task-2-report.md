@@ -114,3 +114,40 @@ Final run:
 ## Concerns
 - Requested interpreter path C:/Users/black/Projects/christag-agency/.venv/Scripts/python.exe does not exist in this environment; active interpreter used instead.
 - Editable install initially failed with WinError 32 due file lock and required retry with --user.
+
+## Fix round 1
+Important finding addressed (verbatim in substance):
+- tests/test_runtime_projectors.py unit-tests render_prompt() but never puts a real .agents/prompts/<slug>.prompt.md into a projector source snapshot and runs _mapped_paths -> project -> validate_output. Therefore the actual shared-runtime projection branch and prompt inventory validation are untested.
+
+Changes made:
+- Added `PROMPT_SOURCE` fixture data in `tests/test_runtime_projectors.py` for a canonical `.agents/prompts/pr-review.prompt.md` document.
+- Added parameterized integration-level test `test_projector_projects_prompt_assets_and_validates_output` covering `copilot`, `claude-code`, and `gemini`.
+- For each integration, the test creates a real source snapshot with `.agents/prompts/pr-review.prompt.md`, runs `projector.project(...)`, asserts exact projected native path and exact bytes/content, and asserts `projector.validate_output(...) == ()`.
+- Renamed `test_gemini_renderer_uses_structured_toml` to `test_prompt_gemini_renderer_uses_structured_toml` so the Gemini case is included by the focused `-k "prompt"` command.
+
+Covering test commands and exact output:
+- `python -m pytest tests/test_runtime_projectors.py -k "prompt" -v`
+  - Collected: 20 items / 14 deselected / 6 selected
+  - Passed nodes:
+    - tests/test_runtime_projectors.py::test_projector_projects_prompt_assets_and_validates_output[prompt-copilot]
+    - tests/test_runtime_projectors.py::test_projector_projects_prompt_assets_and_validates_output[prompt-claude-code]
+    - tests/test_runtime_projectors.py::test_projector_projects_prompt_assets_and_validates_output[prompt-gemini]
+    - tests/test_runtime_projectors.py::test_markdown_prompt_renderers_preserve_source_bytes[target0-prompt-markdown-expected_path0]
+    - tests/test_runtime_projectors.py::test_markdown_prompt_renderers_preserve_source_bytes[target1-markdown-command-expected_path1]
+    - tests/test_runtime_projectors.py::test_prompt_gemini_renderer_uses_structured_toml
+  - Final: 6 passed, 14 deselected in 1.68s
+- `python -m pytest tests/test_runtime_projectors.py tests/test_compilation_cache.py tests/test_cache_locking.py -v`
+  - Collected: 50 items
+  - Final: 50 passed in 2.98s
+
+Files in this fix round:
+- tests/test_runtime_projectors.py
+- .superpowers/sdd/2026-07-26-portable-agent-prompts/task-2-report.md
+
+Commit:
+- Pending (recorded after commit)
+
+Self-review:
+- Confirms previously untested runtime branch now executes through projection + inventory validation for all required integrations.
+- Confirms Gemini prompt projection coverage is selected by the prompt-focused test filter.
+- No production behavior change was required; fix is test-only.
