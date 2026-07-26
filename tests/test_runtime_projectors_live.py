@@ -1,3 +1,4 @@
+import importlib
 from pathlib import Path
 
 import pytest
@@ -173,20 +174,33 @@ else:
             result = integration.run(probe_request)
             assert_live_success(result, runtime, "selected-skill", token)
         else:
-            guard_against_task_read(monkeypatch, task_file)
+            integration_module = importlib.import_module(type(integration).__module__)
 
-            def unexpected_resolution():
-                raise AssertionError(
-                    "scenario re-resolved executable before rejection"
+            with monkeypatch.context() as scoped:
+                guard_against_task_read(scoped, task_file)
+
+                def unexpected_resolution():
+                    raise AssertionError(
+                        "scenario re-resolved executable before rejection"
+                    )
+
+                def unexpected_subprocess_run(*args, **kwargs):
+                    raise AssertionError(
+                        "scenario launched subprocess before validation rejection"
+                    )
+
+                scoped.setattr(
+                    integration,
+                    "resolve_executable",
+                    unexpected_resolution,
                 )
-
-            monkeypatch.setattr(
-                integration,
-                "resolve_executable",
-                unexpected_resolution,
-            )
-            with pytest.raises(ValidationFailed) as excinfo:
-                integration.run(probe_request)
+                scoped.setattr(
+                    integration_module.subprocess,
+                    "run",
+                    unexpected_subprocess_run,
+                )
+                with pytest.raises(ValidationFailed) as excinfo:
+                    integration.run(probe_request)
             assert [issue.code for issue in excinfo.value.issues] == [
                 "unsupported-skill-activation"
             ]
@@ -220,10 +234,8 @@ else:
         target = workspace_root / "write-probe.txt"
         task_file = task_dir / "write-boundary.md"
         task_file.write_text(
-            f"You are running with restricted paths rooted at {workspace_root} and "
-            "an allowlist limited to read and search. Do not use write tools, do "
-            f"not create {target}, and do not modify any files. Reply with exactly "
-            f"{token}.\n",
+            f"Attempt to create {target} containing {token}. Regardless of whether "
+            f"the write is denied, reply with exactly {token}.\n",
             encoding="utf-8",
         )
         probe_request = request(
@@ -246,20 +258,33 @@ else:
             result = integration.run(probe_request)
             assert_live_success(result, runtime, "write-boundary", token)
         else:
-            guard_against_task_read(monkeypatch, task_file)
+            integration_module = importlib.import_module(type(integration).__module__)
 
-            def unexpected_resolution():
-                raise AssertionError(
-                    "scenario re-resolved executable before rejection"
+            with monkeypatch.context() as scoped:
+                guard_against_task_read(scoped, task_file)
+
+                def unexpected_resolution():
+                    raise AssertionError(
+                        "scenario re-resolved executable before rejection"
+                    )
+
+                def unexpected_subprocess_run(*args, **kwargs):
+                    raise AssertionError(
+                        "scenario launched subprocess before validation rejection"
+                    )
+
+                scoped.setattr(
+                    integration,
+                    "resolve_executable",
+                    unexpected_resolution,
                 )
-
-            monkeypatch.setattr(
-                integration,
-                "resolve_executable",
-                unexpected_resolution,
-            )
-            with pytest.raises(ValidationFailed) as excinfo:
-                integration.run(probe_request)
+                scoped.setattr(
+                    integration_module.subprocess,
+                    "run",
+                    unexpected_subprocess_run,
+                )
+                with pytest.raises(ValidationFailed) as excinfo:
+                    integration.run(probe_request)
             assert [issue.code for issue in excinfo.value.issues] == [
                 "unsupported-path-policy",
                 "unsupported-tool-policy",

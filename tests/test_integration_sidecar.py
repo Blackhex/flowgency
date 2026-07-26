@@ -1108,3 +1108,39 @@ class TestCopilot:
         raw = "\n".join(json.dumps(l) for l in lines)
         text, changes = CopilotIntegration._parse_jsonl_output(raw, Path("/repo"))
         assert changes == []
+
+    def test_parse_jsonl_ignores_failed_write_telemetry_but_keeps_text(self):
+        import json
+        from pathlib import Path
+        from agency.integrations.agency.copilot import CopilotIntegration
+
+        root = Path("/repo")
+        lines = [
+            {
+                "type": "tool.execution_start",
+                "data": {
+                    "toolCallId": "w1",
+                    "toolName": "create",
+                    "arguments": {"path": str(root / "write-probe.txt")},
+                },
+            },
+            {
+                "type": "tool.execution_complete",
+                "data": {
+                    "toolCallId": "w1",
+                    "success": False,
+                    "toolTelemetry": {
+                        "properties": {"command": "create"},
+                        "metrics": {"linesAdded": 0, "linesRemoved": 0},
+                    },
+                },
+            },
+            {"type": "assistant.message", "data": {"content": "WRITE_TOKEN"}},
+        ]
+
+        raw = "\n".join(json.dumps(line) for line in lines)
+
+        text, changes = CopilotIntegration._parse_jsonl_output(raw, root)
+
+        assert text == "WRITE_TOKEN"
+        assert changes == []

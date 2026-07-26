@@ -219,6 +219,8 @@ class CopilotIntegration(BaseIntegration):
                     command = props.get("command") or tool_names.get(tcid, "")
                     if command not in CopilotIntegration._WRITE_TOOLS:
                         continue
+                    if data.get("success") is False:
+                        continue
                     path = tool_paths.get(tcid)
                     if not path:
                         continue
