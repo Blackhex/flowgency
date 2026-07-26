@@ -30,7 +30,7 @@ def _write_yaml(path: Path, raw: dict) -> Path:
     return path
 
 
-def _write_blueprint(root: Path, key: str, title: str) -> None:
+def _write_blueprint(root: Path, key: str, title: str, *, include_prompt: bool = True) -> None:
     blueprint = root / key
     skill = blueprint / ".agents" / "skills" / "daily-review"
     skill.mkdir(parents=True, exist_ok=True)
@@ -39,6 +39,13 @@ def _write_blueprint(root: Path, key: str, title: str) -> None:
         "---\nname: daily-review\ndescription: Review\n---\n\nRun.\n",
         encoding="utf-8",
     )
+    if include_prompt:
+        prompt_dir = blueprint / ".agents" / "prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        (prompt_dir / "daily-review.prompt.md").write_text(
+            "---\nname: daily-review\ndescription: Shared daily review.\nargument-hint: Mention the release window if relevant.\n---\n\nReview the current work.\n",
+            encoding="utf-8",
+        )
 
 
 def _private_prompt_bytes(
@@ -50,7 +57,7 @@ def _private_prompt_bytes(
     ).encode("utf-8")
 
 
-def _seed_app(monkeypatch, tmp_path, raw_config):
+def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = True):
     raw = deepcopy(raw_config)
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
@@ -59,7 +66,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     research_paths = create_group_environment(tmp_path, "research")
     group_root = newsletter_paths.state_root
     target_root = research_paths.state_root
-    _write_blueprint(library_root, "advisor", "Advisor")
+    _write_blueprint(library_root, "advisor", "Advisor", include_prompt=with_agent_prompts)
     _write_blueprint(library_root, "builder-blueprint", "Builder")
 
     raw["agency"]["agent_library"] = str(library_root)
@@ -74,6 +81,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
             "name": "advisor",
             "blueprint": "advisor",
             "integration": "copilot",
+            "prompts": ["local-triage"] if with_agent_prompts else [],
             "identity": {"display_name": "Advisor", "title": "Blueprint Librarian"},
         }
     ]
@@ -91,6 +99,16 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
+    if with_agent_prompts:
+        from agency.prompts import PromptStore
+
+        PromptStore(Path(raw["agency"]["prompt_store"])).create(
+            "newsletter",
+            "advisor",
+            "local-triage",
+            _private_prompt_bytes(),
+        )
+        app_mod.refresh_services()
     return TestClient(app_mod.app), config_path, group_root
 
 
@@ -189,12 +207,84 @@ def test_agents_page_is_instance_roster(monkeypatch, tmp_path, raw_config):
     assert "Blueprint" in response.text
     assert "Subagents" not in response.text
     assert "headshot" not in response.text.lower()
-    assert '<select name="blueprint"' in response.text
-    assert '<option value="advisor">advisor</option>' in response.text
+    assert 'data-action="open-add-agent"' in response.text
+    assert '<dialog id="add-agent-dialog"' in response.text
+    assert '<dialog id="add-agent-dialog" open' not in response.text
+    assert 'value="advisor"' in response.text
     assert (
         "return window.confirm('Remove Advisor from Newsletter?')"
         in response.text
     )
+
+
+def test_roster_reopens_creation_dialog_with_values_and_issues_on_error(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+
+    response = client.post(
+        "/newsletter/agents/create",
+        data={
+            "revision": revision,
+            "name": "",
+            "blueprint": "advisor",
+            "integration": "copilot",
+            "display_name": "Reviewer",
+        },
+    )
+
+    assert response.status_code == 409
+    assert '<dialog id="add-agent-dialog" open' in response.text
+    assert 'value="Reviewer"' in response.text
+    assert '<option value="advisor" selected' in response.text
+    assert '<option value="copilot" selected' in response.text
+    assert "required" in response.text.lower()
+
+
+def test_roster_renders_expanded_saved_and_one_off_launcher(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/agents")
+
+    assert response.status_code == 200
+    assert "Saved prompt" in response.text
+    assert "One-off" in response.text
+    assert "Shared from blueprint" in response.text
+    assert "Private to this instance" in response.text
+    assert "Shared daily review." in response.text
+    assert "Private prompt." in response.text
+    assert "Mention the release window if relevant." in response.text
+    assert 'name="invocation_input"' in response.text
+    assert 'name="task_input"' in response.text
+    assert 'name="memory_scope"' in response.text
+    assert 'value="run"' in response.text
+    assert 'value="agent"' in response.text
+    assert 'value="group"' in response.text
+    assert 'value="channel"' in response.text
+    assert "Support" in response.text
+    assert "Run prompt" in response.text
+    assert "Run one-off" in response.text
+
+
+def test_roster_defaults_to_one_off_when_instance_has_no_prompt_catalog(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config, with_agent_prompts=False)
+
+    response = client.get("/newsletter/agents")
+
+    assert response.status_code == 200
+    assert 'value="one-off" checked' in response.text
+    assert "No saved prompts available for this instance." in response.text
 
 
 def test_create_instance_from_roster(monkeypatch, tmp_path, raw_config):
@@ -255,20 +345,8 @@ def test_remove_instance_warns_when_prompt_namespace_is_orphaned(
     prompt_store.create(
         "newsletter",
         "advisor",
-        "local-triage",
-        _private_prompt_bytes(),
-    )
-    prompt_store.create(
-        "newsletter",
-        "advisor",
         "unregistered",
         _private_prompt_bytes("unregistered", "Leave this behind.\n"),
-    )
-    store.patch(
-        snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
-            prompts=["local-triage"]
-        ),
     )
     revision = _revision(config_path)
 
@@ -327,18 +405,7 @@ def test_move_apply_warns_when_prompt_namespace_cleanup_is_orphaned(
     from agency.prompts import PromptStore
 
     prompt_store = PromptStore(Path(snapshot.raw["agency"]["prompt_store"]))
-    created = prompt_store.create(
-        "newsletter",
-        "advisor",
-        "local-triage",
-        _private_prompt_bytes(),
-    )
-    store.patch(
-        snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
-            prompts=["local-triage"]
-        ),
-    )
+    created = prompt_store.read("newsletter", "advisor", "local-triage")
 
     original_delete_namespace_locked = (
         app_mod.app.state.services.instances.prompt_store._delete_namespace_locked
@@ -443,8 +510,41 @@ def test_roster_uses_newest_active_job_deterministically(monkeypatch, tmp_path, 
 
     assert response.status_code == 200
     assert '/newsletter/jobs/job-newer' in response.text
-    assert '/newsletter/jobs/job-older' not in response.text
+    assert '/newsletter/jobs/job-older' in response.text
+    assert response.text.index('/newsletter/jobs/job-newer') < response.text.index('/newsletter/jobs/job-older')
     assert 'Waiting for memory' in response.text
+
+
+def test_roster_shows_all_active_jobs_and_keeps_launch_controls_enabled(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, _, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_roster_job(
+        tmp_path,
+        group_root,
+        job_id="job-older",
+        status="queued",
+        created_at="2026-07-15T00:00:00+00:00",
+    )
+    _write_roster_job(
+        tmp_path,
+        group_root,
+        job_id="job-newer",
+        status="running",
+        created_at="2026-07-16T00:00:00+00:00",
+    )
+
+    response = client.get("/newsletter/agents")
+
+    assert response.status_code == 200
+    assert "2 active jobs" in response.text
+    assert '/newsletter/jobs/job-newer' in response.text
+    assert '/newsletter/jobs/job-older' in response.text
+    assert "Run prompt" in response.text
+    assert "Run one-off" in response.text
+    assert 'disabled' not in response.text
 
 
 def test_old_admin_agent_get_redirects_to_profile(monkeypatch, tmp_path, raw_config):
@@ -507,7 +607,7 @@ def test_roster_returns_actionable_warning_when_agent_library_is_unavailable(
     response = client.get("/newsletter/agents")
 
     assert response.status_code == 409
-    assert "Instance services unavailable" in response.text
+    assert str(missing_root) in response.text
     assert config_path.read_text(encoding="utf-8") == before
 
 

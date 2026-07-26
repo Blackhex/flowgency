@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -10,6 +11,7 @@ from agency.configuration import ConfigConflictError, ValidationFailed
 from agency.configuration.models import MemorySelector
 from agency.fs.snapshot import AssetValidationError
 from agency.instances import AgentInstanceCreate, InstanceMoveConflict
+from agency.prompts import PromptNotFoundError
 from agency.web.dependencies import AgencyServices, get_services
 
 
@@ -100,42 +102,149 @@ def _instance_memory_label(instance, channels) -> str:
     return selector.scope.title() + " memory"
 
 
+def _issue_dicts(exc: ValidationFailed | tuple) -> list[dict[str, str]]:
+    issues = exc.issues if isinstance(exc, ValidationFailed) else exc
+    rows: list[dict[str, str]] = []
+    for issue in issues:
+        rows.append(
+            {
+                "message": issue.message,
+                "field": issue.field,
+                "scope": issue.scope,
+                "hint": issue.corrective_hint or "",
+            }
+        )
+    return rows
+
+
+def _validation_warning(exc: ValidationFailed) -> str:
+    messages: list[str] = []
+    for issue in exc.issues:
+        detail = issue.message
+        if issue.corrective_hint:
+            detail = f"{detail} {issue.corrective_hint}"
+        messages.append(detail)
+    return "; ".join(messages)
+
+
+def _creation_values(form: dict[str, Any] | None = None) -> dict[str, str]:
+    payload = form or {}
+    return {
+        "name": str(payload.get("name", "") or "").strip(),
+        "blueprint": str(payload.get("blueprint", "") or "").strip(),
+        "integration": str(payload.get("integration", "") or "").strip(),
+        "display_name": str(payload.get("display_name", "") or "").strip(),
+    }
+
+
+def _memory_scope_options(snapshot) -> tuple[dict[str, str], ...]:
+    options = [
+        {"value": "run", "label": "Run memory"},
+        {"value": "agent", "label": "Agent memory"},
+        {"value": "group", "label": "Group memory"},
+        {"value": "channel", "label": "Channel memory"},
+    ]
+    return tuple(options)
+
+
+def _memory_channel_options(snapshot) -> tuple[dict[str, str], ...]:
+    return tuple(
+        {
+            "value": key,
+            "label": channel.display_name,
+        }
+        for key, channel in snapshot.config.memory.channels.items()
+    )
+
+
+def _launcher_prompts(services: AgencyServices, snapshot, group_id: str, agent_id: str) -> tuple[dict[str, str], ...]:
+    if services.prompt_service is None:
+        raise HTTPException(status_code=409, detail="Prompt service unavailable")
+    try:
+        catalog = services.prompt_service.catalog(snapshot, group_id, agent_id)
+    except (AssetValidationError, OSError, PromptNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return tuple(
+        {
+            "scope": item.scope,
+            "name": item.document.name,
+            "description": item.document.description,
+            "argument_hint": item.document.argument_hint or "",
+            "source_path": item.source_path,
+        }
+        for item in catalog
+    )
+
+
+def _base_instance_row(snapshot, group_id: str, instance) -> dict[str, Any]:
+    return {
+        "name": instance.name,
+        "display_name": instance.identity.display_name or instance.name,
+        "title": instance.identity.title,
+        "emoji": instance.identity.emoji,
+        "blueprint": instance.blueprint,
+        "integration": instance.integration,
+        "memory_label": _instance_memory_label(instance, snapshot.config.memory.channels),
+        "profile_href": f"/{group_id}/agents/{instance.name}/profile",
+        "activity_href": f"/{group_id}/agents/{instance.name}/activity",
+        "remove_href": f"/{group_id}/agents/{instance.name}/remove",
+        "move_href": f"/{group_id}/agents/{instance.name}/move",
+        "run_href": f"/{group_id}/agents/{instance.name}/run",
+        "active_jobs": tuple(),
+        "active_job_count": 0,
+        "shared_prompts": tuple(),
+        "private_prompts": tuple(),
+        "has_saved_prompts": False,
+        "default_mode": "one-off",
+        "default_prompt_scope": "",
+        "default_prompt_name": "",
+    }
+
+
+def _fallback_instance_rows(snapshot, group_id: str) -> list[dict[str, Any]]:
+    group = snapshot.config.groups[group_id]
+    return [_base_instance_row(snapshot, group_id, instance) for instance in group.agents.values()]
+
+
 def _instance_rows(snapshot, services: AgencyServices, group_id: str) -> list[dict]:
     group = snapshot.config.groups[group_id]
     if services.job_store is None:
         raise HTTPException(status_code=409, detail="Job store unavailable")
     rows = []
     for instance in group.agents.values():
+        prompt_rows = _launcher_prompts(services, snapshot, group_id, instance.name)
+        shared_prompts = tuple(item for item in prompt_rows if item["scope"] == "blueprint")
+        private_prompts = tuple(item for item in prompt_rows if item["scope"] == "instance")
+        selected_prompt = prompt_rows[0] if prompt_rows else None
         current_jobs = sorted(
             services.job_store.active(group_id, instance.name),
             key=_active_job_sort_key,
             reverse=True,
         )
-        current = current_jobs[0] if current_jobs else None
-        rows.append(
+        row = _base_instance_row(snapshot, group_id, instance)
+        row.update(
             {
-                "name": instance.name,
-                "display_name": instance.identity.display_name or instance.name,
-                "title": instance.identity.title,
-                "emoji": instance.identity.emoji,
-                "blueprint": instance.blueprint,
-                "integration": instance.integration,
-                "job_status": (
-                    _friendly_status(current.status)
-                    if current is not None
-                    else None
+                "active_jobs": tuple(
+                    {
+                        "status": _friendly_status(record.status),
+                        "status_key": record.status,
+                        "href": f"/{group_id}/jobs/{record.spec.job_id}",
+                        "classes": _job_badge_classes(record.status),
+                        "title": _job_badge_title(record.status),
+                        "job_id": record.spec.job_id,
+                    }
+                    for record in current_jobs
                 ),
-                "job_href": f"/{group_id}/jobs/{current.spec.job_id}" if current is not None else "",
-                "job_status_key": current.status if current is not None else "",
-                "job_status_classes": _job_badge_classes(current.status) if current is not None else "",
-                "job_status_title": _job_badge_title(current.status) if current is not None else "",
-                "memory_label": _instance_memory_label(instance, snapshot.config.memory.channels),
-                "profile_href": f"/{group_id}/agents/{instance.name}/profile",
-                "activity_href": f"/{group_id}/agents/{instance.name}/activity",
-                "remove_href": f"/{group_id}/agents/{instance.name}/remove",
-                "move_href": f"/{group_id}/agents/{instance.name}/move",
+                "active_job_count": len(current_jobs),
+                "shared_prompts": shared_prompts,
+                "private_prompts": private_prompts,
+                "has_saved_prompts": bool(prompt_rows),
+                "default_mode": "saved" if prompt_rows else "one-off",
+                "default_prompt_scope": selected_prompt["scope"] if selected_prompt is not None else "",
+                "default_prompt_name": selected_prompt["name"] if selected_prompt is not None else "",
             }
         )
+        rows.append(row)
     return rows
 
 
@@ -148,7 +257,17 @@ def _available_blueprint_keys(services: AgencyServices) -> list[str]:
     return sorted(item.key for item in services.blueprint_library.list())
 
 
-def _render_roster(request: Request, services: AgencyServices, group_id: str, *, warning: str = "", status_code: int = 200):
+def _render_roster(
+    request: Request,
+    services: AgencyServices,
+    group_id: str,
+    *,
+    warning: str = "",
+    status_code: int = 200,
+    creation_open: bool = False,
+    creation_values: dict[str, str] | None = None,
+    creation_issues: list[dict[str, str]] | None = None,
+):
     snapshot = services.config_store.load()
     if group_id not in snapshot.config.groups:
         raise HTTPException(status_code=404, detail=f"Unknown group: {group_id}")
@@ -159,6 +278,13 @@ def _render_roster(request: Request, services: AgencyServices, group_id: str, *,
         except (AssetValidationError, FileNotFoundError, NotADirectoryError, OSError) as exc:
             warning = str(exc)
             status_code = 409
+    try:
+        instances = _instance_rows(snapshot, services, group_id)
+    except HTTPException as exc:
+        if not warning:
+            warning = str(exc.detail)
+        status_code = exc.status_code
+        instances = _fallback_instance_rows(snapshot, group_id)
     return _templates(request).TemplateResponse(
         request,
         "agents.html",
@@ -166,11 +292,16 @@ def _render_roster(request: Request, services: AgencyServices, group_id: str, *,
             "request": request,
             **_group_context(request, snapshot, group_id),
             "active": "agents",
-            "instances": _instance_rows(snapshot, services, group_id),
+            "instances": instances,
             "config_revision": snapshot.revision,
             "available_blueprints": available_blueprints,
             "available_integrations": sorted(services.integrations.keys()),
             "warning": warning,
+            "creation_open": creation_open,
+            "creation_values": creation_values or _creation_values(),
+            "creation_issues": creation_issues or [],
+            "memory_scope_options": _memory_scope_options(snapshot),
+            "memory_channel_options": _memory_channel_options(snapshot),
         },
         status_code=status_code,
     )
@@ -179,6 +310,14 @@ def _render_roster(request: Request, services: AgencyServices, group_id: str, *,
 @router.get("/{group}/agents", response_class=HTMLResponse)
 async def agents_roster(request: Request, group: str, services: AgencyServices = Depends(get_services)):
     if services.instances is None:
+        if isinstance(services.startup_error, ValidationFailed):
+            return _render_roster(
+                request,
+                services,
+                group,
+                warning=_validation_warning(services.startup_error),
+                status_code=409,
+            )
         raise HTTPException(status_code=409, detail="Instance services unavailable")
     return _render_roster(request, services, group)
 
@@ -189,6 +328,7 @@ async def agent_create(request: Request, group: str, services: AgencyServices = 
         raise HTTPException(status_code=409, detail="Instance services unavailable")
     form = await request.form()
     expected_revision = str(form.get("revision", "")).strip()
+    values = _creation_values(form)
     try:
         if not expected_revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
@@ -207,11 +347,21 @@ async def agent_create(request: Request, group: str, services: AgencyServices = 
             request,
             services,
             group,
-            warning="; ".join(issue.message for issue in exc.issues),
             status_code=409,
+            creation_open=True,
+            creation_values=values,
+            creation_issues=_issue_dicts(exc),
         )
     except ConfigConflictError as exc:
-        return _render_roster(request, services, group, warning=str(exc), status_code=409)
+        return _render_roster(
+            request,
+            services,
+            group,
+            status_code=409,
+            creation_open=True,
+            creation_values=values,
+            creation_issues=[{"message": str(exc), "field": "revision", "scope": "config", "hint": ""}],
+        )
     request.app.state.refresh_services()
     return RedirectResponse(f"/{group}/agents", status_code=303)
 
