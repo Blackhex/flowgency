@@ -6,7 +6,7 @@
 
 **Architecture:** Canonical prompt parsing lives in a focused `agency.prompts` package. Blueprint prompts are digest-addressed shared source, private prompts are config-registered files in `agency.prompt_store`, and job schema v4 snapshots task text plus private prompt sources before the worker creates a job-local native overlay. Config accepts only schema v4; durable jobs write v4 while retaining explicit read support for historical v3 records.
 
-**Tech Stack:** Python 3.11+, FastAPI, Pydantic v2, Jinja2, PyYAML, `tomli-w`, portalocker, pytest, TypeScript, Playwright, Tailwind utility classes.
+**Tech Stack:** Python 3.11+, FastAPI, Pydantic 2, Jinja2, PyYAML, `tomli-w`, portalocker, pytest, TypeScript, Playwright, Tailwind utility classes.
 
 ## Global Constraints
 
@@ -316,7 +316,7 @@ class ProjectorCapabilities:
     activates_selected_skill: bool
 ```
 
-Set Copilot to `.github/prompts` / `prompt-markdown` / discovered, Claude to `.claude/commands` / `markdown-command` / discovered, Gemini to `.gemini/commands` / `gemini-toml` / discovered, and every `_default_projector()` to `None` / `None` / false. Increment the three named projector versions from `v1` to `v2`.
+Set Copilot to `.github/prompts` / `prompt-markdown` / discovered, Claude to `.claude/commands` / `markdown-command` / discovered, Gemini to `.gemini/commands` / `gemini-toml` / discovered, and every `_default_projector()` to `None` / `None` / false. Increment the three named projector versions from version 1 to version 2.
 
 - [ ] **Step 5: Render prompts through the projector inventory**
 
@@ -672,21 +672,21 @@ Add `prompt_store: PromptStore | None` to `AgencyServices`; construct it from th
 def test_job_spec_reads_v3_routine_record_and_writes_v4_prompt_record(tmp_path):
     current = make_spec(tmp_path)
     current_data = current.to_dict()
-    legacy_data = dict(current_data)
-    legacy_data.update(
+    historical_data = dict(current_data)
+    historical_data.update(
         schema_version=3,
         routine_id="daily-review",
         skill="daily-review",
         skill_arguments=["--brief"],
         prompt_source={"type": "routine", "routine_id": "daily-review"},
     )
-    legacy_data.pop("private_prompts", None)
+    historical_data.pop("private_prompts", None)
 
-    legacy = JobSpec.from_dict(legacy_data)
+    historical = JobSpec.from_dict(historical_data)
     reloaded_current = JobSpec.from_dict(current_data)
 
-    assert legacy.schema_version == 3
-    assert legacy.skill == "daily-review"
+    assert historical.schema_version == 3
+    assert historical.skill == "daily-review"
     assert reloaded_current.schema_version == 4
     assert reloaded_current.skill is None
     assert reloaded_current.prompt_source["type"] == "blueprint_prompt"
@@ -847,7 +847,7 @@ pass `skill=None`.
 
 - [ ] **Step 2: Run focused execution tests and verify failure**
 
-Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_job_execution.py -k "private_prompt or legacy_skill" -v`
+Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_job_execution.py -k "private_prompt or historical_skill" -v`
 
 Expected: FAIL because private snapshots are not projected.
 
