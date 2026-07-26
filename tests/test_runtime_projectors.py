@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -7,6 +8,8 @@ import pytest
 from agency.blueprints.projectors import get_projector
 from agency.blueprints.library import inspect_blueprint
 from agency.integrations import RunResult
+from agency.prompts import parse_prompt_document
+from agency.prompts.projection import render_prompt
 from agency.fs.snapshot import (
     SnapshotFile,
     TreeSnapshot,
@@ -29,6 +32,16 @@ from tests._runtime_probe_helpers import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def prompt_document():
+    return parse_prompt_document(
+        ".agents/prompts/pr-review.prompt.md",
+        (
+            "---\nname: pr-review\ndescription: Review pull requests.\n---\n\n"
+            "Review the pull request.\n"
+        ).encode("utf-8"),
+    )
 
 
 def test_live_scenario_contract_covers_all_builtin_ai_clis():
@@ -239,6 +252,48 @@ def test_protected_state_failure_uses_full_runtime_label(tmp_path):
             runtime=runtime,
             scenario="root-instructions",
         )
+
+
+@pytest.mark.parametrize(
+    ("target", "format", "expected_path"),
+    [
+        (
+            PurePosixPath(".github/prompts"),
+            "prompt-markdown",
+            PurePosixPath(".github/prompts/pr-review.prompt.md"),
+        ),
+        (
+            PurePosixPath(".claude/commands"),
+            "markdown-command",
+            PurePosixPath(".claude/commands/pr-review.md"),
+        ),
+    ],
+)
+def test_markdown_prompt_renderers_preserve_source_bytes(
+    target: PurePosixPath,
+    format: str,
+    expected_path: PurePosixPath,
+):
+    document = prompt_document()
+
+    path, payload = render_prompt(document, target=target, format=format)
+
+    assert path == expected_path
+    assert payload == document.source
+
+
+def test_gemini_renderer_uses_structured_toml():
+    path, payload = render_prompt(
+        prompt_document(),
+        target=PurePosixPath(".gemini/commands"),
+        format="gemini-toml",
+    )
+
+    assert path == PurePosixPath(".gemini/commands/pr-review.toml")
+    assert tomllib.loads(payload.decode("utf-8")) == {
+        "description": "Review pull requests.",
+        "prompt": "Review the pull request.\n",
+    }
 
 
 def test_live_runtime_marker_and_docs_describe_automatic_installed_probes(

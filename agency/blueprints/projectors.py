@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
+from typing import Any, Iterable, Protocol
 
 from agency.configuration.issues import ValidationIssue
 from agency.fs.snapshot import TreeSnapshot
 from agency.projector_capabilities import ProjectorCapabilities
+from agency.prompts import PromptDocument, parse_prompt_document
+from agency.prompts.projection import render_prompt
 
 
 def _issue(code: str, field: str, message: str, hint: str) -> ValidationIssue:
@@ -39,8 +41,29 @@ class StaticRuntimeProjector:
     version: str
     capabilities: Any
 
+    def project_prompt_documents(
+        self,
+        documents: Iterable[PromptDocument],
+        destination: Path,
+    ) -> tuple[PurePosixPath, ...]:
+        if self.capabilities.prompts_target is None or self.capabilities.prompt_format is None:
+            return ()
+        projected: list[PurePosixPath] = []
+        for document in sorted(documents, key=lambda value: value.name):
+            relative, content = render_prompt(
+                document,
+                target=self.capabilities.prompts_target,
+                format=self.capabilities.prompt_format,
+            )
+            target = destination / Path(*relative.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            projected.append(relative)
+        return tuple(projected)
+
     def _mapped_paths(self, source: TreeSnapshot) -> dict[PurePosixPath, bytes]:
         mapped: dict[PurePosixPath, bytes] = {}
+        prompts: list[PromptDocument] = []
         for item in source.files:
             if item.path == PurePosixPath("AGENTS.md"):
                 mapped[self.capabilities.instruction_target] = item.content
@@ -48,6 +71,17 @@ class StaticRuntimeProjector:
             if item.path.parts[:2] == (".agents", "skills"):
                 suffix = item.path.relative_to(PurePosixPath(".agents/skills"))
                 mapped[self.capabilities.skills_target / suffix] = item.content
+                continue
+            if item.path.parts[:2] == (".agents", "prompts"):
+                prompts.append(parse_prompt_document(item.path, item.content))
+        if self.capabilities.prompts_target is not None and self.capabilities.prompt_format is not None:
+            for document in sorted(prompts, key=lambda value: value.name):
+                relative, content = render_prompt(
+                    document,
+                    target=self.capabilities.prompts_target,
+                    format=self.capabilities.prompt_format,
+                )
+                mapped[relative] = content
         return mapped
 
     def project(self, source: TreeSnapshot, destination: Path) -> None:
@@ -65,7 +99,13 @@ class StaticRuntimeProjector:
         expected = self._mapped_paths(source)
         issues: list[ValidationIssue] = []
         actual: set[PurePosixPath] = set()
-        for root in (self.capabilities.instruction_target, self.capabilities.skills_target):
+        inventory_roots = [
+            self.capabilities.instruction_target,
+            self.capabilities.skills_target,
+        ]
+        if self.capabilities.prompts_target is not None:
+            inventory_roots.append(self.capabilities.prompts_target)
+        for root in inventory_roots:
             candidate = destination / Path(*root.parts)
             if candidate.is_file():
                 actual.add(root)
@@ -109,32 +149,41 @@ class StaticRuntimeProjector:
 
 PROJECTORS: dict[str, StaticRuntimeProjector] = {
     "copilot": StaticRuntimeProjector(
-        version="v1",
+        version="2",
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("AGENTS.md"),
             skills_target=PurePosixPath(".agents/skills"),
+            prompts_target=PurePosixPath(".github/prompts"),
+            prompt_format="prompt-markdown",
             discovers_instructions=True,
             discovers_skills=True,
+            discovers_prompts=True,
             activates_selected_skill=True,
         ),
     ),
     "claude-code": StaticRuntimeProjector(
-        version="v1",
+        version="2",
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("CLAUDE.md"),
             skills_target=PurePosixPath(".claude/skills"),
+            prompts_target=PurePosixPath(".claude/commands"),
+            prompt_format="markdown-command",
             discovers_instructions=True,
             discovers_skills=False,
+            discovers_prompts=True,
             activates_selected_skill=False,
         ),
     ),
     "gemini": StaticRuntimeProjector(
-        version="v1",
+        version="2",
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("GEMINI.md"),
             skills_target=PurePosixPath(".agents/skills"),
+            prompts_target=PurePosixPath(".gemini/commands"),
+            prompt_format="gemini-toml",
             discovers_instructions=True,
             discovers_skills=False,
+            discovers_prompts=True,
             activates_selected_skill=False,
         ),
     ),

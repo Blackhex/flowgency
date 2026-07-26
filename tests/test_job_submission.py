@@ -37,8 +37,11 @@ def _projector(version: str = "v-test") -> StaticRuntimeProjector:
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("AGENTS.md"),
             skills_target=PurePosixPath(".agents/skills"),
+            prompts_target=PurePosixPath(".github/prompts"),
+            prompt_format="prompt-markdown",
             discovers_instructions=True,
             discovers_skills=True,
+            discovers_prompts=True,
             activates_selected_skill=True,
         ),
     )
@@ -73,8 +76,11 @@ class NoSkillIntegration(FakeIntegration):
         capabilities=ProjectorCapabilities(
             instruction_target=PurePosixPath("AGENTS.md"),
             skills_target=PurePosixPath(".agents/skills"),
+            prompts_target=PurePosixPath(".github/prompts"),
+            prompt_format="prompt-markdown",
             discovers_instructions=True,
             discovers_skills=True,
+            discovers_prompts=True,
             activates_selected_skill=False,
         ),
     )

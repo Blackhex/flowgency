@@ -279,8 +279,11 @@ class BaseIntegration:
             capabilities=ProjectorCapabilities(
                 instruction_target=PurePosixPath(instruction_name),
                 skills_target=PurePosixPath(".agents/skills"),
+                prompts_target=None,
+                prompt_format=None,
                 discovers_instructions=discovers_instructions,
                 discovers_skills=False,
+                discovers_prompts=False,
                 activates_selected_skill=False,
             ),
         )
