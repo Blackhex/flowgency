@@ -31,8 +31,10 @@ from .patches import (
     patch_group_settings,
     patch_group_settings_state,
     patch_memory_channels,
+    register_agent_prompt,
     remove_agent_instance,
     replace_agent_routines,
+    unregister_agent_prompt,
 )
 from .store import (
     ABSENT_REVISION,
@@ -80,8 +82,10 @@ __all__ = [
     "patch_group_settings_state",
     "patch_memory_channels",
     "parse_config",
+    "register_agent_prompt",
     "remove_agent_instance",
     "replace_agent_routines",
     "resolve_group_paths",
+    "unregister_agent_prompt",
     "validate_config",
 ]
