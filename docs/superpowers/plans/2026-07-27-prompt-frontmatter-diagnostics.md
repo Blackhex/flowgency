@@ -1049,9 +1049,9 @@ Run: `.venv/Scripts/python -m pytest tests/test_setup_skill_e2e.py -v`
 
 Expected: 4 passed. `BlueprintInspection` exposes `title: str`, `skills: tuple[str, ...]` of directory slugs, and `prompts: tuple[PromptDocument, ...]`, so these assertions match the real shapes.
 
-- [ ] **Step 3: Verify the negative control actually controls**
+- [ ] **Step 3: Confirm the negative control discriminates**
 
-Temporarily revert Task 1 by re-adding an `except ValueError` clause that relabels issues, run `.venv/Scripts/python -m pytest tests/test_setup_skill_e2e.py::test_validate_rejects_the_same_library_without_prompt_frontmatter -v`, and confirm it FAILS on the hint assertion. Restore the Task 1 code and re-run to confirm it passes.
+Do not mutate committed code to prove this. The negative control asserts both the message and `"Terminate the YAML frontmatter before the prompt body."`. Under the pre-Task-1 masking behavior the hint would have been `"Use unique prompt names across blueprint and instance scopes."`, so the two assertions cannot both hold under the old code. Confirm by reading the test that it asserts the hint string and not merely a non-zero exit code.
 
 - [ ] **Step 4: Run the full suite**
 
@@ -1070,7 +1070,7 @@ git commit -m "Validate setup skill templates end to end"
 
 ### Task 7: Repair the existing agent library prompts
 
-A data fix outside the repository, performed last so the `validate` command from Task 4 can confirm it.
+A data fix outside the repository, performed last so the `validate` command from Task 4 can confirm it. This task produces no commit and no diff; it is an operator step, not a reviewed code change.
 
 **Files:**
 - Modify (outside the repo): `{agent_library}/reviewer/.agents/prompts/diff-review.prompt.md`
