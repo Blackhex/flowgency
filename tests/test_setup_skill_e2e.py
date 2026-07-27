@@ -31,7 +31,7 @@ SUBSTITUTIONS = {
 }
 
 
-def _template_block(document: str, heading: str) -> str:
+def _template_block(document: str, heading: str, expected_token: str) -> str:
     marker = f"\n## {heading}\n"
     start = document.index(marker) + len(marker)
     section = document[start:]
@@ -39,7 +39,12 @@ def _template_block(document: str, heading: str) -> str:
     fence = "```markdown\n"
     open_at = section.index(fence) + len(fence)
     close_at = section.index("\n```", open_at)
-    return section[open_at:close_at] + "\n"
+    block = section[open_at:close_at] + "\n"
+    assert expected_token in block, (
+        f"Template block for '{heading}' does not contain expected token {expected_token!r}; "
+        f"this likely means the extraction targeted the wrong fenced block"
+    )
+    return block
 
 
 def _render(block: str) -> str:
@@ -60,13 +65,16 @@ def _materialize(tmp_path: Path) -> Path:
     skill_dir.mkdir(parents=True, exist_ok=True)
     prompt_dir.mkdir(parents=True, exist_ok=True)
     (blueprint / "AGENTS.md").write_text(
-        _render(_template_block(document, "Blueprint AGENTS.md")), encoding="utf-8"
+        _render(_template_block(document, "Blueprint AGENTS.md", "{REUSABLE_ROLE_MISSION}")),
+        encoding="utf-8",
     )
     (skill_dir / "SKILL.md").write_text(
-        _render(_template_block(document, "Standard Agent Skill")), encoding="utf-8"
+        _render(_template_block(document, "Standard Agent Skill", "{CONCRETE_TRIGGER_CONDITION}")),
+        encoding="utf-8",
     )
     (prompt_dir / "diff-review.prompt.md").write_text(
-        _render(_template_block(document, "Standard Task Prompt")), encoding="utf-8"
+        _render(_template_block(document, "Standard Task Prompt", "{ONE_LINE_PURPOSE}")),
+        encoding="utf-8",
     )
     return library_root
 
