@@ -55,8 +55,13 @@ test('jobs expose waiting, failed artifact, diagnostics hash, and empty state', 
   await expect(page.getByText(/Memory hash:/)).not.toBeVisible();
   await page.getByText('Diagnostics').press('Enter');
   await expect(page.getByText(/Memory hash: 2222/)).toBeVisible();
+  const stdoutLog = page.getByText(/^Stdout log:/);
+  const stderrLog = page.getByText(/^Stderr log:/);
+  await expect(stdoutLog).toHaveText(/advisor-job-failed\.out$/);
+  await expect(stderrLog).toHaveText(/advisor-job-failed\.err$/);
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('failed-job.png', { fullPage: true });
+  // Log paths are absolute and vary per checkout, so compare them as text only.
+  await expect(page).toHaveScreenshot('failed-job.png', { fullPage: true, mask: [stdoutLog, stderrLog] });
 
   await page.goto('/research/jobs');
   await expect(page.getByRole('heading', { name: 'Jobs in Research' })).toBeVisible();

@@ -19,8 +19,18 @@ test('group settings leads to the sole roster and inherited runtime', async ({ p
   await expect(page.getByRole('heading', { name: 'Edit: Newsletter' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create Instance' })).toHaveCount(0);
   await expect(page.getByText('Advisor')).toHaveCount(0);
+  const workspacePath = page.locator('#workspace_path');
+  const groupPath = page.locator('#path');
+  const sandboxRoots = page.locator('#sandbox_roots');
+  await expect(workspacePath).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]workspaces[\\/]newsletter$/);
+  await expect(groupPath).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]groups[\\/]newsletter$/);
+  await expect(sandboxRoots).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]workspaces[\\/]newsletter$/);
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('group-settings.png', { fullPage: true });
+  // These fields hold absolute paths that vary per checkout, so compare them as text only.
+  await expect(page).toHaveScreenshot('group-settings.png', {
+    fullPage: true,
+    mask: [workspacePath, groupPath, sandboxRoots],
+  });
 
   await expectBodyFocus(page);
   await tabTo(page, { role: 'link', name: /Manage agents/, href: '/newsletter/agents' });
@@ -61,7 +71,11 @@ test('group settings leads to the sole roster and inherited runtime', async ({ p
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('copilot');
   await expect(page.getByRole('heading', { name: 'Effective preview' })).toBeVisible();
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-runtime.png', { fullPage: true });
+  // Sandbox roots are absolute and vary per checkout, so compare them as text only.
+  await expect(page).toHaveScreenshot('agent-runtime.png', {
+    fullPage: true,
+    mask: [inheritedRoot, groupRoot, additionalRoot],
+  });
   await assertNoConsoleErrors(page);
 });
 
