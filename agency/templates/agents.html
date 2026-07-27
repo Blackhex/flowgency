@@ -147,6 +147,18 @@
         </div>
 
         <section data-saved-panel {% if instance.default_mode != 'saved' %}hidden{% endif %} class="space-y-4">
+          {% if instance.prompt_issues %}
+          <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+            <p class="text-xs font-semibold uppercase tracking-wide text-amber-900">Prompt catalog unavailable</p>
+            {% for issue in instance.prompt_issues %}
+            <div class="text-sm text-amber-900">
+              <div class="font-mono text-xs text-amber-800">{{ issue.field }}</div>
+              <div>{{ issue.message }}</div>
+              <div class="text-xs text-amber-700">{{ issue.hint }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
           {% if instance.has_saved_prompts %}
           <div>
             <label class="block">

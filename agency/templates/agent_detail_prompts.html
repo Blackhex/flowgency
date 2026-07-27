@@ -4,6 +4,19 @@
     <p class="text-sm text-gray-500">Shared prompts are read-only from the blueprint. Private prompts belong to this instance and can be edited here.</p>
   </div>
 
+  {% if prompt_issues %}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+    <p class="text-sm font-semibold text-amber-900">Prompt catalog unavailable</p>
+    {% for issue in prompt_issues %}
+    <div class="text-sm text-amber-900">
+      <div class="font-mono text-xs text-amber-800">{{ issue.field }}</div>
+      <div>{{ issue.message }}</div>
+      <div class="text-xs text-amber-700">{{ issue.hint }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="grid gap-4 lg:grid-cols-2">
     <div class="rounded-lg border border-gray-200 bg-white p-4">
       <h3 class="text-sm font-semibold text-gray-900">Shared from blueprint</h3>

@@ -118,6 +118,46 @@ def test_name_collision_across_scopes_keeps_its_own_code_and_hint(tmp_path):
     assert issue.corrective_hint == "Use unique prompt names across blueprint and instance scopes."
 
 
+def _client(monkeypatch, tmp_path, config_path):
+    from fastapi.testclient import TestClient
+
+    from agency import app as app_mod
+
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    return TestClient(app_mod.app)
+
+
+def test_roster_renders_when_one_agent_has_a_broken_catalog(monkeypatch, tmp_path):
+    library_root = tmp_path / "agent-library"
+    _write_blueprint(library_root, "reviewer", NO_FRONTMATTER_PROMPT)
+    _write_blueprint(library_root, "auditor", VALID_PROMPT)
+    config_path = _write_config(
+        tmp_path,
+        [_agent("reviewer", "reviewer"), _agent("auditor", "auditor")],
+    )
+
+    response = _client(monkeypatch, tmp_path, config_path).get("/reviewers/agents")
+
+    assert response.status_code == 200
+    assert "Terminate the YAML frontmatter before the prompt body." in response.text
+    assert "auditor" in response.text
+
+
+def test_agent_detail_prompts_tab_shows_the_diagnostic(monkeypatch, tmp_path):
+    _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    response = _client(monkeypatch, tmp_path, config_path).get(
+        "/reviewers/agents/reviewer/prompts"
+    )
+
+    assert response.status_code == 200
+    assert "Prompt markdown frontmatter is incomplete" in response.text
+    assert "Terminate the YAML frontmatter before the prompt body." in response.text
+
+
 def test_missing_instance_prompt_still_reports_its_own_code(tmp_path):
     _write_blueprint(tmp_path / "agent-library", "reviewer", VALID_PROMPT)
     agent = _agent("reviewer", "reviewer")

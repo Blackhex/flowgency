@@ -157,22 +157,37 @@ def _memory_channel_options(snapshot) -> tuple[dict[str, str], ...]:
     )
 
 
-def _launcher_prompts(services: AgencyServices, snapshot, group_id: str, agent_id: str) -> tuple[dict[str, str], ...]:
+def _launcher_prompts(
+    services: AgencyServices, snapshot, group_id: str, agent_id: str
+) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, str], ...]]:
     if services.prompt_service is None:
         raise HTTPException(status_code=409, detail="Prompt service unavailable")
     try:
         catalog = services.prompt_service.catalog(snapshot, group_id, agent_id)
-    except (AssetValidationError, OSError, PromptNotFoundError, ValueError) as exc:
+    except ValidationFailed as exc:
+        return (), tuple(
+            {
+                "code": issue.code,
+                "field": issue.field,
+                "message": issue.message,
+                "hint": issue.corrective_hint,
+            }
+            for issue in exc.issues
+        )
+    except (OSError, PromptNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return tuple(
-        {
-            "scope": item.scope,
-            "name": item.document.name,
-            "description": item.document.description,
-            "argument_hint": item.document.argument_hint or "",
-            "source_path": item.source_path,
-        }
-        for item in catalog
+    return (
+        tuple(
+            {
+                "scope": item.scope,
+                "name": item.document.name,
+                "description": item.document.description,
+                "argument_hint": item.document.argument_hint or "",
+                "source_path": item.source_path,
+            }
+            for item in catalog
+        ),
+        (),
     )
 
 
@@ -212,7 +227,7 @@ def _instance_rows(snapshot, services: AgencyServices, group_id: str) -> list[di
         raise HTTPException(status_code=409, detail="Job store unavailable")
     rows = []
     for instance in group.agents.values():
-        prompt_rows = _launcher_prompts(services, snapshot, group_id, instance.name)
+        prompt_rows, prompt_issues = _launcher_prompts(services, snapshot, group_id, instance.name)
         shared_prompts = tuple(item for item in prompt_rows if item["scope"] == "blueprint")
         private_prompts = tuple(item for item in prompt_rows if item["scope"] == "instance")
         selected_prompt = prompt_rows[0] if prompt_rows else None
@@ -242,6 +257,7 @@ def _instance_rows(snapshot, services: AgencyServices, group_id: str) -> list[di
                 "default_mode": "saved" if prompt_rows else "one-off",
                 "default_prompt_scope": selected_prompt["scope"] if selected_prompt is not None else "",
                 "default_prompt_name": selected_prompt["name"] if selected_prompt is not None else "",
+                "prompt_issues": prompt_issues,
             }
         )
         rows.append(row)
@@ -275,7 +291,9 @@ def _render_roster(
     if not warning:
         try:
             available_blueprints = _available_blueprint_keys(services)
-        except (AssetValidationError, FileNotFoundError, NotADirectoryError, OSError) as exc:
+        except AssetValidationError:
+            pass  # prompt catalog issue; surfaced per-agent in the roster
+        except (FileNotFoundError, NotADirectoryError, OSError) as exc:
             warning = str(exc)
             status_code = 409
     try:
