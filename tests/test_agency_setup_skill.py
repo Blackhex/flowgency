@@ -279,6 +279,27 @@ def test_setup_does_not_generate_project_scheduler_artifacts():
         assert text not in combined
 
 
+def test_templates_define_the_task_prompt_contract():
+    templates = TEMPLATES_PATH.read_text(encoding="utf-8")
+    assert "## Standard Task Prompt" in templates
+    assert "{agent_library}/{blueprint}/.agents/prompts/{prompt}.prompt.md" in templates
+    for required in (
+        "name: {prompt}",
+        "description: {ONE_LINE_PURPOSE}",
+        "argument-hint: {OPTIONAL_ARGUMENT_SUMMARY}",
+    ):
+        assert required in templates
+    assert "exactly equals the file slug" in templates
+    assert "at most 1024 characters" in templates
+
+
+def test_phase_five_validates_prompt_documents():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    assert "christag-agency validate --config" in skill
+    assert "prompt document" in skill
+    assert "routine skill," not in skill
+
+
 def test_setup_writes_routines_directly_from_assignments():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     assert 'at: "07:00"' in skill
