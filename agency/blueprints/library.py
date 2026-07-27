@@ -169,7 +169,10 @@ def inspect_blueprint(root: Path, key: str) -> BlueprintInspection:
 def list_blueprints(root: Path) -> tuple[BlueprintInspection, ...]:
     library_root = Path(root).resolve()
     inspections: list[BlueprintInspection] = []
-    for entry in sorted((path for path in library_root.iterdir() if path.is_dir()), key=lambda item: item.name):
+    for entry in sorted(
+        (path for path in library_root.iterdir() if path.is_dir() and not path.name.startswith(".")),
+        key=lambda item: item.name,
+    ):
         inspections.append(inspect_blueprint(library_root, entry.name))
     return tuple(inspections)
 

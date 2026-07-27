@@ -303,3 +303,26 @@ def test_list_blueprints_returns_sorted_inspections(tmp_path):
     assert tuple(item.key for item in inspections) == ("alpha", "zeta")
     assert tuple(item.key for item in library.list()) == ("alpha", "zeta")
     assert library.inspect("alpha").key == "alpha"
+
+
+def test_list_blueprints_ignores_dot_prefixed_directories(tmp_path):
+    root = tmp_path / "library"
+    _write_blueprint(root, "alpha")
+    (root / ".git").mkdir()  # common versioned-library artifact
+
+    inspections = list_blueprints(root)
+    library = BlueprintLibrary(root)
+
+    assert tuple(item.key for item in inspections) == ("alpha",)
+    assert tuple(item.key for item in library.list()) == ("alpha",)
+
+
+def test_list_blueprints_still_reports_invalid_non_dot_directory(tmp_path):
+    from agency.fs.snapshot import AssetValidationError
+
+    root = tmp_path / "library"
+    _write_blueprint(root, "alpha")
+    (root / "_archive").mkdir()  # bad name, should still error
+
+    with pytest.raises(AssetValidationError):
+        list_blueprints(root)
