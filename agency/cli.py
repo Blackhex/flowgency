@@ -398,6 +398,18 @@ def run_server(**options) -> None:
     importlib.import_module("agency.app").run_server(**options)
 
 
+def cmd_validate(args: Namespace) -> int:
+    services = _services(args)
+    issues = tuple(services.prompt_issues)
+    if issues:
+        raise CliFailure(ExitCode.VALIDATION, "validation-failed", "Validation failed", issues)
+    if getattr(args, "json", False):
+        print(json.dumps({"issues": []}, sort_keys=True))
+    else:
+        print("No validation issues found.")
+    return int(ExitCode.SUCCESS)
+
+
 def cmd_serve(args: Namespace) -> int:
     os.environ["AGENCY_CONFIG"] = str(_config_path(args))
     run_server(host=args.host, port=args.port, reload=args.reload)
@@ -1034,6 +1046,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config(status)
     status.add_argument("--json", action="store_true")
     status.set_defaults(handler=cmd_status)
+
+    validate = subparsers.add_parser("validate", help="Validate the config and configured assets")
+    _add_config(validate)
+    validate.add_argument("--json", action="store_true")
+    validate.set_defaults(handler=cmd_validate)
 
     for name, help_text, handler in (
         ("inbox", "What needs attention", cmd_inbox),

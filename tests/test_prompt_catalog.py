@@ -222,3 +222,30 @@ def test_roster_reports_malformed_blueprint_not_referenced_by_any_agent(monkeypa
 
     assert response.status_code == 200
     assert "Prompt markdown frontmatter is incomplete" in response.text
+
+
+def test_validate_command_reports_the_prompt_issue(tmp_path, capsys):
+    from agency import cli
+
+    _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    exit_code = cli.run(["--config", str(config_path), "validate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert "Prompt markdown frontmatter is incomplete" in captured.err
+    assert "Terminate the YAML frontmatter before the prompt body." in captured.err
+
+
+def test_validate_command_succeeds_for_a_valid_library(tmp_path, capsys):
+    from agency import cli
+
+    _write_blueprint(tmp_path / "agent-library", "reviewer", VALID_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    exit_code = cli.run(["--config", str(config_path), "validate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "No validation issues found." in captured.out
