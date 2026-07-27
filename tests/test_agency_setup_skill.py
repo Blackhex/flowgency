@@ -308,6 +308,7 @@ def test_templates_define_the_task_prompt_contract():
     assert "markdown body after the closing" in section  # Finding 2: non-empty body rule
     assert "when present, a string" in section  # Finding 3: argument-hint rule
     assert "non-whitespace-only" in section  # Finding 4: description whitespace rule
+    assert "No other location is accepted" in section  # Finding 5: task prompt location rule
 
 
 def test_phase_five_orders_validate_after_config_write():
