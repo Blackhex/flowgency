@@ -45,7 +45,7 @@ The roster manual launcher uses the same effective prompt authority: users can r
 ## Product surfaces
 
 - The Agents page lists group-owned instances.
-- Agent Detail provides `Profile/Blueprint/Runtime/Routines/Memory/Activity`. Profile identity is the config display name, title, and emoji.
+- Agent Detail provides `Profile/Blueprint/Runtime/Routines/Prompts/Memory/Activity`. Profile identity is the config display name, title, and emoji.
 - Agent Library manages standard `AGENTS.md` blueprint source and Agent Skills.
 - Memory Channels and semantic selectors own mutable memory.
 - Routines submit durable jobs; Jobs shows queued, waiting, running, completed, failed, and cancelled work.
