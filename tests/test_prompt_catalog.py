@@ -284,6 +284,22 @@ def test_validate_deduplicates_broken_blueprint_referenced_and_in_library(tmp_pa
     assert captured.err.count("Prompt markdown frontmatter is incomplete") == 1
 
 
+def test_validate_succeeds_when_library_has_dot_git_dir(tmp_path, capsys):
+    from agency import cli
+
+    library_root = tmp_path / "agent-library"
+    _write_blueprint(library_root, "reviewer", VALID_PROMPT)
+    (library_root / ".git").mkdir()
+
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    exit_code = cli.run(["--config", str(config_path), "validate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert ".git" not in captured.err
+
+
 def test_routines_tab_returns_200_for_broken_catalog(monkeypatch, tmp_path):
     _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
