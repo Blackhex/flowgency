@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 from typing import Literal
 
-from agency.configuration.issues import ValidationIssue
+from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.configuration.store import ConfigSnapshot
 
 from .assets import PromptDocument, prompt_source_path
@@ -31,8 +31,19 @@ def _validate_effective_catalog(
     for item in prompts:
         prior_scope = seen.get(item.document.name)
         if prior_scope is not None and prior_scope != item.scope:
-            raise ValueError(
-                f"Prompt '{item.document.name}' exists in both blueprint and instance scopes for {group_id}/{agent_id}."
+            raise ValidationFailed(
+                (
+                    ValidationIssue(
+                        code="invalid-prompt-catalog",
+                        scope=f"groups.{group_id}.agents.{agent_id}",
+                        field="prompts",
+                        message=(
+                            f"Prompt '{item.document.name}' exists in both blueprint and "
+                            f"instance scopes for {group_id}/{agent_id}."
+                        ),
+                        corrective_hint="Use unique prompt names across blueprint and instance scopes.",
+                    ),
+                )
             )
         seen[item.document.name] = item.scope
     return prompts
@@ -83,36 +94,42 @@ def resolve_catalog_prompt(
     raise KeyError(name)
 
 
+def _agent_scoped(issue: ValidationIssue, group_id: str, agent_id: str) -> ValidationIssue:
+    scope = f"groups.{group_id}.agents.{agent_id}"
+    return issue if issue.scope == scope else replace(issue, scope=scope)
+
+
 def validate_prompt_catalogs(
     snapshot: ConfigSnapshot,
     library: BlueprintLibrary,
     store: PromptStore,
 ) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
+    seen: set[tuple[str, str, str]] = set()
     for group_id, group in snapshot.config.groups.items():
         for agent_id in group.agents:
             try:
                 effective_prompt_catalog(snapshot, library, store, group_id, agent_id)
             except PromptNotFoundError as exc:
-                issues.append(
+                collected: tuple[ValidationIssue, ...] = (
                     ValidationIssue(
                         code="missing-instance-prompt",
                         scope=f"groups.{group_id}.agents.{agent_id}",
                         field="prompts",
                         message=str(exc),
                         corrective_hint="Register only prompt names that exist in the configured prompt store.",
-                    )
+                    ),
                 )
-            except ValueError as exc:
-                issues.append(
-                    ValidationIssue(
-                        code="invalid-prompt-catalog",
-                        scope=f"groups.{group_id}.agents.{agent_id}",
-                        field="prompts",
-                        message=str(exc),
-                        corrective_hint="Use unique prompt names across blueprint and instance scopes.",
-                    )
-                )
+            except ValidationFailed as exc:
+                collected = tuple(_agent_scoped(issue, group_id, agent_id) for issue in exc.issues)
+            else:
+                continue
+            for issue in collected:
+                key = (issue.code, issue.field, issue.message)
+                if key in seen:
+                    continue
+                seen.add(key)
+                issues.append(issue)
     return tuple(issues)
 
 
