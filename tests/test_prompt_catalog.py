@@ -194,3 +194,31 @@ def test_build_services_reports_no_prompt_issues_for_a_valid_library(tmp_path):
 
     assert services.startup_error is None
     assert services.prompt_issues == ()
+
+
+def test_roster_surfaces_library_level_warning_for_malformed_blueprint(monkeypatch, tmp_path):
+    library_root = tmp_path / "agent-library"
+    _write_blueprint(library_root, "reviewer", NO_FRONTMATTER_PROMPT)
+    _write_blueprint(library_root, "auditor", VALID_PROMPT)
+    config_path = _write_config(
+        tmp_path,
+        [_agent("reviewer", "reviewer"), _agent("auditor", "auditor")],
+    )
+
+    response = _client(monkeypatch, tmp_path, config_path).get("/reviewers/agents")
+
+    # The warning banner (mb-6 div) must carry the message, not just the per-agent row.
+    assert response.status_code == 200
+    assert 'class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Prompt markdown frontmatter is incomplete' in response.text
+
+
+def test_roster_reports_malformed_blueprint_not_referenced_by_any_agent(monkeypatch, tmp_path):
+    library_root = tmp_path / "agent-library"
+    _write_blueprint(library_root, "auditor", VALID_PROMPT)
+    _write_blueprint(library_root, "orphan", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("agent-a", "auditor")])
+
+    response = _client(monkeypatch, tmp_path, config_path).get("/reviewers/agents")
+
+    assert response.status_code == 200
+    assert "Prompt markdown frontmatter is incomplete" in response.text
