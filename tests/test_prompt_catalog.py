@@ -144,9 +144,15 @@ def test_roster_renders_when_one_agent_has_a_broken_catalog(monkeypatch, tmp_pat
     assert response.status_code == 200
     assert "Terminate the YAML frontmatter before the prompt body." in response.text
     assert "auditor" in response.text
-    # Per-agent notice must render outside the hidden saved-prompt panel.
+    # Per-agent notice must render outside the hidden saved-prompt panel — order-independent.
     html = response.text
-    assert html.index("Prompt catalog unavailable") < html.index("data-saved-panel")
+    reviewer_label = 'font-mono">reviewer</div>'
+    label_pos = html.index(reviewer_label)
+    card_start = html.rindex('<div class="bg-white rounded-xl', 0, label_pos)
+    next_card = html.find('<div class="bg-white rounded-xl', card_start + 1)
+    reviewer_card = html[card_start:] if next_card == -1 else html[card_start:next_card]
+    assert "Prompt catalog unavailable" in reviewer_card
+    assert reviewer_card.index("Prompt catalog unavailable") < reviewer_card.index("data-saved-panel")
 
 
 def test_agent_detail_prompts_tab_shows_the_diagnostic(monkeypatch, tmp_path):
@@ -322,3 +328,25 @@ def test_blueprint_tab_returns_200_for_broken_catalog(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert "Terminate the YAML frontmatter before the prompt body." in response.text
+
+
+def test_routines_post_shows_catalog_issue_and_parse_issue_together(monkeypatch, tmp_path):
+    """Broken catalog: both the root cause and the per-routine parse error must appear."""
+    from agency.configuration import ConfigStore
+
+    _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+    client = _client(monkeypatch, tmp_path, config_path)
+
+    payload = "[{id: daily, prompt: {scope: blueprint, name: diff-review}, schedule: {at: '09:00'}}]"
+    snapshot = ConfigStore(config_path).load()
+    response = client.post(
+        "/reviewers/agents/reviewer/routines",
+        data={"routines_json": payload, "revision": snapshot.revision},
+    )
+
+    assert response.status_code == 409
+    # Root cause must be visible
+    assert "Prompt markdown frontmatter is incomplete" in response.text
+    # Per-routine parse error must also be visible (not overwritten by the root cause)
+    assert "Routine prompt must be selected from the effective prompt catalog." in response.text

@@ -695,6 +695,7 @@ def _detail_context(
 ):
     snapshot = services.config_store.load()
     group, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
+    handler_issues = issues or []
     context: dict[str, Any] = {
         "request": request,
         **_group_context(request, snapshot, group_id),
@@ -711,7 +712,7 @@ def _detail_context(
         "integration": instance.integration,
         "blueprint": instance.blueprint,
         "can_write": instance.capabilities.write,
-        "issues": issues or [],
+        "issues": handler_issues,
         "banner": banner,
         "memory_conflict": memory_conflict,
         "tab_template": f"agent_detail_{tab}.html",
@@ -746,6 +747,16 @@ def _detail_context(
                 services.job_store,
             )
         )
+    # Merge handler-supplied issues with any tab-supplied issues, dedup on (code, field, message).
+    tab_issues = context["issues"]
+    seen_keys: set[tuple[str, str, str]] = set()
+    merged: list[dict[str, str]] = []
+    for item in handler_issues + tab_issues:
+        k = (item.get("code", ""), item.get("field", ""), item.get("message", ""))
+        if k not in seen_keys:
+            seen_keys.add(k)
+            merged.append(item)
+    context["issues"] = merged
     if overrides:
         context.update(overrides)
     return _templates(request).TemplateResponse(request, "agent_detail.html", context, status_code=status_code)
@@ -1051,8 +1062,9 @@ async def agent_detail_routines_save(request: Request, group: str, agent: str, s
     revision = str(form.get("revision", "")).strip()
     snapshot = services.config_store.load()
     _, instance = _get_snapshot_instance(snapshot, group, agent)
-    prompt_options, _ = _available_prompts(services, snapshot, group, agent)
+    prompt_options, catalog_issues = _available_prompts(services, snapshot, group, agent)
     routines, parse_issues = _parse_routines_payload(form, frozenset(prompt_options))
+    parse_issues = catalog_issues + parse_issues
     shared = tuple(sorted(name for scope, name in prompt_options if scope == "blueprint"))
     private = tuple(sorted(name for scope, name in prompt_options if scope == "instance"))
     if parse_issues:
