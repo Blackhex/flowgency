@@ -91,4 +91,31 @@ description: Use when {CONCRETE_TRIGGER_CONDITION}.
 - {TASK_SPECIFIC_BOUNDARY}
 ```
 
-Use standard `scripts/`, `references/`, and `assets/` subdirectories when needed. Task prompts live separately under `{agent_library}/{blueprint}/.agents/prompts/{prompt}.prompt.md`, and routines select a scoped prompt rather than a skill.
+Use standard `scripts/`, `references/`, and `assets/` subdirectories when needed. Routines select a scoped prompt rather than a skill.
+
+## Standard Task Prompt
+
+Create each routine task as a portable prompt document at `{agent_library}/{blueprint}/.agents/prompts/{prompt}.prompt.md`:
+
+```markdown
+---
+name: {prompt}
+description: {ONE_LINE_PURPOSE}
+argument-hint: {OPTIONAL_ARGUMENT_SUMMARY}
+---
+
+# {Prompt Title}
+
+{TASK_INSTRUCTIONS}
+```
+
+Agency rejects any prompt document that breaks this contract:
+
+- The file lives at `.agents/prompts/{prompt}.prompt.md` under the blueprint root. No other location is accepted.
+- The YAML frontmatter opens with `---` on its own line and is terminated by `---` on its own line before the body.
+- `name` exactly equals the file slug.
+- The slug uses 1 to 64 lowercase letters, digits, and single hyphen separators.
+- `description` is a non-empty string of at most 1024 characters.
+- `argument-hint` is optional and, when present, a string. Omit the key entirely when the prompt takes no arguments.
+- No keys other than `name`, `description`, and `argument-hint` are permitted.
+- The markdown body after the closing `---` is non-empty.

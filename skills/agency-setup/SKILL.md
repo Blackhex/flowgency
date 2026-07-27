@@ -151,7 +151,15 @@ Write every approved workspace under the group's `workspaces` list. For a new gr
 
 ## 5. Verify And Schedule
 
-Validate every blueprint and Agent Skill, config cross-reference, registered explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path. Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Agency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, group, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written. Then offer the singleton scheduler setup:
+Validate every blueprint, Agent Skill, and prompt document, plus config cross-reference, registered explicit integration, effective root union, complete tool override, routine prompt selection, channel, workspace, group naming, and storage path. Confirm every prompt document against the Standard Task Prompt contract in `references/templates.md` before writing the config. After the config write and revision confirmation, run the mechanical check and stop on a non-zero exit:
+
+```text
+christag-agency validate --config "{config_path}"
+```
+
+A non-zero exit means the created blueprint source is invalid. Report the printed issues and correct them; do not present setup as complete.
+
+Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Agency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, group, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written. Then offer the singleton scheduler setup:
 
 ```text
 christag-agency dispatch install --config "{config_path}"
