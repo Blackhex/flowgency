@@ -64,7 +64,7 @@ groups:
               name: local-triage
             arguments: [--follow-up]
             schedule:
-              every: "3600"
+              every: "1h"
             memory:
               scope: agent
       - name: builder

@@ -92,7 +92,7 @@ The group root is automatically available to restricted agents. Agency never loa
 
 ## Execution
 
-The Agents page lists group-owned instances. Agent Detail owns the `Profile/Blueprint/Runtime/Prompts/Routines/Memory/Activity` surfaces; Group Settings owns defaults only. Agent Library owns standard `AGENTS.md`, Agent Skills, and shared blueprint prompts, while Memory Channels and semantic memory selectors own mutable memory.
+The Agents page lists group-owned instances. Agent Detail owns the `Profile/Blueprint/Runtime/Routines/Prompts/Memory/Activity` surfaces; Group Settings owns defaults only. Agent Library owns standard `AGENTS.md`, Agent Skills, and shared blueprint prompts, while Memory Channels and semantic memory selectors own mutable memory.
 
 Configured instance integration is authoritative. Job submission resolves the blueprint digest, projector, effective runtime policy, selected prompt source, immutable task input, and semantic memory before launch. Manual launches may run a saved prompt from the effective catalog or a one-off task. The worker runs from a private launch view and publishes memory only after successful execution and validation.
 
