@@ -19,7 +19,9 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
 
 2. Add the group to your Agency `config.yaml`:
    ```yaml
-   schema_version: 3
+   schema_version: 4
+   agency:
+     prompt_store: /path/to/agency/prompts
    groups:
      content:
        name: Content Team
@@ -46,7 +48,7 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
 
 3. Edit each agent's `CLAUDE.md` (or your tool's identity file) to match your project's context — what you publish, where, and your voice/tone guidelines.
 
-4. Assign standard Agent Skills and schedules under each instance's `routines` in `config.yaml`.
+4. Assign saved prompts and schedules under each instance's `routines` in `config.yaml`, and register any instance-private prompts you want to launch from the roster.
 
 5. Restart Agency and your new group appears in the sidebar.
 
@@ -59,17 +61,17 @@ groups:
       - name: researcher
         routines:
           - id: research-scan
-            skill: research-scan
+            prompt: {scope: blueprint, name: research-scan}
             schedule: {every: 12h}
       - name: writer
         routines:
           - id: content-review
-            skill: content-review
+            prompt: {scope: blueprint, name: content-review}
             schedule: {at: "09:00"}
       - name: editor
         routines:
           - id: quality-check
-            skill: quality-check
+            prompt: {scope: blueprint, name: quality-check}
             schedule: {at: "14:00"}
 ```
 

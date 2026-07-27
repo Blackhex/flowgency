@@ -2,9 +2,9 @@
 
 The current model separates reusable behavior from configured identity.
 
-A blueprint is a global Agent Library directory containing reusable `AGENTS.md` instructions and standard Agent Skills. It has no display identity, integration, schedule, permissions, workspace, or mutable memory.
+A blueprint is a global Agent Library directory containing reusable `AGENTS.md` instructions, standard Agent Skills, and shared prompts. It has no display identity, integration, schedule, permissions, workspace, or mutable memory.
 
-An instance belongs to exactly one group. Its config record owns stable `name`, `blueprint`, explicit `integration`, `identity`, `capabilities`, runtime overrides, routines, and default semantic memory. Display names, titles, and emoji may change without changing stable selectors.
+An instance belongs to exactly one group. Its config record owns stable `name`, `blueprint`, explicit `integration`, `identity`, `capabilities`, runtime overrides, registered private prompts, routines, and default semantic memory. Display names, titles, and emoji may change without changing stable selectors.
 
 ```yaml
 - name: advisor

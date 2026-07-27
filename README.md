@@ -40,6 +40,8 @@ Group runtime values are defaults. Instance `runtime.sandbox.additional_roots` a
 
 Routines select prompt-backed execution. Each routine has a stable ID, selects one scoped prompt, defines one schedule, and may use semantic memory selectors with `run`, `routine`, `agent`, `group`, or declared `channel` scope.
 
+The roster manual launcher uses the same effective prompt authority: users can run a saved blueprint or instance prompt from the catalog, or switch to a one-off task without changing config. Native integration prompt files remain generated output only.
+
 ## Product surfaces
 
 - The Agents page lists group-owned instances.

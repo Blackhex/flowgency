@@ -4,20 +4,21 @@ Agency is a FastAPI and Jinja2 application with filesystem-backed canonical conf
 
 ## Authority boundaries
 
-- `config.yaml` with `schema_version: 3` is the sole control-plane authority.
+- `config.yaml` with `schema_version: 4` is the sole control-plane authority.
 - `agency.agent_library` contains reusable blueprint source: `AGENTS.md` and `.agents/skills/<name>/SKILL.md`.
 - `agency.compilation_cache` contains disposable immutable integration projections.
 - `agency.memory_store` contains hash-addressed mutable Markdown selected by semantic scope.
+- `agency.prompt_store` contains canonical saved prompt files referenced by configured instances.
 - A group `workspace_path` is the execution workspace and source repository.
 - A group `path` is the Agency-owned group root for pipeline records, locks, and logs.
 - Every group agent entry is an explicit instance with `name`, `blueprint`, and `integration`.
 
-Do not add runtime directory-shape loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup conversion.
+Do not add runtime directory-shape loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup conversion. Native integration files are generated runtime output only and never become authority.
 
 ## Configuration
 
 ```yaml
-schema_version: 3
+schema_version: 4
 agency:
   title: Agency
   default_group: newsletter
@@ -25,6 +26,7 @@ agency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
+  prompt_store: C:/Agency/prompts
 memory:
   channels:
     brand-strategy:
@@ -65,13 +67,18 @@ groups:
           scope: agent
         routines:
           - id: daily-review
-            skill: daily-review
+            prompt:
+              scope: blueprint
+              name: daily-review
+            arguments: [--brief]
             schedule:
               at: "09:00"
             memory:
               scope: routine
           - id: brand-audit
-            skill: strategic-review
+            prompt:
+              scope: instance
+              name: brand-audit
             schedule:
               every: 7d
             memory:
@@ -85,9 +92,9 @@ The group root is automatically available to restricted agents. Agency never loa
 
 ## Execution
 
-The Agents page lists group-owned instances. Agent Detail owns the `Profile/Blueprint/Runtime/Routines/Memory/Activity` surfaces; Group Settings owns defaults only. Agent Library owns standard `AGENTS.md` and Agent Skills, while Memory Channels and semantic memory selectors own mutable memory.
+The Agents page lists group-owned instances. Agent Detail owns the `Profile/Blueprint/Runtime/Prompts/Routines/Memory/Activity` surfaces; Group Settings owns defaults only. Agent Library owns standard `AGENTS.md`, Agent Skills, and shared blueprint prompts, while Memory Channels and semantic memory selectors own mutable memory.
 
-Configured instance integration is authoritative. Job submission resolves the blueprint digest, projector, effective runtime policy, selected routine/skill, immutable task input, and semantic memory before launch. The worker runs from a private launch view and publishes memory only after successful execution and validation.
+Configured instance integration is authoritative. Job submission resolves the blueprint digest, projector, effective runtime policy, selected prompt source, immutable task input, and semantic memory before launch. Manual launches may run a saved prompt from the effective catalog or a one-off task. The worker runs from a private launch view and publishes memory only after successful execution and validation.
 
 Decision execution requires an explicit configured `execution_agent` whose integration is executable and whose `capabilities.write` is true. A missing, invalid, non-executable, or non-writable executor blocks the decide form and POST until corrected. It does not silently skip execution.
 

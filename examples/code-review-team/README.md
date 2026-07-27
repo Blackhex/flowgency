@@ -19,7 +19,9 @@ A 3-agent team for software projects: automated code review, security scanning, 
 
 2. Add the group to your Agency `config.yaml`:
    ```yaml
-   schema_version: 3
+   schema_version: 4
+   agency:
+     prompt_store: /path/to/agency/prompts
    groups:
      review:
        name: Code Review Team
@@ -46,7 +48,7 @@ A 3-agent team for software projects: automated code review, security scanning, 
 
 3. Edit each agent's `CLAUDE.md` to reference your project's specific tech stack, coding conventions, and security requirements.
 
-4. Assign standard Agent Skills and schedules under each instance's `routines` in `config.yaml`.
+4. Assign saved prompts and schedules under each instance's `routines` in `config.yaml`, and register any instance-private prompts you want to launch from the roster.
 
 5. Restart Agency and your new group appears in the sidebar.
 
@@ -59,17 +61,17 @@ groups:
       - name: reviewer
         routines:
           - id: review-recent
-            skill: review-recent
+            prompt: {scope: blueprint, name: review-recent}
             schedule: {every: 6h}
       - name: security
         routines:
           - id: security-scan
-            skill: security-scan
+            prompt: {scope: blueprint, name: security-scan}
             schedule: {at: "06:00"}
       - name: docs
         routines:
           - id: doc-check
-            skill: doc-check
+            prompt: {scope: blueprint, name: doc-check}
             schedule: {at: "10:00"}
 ```
 

@@ -15,15 +15,15 @@ Open `http://127.0.0.1:8500`.
 
 Start Agency, choose the project folder and supported AI integration, complete the agency-setup conversation, and return to the dashboard automatically. The Agency Setup Skill owns group naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
 
-On first run, open `/setup` and hand off the project folder and supported integration to `agency-setup`. After setup, create reusable blueprints and Agent Skills in Agent Library. Open the group's Agents page to add explicit instances that select a blueprint and integration. Configure identity, runtime overrides, routines, and semantic memory from Agent Detail.
+On first run, open `/setup` and hand off the project folder and supported integration to `agency-setup`. After setup, create reusable blueprints, Agent Skills, and shared prompts in Agent Library. Open the group's Agents page to add explicit instances that select a blueprint and integration. Configure identity, private prompts, runtime overrides, routines, and semantic memory from Agent Detail.
 
 ## Core concepts
 
 ### Blueprints and instances
 
-A blueprint is reusable standard source in the global Agent Library: one `AGENTS.md` plus optional Agent Skills. An instance belongs to one group and stores its stable name, blueprint, integration, display identity, capability, runtime overrides, routines, and default memory selector in config.
+A blueprint is reusable standard source in the global Agent Library: one `AGENTS.md`, optional Agent Skills, and optional shared prompts. An instance belongs to one group and stores its stable name, blueprint, integration, display identity, capability, runtime overrides, registered private prompts, routines, and default memory selector in config.
 
-Runtime projectors compile blueprint source into disposable native layouts for each integration. Do not edit the compilation cache.
+Runtime projectors compile blueprint and prompt source into disposable native layouts for each integration. Do not edit the compilation cache or projected native prompt files.
 
 ### Groups and settings
 
@@ -33,7 +33,7 @@ A group owns a project workspace, runtime defaults, dispatch limits, workspaces,
 
 ### Routines, jobs, and memory
 
-A routine selects one Agent Skill, schedule, optional arguments, and optional semantic memory. Routine and decision submissions create durable jobs. Memory uses selectors such as `scope: routine`, `scope: agent`, or `scope: channel`; Memory Channels define named cross-instance memory.
+A routine selects one saved prompt, schedule, optional arguments, and optional semantic memory. Routine and decision submissions create durable jobs. The roster manual launcher can run saved prompts or one-off tasks. Memory uses selectors such as `scope: routine`, `scope: agent`, or `scope: channel`; Memory Channels define named cross-instance memory.
 
 ### Pipeline
 

@@ -19,6 +19,7 @@ from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import transition_job, write_job
 from agency.memory import MemoryStore, resolve_memory_selector
+from agency.prompts import PromptStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,17 +49,33 @@ def _replace_runtime(value: object, runtime: Path) -> object:
     return value
 
 
-def _seed_blueprint(library: Path, key: str, title: str, skill: str) -> None:
+def _prompt_bytes(name: str, description: str, body: str, *, argument_hint: str | None = None) -> bytes:
+    metadata = [f"name: {name}", f"description: {description}"]
+    if argument_hint is not None:
+        metadata.append(f"argument-hint: {argument_hint}")
+    return ("---\n" + "\n".join(metadata) + f"\n---\n\n{body.rstrip()}\n").encode("utf-8")
+
+
+def _seed_blueprint(
+    library: Path,
+    key: str,
+    title: str,
+    skill: str,
+    *,
+    prompts: tuple[tuple[str, str, str, str | None], ...],
+) -> None:
     _write(library / key / "AGENTS.md", f"# {title}\n\nDeterministic release-gate instructions.\n")
     _write(
         library / key / ".agents" / "skills" / skill / "SKILL.md",
         f"---\nname: {skill}\ndescription: Release gate skill\n---\n\nRun the deterministic workflow.\n",
     )
     _write(library / key / ".agents" / "skills" / skill / "checklist.md", "- Verify content\n")
-    _write(
-        library / key / ".agents" / "prompts" / f"{skill}.prompt.md",
-        f"---\nname: {skill}\ndescription: Release gate prompt\n---\n\nRun the deterministic workflow.\n",
-    )
+    prompt_root = library / key / ".agents" / "prompts"
+    for name, description, body, argument_hint in prompts:
+        prompt_root.mkdir(parents=True, exist_ok=True)
+        (prompt_root / f"{name}.prompt.md").write_bytes(
+            _prompt_bytes(name, description, body, argument_hint=argument_hint)
+        )
 
 
 def _seed_pipeline(group: Path) -> None:
@@ -87,7 +104,7 @@ def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
     group = runtime / "groups" / "newsletter"
     workspace = runtime / "workspaces" / "newsletter"
     return JobSpec(
-        schema_version=3,
+        schema_version=4,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="ui-gate-revision",
@@ -106,8 +123,8 @@ def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
             cache_path=str((runtime / "compiled-agents" / "copilot" / "v1" / ("1" * 64)).resolve()),
         ),
         routine_id="daily-review",
-        skill="daily-review",
-        skill_arguments=("--brief",),
+        skill=None,
+        skill_arguments=(),
         task_input="# Daily review\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1200,
@@ -123,9 +140,17 @@ def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
             path=str((runtime / "memory-store" / "channel-brand-strategy").resolve()),
         ),
         trigger_context={"source": "ui-gate"},
-        prompt_source={"type": "routine", "routine_id": "daily-review", "title": "Daily review"},
+        prompt_source={
+            "type": "blueprint_prompt",
+            "scope": "blueprint",
+            "name": "daily-review",
+            "source_path": ".agents/prompts/daily-review.prompt.md",
+            "source_digest": "1" * 64,
+            "title": "Daily review",
+        },
         timeout_override=None,
         created_at="2026-07-16T12:00:00+00:00",
+        private_prompts=(),
     )
 
 
@@ -155,8 +180,23 @@ def _seed_jobs(runtime: Path, config_path: Path) -> None:
     write_job(failed_path, failed)
 
 
+def _seed_private_prompts(runtime: Path) -> None:
+    PromptStore(runtime / "prompts").create(
+        "newsletter",
+        "advisor",
+        "local-triage",
+        _prompt_bytes(
+            "local-triage",
+            "Private local triage.",
+            "Audit the current release blockers and call out anything that needs a human decision.\n",
+            argument_hint="Escalate blockers if the draft is stale.",
+        ),
+    )
+
+
 def _seed_memory(runtime: Path, config: dict) -> None:
     store = MemoryStore(runtime / "memory-store")
+    store.root.mkdir(parents=True, exist_ok=True)
     channel = resolve_memory_selector(
         MemorySelector(scope="channel", channel="brand-strategy"),
         job_id="ui-preview",
@@ -166,8 +206,8 @@ def _seed_memory(runtime: Path, config: dict) -> None:
         channels=config["memory"]["channels"],
         store_root=store.root,
     )
-    snapshot = store.ensure(channel)
-    store.try_save(channel, snapshot.revision, {"memory.md": b"# Brand Strategy\n\nPrefer concise, evidence-led releases.\n"})
+    store.ensure(channel)
+    _write(channel.directory / "memory.md", "# Brand Strategy\n\nPrefer concise, evidence-led releases.\n")
 
 
 def _safe_remove_runtime(runtime: Path) -> None:
@@ -188,12 +228,47 @@ def _prepare_runtime() -> tuple[Path, Path]:
     config_path = runtime / "config.yaml"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     group = runtime / "groups" / "newsletter"
-    (runtime / "workspaces" / "newsletter" / "editorial").mkdir(parents=True, exist_ok=True)
+    (runtime / "groups" / "newsletter" / "editorial").mkdir(parents=True, exist_ok=True)
+    (runtime / "workspaces" / "newsletter").mkdir(parents=True, exist_ok=True)
+    (runtime / "workspaces" / "research").mkdir(parents=True, exist_ok=True)
     _seed_pipeline(group)
     _seed_group_scaffold(runtime / "groups" / "research")
-    _seed_blueprint(runtime / "agent-library", "advisor", "Advisor", "daily-review")
-    _seed_blueprint(runtime / "agent-library", "builder", "Builder", "publish-draft")
+    _seed_blueprint(
+        runtime / "agent-library",
+        "advisor",
+        "Advisor",
+        "daily-review",
+        prompts=(
+            (
+                "daily-review",
+                "Shared daily review.",
+                "Review the current release plan and summarize the next decision.\n",
+                "Mention the release window if relevant.",
+            ),
+            (
+                "release-window",
+                "Shared release window check.",
+                "Verify the release window, rollout risk, and communication timing.\n",
+                "Include the launch date and any blocked approvals.",
+            ),
+        ),
+    )
+    _seed_blueprint(
+        runtime / "agent-library",
+        "builder",
+        "Builder",
+        "publish-draft",
+        prompts=(
+            (
+                "publish-draft",
+                "Shared publish draft.",
+                "Prepare the current draft for publication and flag any unresolved edits.\n",
+                "Note whether publishing is blocked by review.",
+            ),
+        ),
+    )
     (runtime / "compiled-agents").mkdir()
+    _seed_private_prompts(runtime)
     _seed_memory(runtime, config)
     _seed_jobs(runtime, config_path)
     (runtime / "server.pid").write_text(str(os.getpid()), encoding="ascii")

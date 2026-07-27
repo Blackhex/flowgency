@@ -35,9 +35,9 @@
       <ul class="mt-4 space-y-2 text-sm">
         {% for file in prompt_files %}
         <li>
-          <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/prompts?path={{ file.path|urlencode }}" class="{% if selected_prompt and selected_prompt.path == file.path %}text-emerald-700 font-medium{% else %}text-gray-600 hover:text-emerald-700{% endif %}">{{ file.slug }}</a>
-          <div class="font-mono text-xs text-gray-500">{{ file.path }}</div>
-          <div class="text-xs text-gray-500">{{ file.description }}</div>
+          <a href="/admin/agent-library/blueprints/{{ blueprint.key }}/prompts?path={{ file.path|urlencode }}" class="{% if selected_prompt and selected_prompt.path == file.path %}text-emerald-800 font-medium dark:text-emerald-200{% else %}text-gray-600 hover:text-emerald-800 dark:text-gray-300 dark:hover:text-emerald-200{% endif %}">{{ file.slug }}</a>
+          <div class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ file.path }}</div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">{{ file.description }}</div>
         </li>
         {% endfor %}
       </ul>
@@ -57,7 +57,7 @@
         <input id="create-slug" name="slug" value="{{ create_slug }}" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500" placeholder="pr-review">
         <label class="block text-sm font-medium text-gray-700" for="create-content">Initial source</label>
         <textarea id="create-content" name="content" rows="10" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500">{{ create_content }}</textarea>
-        <button type="submit" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Create prompt</button>
+        <button type="submit" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 dark:bg-emerald-800 dark:hover:bg-emerald-700">Create prompt</button>
       </form>
 
       {% if selected_prompt %}
@@ -69,7 +69,8 @@
         <form method="post" action="/admin/agent-library/blueprints/{{ blueprint.key }}/source" class="mt-4 space-y-4">
           <input type="hidden" name="path" value="{{ form_path }}">
           <input type="hidden" name="expected_digest" value="{{ blueprint.snapshot.digest }}">
-          <textarea name="content" rows="14" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500">{{ form_content }}</textarea>
+          <label for="selected-prompt-content" class="block text-sm font-medium text-gray-700">Prompt source</label>
+          <textarea id="selected-prompt-content" name="content" rows="14" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500">{{ form_content }}</textarea>
           <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save prompt source</button>
         </form>
 
