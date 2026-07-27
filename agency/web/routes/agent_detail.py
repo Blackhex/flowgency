@@ -501,7 +501,16 @@ def _prompts_context(
     if services.prompt_service is None:
         raise HTTPException(status_code=409, detail="Prompt service unavailable")
     overrides = source_overrides or {}
-    catalog = services.prompt_service.catalog(snapshot, group_id, agent_id)
+    try:
+        catalog = services.prompt_service.catalog(snapshot, group_id, agent_id)
+    except ValidationFailed as exc:
+        return {
+            "shared_prompts": (),
+            "private_prompts": (),
+            "prompt_issues": _issue_dicts(exc),
+            "create_prompt_name": create_name,
+            "create_prompt_source": create_source,
+        }
     shared: list[dict[str, str]] = []
     private: list[dict[str, str]] = []
     for item in catalog:
@@ -528,6 +537,7 @@ def _prompts_context(
         "private_prompts": tuple(private),
         "create_prompt_name": create_name,
         "create_prompt_source": create_source,
+        "prompt_issues": [],
     }
 
 
