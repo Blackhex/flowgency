@@ -116,7 +116,7 @@ Agency rejects any prompt document that breaks this contract:
 - The YAML frontmatter opens with `---` on its own line and is terminated by `---` on its own line before the body.
 - `name` exactly equals the file slug.
 - The slug uses 1 to 64 lowercase letters, digits, and single hyphen separators, with no leading or trailing hyphen.
-- `description` is a non-empty string of at most 1024 characters.
+- `description` is a non-empty, non-whitespace-only string of at most 1024 characters.
 - `argument-hint` is optional and, when present, a string. Omit the key entirely when the prompt takes no arguments.
 - No keys other than `name`, `description`, and `argument-hint` are permitted.
 - The markdown body after the closing `---` is non-empty.
