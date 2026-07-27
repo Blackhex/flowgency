@@ -1,6 +1,17 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
+
+// Absolute paths vary in length per checkout; pin them to one line so they cannot reflow the page.
+async function pinToSingleLine(locator: Locator) {
+  await locator.evaluateAll((elements) => {
+    for (const element of elements as HTMLElement[]) {
+      element.style.whiteSpace = 'nowrap';
+      element.style.overflow = 'hidden';
+      element.style.textOverflow = 'clip';
+    }
+  });
+}
 
 function dashboardScreenshotMasks(page: Page) {
   const attentionQueue = page.locator('main > div > div').filter({
@@ -59,6 +70,8 @@ test('jobs expose waiting, failed artifact, diagnostics hash, and empty state', 
   const stderrLog = page.getByText(/^Stderr log:/);
   await expect(stdoutLog).toHaveText(/advisor-job-failed\.out$/);
   await expect(stderrLog).toHaveText(/advisor-job-failed\.err$/);
+  await pinToSingleLine(stdoutLog);
+  await pinToSingleLine(stderrLog);
   await assertNoLayoutIssues(page);
   // Log paths are absolute and vary per checkout, so compare them as text only.
   await expect(page).toHaveScreenshot('failed-job.png', { fullPage: true, mask: [stdoutLog, stderrLog] });
