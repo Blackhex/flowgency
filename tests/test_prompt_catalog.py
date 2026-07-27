@@ -252,3 +252,53 @@ def test_validate_command_succeeds_for_a_valid_library(tmp_path, capsys):
 
     assert exit_code == 0
     assert "No validation issues found." in captured.out
+
+
+def test_validate_reports_orphan_malformed_blueprint(tmp_path, capsys):
+    from agency import cli
+
+    _write_blueprint(tmp_path / "agent-library", "orphan", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [])
+
+    exit_code = cli.run(["--config", str(config_path), "validate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert "Prompt markdown frontmatter is incomplete" in captured.err
+
+
+def test_validate_deduplicates_broken_blueprint_referenced_and_in_library(tmp_path, capsys):
+    from agency import cli
+
+    _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    exit_code = cli.run(["--config", str(config_path), "validate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 3
+    assert captured.err.count("Prompt markdown frontmatter is incomplete") == 1
+
+
+def test_routines_tab_returns_200_for_broken_catalog(monkeypatch, tmp_path):
+    _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    response = _client(monkeypatch, tmp_path, config_path).get(
+        "/reviewers/agents/reviewer/routines"
+    )
+
+    assert response.status_code == 200
+    assert "Terminate the YAML frontmatter before the prompt body." in response.text
+
+
+def test_blueprint_tab_returns_200_for_broken_catalog(monkeypatch, tmp_path):
+    _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    response = _client(monkeypatch, tmp_path, config_path).get(
+        "/reviewers/agents/reviewer/blueprint"
+    )
+
+    assert response.status_code == 200
+    assert "Terminate the YAML frontmatter before the prompt body." in response.text
