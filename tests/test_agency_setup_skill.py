@@ -282,15 +282,36 @@ def test_setup_does_not_generate_project_scheduler_artifacts():
 def test_templates_define_the_task_prompt_contract():
     templates = TEMPLATES_PATH.read_text(encoding="utf-8")
     assert "## Standard Task Prompt" in templates
-    assert "{agent_library}/{blueprint}/.agents/prompts/{prompt}.prompt.md" in templates
+
+    # Scope assertions to the section so a matching phrase elsewhere cannot satisfy them.
+    section_start = templates.index("\n## Standard Task Prompt\n") + len("\n## Standard Task Prompt\n")
+    next_heading = templates.find("\n## ", section_start)
+    section = templates[section_start:] if next_heading == -1 else templates[section_start:next_heading]
+
+    assert "{agent_library}/{blueprint}/.agents/prompts/{prompt}.prompt.md" in section
+    assert "```" in section  # fenced markdown block
     for required in (
         "name: {prompt}",
         "description: {ONE_LINE_PURPOSE}",
         "argument-hint: {OPTIONAL_ARGUMENT_SUMMARY}",
     ):
-        assert required in templates
-    assert "exactly equals the file slug" in templates
-    assert "at most 1024 characters" in templates
+        assert required in section
+    assert "exactly equals the file slug" in section
+    assert "at most 1024 characters" in section
+    assert "No keys other than" in section
+    assert "non-empty" in section
+    assert "lowercase letters, digits, and single hyphen separators" in section
+    assert "no leading or trailing hyphen" in section
+    assert "encoded as UTF-8" in section
+
+
+def test_phase_five_orders_validate_after_config_write():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    section = skill.split("## 5. Verify And Schedule", 1)[1].split("\n## ", 1)[0]
+    write = section.index("Write one complete configuration atomically.")
+    validate = section.index("christag-agency validate --config")
+    dispatch = section.index("christag-agency dispatch install")
+    assert write < validate < dispatch
 
 
 def test_phase_five_validates_prompt_documents():
