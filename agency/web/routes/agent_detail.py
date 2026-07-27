@@ -472,19 +472,27 @@ def _parse_routines_payload(form, available_prompts: frozenset[tuple[str, str]])
     return routines, issues
 
 
-def _available_prompts(services: AgencyServices, snapshot, group_id: str, agent_id: str) -> tuple[tuple[str, str], ...]:
+def _available_prompts(
+    services: AgencyServices, snapshot, group_id: str, agent_id: str
+) -> tuple[tuple[tuple[str, str], ...], list[dict[str, str]]]:
     if services.blueprint_library is None or services.prompt_store is None:
-        return ()
-    return tuple(
-        (item.scope, item.document.name)
-        for item in effective_prompt_catalog(
-            snapshot,
-            services.blueprint_library,
-            services.prompt_store,
-            group_id,
-            agent_id,
+        return (), []
+    try:
+        return (
+            tuple(
+                (item.scope, item.document.name)
+                for item in effective_prompt_catalog(
+                    snapshot,
+                    services.blueprint_library,
+                    services.prompt_store,
+                    group_id,
+                    agent_id,
+                )
+            ),
+            [],
         )
-    )
+    except ValidationFailed as exc:
+        return (), _issue_dicts(exc)
 
 
 def _prompts_context(
@@ -592,7 +600,17 @@ def _blueprint_context(services: AgencyServices, snapshot, group_id: str, agent_
     _, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
     if services.blueprint_library is None:
         raise HTTPException(status_code=409, detail="Blueprint library unavailable")
-    inspection = services.blueprint_library.inspect(instance.blueprint)
+    try:
+        inspection = services.blueprint_library.inspect(instance.blueprint)
+    except ValidationFailed as exc:
+        return {
+            "issues": _issue_dicts(exc),
+            "inspection": None,
+            "compatibility": {},
+            "cache_status": {"state": "unavailable", "path": "", "pins": ()},
+            "edit_library_href": f"/admin/agent-library/blueprints/{instance.blueprint}",
+            "edit_skills_href": f"/admin/agent-library/blueprints/{instance.blueprint}/skills",
+        }
     integration = get_integration(instance.integration)
     projector = integration.projector
     projector_capabilities = getattr(projector, "capabilities", None)
@@ -627,15 +645,18 @@ def _routines_context(services: AgencyServices, snapshot, group_id: str, agent_i
         sort_keys=False,
         allow_unicode=True,
     ).strip()
-    prompt_options = _available_prompts(services, snapshot, group_id, agent_id)
+    prompt_options, issues = _available_prompts(services, snapshot, group_id, agent_id)
     shared = sorted(name for scope, name in prompt_options if scope == "blueprint")
     private = sorted(name for scope, name in prompt_options if scope == "instance")
-    return {
+    result: dict[str, Any] = {
         "available_shared_prompts": tuple(shared),
         "available_private_prompts": tuple(private),
         "routines_yaml": routines_yaml,
         "supports_enabled": True,
     }
+    if issues:
+        result["issues"] = issues
+    return result
 
 
 def _memory_context(snapshot, services: AgencyServices, group_id: str, agent_id: str) -> dict[str, Any]:
@@ -1030,7 +1051,7 @@ async def agent_detail_routines_save(request: Request, group: str, agent: str, s
     revision = str(form.get("revision", "")).strip()
     snapshot = services.config_store.load()
     _, instance = _get_snapshot_instance(snapshot, group, agent)
-    prompt_options = _available_prompts(services, snapshot, group, agent)
+    prompt_options, _ = _available_prompts(services, snapshot, group, agent)
     routines, parse_issues = _parse_routines_payload(form, frozenset(prompt_options))
     shared = tuple(sorted(name for scope, name in prompt_options if scope == "blueprint"))
     private = tuple(sorted(name for scope, name in prompt_options if scope == "instance"))
