@@ -129,6 +129,19 @@
         <input type="hidden" name="prompt_scope" value="{{ instance.default_prompt_scope }}" data-prompt-scope>
         <input type="hidden" name="prompt_name" value="{{ instance.default_prompt_name }}" data-prompt-name>
 
+        {% if instance.prompt_issues %}
+        <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2 mb-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-amber-900">Prompt catalog unavailable</p>
+          {% for issue in instance.prompt_issues %}
+          <div class="text-sm text-amber-900">
+            <div class="font-mono text-xs text-amber-800">{{ issue.field }}</div>
+            <div>{{ issue.message }}</div>
+            <div class="text-xs text-amber-700">{{ issue.hint }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
         <div class="flex items-center justify-between gap-3 flex-wrap mb-4">
           <div>
             <h3 class="text-sm font-semibold text-gray-900">Manual launcher</h3>
@@ -147,18 +160,6 @@
         </div>
 
         <section data-saved-panel {% if instance.default_mode != 'saved' %}hidden{% endif %} class="space-y-4">
-          {% if instance.prompt_issues %}
-          <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
-            <p class="text-xs font-semibold uppercase tracking-wide text-amber-900">Prompt catalog unavailable</p>
-            {% for issue in instance.prompt_issues %}
-            <div class="text-sm text-amber-900">
-              <div class="font-mono text-xs text-amber-800">{{ issue.field }}</div>
-              <div>{{ issue.message }}</div>
-              <div class="text-xs text-amber-700">{{ issue.hint }}</div>
-            </div>
-            {% endfor %}
-          </div>
-          {% endif %}
           {% if instance.has_saved_prompts %}
           <div>
             <label class="block">

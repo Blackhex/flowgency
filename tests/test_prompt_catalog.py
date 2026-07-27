@@ -143,6 +143,9 @@ def test_roster_renders_when_one_agent_has_a_broken_catalog(monkeypatch, tmp_pat
     assert response.status_code == 200
     assert "Terminate the YAML frontmatter before the prompt body." in response.text
     assert "auditor" in response.text
+    # Per-agent notice must render outside the hidden saved-prompt panel.
+    html = response.text
+    assert html.index("Prompt catalog unavailable") < html.index("data-saved-panel")
 
 
 def test_agent_detail_prompts_tab_shows_the_diagnostic(monkeypatch, tmp_path):
