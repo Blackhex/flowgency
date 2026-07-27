@@ -400,9 +400,22 @@ def run_server(**options) -> None:
 
 def cmd_validate(args: Namespace) -> int:
     services = _services(args)
-    issues = tuple(services.prompt_issues)
-    if issues:
-        raise CliFailure(ExitCode.VALIDATION, "validation-failed", "Validation failed", issues)
+    issues: list[ValidationIssue] = list(services.prompt_issues)
+    seen: set[tuple[str, str, str]] = {(i.code, i.field, i.message) for i in issues}
+
+    if services.blueprint_library is not None:
+        try:
+            services.blueprint_library.list()
+        except ValidationFailed as exc:
+            for issue in exc.issues:
+                key = (issue.code, issue.field, issue.message)
+                if key not in seen:
+                    seen.add(key)
+                    issues.append(issue)
+
+    combined = tuple(issues)
+    if combined:
+        raise CliFailure(ExitCode.VALIDATION, "validation-failed", "Validation failed", combined)
     if getattr(args, "json", False):
         print(json.dumps({"issues": []}, sort_keys=True))
     else:
