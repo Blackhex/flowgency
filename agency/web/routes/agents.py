@@ -291,8 +291,8 @@ def _render_roster(
     if not warning:
         try:
             available_blueprints = _available_blueprint_keys(services)
-        except AssetValidationError:
-            pass  # prompt catalog issue; surfaced per-agent in the roster
+        except AssetValidationError as exc:
+            warning = str(exc)
         except (FileNotFoundError, NotADirectoryError, OSError) as exc:
             warning = str(exc)
             status_code = 409
