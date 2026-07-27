@@ -90,6 +90,7 @@ def test_one_broken_blueprint_shared_by_two_agents_reports_once(tmp_path):
     issues = _validate(tmp_path, config_path)
 
     assert len(issues) == 1
+    assert issues[0].scope == "groups.reviewers.agents.first"
 
 
 def test_valid_blueprint_prompt_reports_no_issues(tmp_path):
@@ -212,7 +213,10 @@ def test_roster_surfaces_library_level_warning_for_malformed_blueprint(monkeypat
 
     # The warning banner (mb-6 div) must carry the message, not just the per-agent row.
     assert response.status_code == 200
-    assert 'class="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Prompt markdown frontmatter is incomplete' in response.text
+    html = response.text
+    # "border-amber-200 bg-amber-50 p-4" is the page-level banner; per-agent uses p-3.
+    banner_start = html.index("border-amber-200 bg-amber-50 p-4")
+    assert "Prompt markdown frontmatter is incomplete" in html[banner_start : banner_start + 200]
 
 
 def test_roster_reports_malformed_blueprint_not_referenced_by_any_agent(monkeypatch, tmp_path):

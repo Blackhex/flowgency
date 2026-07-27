@@ -75,7 +75,7 @@ The section states the contract enforced by `agency/prompts/assets.py`:
 - No keys other than `name`, `description`, and `argument-hint` are permitted.
 - The markdown body after the closing fence is non-empty.
 
-**Phase 5 validation.** `SKILL.md` Phase 5 adds prompt-document validation to its validation list and corrects the stale "routine skill" wording to "routine prompt". Validation runs before the atomic config write, and a failure stops the write.
+**Phase 5 validation.** `SKILL.md` Phase 5 adds prompt-document validation to its validation list and corrects the stale "routine skill" wording to "routine prompt". The setup session confirms every prompt document against the Standard Task Prompt contract before the config write. `christag-agency validate` runs after the write and revision confirmation as a mechanical gate, and a non-zero exit stops the setup session.
 
 **Mechanical verification.** A new CLI command performs the check so the setup session proves validity instead of asserting it:
 
@@ -83,7 +83,7 @@ The section states the contract enforced by `agency/prompts/assets.py`:
 christag-agency validate --config "{config_path}"
 ```
 
-The command loads services and prints every collected `ValidationIssue` grouped by scope, showing code, field, message, and corrective hint. It exits non-zero when any issue exists and zero otherwise. Phase 5 runs it before the config write and stops on a non-zero exit. The same command is the operator's recovery check for an already-broken library.
+The command loads services and prints every collected `ValidationIssue` grouped by scope, showing code, field, message, and corrective hint. It exits non-zero when any issue exists and zero otherwise. Phase 5 runs it after the config write and revision confirmation, and stops on a non-zero exit. The same command is the operator's recovery check for an already-broken library.
 
 ### 2. Failure model
 
