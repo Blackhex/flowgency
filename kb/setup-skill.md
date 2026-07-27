@@ -1,6 +1,6 @@
 # Agency Setup Skill
 
-The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces.
+The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces. Generated native prompt files remain derived output.
 
 Every generated config uses `schema_version: 4` and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`. Each group has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned group root). The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
 
@@ -54,7 +54,7 @@ Invoke `agency-setup` from the project workspace after the first-run page launch
 5. Plans Agent Skills, schedules, runtime policy, workspaces, and semantic memory for approval.
 6. Resolves exactly one canonical config with only the supported root sections (`agency`, `memory`, and `groups`) and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`.
 7. Writes each approved blueprint with global `AGENTS.md` source. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, writes `.agents/skills/<skill>/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities.
-8. Registers explicit group-owned instances and every approved group workspace. Every instance pins a blueprint and integration; routines select scoped prompts and semantic memory selectors.
+8. Registers explicit group-owned instances and every approved group workspace. Every instance pins a blueprint and integration; routines select scoped saved prompts and semantic memory selectors, and approved private prompts are registered for the instance when needed.
 9. Validates group naming, storage paths, integrations, cross-references, and revision safety, performs one atomic config write, reparses from disk, and optionally verifies the singleton dispatcher.
 
 ## Result

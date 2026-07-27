@@ -34,6 +34,8 @@ groups:
           display_name: Advisor
           title: Strategy Lead
           emoji: A
+        prompts:
+          - local-triage
         runtime:
           timeout: 1200
           sandbox:
@@ -56,6 +58,15 @@ groups:
             memory:
               scope: channel
               channel: brand-strategy
+          - id: local-triage
+            prompt:
+              scope: instance
+              name: local-triage
+            arguments: [--follow-up]
+            schedule:
+              every: "3600"
+            memory:
+              scope: agent
       - name: builder
         blueprint: builder
         integration: script

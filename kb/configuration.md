@@ -1,10 +1,10 @@
 # Configuration
 
-Agency uses one authoritative YAML document. The top-level `schema_version: 3`, `agency`, and `groups` fields are required. `memory.channels` may be empty.
+Agency uses one authoritative YAML document. The top-level `schema_version: 4`, `agency`, and `groups` fields are required. `memory.channels` may be empty.
 
 ## Global paths
 
-`agency.agent_library`, `agency.compilation_cache`, and `agency.memory_store` are required non-empty paths. Relative paths resolve against the directory containing the config. The library must exist and be readable; Agency may create cache and memory roots when their nearest parent is writable.
+`agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store` are required non-empty paths. Relative paths resolve against the directory containing the config. The library must exist and be readable; Agency may create cache, memory, and prompt-store roots when their nearest parent is writable.
 
 ## Groups and instances
 
@@ -18,7 +18,9 @@ The group root is automatically available to restricted agents. Agency never loa
 
 ## Routines and memory
 
-`routines:` belongs to an instance. Each routine uses a stable `id`, selects one Agent Skill with `skill`, defines one `schedule`, and optionally provides arguments and memory. Schedules support `at`, `every`, and supported conditions.
+`routines:` belongs to an instance. Each routine uses a stable `id`, selects one saved prompt with `prompt.scope` plus `prompt.name`, defines one `schedule`, and optionally provides arguments and memory. Schedules support `at`, `every`, and supported conditions.
+
+The effective prompt catalog is the union of blueprint-shared prompts from `.agents/prompts/*.prompt.md` and instance-private prompt names registered in config and stored under `agency.prompt_store`. Manual launches may use a saved catalog prompt or a one-off task; one-off input is runtime-only and does not create prompt authority.
 
 Memory selectors are semantic: `run`, `routine`, `agent`, `group`, or declared global `channel`. An instance default cannot use routine scope. Example selectors include `scope: routine` and `scope: channel` with a channel key.
 
@@ -26,4 +28,4 @@ See [../config.yaml.example](../config.yaml.example) for a complete example.
 
 ## Superseded layouts
 
-The application does not auto-load directory-coupled agent state, sidecars, prompt schedules, or per-agent memory files.
+The application does not auto-load directory-coupled agent state, sidecars, prompt schedules, or per-agent memory files. Native integration prompt files are generated from canonical prompt authority and are never edited as source.

@@ -15,24 +15,24 @@
 
   <div class="grid gap-4">
     {% for blueprint in blueprints %}
-    <a href="/admin/agent-library/blueprints/{{ blueprint.key }}" class="block rounded-xl border border-gray-200 bg-white p-5 hover:border-indigo-300 transition-colors">
+    <a href="/admin/agent-library/blueprints/{{ blueprint.key }}" class="block rounded-xl border border-gray-200 bg-white p-5 hover:border-indigo-300 transition-colors dark:border-gray-700 dark:bg-gray-800">
       <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h2 class="text-lg font-semibold text-gray-900">{{ blueprint.title }}</h2>
-          <p class="mt-1 font-mono text-xs text-gray-500">{{ blueprint.key }}</p>
+          <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ blueprint.title }}</h2>
+          <p class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ blueprint.key }}</p>
         </div>
-        <div class="text-sm text-gray-500">{{ blueprint.user_count }} instance{{ 's' if blueprint.user_count != 1 else '' }}</div>
+        <div class="text-sm text-gray-500 dark:text-gray-400">{{ blueprint.user_count }} instance{{ 's' if blueprint.user_count != 1 else '' }}</div>
       </div>
-      <div class="mt-4 flex flex-wrap gap-2 text-xs text-gray-600">
-        <span class="rounded-full bg-gray-100 px-2.5 py-1">AGENTS.md</span>
+      <div class="mt-4 flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <span class="rounded-full bg-gray-100 px-2.5 py-1 dark:bg-gray-700">AGENTS.md</span>
         {% for skill in blueprint.skills %}
-        <span class="rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700">{{ skill }}</span>
+        <span class="rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-200">{{ skill }}</span>
         {% endfor %}
         {% for prompt in blueprint.prompts %}
-        <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">{{ prompt }}.prompt.md</span>
+        <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-900 dark:bg-emerald-950/70 dark:text-emerald-200">{{ prompt }}.prompt.md</span>
         {% endfor %}
       </div>
-      <p class="mt-4 font-mono text-xs text-gray-500 break-all">{{ blueprint.digest }}</p>
+      <p class="mt-4 font-mono text-xs text-gray-500 break-all dark:text-gray-400">{{ blueprint.digest }}</p>
     </a>
     {% endfor %}
   </div>

@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
-import { expectLayoutIntegrity } from './layout';
+import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
 
-const tabs = ['Profile', 'Blueprint', 'Runtime', 'Routines', 'Memory', 'Activity'];
+const tabs = ['Profile', 'Blueprint', 'Runtime', 'Routines', 'Prompts', 'Memory', 'Activity'];
 
 test.beforeEach(async ({ page }, testInfo) => {
+  installConsoleErrorGate(page);
   const dark = testInfo.project.name.endsWith('dark');
   await page.addInitScript((theme) => {
     if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
@@ -18,7 +19,7 @@ test('group settings leads to the sole roster and inherited runtime', async ({ p
   await expect(page.getByRole('heading', { name: 'Edit: Newsletter' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create Instance' })).toHaveCount(0);
   await expect(page.getByText('Advisor')).toHaveCount(0);
-  await expectLayoutIntegrity(page);
+  await assertNoLayoutIssues(page);
   await expect(page).toHaveScreenshot('group-settings.png', { fullPage: true });
 
   await expectBodyFocus(page);
@@ -27,7 +28,7 @@ test('group settings leads to the sole roster and inherited runtime', async ({ p
   await expect(page).toHaveURL(/\/newsletter\/agents$/);
   await expect(page.getByText('Blueprint: advisor')).toBeVisible();
   await expect(page.getByText('waiting for memory')).toBeVisible();
-  await expectLayoutIntegrity(page);
+  await assertNoLayoutIssues(page);
   await expect(page).toHaveScreenshot('agent-roster.png', { fullPage: true });
 
   await expectBodyFocus(page);
@@ -42,9 +43,12 @@ test('group settings leads to the sole roster and inherited runtime', async ({ p
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/newsletter\/agents\/advisor\/runtime$/);
   await expect(page.getByRole('heading', { name: 'Group default' })).toBeVisible();
-  const inheritedRoot = page.getByText(/Group default: .*tests\/ui\/\.runtime\/current\/groups\/newsletter\/shared$/);
+  const inheritedRoot = page.getByText(/Group default: .*tests\/ui\/\.runtime\/current\/workspaces\/newsletter$/);
   await expect(inheritedRoot).toHaveCount(2);
   await expect(inheritedRoot.first()).toBeVisible();
+  const groupRoot = page.getByText(/Agent addition: .*tests\/ui\/\.runtime\/current\/groups\/newsletter$/);
+  await expect(groupRoot).toHaveCount(1);
+  await expect(groupRoot).toBeVisible();
   const additionalRoot = page.getByText(/Agent addition: .*tests\/ui\/\.runtime\/current\/groups\/newsletter\/editorial$/);
   await expect(additionalRoot).toHaveCount(1);
   await expect(additionalRoot).toBeVisible();
@@ -56,8 +60,9 @@ test('group settings leads to the sole roster and inherited runtime', async ({ p
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('Copilot');
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('copilot');
   await expect(page.getByRole('heading', { name: 'Effective preview' })).toBeVisible();
-  await expectLayoutIntegrity(page);
+  await assertNoLayoutIssues(page);
   await expect(page).toHaveScreenshot('agent-runtime.png', { fullPage: true });
+  await assertNoConsoleErrors(page);
 });
 
 test('all agent detail tabs have stable selected semantics and keyboard focus', async ({ page }) => {
@@ -69,30 +74,100 @@ test('all agent detail tabs have stable selected semantics and keyboard focus', 
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/newsletter/agents/advisor/${tab.toLowerCase()}$`));
     await expect(page.getByRole('tab', { name: tab })).toHaveAttribute('aria-current', 'page');
-    await expectLayoutIntegrity(page);
+    await assertNoLayoutIssues(page);
   }
+  await assertNoConsoleErrors(page);
+});
+
+test('roster launcher keeps dialog focus, supports grouped prompt selection, and toggles one-off validation', async ({ page }) => {
+  await page.goto('/newsletter/agents');
+  await expectBodyFocus(page);
+
+  const addAgentButton = await tabTo(page, { role: 'button', name: 'Add agent' });
+  await expect(addAgentButton).toBeFocused();
+  await page.keyboard.press('Enter');
+
+  const dialog = page.locator('#add-agent-dialog');
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Instance name' })).toBeFocused();
+
+  const cancelButton = await tabTo(page, { role: 'button', name: 'Cancel' });
+  await expect(cancelButton).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(dialog).not.toBeVisible();
+  await expect(addAgentButton).toBeFocused();
+
+  const launcher = page.locator('[data-launch-form]').first();
+  const promptSelect = launcher.locator('[data-prompt-select]');
+  await expect(promptSelect.locator('optgroup[label="Shared from blueprint"] option')).toHaveCount(2);
+  await expect(promptSelect.locator('optgroup[label="Private to this instance"] option')).toHaveCount(1);
+  await expect(launcher.locator('[data-prompt-description]')).toContainText('Shared daily review.');
+  await expect(launcher.locator('[data-prompt-hint]')).toContainText('Mention the release window if relevant.');
+
+  await promptSelect.selectOption('instance:local-triage');
+  await expect(launcher.locator('[data-prompt-description]')).toContainText('Private local triage.');
+  await expect(launcher.locator('[data-prompt-hint]')).toContainText('Escalate blockers if the draft is stale.');
+
+  const savedRadio = await tabTo(page, { role: 'radio', name: 'Saved prompt' });
+  await expect(savedRadio).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  const oneOffRadio = launcher.getByRole('radio', { name: 'One-off' });
+  await expect(oneOffRadio).toBeFocused();
+  await expect(oneOffRadio).toBeChecked();
+  await expect(launcher.locator('[data-one-off-panel]')).toBeVisible();
+  await expect(launcher.locator('[data-saved-panel]')).toBeHidden();
+  await expect.poll(() => launcher.locator('[data-task-input]').evaluate((node) => (node as HTMLTextAreaElement).required)).toBe(true);
+
+  await page.keyboard.press('ArrowLeft');
+  await expect(savedRadio).toBeFocused();
+  await expect(savedRadio).toBeChecked();
+  await expect(launcher.locator('[data-saved-panel]')).toBeVisible();
+  await expect(launcher.locator('[data-one-off-panel]')).toBeHidden();
+  await expect.poll(() => launcher.locator('[data-task-input]').evaluate((node) => (node as HTMLTextAreaElement).required)).toBe(false);
+
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
 });
 
 test('library instructions and skill targets are canonical', async ({ page }) => {
   await page.goto('/admin/agent-library');
   await expect(page.getByRole('heading', { name: 'Agent Library' })).toBeVisible();
-  await expectLayoutIntegrity(page);
+  await assertNoLayoutIssues(page);
   await expect(page).toHaveScreenshot('agent-library.png', { fullPage: true });
   await page.getByRole('link', { name: /Advisor/ }).press('Enter');
   await expect(page.getByRole('heading', { name: 'AGENTS.md' })).toBeVisible();
   await page.getByRole('link', { name: /daily-review/ }).first().press('Enter');
   await expect(page.getByRole('heading', { name: 'SKILL.md' })).toBeVisible();
+  await assertNoConsoleErrors(page);
+});
+
+test('agent prompts and shared prompt library views have stable visuals', async ({ page }) => {
+  await page.goto('/newsletter/agents/advisor/prompts');
+  await expect(page.getByRole('heading', { name: 'Prompts', exact: true })).toBeVisible();
+  await expect(page.getByText('Shared from blueprint')).toBeVisible();
+  await expect(page.getByText('Private to this instance')).toBeVisible();
+  await assertNoLayoutIssues(page);
+  await expect(page).toHaveScreenshot('agent-prompts.png', { fullPage: true });
+
+  await page.goto('/admin/agent-library/blueprints/advisor/prompts');
+  await expect(page.getByRole('heading', { name: 'Shared prompt source editor' })).toBeVisible();
+  await page.getByRole('link', { name: 'release-window' }).press('Enter');
+  await expect(page.getByRole('heading', { name: 'release-window' })).toBeVisible();
+  await assertNoLayoutIssues(page);
+  await expect(page).toHaveScreenshot('prompt-library.png', { fullPage: true });
+  await assertNoConsoleErrors(page);
 });
 
 test('memory channel uses a friendly label without normal hash disclosure', async ({ page }) => {
   await page.goto('/admin/memory-channels');
-  await expectLayoutIntegrity(page);
+  await assertNoLayoutIssues(page);
   await page.getByRole('link', { name: 'brand-strategy' }).press('Enter');
   await expect(page.getByRole('heading', { name: 'Brand Strategy' })).toBeVisible();
   await expect(page.getByText('Internal hash')).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText('22222222222222222222222222222222');
-  await expectLayoutIntegrity(page);
+  await assertNoLayoutIssues(page);
   await expect(page).toHaveScreenshot('memory-channel.png', { fullPage: true });
+  await assertNoConsoleErrors(page);
 });
 
 test('destructive controls require confirmation or a review page and are keyboard reachable', async ({ page }) => {
@@ -134,6 +209,7 @@ test('destructive controls require confirmation or a review page and are keyboar
   await page.keyboard.press('Enter');
   expect(deleteMessage).toBe('Delete this memory channel?');
   await expect(page.getByRole('heading', { name: 'Brand Strategy' })).toBeVisible();
+  await assertNoConsoleErrors(page);
 });
 
 test('mobile navigation preserves theme and keyboard focus', async ({ page }, testInfo) => {
@@ -172,4 +248,5 @@ test('mobile navigation preserves theme and keyboard focus', async ({ page }, te
   await page.keyboard.press('Space');
   await expect(page.getByRole('button', { name: 'Close navigation' })).toBeFocused();
   await expect(page).toHaveScreenshot('mobile-navigation.png', { fullPage: true });
+  await assertNoConsoleErrors(page);
 });

@@ -271,6 +271,8 @@ def test_roster_renders_expanded_saved_and_one_off_launcher(
     assert "Support" in response.text
     assert "Run prompt" in response.text
     assert "Run one-off" in response.text
+    assert "peer-focus-visible:ring-2" in response.text
+    assert 'name="task_input"' in response.text and "required" in response.text
 
 
 def test_roster_defaults_to_one_off_when_instance_has_no_prompt_catalog(

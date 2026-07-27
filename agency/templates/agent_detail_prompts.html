@@ -9,12 +9,12 @@
       <h3 class="text-sm font-semibold text-gray-900">Shared from blueprint</h3>
       <ul class="mt-3 space-y-2 text-sm">
         {% for prompt in shared_prompts %}
-        <li class="rounded-md border border-gray-100 bg-gray-50 p-3">
+        <li class="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
           <div class="flex items-center justify-between gap-3">
-            <span class="font-mono text-xs text-gray-700">{{ prompt.name }}</span>
-            <a href="{{ prompt.library_href }}" class="text-xs text-indigo-600 hover:text-indigo-800">Open in Agent Library</a>
+            <span class="font-mono text-xs text-gray-700 dark:text-gray-200">{{ prompt.name }}</span>
+            <a href="{{ prompt.library_href }}" class="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">Open in Agent Library</a>
           </div>
-          <p class="mt-1 text-xs text-gray-600">{{ prompt.description }}</p>
+          <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">{{ prompt.description }}</p>
         </li>
         {% else %}
         <li class="text-gray-500">No shared prompts found.</li>
@@ -26,9 +26,9 @@
       <h3 class="text-sm font-semibold text-gray-900">Private to this instance</h3>
       <ul class="mt-3 space-y-2 text-sm">
         {% for prompt in private_prompts %}
-        <li class="rounded-md border border-gray-100 bg-gray-50 p-3">
-          <div class="font-mono text-xs text-gray-700">{{ prompt.name }}</div>
-          <p class="mt-1 text-xs text-gray-600">{{ prompt.description }}</p>
+        <li class="rounded-md border border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+          <div class="font-mono text-xs text-gray-700 dark:text-gray-200">{{ prompt.name }}</div>
+          <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">{{ prompt.description }}</p>
         </li>
         {% else %}
         <li class="text-gray-500">No private prompts registered.</li>
@@ -68,7 +68,8 @@
       </div>
       <form method="post" action="/{{ group }}/agents/{{ agent }}/prompts/{{ prompt.name }}/save" class="space-y-3">
         <input type="hidden" name="digest" value="{{ prompt.digest }}">
-        <textarea name="source" rows="9" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ prompt.source }}</textarea>
+        <label for="edit-prompt-source-{{ loop.index0 }}" class="block text-sm font-medium text-gray-700">Prompt source for {{ prompt.name }}</label>
+        <textarea id="edit-prompt-source-{{ loop.index0 }}" name="source" rows="9" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ prompt.source }}</textarea>
         <div class="flex items-center justify-between gap-3">
           <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-700">Save source</button>
         </div>

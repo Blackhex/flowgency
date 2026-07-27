@@ -136,12 +136,12 @@
           </div>
           <div class="inline-flex rounded-xl bg-white p-1 border border-gray-200 dark:bg-slate-900 dark:border-slate-700">
             <label class="cursor-pointer">
-              <input type="radio" name="mode" value="saved" {% if instance.default_mode == 'saved' %}checked{% endif %} {% if not instance.has_saved_prompts %}disabled{% endif %} class="sr-only" data-mode-toggle>
-              <span class="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 data-[active=true]:bg-indigo-600 data-[active=true]:text-white" data-mode-pill="saved">Saved prompt</span>
+              <input type="radio" name="mode" value="saved" {% if instance.default_mode == 'saved' %}checked{% endif %} {% if not instance.has_saved_prompts %}disabled{% endif %} class="peer sr-only" data-mode-toggle>
+              <span class="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 data-[active=true]:bg-indigo-700 data-[active=true]:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-500 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-white dark:peer-focus-visible:ring-offset-slate-900" data-mode-pill="saved">Saved prompt</span>
             </label>
             <label class="cursor-pointer">
-              <input type="radio" name="mode" value="one-off" {% if instance.default_mode == 'one-off' %}checked{% endif %} class="sr-only" data-mode-toggle>
-              <span class="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 data-[active=true]:bg-indigo-600 data-[active=true]:text-white" data-mode-pill="one-off">One-off</span>
+              <input type="radio" name="mode" value="one-off" {% if instance.default_mode == 'one-off' %}checked{% endif %} class="peer sr-only" data-mode-toggle>
+              <span class="inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 data-[active=true]:bg-indigo-700 data-[active=true]:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-indigo-500 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-white dark:peer-focus-visible:ring-offset-slate-900" data-mode-pill="one-off">One-off</span>
             </label>
           </div>
         </div>
@@ -191,7 +191,7 @@
         <section data-one-off-panel {% if instance.default_mode != 'one-off' %}hidden{% endif %} class="space-y-4">
           <label class="block">
             <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">One-off task</span>
-            <textarea name="task_input" rows="5" placeholder="Describe the one-off task to run." class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"></textarea>
+            <textarea name="task_input" rows="5" placeholder="Describe the one-off task to run." class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono" data-task-input {% if instance.default_mode == 'one-off' %}required{% endif %}></textarea>
           </label>
         </section>
 
@@ -368,6 +368,7 @@
       const promptSelect = form.querySelector('[data-prompt-select]');
       const promptScope = form.querySelector('[data-prompt-scope]');
       const promptName = form.querySelector('[data-prompt-name]');
+      const taskInput = form.querySelector('[data-task-input]');
       const description = form.querySelector('[data-prompt-description]');
       const hint = form.querySelector('[data-prompt-hint]');
       const memoryScope = form.querySelector('[data-memory-scope]');
@@ -426,6 +427,9 @@
         }
         if (oneOffButton) {
           oneOffButton.hidden = mode !== 'one-off';
+        }
+        if (taskInput instanceof HTMLTextAreaElement) {
+          taskInput.required = mode === 'one-off';
         }
         Object.entries(pills).forEach(function ([modeName, pill]) {
           if (pill) {

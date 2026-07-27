@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
+import { assertNoConsoleErrors, installConsoleErrorGate } from './layout';
+
 const pages = [
   { name: 'Group Settings', path: '/admin/orgs/newsletter/edit', identity: ['heading', 'Edit: Newsletter'] },
   { name: 'Agent roster', path: '/newsletter/agents', identity: ['heading', 'Instances assigned to Newsletter'] },
@@ -8,10 +10,12 @@ const pages = [
   { name: 'Agent Blueprint', path: '/newsletter/agents/advisor/blueprint', identity: ['tab', 'Blueprint'] },
   { name: 'Agent Runtime', path: '/newsletter/agents/advisor/runtime', identity: ['tab', 'Runtime'] },
   { name: 'Agent Routines', path: '/newsletter/agents/advisor/routines', identity: ['tab', 'Routines'] },
+  { name: 'Agent Prompts', path: '/newsletter/agents/advisor/prompts', identity: ['tab', 'Prompts'] },
   { name: 'Agent Memory', path: '/newsletter/agents/advisor/memory', identity: ['tab', 'Memory'] },
   { name: 'Agent Activity', path: '/newsletter/agents/advisor/activity', identity: ['tab', 'Activity'] },
   { name: 'Dashboard', path: '/newsletter/', identity: ['text', 'How the pipeline works'] },
   { name: 'Agent Library', path: '/admin/agent-library', identity: ['heading', 'Agent Library'] },
+  { name: 'Prompt Library', path: '/admin/agent-library/blueprints/advisor/prompts', identity: ['heading', 'Shared prompt source editor'] },
   { name: 'Memory Channels', path: '/admin/memory-channels', identity: ['heading', 'Memory Channels'] },
   { name: 'Memory Channel detail', path: '/admin/memory-channels/brand-strategy', identity: ['heading', 'Brand Strategy'] },
   { name: 'Jobs', path: '/newsletter/jobs', identity: ['heading', 'Jobs in Newsletter'] },
@@ -28,6 +32,7 @@ function identityLocator(page: Page, identity: (typeof pages)[number]['identity'
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
+  installConsoleErrorGate(page);
   await page.addInitScript((theme) => {
     if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
   }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
@@ -42,5 +47,6 @@ for (const { name, path, identity } of pages) {
     if (identity[0] === 'tab') await expect(landmark).toHaveAttribute('aria-current', 'page');
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
     expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+    await assertNoConsoleErrors(page);
   });
 }

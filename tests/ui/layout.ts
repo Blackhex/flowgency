@@ -6,7 +6,26 @@ type LayoutIssue = {
   second?: string;
 };
 
-export async function expectLayoutIntegrity(page: Page): Promise<void> {
+const pageErrors = new WeakMap<Page, string[]>();
+
+export function installConsoleErrorGate(page: Page): void {
+  const errors: string[] = [];
+  pageErrors.set(page, errors);
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      errors.push(`console: ${message.text()}`);
+    }
+  });
+  page.on('pageerror', (error) => {
+    errors.push(`pageerror: ${error.message}`);
+  });
+}
+
+export async function assertNoConsoleErrors(page: Page): Promise<void> {
+  expect(pageErrors.get(page) ?? []).toEqual([]);
+}
+
+export async function assertNoLayoutIssues(page: Page): Promise<void> {
   const issues = await page.evaluate<LayoutIssue[]>(() => {
     const results: LayoutIssue[] = [];
     const root = document.documentElement;
@@ -61,3 +80,5 @@ export async function expectLayoutIntegrity(page: Page): Promise<void> {
   });
   expect(issues).toEqual([]);
 }
+
+export const expectLayoutIntegrity = assertNoLayoutIssues;

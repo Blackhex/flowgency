@@ -2,18 +2,23 @@
 
 Agency has one platform-native singleton heartbeat. Global `agency.dispatch.interval` controls how often it checks all groups. Group `dispatch.enabled` and `daily_limit` control whether and how often that group submits work.
 
-Schedules are instance routines, not prompt files. A routine selects a standard Agent Skill:
+Schedules are instance routines, not prompt files. A routine selects one saved prompt from the effective catalog:
 
 ```yaml
 routines:
   - id: daily-review
-    skill: daily-review
+    prompt:
+      scope: blueprint
+      name: daily-review
+    arguments: [--brief]
     schedule:
       at: "09:00"
     memory:
       scope: routine
   - id: strategy-review
-    skill: strategic-review
+    prompt:
+      scope: instance
+      name: strategy-review
     schedule:
       every: 7d
     memory:
@@ -21,7 +26,7 @@ routines:
       channel: product-strategy
 ```
 
-The stable routine ID preserves routine-scoped memory when timing or arguments change. Scheduled runs use persisted memory selectors. The integration must prove it can discover and activate the selected skill before submission.
+The stable routine ID preserves routine-scoped memory when timing or arguments change. Scheduled runs use persisted memory selectors and snapshot the selected prompt authority before submission. Manual launches from the roster may instead run a saved prompt immediately or submit a one-off task without mutating the routine. The integration must prove it can discover the selected prompt and activate the selected skill when a routine requires one.
 
 Install and inspect the scheduler with:
 
