@@ -128,3 +128,29 @@ def test_missing_instance_prompt_still_reports_its_own_code(tmp_path):
 
     assert len(issues) == 1
     assert issues[0].code == "missing-instance-prompt"
+
+
+def test_build_services_reports_prompt_issues_without_failing_startup(tmp_path):
+    from agency.web.dependencies import build_services
+
+    _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    services = build_services(config_path)
+
+    assert services.startup_error is None
+    assert services.instances is not None
+    assert services.blueprint_library is not None
+    assert [issue.code for issue in services.prompt_issues] == ["invalid-prompt-frontmatter"]
+
+
+def test_build_services_reports_no_prompt_issues_for_a_valid_library(tmp_path):
+    from agency.web.dependencies import build_services
+
+    _write_blueprint(tmp_path / "agent-library", "reviewer", VALID_PROMPT)
+    config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
+
+    services = build_services(config_path)
+
+    assert services.startup_error is None
+    assert services.prompt_issues == ()

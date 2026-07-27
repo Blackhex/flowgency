@@ -9,6 +9,7 @@ from fastapi import Request
 
 from agency.blueprints import BlueprintLibrary, CompilationCache
 from agency.configuration import ConfigStore, ValidationFailed
+from agency.configuration.issues import ValidationIssue
 from agency.configuration.paths import (
     initialize_storage_directories,
     validate_resolved_paths,
@@ -34,6 +35,7 @@ class AgencyServices:
     integrations: Mapping[str, BaseIntegration]
     startup_error: Exception | None = None
     prompt_service: PromptService | None = None
+    prompt_issues: tuple[ValidationIssue, ...] = ()
 
 
 def build_services(config_path: Path | None = None) -> AgencyServices:
@@ -66,8 +68,6 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             store=prompt_store,
         )
         catalog_issues = validate_prompt_catalogs(snapshot, blueprint_library, prompt_store)
-        if catalog_issues:
-            raise ValidationFailed(catalog_issues)
         job_store = JobStore(Path(memory_root))
         instances = InstanceService(
             config_store=config_store,
@@ -87,6 +87,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             instances=instances,
             integrations=REGISTRY,
             startup_error=None,
+            prompt_issues=catalog_issues,
         )
     except Exception as exc:
         return AgencyServices(
