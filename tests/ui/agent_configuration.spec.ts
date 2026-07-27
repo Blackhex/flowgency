@@ -1,7 +1,18 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
 import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
+
+// Absolute paths vary in length per checkout; pin them to one line so they cannot reflow the page.
+async function pinToSingleLine(locator: Locator) {
+  await locator.evaluateAll((elements) => {
+    for (const element of elements as HTMLElement[]) {
+      element.style.whiteSpace = 'nowrap';
+      element.style.overflow = 'hidden';
+      element.style.textOverflow = 'clip';
+    }
+  });
+}
 
 const tabs = ['Profile', 'Blueprint', 'Runtime', 'Routines', 'Prompts', 'Memory', 'Activity'];
 
@@ -70,11 +81,16 @@ test('group settings leads to the sole roster and inherited runtime', async ({ p
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('Copilot');
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('copilot');
   await expect(page.getByRole('heading', { name: 'Effective preview' })).toBeVisible();
+  const additionalRootsField = page.locator('textarea[name="additional_roots"]');
+  await expect(additionalRootsField).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]groups[\\/]newsletter[\\/]editorial$/);
+  await pinToSingleLine(inheritedRoot);
+  await pinToSingleLine(groupRoot);
+  await pinToSingleLine(additionalRoot);
   await assertNoLayoutIssues(page);
   // Sandbox roots are absolute and vary per checkout, so compare them as text only.
   await expect(page).toHaveScreenshot('agent-runtime.png', {
     fullPage: true,
-    mask: [inheritedRoot, groupRoot, additionalRoot],
+    mask: [inheritedRoot, groupRoot, additionalRoot, additionalRootsField],
   });
   await assertNoConsoleErrors(page);
 });
