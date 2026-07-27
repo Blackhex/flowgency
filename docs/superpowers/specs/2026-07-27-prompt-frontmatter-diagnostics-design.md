@@ -147,6 +147,34 @@ The four affected files live in the operator's agent library outside this reposi
 
 Each file gains frontmatter with `name` equal to its slug and a one-line `description` derived from its existing body. None of the four takes arguments, so `argument-hint` is omitted. Bodies are unchanged.
 
+## Setup skill end-to-end test
+
+No existing test exercises the artifacts a setup run produces. `tests/test_agency_setup_skill.py` asserts prose in `SKILL.md`, and `tests/test_interactive_setup.py` covers launcher mechanics. Neither feeds a produced agent library to the real loaders, which is why a prompt template that never existed went unnoticed.
+
+A new `tests/test_setup_skill_e2e.py` closes that gap by treating the skill's own templates as executable input and the application's validators as the oracle.
+
+**Materialize.** The test extracts the fenced `markdown` blocks for Blueprint AGENTS.md, Standard Agent Skill, and Standard Task Prompt from `references/templates.md`, substitutes every `{PLACEHOLDER}` with a conforming concrete value, and writes a temporary agent library:
+
+```text
+{tmp}/agent-library/reviewer/AGENTS.md
+{tmp}/agent-library/reviewer/.agents/skills/diff-review/SKILL.md
+{tmp}/agent-library/reviewer/.agents/prompts/diff-review.prompt.md
+```
+
+It then writes a `config.yaml` built from the canonical group registration YAML template in the same file, repointed at temporary storage roots, declaring one group, one agent instance bound to the `reviewer` blueprint, and one routine selecting the blueprint-scoped `diff-review` prompt.
+
+**Assert.** Against that library and config:
+
+- `build_services` returns fully constructed services with `startup_error is None` and `prompt_issues == ()`.
+- `BlueprintLibrary.inspect("reviewer")` yields the skill and a `PromptDocument` whose `name` equals the file slug and whose `description` is the substituted value.
+- `christag-agency validate --config {path}` exits zero and reports no issues.
+
+**Negative control.** The same fixture with the prompt frontmatter stripped must make `validate` exit non-zero and report `invalid-prompt-frontmatter` with the hint about terminating the frontmatter. This proves the test would have caught the reported defect rather than merely passing alongside it.
+
+**Template parity.** The extracted templates from `skills/agency-setup/references/templates.md` and `.github/skills/agency-setup/references/templates.md` must be identical, so the two skill copies cannot drift apart silently.
+
+This test fails today for two independent reasons: no Task Prompt template exists to extract, and the resulting library would not validate. Both are fixed by this design.
+
 ## Testing
 
 - `validate_prompt_catalogs` returns the parser's own issue verbatim for a blueprint prompt with no frontmatter: code `invalid-prompt-frontmatter` and the hint about terminating the frontmatter. This is the regression test for the reported defect.
@@ -159,6 +187,7 @@ Each file gains frontmatter with `name` equal to its slug and a one-line `descri
 - Job submission for a broken prompt fails with the structured issue rather than a missing-prompt error.
 - `christag-agency validate` exits non-zero and prints the issue for a broken library, and exits zero for a clean config.
 - `tests/test_agency_setup_skill.py` asserts the prompt template exists in both skill copies and that Phase 5 references prompt validation.
+- `tests/test_setup_skill_e2e.py` covers the end-to-end template conformance described above, including the negative control and template parity between the two skill copies.
 
 ## Risks
 
