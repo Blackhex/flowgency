@@ -44,7 +44,7 @@ The fleet bar colours each agent from its schedule and its last outcome.
 - **Green** — the agent has run, nothing is overdue, and the last job did not fail.
 - **Amber** — a routine is due. The expected time has passed but is still inside
   the grace window of `agency.dispatch.interval` plus two minutes.
-- **Red** — the last finished job failed, or an enabled routine is past its
+- **Red** — the newest executed job failed, or an enabled routine is past its
   expected time by more than the grace window.
 
 Lateness is measured against the markers the dispatch runner writes:
