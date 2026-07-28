@@ -43,6 +43,13 @@ from agency.jobs import (
 )
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
+from agency.jobs.store import latest_terminal_job
+from agency.health import (
+    evaluate_agent_health,
+    grace_window,
+    routine_schedules,
+    schedule_state,
+)
 from agency.prompts import resolve_catalog_prompt
 from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, SKIP_EXECUTION_SUMMARY
 import json as json_module
@@ -1011,16 +1018,24 @@ app.include_router(agent_detail_router)
 app.include_router(jobs_router)
 
 
-def agent_health_status(last_seen: datetime | None) -> str:
-    """Return health status based on last seen time. green/amber/red."""
-    if last_seen is None:
-        return "red"
-    hours = (clock_now() - last_seen).total_seconds() / 3600
-    if hours < 24:
-        return "green"
-    elif hours < 48:
-        return "amber"
-    return "red"
+def _agent_health(g: dict, agent_name: str, routines, last_seen: datetime | None) -> str:
+    """Colour an agent from its schedule, its last run, and its last outcome."""
+    dispatch_enabled = bool(g.get("dispatch", {}).get("enabled", False))
+    schedules = routine_schedules(routines or ()) if dispatch_enabled else ()
+    state = schedule_state(
+        schedules,
+        logs_root=Path(g["logs"]),
+        agent_name=agent_name,
+        now=clock_now(),
+        grace=grace_window(int(g.get("dispatch_interval", 15))),
+    )
+    terminal = latest_terminal_job(tuple(g.get("job_paths", ())), agent_name)
+    executed = terminal is not None and terminal.status in {"complete", "failed"}
+    return evaluate_agent_health(
+        has_run=last_seen is not None or executed,
+        last_job_failed=terminal is not None and terminal.status == "failed",
+        schedule=state,
+    )
 
 
 def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
@@ -1047,7 +1062,7 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             "emoji": identity.get("emoji", ""),
             "last_run": last_run,
             "last_seen": last_seen,
-            "health": agent_health_status(last_seen),
+            "health": _agent_health(g, agent_name, instance.get("routines"), last_seen),
             "open_observations": open_count,
             "is_subagent": False,
             "has_headshot": False,
@@ -1148,7 +1163,7 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
                 "blueprint": instance.blueprint,
                 "integration": instance.integration,
                 "open_observations": sum(1 for item in observations if item.get("agent") == instance.name and item.get("status") == "open"),
-                "health": agent_health_status(last_seen),
+                "health": _agent_health(g, instance.name, instance.routines, last_seen),
                 "memory_label": _dashboard_memory_label(selector, snapshot.config.memory.channels),
             }
         )

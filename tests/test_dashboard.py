@@ -357,7 +357,7 @@ def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_pa
 
     fleet = build_dashboard_fleet(app_mod.get_group("newsletter"))
 
-    assert fleet[0]["health"] == "red"
+    assert fleet[0]["health"] == "gray"
     assert fleet[0]["running"] is True
 
 
@@ -489,12 +489,12 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
     assert fleet["advisor"]["job_status"] == "Queued"
     assert fleet["advisor"]["job_href"] == "/newsletter/jobs/job-queued"
     assert fleet["advisor"]["running"] is False
-    assert fleet["advisor"]["health"] == "red"
+    assert fleet["advisor"]["health"] == "gray"
     assert fleet["researcher"]["job_status_key"] == "waiting_for_memory"
     assert fleet["researcher"]["job_status"] == "Waiting for memory"
     assert fleet["researcher"]["job_href"] == "/newsletter/jobs/job-waiting"
     assert fleet["researcher"]["running"] is False
-    assert fleet["researcher"]["health"] == "red"
+    assert fleet["researcher"]["health"] == "gray"
     assert fleet["writer"]["job_status_key"] == "running"
     assert fleet["writer"]["job_status"] == "Running"
     assert fleet["writer"]["job_href"] == "/newsletter/jobs/job-running"
