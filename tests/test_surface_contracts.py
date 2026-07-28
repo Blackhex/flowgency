@@ -55,7 +55,7 @@ def _snapshot_bytes(root: Path) -> dict[str, bytes]:
 def _active_documentation_paths() -> list[Path]:
     return [
         REPO_ROOT / "README.md",
-        REPO_ROOT / "CLAUDE.md",
+        REPO_ROOT / "AGENTS.md",
         *sorted((REPO_ROOT / "kb").glob("*.md")),
         *sorted((REPO_ROOT / "skills" / "agency-setup").rglob("*.md")),
     ]
