@@ -13,7 +13,8 @@
 ## Global Constraints
 
 - Work in the existing worktree `.worktrees/job-log-links-and-session-resume` on branch `feat/job-log-links-and-session-resume`. Run every command from that directory.
-- Test command: `.venv/Scripts/python -m pytest tests/ -q`. Focused runs during a task, full suite before the task's commit.
+- Test command: `python -m pytest tests/ -q`, run from the worktree root. There is no `.venv` in this repository despite what AGENTS.md shows. Focused runs during a task, full suite before the task's commit. The full suite is around 1400 tests and takes a few minutes.
+- `tests/test_repository_boundaries.py` greps the whole tracked tree for two prohibited superseded-layout terms and fails the suite if either appears anywhere, including in documentation. Run that test before committing any prose. Describe superseded concepts without naming them.
 - Commit messages follow Conventional Commits with an imperative, lowercase description of at most 72 characters including the type prefix. Bodies wrap at 72 columns and explain what and why.
 - Do not stage or modify `config.yaml`, `config.yaml.lock`, group-state directories, logs, or other untracked runtime data.
 - The session id validation pattern is exactly `^[A-Za-z0-9_-]{1,128}$`. Use this literal in every place it appears.
@@ -114,7 +115,7 @@ def test_job_detail_omits_log_link_without_path(monkeypatch, tmp_path, raw_confi
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_job_routes.py -k "links_logs_to_viewer or omits_log_link" -q`
+Run: `python -m pytest tests/test_job_routes.py -k "links_logs_to_viewer or omits_log_link" -q`
 
 Expected: both FAIL. The first fails because the rendered page contains the bare path but no `/newsletter/logs/view?path=` substring.
 
@@ -174,13 +175,13 @@ with:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `.venv/Scripts/python -m pytest tests/test_job_routes.py -q`
+Run: `python -m pytest tests/test_job_routes.py -q`
 
 Expected: PASS, including the pre-existing `test_job_detail_uses_friendly_memory_and_artifacts`.
 
 - [ ] **Step 6: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 
 Expected: PASS with no new failures.
 
@@ -354,7 +355,7 @@ If `IntegrationRunRequest`, `EffectiveRuntimePolicy`, or `ResolvedToolPolicy` ar
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_integration_sidecar.py -k "session_id or resume_command" -q`
+Run: `python -m pytest tests/test_integration_sidecar.py -k "session_id or resume_command" -q`
 
 Expected: FAIL with `AttributeError: type object 'CopilotIntegration' has no attribute '_parse_session_id'` and `'BaseIntegration' object has no attribute 'resume_command'`.
 
@@ -441,13 +442,13 @@ and the `TimeoutExpired` return becomes:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `.venv/Scripts/python -m pytest tests/test_integration_sidecar.py -q`
+Run: `python -m pytest tests/test_integration_sidecar.py -q`
 
 Expected: PASS.
 
 - [ ] **Step 6: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 
 Expected: PASS.
 
@@ -526,7 +527,7 @@ def test_job_record_loads_payload_without_session_id(tmp_path):
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_job_models.py -k session_id -q`
+Run: `python -m pytest tests/test_job_models.py -k session_id -q`
 
 Expected: FAIL with `TypeError: JobRecord.__init__() got an unexpected keyword argument 'session_id'`.
 
@@ -541,7 +542,7 @@ In `agency/jobs/models.py`, add the field as the last entry of `JobRecord`, afte
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `.venv/Scripts/python -m pytest tests/test_job_models.py -k session_id -q`
+Run: `python -m pytest tests/test_job_models.py -k session_id -q`
 
 Expected: PASS.
 
@@ -575,13 +576,13 @@ Add `session_id=result.session_id` to the three `_terminalize_failure` and `_mer
 
 - [ ] **Step 6: Run the job execution tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_job_execution.py tests/test_job_models.py tests/test_job_store_terminal.py -q`
+Run: `python -m pytest tests/test_job_execution.py tests/test_job_models.py tests/test_job_store_terminal.py -q`
 
 Expected: PASS.
 
 - [ ] **Step 7: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 
 Expected: PASS.
 
@@ -756,7 +757,7 @@ def test_resume_unknown_job_is_not_found(monkeypatch, tmp_path, raw_config):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_job_routes.py -k resume -q`
+Run: `python -m pytest tests/test_job_routes.py -k resume -q`
 
 Expected: FAIL. The POST tests return 405 because the route does not exist; the detail tests fail on the missing substrings.
 
@@ -929,13 +930,13 @@ Add this script at the end of the `{% block content %}`, before `{% endblock %}`
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `.venv/Scripts/python -m pytest tests/test_job_routes.py -q`
+Run: `python -m pytest tests/test_job_routes.py -q`
 
 Expected: PASS.
 
 - [ ] **Step 7: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 
 Expected: PASS.
 
@@ -1054,7 +1055,7 @@ def test_backfill_dry_run_writes_nothing(monkeypatch, tmp_path, raw_config):
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_backfill_job_session_ids.py -q`
+Run: `python -m pytest tests/test_backfill_job_session_ids.py -q`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'tools.backfill_job_session_ids'`.
 
@@ -1148,19 +1149,19 @@ The re-read inside the lock is not redundant with the one above it. The outer re
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `.venv/Scripts/python -m pytest tests/test_backfill_job_session_ids.py -q`
+Run: `python -m pytest tests/test_backfill_job_session_ids.py -q`
 
 Expected: PASS.
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 
 Expected: PASS.
 
 - [ ] **Step 6: Verify against real data with a dry run**
 
-Run: `.venv/Scripts/python -m tools.backfill_job_session_ids --config ../../config.yaml --dry-run`
+Run: `python -m tools.backfill_job_session_ids --config ../../config.yaml --dry-run`
 
 Expected: a per-record listing and a count, with no file modified. Confirm with `git status` that nothing changed and that no runtime file was touched.
 
@@ -1196,6 +1197,6 @@ data and is not a shipped command.
 
 ## Verification before completion
 
-- [ ] Run `.venv/Scripts/python -m pytest tests/ -q` from the worktree root and confirm it is green.
+- [ ] Run `python -m pytest tests/ -q` from the worktree root and confirm it is green.
 - [ ] Start the dashboard, open a completed job, and confirm: both log links open the viewer; the resume command is shown and copies; and, for a job with a session id, the resume button appears.
 - [ ] Confirm `git status` shows no changes to `config.yaml`, `config.yaml.lock`, or any group-state directory.
