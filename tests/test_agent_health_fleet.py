@@ -180,3 +180,9 @@ def test_cancelled_newer_than_failed_keeps_red(tmp_path):
 def test_complete_record_with_no_log_file_is_green(tmp_path):
     _write_job(tmp_path, "job-1", status="complete", completed_at="2026-07-28T10:00:00+00:00")
     assert _health(tmp_path, routines=[]) == "green"
+
+
+def test_complete_followed_by_cancelled_is_green(tmp_path):
+    _write_job(tmp_path, "job-old", status="complete", completed_at="2026-07-27T10:00:00+00:00")
+    _write_job(tmp_path, "job-new", status="cancelled", completed_at="2026-07-28T10:00:00+00:00")
+    assert _health(tmp_path, routines=[]) == "green"
