@@ -19,7 +19,13 @@ from .models import (
     RuntimePolicySnapshot,
 )
 from .resolution import JobValidationError, resolve_job_request
-from .store import active_jobs, cancel_job, group_operation_lock_path, latest_executed_job, latest_terminal_job
+from .store import (
+    active_jobs,
+    cancel_job,
+    group_operation_lock_path,
+    latest_executed_job,
+    latest_terminal_job,
+)
 from .submission import JobSubmissionError, submit_job_request
 
 
