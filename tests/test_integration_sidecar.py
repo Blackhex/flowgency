@@ -1291,3 +1291,117 @@ class TestCopilot:
 
         assert text == "WRITE_TOKEN"
         assert changes == []
+
+    def test_parse_session_id_reads_result_event(self):
+        import json
+        from agency.integrations.agency.copilot import CopilotIntegration
+
+        raw = "\n".join([
+            json.dumps({"type": "assistant", "data": {"text": "hi"}}),
+            "not json at all",
+            json.dumps({"type": "result", "sessionId": "5980e47a-b681-4e22"}),
+        ])
+
+        assert CopilotIntegration._parse_session_id(raw) == "5980e47a-b681-4e22"
+
+    def test_parse_session_id_returns_none_without_result(self):
+        import json
+        from agency.integrations.agency.copilot import CopilotIntegration
+
+        raw = json.dumps({"type": "assistant", "data": {"text": "hi"}})
+
+        assert CopilotIntegration._parse_session_id(raw) is None
+
+    def test_base_integration_has_no_resume_command(self):
+        from agency.integrations import BaseIntegration
+
+        assert BaseIntegration().resume_command("abc") is None
+
+    def test_copilot_resume_command_uses_resume_flag(self):
+        assert CopilotIntegration().resume_command("abc") == (
+            "copilot",
+            "--resume",
+            "abc",
+        )
+
+    def test_copilot_run_captures_session_id(self, tmp_agent_dir, monkeypatch):
+        import json
+        import agency.integrations.agency.copilot as copilot_mod
+
+        prompt = tmp_agent_dir / "p.prompt"
+        prompt.write_text("do the thing")
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = json.dumps({"type": "result", "sessionId": "sess-42"})
+            stderr = ""
+
+        monkeypatch.setattr(copilot_mod.subprocess, "run", lambda *a, **k: FakeCompleted())
+        monkeypatch.setattr(
+            CopilotIntegration,
+            "resolve_executable",
+            lambda self: "copilot",
+        )
+
+        request = IntegrationRunRequest(
+            workspace_root=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+
+        assert CopilotIntegration().run(request).session_id == "sess-42"
+
+    def test_copilot_run_captures_session_id_on_timeout(self, tmp_agent_dir, monkeypatch):
+        import json
+        import subprocess
+        import agency.integrations.agency.copilot as copilot_mod
+
+        prompt = tmp_agent_dir / "p.prompt"
+        prompt.write_text("do the thing")
+
+        partial = json.dumps({"type": "result", "sessionId": "sess-timeout"})
+
+        def fake_run(*args, **kwargs):
+            raise subprocess.TimeoutExpired(
+                cmd="copilot",
+                timeout=60,
+                output=partial,
+                stderr="",
+            )
+
+        monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            CopilotIntegration,
+            "resolve_executable",
+            lambda self: "copilot",
+        )
+
+        request = IntegrationRunRequest(
+            workspace_root=tmp_agent_dir,
+            launch_dir=tmp_agent_dir / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                sandbox_mode="unrestricted",
+                sandbox_roots=(),
+                tools=ResolvedToolPolicy("all", ()),
+            ),
+            skill=None,
+            skill_arguments=(),
+        )
+
+        result = CopilotIntegration().run(request)
+
+        assert result.exit_code == 124
+        assert result.session_id == "sess-timeout"
+
