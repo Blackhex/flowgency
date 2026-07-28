@@ -11,8 +11,8 @@
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-07-28-agent-health-signals-design.md`. Read it before Task 1.
-- Work inside the worktree `.worktrees/agent-health-signals` on branch `agent-health-signals`. Run every command from that directory.
-- Test command: `.venv/Scripts/python -m pytest tests/ -q`. Single file: `.venv/Scripts/python -m pytest tests/test_health.py -q`.
+- Work inside the worktree `.worktrees/agent-health-signals` on branch `agent-health-signals`. Run every command from that directory. Never commit to `master` or to the main checkout at `C:/Projekty/christag-agency`.
+- The interpreter is `python` on `PATH`; this checkout has no `.venv`. Every `.venv/Scripts/python` below is to be read as `python`. Test command: `python -m pytest tests/ -q`. Single file: `python -m pytest tests/test_health.py -q`. Run from the worktree root so the local `agency` and `tests` packages resolve.
 - Health values are exactly the strings `"green"`, `"amber"`, `"gray"`, `"red"`. No other spellings.
 - Schedule states are exactly the strings `"overdue"` and `"due"`, or `None`.
 - Grace window is `dispatch.interval + 2` minutes; the default interval is `15`, so the default grace is 17 minutes.
