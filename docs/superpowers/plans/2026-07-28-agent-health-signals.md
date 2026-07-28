@@ -6,7 +6,7 @@
 
 **Architecture:** Marker-filename construction and `every`-interval parsing move out of the dispatch runner into `agency/dispatch/schedule.py` so the runner and the dashboard cannot drift. A new `agency/health.py` owns the health model as pure functions over plain values. `agency/jobs/store.py` gains `latest_terminal_job`. `agency/app.py` wires both fleet builders to the new module, repairs `compute_next_run_detail`, and publishes three partitioned counters that `home.html` renders.
 
-**Tech Stack:** Python 3, FastAPI, Jinja2, Pydantic v2, pytest, Tailwind utility classes in templates.
+**Tech Stack:** Python 3, FastAPI, Jinja2, Pydantic, pytest, Tailwind utility classes in templates.
 
 ## Global Constraints
 
