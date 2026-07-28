@@ -154,6 +154,7 @@ def _terminalize_failure(
     changed_files: list[dict[str, object]] | None = None,
     base_sha: str | None = None,
     memory_publication: dict[str, object] | None = None,
+    session_id: str | None = None,
 ) -> JobRecord:
     record = read_job(job_path)
     if record.status == "cancelled":
@@ -175,6 +176,7 @@ def _terminalize_failure(
         execution_summary=summary,
         base_sha=base_sha,
         memory_publication=memory_publication,
+        session_id=session_id,
     )
 
 
@@ -190,6 +192,7 @@ def _merge_failed_terminal_metadata(
     changed_files: list[dict[str, object]] | None = None,
     base_sha: str | None = None,
     memory_publication: dict[str, object] | None = None,
+    session_id: str | None = None,
 ) -> JobRecord:
     current = read_job(job_path)
     if current.status != "failed":
@@ -220,6 +223,7 @@ def _merge_failed_terminal_metadata(
         execution_summary=current.execution_summary or summary,
         base_sha=current.base_sha or base_sha,
         memory_publication=(merged_memory_publication or None),
+        session_id=current.session_id or session_id,
     )
     write_job(job_path, updated)
     return updated
@@ -472,6 +476,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 canonical_files,
                             )
                         },
+                        session_id=result.session_id,
                     )
                 else:
                     try:
@@ -510,6 +515,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 changed_files=changes,
                                 execution_summary=summary,
                                 base_sha=base_sha,
+                                session_id=result.session_id,
                             )
                             write_job(job_path, final)
                     except MemoryPublicationError as error:
@@ -535,6 +541,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 memory_publication={
                                     "failed_artifacts": artifacts,
                                 },
+                                session_id=result.session_id,
                             )
                         else:
                             final = _terminalize_failure(
@@ -552,6 +559,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 memory_publication={
                                     "failed_artifacts": artifacts,
                                 },
+                                session_id=result.session_id,
                             )
         except LockCancelledError:
             final = _mark_cancelled_if_waiting(job_path)
