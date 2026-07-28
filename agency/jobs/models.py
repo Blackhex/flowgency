@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from agency.blueprints.cache import CacheRef, CompiledArtifact
-from agency.configuration.models import PromptSelector
+from agency.configuration.models import PromptSelector, MemorySelector
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
 
 
@@ -123,7 +123,7 @@ class JobRequest:
     invocation_input: str = ""
     job_id: str = field(default_factory=lambda: uuid4().hex)
     routine_id: str | None = None
-    memory_override: Any | None = None
+    memory_override: MemorySelector | None = None
     timeout_override: int | None = None
     trigger_context: dict[str, Any] | None = None
 
