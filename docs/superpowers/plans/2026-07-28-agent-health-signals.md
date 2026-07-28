@@ -4,7 +4,7 @@
 
 **Goal:** Replace the dashboard's elapsed-time agent health color with a four-state signal that distinguishes "never run" (gray) from a broken promise (red), where red means a failed job or a routine the dispatch runner did not fire on schedule.
 
-**Architecture:** Marker-filename construction moves out of the dispatch runner into `agency/dispatch/markers.py` so the runner and the dashboard cannot drift. A new `agency/health.py` owns the health model as pure functions over plain values. `agency/jobs/store.py` gains `latest_terminal_job`. `agency/app.py` wires both fleet builders to the new module, repairs `compute_next_run_detail`, and publishes three partitioned counters that `home.html` renders.
+**Architecture:** Marker-filename construction and `every`-interval parsing move out of the dispatch runner into `agency/dispatch/schedule.py` so the runner and the dashboard cannot drift. A new `agency/health.py` owns the health model as pure functions over plain values. `agency/jobs/store.py` gains `latest_terminal_job`. `agency/app.py` wires both fleet builders to the new module, repairs `compute_next_run_detail`, and publishes three partitioned counters that `home.html` renders.
 
 **Tech Stack:** Python 3, FastAPI, Jinja2, Pydantic v2, pytest, Tailwind utility classes in templates.
 
@@ -22,28 +22,39 @@
 
 ---
 
-### Task 1: Shared dispatch marker paths
+### Task 1: Shared dispatch schedule primitives
 
 **Files:**
-- Create: `agency/dispatch/markers.py`
-- Modify: `agency/dispatch/run.py` (remove `_marker_safe`, import the helpers, use them at the four marker sites)
-- Test: `tests/test_dispatch_markers.py`
+- Create: `agency/dispatch/schedule.py`
+- Modify: `agency/dispatch/run.py` (remove `_marker_safe` and the `re` import, rewrite `check_every_rule` on the shared parser, use the marker helpers at the four marker sites)
+- Test: `tests/test_dispatch_schedule.py`
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
 - Produces:
   - `marker_safe(value: str) -> str`
+  - `parse_every(value: str | None) -> timedelta | None`
   - `every_marker_path(logs_root: Path, agent_name: str, routine_id: str) -> Path`
   - `at_marker_path(logs_root: Path, agent_name: str, routine_id: str, day: str) -> Path` where `day` is a `YYYY-MM-DD` string
 
+This module is the single definition of everything the runner and the dashboard must agree on about schedules. Three copies of the `every` parse exist today, in `check_every_rule` and in `compute_next_run_detail`; Tasks 3 and 6 consume this one instead of adding a fourth.
+
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_dispatch_markers.py`:
+Create `tests/test_dispatch_schedule.py`:
 
 ```python
+from datetime import timedelta
 from pathlib import Path
 
-from agency.dispatch.markers import at_marker_path, every_marker_path, marker_safe
+import pytest
+
+from agency.dispatch.schedule import (
+    at_marker_path,
+    every_marker_path,
+    marker_safe,
+    parse_every,
+)
 
 
 def test_marker_safe_replaces_unsafe_runs_with_a_single_hyphen():
@@ -60,6 +71,24 @@ def test_marker_safe_strips_leading_and_trailing_dots_and_hyphens():
 
 def test_marker_safe_falls_back_to_item_when_nothing_survives():
     assert marker_safe("///") == "item"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("30m", timedelta(minutes=30)),
+        ("6h", timedelta(hours=6)),
+        ("7d", timedelta(days=7)),
+        ("0m", timedelta(0)),
+    ],
+)
+def test_parse_every_reads_each_unit(value, expected):
+    assert parse_every(value) == expected
+
+
+@pytest.mark.parametrize("value", [None, "", "soon", "6", "h", "6 h", "6w", "-1d"])
+def test_parse_every_rejects_malformed_intervals(value):
+    assert parse_every(value) is None
 
 
 def test_every_marker_path_sits_at_the_logs_root():
@@ -81,26 +110,37 @@ def test_marker_paths_sanitize_both_identifiers():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_dispatch_markers.py -q`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.dispatch.markers'`
+Run: `.venv/Scripts/python -m pytest tests/test_dispatch_schedule.py -q`
+Expected: FAIL with `ModuleNotFoundError: No module named 'agency.dispatch.schedule'`
 
 - [ ] **Step 3: Write the module**
 
-Create `agency/dispatch/markers.py`:
+Create `agency/dispatch/schedule.py`:
 
 ```python
-"""Filenames the dispatch runner writes to record what it fired."""
+"""Schedule primitives shared by the dispatch runner and the dashboard."""
 
 from __future__ import annotations
 
-import re
+from datetime import timedelta
 from pathlib import Path
+import re
 
 _UNSAFE = re.compile(r"[^a-zA-Z0-9._-]+")
+_EVERY = re.compile(r"(\d+)(m|h|d)")
+_UNIT_SECONDS = {"m": 60, "h": 3600, "d": 86400}
 
 
 def marker_safe(value: str) -> str:
     return _UNSAFE.sub("-", value).strip(".-") or "item"
+
+
+def parse_every(value: str | None) -> timedelta | None:
+    """Return the period of an ``every`` schedule, or None when malformed."""
+    match = _EVERY.fullmatch(value or "")
+    if match is None:
+        return None
+    return timedelta(seconds=int(match.group(1)) * _UNIT_SECONDS[match.group(2)])
 
 
 def every_marker_path(logs_root: Path, agent_name: str, routine_id: str) -> Path:
@@ -120,15 +160,53 @@ def at_marker_path(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv/Scripts/python -m pytest tests/test_dispatch_markers.py -q`
-Expected: PASS, 7 passed
+Run: `.venv/Scripts/python -m pytest tests/test_dispatch_schedule.py -q`
+Expected: PASS, 20 passed
 
-- [ ] **Step 5: Point the runner at the shared helpers**
+- [ ] **Step 5: Point the runner at the shared module**
 
-In `agency/dispatch/run.py`, add to the imports below `from agency.configuration import resolve_group_paths`:
+In `agency/dispatch/run.py`, delete the now-unused `import re` from the imports, and add below `from agency.configuration import resolve_group_paths`:
 
 ```python
-from agency.dispatch.markers import at_marker_path, every_marker_path
+from agency.dispatch.schedule import at_marker_path, every_marker_path, parse_every
+```
+
+Replace `check_every_rule` entirely:
+
+```python
+def check_every_rule(marker_file: Path, interval_str: str) -> bool:
+    """Check if enough time has elapsed since marker file mtime."""
+    match = re.fullmatch(r"(\d+)(m|h|d)", interval_str)
+    if not match:
+        log.warning("Invalid every interval: %s", interval_str)
+        return False
+    val = int(match.group(1))
+    unit = match.group(2)
+    if unit == "m":
+        seconds = val * 60
+    elif unit == "h":
+        seconds = val * 3600
+    else:
+        seconds = val * 86400
+    if not marker_file.exists():
+        return True
+    elapsed = time.time() - marker_file.stat().st_mtime
+    return elapsed >= seconds
+```
+
+with:
+
+```python
+def check_every_rule(marker_file: Path, interval_str: str) -> bool:
+    """Check if enough time has elapsed since marker file mtime."""
+    period = parse_every(interval_str)
+    if period is None:
+        log.warning("Invalid every interval: %s", interval_str)
+        return False
+    if not marker_file.exists():
+        return True
+    elapsed = time.time() - marker_file.stat().st_mtime
+    return elapsed >= period.total_seconds()
 ```
 
 Delete this function entirely:
@@ -138,14 +216,14 @@ def _marker_safe(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip(".-") or "item"
 ```
 
-Inside the routine loop, replace these two lines:
+Inside the routine loop, delete both of these lines:
 
 ```python
                 marker_id = _marker_safe(routine.id)
                 agent_marker = _marker_safe(agent_name)
 ```
 
-with nothing — delete both. Then replace the `should_run` block:
+Then replace the `should_run` block:
 
 ```python
                 should_run = False
@@ -197,18 +275,18 @@ with:
                         every_marker_path(logs_root, agent_name, routine.id).touch()
 ```
 
-`log_dir` is still used for the daily-limit glob, so leave its assignment in place. `re` is still used by `check_every_rule`, so leave the import.
+`log_dir` is still used for the daily-limit glob, so leave its assignment in place.
 
 - [ ] **Step 6: Run the dispatch tests to verify no behavior changed**
 
-Run: `.venv/Scripts/python -m pytest tests/test_dispatch_run.py tests/test_dispatch_markers.py -q`
+Run: `.venv/Scripts/python -m pytest tests/test_dispatch_run.py tests/test_dispatch_schedule.py -q`
 Expected: PASS, all tests pass
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/dispatch/markers.py agency/dispatch/run.py tests/test_dispatch_markers.py
-git commit -m "refactor(dispatch): extract marker path construction"
+git add agency/dispatch/schedule.py agency/dispatch/run.py tests/test_dispatch_schedule.py
+git commit -m "refactor(dispatch): extract shared schedule primitives"
 ```
 
 ---
@@ -459,7 +537,7 @@ git commit -m "feat(jobs): add newest terminal job lookup"
 - Test: `tests/test_health.py`
 
 **Interfaces:**
-- Consumes: `at_marker_path`, `every_marker_path` from Task 1.
+- Consumes: `at_marker_path`, `every_marker_path`, `parse_every` from Task 1.
 - Produces:
   - `RoutineSchedule` — a `NamedTuple` with fields `routine_id: str`, `at: str | None`, `every: str | None`, `enabled: bool`, `conditional: bool`
   - `routine_schedules(routines: Iterable[object]) -> tuple[RoutineSchedule, ...]` accepting either pydantic `Routine` models or their `model_dump(mode="json")` mappings
@@ -678,16 +756,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
-import re
 from typing import NamedTuple
 
-from agency.dispatch.markers import at_marker_path, every_marker_path
+from agency.dispatch.schedule import at_marker_path, every_marker_path, parse_every
 
 OVERDUE = "overdue"
 DUE = "due"
-
-_EVERY = re.compile(r"(\d+)(m|h|d)")
-_UNIT_SECONDS = {"m": 60, "h": 3600, "d": 86400}
 
 
 class RoutineSchedule(NamedTuple):
@@ -817,15 +891,14 @@ def _every_state(
     now: datetime,
     grace: timedelta,
 ) -> str | None:
-    match = _EVERY.fullmatch(schedule.every or "")
-    if match is None:
+    period = parse_every(schedule.every)
+    if period is None:
         return None
     marker = every_marker_path(logs_root, agent_name, schedule.routine_id)
     try:
         fired_at = datetime.fromtimestamp(marker.stat().st_mtime)
     except OSError:
         return None
-    period = timedelta(seconds=int(match.group(1)) * _UNIT_SECONDS[match.group(2)])
     return _lateness(now, fired_at + period, grace)
 
 
@@ -915,7 +988,7 @@ git commit -m "feat(web): expose the dispatch interval on runtime groups"
 
 **Interfaces:**
 - Consumes: `routine_schedules`, `schedule_state`, `evaluate_agent_health`, `grace_window` from Task 3; `latest_terminal_job` from Task 2; `g["dispatch_interval"]` from Task 4.
-- Produces: `_agent_health(g, agent_name, routines) -> str` in `agency/app.py`, used by both builders. The `health` key on every fleet entry now carries one of `"green"`, `"amber"`, `"gray"`, `"red"`.
+- Produces: `_agent_health(g, agent_name, routines, last_seen) -> str` in `agency/app.py`, used by both builders. Both callers already hold `last_seen`, so the helper must not re-scan the log tree for it. The `health` key on every fleet entry now carries one of `"green"`, `"amber"`, `"gray"`, `"red"`.
 
 **Background:** `collect_agents_with_identity` iterates `g["agents_full"]`, which holds `model_dump(mode="json")` mappings, so routines arrive as dicts. `build_dashboard_fleet` iterates `group.agents.values()` from the config snapshot, so routines arrive as `Routine` models. `routine_schedules` accepts both, so `_agent_health` takes whatever the caller has.
 
@@ -1062,7 +1135,7 @@ def agent_health_status(last_seen: datetime | None) -> str:
 and put this in its place:
 
 ```python
-def _agent_health(g: dict, agent_name: str, routines) -> str:
+def _agent_health(g: dict, agent_name: str, routines, last_seen: datetime | None) -> str:
     """Colour an agent from its schedule, its last run, and its last outcome."""
     dispatch_enabled = bool(g.get("dispatch", {}).get("enabled", False))
     schedules = routine_schedules(routines or ()) if dispatch_enabled else ()
@@ -1076,7 +1149,7 @@ def _agent_health(g: dict, agent_name: str, routines) -> str:
     terminal = latest_terminal_job(tuple(g.get("job_paths", ())), agent_name)
     executed = terminal is not None and terminal.status in {"complete", "failed"}
     return evaluate_agent_health(
-        has_run=get_agent_last_seen(g, agent_name) is not None or executed,
+        has_run=last_seen is not None or executed,
         last_job_failed=terminal is not None and terminal.status == "failed",
         schedule=state,
     )
@@ -1093,7 +1166,7 @@ In `collect_agents_with_identity`, replace this line inside the `info` dictionar
 with:
 
 ```python
-            "health": _agent_health(g, agent_name, instance.get("routines")),
+            "health": _agent_health(g, agent_name, instance.get("routines"), last_seen),
 ```
 
 - [ ] **Step 5: Call it from `build_dashboard_fleet`**
@@ -1107,7 +1180,7 @@ In `build_dashboard_fleet`, replace this line inside the appended dictionary:
 with:
 
 ```python
-                "health": _agent_health(g, instance.name, instance.routines),
+                "health": _agent_health(g, instance.name, instance.routines, last_seen),
 ```
 
 - [ ] **Step 6: Run the new tests to verify they pass**
@@ -1178,7 +1251,7 @@ git commit -m "feat(dashboard): colour agents from schedules and outcomes"
 - Test: `tests/test_agent_status.py` (rewrite the `compute_next_run` and `compute_next_run_detail` cases against the current config shape)
 
 **Interfaces:**
-- Consumes: `routine_schedules` from Task 3, `every_marker_path` from Task 1.
+- Consumes: `routine_schedules` from Task 3; `every_marker_path` and `parse_every` from Task 1.
 - Produces: `compute_next_run_detail(g: dict, agent_name: str, dispatch_cfg: dict) -> dict | None` keeping its `{"when", "routine_id", "rule_index"}` return shape, and `compute_next_run(g, agent_name, dispatch_cfg) -> datetime | None` unchanged.
 
 **Background:** Schema 4 puts routines on agent instances. `runtime_group` dumps only `GroupDispatch`, which has `enabled` and `daily_limit`, so `dispatch_cfg["routines"]` has never matched and `next_run` has been `None` for every agent. The `dispatch_cfg` argument keeps its place because callers pass it for the `enabled` flag.
@@ -1443,18 +1516,14 @@ def compute_next_run_detail(
             if target <= now:
                 target += timedelta(days=1)
         elif schedule.every:
-            match = re.fullmatch(r"(\d+)(m|h|d)", schedule.every)
-            if not match:
+            period = parse_every(schedule.every)
+            if period is None:
                 continue
-            value = int(match.group(1))
-            unit = match.group(2)
-            seconds = value * 60 if unit == "m" else value * 3600 if unit == "h" else value * 86400
             marker = every_marker_path(logs_root, agent_name, schedule.routine_id)
             target = (
                 now
                 if not marker.exists()
-                else datetime.fromtimestamp(marker.stat().st_mtime)
-                + timedelta(seconds=seconds)
+                else datetime.fromtimestamp(marker.stat().st_mtime) + period
             )
         else:
             continue
@@ -1468,11 +1537,13 @@ def compute_next_run_detail(
     return min(candidates, key=lambda candidate: candidate["when"], default=None)
 ```
 
-Add `every_marker_path` to the imports at the top of `agency/app.py`:
+Add the shared helpers to the imports at the top of `agency/app.py`:
 
 ```python
-from agency.dispatch.markers import every_marker_path
+from agency.dispatch.schedule import every_marker_path, parse_every
 ```
+
+`re` stays imported; it is still used elsewhere in the file.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
