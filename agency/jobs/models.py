@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from agency.blueprints.cache import CacheRef, CompiledArtifact
-from agency.configuration.models import PromptSelector, MemorySelector
+from agency.configuration.models import MemorySelector, PromptSelector
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
 
 
