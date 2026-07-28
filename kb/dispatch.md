@@ -41,9 +41,6 @@ The fleet bar colours each agent from its schedule and its last outcome.
 
 - **Gray** — no run on record. The agent has produced no log and no completed or
   failed job. A cancelled job is not a run and still leaves the agent gray.
-  An agent can also appear gray when the group's `dispatch.daily_limit` is reached
-  and the runner skips routines without writing a marker, so those routines read as
-  not yet fired.
 - **Green** — the agent has run, nothing is overdue, and the last job did not fail.
 - **Amber** — a routine is due. The expected time has passed but is still inside
   the grace window of `agency.dispatch.interval` plus two minutes.
@@ -56,6 +53,10 @@ Lateness is measured against the markers the dispatch runner writes:
 an `every` schedule produces no signal, because there is no reference point
 before its first dispatch. Routines that are disabled or carry a `condition` are
 never counted as late, matching what the runner actually fires.
+
+A group that reaches its `dispatch.daily_limit` makes the runner skip the
+remaining routines without writing markers, so an `at` routine whose time has
+passed reads as late even though the runner itself is healthy.
 
 ## Superseded layouts
 

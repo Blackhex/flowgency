@@ -40,7 +40,7 @@ Four states, evaluated in this precedence order.
 
 | State | Meaning | Condition |
 | --- | --- | --- |
-| `red` | broken promise | the newest terminal job record for the agent has status `failed`, **or** any enabled routine is overdue past the grace window |
+| `red` | broken promise | the newest executed job record for the agent has status `failed`, **or** any enabled routine is overdue past the grace window |
 | `amber` | running late | an expected occurrence has passed but is still inside the grace window |
 | `gray` | no signal | no run on record, and nothing overdue and nothing failed |
 | `green` | fine | has run, nothing overdue, last run did not fail |
@@ -52,7 +52,7 @@ change the computed health or the background tint.
 the group logs tree nor a job record whose status is `complete` or `failed`. A
 `cancelled` job is not a run; it was never executed.
 
-"Newest terminal job" means the record with the greatest sort key among records
+"Newest executed job" means the record with the greatest sort key among records
 whose status is `complete` or `failed`, where the sort key is `completed_at`
 falling back to `started_at` and then to `spec.created_at`. Ties break on
 `job_id` for a stable result. A `cancelled` record is inert — it does not
@@ -128,9 +128,11 @@ derive them from the same code.
 Inputs are plain values, so the module is testable without FastAPI, a TestClient,
 or a config snapshot.
 
-**`agency/jobs/store.py`.** Add `latest_terminal_job(job_paths, agent_name)`
-alongside `active_jobs`, returning the newest record whose status is terminal, or
-`None`. It reuses the existing tolerant read loop, skipping unreadable records.
+**`agency/jobs/store.py`.** Add `latest_executed_job(job_paths, agent_name)` as
+the function `_agent_health` consumes, returning the newest `complete` or `failed`
+record, or `None`. `latest_terminal_job` is retained as public API but is not the
+health input. Both reuse the existing tolerant read loop, skipping unreadable
+records.
 
 **`agency/app.py`.** `agent_health_status` is replaced by calls into
 `agency/health.py` from both fleet builders, `collect_agents_with_identity` and
