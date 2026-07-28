@@ -27,7 +27,7 @@
       "command": "python",
       "detail": "pip install -e . — install the package and dependencies in editable mode",
       "group": "build",
-      "label": "Install (editable)",
+      "label": "Hidden/Install editable",
       "problemMatcher": [],
       "type": "shell"
     },
@@ -44,7 +44,7 @@
         "isDefault": true,
         "kind": "test"
       },
-      "label": "Run tests",
+      "label": "Tests/Run all",
       "problemMatcher": [],
       "type": "shell"
     },
@@ -58,7 +58,7 @@
       "command": "python",
       "detail": "Run the full pytest suite with verbose output",
       "group": "test",
-      "label": "Run tests (verbose)",
+      "label": "Tests/Run all verbose",
       "problemMatcher": [],
       "type": "shell"
     },
@@ -72,7 +72,7 @@
       "command": "python",
       "detail": "Run pytest against the currently open test file",
       "group": "test",
-      "label": "Run tests (current file)",
+      "label": "Tests/Run current file",
       "problemMatcher": [],
       "type": "shell"
     },
@@ -88,7 +88,7 @@
       "command": "python",
       "detail": "Run pytest filtered by a -k keyword expression",
       "group": "test",
-      "label": "Run tests (filter by keyword)",
+      "label": "Tests/Run by keyword",
       "problemMatcher": [],
       "type": "shell"
     },
@@ -102,7 +102,7 @@
       "detail": "Start Agency dashboard on http://127.0.0.1:8500",
       "group": "none",
       "isBackground": true,
-      "label": "Serve dashboard",
+      "label": "Dashboard/Serve",
       "problemMatcher": {
         "background": {
           "activeOnStart": true,
@@ -130,7 +130,7 @@
       "group": "none",
       "hide": true,
       "isBackground": true,
-      "label": "Serve dashboard (hot-reload): server",
+      "label": "Hidden/Serve hot-reload",
       "problemMatcher": {
         "background": {
           "activeOnStart": true,
@@ -149,7 +149,7 @@
     {
       "command": "${input:openDashboard}",
       "hide": true,
-      "label": "Open dashboard (internal)",
+      "label": "Hidden/Open dashboard",
       "presentation": {
         "reveal": "never"
       },
@@ -158,14 +158,14 @@
     },
     {
       "dependsOn": [
-        "Install (editable)",
-        "Serve dashboard (hot-reload): server",
-        "Open dashboard (internal)"
+        "Hidden/Install editable",
+        "Hidden/Serve hot-reload",
+        "Hidden/Open dashboard"
       ],
       "dependsOrder": "sequence",
       "detail": "Start the Agency dashboard with hot-reload and open it internally on http://127.0.0.1:8500",
       "group": "none",
-      "label": "Serve dashboard (hot-reload)"
+      "label": "Dashboard/Serve hot-reload"
     },
     {
       "args": [
@@ -176,7 +176,7 @@
       "command": "python",
       "detail": "Fleet overview across all groups",
       "group": "none",
-      "label": "CLI: status",
+      "label": "CLI/Status",
       "problemMatcher": [],
       "type": "shell"
     },
@@ -189,7 +189,7 @@
       "command": "python",
       "detail": "Show what needs attention",
       "group": "none",
-      "label": "CLI: inbox",
+      "label": "CLI/Inbox",
       "problemMatcher": [],
       "type": "shell"
     },
@@ -202,7 +202,7 @@
       "command": "python",
       "detail": "List agents with health status",
       "group": "none",
-      "label": "CLI: agents",
+      "label": "CLI/Agents",
       "problemMatcher": [],
       "type": "shell"
     },
@@ -216,12 +216,10 @@
       "command": "python",
       "detail": "Run the dispatch runner a single time against config.yaml",
       "group": "none",
-      "label": "Dispatch: run once",
+      "label": "Dispatch/Run once",
       "problemMatcher": [],
       "type": "shell"
     }
   ],
-  // Development tasks for the Agency project.
-  // Run via: Terminal > Run Task... (Ctrl+Shift+P > "Tasks: Run Task")
   "version": "2.0.0"
 }
