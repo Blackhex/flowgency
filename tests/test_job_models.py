@@ -585,3 +585,27 @@ def test_active_jobs_ignores_malformed_field_types(tmp_path):
 
 def test_runtime_config_surface_exposes_only_current_symbols():
     assert not hasattr(strict_config_module, "load_config_path")
+
+
+def test_job_record_round_trips_session_id(tmp_path):
+    spec = make_spec(tmp_path)
+    record = JobRecord.from_spec(spec)
+    record = JobRecord(
+        spec=record.spec,
+        authority_digest=record.authority_digest,
+        status="queued",
+        session_id="sess-7",
+    )
+
+    restored = JobRecord.from_dict(yaml.safe_load(yaml.safe_dump(record.to_dict())))
+
+    assert restored.session_id == "sess-7"
+
+
+def test_job_record_loads_payload_without_session_id(tmp_path):
+    spec = make_spec(tmp_path)
+    payload = JobRecord.from_spec(spec).to_dict()
+    payload.pop("session_id", None)
+
+    assert JobRecord.from_dict(payload).session_id is None
+
