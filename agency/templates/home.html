@@ -38,12 +38,14 @@
        class="inline-flex items-center gap-1.5 text-base whitespace-nowrap rounded px-2 py-0.5 transition-colors
               {% if a.health == 'red' %}bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40
               {% elif a.health == 'amber' %}bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/40
+              {% elif a.health == 'gray' %}bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200 dark:hover:bg-gray-700
               {% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
       <span class="text-base">{{ a.emoji or '~' }}</span>
       {% if a.running %}
       <span class="text-emerald-500 text-sm leading-none animate-pulse" title="Running">&#9679;</span>
       {% else %}
-      <span class="{% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% else %}text-rose-500{% endif %} text-sm leading-none">&#9679;</span>
+      <span class="{% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% elif a.health == 'gray' %}text-gray-400 dark:text-gray-500{% else %}text-rose-500{% endif %} text-sm leading-none"
+            title="{% if a.health == 'green' %}Healthy{% elif a.health == 'amber' %}Run is due{% elif a.health == 'gray' %}No run on record{% else %}Needs attention{% endif %}">&#9679;</span>
       {% endif %}
       <span class="text-gray-700 dark:text-gray-300 text-base">{{ a.display_name or a.name }}</span>
       {% if a.blueprint %}<span class="text-xs text-gray-600 dark:text-gray-300">Blueprint: {{ a.blueprint }}</span>{% endif %}
@@ -59,7 +61,7 @@
     {% endfor %}
   </div>
   <div class="mt-1.5 text-sm text-gray-500 dark:text-gray-400 font-mono">
-    {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_running %} · <span class="text-emerald-700 dark:text-emerald-300">{{ fleet_running }} running</span>{% endif %}{% if fleet_agents|length - fleet_healthy > 0 %} · <span class="text-amber-700 dark:text-amber-300">{{ fleet_agents|length - fleet_healthy }} needs attention</span>{% endif %}
+    {{ fleet_agents|length }} agents · {{ fleet_healthy }} healthy{% if fleet_never_run %} · <span class="text-gray-500 dark:text-gray-400">{{ fleet_never_run }} never run</span>{% endif %}{% if fleet_running %} · <span class="text-emerald-700 dark:text-emerald-300">{{ fleet_running }} running</span>{% endif %}{% if fleet_attention %} · <span class="text-amber-700 dark:text-amber-300">{{ fleet_attention }} needs attention</span>{% endif %}
   </div>
   {% else %}
   <div class="text-sm text-gray-400 dark:text-gray-500">No agents configured</div>

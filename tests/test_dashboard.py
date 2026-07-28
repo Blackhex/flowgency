@@ -534,3 +534,15 @@ def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw
     assert response.status_code == 200
     assert "Advisor" in response.text
     assert "Analyst" not in response.text
+
+
+def test_dashboard_reports_never_run_agents_separately(monkeypatch, tmp_path, raw_config):
+    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/")
+
+    assert response.status_code == 200
+    assert "1 never run" in response.text
+    assert "1 needs attention" not in response.text
+    assert "text-gray-400" in response.text
+    assert 'title="No run on record"' in response.text
