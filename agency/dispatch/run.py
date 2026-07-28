@@ -2,12 +2,12 @@
 
 import argparse
 import logging
-import re
 import time
 from datetime import datetime
 from pathlib import Path
 
 from agency.configuration import resolve_group_paths
+from agency.dispatch.schedule import at_marker_path, every_marker_path, parse_every
 from agency.configuration.store import ConfigStore
 from agency.jobs import JobRequest, JobSubmissionError, JobValidationError, submit_job_request
 
@@ -32,26 +32,14 @@ def check_at_rule(target_time: str, now_epoch: float | None = None, interval: in
 
 def check_every_rule(marker_file: Path, interval_str: str) -> bool:
     """Check if enough time has elapsed since marker file mtime."""
-    match = re.fullmatch(r"(\d+)(m|h|d)", interval_str)
-    if not match:
+    period = parse_every(interval_str)
+    if period is None:
         log.warning("Invalid every interval: %s", interval_str)
         return False
-    val = int(match.group(1))
-    unit = match.group(2)
-    if unit == "m":
-        seconds = val * 60
-    elif unit == "h":
-        seconds = val * 3600
-    else:
-        seconds = val * 86400
     if not marker_file.exists():
         return True
     elapsed = time.time() - marker_file.stat().st_mtime
-    return elapsed >= seconds
-
-
-def _marker_safe(value: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip(".-") or "item"
+    return elapsed >= period.total_seconds()
 
 
 def load_dispatch_config(config_path: str):
@@ -91,8 +79,6 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                     continue
                 at_time = routine.schedule.at or ""
                 every_val = routine.schedule.every or ""
-                marker_id = _marker_safe(routine.id)
-                agent_marker = _marker_safe(agent_name)
 
                 if getattr(routine, "condition", None):
                     log.info(
@@ -111,13 +97,13 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
 
                 should_run = False
                 if at_time:
-                    event_marker = log_dir / f".event-{agent_marker}-{marker_id}-{today}"
+                    event_marker = at_marker_path(logs_root, agent_name, routine.id, today)
                     if event_marker.exists():
                         continue
                     if check_at_rule(at_time, interval=interval):
                         should_run = True
                 elif every_val:
-                    every_marker = logs_root / f".last-{agent_marker}-{marker_id}"
+                    every_marker = every_marker_path(logs_root, agent_name, routine.id)
                     if check_every_rule(every_marker, every_val):
                         should_run = True
                 else:
@@ -140,9 +126,9 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                         continue
                     # Touch markers
                     if at_time:
-                        (log_dir / f".event-{agent_marker}-{marker_id}-{today}").touch()
+                        at_marker_path(logs_root, agent_name, routine.id, today).touch()
                     elif every_val:
-                        (logs_root / f".last-{agent_marker}-{marker_id}").touch()
+                        every_marker_path(logs_root, agent_name, routine.id).touch()
 
 
 def main():
