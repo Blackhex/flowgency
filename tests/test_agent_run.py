@@ -9,6 +9,7 @@ import yaml
 import agency.app as app_mod
 from agency.app import app, is_agent_running
 from agency.configuration import ConfigStore, PromptSelector
+from agency.configuration.models import MemorySelector
 from agency.jobs import JobRequest
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
@@ -341,7 +342,7 @@ def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):
     )
 
     assert resp.status_code == 202
-    assert calls[0].memory_override == {"scope": "routine"}
+    assert calls[0].memory_override == MemorySelector(scope="routine")
 
 
 def test_run_rejects_invalid_selector_override_for_routine(tmp_path, monkeypatch):
@@ -355,6 +356,48 @@ def test_run_rejects_invalid_selector_override_for_routine(tmp_path, monkeypatch
     )
 
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(
+            {
+                "mode": "saved",
+                "prompt_scope": "blueprint",
+                "prompt_name": "daily-review",
+                "memory_scope": "agent",
+            },
+            id="saved",
+        ),
+        pytest.param(
+            {
+                "mode": "one-off",
+                "task_input": "Inspect the current suite.",
+                "memory_scope": "agent",
+            },
+            id="one-off",
+        ),
+    ],
+)
+def test_run_submits_typed_memory_override_for_manual_modes(
+    tmp_path,
+    monkeypatch,
+    payload,
+):
+    _setup_group(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        "agency.app.submit_job_request",
+        lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"),
+    )
+    client = TestClient(app)
+
+    response = client.post("/test/agents/product/run", data=payload)
+
+    assert response.status_code == 202
+    assert isinstance(calls[0].memory_override, MemorySelector)
+    assert calls[0].memory_override == MemorySelector(scope="agent")
 
 
 def test_agents_page_lists_prompts_with_run(tmp_path):

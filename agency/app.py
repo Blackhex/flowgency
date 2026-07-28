@@ -31,6 +31,7 @@ from agency.configuration import (
     patch_agency_settings,
     resolve_group_paths,
 )
+from agency.configuration.models import MemorySelector
 from agency.integrations import get_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 from agency.dispatch.schedule import every_marker_path, parse_every
@@ -1697,7 +1698,10 @@ async def agent_run(
                 raise HTTPException(status_code=400, detail="Channel memory override requires a channel")
             if memory_channel not in snapshot.config.memory.channels:
                 raise HTTPException(status_code=400, detail="Unknown memory channel")
-            memory_override = {"scope": "channel", "channel": memory_channel}
+            memory_override = MemorySelector(
+                scope="channel",
+                channel=memory_channel,
+            )
         elif memory_scope not in {"run", "routine", "agent", "group"}:
             raise HTTPException(status_code=400, detail="Invalid memory override")
         else:
@@ -1705,7 +1709,7 @@ async def agent_run(
                 raise HTTPException(status_code=400, detail="memory_channel is only valid for channel memory")
             if memory_scope == "routine" and routine is None:
                 raise HTTPException(status_code=400, detail="Routine memory override requires a selected routine")
-            memory_override = {"scope": memory_scope}
+            memory_override = MemorySelector(scope=memory_scope)
     elif memory_channel:
         raise HTTPException(status_code=400, detail="memory_channel is only valid for channel memory")
 
