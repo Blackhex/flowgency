@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -52,6 +53,12 @@ def _safe_job_id(job_id: str) -> str:
 
 def _job_path(job_store: JobStore, group_id: str, job_id: str) -> Path:
     return job_store.path(group_id, _safe_job_id(job_id))
+
+
+def _log_href(group_id: str, log_path: str | None) -> str:
+    if not log_path:
+        return ""
+    return f"/{quote(group_id, safe='')}/logs/view?path={quote(log_path)}"
 
 
 def _friendly_status(status: str) -> str:
@@ -208,6 +215,10 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
         "profile_href": f"/{group_id}/agents/{agent_name}/profile" if instance is not None else "",
         "instance_missing": instance is None,
         "can_cancel": record.status in {"queued", "waiting_for_memory"},
+        "stdout_href": _log_href(group_id, record.stdout_path),
+        "stdout_name": Path(record.stdout_path).name if record.stdout_path else "",
+        "stderr_href": _log_href(group_id, record.stderr_path),
+        "stderr_name": Path(record.stderr_path).name if record.stderr_path else "",
         "diagnostic_memory_hash": record.spec.memory.memory_hash,
     }
 

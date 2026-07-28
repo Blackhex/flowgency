@@ -75,10 +75,14 @@
   </div>
   {% endif %}
 
-  {% if job.stdout_path or job.stderr_path %}
+  {% if stdout_href or stderr_href %}
   <div class="mb-6 text-sm text-gray-600 dark:text-gray-300">
-    {% if job.stdout_path %}<div>Stdout log: {{ job.stdout_path }}</div>{% endif %}
-    {% if job.stderr_path %}<div>Stderr log: {{ job.stderr_path }}</div>{% endif %}
+    {% if stdout_href %}
+    <div>Stdout log: <a href="{{ stdout_href }}" title="{{ job.stdout_path }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ stdout_name }}</a></div>
+    {% endif %}
+    {% if stderr_href %}
+    <div>Stderr log: <a href="{{ stderr_href }}" title="{{ job.stderr_path }}" class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ stderr_name }}</a></div>
+    {% endif %}
   </div>
   {% endif %}
 
