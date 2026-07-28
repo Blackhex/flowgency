@@ -185,3 +185,35 @@ def test_health_is_gray_when_nothing_has_run():
 
 def test_health_is_green_otherwise():
     assert evaluate_agent_health(has_run=True, last_job_failed=False, schedule=None) == "green"
+
+
+def test_at_exact_occurrence_is_due(tmp_path):
+    at_time = NOW.strftime("%H:%M")
+    assert _state(tmp_path, _at(at=at_time)) == "due"
+
+
+def test_at_exact_grace_boundary_is_due(tmp_path):
+    at_time = (NOW - GRACE).strftime("%H:%M")
+    assert _state(tmp_path, _at(at=at_time)) == "due"
+
+
+def test_every_exact_period_boundary_is_due(tmp_path):
+    logs = _logs(tmp_path)
+    marker = logs / ".last-product-r"
+    marker.touch()
+    stamp = (NOW - timedelta(hours=6)).timestamp()
+    os.utime(marker, (stamp, stamp))
+    assert _state(tmp_path, _every(every="6h")) == "due"
+
+
+def test_every_exact_grace_boundary_is_due(tmp_path):
+    logs = _logs(tmp_path)
+    marker = logs / ".last-product-r"
+    marker.touch()
+    stamp = (NOW - timedelta(hours=6, minutes=17)).timestamp()
+    os.utime(marker, (stamp, stamp))
+    assert _state(tmp_path, _every(every="6h")) == "due"
+
+
+def test_amber_outranks_gray_when_schedule_is_due():
+    assert evaluate_agent_health(has_run=False, last_job_failed=False, schedule="due") == "amber"
