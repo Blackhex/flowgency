@@ -35,6 +35,24 @@ christag-agency dispatch install --config C:/Agency/config.yaml
 christag-agency dispatch status --config C:/Agency/config.yaml
 ```
 
+## Agent health on the dashboard
+
+The fleet bar colours each agent from its schedule and its last outcome.
+
+- **Gray** — no run on record. The agent has produced no log and no finished job.
+- **Green** — the agent has run, nothing is overdue, and the last job did not fail.
+- **Amber** — a routine is due. The expected time has passed but is still inside
+  the grace window of `agency.dispatch.interval` plus two minutes.
+- **Red** — the last finished job failed, or an enabled routine is past its
+  expected time by more than the grace window.
+
+Lateness is measured against the markers the dispatch runner writes:
+`<logs>/<date>/.event-<agent>-<routine>-<date>` for `at` rules and
+`<logs>/.last-<agent>-<routine>` for `every` rules. A routine with no marker and
+an `every` schedule produces no signal, because there is no reference point
+before its first dispatch. Routines that are disabled or carry a `condition` are
+never counted as late, matching what the runner actually fires.
+
 ## Superseded layouts
 
 Runtime does not read prompt directories or per-agent schedule maps. Rewrite older schedule sources into instance routines before enabling dispatch.
