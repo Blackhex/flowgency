@@ -39,12 +39,12 @@ from agency.jobs import (
     JobSubmissionError,
     JobValidationError,
     active_jobs,
+    latest_executed_job,
     reconcile_jobs,
     submit_job_request,
 )
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
-from agency.jobs import latest_executed_job
 from agency.health import (
     evaluate_agent_health,
     grace_window,

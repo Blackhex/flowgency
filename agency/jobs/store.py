@@ -235,19 +235,27 @@ def _terminal_sort_key(record: JobRecord) -> tuple[str, str]:
     return (stamp or "", record.spec.job_id)
 
 
-def latest_terminal_job(
+def _latest_by_status(
     job_paths: Path | tuple[Path, ...],
-    agent_name: str | None = None,
-) -> JobRecord | None:
-    """Return the newest finished job record, optionally for one agent."""
+    agent_name: str | None,
+    statuses: frozenset[str],
+) -> "JobRecord | None":
     records = [
         record
         for record in _iter_job_records(job_paths, agent_name)
-        if record.status in TERMINAL_STATUSES
+        if record.status in statuses
     ]
     if not records:
         return None
     return max(records, key=_terminal_sort_key)
+
+
+def latest_terminal_job(
+    job_paths: Path | tuple[Path, ...],
+    agent_name: str | None = None,
+) -> "JobRecord | None":
+    """Return the newest finished job record, optionally for one agent."""
+    return _latest_by_status(job_paths, agent_name, TERMINAL_STATUSES)
 
 
 EXECUTED_STATUSES = frozenset({"complete", "failed"})
@@ -256,13 +264,6 @@ EXECUTED_STATUSES = frozenset({"complete", "failed"})
 def latest_executed_job(
     job_paths: Path | tuple[Path, ...],
     agent_name: str | None = None,
-) -> JobRecord | None:
+) -> "JobRecord | None":
     """Return the newest complete or failed record; cancellations are inert."""
-    records = [
-        record
-        for record in _iter_job_records(job_paths, agent_name)
-        if record.status in EXECUTED_STATUSES
-    ]
-    if not records:
-        return None
-    return max(records, key=_terminal_sort_key)
+    return _latest_by_status(job_paths, agent_name, EXECUTED_STATUSES)
