@@ -17,6 +17,7 @@ from agency.integrations import (
     spawn_interactive_terminal,
 )
 from agency.jobs.authority import JobStore
+from agency.jobs.models import JobRecord
 from agency.jobs.store import InvalidJobTransition, cancel_job, read_job
 from agency.web.dependencies import AgencyServices, get_services
 
@@ -72,7 +73,7 @@ def _log_href(group_id: str, log_path: str | None) -> str:
 _SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
-def _resume_argv(record) -> tuple[str, ...] | None:
+def _resume_argv(record: JobRecord) -> tuple[str, ...] | None:
     session_id = record.session_id
     if not session_id or not _SAFE_SESSION_ID.match(session_id):
         return None
@@ -83,7 +84,7 @@ def _resume_argv(record) -> tuple[str, ...] | None:
     return integration.resume_command(session_id)
 
 
-def _integration_display_name(record) -> str:
+def _integration_display_name(record: JobRecord) -> str:
     try:
         integration = get_integration(record.spec.integration_name)
     except KeyError:
@@ -328,7 +329,7 @@ async def job_resume(request: Request, group: str, job_id: str, services: Agency
         await run_in_threadpool(
             spawn_interactive_terminal,
             command,
-            Path(record.spec.workspace_root),
+            record.spec.resolved_workspace_root,
         )
     except (IntegrationError, OSError):
         outcome = "failed"

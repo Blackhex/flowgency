@@ -1404,4 +1404,3 @@ class TestCopilot:
 
         assert result.exit_code == 124
         assert result.session_id == "sess-timeout"
-

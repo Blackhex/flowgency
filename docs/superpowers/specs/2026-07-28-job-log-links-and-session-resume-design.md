@@ -121,8 +121,10 @@ dashboard.
 This endpoint starts a local process in response to an HTTP request, so it is
 constrained deliberately.
 
-- It is POST-only. A prefetched link, an `<img>` tag, or a crawler cannot
-  trigger it.
+- It is POST-only, which blocks passive triggers such as prefetch, `<img>`,
+  and crawlers; it does not defend against a cross-origin form submission,
+  which is consistent with every other state-changing endpoint in the
+  dashboard.
 - `session_id` is validated against `^[A-Za-z0-9_-]{1,128}$` before it reaches
   an argument vector, and a non-conforming value is rejected with 400. This is
   the only attacker-influenceable element of the command, and it matters
