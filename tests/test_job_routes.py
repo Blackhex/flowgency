@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 from fastapi.testclient import TestClient
@@ -339,3 +340,55 @@ def test_job_artifact_path_must_be_canonical(monkeypatch, tmp_path, raw_config):
     response = client.get("/newsletter/jobs/job-safe?artifact=..%2F..%2Fsecret.txt")
 
     assert response.status_code in {400, 403}
+
+
+def test_job_detail_links_logs_to_viewer(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(group_root, config_path, job_id="job-logs", status="queued")
+    log_dir = group_root / "logs" / "2026-07-16"
+    stdout_log = log_dir / "advisor-scheduled_prompt-job-logs.out"
+    stderr_log = log_dir / "advisor-scheduled_prompt-job-logs.err"
+    stdout_log.write_text("stdout", encoding="utf-8")
+    stderr_log.write_text("stderr", encoding="utf-8")
+    record = read_job(path)
+    write_job(
+        path,
+        replace(
+            record,
+            status="failed",
+            stdout_path=str(stdout_log.resolve()),
+            stderr_path=str(stderr_log.resolve()),
+        ),
+    )
+
+    response = client.get("/newsletter/jobs/job-logs")
+
+    assert response.status_code == 200
+    assert f"/newsletter/logs/view?path={quote(str(stdout_log.resolve()))}" in response.text
+    assert f"/newsletter/logs/view?path={quote(str(stderr_log.resolve()))}" in response.text
+    assert "advisor-scheduled_prompt-job-logs.out" in response.text
+    assert "advisor-scheduled_prompt-job-logs.err" in response.text
+
+
+def test_job_detail_omits_log_link_without_path(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(group_root, config_path, job_id="job-nolog", status="queued")
+    log_dir = group_root / "logs" / "2026-07-16"
+    stdout_log = log_dir / "advisor-scheduled_prompt-job-nolog.out"
+    stdout_log.write_text("stdout", encoding="utf-8")
+    record = read_job(path)
+    write_job(
+        path,
+        replace(
+            record,
+            status="failed",
+            stdout_path=str(stdout_log.resolve()),
+            stderr_path=None,
+        ),
+    )
+
+    response = client.get("/newsletter/jobs/job-nolog")
+
+    assert response.status_code == 200
+    assert "Stdout log:" in response.text
+    assert "Stderr log:" not in response.text
