@@ -458,6 +458,7 @@ def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config)
     assert response.status_code == 303
     assert response.headers["location"] == "/newsletter/jobs/job-spawn?resume=launched"
     assert captured["command"] == ["/opt/copilot", "--resume", "sess-2"]
+    assert captured["cwd"] == Path(group_root.parent.parent / "workspaces" / "newsletter")
 
 
 def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
