@@ -110,11 +110,14 @@ any routine is overdue, else `due` if any routine is due, else no signal.
 
 ## Structure
 
-**`agency/dispatch/markers.py`** (new). Owns `marker_safe`, the `.event-` path,
-and the `.last-` path. `agency/dispatch/run.py` imports from it in place of its
-private `_marker_safe`. Marker filenames are the one place where a silent drift
-between the runner and the dashboard would make every scheduled agent look red,
-so both sides must derive them from the same code.
+**`agency/dispatch/schedule.py`** (new). Owns everything the runner and the
+dashboard must agree on about schedules: `marker_safe`, the `.event-` path, the
+`.last-` path, and `parse_every`, which turns an `every` interval into a
+`timedelta` or `None`. `agency/dispatch/run.py` imports from it in place of its
+private `_marker_safe` and its inline interval parse. Marker filenames and
+interval semantics are the two places where a silent drift between the runner and
+the dashboard would make every scheduled agent look red, so both sides must
+derive them from the same code.
 
 **`agency/health.py`** (new). Owns the health model. Public surface:
 
@@ -179,8 +182,9 @@ Unit tests against `agency/health.py`, driving the clock through
 - a routine with a `condition` suppresses overdue
 - malformed `at` and malformed `every` produce no signal
 
-Marker-name tests assert that `agency/dispatch/markers.py` produces exactly the
-names `run.py` wrote before the extraction.
+Marker-name tests assert that `agency/dispatch/schedule.py` produces exactly the
+names `run.py` wrote before the extraction, and that `parse_every` accepts each
+unit and rejects malformed intervals.
 
 A store test covers `latest_terminal_job` ordering, its exclusion of active
 records, and its tolerance of unreadable files.
