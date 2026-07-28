@@ -1015,3 +1015,58 @@ def test_worker_returns_status_as_exit_code(tmp_path, monkeypatch):
     )
     assert worker_main(authority.worker_args()) == 1
     assert seen == [authority]
+
+
+def test_execute_job_persists_session_id_from_successful_run(tmp_path, monkeypatch):
+    path, spec = queued_job(tmp_path)
+    authority = _authority(spec)
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            return RunResult(0, "done", "", 0.1, session_id="sess-success-abc")
+
+    workspace_root = tmp_path / "group"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            workspace_root=workspace_root,
+            integration=Integration(),
+            timeout=30,
+            sandbox_root=None,
+            group_root=tmp_path / "group",
+        ),
+    )
+
+    execute_job(authority)
+
+    assert read_job(path).session_id == "sess-success-abc"
+
+
+def test_execute_job_persists_session_id_from_failed_run(tmp_path, monkeypatch):
+    fixture = MemoryJobFixture(tmp_path)
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            return RunResult(1, "done", "", 0.1, session_id="sess-fail-xyz")
+
+    context = SimpleNamespace(
+        workspace_root=fixture.group_root,
+        integration=Integration(),
+        timeout=30,
+        sandbox_root=None,
+        group_root=fixture.group_root,
+    )
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+    )
+
+    execute_job(fixture.authority)
+
+    assert read_job(fixture.job_path).session_id == "sess-fail-xyz"

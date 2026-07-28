@@ -508,3 +508,13 @@ def test_resume_unknown_job_is_not_found(monkeypatch, tmp_path, raw_config):
     response = client.post("/newsletter/jobs/job-missing/resume", follow_redirects=False)
 
     assert response.status_code == 404
+
+
+def test_job_detail_shows_failure_notice_when_resume_failed(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(group_root, config_path, job_id="job-notice", session_id="sess-n")
+
+    response = client.get("/newsletter/jobs/job-notice?resume=failed")
+
+    assert response.status_code == 200
+    assert "Could not open a terminal" in response.text

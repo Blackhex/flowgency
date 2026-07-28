@@ -47,7 +47,6 @@ class RunResult:
     session_id: str | None = None
 
 
-
 @dataclass
 class AgentIdentity:
     """Agent identity extracted from a tool's native file."""

@@ -608,4 +608,3 @@ def test_job_record_loads_payload_without_session_id(tmp_path):
     payload.pop("session_id", None)
 
     assert JobRecord.from_dict(payload).session_id is None
-
