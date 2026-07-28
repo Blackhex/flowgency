@@ -53,11 +53,10 @@ the group logs tree nor a job record whose status is `complete` or `failed`. A
 `cancelled` job is not a run; it was never executed.
 
 "Newest terminal job" means the record with the greatest sort key among records
-whose status is `complete`, `failed`, or `cancelled`, where the sort key is
-`completed_at` falling back to `started_at` and then to `spec.created_at`, since
-`cancelled` records may carry no `completed_at`. Ties break on `job_id` for a
-stable result. A `cancelled` job is not a failure. A later successful job clears a
-red caused by an earlier failure.
+whose status is `complete` or `failed`, where the sort key is `completed_at`
+falling back to `started_at` and then to `spec.created_at`. Ties break on
+`job_id` for a stable result. A `cancelled` record is inert — it does not
+participate in `has_run` or `last_job_failed` and cannot clear or set a red.
 
 ### Applied to the `atreides` group
 
@@ -145,8 +144,9 @@ reach back into agency settings.
 places routines on agent instances and `runtime_group` dumps only
 `GroupDispatch`, which holds `enabled` and `daily_limit`, so that lookup never
 matches and `next_run` is dead for every agent. It is re-pointed at
-`instance.routines` and at the shared marker helpers, which restores the feature
-and keeps one definition of a routine's next occurrence.
+`instance.routines` and at the shared marker helpers, removing a lookup the
+current config schema can never satisfy and keeping one definition of a
+routine's next occurrence.
 
 ## Counters and rendering
 
