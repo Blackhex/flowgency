@@ -358,6 +358,40 @@ def test_run_rejects_invalid_selector_override_for_routine(tmp_path, monkeypatch
     assert resp.status_code == 400
 
 
+def test_run_accepts_valid_channel_memory_override(tmp_path, monkeypatch):
+    _setup_group(tmp_path)
+    config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
+    config["memory"] = {"channels": {"support": {"display_name": "Support"}}}
+    app_mod.CONFIG_PATH.write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
+    app_mod.refresh_services()
+    calls = []
+    monkeypatch.setattr(
+        "agency.app.submit_job_request",
+        lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/test/agents/product/run",
+        data={
+            "mode": "saved",
+            "prompt_scope": "blueprint",
+            "prompt_name": "daily-review",
+            "memory_scope": "channel",
+            "memory_channel": "support",
+        },
+    )
+
+    assert response.status_code == 202
+    assert calls[0].memory_override == MemorySelector(
+        scope="channel",
+        channel="support",
+    )
+
+
 @pytest.mark.parametrize(
     "payload",
     [
