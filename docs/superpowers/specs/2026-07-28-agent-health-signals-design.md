@@ -134,7 +134,9 @@ alongside `active_jobs`, returning the newest record whose status is terminal, o
 `agency/health.py` from both fleet builders, `collect_agents_with_identity` and
 `build_dashboard_fleet`. Both already resolve the group's logs root and job paths;
 they additionally need the agent's routines and the agency-level
-`dispatch.interval`, which the dashboard route passes in from `agency_settings`.
+`dispatch.interval`. The interval is added to the group runtime dictionary by
+`runtime_group`, alongside `logs` and `job_paths`, so that neither builder has to
+reach back into agency settings.
 
 `compute_next_run_detail` currently reads `dispatch_cfg["routines"]`. Schema 4
 places routines on agent instances and `runtime_group` dumps only
