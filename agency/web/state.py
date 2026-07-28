@@ -61,6 +61,7 @@ def runtime_group(snapshot: ConfigSnapshot, group_id: str) -> dict[str, Any]:
         "locks": paths.locks,
         "logs": paths.logs,
         "job_paths": job_store.paths(group_id),
+        "dispatch_interval": snapshot.config.agency.dispatch.interval,
         "agents": list(group.agents.keys()),
         "agents_full": agents_full,
         "dispatch": group.dispatch.model_dump(mode="json"),
