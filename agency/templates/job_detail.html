@@ -42,12 +42,32 @@
     {% if routine_href %}
     <a href="{{ routine_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Routines</a>
     {% endif %}
+    {% if resume_available %}
+    <form method="POST" action="/{{ group }}/jobs/{{ job.spec.job_id }}/resume">
+      <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">{{ resume_label }}</button>
+    </form>
+    {% endif %}
     {% if can_cancel %}
     <form method="POST" action="/{{ group }}/jobs/{{ job.spec.job_id }}/cancel">
       <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-amber-700 rounded-lg hover:bg-amber-800 transition-colors">Cancel</button>
     </form>
     {% endif %}
   </div>
+
+  {% if resume_notice %}
+  <div class="mb-4 text-sm text-gray-600 dark:text-gray-300">{{ resume_notice }}</div>
+  {% endif %}
+
+  {% if resume_command %}
+  <div class="mb-6 space-y-2">
+    <label for="resume-command" class="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Resume command</label>
+    <input id="resume-command" type="text" readonly value="{{ resume_command }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-gray-900 bg-gray-50">
+    <div class="flex flex-wrap gap-3 items-center">
+      <button type="button" id="copy-resume" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Copy command</button>
+      <span id="copy-resume-feedback" class="text-sm text-gray-500"></span>
+    </div>
+  </div>
+  {% endif %}
 
   {% if job.changed_files %}
   <div class="mt-3 mb-6">
@@ -100,4 +120,25 @@
   {% endif %}
 
 </div>
+
+<script>
+  (function () {
+    const field = document.getElementById("resume-command");
+    const button = document.getElementById("copy-resume");
+    const feedback = document.getElementById("copy-resume-feedback");
+    if (!field || !button || !feedback) {
+      return;
+    }
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(field.value);
+        feedback.textContent = "Copied.";
+      } catch (error) {
+        field.focus();
+        field.select();
+        feedback.textContent = "Copy failed. Select the command and copy it manually.";
+      }
+    });
+  })();
+</script>
 {% endblock %}

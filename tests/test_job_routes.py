@@ -392,3 +392,118 @@ def test_job_detail_omits_log_link_without_path(monkeypatch, tmp_path, raw_confi
     assert response.status_code == 200
     assert "Stdout log:" in response.text
     assert "Stderr log:" not in response.text
+
+
+def _write_resumable_job(group_root, config_path, *, job_id, session_id):
+    path = _write_job_record(group_root, config_path, job_id=job_id, status="queued")
+    record = read_job(path)
+    write_job(path, replace(record, status="complete", session_id=session_id))
+    return path
+
+
+def test_job_detail_offers_resume_when_session_known(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(group_root, config_path, job_id="job-resume", session_id="sess-1")
+
+    response = client.get("/newsletter/jobs/job-resume")
+
+    assert response.status_code == 200
+    assert "/newsletter/jobs/job-resume/resume" in response.text
+    assert "--resume" in response.text
+    assert "sess-1" in response.text
+
+
+def test_job_detail_hides_resume_without_session(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(group_root, config_path, job_id="job-nosess", status="queued")
+    write_job(path, replace(read_job(path), status="complete"))
+
+    response = client.get("/newsletter/jobs/job-nosess")
+
+    assert response.status_code == 200
+    assert "/newsletter/jobs/job-nosess/resume" not in response.text
+
+
+def test_job_detail_hides_resume_without_integration_support(monkeypatch, tmp_path, raw_config):
+    from agency.integrations.agency.copilot import CopilotIntegration
+
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(group_root, config_path, job_id="job-unsup", session_id="sess-9")
+    monkeypatch.setattr(CopilotIntegration, "resume_command", lambda self, session_id: None)
+
+    response = client.get("/newsletter/jobs/job-unsup")
+
+    assert response.status_code == 200
+    assert "/newsletter/jobs/job-unsup/resume" not in response.text
+
+
+def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config):
+    import agency.web.routes.jobs as jobs_mod
+    from agency.integrations.agency.copilot import CopilotIntegration
+
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(group_root, config_path, job_id="job-spawn", session_id="sess-2")
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
+    captured = {}
+
+    def fake_spawn(command, cwd):
+        captured["command"] = list(command)
+        captured["cwd"] = cwd
+        return "copilot --resume sess-2"
+
+    monkeypatch.setattr(jobs_mod, "spawn_interactive_terminal", fake_spawn)
+
+    response = client.post("/newsletter/jobs/job-spawn/resume", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/newsletter/jobs/job-spawn?resume=launched"
+    assert captured["command"] == ["/opt/copilot", "--resume", "sess-2"]
+
+
+def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
+    import agency.web.routes.jobs as jobs_mod
+    from agency.integrations import IntegrationError
+    from agency.integrations.agency.copilot import CopilotIntegration
+
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(group_root, config_path, job_id="job-nospawn", session_id="sess-3")
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
+
+    def fake_spawn(command, cwd):
+        raise IntegrationError("no terminal")
+
+    monkeypatch.setattr(jobs_mod, "spawn_interactive_terminal", fake_spawn)
+
+    response = client.post("/newsletter/jobs/job-nospawn/resume", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/newsletter/jobs/job-nospawn?resume=failed"
+
+
+def test_resume_rejects_unsafe_session_id(monkeypatch, tmp_path, raw_config):
+    import agency.web.routes.jobs as jobs_mod
+
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(
+        group_root,
+        config_path,
+        job_id="job-evil",
+        session_id="a; rm -rf ~",
+    )
+
+    def fail_spawn(command, cwd):
+        raise AssertionError("spawn must not be reached")
+
+    monkeypatch.setattr(jobs_mod, "spawn_interactive_terminal", fail_spawn)
+
+    response = client.post("/newsletter/jobs/job-evil/resume", follow_redirects=False)
+
+    assert response.status_code == 400
+
+
+def test_resume_unknown_job_is_not_found(monkeypatch, tmp_path, raw_config):
+    client, _config_path, _group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.post("/newsletter/jobs/job-missing/resume", follow_redirects=False)
+
+    assert response.status_code == 404

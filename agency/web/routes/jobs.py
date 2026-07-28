@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from agency.configuration.models import MemorySelector
+from agency.integrations import (
+    IntegrationError,
+    format_interactive_command,
+    get_integration,
+    spawn_interactive_terminal,
+)
 from agency.jobs.authority import JobStore
 from agency.jobs.store import InvalidJobTransition, cancel_job, read_job
 from agency.web.dependencies import AgencyServices, get_services
@@ -59,6 +67,28 @@ def _log_href(group_id: str, log_path: str | None) -> str:
     if not log_path:
         return ""
     return f"/{quote(group_id, safe='')}/logs/view?path={quote(log_path)}"
+
+
+_SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def _resume_argv(record) -> tuple[str, ...] | None:
+    session_id = record.session_id
+    if not session_id or not _SAFE_SESSION_ID.match(session_id):
+        return None
+    try:
+        integration = get_integration(record.spec.integration_name)
+    except KeyError:
+        return None
+    return integration.resume_command(session_id)
+
+
+def _integration_display_name(record) -> str:
+    try:
+        integration = get_integration(record.spec.integration_name)
+    except KeyError:
+        return record.spec.integration_name
+    return integration.display_name or record.spec.integration_name
 
 
 def _friendly_status(status: str) -> str:
@@ -196,6 +226,7 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
                 }
             )
     publication = record.memory_publication or {}
+    resume_argv = _resume_argv(record)
     return {
         "job": record,
         "job_status_label": _friendly_status(record.status),
@@ -220,6 +251,9 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
         "stderr_href": _log_href(group_id, record.stderr_path),
         "stderr_name": Path(record.stderr_path).name if record.stderr_path else "",
         "diagnostic_memory_hash": record.spec.memory.memory_hash,
+        "resume_command": format_interactive_command(resume_argv) if resume_argv else "",
+        "resume_available": resume_argv is not None,
+        "resume_label": f"Resume in {_integration_display_name(record)}",
     }
 
 
@@ -243,7 +277,7 @@ async def jobs_list(request: Request, group: str, services: AgencyServices = Dep
 
 
 @router.get("/{group}/jobs/{job_id}", response_class=HTMLResponse)
-async def job_detail(request: Request, group: str, job_id: str, artifact: str = "", services: AgencyServices = Depends(get_services)):
+async def job_detail(request: Request, group: str, job_id: str, artifact: str = "", resume: str = "", services: AgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
     if group not in snapshot.config.groups:
         raise HTTPException(status_code=404, detail="Unknown group")
@@ -265,8 +299,40 @@ async def job_detail(request: Request, group: str, job_id: str, artifact: str = 
             **_group_context(request, snapshot, group),
             "active": "jobs",
             **context,
+            "resume_notice": {
+                "launched": "Opening the session in a new terminal.",
+                "failed": "Could not open a terminal. Copy the command below and run it yourself.",
+            }.get(resume, ""),
         },
     )
+
+
+@router.post("/{group}/jobs/{job_id}/resume")
+async def job_resume(request: Request, group: str, job_id: str, services: AgencyServices = Depends(get_services)):
+    snapshot = services.config_store.load()
+    if group not in snapshot.config.groups:
+        raise HTTPException(status_code=404, detail="Unknown group")
+    if services.job_store is None:
+        raise HTTPException(status_code=409, detail="Job store unavailable")
+    path = _job_path(services.job_store, group, job_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    record = read_job(path)
+    argv = _resume_argv(record)
+    if argv is None:
+        raise HTTPException(status_code=400, detail="Job cannot be resumed")
+    outcome = "launched"
+    try:
+        integration = get_integration(record.spec.integration_name)
+        command = (integration.require_executable(), *argv[1:])
+        await run_in_threadpool(
+            spawn_interactive_terminal,
+            command,
+            Path(record.spec.workspace_root),
+        )
+    except (IntegrationError, OSError):
+        outcome = "failed"
+    return RedirectResponse(f"/{group}/jobs/{job_id}?resume={outcome}", status_code=303)
 
 
 @router.post("/{group}/jobs/{job_id}/cancel", response_class=HTMLResponse)
