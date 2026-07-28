@@ -85,6 +85,7 @@ def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_inp
         }
     ]
     assert runtime["job_paths"] == ()
+    assert runtime["dispatch_interval"] == 15
     root = Path("/groups/team").resolve(strict=False)
     assert runtime["workspace_root"] == root
     assert runtime["group_root"] == root
