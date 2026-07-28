@@ -164,99 +164,115 @@ def test_agent_last_run_stats_each_candidate_once(tmp_path, monkeypatch):
     assert stat_calls == {candidate: 1 for candidate in candidates}
 
 
+def _group_with_routines(tmp_path, routines):
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    return {
+        "key": "grp",
+        "logs": logs,
+        "agents_full": [
+            {
+                "name": "product",
+                "blueprint": "product-blueprint",
+                "integration": "script",
+                "routines": [
+                    {
+                        "id": routine["id"],
+                        "prompt": {"scope": "blueprint", "name": "daily-review"},
+                        "schedule": {
+                            key: value
+                            for key, value in routine.items()
+                            if key in {"at", "every"}
+                        },
+                        **({"condition": routine["condition"]} if "condition" in routine else {}),
+                    }
+                    for routine in routines
+                ],
+            }
+        ],
+    }
+
+
+ENABLED = {"enabled": True}
+
+
 def test_next_run_disabled(tmp_path):
-    g = _group_with_logs(tmp_path)
-    cfg = {"enabled": False, "routines": {"product": [{"id": "r", "every": "6h"}]}}
-    assert compute_next_run(g, "product", cfg) is None
+    g = _group_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
+    assert compute_next_run(g, "product", {"enabled": False}) is None
 
 
 def test_next_run_no_rules(tmp_path):
-    g = _group_with_logs(tmp_path)
-    cfg = {"enabled": True, "routines": {}}
-    assert compute_next_run(g, "product", cfg) is None
+    g = _group_with_routines(tmp_path, [])
+    assert compute_next_run(g, "product", ENABLED) is None
+
+
+def test_next_run_unknown_agent(tmp_path):
+    g = _group_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
+    assert compute_next_run(g, "missing", ENABLED) is None
 
 
 def test_next_run_at_future(tmp_path):
-    g = _group_with_logs(tmp_path)
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
-
     future = (fixed_now + timedelta(hours=2)).strftime("%H:%M")
-    cfg = {"enabled": True, "routines": {"product": [{"id": "r", "at": future}]}}
+    g = _group_with_routines(tmp_path, [{"id": "r", "at": future}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
-        result = compute_next_run(g, "product", cfg)
+        result = compute_next_run(g, "product", ENABLED)
     assert result is not None
     assert result.date() == fixed_now.date()
     assert result.strftime("%H:%M") == future
 
 
 def test_next_run_at_past_rolls_to_tomorrow(tmp_path):
-    g = _group_with_logs(tmp_path)
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
-
     past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
-    cfg = {"enabled": True, "routines": {"product": [{"id": "r", "at": past}]}}
+    g = _group_with_routines(tmp_path, [{"id": "r", "at": past}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
-        result = compute_next_run(g, "product", cfg)
+        result = compute_next_run(g, "product", ENABLED)
     assert result is not None
     assert result.date() == (fixed_now + timedelta(days=1)).date()
 
 
 def test_next_run_every_no_marker_due_now(tmp_path):
-    g = _group_with_logs(tmp_path)
-    cfg = {"enabled": True, "routines": {"product": [{"id": "r", "every": "6h"}]}}
+    g = _group_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
     before = datetime.now()
-    result = compute_next_run(g, "product", cfg)
+    result = compute_next_run(g, "product", ENABLED)
     assert result is not None
     assert result <= datetime.now() and result >= before - timedelta(seconds=5)
 
 
 def test_next_run_every_with_marker(tmp_path):
-    g = _group_with_logs(tmp_path)
+    g = _group_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
     marker = g["logs"] / ".last-product-r"
     marker.touch()
     two_hours_ago = time.time() - 2 * 3600
     os.utime(marker, (two_hours_ago, two_hours_ago))
-    cfg = {"enabled": True, "routines": {"product": [{"id": "r", "every": "6h"}]}}
-    result = compute_next_run(g, "product", cfg)
-    # marker + 6h => ~4h from now
+    result = compute_next_run(g, "product", ENABLED)
     assert result is not None
     delta = (result - datetime.now()).total_seconds()
     assert 3.9 * 3600 < delta < 4.1 * 3600
 
 
 def test_next_run_skips_condition_rule(tmp_path):
-    g = _group_with_logs(tmp_path)
-    cfg = {"enabled": True, "routines": {"product": [
-        {"id": "gate", "at": "06:00", "condition": "pre-send"},
-    ]}}
-    assert compute_next_run(g, "product", cfg) is None
+    g = _group_with_routines(tmp_path, [{"id": "gate", "at": "06:00", "condition": "pre-send"}])
+    assert compute_next_run(g, "product", ENABLED) is None
 
 
 def test_next_run_returns_soonest(tmp_path):
-    g = _group_with_logs(tmp_path)
-    soon = (datetime.now() + timedelta(minutes=30)).strftime("%H:%M")
-    later = (datetime.now() + timedelta(hours=5)).strftime("%H:%M")
-    cfg = {"enabled": True, "routines": {"product": [
-        {"id": "a", "at": later},
-        {"id": "b", "at": soon},
-    ]}}
-    result = compute_next_run(g, "product", cfg)
+    fixed_now = datetime(2026, 1, 15, 12, 0, 0)
+    soon = (fixed_now + timedelta(minutes=30)).strftime("%H:%M")
+    later = (fixed_now + timedelta(hours=5)).strftime("%H:%M")
+    g = _group_with_routines(tmp_path, [{"id": "a", "at": later}, {"id": "b", "at": soon}])
+    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+        result = compute_next_run(g, "product", ENABLED)
     assert result.strftime("%H:%M") == soon
 
 
 def test_next_run_detail_identifies_winning_rule(tmp_path):
-    g = _group_with_logs(tmp_path)
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
-
-    cfg = {"enabled": True, "routines": {"product": [
-        {"id": "later", "at": "17:00"},
-        {"id": "soon", "at": "12:30"},
-    ]}}
-
+    g = _group_with_routines(tmp_path, [{"id": "later", "at": "17:00"}, {"id": "soon", "at": "12:30"}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
-        detail = compute_next_run_detail(g, "product", cfg)
-        compatible_value = compute_next_run(g, "product", cfg)
-
+        detail = compute_next_run_detail(g, "product", ENABLED)
+        compatible_value = compute_next_run(g, "product", ENABLED)
     assert detail == {
         "when": fixed_now + timedelta(minutes=30),
         "routine_id": "soon",
@@ -266,19 +282,18 @@ def test_next_run_detail_identifies_winning_rule(tmp_path):
 
 
 def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
-    g = _group_with_logs(tmp_path)
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
-
-    cfg = {"enabled": True, "routines": {"product": [
-        {"id": "first", "at": "13:00"},
-        {"id": "second", "at": "13:00"},
-    ]}}
-
+    g = _group_with_routines(tmp_path, [{"id": "first", "at": "13:00"}, {"id": "second", "at": "13:00"}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
-        detail = compute_next_run_detail(g, "product", cfg)
-
+        detail = compute_next_run_detail(g, "product", ENABLED)
     assert detail["routine_id"] == "first"
     assert detail["rule_index"] == 0
+
+
+def test_next_run_skips_disabled_routine(tmp_path):
+    g = _group_with_routines(tmp_path, [{"id": "r", "at": "13:00"}])
+    g["agents_full"][0]["routines"][0]["enabled"] = False
+    assert compute_next_run(g, "product", ENABLED) is None
 
 
 def test_relative_future_none():
@@ -339,7 +354,9 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
         "decisions": group_path / "decisions",
         "logs": group_path / "logs",
         "job_paths": tuple(JobStore(memory_root).paths("grp")),
-        "dispatch": {"enabled": True, "routines": {"product": [{"id": "r", "every": "6h"}]}},
+        "dispatch": {"enabled": True},
+        "dispatch_interval": 15,
+        "runtime": {"timeout": 1800},
     }
 
     _write_job(group_path, "running")

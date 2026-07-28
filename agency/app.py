@@ -33,6 +33,7 @@ from agency.configuration import (
 )
 from agency.integrations import get_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
+from agency.dispatch.schedule import every_marker_path, parse_every
 from agency.jobs import (
     JobRequest,
     JobSubmissionError,
@@ -875,6 +876,13 @@ def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
     return bool(active_jobs(tuple(g.get("job_paths", ())), agent_name))
 
 
+def _agent_routines(g: dict, agent_name: str):
+    for instance in g.get("agents_full", []):
+        if instance.get("name") == agent_name:
+            return instance.get("routines") or ()
+    return ()
+
+
 def compute_next_run_detail(
     g: dict,
     agent_name: str,
@@ -883,53 +891,42 @@ def compute_next_run_detail(
     """Return the soonest scheduled run with its originating rule identity."""
     if not dispatch_cfg.get("enabled", False):
         return None
-    rules = dispatch_cfg.get("routines", {}).get(agent_name, [])
-    if not isinstance(rules, list):
-        return None
 
     now = clock_now()
     logs_root = Path(g["logs"])
     candidates: list[dict] = []
 
-    for rule_index, rule in enumerate(rules):
-        if not isinstance(rule, dict):
-            continue
-        routine_id = rule.get("id", "")
-        if not routine_id or rule.get("condition"):
+    for rule_index, schedule in enumerate(
+        routine_schedules(_agent_routines(g, agent_name))
+    ):
+        if not schedule.enabled or schedule.conditional or not schedule.routine_id:
             continue
 
-        at_time = rule.get("at", "")
-        every_val = rule.get("every", "")
-
-        if at_time:
+        if schedule.at:
             try:
                 target = datetime.strptime(
-                    f"{now.strftime('%Y-%m-%d')} {at_time}", "%Y-%m-%d %H:%M"
+                    f"{now.strftime('%Y-%m-%d')} {schedule.at}", "%Y-%m-%d %H:%M"
                 )
             except ValueError:
                 continue
             if target <= now:
                 target += timedelta(days=1)
-        elif every_val:
-            match = re.fullmatch(r"(\d+)(m|h|d)", every_val)
-            if not match:
+        elif schedule.every:
+            period = parse_every(schedule.every)
+            if period is None:
                 continue
-            value = int(match.group(1))
-            unit = match.group(2)
-            seconds = value * 60 if unit == "m" else value * 3600 if unit == "h" else value * 86400
-            marker = logs_root / f".last-{agent_name}-{routine_id}"
+            marker = every_marker_path(logs_root, agent_name, schedule.routine_id)
             target = (
                 now
                 if not marker.exists()
-                else datetime.fromtimestamp(marker.stat().st_mtime)
-                + timedelta(seconds=seconds)
+                else datetime.fromtimestamp(marker.stat().st_mtime) + period
             )
         else:
             continue
 
         candidates.append({
             "when": target,
-            "routine_id": routine_id,
+            "routine_id": schedule.routine_id,
             "rule_index": rule_index,
         })
 
