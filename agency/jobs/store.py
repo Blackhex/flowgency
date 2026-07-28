@@ -196,24 +196,55 @@ def cancel_job(path: Path) -> JobRecord:
         return updated
 
 
-def active_jobs(
+ACTIVE_STATUSES = frozenset({"queued", "waiting_for_memory", "running"})
+TERMINAL_STATUSES = frozenset({"complete", "failed", "cancelled"})
+
+
+def _iter_job_records(
     job_paths: Path | tuple[Path, ...],
-    agent_name: str | None = None,
-) -> list[JobRecord]:
-    """Return persisted active jobs, optionally for one agent."""
+    agent_name: str | None,
+):
     if isinstance(job_paths, Path):
         paths = tuple(sorted(job_paths.glob("*.yaml"))) if job_paths.is_dir() else ()
     else:
         paths = tuple(job_paths)
-    records = []
     for path in paths:
         try:
             record = read_job(path)
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError):
             continue
-        if record.status not in {"queued", "waiting_for_memory", "running"}:
-            continue
         if agent_name is not None and record.spec.agent_name != agent_name:
             continue
-        records.append(record)
-    return records
+        yield record
+
+
+def active_jobs(
+    job_paths: Path | tuple[Path, ...],
+    agent_name: str | None = None,
+) -> list[JobRecord]:
+    """Return persisted active jobs, optionally for one agent."""
+    return [
+        record
+        for record in _iter_job_records(job_paths, agent_name)
+        if record.status in ACTIVE_STATUSES
+    ]
+
+
+def _terminal_sort_key(record: JobRecord) -> tuple[str, str]:
+    stamp = record.completed_at or record.started_at or record.spec.created_at
+    return (stamp or "", record.spec.job_id)
+
+
+def latest_terminal_job(
+    job_paths: Path | tuple[Path, ...],
+    agent_name: str | None = None,
+) -> JobRecord | None:
+    """Return the newest finished job record, optionally for one agent."""
+    records = [
+        record
+        for record in _iter_job_records(job_paths, agent_name)
+        if record.status in TERMINAL_STATUSES
+    ]
+    if not records:
+        return None
+    return max(records, key=_terminal_sort_key)
