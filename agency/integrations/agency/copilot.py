@@ -306,6 +306,28 @@ class CopilotIntegration(BaseIntegration):
         return f"{seconds}s"
 
     @staticmethod
+    def _parse_session_id(raw: str) -> str | None:
+        """Return the sessionId of the last result event, or None."""
+        session_id: str | None = None
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(event, dict) or event.get("type") != "result":
+                continue
+            candidate = event.get("sessionId")
+            if isinstance(candidate, str) and candidate:
+                session_id = candidate
+        return session_id
+
+    def resume_command(self, session_id: str) -> tuple[str, ...] | None:
+        return (self.cli_command, "--resume", session_id)
+
+    @staticmethod
     def _usage_summary(raw: str) -> str:
         result = None
         for line in raw.splitlines():
@@ -470,6 +492,7 @@ class CopilotIntegration(BaseIntegration):
                 duration_seconds=duration,
                 changed_files=changed_files,
                 write_attempts=write_attempts,
+                session_id=self._parse_session_id(result.stdout),
             )
         except subprocess.TimeoutExpired as error:
             duration = time.monotonic() - start
@@ -497,6 +520,7 @@ class CopilotIntegration(BaseIntegration):
                 duration_seconds=duration,
                 changed_files=changed_files,
                 write_attempts=write_attempts,
+                session_id=self._parse_session_id(partial_stdout),
             )
         except FileNotFoundError:
             raise IntegrationError(f"GitHub Copilot CLI not found. Looked for: {cmd}")

@@ -44,6 +44,8 @@ class RunResult:
     duration_seconds: float
     changed_files: list["FileChange"] = field(default_factory=list)
     write_attempts: list[str] = field(default_factory=list)
+    session_id: str | None = None
+
 
 
 @dataclass
@@ -86,6 +88,10 @@ class BaseIntegration:
     def run(self, request: IntegrationRunRequest) -> RunResult:
         """Execute an agent with a typed immutable run request."""
         raise NotImplementedError
+
+    def resume_command(self, session_id: str) -> tuple[str, ...] | None:
+        """Argv that reopens a past session, or None when unsupported."""
+        return None
 
     def identity_filename(self) -> str:
         """The native file this tool uses for project instructions."""
