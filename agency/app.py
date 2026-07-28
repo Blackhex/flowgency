@@ -44,7 +44,7 @@ from agency.jobs import (
 )
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
-from agency.jobs.store import latest_terminal_job
+from agency.jobs import latest_executed_job
 from agency.health import (
     evaluate_agent_health,
     grace_window,
@@ -916,11 +916,10 @@ def compute_next_run_detail(
             if period is None:
                 continue
             marker = every_marker_path(logs_root, agent_name, schedule.routine_id)
-            target = (
-                now
-                if not marker.exists()
-                else datetime.fromtimestamp(marker.stat().st_mtime) + period
-            )
+            try:
+                target = datetime.fromtimestamp(marker.stat().st_mtime) + period
+            except OSError:
+                target = now
         else:
             continue
 
@@ -1026,11 +1025,10 @@ def _agent_health(g: dict, agent_name: str, routines, last_seen: datetime | None
         now=clock_now(),
         grace=grace_window(int(g.get("dispatch_interval", 15))),
     )
-    terminal = latest_terminal_job(tuple(g.get("job_paths", ())), agent_name)
-    executed = terminal is not None and terminal.status in {"complete", "failed"}
+    executed = latest_executed_job(tuple(g.get("job_paths", ())), agent_name)
     return evaluate_agent_health(
-        has_run=last_seen is not None or executed,
-        last_job_failed=terminal is not None and terminal.status == "failed",
+        has_run=last_seen is not None or executed is not None,
+        last_job_failed=executed is not None and executed.status == "failed",
         schedule=state,
     )
 

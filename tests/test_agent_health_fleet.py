@@ -1,12 +1,12 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 import os
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from agency import app as app_module
 from agency.jobs.authority import JobStore
+from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from agency.jobs.store import write_job
 
 NOW = datetime(2026, 7, 28, 12, 0, 0)
 
@@ -96,4 +96,87 @@ def test_an_agent_whose_last_run_is_ancient_is_still_green_without_a_schedule(tm
     log_file.write_text("", encoding="utf-8")
     stamp = (NOW - timedelta(days=120)).timestamp()
     os.utime(log_file, (stamp, stamp))
+    assert _health(tmp_path, routines=[]) == "green"
+
+
+# ── Helpers for job-record tests ──────────────────────────────────────────────
+
+
+def _spec(tmp_path, job_id, created_at="2026-07-20T00:00:00+00:00"):
+    config_path = tmp_path / "config.yaml"
+    if not config_path.exists():
+        config_path.write_text("schema_version: 4\ngroups: {}\n", encoding="utf-8")
+    return JobSpec(
+        schema_version=3,
+        job_id=job_id,
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
+        group_key="grp",
+        group_root=str(tmp_path.resolve()),
+        agent_name="product",
+        workspace_root=str(tmp_path.resolve()),
+        trigger="manual_prompt",
+        integration_name="script",
+        integration_config={},
+        blueprint=BlueprintRef(
+            key="product-blueprint",
+            source_digest="digest-1",
+            integration="script",
+            projector_version="v1",
+            cache_path=str((tmp_path / "cache" / "entry.py").resolve()),
+        ),
+        routine_id="daily-review",
+        skill="daily-review",
+        skill_arguments=(),
+        task_input="# Task\n",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="unrestricted",
+            sandbox_roots=(),
+            tool_mode="all",
+            tool_names=(),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "agent", "version": 1, "group": "grp", "agent": "product"},
+            canonical_json='{"scope":"agent"}',
+            memory_hash="mem-1",
+            path=str((tmp_path / "memory" / "mem-1").resolve()),
+        ),
+        trigger_context=None,
+        prompt_source={"type": "prompt", "path": "routine.md"},
+        timeout_override=None,
+        created_at=created_at,
+    )
+
+
+def _write_job(tmp_path, job_id, *, status, completed_at=None, created_at="2026-07-20T00:00:00+00:00"):
+    spec = _spec(tmp_path, job_id, created_at=created_at)
+    record = replace(JobRecord.from_spec(spec), status=status, completed_at=completed_at)
+    store = JobStore(tmp_path / "memory")
+    store.group_root("grp").mkdir(parents=True, exist_ok=True)
+    write_job(store.path("grp", job_id), record)
+
+
+# ── Job-record health tests ───────────────────────────────────────────────────
+
+
+def test_newest_failed_record_makes_agent_red(tmp_path):
+    _write_job(tmp_path, "job-1", status="failed", completed_at="2026-07-28T10:00:00+00:00")
+    assert _health(tmp_path, routines=[]) == "red"
+
+
+def test_complete_record_newer_than_failed_is_not_red(tmp_path):
+    _write_job(tmp_path, "job-old", status="failed", completed_at="2026-07-27T10:00:00+00:00")
+    _write_job(tmp_path, "job-new", status="complete", completed_at="2026-07-28T10:00:00+00:00")
+    assert _health(tmp_path, routines=[]) != "red"
+
+
+def test_cancelled_newer_than_failed_keeps_red(tmp_path):
+    _write_job(tmp_path, "job-fail", status="failed", completed_at="2026-07-27T10:00:00+00:00")
+    _write_job(tmp_path, "job-cancel", status="cancelled", completed_at="2026-07-28T10:00:00+00:00")
+    assert _health(tmp_path, routines=[]) == "red"
+
+
+def test_complete_record_with_no_log_file_is_green(tmp_path):
+    _write_job(tmp_path, "job-1", status="complete", completed_at="2026-07-28T10:00:00+00:00")
     assert _health(tmp_path, routines=[]) == "green"
