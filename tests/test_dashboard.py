@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -546,3 +547,36 @@ def test_dashboard_reports_never_run_agents_separately(monkeypatch, tmp_path, ra
     assert "1 needs attention" not in response.text
     assert "text-gray-400" in response.text
     assert 'title="No run on record"' in response.text
+
+
+def test_initials_filter_builds_a_two_letter_avatar():
+    assert app_mod.initials("Duncan Idaho") == "DI"
+    assert app_mod.initials("Lady Jessica Atreides") == "LJ"
+    assert app_mod.initials("advisor") == "AD"
+    assert app_mod.initials("") == "?"
+
+
+def test_fleet_cards_render_both_timing_values(monkeypatch, tmp_path, raw_config):
+    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/")
+
+    assert response.status_code == 200
+    assert "never run" in response.text
+    assert "/newsletter/agents/advisor/routines" in response.text
+
+
+def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
+    _write_yaml(config_path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+
+    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+        response = client.get("/newsletter/")
+
+    assert "daily-review due 09:00" in response.text
+    assert 'title="Routine daily-review was due at 09:00' in response.text

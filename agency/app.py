@@ -987,6 +987,20 @@ def relative_future(dt: datetime | None) -> str:
 templates.env.filters["relative_future"] = relative_future
 
 
+def initials(name: str) -> str:
+    """Two-letter avatar for an agent with no configured emoji."""
+    words = (name or "").split()
+    if not words:
+        return "?"
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return (words[0][0] + words[1][0]).upper()
+
+
+templates.env.filters["initials"] = initials
+templates.env.filters["elapsed"] = elapsed_coarse
+
+
 def integration_badge_filter(name: str) -> Markup:
     """Render a colored badge for an integration name."""
     colors = {

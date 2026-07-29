@@ -32,32 +32,59 @@
    ════════════════════════════════════════════════════════════ #}
 <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2.5 mb-3">
   {% if fleet_agents %}
-  <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 items-start">
     {% for a in fleet_agents %}
-    <a href="{{ a.profile_href or ('/' ~ group ~ '/agents/' ~ a.name) }}"
-       class="inline-flex items-center gap-1.5 text-base whitespace-nowrap rounded px-2 py-0.5 transition-colors
-              {% if a.health == 'red' %}bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40
-              {% elif a.health == 'amber' %}bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/40
-              {% elif a.health == 'gray' %}bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200 dark:hover:bg-gray-700
-              {% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
-      <span class="text-base">{{ a.emoji or '~' }}</span>
-      {% if a.running %}
-      <span class="text-emerald-500 text-sm leading-none animate-pulse" title="Running">&#9679;</span>
-      {% else %}
-      <span class="{% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% elif a.health == 'gray' %}text-gray-400 dark:text-gray-500{% else %}text-rose-500{% endif %} text-sm leading-none"
-            title="{% if a.health == 'green' %}Healthy{% elif a.health == 'amber' %}Run is due{% elif a.health == 'gray' %}No run on record{% else %}Needs attention{% endif %}">&#9679;</span>
+    <div class="rounded-lg border px-3 py-2 transition-colors
+         {% if a.health == 'red' %}border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/25
+         {% elif a.health == 'amber' %}border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/25
+         {% elif a.health == 'gray' %}border-gray-200 dark:border-gray-700 bg-gray-100/60 dark:bg-gray-800/60 opacity-75
+         {% else %}border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800{% endif %}">
+
+      <a href="{{ a.profile_href or ('/' ~ group ~ '/agents/' ~ a.name) }}" class="flex items-center gap-2 group">
+        <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-200 dark:bg-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200">{{ a.emoji or (a.display_name or a.name) | initials }}</span>
+        <span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100 group-hover:underline">{{ a.display_name or a.name }}</span>
+        {% if a.open_observations %}<span class="rounded-full bg-amber-100 dark:bg-amber-900/50 px-1.5 text-xs font-mono text-amber-700 dark:text-amber-300">{{ a.open_observations }}</span>{% endif %}
+        {% if a.running %}
+        <span class="ml-auto text-emerald-500 text-xs leading-none animate-pulse" title="Running">&#9679;</span>
+        {% else %}
+        <span class="ml-auto text-xs leading-none {% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% elif a.health == 'gray' %}text-gray-400 dark:text-gray-500{% else %}text-rose-500{% endif %}"
+              title="{{ a.health_sentence }}">&#9679;</span>
+        {% endif %}
+      </a>
+
+      {% if a.title %}<div class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{{ a.title }}</div>{% endif %}
+
+      <div class="mt-1.5 flex flex-wrap gap-1">
+        {% if a.blueprint %}<span class="rounded bg-gray-200 dark:bg-gray-700 px-1.5 text-xs text-gray-700 dark:text-gray-200" title="Blueprint: {{ a.blueprint }}">{{ a.blueprint }}</span>{% endif %}
+        {% if a.integration %}<span class="rounded bg-slate-200 dark:bg-slate-700 px-1.5 text-xs text-slate-700 dark:text-slate-200">{{ a.integration }}</span>{% endif %}
+      </div>
+
+      <div class="mt-2 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-1.5 font-mono text-xs">
+        {% if a.last_run %}
+        <a href="/{{ group }}/logs/view?path={{ a.last_run.path | urlencode }}"
+           class="text-gray-600 dark:text-gray-300 hover:underline"
+           title="{{ a.last_run.at.strftime('%Y-%m-%d %H:%M') }}">{{ a.last_run.at | relative_time }}</a>
+        {% else %}
+        <a href="{{ a.activity_href }}" class="text-gray-500 dark:text-gray-400 hover:underline">never run</a>
+        {% endif %}
+
+        {% if a.job_status and a.job_href %}
+        <a href="{{ a.job_href }}" class="text-indigo-600 dark:text-indigo-300 hover:underline">{{ a.job_status }}</a>
+        {% elif a.health_kind == 'overdue' %}
+        <a href="/{{ group }}/agents/{{ a.name }}/routines" class="text-rose-600 dark:text-rose-300 hover:underline">overdue {{ a.health_late | elapsed }}</a>
+        {% elif a.health_kind == 'due' %}
+        <a href="/{{ group }}/agents/{{ a.name }}/routines" class="text-amber-600 dark:text-amber-300 hover:underline">due now</a>
+        {% elif a.next_run %}
+        <a href="/{{ group }}/agents/{{ a.name }}/routines" class="text-sky-600 dark:text-sky-300 hover:underline">{{ a.next_run | relative_future }}</a>
+        {% else %}
+        <a href="/{{ group }}/agents/{{ a.name }}/routines" class="text-gray-400 dark:text-gray-500">&mdash;</a>
+        {% endif %}
+      </div>
+
+      {% if a.health_fault %}
+      <div class="mt-1 text-xs {% if a.health == 'red' %}text-rose-700 dark:text-rose-200{% else %}text-amber-700 dark:text-amber-200{% endif %}">{{ a.health_fault }}</div>
       {% endif %}
-      <span class="text-gray-700 dark:text-gray-300 text-base">{{ a.display_name or a.name }}</span>
-      {% if a.blueprint %}<span class="text-xs text-gray-600 dark:text-gray-300">Blueprint: {{ a.blueprint }}</span>{% endif %}
-      {% if a.integration %}<span class="text-xs text-gray-700 dark:text-gray-200">{{ a.integration }}</span>{% endif %}
-      {% if a.open_observations %}<span class="font-mono text-sm text-amber-700 dark:text-amber-300">{{ a.open_observations }}</span>{% endif %}
-    </a>
-    {% if a.job_status and a.job_href %}
-    <a href="{{ a.job_href }}" class="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">{{ a.job_status }}</a>
-    {% endif %}
-    {% if a.activity_href %}
-    <a href="{{ a.activity_href }}" class="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Activity</a>
-    {% endif %}
+    </div>
     {% endfor %}
   </div>
   <div class="mt-1.5 text-sm text-gray-500 dark:text-gray-400 font-mono">
