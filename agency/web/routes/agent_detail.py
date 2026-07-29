@@ -30,6 +30,8 @@ from agency.health import (
     elapsed_coarse,
     grace_window,
     last_fired_at,
+    next_occurrence,
+    relative_future,
     routine_schedules,
     schedule_lateness,
 )
@@ -652,6 +654,7 @@ def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
     logs_root = resolve_group_paths(group).logs
     now = clock_now()
     grace = grace_window(int(snapshot.config.agency.dispatch.interval))
+    dispatch_enabled = group.dispatch.enabled
     rows = []
     for schedule in routine_schedules(instance.routines):
         if schedule.conditional:
@@ -676,7 +679,7 @@ def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
                     )
                 ),
                 "next_due": _next_due_text(
-                    schedule, logs_root, instance.name, now, grace
+                    schedule, logs_root, instance.name, now, grace, dispatch_enabled
                 ),
             }
         )
@@ -689,7 +692,9 @@ def _marker_stamp(fired_at) -> str:
     return fired_at.strftime("%Y-%m-%d %H:%M")
 
 
-def _next_due_text(schedule, logs_root, agent_name, now, grace) -> str:
+def _next_due_text(schedule, logs_root, agent_name, now, grace, dispatch_enabled=True) -> str:
+    if not dispatch_enabled:
+        return "dispatch disabled"
     if schedule.conditional or not schedule.enabled:
         return "—"
     lateness = schedule_lateness(
@@ -700,7 +705,8 @@ def _next_due_text(schedule, logs_root, agent_name, now, grace) -> str:
         grace=grace,
     )
     if lateness is None:
-        return "on schedule"
+        nxt = next_occurrence(schedule, logs_root=logs_root, agent_name=agent_name, now=now)
+        return relative_future(nxt)
     if lateness.state == "overdue":
         return f"overdue {elapsed_coarse(now - lateness.due_at)}"
     return "due now"

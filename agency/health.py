@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
+from agency.clock import now as clock_now
 from agency.dispatch.schedule import at_marker_path, every_marker_path, parse_every
 
 OVERDUE = "overdue"
@@ -279,6 +280,62 @@ def describe_agent_health(
     if not has_run:
         return AgentHealth(color, "never_run", None, None, None)
     return AgentHealth(color, "healthy", None, None, None)
+
+
+def next_occurrence(
+    schedule: RoutineSchedule,
+    *,
+    logs_root: Path,
+    agent_name: str,
+    now: datetime,
+) -> datetime | None:
+    """Return the datetime of the next occurrence for an active schedule."""
+    if not schedule.enabled or schedule.conditional or not schedule.routine_id:
+        return None
+    if schedule.at:
+        try:
+            today_target = datetime.strptime(
+                f"{now.strftime('%Y-%m-%d')} {schedule.at}", "%Y-%m-%d %H:%M"
+            )
+        except ValueError:
+            return None
+        if now < today_target:
+            return today_target
+        # Past today's time — fired today means tomorrow; otherwise still today (overdue)
+        day = now.strftime("%Y-%m-%d")
+        marker = at_marker_path(logs_root, agent_name, schedule.routine_id, day)
+        if marker.exists():
+            return today_target + timedelta(days=1)
+        return today_target
+    if schedule.every:
+        period = parse_every(schedule.every)
+        if period is None:
+            return None
+        marker = every_marker_path(logs_root, agent_name, schedule.routine_id)
+        try:
+            return datetime.fromtimestamp(marker.stat().st_mtime) + period
+        except OSError:
+            return now  # never ran; next opportunity is now
+    return None
+
+
+def relative_future(dt: datetime | None) -> str:
+    """Format an upcoming datetime as '5m away', '2h away', 'tomorrow HH:MM', etc."""
+    if dt is None:
+        return ""
+    now = clock_now()
+    seconds = int((dt - now).total_seconds())
+    if seconds <= 0:
+        return "due now"
+    minutes = max(1, round(seconds / 60))
+    if minutes < 60:
+        return f"{minutes}m away"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h away"
+    if dt.date() == (now + timedelta(days=1)).date():
+        return f"tomorrow {dt.strftime('%H:%M')}"
+    return dt.strftime("%Y-%m-%d %H:%M")
 
 
 def _field(source: object, name: str):
