@@ -207,7 +207,7 @@ Item body:
 
 | `kind` | Label | Sentence |
 | --- | --- | --- |
-| `job_failed` | `last run failed` | `Job {job_id[:8]} exited {exit_code} after {duration}, {relative_time(completed_at)}.` |
+| `job_failed` | `last run failed` | assembled from parts, see below |
 | `overdue` | `overdue` | `Routine {routine_id} was due at {due_at:%H:%M} and has not run — {late} late.` |
 | `due` | `due` | `Routine {routine_id} came due {late} ago; the dispatcher has not picked it up yet.` |
 
