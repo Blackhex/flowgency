@@ -245,6 +245,40 @@ def evaluate_agent_health(
     return "green"
 
 
+class AgentHealth(NamedTuple):
+    color: str
+    kind: str
+    routine_id: str | None
+    due_at: datetime | None
+    late: timedelta | None
+
+
+def describe_agent_health(
+    *,
+    has_run: bool,
+    last_job_failed: bool,
+    lateness: Lateness | None,
+    now: datetime,
+) -> AgentHealth:
+    """Pair the health colour with the reason that produced it."""
+    color = evaluate_agent_health(
+        has_run=has_run,
+        last_job_failed=last_job_failed,
+        schedule=lateness.state if lateness is not None else None,
+    )
+    if last_job_failed:
+        return AgentHealth(color, "job_failed", None, None, None)
+    if lateness is not None:
+        return AgentHealth(
+            color,
+            lateness.state,
+            lateness.routine_id,
+            lateness.due_at,
+            now - lateness.due_at,
+        )
+    if not has_run:
+        return AgentHealth(color, "never_run", None, None, None)
+    return AgentHealth(color, "healthy", None, None, None)
 
 
 def _field(source: object, name: str):

@@ -2,8 +2,10 @@ from datetime import datetime, timedelta
 import os
 
 from agency.health import (
+    AgentHealth,
     Lateness,
     RoutineSchedule,
+    describe_agent_health,
     elapsed_coarse,
     elapsed_precise,
     evaluate_agent_health,
@@ -317,3 +319,73 @@ def test_last_fired_at_reads_the_every_marker(tmp_path):
     assert last_fired_at(
         _every(), logs_root=logs, agent_name="product", now=NOW
     ) == datetime(2026, 7, 27, 6, 12)
+
+
+def _describe(has_run=True, last_job_failed=False, lateness=None):
+    return describe_agent_health(
+        has_run=has_run,
+        last_job_failed=last_job_failed,
+        lateness=lateness,
+        now=NOW,
+    )
+
+
+def _late(state="overdue", routine_id="suite-health", hours=3):
+    return Lateness(
+        routine_id=routine_id,
+        state=state,
+        due_at=NOW - timedelta(hours=hours),
+    )
+
+
+def test_failed_job_is_red_and_named():
+    assert _describe(last_job_failed=True) == AgentHealth("red", "job_failed", None, None, None)
+
+
+def test_overdue_carries_the_routine_and_how_late_it_is():
+    result = _describe(lateness=_late())
+    assert result.color == "red"
+    assert result.kind == "overdue"
+    assert result.routine_id == "suite-health"
+    assert result.due_at == NOW - timedelta(hours=3)
+    assert result.late == timedelta(hours=3)
+
+
+def test_due_is_amber_and_named():
+    result = _describe(lateness=_late(state="due", hours=0))
+    assert result.color == "amber"
+    assert result.kind == "due"
+
+
+def test_a_failed_job_outranks_an_overdue_routine():
+    result = _describe(last_job_failed=True, lateness=_late())
+    assert result.kind == "job_failed"
+    assert result.routine_id is None
+
+
+def test_no_run_on_record_is_gray_and_named():
+    assert _describe(has_run=False) == AgentHealth("gray", "never_run", None, None, None)
+
+
+def test_a_quiet_agent_that_has_run_is_healthy():
+    assert _describe() == AgentHealth("green", "healthy", None, None, None)
+
+
+def test_kind_never_contradicts_colour():
+    cases = [
+        _describe(last_job_failed=True),
+        _describe(lateness=_late()),
+        _describe(lateness=_late(state="due", hours=0)),
+        _describe(has_run=False),
+        _describe(),
+    ]
+    expected = {
+        "job_failed": "red",
+        "overdue": "red",
+        "due": "amber",
+        "never_run": "gray",
+        "healthy": "green",
+    }
+    for result in cases:
+        assert result.color == expected[result.kind]
+
