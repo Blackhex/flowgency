@@ -18,6 +18,7 @@
 - Cards render in configured order. Never sort by severity.
 - Card elapsed values are coarse and single-unit (`3h`). Queue elapsed values are compound (`3h 46m`, `3m 55s`, `12s`, `2d 3h`), with a zero remainder omitted.
 - Do not stage or modify `config.yaml`, `config.yaml.lock`, group-state directories, logs, or `.superpowers/`.
+- Timestamps are stored in UTC and always displayed in local time. `clock_now()` returns a naive local datetime, and durable job records carry aware UTC stamps, so any stored stamp must be converted with `.astimezone()` before display — never stripped with a bare `.replace(tzinfo=None)`. A stored stamp that carries no offset is UTC.
 - Commit messages follow Conventional Commits with an imperative, lowercase, period-free description of at most 72 characters including the prefix.
 
 ---
@@ -676,9 +677,12 @@ def _job_finished_at(job) -> datetime | None:
     if not stamp:
         return None
     try:
-        return datetime.fromisoformat(stamp).replace(tzinfo=None)
+        parsed = datetime.fromisoformat(stamp)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone().replace(tzinfo=None)
 
 
 def _apply_agent_status(g: dict, agent: dict, routines, dispatch_cfg: dict) -> None:
