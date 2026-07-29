@@ -13,7 +13,6 @@ from agency.health import (
     last_fired_at,
     routine_schedules,
     schedule_lateness,
-    schedule_state,
 )
 
 NOW = datetime(2026, 7, 28, 12, 0, 0)
@@ -27,13 +26,14 @@ def _logs(tmp_path):
 
 
 def _state(tmp_path, *schedules, now=NOW):
-    return schedule_state(
+    lateness = schedule_lateness(
         schedules,
         logs_root=_logs(tmp_path),
         agent_name="product",
         now=now,
         grace=GRACE,
     )
+    return lateness.state if lateness is not None else None
 
 
 def _lateness(tmp_path, *schedules, now=NOW):
@@ -279,7 +279,7 @@ def test_exact_tie_breaks_on_configured_order(tmp_path):
     assert result.routine_id == "first"
 
 
-def test_schedule_state_still_reports_only_severity(tmp_path):
+def test_lateness_state_reports_only_the_severity_strings(tmp_path):
     assert _state(tmp_path, _at(at="08:00")) == "overdue"
     assert _state(tmp_path, _at(at="18:00")) is None
 
