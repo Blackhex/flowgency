@@ -6,7 +6,7 @@ import stat
 import subprocess
 import urllib.parse
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import markdown
@@ -1058,9 +1058,12 @@ def _job_finished_at(job) -> datetime | None:
     if not stamp:
         return None
     try:
-        return datetime.fromisoformat(stamp).replace(tzinfo=None)
+        parsed = datetime.fromisoformat(stamp)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone().replace(tzinfo=None)
 
 
 def _apply_agent_status(g: dict, agent: dict, routines, dispatch_cfg: dict) -> None:

@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import time
@@ -10,6 +10,7 @@ import pytest
 from agency import app as app_module
 from agency.app import (
     _apply_agent_status,
+    _job_finished_at,
     compute_next_run,
     compute_next_run_detail,
     get_agent_last_run,
@@ -438,4 +439,33 @@ def test_enricher_ignores_schedules_when_dispatch_is_off(tmp_path):
         _apply_agent_status(g, agent, g["agents_full"][0]["routines"], {"enabled": False})
     assert agent["health_kind"] == "never_run"
     assert agent["next_run"] is None
+
+
+# ---------------------------------------------------------------------------
+# _job_finished_at: UTC conversion tests
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+
+def _job(completed_at=None, started_at=None):
+    return SimpleNamespace(completed_at=completed_at, started_at=started_at)
+
+
+def test_job_finished_at_aware_stamp_converts_to_local():
+    """Aware UTC stamp must be converted (astimezone), not stripped."""
+    stamp = "2026-07-28T06:16:06.226620+00:00"
+    expected = datetime.fromisoformat(stamp).astimezone().replace(tzinfo=None)
+    assert _job_finished_at(_job(completed_at=stamp)) == expected
+
+
+def test_job_finished_at_naive_stamp_treated_as_utc():
+    """Naive stamp is the storage convention for UTC; must shift to local."""
+    stamp = "2026-07-28T06:16:06"
+    expected = datetime(2026, 7, 28, 6, 16, 6, tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
+    assert _job_finished_at(_job(completed_at=stamp)) == expected
+
+
+def test_job_finished_at_malformed_stamp_returns_none():
+    assert _job_finished_at(_job(completed_at="not-a-date")) is None
 
