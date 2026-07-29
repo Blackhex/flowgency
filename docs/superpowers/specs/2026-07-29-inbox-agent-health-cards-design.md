@@ -140,8 +140,11 @@ a single-word name yields its first two letters. The bare `~` placeholder is
 retired.
 
 **Health dot.** Unchanged glyph and colors, including the pulsing emerald dot for
-a running agent. Its `title` becomes the full queue sentence from the section
-below, so the tooltip and the queue never diverge.
+a running agent. Its `title` is always `health_sentence`, in every state
+including running, so the tooltip and the queue never diverge.
+
+**The card carries no Activity link.** The chip had one per agent; the card body
+links to the profile, and the Activity tab is reachable from there.
 
 **Never-run cards** carry `opacity-75`.
 
@@ -153,16 +156,21 @@ non-zero. The mockup shows no pill because every count in that group is zero.
 | Case | Left cell | Right cell |
 | --- | --- | --- |
 | active job | `relative_time(last_run.at)` | `job_status`, linked to `job_href` |
-| `never_run` | `never run` | `—` |
-| `overdue` | `relative_time(last_run.at)` or `never run` | `overdue {relative}` |
-| `due` | `relative_time(last_run.at)` | `due now` |
-| otherwise | `relative_time(last_run.at)` | `relative_future(next_run)`, or `—` when the agent has no schedule |
+| `overdue` | `relative_time(last_run.at)` or `never run` | `overdue {relative}`, linked to the routines tab |
+| `due` | `relative_time(last_run.at)` | `due now`, linked to the routines tab |
+| has a schedule | `relative_time(last_run.at)` | `relative_future(next_run)`, linked to the routines tab |
+| no schedule | `relative_time(last_run.at)` or `never run` | `no schedule`, linked to the routines tab |
 
 An active job outranks every other case. `job_status` is the existing label
 (`Waiting for memory`, `Queued`, `Running`) and the cell keeps the job link the
 chip used to carry beside it, so a queued or running job stays one click away
 from the Inbox. This is the only element of the old chip that survives as a
 link rather than as text.
+
+The last row reads `no schedule` rather than a bare em dash. An em dash is a
+poor click target and reads as decoration, so an agent with nothing configured
+gets a named affordance that says what is missing and leads to where it is
+fixed. The card therefore has no unlinked right-hand state.
 
 `{relative}` is `late` in coarse form: whole minutes under an hour, whole hours
 under a day, whole days beyond that. The card never shows a compound value.
