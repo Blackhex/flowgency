@@ -1242,6 +1242,49 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
     return fleet
 
 
+_HEALTH_LABELS = {
+    "job_failed": "last run failed",
+    "overdue": "overdue",
+    "due": "due",
+}
+
+
+def build_health_items(g: dict, agents: list[dict]) -> list[dict]:
+    """Turn unhealthy fleet entries into Attention Queue rows."""
+    key = g["key"]
+    items = []
+    for agent in agents:
+        label = _HEALTH_LABELS.get(agent.get("health_kind"))
+        if label is None or agent.get("running"):
+            continue
+        job = agent.get("health_job")
+        items.append(
+            {
+                "name": agent["name"],
+                "display_name": agent.get("display_name") or agent["name"],
+                "kind": agent["health_kind"],
+                "label": label,
+                "sentence": agent.get("health_sentence", ""),
+                "last_line": _last_run_line(job),
+                "routines_href": f"/{key}/agents/{agent['name']}/routines",
+                "job_href": f"/{key}/jobs/{job.spec.job_id}" if job is not None else "",
+                "run_href": f"/{key}/agents/{agent['name']}",
+            }
+        )
+    return items
+
+
+def _last_run_line(job) -> str:
+    if job is None:
+        return ""
+    finished = _job_finished_at(job)
+    if finished is None:
+        return ""
+    outcome = "failed" if job.status == "failed" else "succeeded"
+    duration = elapsed_precise(timedelta(seconds=job.duration_seconds or 0))
+    return f"last run {finished.strftime('%Y-%m-%d %H:%M')} · {outcome} in {duration}"
+
+
 def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:
     """Get recent log files for an agent, newest first."""
     logs_dir = Path(g["logs"])
@@ -1819,10 +1862,11 @@ async def home(request: Request, group: str):
     actionable_proposals = [c for c in proposals if c.get("status") in ("proposed", "investigating")]
 
     floated_open_observations = [c for c in observations if c.get("float") and c.get("status") == "open"]
-    needs_action_count = len(actionable_proposals) + len(floated_open_observations)
 
     # Zone 1: Fleet status
     agents = build_dashboard_fleet(g)
+    health_items = build_health_items(g, agents)
+    needs_action_count = len(actionable_proposals) + len(floated_open_observations) + len(health_items)
 
     # Zone 2: Pipeline pulse
     pipeline = build_pipeline_stats(observations, proposals, decisions)
@@ -1842,6 +1886,7 @@ async def home(request: Request, group: str):
         # Zone 2: Pipeline
         "pipeline": pipeline,
         # Zone 3: Attention queue
+        "health_items": health_items,
         "actionable_proposals": actionable_proposals,
         "open_observations": open_observations[:7],
         "floated_observations": floated_observations,

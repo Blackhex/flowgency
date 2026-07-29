@@ -596,3 +596,54 @@ def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
 
     assert "daily-review due 09:00" in response.text
     assert 'title="Routine daily-review was due at 09:00' in response.text
+
+
+def test_health_items_cover_faults_and_skip_healthy_agents():
+    g = {"key": "newsletter"}
+    agents = [
+        {"name": "a", "display_name": "A", "health_kind": "healthy", "health_sentence": "Healthy", "health_job": None},
+        {"name": "b", "display_name": "B", "health_kind": "never_run", "health_sentence": "No run on record", "health_job": None},
+        {"name": "c", "display_name": "C", "health_kind": "overdue", "health_sentence": "Routine r was due.", "health_job": None},
+        {"name": "d", "display_name": "D", "health_kind": "due", "health_sentence": "Routine r came due.", "health_job": None},
+    ]
+    items = app_mod.build_health_items(g, agents)
+
+    assert [item["name"] for item in items] == ["c", "d"]
+    assert items[0]["label"] == "overdue"
+    assert items[0]["sentence"] == "Routine r was due."
+    assert items[0]["routines_href"] == "/newsletter/agents/c/routines"
+    assert items[0]["run_href"] == "/newsletter/agents/c"
+    assert items[0]["last_line"] == ""
+
+
+def test_a_running_agent_produces_no_health_item():
+    g = {"key": "newsletter"}
+    agents = [{"name": "c", "display_name": "C", "health_kind": "overdue", "health_sentence": "s", "health_job": None, "running": True}]
+
+    assert app_mod.build_health_items(g, agents) == []
+
+
+def test_overdue_agent_appears_in_the_attention_queue(monkeypatch, tmp_path, raw_config):
+    # dispatch must be enabled so schedule_lateness detects the overdue routine
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
+    _write_yaml(config_path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+
+    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+        response = client.get("/newsletter/")
+
+    assert "Routine daily-review was due at 09:00" in response.text
+    assert "No items need attention right now." not in response.text
+    assert "Open routine" in response.text
+
+
+def test_never_run_agent_produces_no_queue_item(monkeypatch, tmp_path, raw_config):
+    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/")
+
+    assert "No items need attention right now." in response.text
