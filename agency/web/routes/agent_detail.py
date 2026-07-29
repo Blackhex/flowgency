@@ -10,6 +10,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from agency.clock import now as clock_now
 from agency.configuration import (
     AgentProfilePatch,
     AgentRuntimePatch,
@@ -25,6 +26,13 @@ from agency.configuration import (
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
 from agency.fs import ResourceBusyError
+from agency.health import (
+    elapsed_coarse,
+    grace_window,
+    last_fired_at,
+    routine_schedules,
+    schedule_lateness,
+)
 from agency.integrations import get_integration
 from agency.jobs.authority import JobStore
 from agency.memory import MemoryConflictError, resolve_memory_selector
@@ -638,6 +646,66 @@ def _blueprint_context(services: AgencyServices, snapshot, group_id: str, agent_
     }
 
 
+def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
+    """Pair each configured routine with what actually fired."""
+    group = snapshot.config.groups[group_id]
+    logs_root = resolve_group_paths(group).logs
+    now = clock_now()
+    grace = grace_window(int(snapshot.config.agency.dispatch.interval))
+    rows = []
+    for schedule in routine_schedules(instance.routines):
+        if schedule.conditional:
+            spec = "conditional"
+        elif schedule.at:
+            spec = f"at {schedule.at}"
+        elif schedule.every:
+            spec = f"every {schedule.every}"
+        else:
+            spec = "no schedule"
+        rows.append(
+            {
+                "routine_id": schedule.routine_id,
+                "enabled": schedule.enabled,
+                "schedule": spec,
+                "last_fired": _marker_stamp(
+                    last_fired_at(
+                        schedule,
+                        logs_root=logs_root,
+                        agent_name=instance.name,
+                        now=now,
+                    )
+                ),
+                "next_due": _next_due_text(
+                    schedule, logs_root, instance.name, now, grace
+                ),
+            }
+        )
+    return rows
+
+
+def _marker_stamp(fired_at) -> str:
+    if fired_at is None:
+        return "never"
+    return fired_at.strftime("%Y-%m-%d %H:%M")
+
+
+def _next_due_text(schedule, logs_root, agent_name, now, grace) -> str:
+    if schedule.conditional or not schedule.enabled:
+        return "—"
+    lateness = schedule_lateness(
+        (schedule,),
+        logs_root=logs_root,
+        agent_name=agent_name,
+        now=now,
+        grace=grace,
+    )
+    if lateness is None:
+        return "on schedule"
+    if lateness.state == "overdue":
+        return f"overdue {elapsed_coarse(now - lateness.due_at)}"
+    return "due now"
+
+
 def _routines_context(services: AgencyServices, snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
     _, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
     routines_yaml = yaml.safe_dump(
@@ -653,6 +721,7 @@ def _routines_context(services: AgencyServices, snapshot, group_id: str, agent_i
         "available_private_prompts": tuple(private),
         "routines_yaml": routines_yaml,
         "supports_enabled": True,
+        "routine_status": _routine_status(snapshot, group_id, instance),
     }
     if issues:
         result["issues"] = issues

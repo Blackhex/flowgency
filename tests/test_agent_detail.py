@@ -787,6 +787,70 @@ def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memo
     assert current.files == seeded.files
 
 
+def test_routines_get_lists_schedule_status(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/agents/advisor/routines")
+
+    assert response.status_code == 200
+    assert "Schedule status" in response.text
+    assert "Last fired" in response.text
+    assert "Next due" in response.text
+    assert "at 09:00" in response.text
+    assert "never" in response.text
+
+
+def test_routines_get_disabled_routine_shows_dash_for_next_due(monkeypatch, tmp_path, raw_config):
+    """Disabled routines must show '—' for next_due, not a computed schedule."""
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["agents"][0]["routines"].append(
+        {
+            "id": "weekly-digest",
+            "prompt": {"scope": "blueprint", "name": "pr-review"},
+            "enabled": False,
+            "schedule": {"every": "6h"},
+        }
+    )
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+
+    response = client.get("/newsletter/agents/advisor/routines")
+
+    assert response.status_code == 200
+    assert "weekly-digest" in response.text
+    assert "—" in response.text
+
+
+def test_routines_get_fired_routine_shows_timestamp_and_on_schedule(monkeypatch, tmp_path, raw_config):
+    """A routine whose marker file exists shows a timestamp and 'on schedule'."""
+    from agency.dispatch.schedule import every_marker_path
+
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["agents"][0]["routines"].append(
+        {
+            "id": "hourly-check",
+            "prompt": {"scope": "blueprint", "name": "pr-review"},
+            "schedule": {"every": "6h"},
+        }
+    )
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+
+    logs_root = tmp_path / "groups" / "newsletter" / "logs"
+    marker = every_marker_path(logs_root, "advisor", "hourly-check")
+    marker.touch()
+
+    response = client.get("/newsletter/agents/advisor/routines")
+
+    assert response.status_code == 200
+    assert "hourly-check" in response.text
+    assert "on schedule" in response.text
+    from datetime import datetime
+    assert datetime.now().strftime("%Y-%m-%d") in response.text
+
+
 def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
