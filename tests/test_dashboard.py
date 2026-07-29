@@ -647,3 +647,63 @@ def test_never_run_agent_produces_no_queue_item(monkeypatch, tmp_path, raw_confi
     response = client.get("/newsletter/")
 
     assert "No items need attention right now." in response.text
+
+
+def test_build_health_items_job_href(tmp_path):
+    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="succeeded", job_id="job-abc-123")
+    record = JobRecord.from_spec(spec)
+    record.status = "succeeded"
+    record.completed_at = "2026-07-29T10:00:00+00:00"
+    record.duration_seconds = 235.0
+
+    g = {"key": "newsletter"}
+    agents = [{"name": "advisor", "display_name": "Advisor", "health_kind": "job_failed", "health_sentence": "Last run failed.", "health_job": record}]
+    items = app_mod.build_health_items(g, agents)
+
+    assert len(items) == 1
+    assert items[0]["job_href"] == f"/newsletter/jobs/{spec.job_id}"
+
+
+def test_last_run_line_succeeded(tmp_path):
+    from datetime import timezone
+    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="succeeded", job_id="job-succeeded")
+    record = JobRecord.from_spec(spec)
+    record.status = "succeeded"
+    record.completed_at = "2026-07-29T10:00:00+00:00"
+    record.duration_seconds = 235.0
+
+    expected_ts = datetime(2026, 7, 29, 10, 0, tzinfo=timezone.utc).astimezone().replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
+    assert app_mod._last_run_line(record) == f"last run {expected_ts} · succeeded in 3m 55s"
+
+
+def test_last_run_line_failed(tmp_path):
+    from datetime import timezone
+    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-failed")
+    record = JobRecord.from_spec(spec)
+    record.status = "failed"
+    record.completed_at = "2026-07-29T08:30:00+00:00"
+    record.duration_seconds = 10.0
+
+    expected_ts = datetime(2026, 7, 29, 8, 30, tzinfo=timezone.utc).astimezone().replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
+    assert app_mod._last_run_line(record) == f"last run {expected_ts} · failed in 10s"
+
+
+def test_last_run_line_none():
+    assert app_mod._last_run_line(None) == ""
+
+
+def test_attention_queue_header_singular(monkeypatch, tmp_path, raw_config):
+    # dispatch must be enabled so schedule_lateness produces the overdue fault
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
+    _write_yaml(config_path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+
+    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+        response = client.get("/newsletter/")
+
+    assert "1 item" in response.text
+    assert "1 items" not in response.text
