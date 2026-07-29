@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Work in the existing worktree `.worktrees/inbox-agent-health-cards` on branch `feat/inbox-agent-health-cards`. Run every command from that directory.
-- Run tests with `.venv/Scripts/python -m pytest`. Running from another checkout resolves the wrong local `tests` package.
+- Run tests with `python -m pytest` from the worktree root. This repo has no `.venv`, despite what AGENTS.md says; `python` is 3.13 with the package installed editable, and running from the worktree root is what makes `import agency` resolve to the worktree rather than the main checkout. Baseline before this branch: 1491 passed, 2 skipped, about four minutes.
 - The specification is `docs/superpowers/specs/2026-07-29-inbox-agent-health-cards-design.md`. Its assets are `docs/superpowers/specs/assets/2026-07-29-inbox-agent-health-cards/fleet-cards.png` and `attention-queue.png`, rendered from `inbox-fleet-cards.html` in the same directory. The images are normative for layout, ordering, and copy; the prose is normative for behavior. Compare the rendered page against both images before calling Task 4 or Task 5 complete.
 - The health model is fixed. Four colours, the precedence `job_failed > overdue > due > never_run > healthy`, `grace_window(interval) == interval + 2 minutes`, and the marker file names all stay exactly as they are. `evaluate_agent_health` keeps its signature and its return values.
 - `running` is orthogonal: it changes the dot glyph and the next-run cell only. It never changes `color` or `kind`, and a running agent never produces a queue item.
@@ -156,7 +156,7 @@ def test_last_fired_at_reads_the_every_marker(tmp_path):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_health.py -v`
+Run: `python -m pytest tests/test_health.py -v`
 Expected: collection error, `ImportError: cannot import name 'Lateness' from 'agency.health'`.
 
 - [ ] **Step 3: Add the lateness value and the elapsed formatters**
@@ -363,12 +363,12 @@ def _as_lateness(
 
 - [ ] **Step 5: Run the health tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_health.py -v`
+Run: `python -m pytest tests/test_health.py -v`
 Expected: PASS, including every pre-existing `schedule_state` and `evaluate_agent_health` case.
 
 - [ ] **Step 6: Run the suites that consume the health module**
 
-Run: `.venv/Scripts/python -m pytest tests/test_health.py tests/test_dashboard.py tests/test_agent_health_fleet.py tests/test_agent_status.py -q`
+Run: `python -m pytest tests/test_health.py tests/test_dashboard.py tests/test_agent_health_fleet.py tests/test_agent_status.py -q`
 Expected: PASS. `schedule_state` is behaviour-preserving, so nothing downstream may change yet.
 
 - [ ] **Step 7: Commit**
@@ -468,7 +468,7 @@ def test_kind_never_contradicts_colour():
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_health.py -k describe -v`
+Run: `python -m pytest tests/test_health.py -k describe -v`
 Expected: collection error, `ImportError: cannot import name 'AgentHealth'`.
 
 - [ ] **Step 3: Implement the description**
@@ -516,7 +516,7 @@ def describe_agent_health(
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `.venv/Scripts/python -m pytest tests/test_health.py -v`
+Run: `python -m pytest tests/test_health.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -610,7 +610,7 @@ def test_enricher_ignores_schedules_when_dispatch_is_off(tmp_path):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_agent_status.py -k enricher -v`
+Run: `python -m pytest tests/test_agent_status.py -k enricher -v`
 Expected: `ImportError: cannot import name '_apply_agent_status' from 'agency.app'`.
 
 - [ ] **Step 3: Extend the health imports in `agency/app.py`**
@@ -783,12 +783,12 @@ In `build_dashboard_fleet`, delete the `last_run` and `last_seen` locals, remove
 
 - [ ] **Step 7: Run the fleet tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_agent_status.py tests/test_agent_health_fleet.py tests/test_dashboard.py -q`
+Run: `python -m pytest tests/test_agent_status.py tests/test_agent_health_fleet.py tests/test_dashboard.py -q`
 Expected: PASS. If a test fails on a missing `health` key, the enricher call was placed before the dict existed.
 
 - [ ] **Step 8: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 Expected: PASS.
 
 - [ ] **Step 9: Commit**
@@ -849,7 +849,7 @@ def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_dashboard.py -k "initials or fleet_cards or fault_line" -v`
+Run: `python -m pytest tests/test_dashboard.py -k "initials or fleet_cards or fault_line" -v`
 Expected: `AttributeError: module 'agency.app' has no attribute 'initials'`.
 
 - [ ] **Step 3: Add the `initials` filter**
@@ -944,12 +944,12 @@ templates.env.filters["elapsed"] = elapsed_coarse
 
 - [ ] **Step 6: Run the dashboard tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_dashboard.py -v`
+Run: `python -m pytest tests/test_dashboard.py -v`
 Expected: PASS, including `test_dashboard_reports_never_run_agents_separately`, whose `'title="No run on record"'` assertion is satisfied by `health_sentence` on the gray dot.
 
 - [ ] **Step 7: Compare the rendered page against the sketch**
 
-Run: `.venv/Scripts/python -m agency.app`
+Run: `python -m agency.app`
 Open `http://127.0.0.1:8500/atreides/`. Confirm against `docs/superpowers/specs/assets/2026-07-29-inbox-agent-health-cards/fleet-cards.png`: three cards per row, initials avatars, Duncan Idaho rose with `overdue 3h` and the fault line `suite-health due 08:00`, Paul Atreides dimmed and reading `never run` and an em dash, the other three green with a `Nd ago` / `Nd away` pair. Stop the server.
 
 - [ ] **Step 8: Commit**
@@ -1025,7 +1025,7 @@ def test_never_run_agent_produces_no_queue_item(monkeypatch, tmp_path, raw_confi
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_dashboard.py -k "health_items or running_agent or attention_queue or no_queue_item" -v`
+Run: `python -m pytest tests/test_dashboard.py -k "health_items or running_agent or attention_queue or no_queue_item" -v`
 Expected: `AttributeError: module 'agency.app' has no attribute 'build_health_items'`.
 
 - [ ] **Step 3: Implement the builder**
@@ -1131,17 +1131,17 @@ and insert this block immediately after that line, above the `{# ─ Proposals (
 
 - [ ] **Step 6: Run the dashboard tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_dashboard.py -v`
+Run: `python -m pytest tests/test_dashboard.py -v`
 Expected: PASS.
 
 - [ ] **Step 7: Compare the rendered queue against the sketch**
 
-Run: `.venv/Scripts/python -m agency.app`
+Run: `python -m agency.app`
 Open `http://127.0.0.1:8500/atreides/`. Confirm against `attention-queue.png`: the header counts one item, the card reads `overdue`, a `Duncan Idaho` pill, the full sentence with the compound `3h NNm late`, the monospace last-run line, and the three links. Confirm the fleet footer's `1 needs attention` and the queue can no longer disagree. Stop the server.
 
 - [ ] **Step 8: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 Expected: PASS.
 
 - [ ] **Step 9: Commit**
@@ -1186,7 +1186,7 @@ def test_routines_get_lists_schedule_status(monkeypatch, tmp_path, raw_config):
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_agent_detail.py -k schedule_status -v`
+Run: `python -m pytest tests/test_agent_detail.py -k schedule_status -v`
 Expected: FAIL, `assert 'Schedule status' in ...`.
 
 - [ ] **Step 3: Build the status rows**
@@ -1301,7 +1301,7 @@ In `agency/templates/agent_detail_routines.html`, insert above the `<form ...>` 
 
 - [ ] **Step 5: Run the agent detail tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_agent_detail.py -q`
+Run: `python -m pytest tests/test_agent_detail.py -q`
 Expected: PASS. The `409` re-render paths pass `overrides` that omit `routine_status`; the `{% if routine_status %}` guard keeps those responses working, since an undefined name is falsy in Jinja.
 
 - [ ] **Step 6: Commit**
@@ -1376,7 +1376,7 @@ Expected: PASS. If Playwright browsers are missing, run `npx playwright install 
 
 - [ ] **Step 5: Run the complete suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 Expected: PASS, with no skips introduced by this branch.
 
 - [ ] **Step 6: Confirm the working tree holds nothing unrelated**
