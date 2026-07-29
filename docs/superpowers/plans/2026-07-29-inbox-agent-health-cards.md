@@ -52,6 +52,7 @@
   - `schedule_lateness(schedules: Iterable[RoutineSchedule], *, logs_root: Path, agent_name: str, now: datetime, grace: timedelta) -> Lateness | None`
   - `elapsed_coarse(delta: timedelta) -> str`
   - `elapsed_precise(delta: timedelta) -> str`
+  - `last_fired_at(schedule: RoutineSchedule, *, logs_root: Path, agent_name: str, now: datetime) -> datetime | None`
   - `schedule_state` keeps its exact signature and return values.
 
 - [ ] **Step 1: Write the failing tests**
@@ -133,6 +134,24 @@ def test_elapsed_precise_adds_the_next_smaller_unit():
 def test_elapsed_precise_omits_a_zero_remainder():
     assert elapsed_precise(timedelta(hours=3)) == "3h"
     assert elapsed_precise(timedelta(minutes=5)) == "5m"
+
+
+def test_last_fired_at_is_none_without_a_marker(tmp_path):
+    assert last_fired_at(
+        _at(), logs_root=_logs(tmp_path), agent_name="product", now=NOW
+    ) is None
+
+
+def test_last_fired_at_reads_the_every_marker(tmp_path):
+    logs = _logs(tmp_path)
+    marker = logs / ".last-product-r"
+    marker.write_text("", encoding="utf-8")
+    stamp = datetime(2026, 7, 27, 6, 12).timestamp()
+    os.utime(marker, (stamp, stamp))
+
+    assert last_fired_at(
+        _every(), logs_root=logs, agent_name="product", now=NOW
+    ) == datetime(2026, 7, 27, 6, 12)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -181,7 +200,32 @@ def _compound(major: int, major_unit: str, minor: int, minor_unit: str) -> str:
     if minor == 0:
         return f"{major}{major_unit}"
     return f"{major}{major_unit} {minor}{minor_unit}"
+
+
+def last_fired_at(
+    schedule: RoutineSchedule,
+    *,
+    logs_root: Path,
+    agent_name: str,
+    now: datetime,
+) -> datetime | None:
+    """When a routine's marker says it last fired, or None."""
+    if schedule.at:
+        marker = at_marker_path(
+            logs_root, agent_name, schedule.routine_id, now.strftime("%Y-%m-%d")
+        )
+    elif schedule.every:
+        marker = every_marker_path(logs_root, agent_name, schedule.routine_id)
+    else:
+        return None
+    try:
+        return datetime.fromtimestamp(marker.stat().st_mtime)
+    except OSError:
+        return None
 ```
+
+`last_fired_at` exists so Task 6 does not re-derive marker paths that this
+module already owns. Marker naming must have exactly one definition.
 
 - [ ] **Step 4: Convert the private state helpers to return a `Lateness`**
 
@@ -867,8 +911,8 @@ Replace the whole `<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">` 
         <span class="text-gray-500 dark:text-gray-400">never run</span>
         {% endif %}
 
-        {% if a.running %}
-        <span class="text-emerald-600 dark:text-emerald-400">running</span>
+        {% if a.job_status and a.job_href %}
+        <a href="{{ a.job_href }}" class="text-indigo-600 dark:text-indigo-300 hover:underline">{{ a.job_status }}</a>
         {% elif a.health_kind == 'overdue' %}
         <a href="/{{ group }}/agents/{{ a.name }}/routines" class="text-rose-600 dark:text-rose-300 hover:underline">overdue {{ a.health_late | elapsed }}</a>
         {% elif a.health_kind == 'due' %}
@@ -1158,24 +1202,27 @@ def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
     grace = grace_window(int(snapshot.config.agency.dispatch.interval))
     rows = []
     for schedule in routine_schedules(instance.routines):
-        if schedule.at:
-            spec = f"at {schedule.at}"
-            day = now.strftime("%Y-%m-%d")
-            marker = at_marker_path(logs_root, instance.name, schedule.routine_id, day)
-        elif schedule.every:
-            spec = f"every {schedule.every}"
-            marker = every_marker_path(logs_root, instance.name, schedule.routine_id)
-        else:
-            spec = "no schedule"
-            marker = None
         if schedule.conditional:
             spec = "conditional"
+        elif schedule.at:
+            spec = f"at {schedule.at}"
+        elif schedule.every:
+            spec = f"every {schedule.every}"
+        else:
+            spec = "no schedule"
         rows.append(
             {
                 "routine_id": schedule.routine_id,
                 "enabled": schedule.enabled,
                 "schedule": spec,
-                "last_fired": _marker_stamp(marker),
+                "last_fired": _marker_stamp(
+                    last_fired_at(
+                        schedule,
+                        logs_root=logs_root,
+                        agent_name=instance.name,
+                        now=now,
+                    )
+                ),
                 "next_due": _next_due_text(
                     schedule, logs_root, instance.name, now, grace
                 ),
@@ -1184,13 +1231,10 @@ def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
     return rows
 
 
-def _marker_stamp(marker) -> str:
-    if marker is None:
+def _marker_stamp(fired_at) -> str:
+    if fired_at is None:
         return "never"
-    try:
-        return datetime.fromtimestamp(marker.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-    except OSError:
-        return "never"
+    return fired_at.strftime("%Y-%m-%d %H:%M")
 
 
 def _next_due_text(schedule, logs_root, agent_name, now, grace) -> str:
@@ -1214,17 +1258,17 @@ Add the imports this needs to the top of `agency/web/routes/agent_detail.py`.
 `resolve_group_paths` is already imported from `agency.configuration`; add only:
 
 ```python
-from datetime import datetime
-
 from agency.clock import now as clock_now
-from agency.dispatch.schedule import at_marker_path, every_marker_path
 from agency.health import (
     elapsed_coarse,
     grace_window,
+    last_fired_at,
     routine_schedules,
     schedule_lateness,
 )
 ```
+
+Marker paths are never derived here — `last_fired_at` owns that.
 
 In `_routines_context`, add `"routine_status": _routine_status(snapshot, group_id, instance),` to the `result` literal.
 
@@ -1278,43 +1322,72 @@ git commit -m "feat(agents): show what each routine actually fired"
 - Consumes: the rendered markup from Tasks 4 and 5.
 - Produces: no code other tasks depend on. This is the closing gate.
 
-- [ ] **Step 1: Read the existing spec**
+- [ ] **Step 1: Repair the assertion the redesign invalidates**
 
-Read `tests/ui/dashboard.spec.ts`. Its Attention Queue locator uses `page.getByText('Attention Queue', { exact: true })`, which still matches. Note the fixture config at `tests/ui/fixtures/config.yaml` and which agents it defines.
+`tests/ui/dashboard.spec.ts` asserts `page.getByText('Blueprint: advisor')`. The
+card renders a bare `advisor` badge, so change that one line to:
+
+```ts
+  await expect(page.getByText('advisor', { exact: true }).first()).toBeVisible();
+```
+
+Leave every other assertion in that test alone. In particular
+`getByRole('link', { name: 'waiting for memory' })` must keep passing: Task 4
+gives an active job the right-hand timing cell as a link labelled with
+`job_status`, so the affordance survives. If that assertion fails, Task 4's
+active-job branch is wrong — fix Task 4's template, never this assertion.
 
 - [ ] **Step 2: Add the fleet card assertions**
 
-Append a test that asserts one card per configured agent and that a card exposes a link to that agent's routines:
+The fixture at `tests/ui/fixtures/config.yaml` defines group `newsletter` with
+agent `advisor` (display name `Advisor`, emoji `A`, blueprint `advisor`, one
+`daily-review` routine at `09:00`). The dashboard test already asserts
+`2 agents`, so a second instance exists. Append:
 
 ```ts
-test('fleet cards expose run timing', async ({ page }) => {
+test('fleet cards expose run timing and the routine link', async ({ page }) => {
   await page.goto('/newsletter/');
-  const fleet = page.locator('a[href$="/routines"]');
-  await expect(fleet.first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Advisor' })).toHaveAttribute(
+    'href',
+    '/newsletter/agents/advisor/profile',
+  );
+  await expect(
+    page.locator('a[href="/newsletter/agents/advisor/routines"]'),
+  ).toBeVisible();
+  await assertNoConsoleErrors(page);
 });
 ```
 
-Adapt the group segment and the agent count to the fixture you read in Step 1. Do not invent a group name.
+- [ ] **Step 3: Regenerate the visual baselines**
 
-- [ ] **Step 3: Run the browser tests**
+Tasks 4 and 5 replace Zone 1 entirely and add a queue item, so the committed
+`dashboard.png` baselines for the light and dark projects no longer match.
+
+Run: `npx playwright test tests/ui/dashboard.spec.ts --update-snapshots`
+Then open the regenerated baselines under `tests/ui/` and confirm they show the
+card grid from `docs/superpowers/specs/assets/2026-07-29-inbox-agent-health-cards/fleet-cards.png`.
+A baseline is only allowed to change because this feature changed the page. If
+anything else moved, stop and report it rather than blessing the diff.
+
+- [ ] **Step 4: Run the browser tests**
 
 Run: `npx playwright test tests/ui/dashboard.spec.ts`
 Expected: PASS. If Playwright browsers are missing, run `npx playwright install chromium` first.
 
-- [ ] **Step 4: Run the complete suite**
+- [ ] **Step 5: Run the complete suite**
 
 Run: `.venv/Scripts/python -m pytest tests/ -q`
 Expected: PASS, with no skips introduced by this branch.
 
-- [ ] **Step 5: Confirm the working tree holds nothing unrelated**
+- [ ] **Step 6: Confirm the working tree holds nothing unrelated**
 
 Run: `git status --short`
 Expected: only files this plan names. `config.yaml`, `config.yaml.lock`, logs, and `.superpowers/` must not appear.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add tests/ui/dashboard.spec.ts
+git add tests/ui/dashboard.spec.ts tests/ui
 git commit -m "test(dashboard): cover fleet cards in the browser suite"
 ```
 
@@ -1325,6 +1398,8 @@ git commit -m "test(dashboard): cover fleet cards in the browser suite"
 **Spec coverage.** Health reason model → Tasks 1 and 2. Fleet card anatomy, avatar, dot, dimming, observation pill → Task 4. Timing cells and their links → Tasks 3 and 4. Fault line → Tasks 3 and 4. Queue items, sentences, last-run line, three links, `needs_action_count`, empty state → Task 5. Routines tab table → Task 6. Testing section → distributed across every task, with the browser spec in Task 7.
 
 **Known deviation.** The spec says `collect_agents_with_identity` already computes the timing fields; that is true, but `build_dashboard_fleet` is the path that renders whenever services are healthy and it computed none of them. Task 3 resolves this by routing both builders through one enricher, which satisfies the spec's intent and removes the asymmetry that hid the data.
+
+**Pre-flight rulings.** The approved sketch drew neither the `Blueprint:` prefix nor the job status link, and the browser suite asserts both. Ruling: drop the prefix, keep the job link by giving an active job the right-hand timing cell. The specification was amended to match before implementation began. Task 6 was rewritten to consume `last_fired_at` rather than re-derive marker paths, and Task 7 gained an explicit baseline-regeneration step because Tasks 4 and 5 invalidate the committed `dashboard.png` snapshots.
 
 **Type consistency.** `Lateness` is produced in Task 1 and consumed in Tasks 2, 3, and 6 with the same field names. `AgentHealth` is produced in Task 2 and consumed only through `_apply_agent_status`. The `health_*` dictionary keys set in Task 3 are the exact keys read in Tasks 4 and 5. `elapsed_coarse` is registered as the `elapsed` Jinja filter in Task 4 and used unregistered in Task 6.
 
