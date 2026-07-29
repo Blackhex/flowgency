@@ -158,8 +158,8 @@ non-zero. The mockup shows no pill because every count in that group is zero.
 | `due` | `relative_time(last_run.at)` | `due now` |
 | otherwise | `relative_time(last_run.at)` | `relative_future(next_run)`, or `—` when the agent has no schedule |
 
-`{relative}` is `late` rendered by the same coarse rules `relative_time` uses:
-minutes under an hour, hours under a day, days beyond that.
+`{relative}` is `late` in coarse form: whole minutes under an hour, whole hours
+under a day, whole days beyond that. The card never shows a compound value.
 
 Left cell links to `/{group}/logs/view?path={last_run.path | urlencode}` when
 `last_run` exists, and is plain text otherwise. Right cell links to
@@ -193,6 +193,11 @@ Item body:
 
 Beneath the sentence, when a previous executed job exists, a monospace line:
 `last run {completed_at:%Y-%m-%d %H:%M} · {succeeded|failed} in {duration}`.
+
+`{late}` and `{duration}` are compound, unlike the card's coarse `{relative}`:
+seconds alone under a minute (`12s`), minutes and seconds under an hour
+(`3m 55s`), hours and minutes under a day (`3h 46m`), days and hours beyond that
+(`2d 3h`). A zero remainder is omitted, so exactly three hours reads `3h`.
 
 Then three links: `Open routine` to `/{group}/agents/{name}/routines`,
 `Last job log` to `/{group}/jobs/{job_id}` when a job record exists, and
