@@ -185,7 +185,26 @@
       {% endif %}
     </div>
 
-    {% if actionable_proposals or open_observations or floated_observations %}
+    {% if health_items or actionable_proposals or open_observations or floated_observations %}
+
+    {# ─ Agent health (highest priority) ─ #}
+    {% for h in health_items %}
+    <div class="block border rounded-md px-3 py-2.5 mb-2 {% if h.kind == 'due' %}border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/30{% else %}border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/30{% endif %}">
+      <div class="flex items-center gap-1.5">
+        <span class="text-sm font-semibold {% if h.kind == 'due' %}text-amber-700 dark:text-amber-300{% else %}text-rose-700 dark:text-rose-300{% endif %}">{{ h.label }}</span>
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">{{ h.display_name }}</span>
+      </div>
+      <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ h.sentence }}</div>
+      {% if h.last_line %}
+      <div class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ h.last_line }}</div>
+      {% endif %}
+      <div class="mt-1.5 flex flex-wrap gap-3 text-sm">
+        <a href="{{ h.routines_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Open routine</a>
+        {% if h.job_href %}<a href="{{ h.job_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Last job log</a>{% endif %}
+        <a href="{{ h.run_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Run now</a>
+      </div>
+    </div>
+    {% endfor %}
 
     {# ─ Proposals (high priority) ─ #}
     {% for c in actionable_proposals %}
