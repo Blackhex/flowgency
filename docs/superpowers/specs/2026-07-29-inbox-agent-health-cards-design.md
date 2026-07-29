@@ -146,6 +146,12 @@ including running, so the tooltip and the queue never diverge.
 **The card carries no Activity link.** The chip had one per agent; the card body
 links to the profile, and the Activity tab is reachable from there.
 
+**The card link's accessible name is the display name alone.** Without an
+explicit label the anchor's computed name concatenates the avatar initials, the
+display name, the open-observation count, and the dot glyph, giving
+`A Advisor 1 ●`. That name changes whenever the count changes and embeds a
+non-text glyph, so the anchor carries an explicit label of the display name.
+
 **Never-run cards** carry `opacity-75`.
 
 **Open observations** keep their existing amber count and render only when
@@ -204,6 +210,14 @@ Item body:
 | `job_failed` | `last run failed` | `Job {job_id[:8]} exited {exit_code} after {duration}, {relative_time(completed_at)}.` |
 | `overdue` | `overdue` | `Routine {routine_id} was due at {due_at:%H:%M} and has not run — {late} late.` |
 | `due` | `due` | `Routine {routine_id} came due {late} ago; the dispatcher has not picked it up yet.` |
+
+The `job_failed` sentence is assembled from parts, because `exit_code`,
+`duration_seconds`, and `completed_at` are all nullable on a job record and a
+naïve template renders `exited None after 0s, No activity recorded.` for a
+record that carries none of them. Each clause appears only when its value
+exists: `exited {exit_code}` degrades to `failed`, `after {duration}` is
+omitted entirely, and the trailing `, {relative_time}` is omitted entirely. The
+shortest legal form is `Job a1b2c3d4 failed.`
 
 Beneath the sentence, when a previous executed job exists, a monospace line:
 `last run {completed_at:%Y-%m-%d %H:%M} · {succeeded|failed} in {duration}`.
