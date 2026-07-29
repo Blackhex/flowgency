@@ -34,7 +34,6 @@ from agency.configuration import (
 from agency.configuration.models import MemorySelector
 from agency.integrations import get_integration, REGISTRY
 from agency.dispatch.install import install_timer, get_timer_status as _get_timer_status
-from agency.dispatch.schedule import every_marker_path, parse_every
 from agency.jobs import (
     JobRequest,
     JobSubmissionError,
@@ -51,6 +50,7 @@ from agency.health import (
     elapsed_coarse,
     elapsed_precise,
     grace_window,
+    next_occurrence,
     relative_future,
     routine_schedules,
     schedule_lateness,
@@ -903,30 +903,14 @@ def compute_next_run_detail(
     for rule_index, schedule in enumerate(
         routine_schedules(_agent_routines(g, agent_name))
     ):
-        if not schedule.enabled or schedule.conditional or not schedule.routine_id:
+        target = next_occurrence(
+            schedule,
+            logs_root=logs_root,
+            agent_name=agent_name,
+            now=now,
+        )
+        if target is None:
             continue
-
-        if schedule.at:
-            try:
-                target = datetime.strptime(
-                    f"{now.strftime('%Y-%m-%d')} {schedule.at}", "%Y-%m-%d %H:%M"
-                )
-            except ValueError:
-                continue
-            if target <= now:
-                target += timedelta(days=1)
-        elif schedule.every:
-            period = parse_every(schedule.every)
-            if period is None:
-                continue
-            marker = every_marker_path(logs_root, agent_name, schedule.routine_id)
-            try:
-                target = datetime.fromtimestamp(marker.stat().st_mtime) + period
-            except OSError:
-                target = now
-        else:
-            continue
-
         candidates.append({
             "when": target,
             "routine_id": schedule.routine_id,
