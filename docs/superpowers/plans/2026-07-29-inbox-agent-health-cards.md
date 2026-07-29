@@ -1,5 +1,14 @@
 # Inbox Agent Health Cards Implementation Plan
 
+> **Status: executed and superseded.** This plan shipped, but several of its code
+> blocks were corrected during implementation and review and no longer match what
+> was built. The design specification,
+> [2026-07-29-inbox-agent-health-cards-design.md](../specs/2026-07-29-inbox-agent-health-cards-design.md),
+> was amended alongside each correction and is the accurate record. Read the code
+> and the specification, not this plan's snippets. The known divergences are the
+> failed-job sentence in Task 3, and the em dash, the running dot's tooltip, and
+> the missing accessible name in Task 4.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the Inbox fleet bar into a card grid that shows every agent's last run and next run, names the fault on unhealthy agents, and files those faults as Attention Queue items.
