@@ -37,15 +37,15 @@
     <div class="rounded-lg border px-3 py-2 transition-colors
          {% if a.health == 'red' %}border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/25
          {% elif a.health == 'amber' %}border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/25
-         {% elif a.health == 'gray' %}border-gray-200 dark:border-gray-700 bg-gray-100/60 dark:bg-gray-800/60 opacity-75
+         {% elif a.health == 'gray' %}border-gray-200 dark:border-gray-700 bg-gray-100/60 dark:bg-gray-800/60
          {% else %}border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800{% endif %}">
 
       <a href="{{ a.profile_href or ('/' ~ group ~ '/agents/' ~ a.name) }}" aria-label="{{ a.display_name or a.name }}" class="flex items-center gap-2 group">
         <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-200 dark:bg-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-200">{{ a.emoji or (a.display_name or a.name) | initials }}</span>
-        <span class="truncate text-sm font-semibold text-gray-900 dark:text-gray-100 group-hover:underline">{{ a.display_name or a.name }}</span>
+        <span class="truncate text-sm font-semibold {% if a.health == 'gray' %}text-gray-500 dark:text-gray-400{% else %}text-gray-900 dark:text-gray-100{% endif %} group-hover:underline">{{ a.display_name or a.name }}</span>
         {% if a.open_observations %}<span class="rounded-full bg-amber-100 dark:bg-amber-900/50 px-1.5 text-xs font-mono text-amber-700 dark:text-amber-300">{{ a.open_observations }}</span>{% endif %}
         {% if a.running %}
-        <span class="ml-auto text-emerald-500 text-xs leading-none animate-pulse" title="{{ a.health_sentence }}">&#9679;</span>
+        <span class="ml-auto text-emerald-500 text-xs leading-none animate-pulse" data-agent-running title="{{ a.health_sentence }}">&#9679;</span>
         {% else %}
         <span class="ml-auto text-xs leading-none {% if a.health == 'green' %}text-emerald-500{% elif a.health == 'amber' %}text-amber-500{% elif a.health == 'gray' %}text-gray-400 dark:text-gray-500{% else %}text-rose-500{% endif %}"
               title="{{ a.health_sentence }}">&#9679;</span>
