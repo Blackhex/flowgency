@@ -9,6 +9,7 @@ import pytest
 
 from agency import app as app_module
 from agency.app import (
+    _apply_agent_status,
     compute_next_run,
     compute_next_run_detail,
     get_agent_last_run,
@@ -371,3 +372,70 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
     assert product["next_run"] == product["next_run_detail"]["when"]
     assert product["next_run_detail"]["routine_id"] == "r"
     assert product["next_run_detail"]["rule_index"] == 0
+
+
+# ---------------------------------------------------------------------------
+# _apply_agent_status enricher tests
+# ---------------------------------------------------------------------------
+
+NOW = datetime(2026, 7, 29, 11, 46, 0)
+ENABLED_DISPATCH = {"enabled": True}
+
+
+def _fleet_group(tmp_path, routines):
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    return {
+        "key": "grp",
+        "logs": logs,
+        "job_paths": (),
+        "dispatch": {"enabled": True},
+        "dispatch_interval": 15,
+        "agents_full": [{"name": "product", "routines": routines}],
+    }
+
+
+def _enrich(tmp_path, routines):
+    g = _fleet_group(tmp_path, routines)
+    agent = {"name": "product"}
+    with patch("agency.app.clock_now", return_value=NOW):
+        _apply_agent_status(g, agent, routines, ENABLED_DISPATCH)
+    return agent
+
+
+def test_enricher_reports_an_overdue_routine(tmp_path):
+    agent = _enrich(tmp_path, [{"id": "suite-health", "schedule": {"at": "08:00"}}])
+    assert agent["health"] == "red"
+    assert agent["health_kind"] == "overdue"
+    assert agent["health_routine"] == "suite-health"
+    assert agent["health_due_at"] == datetime(2026, 7, 29, 8, 0)
+    assert agent["health_fault"] == "suite-health due 08:00"
+    assert agent["health_sentence"] == (
+        "Routine suite-health was due at 08:00 and has not run — 3h 46m late."
+    )
+
+
+def test_enricher_reports_a_never_run_agent(tmp_path):
+    agent = _enrich(tmp_path, [])
+    assert agent["health"] == "gray"
+    assert agent["health_kind"] == "never_run"
+    assert agent["health_fault"] == ""
+    assert agent["health_sentence"] == "No run on record"
+
+
+def test_enricher_supplies_the_timing_pair(tmp_path):
+    agent = _enrich(tmp_path, [{"id": "nightly", "schedule": {"at": "23:00"}}])
+    assert agent["next_run"] == datetime(2026, 7, 29, 23, 0)
+    assert agent["next_run_detail"]["routine_id"] == "nightly"
+    assert agent["last_run"] is None
+
+
+def test_enricher_ignores_schedules_when_dispatch_is_off(tmp_path):
+    g = _fleet_group(tmp_path, [{"id": "suite-health", "schedule": {"at": "08:00"}}])
+    g["dispatch"] = {"enabled": False}
+    agent = {"name": "product"}
+    with patch("agency.app.clock_now", return_value=NOW):
+        _apply_agent_status(g, agent, g["agents_full"][0]["routines"], {"enabled": False})
+    assert agent["health_kind"] == "never_run"
+    assert agent["next_run"] is None
+
