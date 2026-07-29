@@ -55,7 +55,7 @@
       {% if a.title %}<div class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{{ a.title }}</div>{% endif %}
 
       <div class="mt-1.5 flex flex-wrap gap-1">
-        {% if a.blueprint %}<span class="rounded bg-gray-200 dark:bg-gray-700 px-1.5 text-xs text-gray-700 dark:text-gray-200" title="Blueprint: {{ a.blueprint }}">{{ a.blueprint }}</span>{% endif %}
+        {% if a.blueprint %}<span class="rounded bg-gray-200 dark:bg-gray-700 px-1.5 text-xs text-gray-700 dark:text-gray-200">{{ a.blueprint }}</span>{% endif %}
         {% if a.integration %}<span class="rounded bg-slate-200 dark:bg-slate-700 px-1.5 text-xs text-slate-700 dark:text-slate-200">{{ a.integration }}</span>{% endif %}
       </div>
 
@@ -65,7 +65,7 @@
            class="text-gray-600 dark:text-gray-300 hover:underline"
            title="{{ a.last_run.at.strftime('%Y-%m-%d %H:%M') }}">{{ a.last_run.at | relative_time }}</a>
         {% else %}
-        <a href="{{ a.activity_href }}" class="text-gray-500 dark:text-gray-400 hover:underline">never run</a>
+        <span class="text-gray-500 dark:text-gray-400">never run</span>
         {% endif %}
 
         {% if a.job_status and a.job_href %}

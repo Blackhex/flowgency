@@ -343,8 +343,8 @@ def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_pa
     assert response.status_code == 200
     assert "Waiting for memory" in response.text
     assert f'/newsletter/jobs/{spec.job_id}' in response.text
-    assert "/newsletter/agents/advisor/activity" in response.text
-    assert "Blueprint: advisor" in response.text
+    assert "/newsletter/agents/advisor/profile" in response.text
+    assert ">advisor</span>" in response.text
     assert "copilot" in response.text
     assert spec.memory.memory_hash not in response.text
 
