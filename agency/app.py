@@ -47,10 +47,12 @@ from agency.jobs import (
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
 from agency.health import (
-    evaluate_agent_health,
+    describe_agent_health,
+    elapsed_coarse,
+    elapsed_precise,
     grace_window,
     routine_schedules,
-    schedule_state,
+    schedule_lateness,
 )
 from agency.prompts import resolve_catalog_prompt
 from agency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, SKIP_EXECUTION_SUMMARY
@@ -1015,22 +1017,92 @@ app.include_router(agent_detail_router)
 app.include_router(jobs_router)
 
 
-def _agent_health(g: dict, agent_name: str, routines, last_seen: datetime | None) -> str:
-    """Colour an agent from its schedule, its last run, and its last outcome."""
+def _fault_line(status, now: datetime) -> str:
+    """One terse line for the card, empty when there is nothing wrong."""
+    if status.kind == "job_failed":
+        return "last job failed"
+    if status.kind not in ("overdue", "due"):
+        return ""
+    same_day = status.due_at.date() == now.date()
+    stamp = status.due_at.strftime("%H:%M" if same_day else "%Y-%m-%d %H:%M")
+    return f"{status.routine_id} due {stamp}"
+
+
+def _health_sentence(status, job, now: datetime) -> str:
+    """The full explanation, shared by the card tooltip and the queue item."""
+    if status.kind == "job_failed":
+        return (
+            f"Job {job.spec.job_id[:8]} exited {job.exit_code} after "
+            f"{elapsed_precise(timedelta(seconds=job.duration_seconds or 0))}, "
+            f"{relative_time(_job_finished_at(job))}."
+        )
+    if status.kind == "overdue":
+        return (
+            f"Routine {status.routine_id} was due at "
+            f"{status.due_at.strftime('%H:%M')} and has not run — "
+            f"{elapsed_precise(status.late)} late."
+        )
+    if status.kind == "due":
+        return (
+            f"Routine {status.routine_id} came due "
+            f"{elapsed_precise(status.late)} ago; the dispatcher has not "
+            "picked it up yet."
+        )
+    if status.kind == "never_run":
+        return "No run on record"
+    return "Healthy"
+
+
+def _job_finished_at(job) -> datetime | None:
+    stamp = job.completed_at or job.started_at
+    if not stamp:
+        return None
+    try:
+        return datetime.fromisoformat(stamp).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _apply_agent_status(g: dict, agent: dict, routines, dispatch_cfg: dict) -> None:
+    """Attach run timing and the health reason to one fleet entry."""
+    name = agent["name"]
+    now = clock_now()
+    last_run = get_agent_last_run(g, name)
+    last_seen = last_run["at"] if last_run else get_agent_last_seen(g, name)
+    detail = compute_next_run_detail(g, name, dispatch_cfg)
+
     dispatch_enabled = bool(g.get("dispatch", {}).get("enabled", False))
     schedules = routine_schedules(routines or ()) if dispatch_enabled else ()
-    state = schedule_state(
+    lateness = schedule_lateness(
         schedules,
         logs_root=Path(g["logs"]),
-        agent_name=agent_name,
-        now=clock_now(),
+        agent_name=name,
+        now=now,
         grace=grace_window(int(g.get("dispatch_interval", 15))),
     )
-    executed = latest_executed_job(tuple(g.get("job_paths", ())), agent_name)
-    return evaluate_agent_health(
+    executed = latest_executed_job(tuple(g.get("job_paths", ())), name)
+    status = describe_agent_health(
         has_run=last_seen is not None or executed is not None,
         last_job_failed=executed is not None and executed.status == "failed",
-        schedule=state,
+        lateness=lateness,
+        now=now,
+    )
+
+    agent.update(
+        {
+            "last_run": last_run,
+            "last_seen": last_seen,
+            "next_run": detail["when"] if detail else None,
+            "next_run_detail": detail,
+            "health": status.color,
+            "health_kind": status.kind,
+            "health_routine": status.routine_id,
+            "health_due_at": status.due_at,
+            "health_late": status.late,
+            "health_job": executed,
+            "health_fault": _fault_line(status, now),
+            "health_sentence": _health_sentence(status, executed, now),
+        }
     )
 
 
@@ -1044,31 +1116,18 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
         agent_name = instance["name"]
         identity = instance.get("identity") or {}
         open_count = sum(1 for c in observations if c.get("agent") == agent_name and c.get("status") == "open")
-        last_run = get_agent_last_run(g, agent_name)
-        last_seen = (
-            last_run["at"]
-            if last_run
-            else get_agent_last_seen(g, agent_name)
-        )
-        next_run_detail = compute_next_run_detail(g, agent_name, dispatch_cfg)
         info = {
             "name": agent_name,
             "display_name": identity.get("display_name") or agent_name,
             "title": identity.get("title", ""),
             "emoji": identity.get("emoji", ""),
-            "last_run": last_run,
-            "last_seen": last_seen,
-            "health": _agent_health(g, agent_name, instance.get("routines"), last_seen),
             "open_observations": open_count,
             "is_subagent": False,
             "has_headshot": False,
             "integration": instance["integration"],
             "running": is_agent_running(g, agent_name, run_timeout),
-            "next_run": (
-                next_run_detail["when"] if next_run_detail else None
-            ),
-            "next_run_detail": next_run_detail,
         }
+        _apply_agent_status(g, info, instance.get("routines"), dispatch_cfg)
         agents.append(info)
 
     return agents, []
@@ -1141,9 +1200,8 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
     group = snapshot.config.groups[g["key"]]
     observations = list_observations(g)
     fleet: list[dict] = []
+    dispatch_cfg = g.get("dispatch", {})
     for instance in group.agents.values():
-        last_run = get_agent_last_run(g, instance.name)
-        last_seen = last_run["at"] if last_run else get_agent_last_seen(g, instance.name)
         current = _newest_active_job(tuple(g.get("job_paths", ())), instance.name)
         selector = (
             current.spec.memory.selector
@@ -1159,10 +1217,10 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
                 "blueprint": instance.blueprint,
                 "integration": instance.integration,
                 "open_observations": sum(1 for item in observations if item.get("agent") == instance.name and item.get("status") == "open"),
-                "health": _agent_health(g, instance.name, instance.routines, last_seen),
                 "memory_label": _dashboard_memory_label(selector, snapshot.config.memory.channels),
             }
         )
+        _apply_agent_status(g, fleet[-1], instance.routines, dispatch_cfg)
         _overlay_dashboard_job_state(fleet[-1], current, g["key"])
     return fleet
 
