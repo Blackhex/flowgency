@@ -127,25 +127,6 @@ def schedule_lateness(
     return best
 
 
-def schedule_state(
-    schedules: Iterable[RoutineSchedule],
-    *,
-    logs_root: Path,
-    agent_name: str,
-    now: datetime,
-    grace: timedelta,
-) -> str | None:
-    """Return the strongest lateness across an agent's routines."""
-    lateness = schedule_lateness(
-        schedules,
-        logs_root=logs_root,
-        agent_name=agent_name,
-        now=now,
-        grace=grace,
-    )
-    return lateness.state if lateness is not None else None
-
-
 def _rank(lateness: Lateness) -> tuple[int, datetime]:
     return (0 if lateness.state == OVERDUE else 1, lateness.due_at)
 
