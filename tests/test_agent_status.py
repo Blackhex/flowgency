@@ -17,6 +17,7 @@ from agency.app import (
     is_agent_running,
     relative_future,
 )
+from agency.dispatch.schedule import at_marker_path
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import job_path, write_job
@@ -224,14 +225,27 @@ def test_next_run_at_future(tmp_path):
     assert result.strftime("%H:%M") == future
 
 
-def test_next_run_at_past_rolls_to_tomorrow(tmp_path):
+def test_next_run_at_past_without_marker_stays_today(tmp_path):
+    """A missed occurrence is still the next one — the dispatcher fires it on its next tick."""
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
     g = _group_with_routines(tmp_path, [{"id": "r", "at": past}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
-    assert result is not None
-    assert result.date() == (fixed_now + timedelta(days=1)).date()
+    assert result == datetime(2026, 1, 15, 10, 0, 0)
+
+
+def test_next_run_at_past_with_marker_rolls_to_tomorrow(tmp_path):
+    fixed_now = datetime(2026, 1, 15, 12, 0, 0)
+    past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
+    g = _group_with_routines(tmp_path, [{"id": "r", "at": past}])
+    day = fixed_now.strftime("%Y-%m-%d")
+    marker = at_marker_path(g["logs"], "product", "r", day)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+        result = compute_next_run(g, "product", ENABLED)
+    assert result == datetime(2026, 1, 16, 10, 0, 0)
 
 
 def test_next_run_every_no_marker_due_now(tmp_path):
