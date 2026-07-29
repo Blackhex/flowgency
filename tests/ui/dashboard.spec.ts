@@ -34,7 +34,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 test('dashboard reports selected group pipeline and durable job semantics', async ({ page }) => {
   await page.goto('/newsletter/');
   await expect(page.getByText('2 agents')).toBeVisible();
-  await expect(page.getByText('Blueprint: advisor')).toBeVisible();
+  await expect(page.getByText('advisor', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('copilot')).toBeVisible();
   await expect(page.getByRole('link', { name: 'waiting for memory' })).toBeVisible();
   await expect(page.getByRole('link', { name: /Advisor/ }).first()).toHaveAttribute('href', '/newsletter/agents/advisor/profile');
@@ -80,5 +80,17 @@ test('jobs expose waiting, failed artifact, diagnostics hash, and empty state', 
   await expect(page.getByRole('heading', { name: 'Jobs in Research' })).toBeVisible();
   await expect(page.getByText('No jobs found.')).toBeVisible();
   await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+});
+
+test('fleet cards expose run timing and the routine link', async ({ page }) => {
+  await page.goto('/newsletter/');
+  await expect(page.getByRole('link', { name: 'Advisor' }).first()).toHaveAttribute(
+    'href',
+    '/newsletter/agents/advisor/profile',
+  );
+  await expect(
+    page.locator('a[href="/newsletter/agents/advisor/routines"]'),
+  ).toBeVisible();
   await assertNoConsoleErrors(page);
 });
