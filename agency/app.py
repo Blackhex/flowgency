@@ -1045,11 +1045,14 @@ def _fault_line(status, now: datetime) -> str:
 def _health_sentence(status, job, now: datetime) -> str:
     """The full explanation, shared by the card tooltip and the queue item."""
     if status.kind == "job_failed":
-        return (
-            f"Job {job.spec.job_id[:8]} exited {job.exit_code} after "
-            f"{elapsed_precise(timedelta(seconds=job.duration_seconds or 0))}, "
-            f"{relative_time(_job_finished_at(job))}."
-        )
+        sentence = f"Job {job.spec.job_id[:8]}"
+        sentence += f" exited {job.exit_code}" if job.exit_code is not None else " failed"
+        if job.duration_seconds is not None:
+            sentence += f" after {elapsed_precise(timedelta(seconds=job.duration_seconds))}"
+        finished = _job_finished_at(job)
+        if finished is not None:
+            sentence += f", {relative_time(finished)}"
+        return sentence + "."
     if status.kind == "overdue":
         return (
             f"Routine {status.routine_id} was due at "
@@ -1281,8 +1284,10 @@ def _last_run_line(job) -> str:
     if finished is None:
         return ""
     outcome = "failed" if job.status == "failed" else "succeeded"
-    duration = elapsed_precise(timedelta(seconds=job.duration_seconds or 0))
-    return f"last run {finished.strftime('%Y-%m-%d %H:%M')} · {outcome} in {duration}"
+    line = f"last run {finished.strftime('%Y-%m-%d %H:%M')} · {outcome}"
+    if job.duration_seconds is not None:
+        line += f" in {elapsed_precise(timedelta(seconds=job.duration_seconds))}"
+    return line
 
 
 def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:

@@ -692,6 +692,84 @@ def test_last_run_line_none():
     assert app_mod._last_run_line(None) == ""
 
 
+def test_last_run_line_no_duration(tmp_path):
+    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-nodur")
+    record = JobRecord.from_spec(spec)
+    record.status = "failed"
+    record.completed_at = "2026-07-29T08:30:00+00:00"
+    record.duration_seconds = None
+
+    from datetime import timezone
+    expected_ts = datetime(2026, 7, 29, 8, 30, tzinfo=timezone.utc).astimezone().replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
+    assert app_mod._last_run_line(record) == f"last run {expected_ts} · failed"
+
+
+def test_health_sentence_fully_populated(tmp_path):
+    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-full1234")
+    record = JobRecord.from_spec(spec)
+    record.status = "failed"
+    record.exit_code = 1
+    record.completed_at = "2026-07-29T10:00:00+00:00"
+    record.duration_seconds = 12.0
+
+    from datetime import timezone
+    finished = datetime.fromisoformat("2026-07-29T10:00:00+00:00").astimezone().replace(tzinfo=None)
+    mock_now = finished + timedelta(hours=4)
+
+    status = SimpleNamespace(kind="job_failed")
+    with patch("agency.app.clock_now", return_value=mock_now):
+        sentence = app_mod._health_sentence(status, record, mock_now)
+    assert sentence == "Job job-full exited 1 after 12s, 4h ago."
+
+
+def test_health_sentence_exit_code_none(tmp_path):
+    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-nocode1")
+    record = JobRecord.from_spec(spec)
+    record.status = "failed"
+    record.exit_code = None
+    record.completed_at = "2026-07-29T10:00:00+00:00"
+    record.duration_seconds = 12.0
+
+    finished = datetime.fromisoformat("2026-07-29T10:00:00+00:00").astimezone().replace(tzinfo=None)
+    mock_now = finished + timedelta(hours=4)
+
+    status = SimpleNamespace(kind="job_failed")
+    with patch("agency.app.clock_now", return_value=mock_now):
+        sentence = app_mod._health_sentence(status, record, mock_now)
+    assert sentence == "Job job-noco failed after 12s, 4h ago."
+
+
+def test_health_sentence_duration_none(tmp_path):
+    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-nodur123")
+    record = JobRecord.from_spec(spec)
+    record.status = "failed"
+    record.exit_code = 1
+    record.completed_at = "2026-07-29T10:00:00+00:00"
+    record.duration_seconds = None
+
+    finished = datetime.fromisoformat("2026-07-29T10:00:00+00:00").astimezone().replace(tzinfo=None)
+    mock_now = finished + timedelta(hours=4)
+
+    status = SimpleNamespace(kind="job_failed")
+    with patch("agency.app.clock_now", return_value=mock_now):
+        sentence = app_mod._health_sentence(status, record, mock_now)
+    assert sentence == "Job job-nodu exited 1, 4h ago."
+
+
+def test_health_sentence_completed_at_none(tmp_path):
+    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-notime12")
+    record = JobRecord.from_spec(spec)
+    record.status = "failed"
+    record.exit_code = 1
+    record.completed_at = None
+    record.started_at = None
+    record.duration_seconds = 12.0
+
+    status = SimpleNamespace(kind="job_failed")
+    sentence = app_mod._health_sentence(status, record, datetime(2026, 7, 29, 14, 0))
+    assert sentence == "Job job-noti exited 1 after 12s."
+
+
 def test_attention_queue_header_singular(monkeypatch, tmp_path, raw_config):
     # dispatch must be enabled so schedule_lateness produces the overdue fault
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
