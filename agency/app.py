@@ -51,6 +51,7 @@ from agency.health import (
     elapsed_coarse,
     elapsed_precise,
     grace_window,
+    relative_future,
     routine_schedules,
     schedule_lateness,
 )
@@ -965,25 +966,6 @@ def relative_time(dt: datetime | None) -> str:
 templates.env.filters["relative_time"] = relative_time
 
 
-def relative_future(dt: datetime | None) -> str:
-    """Format an upcoming datetime as '5m away', '2h away', 'tomorrow HH:MM', etc."""
-    if dt is None:
-        return ""
-    now = clock_now()
-    seconds = int((dt - now).total_seconds())
-    if seconds <= 0:
-        return "due now"
-    minutes = max(1, round(seconds / 60))
-    if minutes < 60:
-        return f"{minutes}m away"
-    hours = minutes // 60
-    if hours < 24:
-        return f"{hours}h away"
-    if dt.date() == (now + timedelta(days=1)).date():
-        return f"tomorrow {dt.strftime('%H:%M')}"
-    return dt.strftime("%Y-%m-%d %H:%M")
-
-
 templates.env.filters["relative_future"] = relative_future
 
 
@@ -1886,7 +1868,7 @@ async def home(request: Request, group: str):
         "fleet_agents": agents,
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
         "fleet_never_run": sum(1 for a in agents if a["health"] == "gray"),
-        "fleet_attention": sum(1 for a in agents if a["health"] in {"amber", "red"}),
+        "fleet_attention": len(health_items),
         "fleet_running": sum(1 for a in agents if a.get("job_status_key") == "running"),
         # Zone 2: Pipeline
         "pipeline": pipeline,
