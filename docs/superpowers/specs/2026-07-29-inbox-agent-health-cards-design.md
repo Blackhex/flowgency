@@ -152,7 +152,10 @@ display name, the open-observation count, and the dot glyph, giving
 `A Advisor 1 ●`. That name changes whenever the count changes and embeds a
 non-text glyph, so the anchor carries an explicit label of the display name.
 
-**Never-run cards** carry `opacity-75`.
+**Never-run cards** are dimmed with explicit colour tokens, not with an opacity
+layer. Compositing `text-gray-500` at 75% opacity drops it to roughly 3:1 on
+white, below the WCAG 2.1 AA threshold for the small text it is applied to, and
+it washes out the health dot as well.
 
 **Open observations** keep their existing amber count and render only when
 non-zero. The mockup shows no pill because every count in that group is zero.
@@ -234,7 +237,15 @@ requires choosing a prompt.
 
 `needs_action_count` gains the health-item count, so the panel header and the
 fleet footer are computed from the same set. `fleet_healthy`, `fleet_never_run`,
-`fleet_attention`, and `fleet_running` keep their current definitions.
+and `fleet_running` keep their current definitions.
+
+`fleet_attention` does NOT keep its current definition. It previously counted
+every amber or red agent, including running ones, while a running agent
+deliberately produces no queue item. An agent whose last job failed and which is
+now running again — the ordinary "I re-ran it" state — would therefore report
+`1 needs attention` above a queue saying nothing needs attention, which is the
+exact defect this design exists to remove. `fleet_attention` counts the health
+items, so the two cannot drift by construction.
 
 The empty state changes from `No items need attention right now.` to render only
 when there are no health items and no pipeline items.
@@ -250,10 +261,15 @@ table is added above the form:
 | Routine | `routine.id`, struck through when `enabled` is false |
 | Schedule | `at HH:MM` or `every {spec}`, or `conditional` when the routine has a `condition` |
 | Last fired | marker mtime as `YYYY-MM-DD HH:MM`, or `never` |
-| Next due | `relative_future(due_at)`, `overdue {relative}`, `due now`, or `—` for conditional and disabled routines |
+| Next due | `relative_future(next occurrence)`, `overdue {relative}`, `due now`, or `—` for conditional and disabled routines |
 
-Values come from the same `agency/health.py` helpers the Inbox uses. The table is
-informational; the form below it remains the only way to change a routine.
+Values come from the same `agency/health.py` helpers the Inbox uses, and the tab
+honours the group's `dispatch.enabled` exactly as the Inbox does. When dispatch
+is disabled the column reads `dispatch disabled` for every routine, because a
+routine cannot be late when nothing is scheduled to fire it. A tab that reported
+`overdue 5h` while the Inbox card for the same agent reported good health would
+reintroduce the divergence this design removes. The table is informational; the
+form below it remains the only way to change a routine.
 
 ## Testing
 
@@ -281,6 +297,10 @@ informational; the form below it remains the only way to change a routine.
 - Cards follow configured order. Severity-first sorting was considered and
   rejected: a fleet that reorders itself when an agent goes late is hard to
   build a spatial memory of.
+- The drawings set routine ids in monospace inside the fault line and the queue
+  sentence. Both ship as flat strings, because the sentence is composed once in
+  Python so the dot tooltip and the queue item cannot diverge. The composition
+  invariant is worth more than the typography.
 - The overdue fact is deliberately stated twice, tersely on the card and fully in
   the queue. The card is for triage, the queue is for acting.
 - The fleet zone grows from roughly 60px to roughly 210px at three columns,
