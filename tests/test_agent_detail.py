@@ -822,12 +822,15 @@ def test_routines_get_disabled_routine_shows_dash_for_next_due(monkeypatch, tmp_
     assert "—" in response.text
 
 
-def test_routines_get_fired_routine_shows_timestamp_and_on_schedule(monkeypatch, tmp_path, raw_config):
-    """A routine whose marker file exists shows a timestamp and 'on schedule'."""
+def test_routines_get_fired_routine_shows_timestamp_and_next_occurrence(monkeypatch, tmp_path, raw_config):
+    """A routine whose marker file exists shows a timestamp and a relative next-due time."""
+    import os
+    from datetime import datetime
     from agency.dispatch.schedule import every_marker_path
 
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
     raw["groups"]["newsletter"]["agents"][0]["routines"].append(
         {
             "id": "hourly-check",
@@ -840,15 +843,36 @@ def test_routines_get_fired_routine_shows_timestamp_and_on_schedule(monkeypatch,
 
     logs_root = tmp_path / "groups" / "newsletter" / "logs"
     marker = every_marker_path(logs_root, "advisor", "hourly-check")
+    marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
+    # set mtime to now so next occurrence is 6h from now
+    stamp = datetime.now().timestamp()
+    os.utime(marker, (stamp, stamp))
 
     response = client.get("/newsletter/agents/advisor/routines")
 
     assert response.status_code == 200
     assert "hourly-check" in response.text
-    assert "on schedule" in response.text
-    from datetime import datetime
+    assert "on schedule" not in response.text
+    # a relative future string should appear (e.g. "6h away" or "5h away" etc.)
+    assert "away" in response.text or "due now" in response.text
     assert datetime.now().strftime("%Y-%m-%d") in response.text
+
+
+def test_routines_dispatch_disabled_shows_dispatch_disabled(monkeypatch, tmp_path, raw_config):
+    """When dispatch is disabled, Next due reads 'dispatch disabled' for every routine."""
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    # ensure dispatch is explicitly disabled
+    raw["groups"]["newsletter"]["dispatch"] = {"enabled": False}
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+
+    response = client.get("/newsletter/agents/advisor/routines")
+
+    assert response.status_code == 200
+    assert "dispatch disabled" in response.text
+    assert "overdue" not in response.text
 
 
 def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, raw_config):

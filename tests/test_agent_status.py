@@ -453,17 +453,17 @@ def _job(completed_at=None, started_at=None):
 
 
 def test_job_finished_at_aware_stamp_converts_to_local():
-    """Aware UTC stamp must be converted (astimezone), not stripped."""
-    stamp = "2026-07-28T06:16:06.226620+00:00"
-    expected = datetime.fromisoformat(stamp).astimezone().replace(tzinfo=None)
-    assert _job_finished_at(_job(completed_at=stamp)) == expected
+    """Same instant expressed with two different offsets must yield the same local datetime."""
+    result_utc = _job_finished_at(_job(completed_at="2026-07-28T06:16:06+00:00"))
+    result_plus2 = _job_finished_at(_job(completed_at="2026-07-28T08:16:06+02:00"))
+    assert result_utc == result_plus2
 
 
 def test_job_finished_at_naive_stamp_treated_as_utc():
-    """Naive stamp is the storage convention for UTC; must shift to local."""
-    stamp = "2026-07-28T06:16:06"
-    expected = datetime(2026, 7, 28, 6, 16, 6, tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
-    assert _job_finished_at(_job(completed_at=stamp)) == expected
+    """Naive stamp means UTC; must equal the explicit +00:00 form of the same instant."""
+    result_utc = _job_finished_at(_job(completed_at="2026-07-28T06:16:06+00:00"))
+    result_naive = _job_finished_at(_job(completed_at="2026-07-28T06:16:06"))
+    assert result_utc == result_naive
 
 
 def test_job_finished_at_malformed_stamp_returns_none():

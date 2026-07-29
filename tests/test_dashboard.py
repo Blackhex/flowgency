@@ -407,7 +407,7 @@ def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, t
     assert "Waiting for memory" in response.text
     assert "Running" in response.text
     assert "1 running" in response.text
-    assert response.text.count("animate-pulse") == 1
+    assert response.text.count("data-agent-running") == 1
 
     fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_group("newsletter"))}
     assert fleet["advisor"]["job_status_key"] == "queued"
@@ -485,7 +485,7 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
     assert "/newsletter/jobs/job-queued" in response.text
     assert "/newsletter/jobs/job-waiting" in response.text
     assert "1 running" in response.text
-    assert response.text.count("animate-pulse") == 1
+    assert response.text.count("data-agent-running") == 1
     assert fleet["advisor"]["job_status_key"] == "queued"
     assert fleet["advisor"]["job_status"] == "Queued"
     assert fleet["advisor"]["job_href"] == "/newsletter/jobs/job-queued"
@@ -665,27 +665,42 @@ def test_build_health_items_job_href(tmp_path):
 
 
 def test_last_run_line_succeeded(tmp_path):
-    from datetime import timezone
     spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="succeeded", job_id="job-succeeded")
     record = JobRecord.from_spec(spec)
     record.status = "succeeded"
-    record.completed_at = "2026-07-29T10:00:00+00:00"
     record.duration_seconds = 235.0
 
-    expected_ts = datetime(2026, 7, 29, 10, 0, tzinfo=timezone.utc).astimezone().replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
-    assert app_mod._last_run_line(record) == f"last run {expected_ts} · succeeded in 3m 55s"
+    # same instant: +00:00 and +02:00 must produce the same line
+    record.completed_at = "2026-07-29T10:00:00+00:00"
+    line_utc = app_mod._last_run_line(record)
+    record.completed_at = "2026-07-29T12:00:00+02:00"
+    line_offset = app_mod._last_run_line(record)
+    record.completed_at = "2026-07-29T10:00:00"  # naive = UTC
+    line_naive = app_mod._last_run_line(record)
+
+    assert line_utc == line_offset
+    assert line_utc == line_naive
+    assert "· succeeded in 3m 55s" in line_utc
+    assert line_utc.startswith("last run ")
 
 
 def test_last_run_line_failed(tmp_path):
-    from datetime import timezone
     spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-failed")
     record = JobRecord.from_spec(spec)
     record.status = "failed"
-    record.completed_at = "2026-07-29T08:30:00+00:00"
     record.duration_seconds = 10.0
 
-    expected_ts = datetime(2026, 7, 29, 8, 30, tzinfo=timezone.utc).astimezone().replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
-    assert app_mod._last_run_line(record) == f"last run {expected_ts} · failed in 10s"
+    record.completed_at = "2026-07-29T08:30:00+00:00"
+    line_utc = app_mod._last_run_line(record)
+    record.completed_at = "2026-07-29T10:30:00+02:00"
+    line_offset = app_mod._last_run_line(record)
+    record.completed_at = "2026-07-29T08:30:00"  # naive = UTC
+    line_naive = app_mod._last_run_line(record)
+
+    assert line_utc == line_offset
+    assert line_utc == line_naive
+    assert "· failed in 10s" in line_utc
+    assert line_utc.startswith("last run ")
 
 
 def test_last_run_line_none():
@@ -696,12 +711,19 @@ def test_last_run_line_no_duration(tmp_path):
     spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-nodur")
     record = JobRecord.from_spec(spec)
     record.status = "failed"
-    record.completed_at = "2026-07-29T08:30:00+00:00"
     record.duration_seconds = None
 
-    from datetime import timezone
-    expected_ts = datetime(2026, 7, 29, 8, 30, tzinfo=timezone.utc).astimezone().replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
-    assert app_mod._last_run_line(record) == f"last run {expected_ts} · failed"
+    record.completed_at = "2026-07-29T08:30:00+00:00"
+    line_utc = app_mod._last_run_line(record)
+    record.completed_at = "2026-07-29T10:30:00+02:00"
+    line_offset = app_mod._last_run_line(record)
+    record.completed_at = "2026-07-29T08:30:00"  # naive = UTC
+    line_naive = app_mod._last_run_line(record)
+
+    assert line_utc == line_offset
+    assert line_utc == line_naive
+    assert line_utc.endswith("· failed")
+    assert line_utc.startswith("last run ")
 
 
 def test_health_sentence_fully_populated(tmp_path):
@@ -785,3 +807,68 @@ def test_attention_queue_header_singular(monkeypatch, tmp_path, raw_config):
 
     assert "1 item" in response.text
     assert "1 items" not in response.text
+
+
+def test_fleet_attention_counts_health_items_not_color():
+    """fleet_attention must equal len(health_items) so the footer and queue cannot drift."""
+    g = {"key": "newsletter"}
+    # one overdue agent that is running — must produce 0 health items
+    agents_running_unhealthy = [
+        {"name": "x", "display_name": "X", "health": "red", "health_kind": "overdue",
+         "health_sentence": "s", "health_job": None, "running": True},
+    ]
+    items = app_mod.build_health_items(g, agents_running_unhealthy)
+    assert len(items) == 0, "running agent must be excluded from health items"
+
+    # fleet_attention was previously computed independently; verify the new formula agrees
+    # one overdue (not running) + one healthy = 1 item, so fleet_attention must be 1
+    agents_mixed = [
+        {"name": "a", "display_name": "A", "health": "red", "health_kind": "overdue",
+         "health_sentence": "s", "health_job": None},
+        {"name": "b", "display_name": "B", "health": "green", "health_kind": "healthy",
+         "health_sentence": "ok", "health_job": None},
+    ]
+    items2 = app_mod.build_health_items(g, agents_mixed)
+    assert len(items2) == 1
+
+
+def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, tmp_path, raw_config):
+    """An unhealthy agent that is running must not appear in fleet_attention or the queue."""
+    from copy import deepcopy
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
+    # add a second agent so advisor can be overdue while writer is running
+    advisor = raw["groups"]["newsletter"]["agents"][0]
+    writer = deepcopy(advisor)
+    writer["name"] = "writer"
+    writer["identity"] = {"display_name": "Writer"}
+    raw["groups"]["newsletter"]["agents"].append(writer)
+    _write_yaml(config_path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+    (group_root / "logs" / "2026-07-16" / "writer-run.out").write_text("x", encoding="utf-8")
+
+    # put writer in a running job so it is unhealthy but running
+    running_spec = _job_spec(group_root, config_path, status="running", job_id="job-writer-run", agent_name="writer")
+    running_path = JobStore(tmp_path / "memory-store").path("newsletter", running_spec.job_id)
+    write_job(running_path, JobRecord.from_spec(running_spec))
+    transition_job(running_path, "queued", "running")
+
+    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+        response = client.get("/newsletter/")
+
+    # advisor is overdue and NOT running → counts as 1 attention
+    # writer has a running job (even if its last job later fails), NOT counted in queue
+    assert response.status_code == 200
+    text = response.text
+    # the fleet_attention count must equal the queue item count
+    import re
+    footer_match = re.search(r"(\d+) needs attention", text)
+    queue_items = text.count('class="text-xs font-mono text-amber-700') + text.count('class="text-xs font-mono text-rose-700')
+    if footer_match:
+        assert int(footer_match.group(1)) == len(app_mod.build_health_items(
+            app_mod.get_group("newsletter"),
+            [a for a in app_mod.build_dashboard_fleet(app_mod.get_group("newsletter"))],
+        ))

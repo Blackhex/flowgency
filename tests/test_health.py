@@ -321,6 +321,22 @@ def test_last_fired_at_reads_the_every_marker(tmp_path):
     ) == datetime(2026, 7, 27, 6, 12)
 
 
+def test_last_fired_at_reads_the_at_marker(tmp_path):
+    """last_fired_at reads the mtime of the at-schedule marker (the common schedule kind)."""
+    from agency.dispatch.schedule import at_marker_path
+    logs = _logs(tmp_path)
+    day = NOW.strftime("%Y-%m-%d")
+    marker = at_marker_path(logs, "product", "r", day)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    stamp = datetime(2026, 7, 28, 9, 5, 0).timestamp()
+    os.utime(marker, (stamp, stamp))
+
+    assert last_fired_at(
+        _at(), logs_root=logs, agent_name="product", now=NOW
+    ) == datetime(2026, 7, 28, 9, 5, 0)
+
+
 def _describe(has_run=True, last_job_failed=False, lateness=None):
     return describe_agent_health(
         has_run=has_run,
