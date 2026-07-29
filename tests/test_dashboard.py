@@ -407,7 +407,7 @@ def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, t
     assert "Waiting for memory" in response.text
     assert "Running" in response.text
     assert "1 running" in response.text
-    assert response.text.count('title="Running"') == 1
+    assert response.text.count("animate-pulse") == 1
 
     fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_group("newsletter"))}
     assert fleet["advisor"]["job_status_key"] == "queued"
@@ -485,7 +485,7 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
     assert "/newsletter/jobs/job-queued" in response.text
     assert "/newsletter/jobs/job-waiting" in response.text
     assert "1 running" in response.text
-    assert response.text.count('title="Running"') == 1
+    assert response.text.count("animate-pulse") == 1
     assert fleet["advisor"]["job_status_key"] == "queued"
     assert fleet["advisor"]["job_status"] == "Queued"
     assert fleet["advisor"]["job_href"] == "/newsletter/jobs/job-queued"
@@ -563,7 +563,23 @@ def test_fleet_cards_render_both_timing_values(monkeypatch, tmp_path, raw_config
 
     assert response.status_code == 200
     assert "never run" in response.text
+    assert "no schedule" in response.text
     assert "/newsletter/agents/advisor/routines" in response.text
+
+
+def test_running_dot_uses_health_sentence_as_title(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    spec = _job_spec(group_root, config_path, status="running", job_id="job-running")
+    path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
+    write_job(path, JobRecord.from_spec(spec))
+    transition_job(path, "queued", "running")
+
+    response = client.get("/newsletter/")
+
+    assert response.status_code == 200
+    assert 'title="Running"' not in response.text
+    assert "animate-pulse" in response.text
+    assert 'title="No run on record"' in response.text
 
 
 def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
