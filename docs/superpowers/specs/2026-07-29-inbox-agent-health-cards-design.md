@@ -110,7 +110,8 @@ same precedence the color does, so the two can never disagree:
 
 `late` is `now - due_at` for `overdue` and `due`, and `None` otherwise.
 `routine_id` and `due_at` are populated only for `overdue` and `due`. `job` is
-populated only for `job_failed`.
+the newest executed record whatever the `kind`, because the queue's last-run
+line reports it for an overdue agent too, as the drawing shows.
 
 `running` stays orthogonal. It overrides the dot glyph and the next-run cell; it
 does not change `color` or `kind`, and a running agent never produces a queue
@@ -130,8 +131,7 @@ Card contents, top to bottom:
 | --- | --- |
 | Header | avatar, display name, health dot pushed right |
 | Title | `identity.title`, omitted when empty |
-| Badges | blueprint key, integration key, open-observation pill when non-zero |
-| Timing | last run on the left, next run on the right, separated by a top border |
+| Badges | blueprint key, integration key, open-observation pill when non-zero || Timing | last run on the left, next run on the right, separated by a top border |
 | Fault | one line, present only when `kind` is `overdue`, `due`, or `job_failed` |
 
 **Avatar.** `identity.emoji` when set. Otherwise initials: the first letter of
@@ -152,11 +152,17 @@ non-zero. The mockup shows no pill because every count in that group is zero.
 
 | Case | Left cell | Right cell |
 | --- | --- | --- |
-| running | `relative_time(last_run.at)` | `running {elapsed}` |
+| active job | `relative_time(last_run.at)` | `job_status`, linked to `job_href` |
 | `never_run` | `never run` | `—` |
 | `overdue` | `relative_time(last_run.at)` or `never run` | `overdue {relative}` |
 | `due` | `relative_time(last_run.at)` | `due now` |
 | otherwise | `relative_time(last_run.at)` | `relative_future(next_run)`, or `—` when the agent has no schedule |
+
+An active job outranks every other case. `job_status` is the existing label
+(`Waiting for memory`, `Queued`, `Running`) and the cell keeps the job link the
+chip used to carry beside it, so a queued or running job stays one click away
+from the Inbox. This is the only element of the old chip that survives as a
+link rather than as text.
 
 `{relative}` is `late` in coarse form: whole minutes under an hour, whole hours
 under a day, whole days beyond that. The card never shows a compound value.
