@@ -25,6 +25,26 @@
       </ul>
     </div>
   </div>
+  {% if routine_status %}
+  <div class="border-t border-gray-200 pt-4">
+    <h3 class="font-semibold text-gray-900">Schedule status</h3>
+    <table class="mt-2 w-full text-left text-sm text-gray-700">
+      <thead class="text-xs uppercase tracking-wider text-gray-500">
+        <tr><th class="py-1">Routine</th><th class="py-1">Schedule</th><th class="py-1">Last fired</th><th class="py-1">Next due</th></tr>
+      </thead>
+      <tbody>
+        {% for r in routine_status %}
+        <tr class="border-t border-gray-100">
+          <td class="py-1 font-mono text-xs {% if not r.enabled %}line-through text-gray-400{% endif %}">{{ r.routine_id }}</td>
+          <td class="py-1 font-mono text-xs">{{ r.schedule }}</td>
+          <td class="py-1 font-mono text-xs">{{ r.last_fired }}</td>
+          <td class="py-1 font-mono text-xs">{{ r.next_due }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
   <form method="post" action="/{{ group }}/agents/{{ agent }}/routines" class="space-y-4 border-t border-gray-200 pt-4">
     <input type="hidden" name="revision" value="{{ config_revision }}">
     <label class="block text-sm text-gray-700">
