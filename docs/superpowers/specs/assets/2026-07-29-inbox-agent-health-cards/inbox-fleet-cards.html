@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inbox fleet cards — approved design, 2026-07-29</title>
+<style>
+  body { margin:0; background:#141414; font-family:'Segoe UI',system-ui,sans-serif; }
+  .frame { width:1030px; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div style="background:#1f1f1f;padding:16px">
+
+    <!-- ZONE 1: FLEET -->
+    <div id="fleet-zone" style="background:#262626;border:1px solid #3a3a3a;border-radius:8px;padding:11px 12px;margin-bottom:10px">
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;align-items:start">
+
+        <div style="border:1px solid #3a3a3a;background:#2b2b2b;border-radius:8px;padding:9px 11px;opacity:.72">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span style="width:24px;height:24px;border-radius:6px;background:#3f3f46;color:#e5e5e5;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">PA</span>
+            <span style="color:#ededed;font-size:14px;font-weight:600">Paul Atreides</span>
+            <span style="color:#6b7280;margin-left:auto;font-size:11px">&#9679;</span>
+          </div>
+          <div style="font-size:11px;color:#8a8a8a;margin-top:3px">Builder</div>
+          <div style="display:flex;gap:5px;margin-top:6px">
+            <span style="font-size:10px;background:#3f3f46;color:#d4d4d8;border-radius:4px;padding:1px 6px">builder</span>
+            <span style="font-size:10px;background:#334155;color:#cbd5e1;border-radius:4px;padding:1px 6px">copilot</span>
+          </div>
+          <div style="margin-top:7px;padding-top:6px;border-top:1px solid #3a3a3a;font-family:ui-monospace,monospace;font-size:11px;display:flex;justify-content:space-between">
+            <span style="color:#6b7280">never run</span><span style="color:#6b7280">&mdash;</span>
+          </div>
+        </div>
+
+        <div style="border:1px solid #3a3a3a;background:#2b2b2b;border-radius:8px;padding:9px 11px">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span style="width:24px;height:24px;border-radius:6px;background:#3f3f46;color:#e5e5e5;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">GH</span>
+            <span style="color:#ededed;font-size:14px;font-weight:600">Gurney Halleck</span>
+            <span style="color:#34d399;margin-left:auto;font-size:11px">&#9679;</span>
+          </div>
+          <div style="font-size:11px;color:#8a8a8a;margin-top:3px">Code Reviewer</div>
+          <div style="display:flex;gap:5px;margin-top:6px">
+            <span style="font-size:10px;background:#3f3f46;color:#d4d4d8;border-radius:4px;padding:1px 6px">reviewer</span>
+            <span style="font-size:10px;background:#334155;color:#cbd5e1;border-radius:4px;padding:1px 6px">copilot</span>
+          </div>
+          <div style="margin-top:7px;padding-top:6px;border-top:1px solid #3a3a3a;font-family:ui-monospace,monospace;font-size:11px;display:flex;justify-content:space-between">
+            <span style="color:#9a9a9a;text-decoration:underline;text-decoration-color:#4b5563">17h ago</span>
+            <span style="color:#7dd3fc;text-decoration:underline">6h away</span>
+          </div>
+        </div>
+
+        <div style="border:1px solid #3a3a3a;background:#2b2b2b;border-radius:8px;padding:9px 11px">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span style="width:24px;height:24px;border-radius:6px;background:#3f3f46;color:#e5e5e5;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">TH</span>
+            <span style="color:#ededed;font-size:14px;font-weight:600">Thufir Hawat</span>
+            <span style="color:#34d399;margin-left:auto;font-size:11px">&#9679;</span>
+          </div>
+          <div style="font-size:11px;color:#8a8a8a;margin-top:3px">Design Advisor</div>
+          <div style="display:flex;gap:5px;margin-top:6px">
+            <span style="font-size:10px;background:#3f3f46;color:#d4d4d8;border-radius:4px;padding:1px 6px">architect</span>
+            <span style="font-size:10px;background:#334155;color:#cbd5e1;border-radius:4px;padding:1px 6px">copilot</span>
+          </div>
+          <div style="margin-top:7px;padding-top:6px;border-top:1px solid #3a3a3a;font-family:ui-monospace,monospace;font-size:11px;display:flex;justify-content:space-between">
+            <span style="color:#9a9a9a;text-decoration:underline;text-decoration-color:#4b5563">2d ago</span>
+            <span style="color:#7dd3fc;text-decoration:underline">5d away</span>
+          </div>
+        </div>
+
+        <div style="border:1px solid #7f1d1d;background:rgba(76,5,25,.24);border-radius:8px;padding:9px 11px">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span style="width:24px;height:24px;border-radius:6px;background:#4c1d24;color:#fecdd3;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">DI</span>
+            <span style="color:#ededed;font-size:14px;font-weight:600">Duncan Idaho</span>
+            <span style="color:#fb7185;margin-left:auto;font-size:11px">&#9679;</span>
+          </div>
+          <div style="font-size:11px;color:#8a8a8a;margin-top:3px">Test Engineer</div>
+          <div style="display:flex;gap:5px;margin-top:6px">
+            <span style="font-size:10px;background:#3f3f46;color:#d4d4d8;border-radius:4px;padding:1px 6px">test-engineer</span>
+            <span style="font-size:10px;background:#334155;color:#cbd5e1;border-radius:4px;padding:1px 6px">copilot</span>
+          </div>
+          <div style="margin-top:7px;padding-top:6px;border-top:1px solid #7f1d1d;font-family:ui-monospace,monospace;font-size:11px;display:flex;justify-content:space-between">
+            <span style="color:#9a9a9a;text-decoration:underline;text-decoration-color:#4b5563">1d ago</span>
+            <span style="color:#fda4af;text-decoration:underline">overdue 3h</span>
+          </div>
+          <div style="margin-top:5px;font-size:11px;color:#fecdd3;line-height:1.35">
+            <span style="font-family:ui-monospace,monospace">suite-health</span> due 08:00
+          </div>
+        </div>
+
+        <div style="border:1px solid #3a3a3a;background:#2b2b2b;border-radius:8px;padding:9px 11px">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span style="width:24px;height:24px;border-radius:6px;background:#3f3f46;color:#e5e5e5;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">LJ</span>
+            <span style="color:#ededed;font-size:14px;font-weight:600">Lady Jessica</span>
+            <span style="color:#34d399;margin-left:auto;font-size:11px">&#9679;</span>
+          </div>
+          <div style="font-size:11px;color:#8a8a8a;margin-top:3px">Docs Writer</div>
+          <div style="display:flex;gap:5px;margin-top:6px">
+            <span style="font-size:10px;background:#3f3f46;color:#d4d4d8;border-radius:4px;padding:1px 6px">docs-writer</span>
+            <span style="font-size:10px;background:#334155;color:#cbd5e1;border-radius:4px;padding:1px 6px">copilot</span>
+          </div>
+          <div style="margin-top:7px;padding-top:6px;border-top:1px solid #3a3a3a;font-family:ui-monospace,monospace;font-size:11px;display:flex;justify-content:space-between">
+            <span style="color:#9a9a9a;text-decoration:underline;text-decoration-color:#4b5563">2d ago</span>
+            <span style="color:#7dd3fc;text-decoration:underline">5d away</span>
+          </div>
+        </div>
+
+        <div></div>
+      </div>
+
+      <div style="margin-top:9px;font-family:ui-monospace,monospace;font-size:12px;color:#8a8a8a">
+        5 agents &middot; 3 healthy &middot; <span style="color:#8a8a8a">1 never run</span> &middot; <span style="color:#fcd34d">1 needs attention</span>
+      </div>
+    </div>
+
+    <!-- ZONE 2: PIPELINE -->
+    <div style="background:#262626;border:1px solid #14532d;border-radius:8px;padding:10px 14px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:11px;letter-spacing:.08em;color:#8a8a8a;text-transform:uppercase;font-weight:600">Pipeline</span>
+        <span style="font-family:ui-monospace,monospace;font-size:12px;color:#6ee7b7">healthy</span>
+      </div>
+      <div style="display:flex;align-items:center">
+        <div style="flex:1;text-align:center"><div style="font-size:12px;color:#60a5fa">Observations</div><div style="font-family:ui-monospace,monospace;font-size:22px;font-weight:700;color:#93c5fd">0</div></div>
+        <div style="color:#4b5563;font-size:20px;padding:0 8px">&rarr;</div>
+        <div style="flex:1;text-align:center"><div style="font-size:12px;color:#c084fc">Proposals</div><div style="font-family:ui-monospace,monospace;font-size:22px;font-weight:700;color:#d8b4fe">0</div></div>
+        <div style="color:#4b5563;font-size:20px;padding:0 8px">&rarr;</div>
+        <div style="flex:1;text-align:center"><div style="font-size:12px;color:#6ee7b7">Decisions</div><div style="font-family:ui-monospace,monospace;font-size:22px;font-weight:700;color:#6ee7b7">0</div></div>
+      </div>
+    </div>
+
+    <!-- ZONES 3+4 -->
+    <div id="queue-zone" style="display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:10px">
+
+      <div style="background:#262626;border:1px solid #3a3a3a;border-radius:8px;padding:10px 12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:11px;letter-spacing:.08em;color:#8a8a8a;text-transform:uppercase;font-weight:600">Attention Queue</span>
+          <span style="font-family:ui-monospace,monospace;font-size:12px;color:#fcd34d">1 item</span>
+        </div>
+
+        <div style="border:1px solid #7f1d1d;background:rgba(76,5,25,.28);border-radius:6px;padding:9px 11px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+            <span style="font-size:12px;color:#fda4af;font-weight:600">overdue</span>
+            <span style="font-size:11px;background:#3f3f46;color:#d4d4d8;border-radius:9999px;padding:1px 8px">Duncan Idaho</span>
+          </div>
+          <div style="font-size:14px;color:#e5e5e5;line-height:1.35">
+            Routine <span style="font-family:ui-monospace,monospace;color:#fca5a5">suite-health</span> was due at <strong>08:00</strong> and has not run &mdash; 3h 46m late.
+          </div>
+          <div style="font-size:11px;color:#9a9a9a;margin-top:4px;font-family:ui-monospace,monospace">
+            last run 2026-07-28 08:12 &middot; succeeded in 3m 55s
+          </div>
+          <div style="margin-top:6px;display:flex;gap:12px;font-size:12px">
+            <span style="color:#93c5fd;text-decoration:underline">Open routine</span>
+            <span style="color:#93c5fd;text-decoration:underline">Last job log</span>
+            <span style="color:#93c5fd;text-decoration:underline">Run now</span>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:16px;padding-top:8px;border-top:1px solid #3a3a3a;font-size:12px">
+          <span style="color:#a5b4fc">View all observations &rarr;</span>
+          <span style="color:#a5b4fc">View all proposals &rarr;</span>
+        </div>
+      </div>
+
+      <div style="background:#262626;border:1px solid #3a3a3a;border-radius:8px;padding:10px 12px">
+        <div style="font-size:11px;letter-spacing:.08em;color:#8a8a8a;text-transform:uppercase;font-weight:600;margin-bottom:8px">Activity</div>
+        <div style="color:#6b7280;font-size:13px">No recent activity</div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
