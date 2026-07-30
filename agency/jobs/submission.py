@@ -62,10 +62,12 @@ def _submit_resolved(
     spec: JobSpec,
     job_store: JobStore,
     launcher: JobLauncher | None = None,
+    *,
+    due_at: str | None = None,
 ) -> JobHandle:
     spec.validate()
     artifact = spec.blueprint.to_artifact()
-    record = JobRecord.from_spec(spec)
+    record = JobRecord.from_spec(spec, due_at=due_at)
     from agency.blueprints.cache import pin_artifact, release_pin
 
     try:
@@ -99,6 +101,7 @@ def _submit_resolved(
             execution_summary=f"Launch error: {error}",
             base_sha=record.base_sha,
             memory_publication=record.memory_publication,
+            due_at=record.due_at,
         )
         job_store.write(authority, failed)
         raise JobSubmissionError(str(error), authority.path) from error
@@ -126,6 +129,7 @@ def submit_job_request(
                     _resolve_request(request, locked_snapshot),
                     job_store,
                     launcher,
+                    due_at=request.due_at,
                 )
         except ConfigConflictError as error:
             last_conflict = error
