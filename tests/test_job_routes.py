@@ -518,3 +518,37 @@ def test_job_detail_shows_failure_notice_when_resume_failed(monkeypatch, tmp_pat
 
     assert response.status_code == 200
     assert "Could not open a terminal" in response.text
+
+
+def test_waiting_jobs_show_their_position(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(group_root, config_path, job_id="job-pos-a", status="queued")
+    _write_job_record(group_root, config_path, job_id="job-pos-b", status="queued")
+    _write_job_record(group_root, config_path, job_id="job-pos-c", status="queued")
+
+    response = client.get("/newsletter/jobs")
+
+    assert response.status_code == 200
+    assert "1 of 3" in response.text
+
+
+def test_a_running_job_has_no_position(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(group_root, config_path, job_id="job-pos-running", status="running")
+
+    response = client.get("/newsletter/jobs")
+
+    assert response.status_code == 200
+    assert "Running" in response.text  # the job row is present
+    assert " of " not in response.text  # no position badge anywhere on the page
+
+
+def test_a_queued_job_offers_cancel(monkeypatch, tmp_path, raw_config):
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(group_root, config_path, job_id="job-pos-q", status="queued")
+
+    response = client.get("/newsletter/jobs")
+
+    assert response.status_code == 200
+    assert "/jobs/" in response.text
+    assert "cancel" in response.text.lower()

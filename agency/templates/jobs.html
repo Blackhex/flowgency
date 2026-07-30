@@ -21,6 +21,9 @@
         <div class="flex items-center gap-3 flex-wrap">
           <a href="{{ job.detail_href }}" class="font-semibold text-gray-900 hover:text-indigo-700">{{ job.display_name }}</a>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ job.status_classes }}">{{ job.status_label }}</span>
+          {% if job.queue_position %}
+          <span class="font-mono text-xs text-slate-500 dark:text-slate-400">{{ job.queue_position }} of {{ job.queue_length }}</span>
+          {% endif %}
           <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-medium">Blueprint: {{ job.blueprint }}</span>
           {{ job.integration | integration_badge }}
         </div>
@@ -31,6 +34,11 @@
       <div class="flex gap-2 flex-wrap">
         {% if job.activity_href %}
         <a href="{{ job.activity_href }}" class="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Activity</a>
+        {% endif %}
+        {% if job.can_cancel %}
+        <form method="POST" action="{{ job.detail_href }}/cancel">
+          <button type="submit" class="px-3 py-2 text-sm font-medium text-white bg-amber-700 rounded-lg hover:bg-amber-800 transition-colors">Cancel</button>
+        </form>
         {% endif %}
         <a href="{{ job.detail_href }}" class="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">Details</a>
       </div>
