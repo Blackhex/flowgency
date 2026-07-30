@@ -451,6 +451,55 @@ def test_every_marker_anchors_on_the_occurrence_not_the_launch(
     )
 
 
+def test_a_routine_that_is_merely_not_due_is_not_reported_as_broken(
+    tmp_path, monkeypatch, caplog
+):
+    """`every` returns no occurrence both when not due and when unreadable."""
+    workspace, group_root, config_path, _ = _make_group(tmp_path)
+    _write_config(
+        config_path,
+        workspace,
+        group_root,
+        routines=[{"id": "audit", "prompt_name": "daily-review",
+                   "schedule": {"every": "6h"}}],
+    )
+    marker = every_marker_path(group_root / "logs", "product", "audit")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    anchor = datetime(2026, 7, 29, 9, 0).timestamp()
+    os.utime(marker, (anchor, anchor))
+    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T10:00:00")
+
+    with caplog.at_level("WARNING", logger="agency.dispatch.run"):
+        run_dispatch_cycle(None, config_path, _RecordingLauncher())
+
+    assert "no usable schedule" not in caplog.text
+
+
+def test_a_routine_with_an_unreadable_period_is_still_reported(
+    tmp_path, monkeypatch, caplog
+):
+    workspace, group_root, config_path, _ = _make_group(tmp_path)
+    _write_config(
+        config_path,
+        workspace,
+        group_root,
+        routines=[{"id": "audit", "prompt_name": "daily-review",
+                   "schedule": {"every": "6h"}}],
+    )
+    monkeypatch.setattr(
+        "agency.dispatch.run.parse_every", lambda value: None
+    )
+    marker = every_marker_path(group_root / "logs", "product", "audit")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+
+    with caplog.at_level("WARNING", logger="agency.dispatch.run"):
+        run_dispatch_cycle(None, config_path, _RecordingLauncher())
+
+    assert "no usable schedule" in caplog.text
+
+
 def test_a_dispatch_cycle_drains_before_it_evaluates_routines(tmp_path, monkeypatch):
     order = []
     monkeypatch.setattr("agency.dispatch.run.drain", lambda *a, **k: order.append("drain"))
