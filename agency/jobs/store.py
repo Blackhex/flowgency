@@ -196,6 +196,49 @@ def cancel_job(path: Path) -> JobRecord:
         return updated
 
 
+def worker_alive(pid: int | None) -> "bool | None":
+    # Lazy import breaks the store -> reconciliation -> store circular dependency.
+    import agency.jobs.reconciliation as _rec
+    return _rec.worker_alive(pid)
+
+
+def queue_lock_path(store_root: "Path") -> "Path":
+    return Path(store_root) / ".queue.lock"
+
+
+def _worker_gone(record: JobRecord) -> bool:
+    return record.worker_pid is not None and worker_alive(record.worker_pid) is False
+
+
+def occupies_slot(record: JobRecord) -> bool:
+    """Whether this record is holding one of the pool's slots."""
+    if record.status in {"running", "waiting_for_memory"}:
+        return True
+    if record.status != "queued":
+        return False
+    return record.worker_pid is not None and not _worker_gone(record)
+
+
+def is_launchable(record: JobRecord) -> bool:
+    """Whether the drain may start this record now."""
+    if record.status != "queued":
+        return False
+    return record.worker_pid is None or _worker_gone(record)
+
+
+def claim_job(path: Path, worker_pid: "int | None") -> JobRecord:
+    """Record which worker owns a queued job without changing its status."""
+    with exclusive_lock(job_lock_path(path), wait=True):
+        record = read_job(path)
+        if record.status != "queued":
+            raise InvalidJobTransition(
+                f"Only queued jobs can be claimed, found {record.status!r}"
+            )
+        updated = replace(record, worker_pid=worker_pid)
+        write_job(path, updated)
+        return updated
+
+
 ACTIVE_STATUSES = frozenset({"queued", "waiting_for_memory", "running"})
 TERMINAL_STATUSES = frozenset({"complete", "failed", "cancelled"})
 
