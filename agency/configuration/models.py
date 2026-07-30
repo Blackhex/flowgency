@@ -130,7 +130,6 @@ class AgentInstance(BaseModel):
 class GroupDispatch(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = False
-    daily_limit: int = 20
 
 
 class WorkspaceConfig(BaseModel):
@@ -891,7 +890,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
         dispatch = group.get("dispatch") if _is_mapping(group.get("dispatch")) else {}
         if _is_mapping(dispatch):
             for key in dispatch:
-                if key not in {"enabled", "daily_limit"} and key != "agents":
+                if key not in {"enabled"} and key != "agents":
                     issues.append(
                         _build_issue(
                             code="invalid-config",

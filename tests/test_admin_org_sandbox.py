@@ -90,7 +90,6 @@ def test_admin_org_save_persists_sandbox_root(tmp_path, monkeypatch, raw_config)
             "sandbox_roots": str(tmp_path / "repo"),
             "tool_mode": "all",
             "tool_names": "",
-            "daily_limit": "20",
         },
         follow_redirects=False,
     )
@@ -128,7 +127,6 @@ def test_admin_org_save_clears_sandbox_root_when_empty(tmp_path, monkeypatch, ra
             "sandbox_roots": "",
             "tool_mode": "all",
             "tool_names": "",
-            "daily_limit": "20",
         },
         follow_redirects=False,
     )
@@ -221,7 +219,6 @@ def test_admin_org_save_persists_multiline_sandbox_root_as_list(tmp_path, monkey
             "sandbox_roots": f"{tmp_path / 'repo'}\n{tmp_path / 'cowork'}",
             "tool_mode": "all",
             "tool_names": "",
-            "daily_limit": "20",
         },
         follow_redirects=False,
     )
@@ -253,7 +250,6 @@ def test_admin_org_save_single_line_sandbox_root_stays_string(tmp_path, monkeypa
             "sandbox_roots": str(tmp_path / "repo"),
             "tool_mode": "all",
             "tool_names": "",
-            "daily_limit": "20",
         },
         follow_redirects=False,
     )
@@ -285,7 +281,6 @@ def test_admin_org_save_persists_allowed_tools(tmp_path, monkeypatch, raw_config
             "sandbox_roots": str(tmp_path / "repo"),
             "tool_mode": "allowlist",
             "tool_names": "shell\nwrite",
-            "daily_limit": "20",
         },
         follow_redirects=False,
     )
@@ -316,7 +311,6 @@ def test_admin_org_save_clears_allowed_tools_when_none_checked(tmp_path, monkeyp
             "sandbox_roots": "",
             "tool_mode": "all",
             "tool_names": "",
-            "daily_limit": "20",
         },
         follow_redirects=False,
     )
@@ -339,7 +333,6 @@ def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_p
     }
     snapshot.raw["groups"]["grp"]["dispatch"] = {
         "enabled": False,
-        "daily_limit": 10,
     }
     snapshot.raw["groups"]["grp"]["workspaces"] = [
         {
@@ -367,7 +360,6 @@ def test_admin_org_save_preserves_unknown_runtime_and_group_extension_keys(tmp_p
             "tool_mode": "allowlist",
             "tool_names": "shell",
             "dispatch_enabled": "on",
-            "daily_limit": "20",
         },
         follow_redirects=False,
     )
@@ -514,7 +506,7 @@ def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
     assert saved["workspace_path"] == str(tmp_path / "new-workspace")
     assert saved["path"] == str(tmp_path / "new-agents")
     assert saved["default_integration"] == "claude-code"
-    assert saved["dispatch"] == {"enabled": False, "daily_limit": 20}
+    assert saved["dispatch"] == {"enabled": False}
     assert saved["runtime"]["sandbox"] == {
         "mode": "restricted",
         "roots": [str(tmp_path / "repo"), str(tmp_path / "cowork")],
@@ -551,7 +543,6 @@ def test_admin_org_save_invalid_workspaces_is_all_or_nothing(tmp_path, monkeypat
             "tool_mode": "allowlist",
             "tool_names": "shell",
             "dispatch_enabled": "on",
-            "daily_limit": "3",
         },
         follow_redirects=False,
     )
@@ -603,7 +594,6 @@ def test_admin_org_save_invalid_paths_rerender_submitted_form_without_writing(
             "sandbox_roots": "",
             "tool_mode": "all",
             "tool_names": "",
-            "daily_limit": "20",
         },
         follow_redirects=False,
     )

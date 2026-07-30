@@ -83,7 +83,6 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
                 ],
                 "dispatch": {
                     "enabled": True,
-                    "daily_limit": 15,
                 },
                 "workspaces": [],
             }, paths),
@@ -123,7 +122,6 @@ def test_group_schedule_controls_remain_visible_when_dispatcher_inactive(tmp_pat
     assert response.status_code == 200
     assert "Runtime defaults" in response.text
     assert "Dispatch enabled" in response.text
-    assert "Daily Limit" in response.text
     assert "Dispatch Schedule" not in response.text
     assert "Save Dispatch Config" not in response.text
     assert "Manage agents (1)" in response.text

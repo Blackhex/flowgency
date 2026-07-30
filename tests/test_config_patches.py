@@ -187,7 +187,6 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
     }
     snapshot.raw["groups"]["newsletter"]["dispatch"] = {
         "enabled": False,
-        "daily_limit": 7,
     }
     snapshot.raw["groups"]["newsletter"]["workspaces"] = [
         {
@@ -221,7 +220,6 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
             tool_mode="allowlist",
             tool_names=("shell", "write"),
             dispatch_enabled=True,
-            dispatch_daily_limit=12,
             workspaces=(
                 {
                     "name": "Primary",
@@ -297,7 +295,6 @@ def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_stor
                 tool_mode="allowlist",
                 tool_names=("shell", "write"),
                 dispatch_enabled=True,
-                dispatch_daily_limit=12,
                 workspaces=(
                     {
                         "name": "Primary",

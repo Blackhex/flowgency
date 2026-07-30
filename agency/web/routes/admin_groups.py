@@ -201,9 +201,6 @@ def _group_settings_response(
             "tool_mode": value("tool_mode", tools.mode),
             "tool_names": value("tool_names", "\n".join(tools.names)),
             "dispatch_enabled": value("dispatch_enabled", dispatch.enabled),
-            "dispatch_daily_limit": value(
-                "daily_limit", dispatch.daily_limit
-            ),
             "agent_count": len(group.agents),
             "manage_agents_href": f"/{group_id}/agents",
             "warning": warning,
@@ -548,7 +545,6 @@ async def admin_org_save(
     tool_mode = str(form.get("tool_mode", "all")).strip() or "all"
     tool_names = _split_lines(str(form.get("tool_names", "")))
     dispatch_enabled = form.get("dispatch_enabled") == "on"
-    daily_limit = int(str(form.get("daily_limit", "20")) or "20")
     workspaces_json = str(form.get("workspaces_json", "[]"))
     try:
         workspaces = json.loads(workspaces_json)
@@ -588,7 +584,6 @@ async def admin_org_save(
                     tool_mode=tool_mode,
                     tool_names=tuple(tool_names),
                     dispatch_enabled=dispatch_enabled,
-                    dispatch_daily_limit=daily_limit,
                     workspaces=tuple(workspaces),
                 ),
             )
@@ -620,7 +615,6 @@ async def admin_org_save(
                 "tool_mode": tool_mode,
                 "tool_names": str(form.get("tool_names", "")),
                 "dispatch_enabled": dispatch_enabled,
-                "daily_limit": daily_limit,
                 "workspaces_json": workspaces_json,
             },
             revision=revision,
@@ -746,7 +740,6 @@ async def admin_org_create(
                     tool_mode="allowlist" if tools else "all",
                     tool_names=tuple(tools),
                     dispatch_enabled=False,
-                    dispatch_daily_limit=20,
                     workspaces=tuple(workspaces),
                 ),
             )
