@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 import re
 
 _UNSAFE = re.compile(r"[^a-zA-Z0-9._-]+")
 _EVERY = re.compile(r"(\d+)(m|h|d)")
 _UNIT_SECONDS = {"m": 60, "h": 3600, "d": 86400}
+
+DEFAULT_CATCH_UP = "today"
+_KEYWORDS = ("none", "today", "always")
+
+
+class CatchUp(NamedTuple):
+    kind: str
+    period: timedelta | None
 
 
 def marker_safe(value: str) -> str:
@@ -36,3 +45,32 @@ def at_marker_path(
 ) -> Path:
     name = f".event-{marker_safe(agent_name)}-{marker_safe(routine_id)}-{day}"
     return Path(logs_root) / day / name
+
+
+def parse_catch_up(value: str | None) -> CatchUp | None:
+    """Return the recovery bound, or None when the value is malformed."""
+    text = (value or "").strip() or DEFAULT_CATCH_UP
+    if text in _KEYWORDS:
+        return CatchUp(text, None)
+    period = parse_every(text)
+    if period is None:
+        return None
+    return CatchUp("duration", period)
+
+
+def catch_up_allows(
+    occurrence: datetime,
+    now: datetime,
+    bound: CatchUp,
+    grace: timedelta,
+) -> bool:
+    """Whether an occurrence is still worth running at ``now``."""
+    age = now - occurrence
+    if bound.kind == "always":
+        return True
+    if bound.kind == "today":
+        return occurrence.date() == now.date()
+    if bound.kind == "duration":
+        return age <= bound.period
+    return age < grace
+
