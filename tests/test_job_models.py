@@ -705,3 +705,26 @@ def test_claiming_a_job_that_left_the_queue_is_refused(tmp_path, sample_spec):
     write_job(path, record)
     with pytest.raises(InvalidJobTransition):
         claim_job(path, 4321)
+
+
+def test_a_claim_without_a_pid_still_holds_the_slot(tmp_path, sample_spec):
+    path = tmp_path / "job.yaml"
+    write_job(path, JobRecord.from_spec(sample_spec))
+    claimed = claim_job(path, None)
+    assert claimed.launched_at is not None
+    assert occupies_slot(claimed) is True
+    assert is_launchable(claimed) is False
+
+
+def test_a_pidless_claim_is_relaunchable_once_the_grace_expires(
+    tmp_path, sample_spec
+):
+    from datetime import datetime, timedelta, timezone
+
+    from agency.jobs.store import LAUNCH_GRACE_SECONDS
+
+    stale = datetime.now(timezone.utc) - timedelta(seconds=LAUNCH_GRACE_SECONDS + 60)
+    record = JobRecord.from_spec(sample_spec)
+    record.launched_at = stale.isoformat()
+    assert occupies_slot(record) is False
+    assert is_launchable(record) is True
