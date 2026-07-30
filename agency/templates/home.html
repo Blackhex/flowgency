@@ -172,6 +172,31 @@
 </div>
 
 {# ════════════════════════════════════════════════════════════
+   WORK QUEUE STRIP
+   ════════════════════════════════════════════════════════════ #}
+<div class="rounded-lg border px-4 py-3 mb-3
+     {% if work_queue.waiting or work_queue.running %}border-cyan-700 bg-cyan-950/20{% else %}bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700{% endif %}">
+  <div class="flex items-center justify-between gap-2">
+    <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Work queue</span>
+    {% if work_queue.waiting or work_queue.running %}
+    <span class="flex gap-1.5">
+      <span class="rounded bg-emerald-900/60 px-1.5 font-mono text-xs text-emerald-200">{{ work_queue.running }} running</span>
+      <span class="rounded bg-cyan-900/60 px-1.5 font-mono text-xs text-cyan-100">{{ work_queue.waiting|length }} queued</span>
+    </span>
+    {% else %}
+    <span class="font-mono text-xs text-gray-500 dark:text-gray-400">idle &middot; pool {{ work_queue.pool }}</span>
+    {% endif %}
+  </div>
+  {% if work_queue.waiting %}
+  <div class="mt-1.5 max-h-24 overflow-y-auto font-mono text-xs leading-6">
+    {% for item in work_queue.waiting %}
+    <a href="{{ item.href }}" class="block hover:underline text-gray-700 dark:text-gray-200">{{ item.position }} {{ item.agent }} / {{ item.routine }} <span class="text-gray-500 dark:text-gray-400">{{ item.due }}</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{# ════════════════════════════════════════════════════════════
    ZONES 3 + 4: ATTENTION QUEUE + ACTIVITY FEED
    ════════════════════════════════════════════════════════════ #}
 <div class="md:grid md:grid-cols-5 md:gap-3">
