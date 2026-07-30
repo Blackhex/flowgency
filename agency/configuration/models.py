@@ -94,6 +94,7 @@ class ScheduleRule(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     at: str | None = None
     every: str | None = None
+    catch_up: str | None = None
 
 
 class PromptSelector(BaseModel):
@@ -483,6 +484,18 @@ def _validate_rule(rule: Any, scope: str) -> ValidationIssue | None:
             field="schedule",
             message="Dispatch rule must define exactly one of at or every.",
             hint="Set either at or every, but not both and not neither.",
+        )
+
+    from agency.dispatch.schedule import parse_catch_up
+
+    catch_up = rule.get("catch_up")
+    if catch_up is not None and parse_catch_up(str(catch_up)) is None:
+        return _build_issue(
+            code="invalid-dispatch-rule",
+            scope=scope,
+            field="schedule.catch_up",
+            message=f"Invalid catch_up value: {catch_up}",
+            hint="Use none, today, always, or a duration such as 30m, 8h, or 7d.",
         )
     return None
 
