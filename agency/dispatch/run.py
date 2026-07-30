@@ -58,7 +58,11 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
     interval = resolved.agency.dispatch.interval
 
     try:
-        drain(resolved, memory_store=resolved.agency.memory_store)
+        drain(
+            resolved,
+            memory_store=resolved.agency.memory_store,
+            full_reconcile=True,
+        )
     except Exception:
         log.exception("queue drain failed")
 

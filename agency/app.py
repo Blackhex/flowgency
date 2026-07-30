@@ -370,7 +370,11 @@ async def lifespan(app: FastAPI):
     if services.startup_error is None:
         snapshot = services.config_store.load()
         try:
-            drain(snapshot.config, memory_store=snapshot.config.agency.memory_store)
+            drain(
+                snapshot.config,
+                memory_store=snapshot.config.agency.memory_store,
+                full_reconcile=True,
+            )
         except Exception:
             log.exception("startup drain failed")
     yield

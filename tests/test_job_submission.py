@@ -887,32 +887,19 @@ def test_resolve_job_request_snapshots_distinct_configured_roots(tmp_path):
 def test_submit_releases_cache_pin_when_launch_fails(tmp_path):
     config = _write_config(tmp_path)
     _write_blueprint(tmp_path / "agent-library")
-    cache = CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()})
-    spec = resolve_job_request(
-        JobRequest(
-            config_path=config,
-            group_key="newsletter",
-            agent_name="builder",
-            trigger="manual_prompt",
-            task_input="",
-            routine_id="daily-review",
-        ),
-        config_store=ConfigStore(config),
-        library=BlueprintLibrary(tmp_path / "agent-library"),
-        cache=cache,
-        prompt_store=PromptStore(tmp_path / "prompts"),
-        integrations={"copilot": FakeIntegration()},
+    request = JobRequest(
+        config_path=config,
+        group_key="newsletter",
+        agent_name="builder",
+        trigger="manual_prompt",
+        task_input="",
+        routine_id="daily-review",
     )
     launcher = Mock()
     launcher.launch.side_effect = OSError("spawn denied")
 
     with pytest.raises(JobSubmissionError, match="spawn denied"):
-        jobs_package.submission._submit_resolved(
-            spec,
-            JobStore(tmp_path / "memory"),
-            launcher,
-            config=ConfigStore(config).load().config,
-        )
+        submit_job_request(request, launcher)
 
     pins_root = tmp_path / "compiled-agents" / "_pins"
     assert list(pins_root.rglob("*")) == []
@@ -1072,7 +1059,7 @@ def test_submit_job_uses_default_launcher_when_none_provided(tmp_path):
     request = configured_request(tmp_path)
     fake_launcher = Mock()
     fake_launcher.launch.return_value = LaunchResult(worker_pid=999)
-    with patch("agency.jobs.submission.default_launcher", return_value=fake_launcher):
+    with patch("agency.jobs.queue.default_launcher", return_value=fake_launcher):
         handle = submit_job_request(request)
     assert fake_launcher.launch.called
     assert handle.worker_pid == 999
@@ -1113,15 +1100,19 @@ import os
 from dataclasses import replace as dc_replace
 
 from agency.configuration.models import parse_config
+from agency.fs.locks import exclusive_lock
 from agency.jobs.models import RuntimePolicySnapshot, MemoryBinding, BlueprintRef, JobRecord
-from agency.jobs.store import write_job
+from agency.jobs.store import queue_lock_path, write_job
 
 
 class _RecordingLauncher:
     def __init__(self):
         self.launched: list[str] = []
+        self.fail = False
 
     def launch(self, reference):
+        if self.fail:
+            raise OSError("spawn denied")
         self.launched.append(reference.job_id)
         return LaunchResult(worker_pid=os.getpid())
 
@@ -1317,10 +1308,39 @@ def test_a_waiting_job_records_its_due_time(submission_env):
     assert submission_env.record(handle.job_id).due_at == "2026-07-29T08:00:00"
 
 
-def test_submission_is_refused_when_nothing_can_drain(submission_env, monkeypatch):
+def test_submission_never_launches_outside_the_queue_lock(submission_env):
+    """Every launch goes through the drain, so the pool cannot be overrun."""
+    store = JobStore(submission_env.memory_store)
+    with exclusive_lock(queue_lock_path(store.root), wait=False):
+        handle = submit_job_request(
+            submission_env.request(), submission_env.launcher
+        )
+    assert submission_env.launcher.launched == []
+    assert handle.status == "queued"
+
+
+def test_a_pool_of_dead_workers_is_reclaimed_by_the_submission_drain(
+    submission_env, monkeypatch
+):
+    """The drain reconciles before it counts, so ghosts never wedge the queue."""
+    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
     submission_env.fill_pool_with_dead_workers()
-    monkeypatch.setattr(
-        "agency.jobs.queue.has_drainer", lambda *a, **k: False
-    )
-    with pytest.raises(JobSubmissionError):
+    handle = submit_job_request(submission_env.request(), submission_env.launcher)
+    assert submission_env.launcher.launched == [handle.job_id]
+    assert submission_env.status("dead-0") == "failed"
+
+
+def test_a_launch_failure_is_reported_to_the_submitter(submission_env):
+    """The launch now happens in the drain; the caller must still hear about it."""
+    submission_env.launcher.fail = True
+    with pytest.raises(JobSubmissionError, match="spawn denied") as error:
         submit_job_request(submission_env.request(), submission_env.launcher)
+    assert read_job(error.value.job_path).status == "failed"
+
+
+def test_a_queued_job_is_not_reported_as_a_failed_submission(submission_env):
+    """A full pool is not a failure: the job is committed and will be drained."""
+    submission_env.fill_pool()
+    handle = submit_job_request(submission_env.request(), submission_env.launcher)
+    assert handle.status == "queued"
+    assert submission_env.status(handle.job_id) == "queued"

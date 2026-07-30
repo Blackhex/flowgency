@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from agency.configuration.models import parse_config
+from agency.fs.locks import exclusive_lock
 from agency.jobs.authority import JobStore
 from agency.jobs.launcher import LaunchResult
 from agency.jobs.models import (
@@ -18,8 +19,8 @@ from agency.jobs.models import (
     MemoryBinding,
     RuntimePolicySnapshot,
 )
-from agency.jobs.queue import drain, has_drainer, queue_snapshot
-from agency.jobs.store import read_job, write_job
+from agency.jobs.queue import drain, queue_snapshot
+from agency.jobs.store import cancel_job, queue_lock_path, read_job, write_job
 from agency.jobs.worker import main as worker_main
 
 
@@ -266,26 +267,64 @@ def test_a_failing_launch_marks_the_job_and_the_drain_continues(queue_fixture):
     assert "second" in queue_fixture.launcher.launched
 
 
-def test_a_live_worker_counts_as_a_drainer(queue_fixture, monkeypatch):
-    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: True)
-    queue_fixture.enqueue("busy", status="running", worker_pid=4321)
-    assert has_drainer(
-        queue_fixture.config,
-        memory_store=queue_fixture.memory_store,
-        config_path=queue_fixture.config_path,
-    ) is True
+def test_a_cancelled_job_is_not_launched_or_resurrected(queue_fixture):
+    """A record can change between the drain's snapshot and its launch."""
+    queue_fixture.enqueue("first", due_at="2026-07-29T08:00:00")
+    queue_fixture.enqueue("second", due_at="2026-07-29T09:00:00")
+    store = JobStore(queue_fixture.memory_store)
+    launcher = queue_fixture.launcher
+    original_launch = launcher.launch
+
+    def cancel_the_next_one(reference):
+        if reference.job_id == "first":
+            cancel_job(store.path("newsletter", "second"))
+        return original_launch(reference)
+
+    launcher.launch = cancel_the_next_one
+    drain(queue_fixture.config, memory_store=queue_fixture.memory_store,
+          launcher=launcher)
+    assert launcher.launched == ["first"]
+    assert queue_fixture.status("second") == "cancelled"
 
 
-def test_with_nothing_alive_the_installed_timer_decides(queue_fixture, monkeypatch):
+def test_a_busy_queue_lock_leaves_the_drain_to_its_holder(queue_fixture):
+    """A drain must never block its caller behind another drainer forever."""
+    store = JobStore(queue_fixture.memory_store)
+    queue_fixture.enqueue("only", due_at="2026-07-29T08:00:00")
+    with exclusive_lock(queue_lock_path(store.root), wait=False):
+        started = drain(
+            queue_fixture.config,
+            memory_store=queue_fixture.memory_store,
+            launcher=queue_fixture.launcher,
+        )
+    assert started == 0
+    assert queue_fixture.launcher.launched == []
+
+
+def test_a_drain_does_not_reproject_terminal_records(queue_fixture, monkeypatch):
+    """Terminal projection is a startup sweep, not a per-drain cost."""
+    projected: list[str] = []
     monkeypatch.setattr(
-        "agency.jobs.queue.get_timer_status",
-        lambda path, interval: {"installed": False, "enabled": False},
+        "agency.jobs.reconciliation.project_decision",
+        lambda record: projected.append(record.spec.job_id),
     )
-    assert has_drainer(
-        queue_fixture.config,
-        memory_store=queue_fixture.memory_store,
-        config_path=queue_fixture.config_path,
-    ) is False
+    queue_fixture.enqueue("done", status="complete")
+    drain(queue_fixture.config, memory_store=queue_fixture.memory_store,
+          launcher=queue_fixture.launcher)
+    assert projected == []
+    drain(queue_fixture.config, memory_store=queue_fixture.memory_store,
+          launcher=queue_fixture.launcher, full_reconcile=True)
+    assert projected == ["done"]
+
+
+def test_a_malformed_record_is_reported_rather_than_dropped(queue_fixture, caplog):
+    store = JobStore(queue_fixture.memory_store)
+    corrupt = store.path("newsletter", "corrupt")
+    corrupt.parent.mkdir(parents=True, exist_ok=True)
+    corrupt.write_text("spec: not-a-mapping\n", encoding="utf-8")
+    with caplog.at_level("WARNING", logger="agency.jobs.queue"):
+        queue_snapshot(queue_fixture.config, memory_store=queue_fixture.memory_store)
+    assert "corrupt" in caplog.text
 
 
 def test_a_finishing_worker_starts_the_next_waiting_job(queue_fixture, monkeypatch):

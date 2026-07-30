@@ -66,8 +66,15 @@ def reconcile_jobs(
     groups: dict,
     *,
     memory_store_root: Path,
+    statuses: frozenset[str] | None = None,
 ) -> ReconciliationResult:
-    """Fail running jobs only when their worker is confirmed absent."""
+    """Fail running jobs only when their worker is confirmed absent.
+
+    ``statuses`` narrows the sweep to the records a caller actually cares
+    about. Passing the active statuses skips the terminal pass, whose pin
+    release and decision projection rewrite every terminal record ever
+    written and belong to startup rather than to every drain.
+    """
     failed = 0
     left_running = 0
     job_store = JobStore(memory_store_root)
@@ -111,6 +118,8 @@ def reconcile_jobs(
                 record = read_job(path)
             except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
                 logger.warning("Ignoring malformed job record %s: %s", path, error)
+                continue
+            if statuses is not None and record.status not in statuses:
                 continue
             if recovery_unavailable or record.spec.job_id in blocked_job_ids:
                 logger.warning(
