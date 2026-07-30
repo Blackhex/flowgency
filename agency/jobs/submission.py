@@ -1,6 +1,8 @@
 import logging
 from pathlib import Path
 
+import yaml
+
 from agency.blueprints.cache import active_pins
 from agency.blueprints import BlueprintLibrary, CompilationCache
 from agency.configuration import ConfigStore, ValidationFailed
@@ -13,10 +15,10 @@ from agency.integrations import REGISTRY
 from agency.prompts import PromptStore
 
 from .authority import JobStore
-from .launcher import JobLauncher, default_launcher
+from .launcher import JobLauncher
 from .models import JobHandle, JobRecord, JobRequest, JobSpec
 from .resolution import resolve_job_request
-from .store import claim_job, revision_bound_group_operation
+from .store import read_job, revision_bound_group_operation
 
 log = logging.getLogger("agency.jobs.submission")
 
@@ -64,11 +66,10 @@ def _resolve_request(
 def _submit_resolved(
     spec: JobSpec,
     job_store: JobStore,
-    launcher: JobLauncher | None = None,
     *,
-    config,
     due_at: str | None = None,
 ) -> JobHandle:
+    """Pin the artifact and put the job in the queue. The drain starts it."""
     spec.validate()
     artifact = spec.blueprint.to_artifact()
     record = JobRecord.from_spec(spec, due_at=due_at)
@@ -79,7 +80,6 @@ def _submit_resolved(
     except Exception:
         pass
     pin_artifact(spec.blueprint.cache_root, artifact.ref, spec.job_id)
-    selected_launcher = launcher or default_launcher()
     authority = job_store.reference(
         spec.group_key,
         spec.job_id,
@@ -87,50 +87,42 @@ def _submit_resolved(
     )
     try:
         authority = job_store.create(record)
-        from .queue import has_drainer, queue_snapshot
-
-        view = queue_snapshot(config, memory_store=job_store.memory_store)
-        if view.running < view.pool:
-            result = selected_launcher.launch(authority)
-            claim_job(authority.path, result.worker_pid)
-            worker_pid = result.worker_pid
-        else:
-            if not has_drainer(
-                config,
-                memory_store=job_store.memory_store,
-                config_path=Path(spec.config_path),
-            ):
-                raise JobSubmissionError(
-                    "pool is full and no drainer is available; "
-                    "install the dispatch timer or wait for a worker",
-                    authority.path,
-                )
-            worker_pid = None
-    except JobSubmissionError:
-        release_pin(spec.blueprint.cache_root, artifact.ref, spec.job_id)
-        raise
     except Exception as error:
         release_pin(spec.blueprint.cache_root, artifact.ref, spec.job_id)
-        failed = JobRecord(
-            spec=record.spec,
-            authority_digest=record.authority_digest,
-            status="failed",
-            worker_pid=record.worker_pid,
-            started_at=record.started_at,
-            completed_at=record.completed_at,
-            stdout_path=record.stdout_path,
-            stderr_path=record.stderr_path,
-            exit_code=record.exit_code,
-            duration_seconds=record.duration_seconds,
-            changed_files=record.changed_files,
-            execution_summary=f"Launch error: {error}",
-            base_sha=record.base_sha,
-            memory_publication=record.memory_publication,
-            due_at=record.due_at,
-        )
-        job_store.write(authority, failed)
         raise JobSubmissionError(str(error), authority.path) from error
-    return JobHandle(spec.job_id, "queued", authority.path, worker_pid)
+    return JobHandle(spec.job_id, "queued", authority.path, None)
+
+
+def _settle(handle: JobHandle) -> JobHandle:
+    """Report what the drain made of the job it was just handed.
+
+    A record that is ``failed`` without ever having been claimed never
+    reached a worker, so the submission failed and the caller must hear so.
+    A scheduled caller depends on this to leave its marker unwritten.
+    """
+    from agency.blueprints.cache import release_pin
+
+    try:
+        record = read_job(handle.path)
+    except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError):
+        return handle
+    if record.status == "failed" and record.launched_at is None:
+        summary = record.execution_summary or "job could not be launched"
+        try:
+            release_pin(
+                record.spec.blueprint.cache_root,
+                record.spec.blueprint.cache_ref,
+                record.spec.job_id,
+            )
+        except Exception:
+            log.warning("could not release the pin of %s", record.spec.job_id)
+        raise JobSubmissionError(summary, handle.path)
+    return JobHandle(
+        handle.job_id,
+        record.status,
+        handle.path,
+        record.worker_pid,
+    )
 
 
 def submit_job_request(
@@ -153,8 +145,6 @@ def submit_job_request(
                 handle = _submit_resolved(
                     _resolve_request(request, locked_snapshot),
                     job_store,
-                    launcher,
-                    config=locked_snapshot.config,
                     due_at=request.due_at,
                 )
                 snapshot_config = locked_snapshot.config
@@ -165,7 +155,7 @@ def submit_job_request(
                 drain(snapshot_config, memory_store=memory_store, launcher=launcher)
             except Exception:
                 log.warning("drain after submission failed", exc_info=True)
-            return handle
+            return _settle(handle)
         except ConfigConflictError as error:
             last_conflict = error
     raise last_conflict or ConfigConflictError(

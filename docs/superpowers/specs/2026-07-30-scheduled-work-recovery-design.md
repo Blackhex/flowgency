@@ -159,16 +159,35 @@ sweeper that repairs anything dropped, the same role it plays for markers.
 
 Under a global lock in `<memory_store>/.jobs`, `drain`:
 
-1. runs `reconcile_jobs` for every group, so the records it is about to count
-   have just been checked against process reality,
+1. reconciles the records that could be holding a slot — `running` and
+   `waiting_for_memory` — so the records it is about to count have just been
+   checked against process reality,
 2. counts records in `running` and `waiting_for_memory` across all groups,
-3. while the count is below `pool`, launches the head of the queue.
+   together with `queued` records whose launch has been claimed,
+3. while the count is below `pool`, launches the head of the queue, re-reading
+   each record before it does so and claiming it immediately afterwards.
 
 Reconciling first is what makes record-based counting safe. A worker killed by a
 power cut leaves a `running` record; without the reconcile it would consume a
 slot forever and the pool would shrink monotonically toward zero. `reconcile_jobs`
 consequently stops having the FastAPI lifespan as its only caller, so a headless
-installation reconciles too.
+installation reconciles too. The full sweep — memory recovery, pin release and
+decision projection over every terminal record ever written — stays at startup
+and in the dispatch cycle, which pass `full_reconcile`; a drain triggered by a
+submission or a worker exit does not pay it.
+
+A drain waits only briefly for the global lock. Whoever holds it is doing the
+same work, so a drain that cannot get in leaves the queue to its holder and
+returns. That keeps the dashboard lifespan and every submission bounded.
+
+### Claiming
+
+A launched job is marked by a `launched_at` stamp, not by a worker pid. A
+launcher that hands the process to an init system cannot report a pid, and
+without the stamp such a record is indistinguishable from one that was never
+started — the next drain would start it a second time. A claimed record holds
+its slot until a worker transitions it; if no worker ever does, a startup grace
+window expires and the drain may start it again.
 
 ### Ordering
 
@@ -182,21 +201,32 @@ Work runs in the order it was meant to run. The consequence is accepted: after a
 long absence a manual launch sorts behind the recovered backlog, because its due
 time is later. Determinism matters more, since jobs can depend on one another.
 
-### Enqueue guard
+### Submission
 
-A job may only enter the queue if something will drain it: a live worker, or
-failing that an installed and enabled platform dispatcher. Otherwise submission
-raises `JobSubmissionError`.
+Submission does not launch. It resolves the request, pins the artifact, writes
+the `queued` record under the group operation lock, and then drains once the
+group lock is released. Every launch therefore goes through one implementation
+of check-launch-claim, under the global queue lock, and two submissions in
+different groups cannot both read the same free slot.
 
-In practice the guard almost never fires, because a job is only queued when the
-pool is full, and a full pool means live workers exist, every one of which
-drains on exit. The check exists for the case where those workers die
-abnormally between the count and the enqueue.
+There is no enqueue guard. A job may enter the queue whether or not anything is
+obviously alive to drain it, because the submission's own drain reconciles
+first: a pool held only by workers that died is emptied by that very drain and
+the job starts. A pool held by live workers is drained by those workers as they
+exit, and the dispatch cycle sweeps whatever is left. A guard consulting record
+occupancy could not improve on any of those, and it could not detect the one
+case that is genuinely stuck — records whose liveness the platform will not
+confirm — because such records look occupied and alive.
+
+Submission reports what its drain made of the job. A record that is `failed`
+without ever having been claimed never reached a worker, and the submission
+raises rather than pretending the job is queued. A scheduled submission depends
+on this: it leaves its marker unwritten, so the occurrence stays eligible and
+`catch_up` retries it on a later cycle.
 
 ### Expiry
 
-Queued jobs never expire. The enqueue guard is what prevents a job entering a
-queue nobody will drain; once a job is in the queue it is committed, whatever
+Queued jobs never expire. Once a job is in the queue it is committed, whatever
 happens to the machine afterwards.
 
 ## Session ledger
@@ -241,14 +271,15 @@ collapsed into general activity.
 
 ## Failure behavior
 
-- **No drainer available.** A scheduled submission logs the refusal and leaves
-  the marker unwritten, so the occurrence stays eligible and `catch_up` retries
-  it on a later cycle. A manual submission surfaces the error.
 - **A queued job fails to launch.** Its record becomes `failed` with the launch
   error recorded, and the drain continues to the next job rather than stopping.
+  The submission that queued it raises, so a scheduled submission leaves the
+  marker unwritten and the occurrence stays eligible for `catch_up`.
 - **A worker dies without draining.** Its record is cleared by the reconcile at
   the head of the next drain, so it never permanently consumes a slot, and the
   dispatch cycle guarantees a drain happens within `interval`.
+- **A worker wins the race to its own record.** The claim is refused and the
+  drain moves on. A job whose worker has already started is never marked failed.
 - **A routine that keeps failing to submit** is retried on every cycle for as
   long as its occurrence stays inside `catch_up`, and writes one error line per
   attempt.
@@ -263,10 +294,13 @@ rather than today; expiry at `none`, `today`, `always` and a duration; the
 exactly one run per routine per cycle.
 
 **Queue.** Capacity counting with live records, with confirmed-dead records, and
-with records whose liveness cannot be determined; due-time FIFO including the
-tie-break; the enqueue guard admitting when a worker is live and refusing when
-nothing can drain; a drain triggered from a worker exit with no dashboard and no
-dispatch cycle running; a queued job surviving a simulated restart.
+with records whose liveness cannot be determined; a claim that reports no pid
+holding a slot, and becoming launchable again once its grace expires; due-time
+FIFO including the tie-break; a pool of dead workers reclaimed by the drain a
+submission triggers; a launch failure reaching the submitter; a busy queue lock
+leaving the drain to its holder; a drain not reprojecting terminal records; a
+drain triggered from a worker exit with no dashboard and no dispatch cycle
+running; a queued job surviving a simulated restart.
 
 **Configuration.** Rejection of a configuration still carrying `daily_limit`;
 `pool` validation at and below `1`; round-tripping `catch_up` through a config
@@ -298,6 +332,10 @@ the Jobs list; cancelling a queued job; the queued state on an agent card.
 
 **Queue**
 
+- *A capacity fast path in submission*, launching directly when the pool looked
+  free and only queueing otherwise. Rejected: it duplicated check-launch-claim
+  outside the global queue lock, so two submissions could read the same free
+  slot and overrun the pool.
 - *A dedicated queue daemon.* Rejected: a new supervised process with its own
   install, status and failure story on two platforms.
 - *Draining from the dashboard.* Rejected: it makes headless operation
@@ -312,10 +350,14 @@ the Jobs list; cancelling a queued job; the queued state on an agent card.
 - *Interactive-first queue tiering.* Rejected in favor of deterministic due-time
   order, since jobs can depend on one another.
 - *Queued jobs inheriting the `catch_up` bound and expiring in the queue.*
-  Rejected: the enqueue guard already prevents the situation that would make a
-  queued job stale.
+  Rejected: a job is committed once it is queued, and the reconcile at the head
+  of every drain is what prevents a queue nobody empties.
+- *An enqueue guard refusing submission when nothing looks able to drain.*
+  Rejected: the submission's own drain reconciles first and empties a pool of
+  dead workers itself, so the guard can only refuse work that would in fact
+  have run.
 - *Liveness-based capacity counting with no operational check.* Rejected in
-  favor of records plus the guard plus a reconcile at the head of every drain.
+  favor of records plus a reconcile at the head of every drain.
 - *A `queue_size` knob.* Rejected: it guards a depth nothing reaches, and its
   only unique effect is refusing work a person just asked for.
 

@@ -35,16 +35,15 @@ def reconcile_jobs(groups: dict, *, memory_store_root):
     return _reconcile_jobs(groups, memory_store_root=memory_store_root)
 
 
-def drain(config, *, memory_store, launcher=None):
+def drain(config, *, memory_store, launcher=None, full_reconcile=False):
     from .queue import drain as _drain
 
-    return _drain(config, memory_store=memory_store, launcher=launcher)
-
-
-def has_drainer(config, *, memory_store, config_path):
-    from .queue import has_drainer as _has_drainer
-
-    return _has_drainer(config, memory_store=memory_store, config_path=config_path)
+    return _drain(
+        config,
+        memory_store=memory_store,
+        launcher=launcher,
+        full_reconcile=full_reconcile,
+    )
 
 
 def queue_snapshot(config, *, memory_store):
@@ -66,7 +65,6 @@ __all__ = [
     "group_operation_lock_path",
     "create_launch_view",
     "default_launcher",
-    "has_drainer",
     "JobArtifact",
     "JobHandle",
     "JobLauncher",
