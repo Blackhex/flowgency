@@ -2,6 +2,7 @@
 
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import time
@@ -206,8 +207,30 @@ def queue_lock_path(store_root: "Path") -> "Path":
     return Path(store_root) / ".queue.lock"
 
 
-def _worker_gone(record: JobRecord) -> bool:
-    return record.worker_pid is not None and worker_alive(record.worker_pid) is False
+# A launched job keeps its slot for this long before the drain may start it
+# again. It covers a launcher that reports no pid, such as systemd-run, whose
+# worker has not yet transitioned the record.
+LAUNCH_GRACE_SECONDS = 300
+
+
+def _is_launched(record: JobRecord) -> bool:
+    return record.launched_at is not None or record.worker_pid is not None
+
+
+def _launch_abandoned(record: JobRecord) -> bool:
+    """Whether a launched job has provably failed to become a live worker."""
+    if record.worker_pid is not None:
+        return worker_alive(record.worker_pid) is False
+    if record.launched_at is None:
+        return False
+    try:
+        launched = datetime.fromisoformat(record.launched_at)
+    except (TypeError, ValueError):
+        return True
+    if launched.tzinfo is None:
+        launched = launched.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - launched).total_seconds()
+    return age > LAUNCH_GRACE_SECONDS
 
 
 def occupies_slot(record: JobRecord) -> bool:
@@ -216,25 +239,33 @@ def occupies_slot(record: JobRecord) -> bool:
         return True
     if record.status != "queued":
         return False
-    return record.worker_pid is not None and not _worker_gone(record)
+    return _is_launched(record) and not _launch_abandoned(record)
 
 
 def is_launchable(record: JobRecord) -> bool:
     """Whether the drain may start this record now."""
     if record.status != "queued":
         return False
-    return record.worker_pid is None or _worker_gone(record)
+    return not _is_launched(record) or _launch_abandoned(record)
 
 
 def claim_job(path: Path, worker_pid: "int | None") -> JobRecord:
-    """Record which worker owns a queued job without changing its status."""
+    """Record that a queued job has been launched, without changing its status.
+
+    The stamp is what holds the slot. ``worker_pid`` stays optional because a
+    launcher that hands the process to an init system cannot report one.
+    """
     with exclusive_lock(job_lock_path(path), wait=True):
         record = read_job(path)
         if record.status != "queued":
             raise InvalidJobTransition(
                 f"Only queued jobs can be claimed, found {record.status!r}"
             )
-        updated = replace(record, worker_pid=worker_pid)
+        updated = replace(
+            record,
+            worker_pid=worker_pid,
+            launched_at=datetime.now(timezone.utc).isoformat(),
+        )
         write_job(path, updated)
         return updated
 

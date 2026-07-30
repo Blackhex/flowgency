@@ -311,6 +311,7 @@ class JobRecord:
     memory_publication: dict[str, Any] | None = None
     session_id: str | None = None
     due_at: str | None = None
+    launched_at: str | None = None
 
     @classmethod
     def from_spec(cls, spec: JobSpec, *, due_at: str | None = None) -> "JobRecord":

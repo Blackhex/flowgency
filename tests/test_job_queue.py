@@ -80,15 +80,16 @@ def _make_spec(tmp_path: Path, job_id: str) -> JobSpec:
 
 
 class _RecordingLauncher:
-    def __init__(self):
+    def __init__(self, worker_pid: int | None = os.getpid()):
         self.launched: list[str] = []
         self.fail_on: str | None = None
+        self.worker_pid = worker_pid
 
     def launch(self, reference):
         if self.fail_on is not None and reference.job_id == self.fail_on:
             raise OSError(f"simulated launch failure for {reference.job_id}")
         self.launched.append(reference.job_id)
-        return LaunchResult(worker_pid=os.getpid())
+        return LaunchResult(worker_pid=self.worker_pid)
 
 
 class _QueueFixture:
@@ -201,6 +202,39 @@ def test_drain_claims_what_it_starts_so_a_second_drain_is_a_no_op(queue_fixture)
     )
     assert started_again == 0
     assert queue_fixture.launcher.launched == ["only"]
+
+
+def test_a_launcher_that_reports_no_pid_is_not_relaunched(queue_fixture):
+    """systemd-run owns the process and reports no pid; the claim must still stick."""
+    queue_fixture.launcher.worker_pid = None
+    queue_fixture.enqueue("only", due_at="2026-07-29T08:00:00")
+    drain(queue_fixture.config, memory_store=queue_fixture.memory_store,
+          launcher=queue_fixture.launcher)
+    started_again = drain(
+        queue_fixture.config,
+        memory_store=queue_fixture.memory_store,
+        launcher=queue_fixture.launcher,
+    )
+    assert started_again == 0
+    assert queue_fixture.launcher.launched == ["only"]
+    assert queue_fixture.status("only") == "queued"
+
+
+def test_a_pidless_launch_holds_a_pool_slot(queue_fixture_pool1):
+    """Without a pid the launch stamp is the only thing bounding the pool."""
+    queue_fixture_pool1.launcher.worker_pid = None
+    queue_fixture_pool1.enqueue("first", due_at="2026-07-29T08:00:00")
+    queue_fixture_pool1.enqueue("second", due_at="2026-07-29T09:00:00")
+    drain(
+        queue_fixture_pool1.config,
+        memory_store=queue_fixture_pool1.memory_store,
+        launcher=queue_fixture_pool1.launcher,
+    )
+    view = queue_snapshot(
+        queue_fixture_pool1.config, memory_store=queue_fixture_pool1.memory_store
+    )
+    assert queue_fixture_pool1.launcher.launched == ["first"]
+    assert view.running == 1
 
 
 def test_a_ghost_running_record_does_not_hold_a_slot_forever(
