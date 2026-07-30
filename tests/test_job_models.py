@@ -26,8 +26,12 @@ from agency.jobs.store import (
     active_jobs,
     canonical_group_operation_lock_paths,
     cancel_job,
+    claim_job,
     group_operation_lock_path,
+    is_launchable,
     job_path,
+    occupies_slot,
+    queue_lock_path,
     read_job,
     transition_job,
     write_job,
@@ -635,3 +639,69 @@ def test_due_at_does_not_change_the_authority_digest(tmp_path):
     plain = JobRecord.from_spec(spec)
     dated = JobRecord.from_spec(spec, due_at="2026-07-29T08:00:00")
     assert plain.authority_digest == dated.authority_digest
+
+
+# ---------------------------------------------------------------------------
+# Slot counting and claiming
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sample_spec(tmp_path):
+    return make_spec(tmp_path)
+
+
+def test_queue_lock_sits_beside_the_group_directories(tmp_path):
+    assert queue_lock_path(tmp_path).name == ".queue.lock"
+    assert queue_lock_path(tmp_path).parent == tmp_path
+
+
+def test_running_and_waiting_records_occupy_a_slot(sample_spec):
+    for status in ("running", "waiting_for_memory"):
+        record = JobRecord.from_spec(sample_spec)
+        record.status = status
+        assert occupies_slot(record) is True
+
+
+def test_an_unclaimed_queued_record_is_launchable(sample_spec):
+    record = JobRecord.from_spec(sample_spec)
+    assert occupies_slot(record) is False
+    assert is_launchable(record) is True
+
+
+def test_a_queued_record_with_a_dead_worker_is_launchable_again(
+    sample_spec, monkeypatch
+):
+    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: False)
+    record = JobRecord.from_spec(sample_spec)
+    record.worker_pid = 999999
+    assert occupies_slot(record) is False
+    assert is_launchable(record) is True
+
+
+def test_a_queued_record_with_an_unverifiable_worker_holds_its_slot(
+    sample_spec, monkeypatch
+):
+    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: None)
+    record = JobRecord.from_spec(sample_spec)
+    record.worker_pid = 999999
+    assert occupies_slot(record) is True
+    assert is_launchable(record) is False
+
+
+def test_claim_records_the_worker_without_changing_status(tmp_path, sample_spec):
+    path = tmp_path / "job.yaml"
+    write_job(path, JobRecord.from_spec(sample_spec))
+    claimed = claim_job(path, 4321)
+    assert claimed.status == "queued"
+    assert claimed.worker_pid == 4321
+    assert read_job(path).worker_pid == 4321
+
+
+def test_claiming_a_job_that_left_the_queue_is_refused(tmp_path, sample_spec):
+    path = tmp_path / "job.yaml"
+    record = JobRecord.from_spec(sample_spec)
+    record.status = "running"
+    write_job(path, record)
+    with pytest.raises(InvalidJobTransition):
+        claim_job(path, 4321)
