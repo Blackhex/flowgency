@@ -126,6 +126,7 @@ class JobRequest:
     memory_override: MemorySelector | None = None
     timeout_override: int | None = None
     trigger_context: dict[str, Any] | None = None
+    due_at: str | None = None
 
     @property
     def prompt_content(self) -> str:
@@ -309,11 +310,12 @@ class JobRecord:
     base_sha: str | None = None
     memory_publication: dict[str, Any] | None = None
     session_id: str | None = None
+    due_at: str | None = None
 
     @classmethod
-    def from_spec(cls, spec: JobSpec) -> "JobRecord":
+    def from_spec(cls, spec: JobSpec, *, due_at: str | None = None) -> "JobRecord":
         spec.validate()
-        return cls(spec=spec, authority_digest=spec.immutable_digest())
+        return cls(spec=spec, authority_digest=spec.immutable_digest(), due_at=due_at)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

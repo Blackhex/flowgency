@@ -608,3 +608,30 @@ def test_job_record_loads_payload_without_session_id(tmp_path):
     payload.pop("session_id", None)
 
     assert JobRecord.from_dict(payload).session_id is None
+
+
+def test_job_record_defaults_due_at_to_none(tmp_path):
+    spec = make_spec(tmp_path)
+    record = JobRecord.from_spec(spec)
+    assert record.due_at is None
+
+
+def test_job_record_round_trips_due_at(tmp_path):
+    spec = make_spec(tmp_path)
+    record = JobRecord.from_spec(spec, due_at="2026-07-29T08:00:00")
+    restored = JobRecord.from_dict(record.to_dict())
+    assert restored.due_at == "2026-07-29T08:00:00"
+
+
+def test_a_record_written_before_due_at_still_loads(tmp_path):
+    spec = make_spec(tmp_path)
+    payload = JobRecord.from_spec(spec).to_dict()
+    payload.pop("due_at")
+    assert JobRecord.from_dict(payload).due_at is None
+
+
+def test_due_at_does_not_change_the_authority_digest(tmp_path):
+    spec = make_spec(tmp_path)
+    plain = JobRecord.from_spec(spec)
+    dated = JobRecord.from_spec(spec, due_at="2026-07-29T08:00:00")
+    assert plain.authority_digest == dated.authority_digest
