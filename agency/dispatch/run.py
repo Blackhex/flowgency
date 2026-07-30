@@ -24,7 +24,7 @@ from agency.health import grace_window
 from agency.jobs import JobRequest, JobSubmissionError, JobValidationError, submit_job_request
 from agency.jobs.authority import JobStore
 from agency.jobs.queue import drain
-from agency.jobs.store import read_job
+from agency.jobs.store import _is_launched, read_job
 
 log = logging.getLogger("agency.dispatch")
 
@@ -49,7 +49,7 @@ def _occurrence_of(record) -> datetime | None:
 
 def _never_ran(record) -> bool:
     """Whether this job was recorded as failed without ever reaching a worker."""
-    return record.status == "failed" and record.launched_at is None
+    return record.status == "failed" and not _is_launched(record)
 
 
 def lost_occurrences(records) -> dict[tuple[str, str], datetime]:
