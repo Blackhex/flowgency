@@ -45,7 +45,7 @@ from agency.jobs import (
 )
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
-from agency.jobs.queue import drain
+from agency.jobs.queue import drain, queue_snapshot, QueueView
 from agency.health import (
     describe_agent_health,
     elapsed_coarse,
@@ -1841,6 +1841,31 @@ async def home(request: Request, group: str):
     # Zone 2: Pipeline pulse
     pipeline = build_pipeline_stats(observations, proposals, decisions)
 
+    # Work queue strip (between Pipeline and Attention Queue)
+    try:
+        _qs = _load_snapshot()
+        _ms = _qs.config.agency.memory_store
+        if _ms is not None:
+            _view = queue_snapshot(_qs.config, memory_store=_ms)
+        else:
+            _view = QueueView(running=0, waiting=(), pool=_qs.config.agency.jobs.pool)
+    except Exception:
+        _view = QueueView(running=0, waiting=(), pool=4)
+    work_queue = {
+        "running": _view.running,
+        "pool": _view.pool,
+        "waiting": [
+            {
+                "position": _i + 1,
+                "agent": _e.record.spec.agent_name,
+                "routine": _e.record.spec.routine_id or "task",
+                "due": _e.record.due_at or _e.record.spec.created_at,
+                "href": f"/{_e.group_id}/jobs/{_e.record.spec.job_id}",
+            }
+            for _i, _e in enumerate(_view.waiting)
+        ],
+    }
+
     # Zone 4: Activity feed
     activity = build_activity_feed(observations, proposals, limit=15)
 
@@ -1855,6 +1880,8 @@ async def home(request: Request, group: str):
         "fleet_running": sum(1 for a in agents if a.get("job_status_key") == "running"),
         # Zone 2: Pipeline
         "pipeline": pipeline,
+        # Work queue
+        "work_queue": work_queue,
         # Zone 3: Attention queue
         "health_items": health_items,
         "actionable_proposals": actionable_proposals,

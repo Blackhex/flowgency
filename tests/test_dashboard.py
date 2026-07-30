@@ -287,6 +287,7 @@ def _job_spec(
     status: str,
     job_id: str = "job-waiting",
     agent_name: str = "advisor",
+    routine_id: str = "daily-review",
 ) -> JobSpec:
     return JobSpec(
         schema_version=3,
@@ -307,8 +308,8 @@ def _job_spec(
             projector_version="v1",
             cache_path=str((group_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
         ),
-        routine_id="daily-review",
-        skill="daily-review",
+        routine_id=routine_id,
+        skill=routine_id,
         skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
@@ -325,7 +326,7 @@ def _job_spec(
             path=str((group_root.parent.parent / "memory-store" / "channel-support").resolve()),
         ),
         trigger_context={"source": "test"},
-        prompt_source={"type": "routine", "routine_id": "daily-review", "title": "Daily review"},
+        prompt_source={"type": "routine", "routine_id": routine_id, "title": routine_id.replace("-", " ").title()},
         timeout_override=None,
         created_at="2026-07-16T00:00:00+00:00",
     )
@@ -899,3 +900,49 @@ def test_startup_drain_failure_does_not_prevent_startup(monkeypatch):
 
     asyncio.run(run())
     assert reached_yield == [True]
+
+
+class TestWorkQueueStrip:
+    @pytest.fixture
+    def _env(self, monkeypatch, tmp_path, raw_config):
+        return _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+
+    @pytest.fixture
+    def client(self, _env):
+        return _env[0]
+
+    @pytest.fixture
+    def waiting_jobs(self, _env, tmp_path):
+        _, config_path, group_root = _env
+        authority = JobStore(tmp_path / "memory-store")
+
+        for job_id in ("job-running-1", "job-running-2"):
+            spec = _job_spec(group_root, config_path, status="running", job_id=job_id)
+            path = authority.path("newsletter", job_id)
+            write_job(path, JobRecord.from_spec(spec))
+            transition_job(path, "queued", "running")
+
+        for job_id, routine, due in (
+            ("job-queue-sh", "suite-health", "2026-07-16T08:00:00+00:00"),
+            ("job-queue-aa", "authority-audit", "2026-07-16T09:00:00+00:00"),
+            ("job-queue-da", "docs-audit", "2026-07-16T11:42:00+00:00"),
+        ):
+            spec = _job_spec(group_root, config_path, status="queued", job_id=job_id, routine_id=routine)
+            path = authority.path("newsletter", job_id)
+            write_job(path, JobRecord.from_spec(spec, due_at=due))
+
+    def test_the_strip_sits_between_pipeline_and_the_attention_queue(self, client, waiting_jobs):
+        body = client.get("/newsletter/").text
+        assert body.index("Pipeline") < body.index("Work queue") < body.index("Attention Queue")
+
+    def test_the_strip_lists_waiting_jobs_in_due_order(self, client, waiting_jobs):
+        body = client.get("/newsletter/").text
+        assert body.index("suite-health") < body.index("docs-audit")
+
+    def test_the_strip_header_counts_running_and_waiting(self, client, waiting_jobs):
+        body = client.get("/newsletter/").text
+        assert "2 running" in body and "3 queued" in body
+
+    def test_an_empty_queue_keeps_one_idle_line(self, client):
+        body = client.get("/newsletter/").text
+        assert "idle" in body and "pool 4" in body
