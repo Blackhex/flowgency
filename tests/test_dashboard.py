@@ -872,3 +872,30 @@ def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, 
             app_mod.get_group("newsletter"),
             [a for a in app_mod.build_dashboard_fleet(app_mod.get_group("newsletter"))],
         ))
+
+
+def test_startup_drain_failure_does_not_prevent_startup(monkeypatch):
+    import asyncio
+    from agency.app import lifespan
+
+    mock_config = SimpleNamespace(agency=SimpleNamespace(memory_store=None))
+    mock_snapshot = SimpleNamespace(config=mock_config)
+    mock_services = SimpleNamespace(
+        startup_error=None,
+        config_store=SimpleNamespace(load=lambda: mock_snapshot),
+    )
+    monkeypatch.setattr("agency.app.refresh_services", lambda: mock_services)
+
+    def _boom(*a, **k):
+        raise RuntimeError("simulated drain failure")
+
+    monkeypatch.setattr("agency.app.drain", _boom)
+
+    reached_yield = []
+
+    async def run():
+        async with lifespan(None):
+            reached_yield.append(True)
+
+    asyncio.run(run())
+    assert reached_yield == [True]
