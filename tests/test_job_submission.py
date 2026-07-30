@@ -911,6 +911,7 @@ def test_submit_releases_cache_pin_when_launch_fails(tmp_path):
             spec,
             JobStore(tmp_path / "memory"),
             launcher,
+            config=ConfigStore(config).load().config,
         )
 
     pins_root = tmp_path / "compiled-agents" / "_pins"
@@ -1104,3 +1105,222 @@ def test_resolution_does_not_infer_routine_or_skill_from_prompt_source_path(tmp_
             prompt_store=PromptStore(tmp_path / "prompts"),
             integrations={"copilot": FakeIntegration()},
         )
+
+
+# --- Pool-aware submission ---
+
+import os
+from dataclasses import replace as dc_replace
+
+from agency.configuration.models import parse_config
+from agency.jobs.models import RuntimePolicySnapshot, MemoryBinding, BlueprintRef, JobRecord
+from agency.jobs.store import write_job
+
+
+class _RecordingLauncher:
+    def __init__(self):
+        self.launched: list[str] = []
+
+    def launch(self, reference):
+        self.launched.append(reference.job_id)
+        return LaunchResult(worker_pid=os.getpid())
+
+
+def _pool_config(tmp_path, *, pool=1):
+    workspace = tmp_path / "workspaces" / "newsletter"
+    group = tmp_path / "agents" / "newsletter"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "repo").mkdir(parents=True, exist_ok=True)
+    group.mkdir(parents=True, exist_ok=True)
+    memory_store = tmp_path / "memory"
+
+    raw = {
+        "schema_version": 4,
+        "agency": {
+            "title": "Agency",
+            "default_group": "newsletter",
+            "ai_backend": "claude-code",
+            "agent_library": str(tmp_path / "agent-library"),
+            "compilation_cache": str(tmp_path / "compiled-agents"),
+            "memory_store": str(memory_store),
+            "prompt_store": str(tmp_path / "prompts"),
+            "jobs": {"pool": pool},
+        },
+        "groups": {
+            "newsletter": {
+                "name": "Newsletter",
+                "workspace_path": str(workspace),
+                "path": str(group),
+                "default_integration": "copilot",
+                "runtime": {
+                    "timeout": 1800,
+                    "sandbox": {"mode": "restricted", "roots": ["repo"]},
+                    "tools": {"mode": "allowlist", "names": ["shell", "write"]},
+                },
+                "agents": [
+                    {
+                        "name": "builder",
+                        "blueprint": "builder-blueprint",
+                        "integration": "copilot",
+                        "integration_config": {"command": "echo ok"},
+                        "default_memory": {"scope": "agent"},
+                        "routines": [
+                            {
+                                "id": "daily-review",
+                                "prompt": {
+                                    "scope": "blueprint",
+                                    "name": "daily-review",
+                                },
+                                "schedule": {"at": "09:00"},
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    _write_blueprint(tmp_path / "agent-library")
+    return config_path, memory_store, parse_config(raw, config_path)
+
+
+def _queue_spec(tmp_path, job_id):
+    config_path = tmp_path / "config.yaml"
+    return JobSpec(
+        schema_version=4,
+        job_id=job_id,
+        config_path=str(config_path.resolve()),
+        config_revision="cfg-1",
+        group_key="newsletter",
+        group_root=str((tmp_path / "agents" / "newsletter").resolve()),
+        agent_name="builder",
+        workspace_root=str((tmp_path / "workspaces" / "newsletter").resolve()),
+        trigger="manual_prompt",
+        integration_name="copilot",
+        integration_config={"command": "echo ok"},
+        blueprint=BlueprintRef(
+            key="builder-blueprint",
+            source_digest="digest-1",
+            integration="copilot",
+            projector_version="v-test",
+            cache_path=str(
+                (tmp_path / "compiled-agents" / "copilot" / "v-test" / "digest-1").resolve()
+            ),
+        ),
+        routine_id="daily-review",
+        skill=None,
+        skill_arguments=(),
+        task_input="# Routine\n",
+        runtime_policy=RuntimePolicySnapshot(
+            timeout=1800,
+            sandbox_mode="restricted",
+            sandbox_roots=(str(tmp_path.resolve()),),
+            tool_mode="allowlist",
+            tool_names=("shell", "write"),
+        ),
+        memory=MemoryBinding(
+            selector={"scope": "run", "version": 1, "job": "placeholder"},
+            canonical_json='{"job":"placeholder","scope":"run","version":1}',
+            memory_hash="memory-hash-1",
+            path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
+        ),
+        trigger_context={"source": "test"},
+        prompt_source={
+            "type": "blueprint_prompt",
+            "scope": "blueprint",
+            "name": "daily-review",
+            "source_path": ".agents/prompts/daily-review.prompt.md",
+            "source_digest": "digest-1",
+        },
+        timeout_override=None,
+        created_at="2026-07-15T00:00:00+00:00",
+        private_prompts=(),
+    )
+
+
+class _SubmissionEnv:
+    def __init__(self, tmp_path, config_path, memory_store, config):
+        self._tmp_path = tmp_path
+        self.config_path = config_path
+        self.memory_store = memory_store
+        self.config = config
+        self.launcher = _RecordingLauncher()
+        self._store = JobStore(memory_store)
+
+    def request(self, **overrides):
+        defaults = dict(
+            config_path=self.config_path,
+            group_key="newsletter",
+            agent_name="builder",
+            trigger="manual_prompt",
+            task_input="",
+            routine_id="daily-review",
+        )
+        defaults.update(overrides)
+        return JobRequest(**defaults)
+
+    def record(self, job_id):
+        return read_job(self._store.path("newsletter", job_id))
+
+    def status(self, job_id):
+        return self.record(job_id).status
+
+    def fill_pool(self):
+        """Write running records with live PIDs to fill the pool."""
+        pool_size = self.config.agency.jobs.pool
+        for i in range(pool_size):
+            spec = _queue_spec(self._tmp_path, f"running-{i}")
+            record = dc_replace(
+                JobRecord.from_spec(spec),
+                status="running",
+                worker_pid=os.getpid(),
+            )
+            write_job(self._store.path("newsletter", spec.job_id), record)
+
+    def fill_pool_with_dead_workers(self):
+        """Write running records with dead PIDs to fill the pool."""
+        pool_size = self.config.agency.jobs.pool
+        for i in range(pool_size):
+            spec = _queue_spec(self._tmp_path, f"dead-{i}")
+            record = dc_replace(
+                JobRecord.from_spec(spec),
+                status="running",
+                worker_pid=999999,
+            )
+            write_job(self._store.path("newsletter", spec.job_id), record)
+
+
+@pytest.fixture
+def submission_env(tmp_path):
+    config_path, memory_store, config = _pool_config(tmp_path, pool=1)
+    return _SubmissionEnv(tmp_path, config_path, memory_store, config)
+
+
+def test_submission_launches_immediately_when_the_pool_has_room(submission_env):
+    handle = submit_job_request(submission_env.request(), submission_env.launcher)
+    assert submission_env.launcher.launched == [handle.job_id]
+
+
+def test_submission_waits_when_the_pool_is_full(submission_env):
+    submission_env.fill_pool()
+    handle = submit_job_request(submission_env.request(), submission_env.launcher)
+    assert submission_env.launcher.launched == []
+    assert submission_env.status(handle.job_id) == "queued"
+
+
+def test_a_waiting_job_records_its_due_time(submission_env):
+    handle = submit_job_request(
+        submission_env.request(due_at="2026-07-29T08:00:00"),
+        submission_env.launcher,
+    )
+    assert submission_env.record(handle.job_id).due_at == "2026-07-29T08:00:00"
+
+
+def test_submission_is_refused_when_nothing_can_drain(submission_env, monkeypatch):
+    submission_env.fill_pool_with_dead_workers()
+    monkeypatch.setattr(
+        "agency.jobs.queue.has_drainer", lambda *a, **k: False
+    )
+    with pytest.raises(JobSubmissionError):
+        submit_job_request(submission_env.request(), submission_env.launcher)

@@ -114,6 +114,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                         trigger="scheduled_prompt",
                         task_input="",
                         routine_id=routine.id,
+                        due_at=occurrence.isoformat(),
                     )
                     submit_job_request(request, launcher)
                 except (TypeError, ValueError, JobValidationError, JobSubmissionError, OSError) as error:
