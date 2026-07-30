@@ -4,7 +4,14 @@ Agency uses one authoritative YAML document. The top-level `schema_version: 4`, 
 
 ## Global paths
 
-`agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store` are required non-empty paths. Relative paths resolve against the directory containing the config. The library must exist and be readable; Agency may create cache, memory, and prompt-store roots when their nearest parent is writable.
+`agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and
+`agency.prompt_store` are required non-empty paths. Relative paths resolve against
+the directory containing the config. The library must exist and be readable; Agency
+may create cache, memory, and prompt-store roots when their nearest parent is writable.
+
+`agency.jobs.pool` caps the number of concurrently running workers across the whole
+installation. The default is 4; the minimum is 1. See [dispatch.md](dispatch.md)
+for queue behaviour.
 
 ## Groups and instances
 
@@ -18,7 +25,15 @@ The group root is automatically available to restricted agents. Agency never loa
 
 ## Routines and memory
 
-`routines:` belongs to an instance. Each routine uses a stable `id`, selects one saved prompt with `prompt.scope` plus `prompt.name`, defines one `schedule`, and optionally provides arguments and memory. Schedules support `at`, `every`, and supported conditions.
+`routines:` belongs to an instance. Each routine uses a stable `id`, selects one
+saved prompt with `prompt.scope` plus `prompt.name`, defines one `schedule`, and
+optionally provides arguments and memory. Schedules support `at`, `every`, and
+supported conditions.
+
+`schedule.catch_up` controls how far back the runner recovers a missed occurrence.
+Accepted values are `none`, `today`, `always`, or a duration in the same grammar
+as `every` (e.g. `8h`, `7d`). Absent means `today`. See
+[dispatch.md](dispatch.md) for recovery semantics.
 
 The effective prompt catalog is the union of blueprint-shared prompts from `.agents/prompts/*.prompt.md` and instance-private prompt names registered in config and stored under `agency.prompt_store`. Manual launches may use a saved catalog prompt or a one-off task; one-off input is runtime-only and does not create prompt authority.
 

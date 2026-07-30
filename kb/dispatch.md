@@ -35,6 +35,49 @@ christag-agency dispatch install --config C:/Agency/config.yaml
 christag-agency dispatch status --config C:/Agency/config.yaml
 ```
 
+## Recovery
+
+When the dispatch runner starts a cycle, it checks whether any routine missed an
+occurrence while the runner was stopped or momentarily late. A routine is recovered
+when its most recent occurrence at or before now carries no marker and is still
+within the routine's `catch_up` bound.
+
+There is exactly one candidate occurrence per routine per cycle. The runner never
+replays a backlog; it recovers at most the last missed occurrence.
+
+`schedule.catch_up` controls how far back recovery reaches:
+
+| Value | Meaning |
+|-------|---------|
+| `none` | No recovery. The occurrence fires only inside the ordinary grace window of `agency.dispatch.interval` plus two minutes. |
+| `today` | Recover any occurrence on the current calendar date. This is the default when `catch_up` is absent. |
+| `always` | Recover any occurrence regardless of age. |
+| `30m`, `8h`, `7d`, … | Recover any occurrence within the specified duration. The grammar is the same as `every`. |
+
+The marker for a recovered `at` occurrence records the occurrence's own calendar
+day, not today's date. A 03:00 recovery of yesterday's 08:00 writes yesterday's
+marker and leaves today's 08:00 still ahead. For an `every` routine the marker
+timestamp is set to the occurrence rather than the launch moment, so a late
+recovery does not push subsequent occurrences later.
+
+## Job queue
+
+`agency.jobs.pool` caps the number of concurrently running workers across the
+whole installation. The default is 4; the minimum is 1.
+
+When a job is submitted and the pool has a free slot it launches immediately.
+When the pool is full the job waits in the `queued` status until a slot opens.
+Jobs drain in ascending due-time order, ties broken by job id, globally across
+all groups.
+
+Draining runs at the end of every submission, inside every worker as it exits,
+and at the start of every dispatch cycle. A backlog drains through worker exits
+with no browser open and no external timer.
+
+If the pool is full and no live worker or installed platform timer exists that
+could ever open a slot, submission is refused with an error rather than parking
+work indefinitely.
+
 ## Agent health on the dashboard
 
 The fleet bar colours each agent from its schedule and its last outcome.

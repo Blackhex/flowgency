@@ -23,6 +23,8 @@ agency:
   title: Agency
   default_group: newsletter
   ai_backend: copilot
+  jobs:
+    pool: 4
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
@@ -85,7 +87,7 @@ groups:
               channel: brand-strategy
 ```
 
-Relative global and group paths resolve against the config directory. Relative sandbox roots resolve against the group workspace. Agent roots are additive. Agent tools are a complete override, not an addition. Omitted runtime defaults are timeout 1800, unrestricted sandbox, tools `all`, dispatch disabled, and daily limit 20.
+Relative global and group paths resolve against the config directory. Relative sandbox roots resolve against the group workspace. Agent roots are additive. Agent tools are a complete override, not an addition. Omitted runtime defaults are timeout 1800, unrestricted sandbox, tools `all`, and dispatch disabled.
 
 The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`; operation locks live in `<group.path>/locks`.
 
