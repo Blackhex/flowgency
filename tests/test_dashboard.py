@@ -407,14 +407,15 @@ def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, t
     assert "Queued" in response.text
     assert "Waiting for memory" in response.text
     assert "Running" in response.text
-    assert "1 running" in response.text
-    assert response.text.count("data-agent-running") == 1
+    assert "2 running" in response.text
+    assert response.text.count("data-agent-running") == 2
 
     fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_group("newsletter"))}
     assert fleet["advisor"]["job_status_key"] == "queued"
     assert fleet["advisor"]["running"] is False
+    assert fleet["advisor"].get("queued") is True
     assert fleet["researcher"]["job_status_key"] == "waiting_for_memory"
-    assert fleet["researcher"]["running"] is False
+    assert fleet["researcher"]["running"] is True
     assert fleet["writer"]["job_status_key"] == "running"
     assert fleet["writer"]["running"] is True
 
@@ -485,17 +486,18 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
     assert "Waiting for memory" in response.text
     assert "/newsletter/jobs/job-queued" in response.text
     assert "/newsletter/jobs/job-waiting" in response.text
-    assert "1 running" in response.text
-    assert response.text.count("data-agent-running") == 1
+    assert "2 running" in response.text
+    assert response.text.count("data-agent-running") == 2
     assert fleet["advisor"]["job_status_key"] == "queued"
     assert fleet["advisor"]["job_status"] == "Queued"
     assert fleet["advisor"]["job_href"] == "/newsletter/jobs/job-queued"
     assert fleet["advisor"]["running"] is False
+    assert fleet["advisor"].get("queued") is True
     assert fleet["advisor"]["health"] == "gray"
     assert fleet["researcher"]["job_status_key"] == "waiting_for_memory"
     assert fleet["researcher"]["job_status"] == "Waiting for memory"
     assert fleet["researcher"]["job_href"] == "/newsletter/jobs/job-waiting"
-    assert fleet["researcher"]["running"] is False
+    assert fleet["researcher"]["running"] is True
     assert fleet["researcher"]["health"] == "gray"
     assert fleet["writer"]["job_status_key"] == "running"
     assert fleet["writer"]["job_status"] == "Running"
@@ -1071,3 +1073,44 @@ class TestQueueDueTimeFilter:
             f"got {result!r}; filter may be using replace(tzinfo=None) "
             f"instead of astimezone() (naive hours={due.hour}, local hours={local.hour})"
         )
+
+
+class TestFleetCardQueuedState:
+    """Fleet card correctly distinguishes queued agents from running ones."""
+
+    @pytest.fixture
+    def _env(self, monkeypatch, tmp_path, raw_config):
+        return _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+
+    @pytest.fixture
+    def client(self, _env):
+        return _env[0]
+
+    @pytest.fixture
+    def waiting_jobs(self, _env, tmp_path):
+        _, config_path, group_root = _env
+        spec = _job_spec(group_root, config_path, status="queued", job_id="job-queued")
+        path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
+        write_job(path, JobRecord.from_spec(spec))
+
+    @pytest.fixture
+    def running_job(self, _env, tmp_path):
+        _, config_path, group_root = _env
+        spec = _job_spec(group_root, config_path, status="running", job_id="job-running")
+        path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
+        write_job(path, JobRecord.from_spec(spec))
+        transition_job(path, "queued", "running")
+
+    def test_an_agent_with_a_waiting_job_is_not_shown_as_running(self, client, waiting_jobs):
+        fleet = build_dashboard_fleet(app_mod.get_group("newsletter"))
+        assert fleet[0].get("queued") is True
+        assert fleet[0].get("running") is False
+        body = client.get("/newsletter/").text
+        assert "data-agent-running" not in body
+
+    def test_an_agent_with_a_started_job_is_still_shown_as_running(self, client, running_job):
+        body = client.get("/newsletter/").text
+        assert "data-agent-running" in body
+        fleet = build_dashboard_fleet(app_mod.get_group("newsletter"))
+        assert fleet[0].get("running") is True
+        assert not fleet[0].get("queued")

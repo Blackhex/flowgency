@@ -86,7 +86,7 @@ test('jobs expose waiting, failed artifact, diagnostics hash, and empty state', 
 test('fleet cards expose run timing and the routine link', async ({ page }) => {
   await page.goto('/newsletter/');
   await expect(page.locator('a[href="/newsletter/agents/advisor/profile"]')).toBeVisible();
-  await expect(page.locator('a[href="/newsletter/agents/advisor/routines"]')).toBeVisible();
+  await expect(page.locator('a[href="/newsletter/agents/builder/routines"]')).toBeVisible();
   await expect(page.getByText('last job failed').first()).toBeVisible();
   await assertNoConsoleErrors(page);
 });

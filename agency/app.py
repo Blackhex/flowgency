@@ -1173,7 +1173,8 @@ def _overlay_dashboard_job_state(agent: dict, current, group_key: str) -> None:
     agent_name = agent["name"]
     agent.update(
         {
-            "running": current is not None and current.status == "running",
+            "running": current is not None and current.status in {"running", "waiting_for_memory"},
+            "queued": current is not None and current.status == "queued",
             "job_status_key": current.status if current is not None else None,
             "job_status": _job_state_label(current.status) if current is not None else None,
             "job_href": f"/{group_key}/jobs/{current.spec.job_id}" if current is not None else "",
@@ -1894,7 +1895,7 @@ async def home(request: Request, group: str):
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
         "fleet_never_run": sum(1 for a in agents if a["health"] == "gray"),
         "fleet_attention": len(health_items),
-        "fleet_running": sum(1 for a in agents if a.get("job_status_key") == "running"),
+        "fleet_running": sum(1 for a in agents if a.get("running")),
         # Zone 2: Pipeline
         "pipeline": pipeline,
         # Work queue
