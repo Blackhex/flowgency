@@ -142,8 +142,9 @@ submission no longer launches, the two can come apart: a job queued behind a
 full pool is started by a later drain, and that drain can fail. The firing rule
 therefore reads the occurrence's outcome alongside its marker.
 
-A scheduled job that is `failed` with no `launched_at` never reached a worker,
-so its occurrence is unserved and the routine owes it again. A later job for the
+A scheduled job that is `failed` with no `launched_at` and no `worker_pid`
+never reached a worker, so its occurrence is unserved and the routine owes it
+again. A later job for the
 same routine that launched, or that is still pending, makes an earlier
 occurrence moot — the same rule the candidate definition already uses — and that
 is what stops a retry from replaying an occurrence already served.

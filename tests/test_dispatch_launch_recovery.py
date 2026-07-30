@@ -220,7 +220,7 @@ def test_a_failed_deferred_launch_of_an_every_occurrence_is_offered_again(
     assert len(every_bench.launcher.launched) == 1
 
 
-def _record(routine, due_at, status, launched_at=None, trigger="scheduled_prompt"):
+def _record(routine, due_at, status, launched_at=None, worker_pid=None, trigger="scheduled_prompt"):
     return SimpleNamespace(
         spec=SimpleNamespace(
             trigger=trigger, agent_name="builder", routine_id=routine
@@ -228,6 +228,7 @@ def _record(routine, due_at, status, launched_at=None, trigger="scheduled_prompt
         due_at=due_at,
         status=status,
         launched_at=launched_at,
+        worker_pid=worker_pid,
     )
 
 
@@ -237,6 +238,8 @@ def test_only_a_job_that_never_reached_a_worker_reopens_its_occurrence():
         _record("b", "2026-07-29T08:00:00", "failed", launched_at="2026-07-29T08:01:00"),
         _record("c", "2026-07-29T08:00:00", "cancelled"),
         _record("d", "2026-07-29T08:00:00", "complete"),
+        # worker beat claim_job: worker_pid set, launched_at absent — still launched
+        _record("e", "2026-07-29T08:00:00", "failed", worker_pid=12345),
     ]
 
     assert lost_occurrences(records) == {
