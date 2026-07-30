@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from agency.blueprints.cache import active_pins
@@ -15,7 +16,9 @@ from .authority import JobStore
 from .launcher import JobLauncher, default_launcher
 from .models import JobHandle, JobRecord, JobRequest, JobSpec
 from .resolution import resolve_job_request
-from .store import revision_bound_group_operation
+from .store import claim_job, revision_bound_group_operation
+
+log = logging.getLogger("agency.jobs.submission")
 
 
 class JobSubmissionError(RuntimeError):
@@ -63,6 +66,7 @@ def _submit_resolved(
     job_store: JobStore,
     launcher: JobLauncher | None = None,
     *,
+    config,
     due_at: str | None = None,
 ) -> JobHandle:
     spec.validate()
@@ -83,7 +87,28 @@ def _submit_resolved(
     )
     try:
         authority = job_store.create(record)
-        result = selected_launcher.launch(authority)
+        from .queue import has_drainer, queue_snapshot
+
+        view = queue_snapshot(config, memory_store=job_store.memory_store)
+        if view.running < view.pool:
+            result = selected_launcher.launch(authority)
+            claim_job(authority.path, result.worker_pid)
+            worker_pid = result.worker_pid
+        else:
+            if not has_drainer(
+                config,
+                memory_store=job_store.memory_store,
+                config_path=Path(spec.config_path),
+            ):
+                raise JobSubmissionError(
+                    "pool is full and no drainer is available; "
+                    "install the dispatch timer or wait for a worker",
+                    authority.path,
+                )
+            worker_pid = None
+    except JobSubmissionError:
+        release_pin(spec.blueprint.cache_root, artifact.ref, spec.job_id)
+        raise
     except Exception as error:
         release_pin(spec.blueprint.cache_root, artifact.ref, spec.job_id)
         failed = JobRecord(
@@ -105,7 +130,7 @@ def _submit_resolved(
         )
         job_store.write(authority, failed)
         raise JobSubmissionError(str(error), authority.path) from error
-    return JobHandle(spec.job_id, "queued", authority.path, result.worker_pid)
+    return JobHandle(spec.job_id, "queued", authority.path, worker_pid)
 
 
 def submit_job_request(
@@ -125,12 +150,22 @@ def submit_job_request(
                     raise ValidationFailed(issues)
                 initialize_storage_directories(locked_snapshot.config)
                 job_store = JobStore(locked_snapshot.config.agency.memory_store)
-                return _submit_resolved(
+                handle = _submit_resolved(
                     _resolve_request(request, locked_snapshot),
                     job_store,
                     launcher,
+                    config=locked_snapshot.config,
                     due_at=request.due_at,
                 )
+                snapshot_config = locked_snapshot.config
+                memory_store = job_store.memory_store
+            try:
+                from .queue import drain
+
+                drain(snapshot_config, memory_store=memory_store, launcher=launcher)
+            except Exception:
+                log.warning("drain after submission failed", exc_info=True)
+            return handle
         except ConfigConflictError as error:
             last_conflict = error
     raise last_conflict or ConfigConflictError(
