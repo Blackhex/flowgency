@@ -18,6 +18,7 @@ from agency.integrations import (
 )
 from agency.jobs.authority import JobStore
 from agency.jobs.models import JobRecord
+from agency.jobs.queue import queue_snapshot
 from agency.jobs.store import InvalidJobTransition, cancel_job, read_job
 from agency.web.dependencies import AgencyServices, get_services
 
@@ -184,6 +185,11 @@ def _validate_artifact_query(job_store: JobStore, group_id: str, job_id: str, ar
 
 def _job_rows(snapshot, job_store: JobStore, group_id: str) -> list[dict[str, Any]]:
     group = snapshot.config.groups[group_id]
+    view = queue_snapshot(snapshot.config, memory_store=job_store.memory_store)
+    positions = {
+        entry.record.spec.job_id: index + 1
+        for index, entry in enumerate(view.waiting)
+    }
     rows: list[dict[str, Any]] = []
     for path in sorted(job_store.paths(group_id), key=lambda item: item.stat().st_mtime, reverse=True):
         record = read_job(path)
@@ -205,6 +211,10 @@ def _job_rows(snapshot, job_store: JobStore, group_id: str) -> list[dict[str, An
                 "detail_href": f"/{group_id}/jobs/{record.spec.job_id}",
                 "activity_href": f"/{group_id}/agents/{agent_name}/activity" if instance is not None else "",
                 "instance_missing": instance is None,
+                "queue_position": positions.get(record.spec.job_id),
+                "queue_length": len(view.waiting),
+                "due_at": record.due_at,
+                "can_cancel": record.status in {"queued", "waiting_for_memory"},
             }
         )
     return rows
