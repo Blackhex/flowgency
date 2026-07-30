@@ -922,7 +922,7 @@ def test_parse_config_rejects_malformed_nested_shapes(raw_config, config_paths, 
 # catch_up field on ScheduleRule
 # ---------------------------------------------------------------------------
 
-def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None):
+def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None, jobs_pool=None):
     import yaml
 
     lib = tmp_path / "lib"
@@ -936,17 +936,21 @@ def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None)
     if catch_up is not None:
         schedule["catch_up"] = catch_up
 
+    agency = {
+        "title": "Test",
+        "default_group": "grp",
+        "ai_backend": "copilot",
+        "agent_library": str(lib),
+        "compilation_cache": str(tmp_path / "cache"),
+        "memory_store": str(tmp_path / "memory"),
+        "prompt_store": str(prompts),
+    }
+    if jobs_pool is not None:
+        agency["jobs"] = {"pool": jobs_pool}
+
     raw = {
         "schema_version": 4,
-        "agency": {
-            "title": "Test",
-            "default_group": "grp",
-            "ai_backend": "copilot",
-            "agent_library": str(lib),
-            "compilation_cache": str(tmp_path / "cache"),
-            "memory_store": str(tmp_path / "memory"),
-            "prompt_store": str(prompts),
-        },
+        "agency": agency,
         "groups": {
             "grp": {
                 "name": "Grp",
@@ -1011,3 +1015,18 @@ def test_group_dispatch_rejects_daily_limit(tmp_path):
     config = _write_minimal_config(tmp_path, dispatch_daily_limit=20)
     with pytest.raises(ValidationFailed):
         load_config(config)
+
+
+def test_jobs_pool_defaults_to_four(tmp_path):
+    parsed = load_config(_write_minimal_config(tmp_path))
+    assert parsed.agency.jobs.pool == 4
+
+
+def test_jobs_pool_is_read_from_config(tmp_path):
+    parsed = load_config(_write_minimal_config(tmp_path, jobs_pool=2))
+    assert parsed.agency.jobs.pool == 2
+
+
+def test_jobs_pool_below_one_is_rejected(tmp_path):
+    with pytest.raises(ValidationFailed):
+        load_config(_write_minimal_config(tmp_path, jobs_pool=0))

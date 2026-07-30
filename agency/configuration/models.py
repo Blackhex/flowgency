@@ -25,12 +25,18 @@ class AgencyDispatch(BaseModel):
     interval: int = 15
 
 
+class AgencyJobs(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True)
+    pool: int = Field(default=4, ge=1)
+
+
 class AgencySettings(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     title: str = "Agency"
     default_group: str = ""
     ai_backend: str = "claude-code"
     dispatch: AgencyDispatch = Field(default_factory=AgencyDispatch)
+    jobs: AgencyJobs = Field(default_factory=AgencyJobs)
     agent_library: Path | None = None
     compilation_cache: Path | None = None
     memory_store: Path | None = None
