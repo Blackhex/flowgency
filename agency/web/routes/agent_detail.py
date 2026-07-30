@@ -25,6 +25,7 @@ from agency.configuration import (
 )
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
+from agency.dispatch.schedule import parse_catch_up
 from agency.fs import ResourceBusyError
 from agency.health import (
     elapsed_coarse,
@@ -460,6 +461,17 @@ def _parse_routines_payload(form, available_prompts: frozenset[tuple[str, str]])
         has_every = bool(str(schedule.get("every", "")).strip())
         if has_at == has_every:
             issues.append({"field": f"{field_prefix}.schedule", "message": "Schedule must define exactly one of at or every.", "hint": "Set one schedule mode only."})
+        schedule_payload: dict[str, str] = {}
+        if has_at:
+            schedule_payload["at"] = str(schedule.get("at", "")).strip()
+        elif has_every:
+            schedule_payload["every"] = str(schedule.get("every", "")).strip()
+        catch_up = str(schedule.get("catch_up", "")).strip()
+        if catch_up:
+            if parse_catch_up(catch_up) is None:
+                issues.append({"field": f"{field_prefix}.schedule.catch_up", "message": "Recovery bound must be none, today, always, or a duration.", "hint": "Use none, today, always, or a duration such as 48h."})
+            else:
+                schedule_payload["catch_up"] = catch_up
         memory = item.get("memory")
         memory_payload = None
         if memory is not None:
@@ -475,7 +487,7 @@ def _parse_routines_payload(form, available_prompts: frozenset[tuple[str, str]])
                 "prompt": {"scope": prompt_scope, "name": prompt_name},
                 "enabled": enabled,
                 "arguments": [arg.strip() for arg in arguments if isinstance(arg, str) and arg.strip()],
-                "schedule": {"at": str(schedule.get("at", "")).strip()} if has_at else {"every": str(schedule.get("every", "")).strip()} if has_every else {},
+                "schedule": schedule_payload,
                 **({"memory": memory_payload} if memory_payload is not None else {}),
             }
         )

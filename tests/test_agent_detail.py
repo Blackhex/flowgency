@@ -536,6 +536,63 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):
     assert routines[1]["schedule"] == {"at": "17:30"}
 
 
+def test_routines_post_keeps_the_recovery_bound(monkeypatch, tmp_path, raw_config):
+    """Saving a routine must not silently drop its catch_up."""
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+    routines_yaml = yaml.safe_dump(
+        [
+            {
+                "id": "triage",
+                "prompt": {"scope": "blueprint", "name": "pr-review"},
+                "arguments": [],
+                "schedule": {"at": "09:00", "catch_up": "48h"},
+            }
+        ],
+        sort_keys=False,
+    )
+
+    response = client.post(
+        "/newsletter/agents/advisor/routines",
+        data={"revision": revision, "routines_json": routines_yaml},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    routines = saved["groups"]["newsletter"]["agents"][0]["routines"]
+    assert routines[0]["schedule"] == {"at": "09:00", "catch_up": "48h"}
+
+    reloaded = client.get("/newsletter/agents/advisor/routines")
+    assert "catch_up: 48h" in reloaded.text
+
+
+def test_routines_post_rejects_an_unusable_recovery_bound(
+    monkeypatch, tmp_path, raw_config
+):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+    routines_yaml = yaml.safe_dump(
+        [
+            {
+                "id": "triage",
+                "prompt": {"scope": "blueprint", "name": "pr-review"},
+                "arguments": [],
+                "schedule": {"at": "09:00", "catch_up": "sometimes"},
+            }
+        ],
+        sort_keys=False,
+    )
+
+    response = client.post(
+        "/newsletter/agents/advisor/routines",
+        data={"revision": revision, "routines_json": routines_yaml},
+    )
+
+    assert response.status_code == 409
+    assert "Recovery bound" in response.text
+
+
 def test_routines_get_preserves_disabled_state(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))

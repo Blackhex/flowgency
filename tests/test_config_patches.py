@@ -22,6 +22,33 @@ def config_store(tmp_path, raw_config):
     return ConfigStore(path)
 
 
+def test_routine_patch_round_trips_the_recovery_bound(config_store):
+    from agency.configuration.patches import replace_agent_routines
+
+    snapshot = config_store.load()
+    updated = replace_agent_routines(
+        config_store,
+        snapshot.revision,
+        "newsletter",
+        "builder",
+        [
+            {
+                "id": "daily-review",
+                "prompt": {"scope": "blueprint", "name": "pr-review"},
+                "enabled": True,
+                "arguments": [],
+                "schedule": {"at": "09:00", "catch_up": "48h"},
+            }
+        ],
+    )
+
+    saved = yaml.safe_load(updated.path.read_text(encoding="utf-8"))
+    routine = saved["groups"]["newsletter"]["agents"][0]["routines"][0]
+    assert routine["schedule"] == {"at": "09:00", "catch_up": "48h"}
+    reloaded = config_store.load().config.groups["newsletter"].agents["builder"]
+    assert reloaded.routines[0].schedule.catch_up == "48h"
+
+
 def test_agent_patch_preserves_workspaces_and_other_agents(config_store):
     from agency.configuration.patches import (
         AgentProfilePatch,
