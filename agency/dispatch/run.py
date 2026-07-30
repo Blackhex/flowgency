@@ -19,6 +19,7 @@ from agency.dispatch.schedule import (
 from agency.configuration.store import ConfigStore
 from agency.health import grace_window
 from agency.jobs import JobRequest, JobSubmissionError, JobValidationError, submit_job_request
+from agency.jobs.queue import drain
 
 log = logging.getLogger("agency.dispatch")
 
@@ -55,6 +56,11 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
     snapshot = config if hasattr(config, "config") else load_dispatch_config(str(config_path))
     resolved = snapshot.config
     interval = resolved.agency.dispatch.interval
+
+    try:
+        drain(resolved, memory_store=resolved.agency.memory_store)
+    except Exception:
+        log.exception("queue drain failed")
 
     for group_key, group in resolved.groups.items():
         if not group.dispatch.enabled:

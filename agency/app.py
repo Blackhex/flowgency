@@ -40,11 +40,11 @@ from agency.jobs import (
     JobValidationError,
     active_jobs,
     latest_executed_job,
-    reconcile_jobs,
     submit_job_request,
 )
 from agency.jobs.atomic import atomic_write_text
 from agency.jobs.prompts import build_decision_prompt
+from agency.jobs.queue import drain
 from agency.health import (
     describe_agent_health,
     elapsed_coarse,
@@ -365,15 +365,7 @@ async def lifespan(app: FastAPI):
     services = refresh_services()
     if services.startup_error is None:
         snapshot = services.config_store.load()
-        reconcile_jobs(
-            {
-                group_id: {
-                    "group_root": str(resolve_group_paths(group).group_root)
-                }
-                for group_id, group in snapshot.config.groups.items()
-            },
-            memory_store_root=snapshot.config.agency.memory_store,
-        )
+        drain(snapshot.config, memory_store=snapshot.config.agency.memory_store)
     yield
 
 

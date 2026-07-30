@@ -449,3 +449,19 @@ def test_every_marker_anchors_on_the_occurrence_not_the_launch(
     assert datetime.fromtimestamp(marker.stat().st_mtime) == datetime(
         2026, 7, 29, 9, 0
     )
+
+
+def test_a_dispatch_cycle_drains_before_it_evaluates_routines(tmp_path, monkeypatch):
+    order = []
+    monkeypatch.setattr("agency.dispatch.run.drain", lambda *a, **k: order.append("drain"))
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job_request",
+        lambda *a, **k: order.append("submit"),
+    )
+    workspace, group_root, config_path, _ = _make_group(tmp_path)
+    _write_config(
+        config_path, workspace, group_root,
+        routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}],
+    )
+    run_dispatch_cycle(None, config_path, _RecordingLauncher())
+    assert order.index("drain") < order.index("submit")
