@@ -952,6 +952,24 @@ templates.env.filters["relative_time"] = relative_time
 templates.env.filters["relative_future"] = relative_future
 
 
+def queue_due_time(value: "datetime | str | None") -> str:
+    """Format a job due time: HH:MM today, Mon HH:MM for any other day."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    local = value.astimezone()
+    if local.date() == clock_today():
+        return local.strftime("%H:%M")
+    return local.strftime("%a %H:%M")
+
+
+templates.env.filters["queue_due_time"] = queue_due_time
+
+
 def initials(name: str) -> str:
     """Two-letter avatar for an agent with no configured emoji."""
     words = (name or "").split()

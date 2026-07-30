@@ -190,7 +190,7 @@
   {% if work_queue.waiting %}
   <div class="mt-1.5 max-h-24 overflow-y-auto font-mono text-xs leading-6">
     {% for item in work_queue.waiting %}
-    <a href="{{ item.href }}" class="block hover:underline text-gray-700 dark:text-gray-200">{{ item.position }} {{ item.agent }} / {{ item.routine }} <span class="text-gray-500 dark:text-gray-400">{{ item.due }}</span></a>
+    <a href="{{ item.href }}" class="block hover:underline text-gray-700 dark:text-gray-200">{{ item.position }} {{ item.agent }} / {{ item.routine }} <span class="text-gray-500 dark:text-gray-400">{{ item.due | queue_due_time }}</span></a>
     {% endfor %}
   </div>
   {% endif %}

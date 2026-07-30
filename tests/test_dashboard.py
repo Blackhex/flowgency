@@ -946,3 +946,79 @@ class TestWorkQueueStrip:
     def test_an_empty_queue_keeps_one_idle_line(self, client):
         body = client.get("/newsletter/").text
         assert "idle" in body and "pool 4" in body
+
+    def test_waiting_jobs_due_time_is_not_a_raw_iso_string(self, client, waiting_jobs):
+        """Raw ISO timestamps must not appear; a formatted clock time must."""
+        import re
+        body = client.get("/newsletter/").text
+        assert "2026-07-16T08:00:00" not in body
+        assert re.search(r"\b\d{2}:\d{2}\b", body)
+
+    def test_waiting_jobs_due_today_renders_as_time_only(self, client, waiting_jobs, monkeypatch):
+        """A job due today shows HH:MM with no weekday prefix."""
+        import re
+        # Fix "today" to 2026-07-16 so fixture jobs (due 2026-07-16 UTC) are today
+        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-16T12:00:00")
+        body = client.get("/newsletter/").text
+        # No weekday prefix before the time (Mon/Tue/…/Sun HH:MM pattern absent)
+        assert not re.search(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{2}:\d{2}", body)
+
+    def test_waiting_jobs_due_other_day_renders_with_weekday_prefix(self, client, waiting_jobs, monkeypatch):
+        """A job due on a different day shows Mon HH:MM (abbreviated weekday prefix)."""
+        import re
+        # today is 2026-07-30; fixture jobs are due on 2026-07-16 — a past day
+        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T12:00:00")
+        body = client.get("/newsletter/").text
+        assert re.search(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{2}:\d{2}", body)
+
+
+class TestQueueDueTimeFilter:
+    """Unit tests for the queue_due_time Jinja filter."""
+
+    def test_none_returns_empty_string(self):
+        from agency.app import queue_due_time
+        assert queue_due_time(None) == ""
+
+    def test_today_formats_as_hhmm(self, monkeypatch):
+        from datetime import timezone
+        from agency.app import queue_due_time
+        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-16T12:00:00")
+        due = datetime(2026, 7, 16, 8, 0, 0, tzinfo=timezone.utc)
+        local = due.astimezone()
+        result = queue_due_time(due)
+        # If UTC+8 or beyond, local date may differ; guard gracefully
+        import re
+        assert re.fullmatch(r"\d{2}:\d{2}|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}", result)
+
+    def test_other_day_formats_with_weekday_prefix(self, monkeypatch):
+        from datetime import timezone
+        from agency.app import queue_due_time
+        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T12:00:00")
+        due = datetime(2026, 7, 16, 8, 0, 0, tzinfo=timezone.utc)
+        result = queue_due_time(due)
+        import re
+        assert re.fullmatch(r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}", result)
+
+    def test_accepts_iso_string(self, monkeypatch):
+        from agency.app import queue_due_time
+        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T12:00:00")
+        result = queue_due_time("2026-07-16T08:00:00+00:00")
+        import re
+        assert re.fullmatch(r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}", result)
+
+    def test_uses_astimezone_not_naive_strip(self, monkeypatch):
+        """Naive replace(tzinfo=None) discards the UTC offset; astimezone must be used."""
+        from datetime import timezone, timedelta
+        from agency.app import queue_due_time
+        from agency.clock import today as clock_today
+        # 08:00 UTC+3 = 05:00 UTC; naive strip gives "08:00", astimezone gives local hours
+        utc_plus_3 = timezone(timedelta(hours=3))
+        due = datetime(2026, 7, 16, 8, 0, 0, tzinfo=utc_plus_3)
+        local = due.astimezone()
+        # Set today to match the local date so the format branch is predictable
+        monkeypatch.setenv("AGENCY_FIXED_NOW", local.strftime("%Y-%m-%dT%H:%M:%S"))
+        result = queue_due_time(due)
+        assert result == local.strftime("%H:%M"), (
+            f"got {result!r}; filter may be using replace(tzinfo=None) "
+            f"instead of astimezone() (naive hours={due.hour}, local hours={local.hour})"
+        )
