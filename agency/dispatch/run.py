@@ -15,6 +15,7 @@ from agency.dispatch.schedule import (
     last_at_occurrence,
     last_every_occurrence,
     parse_catch_up,
+    parse_every,
 )
 from agency.configuration.store import ConfigStore
 from agency.health import grace_window
@@ -25,7 +26,12 @@ log = logging.getLogger("agency.dispatch")
 
 
 def _due_occurrence(routine, logs_root: Path, agent_name: str, now: datetime):
-    """The occurrence this routine owes, with the marker that would record it."""
+    """The occurrence this routine owes, with the marker that would record it.
+
+    A marker of ``None`` means the rule cannot be read at all. An occurrence
+    of ``None`` with a marker means the rule is readable and simply not due
+    yet, which is the ordinary case and must not be reported as a fault.
+    """
     at_time = routine.schedule.at or ""
     every_value = routine.schedule.every or ""
     if at_time:
@@ -37,6 +43,9 @@ def _due_occurrence(routine, logs_root: Path, agent_name: str, now: datetime):
         )
         return occurrence, marker
     if every_value:
+        period = parse_every(every_value)
+        if period is None or period.total_seconds() <= 0:
+            return None, None
         marker = every_marker_path(logs_root, agent_name, routine.id)
         try:
             anchor = datetime.fromtimestamp(marker.stat().st_mtime)
@@ -104,12 +113,14 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                 occurrence, marker = _due_occurrence(
                     routine, logs_root, agent_name, now
                 )
-                if occurrence is None or marker is None:
+                if marker is None:
                     log.warning(
                         "  WARNING: rule for %s/%s has no usable schedule",
                         agent_name,
                         routine.id,
                     )
+                    continue
+                if occurrence is None:
                     continue
                 if routine.schedule.at and marker.exists():
                     continue
