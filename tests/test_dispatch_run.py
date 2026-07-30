@@ -1,58 +1,13 @@
 import os
-import time
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from agency.dispatch.run import check_at_rule, check_every_rule, run_dispatch_cycle
+from agency.dispatch.run import run_dispatch_cycle
+from agency.dispatch.schedule import at_marker_path, every_marker_path
 from agency.jobs import JobSubmissionError
-
-
-def _epoch(time_str: str) -> float:
-    """Helper: convert HH:MM to today's epoch."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    return datetime.strptime(f"{today} {time_str}", "%Y-%m-%d %H:%M").timestamp()
-
-
-def test_check_at_rule_within_window():
-    assert check_at_rule("09:00", now_epoch=_epoch("09:01"), interval=15) is True
-
-
-def test_check_at_rule_outside_window():
-    assert check_at_rule("09:00", now_epoch=_epoch("09:20"), interval=15) is False
-
-
-def test_check_at_rule_before_target():
-    assert check_at_rule("09:00", now_epoch=_epoch("08:59"), interval=15) is False
-
-
-def test_check_every_rule_no_marker(tmp_path):
-    marker = tmp_path / ".last-test"
-    assert check_every_rule(marker, "6h") is True
-
-
-def test_check_every_rule_elapsed(tmp_path):
-    marker = tmp_path / ".last-test"
-    marker.write_text("")
-    old_time = time.time() - (7 * 3600)
-    os.utime(marker, (old_time, old_time))
-    assert check_every_rule(marker, "6h") is True
-
-
-def test_check_every_rule_not_elapsed(tmp_path):
-    marker = tmp_path / ".last-test"
-    marker.write_text("")
-    assert check_every_rule(marker, "6h") is False
-
-
-def test_check_every_rule_minutes(tmp_path):
-    marker = tmp_path / ".last-test"
-    marker.write_text("")
-    old_time = time.time() - (35 * 60)
-    os.utime(marker, (old_time, old_time))
-    assert check_every_rule(marker, "30m") is True
 
 
 def _make_group(tmp_path):
@@ -98,10 +53,16 @@ def _write_config(
         )
         + (
             "            schedule:\n"
-            f"              at: '{routine['schedule']['at']}'\n"
-            if "at" in routine["schedule"]
-            else "            schedule:\n"
-            f"              every: {routine['schedule']['every']}\n"
+            + (
+                f"              at: '{routine['schedule']['at']}'\n"
+                if "at" in routine["schedule"]
+                else f"              every: {routine['schedule']['every']}\n"
+            )
+            + (
+                f"              catch_up: {routine['schedule']['catch_up']}\n"
+                if "catch_up" in routine["schedule"]
+                else ""
+            )
         )
         + (
             f"            memory:\n              scope: {routine['memory']['scope']}\n"
@@ -271,14 +232,6 @@ def test_schedule_skips_condition_rules(tmp_path, monkeypatch):
     assert not (group_root / "logs" / ".last-product-daily-review").exists()
 
 
-def test_check_every_rule_days(tmp_path):
-    marker = tmp_path / ".last-test"
-    marker.write_text("")
-    old_time = time.time() - (2 * 24 * 3600)
-    os.utime(marker, (old_time, old_time))
-    assert check_every_rule(marker, "1d") is True
-
-
 def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, monkeypatch):
     first_workspace, first_group, first_config, _ = _make_group(tmp_path / "first")
     second_workspace, second_group, second_config, _ = _make_group(tmp_path / "second")
@@ -301,24 +254,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
     """
     workspace_path, group_root, config_path, log_dir = _make_group(tmp_path)
 
-    # Fixed time: 2026-07-03 09:15:00 (within window of 09:00 at rule)
-    fixed_dt = datetime(2026, 7, 3, 9, 15, 0)
-
-    # Monkeypatch datetime.now() in dispatch.run module
-    class MockDatetime:
-        @staticmethod
-        def now():
-            return fixed_dt
-
-        @staticmethod
-        def fromtimestamp(ts):
-            return datetime.fromtimestamp(ts)
-
-        @staticmethod
-        def strptime(date_string, format):
-            return datetime.strptime(date_string, format)
-
-    monkeypatch.setattr("agency.dispatch.run.datetime", MockDatetime)
+    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-03T09:15:00")
 
     _write_config(
         config_path,
@@ -380,3 +316,136 @@ def test_disabled_routine_is_never_submitted_or_marked(tmp_path, monkeypatch):
 
     assert submitted == []
     assert not (group_root / "logs" / ".last-product-daily-review").exists()
+
+
+class _RecordingLauncher:
+    def __init__(self):
+        self.launched = []
+
+    def launch(self, authority):
+        self.launched.append(authority.job_id)
+        return SimpleNamespace(worker_pid=4321)
+
+
+def _patch_submit(monkeypatch, launcher):
+    """Patch submit_job_request to invoke the launcher without real infra."""
+    def _submit(req, _launcher_arg=None, _l=launcher):
+        _l.launch(SimpleNamespace(job_id=req.routine_id))
+        return SimpleNamespace(job_id=req.routine_id)
+    monkeypatch.setattr("agency.dispatch.run.submit_job_request", _submit)
+
+
+def test_missed_morning_occurrence_recovers_later_the_same_day(
+    tmp_path, monkeypatch
+):
+    workspace, group_root, config_path, _ = _make_group(tmp_path)
+    _write_config(
+        config_path,
+        workspace,
+        group_root,
+        routines=[{"id": "suite-health", "prompt_name": "daily-review",
+                   "schedule": {"at": "08:00"}}],
+    )
+    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    launcher = _RecordingLauncher()
+    _patch_submit(monkeypatch, launcher)
+
+    run_dispatch_cycle(None, config_path, launcher)
+
+    assert len(launcher.launched) == 1
+    marker = at_marker_path(
+        group_root / "logs", "product", "suite-health", "2026-07-29"
+    )
+    assert marker.exists()
+
+
+def test_recovery_marks_the_occurrence_day_not_today(tmp_path, monkeypatch):
+    workspace, group_root, config_path, _ = _make_group(tmp_path)
+    _write_config(
+        config_path,
+        workspace,
+        group_root,
+        routines=[{"id": "suite-health", "prompt_name": "daily-review",
+                   "schedule": {"at": "08:00", "catch_up": "always"}}],
+    )
+    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T03:00:00")
+    launcher = _RecordingLauncher()
+    _patch_submit(monkeypatch, launcher)
+
+    run_dispatch_cycle(None, config_path, launcher)
+
+    assert len(launcher.launched) == 1
+    assert at_marker_path(
+        group_root / "logs", "product", "suite-health", "2026-07-28"
+    ).exists()
+    assert not at_marker_path(
+        group_root / "logs", "product", "suite-health", "2026-07-29"
+    ).exists()
+
+
+def test_default_bound_forgets_yesterdays_occurrence(tmp_path, monkeypatch):
+    workspace, group_root, config_path, _ = _make_group(tmp_path)
+    _write_config(
+        config_path,
+        workspace,
+        group_root,
+        routines=[{"id": "suite-health", "prompt_name": "daily-review",
+                   "schedule": {"at": "08:00"}}],
+    )
+    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T03:00:00")
+    launcher = _RecordingLauncher()
+
+    run_dispatch_cycle(None, config_path, launcher)
+
+    assert launcher.launched == []
+
+
+def test_an_already_marked_occurrence_does_not_run_again(tmp_path, monkeypatch):
+    workspace, group_root, config_path, _ = _make_group(tmp_path)
+    _write_config(
+        config_path,
+        workspace,
+        group_root,
+        routines=[{"id": "suite-health", "prompt_name": "daily-review",
+                   "schedule": {"at": "08:00"}}],
+    )
+    marker = at_marker_path(
+        group_root / "logs", "product", "suite-health", "2026-07-29"
+    )
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    launcher = _RecordingLauncher()
+
+    run_dispatch_cycle(None, config_path, launcher)
+
+    assert launcher.launched == []
+
+
+def test_every_marker_anchors_on_the_occurrence_not_the_launch(
+    tmp_path, monkeypatch
+):
+    workspace, group_root, config_path, _ = _make_group(tmp_path)
+    _write_config(
+        config_path,
+        workspace,
+        group_root,
+        routines=[{"id": "audit", "prompt_name": "daily-review",
+                   "schedule": {"every": "6h", "catch_up": "always"}}],
+    )
+    marker = every_marker_path(group_root / "logs", "product", "audit")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    anchor = datetime(2026, 7, 29, 3, 0).timestamp()
+    os.utime(marker, (anchor, anchor))
+    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job_request",
+        lambda req, launcher=None: SimpleNamespace(job_id=req.routine_id),
+    )
+
+    run_dispatch_cycle(None, config_path, _RecordingLauncher())
+
+    assert datetime.fromtimestamp(marker.stat().st_mtime) == datetime(
+        2026, 7, 29, 9, 0
+    )
