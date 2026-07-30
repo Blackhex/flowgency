@@ -70,6 +70,8 @@ agency:
   title: Agency
   default_group: example
   ai_backend: copilot
+  jobs:
+    pool: 4
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
