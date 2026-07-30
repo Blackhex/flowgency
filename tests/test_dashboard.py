@@ -363,7 +363,13 @@ def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_pa
     assert fleet[0]["running"] is True
 
 
-def test_dashboard_running_count_excludes_queued_and_waiting_jobs(monkeypatch, tmp_path, raw_config):
+def test_dashboard_running_count_excludes_queued_but_not_waiting_jobs(monkeypatch, tmp_path, raw_config):
+    """A queued job has no worker; a waiting one has a live worker holding a slot.
+
+    `waiting_for_memory` is a phase of a running job, not a phase of waiting to
+    run, so the card stays lit and the count includes it. Only `queued` — which
+    nothing has started yet — is excluded.
+    """
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["groups"]["newsletter"]["agents"][0]
@@ -939,7 +945,16 @@ class TestWorkQueueStrip:
 
     def test_the_strip_lists_waiting_jobs_in_due_order(self, client, waiting_jobs):
         body = client.get("/newsletter/").text
-        assert body.index("suite-health") < body.index("docs-audit")
+        strip = body[body.index("Work queue"):body.index("Attention Queue")]
+        assert [
+            line for line in ("suite-health", "authority-audit", "docs-audit")
+            if line in strip
+        ] == ["suite-health", "authority-audit", "docs-audit"]
+        assert (
+            strip.index("suite-health")
+            < strip.index("authority-audit")
+            < strip.index("docs-audit")
+        )
 
     def test_the_strip_header_counts_running_and_waiting(self, client, waiting_jobs):
         body = client.get("/newsletter/").text
@@ -947,7 +962,10 @@ class TestWorkQueueStrip:
 
     def test_an_empty_queue_keeps_one_idle_line(self, client):
         body = client.get("/newsletter/").text
-        assert "idle" in body and "pool 4" in body
+        strip = body[body.index("Work queue"):body.index("Attention Queue")]
+        assert strip.count("idle") == 1
+        assert "pool 4" in strip
+        assert "queued" not in strip
 
     def test_waiting_jobs_due_time_is_not_a_raw_iso_string(self, client, waiting_jobs):
         """Raw ISO timestamps must not appear; a formatted clock time must."""

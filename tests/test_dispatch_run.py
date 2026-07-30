@@ -393,11 +393,18 @@ def test_default_bound_forgets_yesterdays_occurrence(tmp_path, monkeypatch):
                    "schedule": {"at": "08:00"}}],
     )
     monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T03:00:00")
-    launcher = _RecordingLauncher()
+    submitted = []
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job_request",
+        lambda req, launcher=None: submitted.append(req.routine_id),
+    )
 
-    run_dispatch_cycle(None, config_path, launcher)
+    run_dispatch_cycle(None, config_path, _RecordingLauncher())
 
-    assert launcher.launched == []
+    assert submitted == []
+    assert not at_marker_path(
+        group_root / "logs", "product", "suite-health", "2026-07-28"
+    ).exists()
 
 
 def test_an_already_marked_occurrence_does_not_run_again(tmp_path, monkeypatch):
@@ -414,12 +421,18 @@ def test_an_already_marked_occurrence_does_not_run_again(tmp_path, monkeypatch):
     )
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
+    stamp = marker.stat().st_mtime
     monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
-    launcher = _RecordingLauncher()
+    submitted = []
+    monkeypatch.setattr(
+        "agency.dispatch.run.submit_job_request",
+        lambda req, launcher=None: submitted.append(req.routine_id),
+    )
 
-    run_dispatch_cycle(None, config_path, launcher)
+    run_dispatch_cycle(None, config_path, _RecordingLauncher())
 
-    assert launcher.launched == []
+    assert submitted == []
+    assert marker.stat().st_mtime == stamp
 
 
 def test_every_marker_anchors_on_the_occurrence_not_the_launch(
