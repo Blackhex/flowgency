@@ -111,8 +111,7 @@ class _QueueFixture:
         return read_job(path).status
 
 
-@pytest.fixture
-def queue_fixture(tmp_path):
+def _make_queue_fixture(tmp_path, *, pool: int = 3) -> _QueueFixture:
     memory_store = tmp_path / "memory"
     config_path = tmp_path / "config.yaml"
     workspace_path = tmp_path / "workspace"
@@ -129,7 +128,7 @@ def queue_fixture(tmp_path):
             "compilation_cache": str(tmp_path / "compiled-agents"),
             "memory_store": str(memory_store),
             "prompt_store": str(tmp_path / "prompts"),
-            "jobs": {"pool": 3},
+            "jobs": {"pool": pool},
         },
         "groups": {
             "newsletter": {
@@ -145,8 +144,17 @@ def queue_fixture(tmp_path):
     config = parse_config(raw, config_path)
     store = JobStore(memory_store)
     launcher = _RecordingLauncher()
-
     return _QueueFixture(config, config_path, memory_store, store, launcher, tmp_path)
+
+
+@pytest.fixture
+def queue_fixture(tmp_path):
+    return _make_queue_fixture(tmp_path)
+
+
+@pytest.fixture
+def queue_fixture_pool1(tmp_path):
+    return _make_queue_fixture(tmp_path, pool=1)
 
 
 def test_queue_orders_waiting_jobs_by_due_time(queue_fixture):
@@ -188,14 +196,22 @@ def test_drain_claims_what_it_starts_so_a_second_drain_is_a_no_op(queue_fixture)
 
 
 def test_a_ghost_running_record_does_not_hold_a_slot_forever(
-    queue_fixture, monkeypatch
+    queue_fixture_pool1, monkeypatch
 ):
-    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: False)
-    queue_fixture.enqueue("ghost", status="running", worker_pid=999999)
-    queue_fixture.enqueue("real", due_at="2026-07-29T08:00:00")
-    drain(queue_fixture.config, memory_store=queue_fixture.memory_store,
-          launcher=queue_fixture.launcher)
-    assert "real" in queue_fixture.launcher.launched
+    # pool=1 means the ghost's slot is the only one; real job can only launch if
+    # reconcile actually frees it. Patch the binding drain calls directly.
+    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    queue_fixture_pool1.enqueue("ghost", status="running", worker_pid=999999)
+    queue_fixture_pool1.enqueue("real", due_at="2026-07-29T08:00:00")
+    drain(
+        queue_fixture_pool1.config,
+        memory_store=queue_fixture_pool1.memory_store,
+        launcher=queue_fixture_pool1.launcher,
+    )
+    # Ghost must be "failed" to prove reconcile freed its slot (pool=1 ensures the
+    # real job can only launch once that slot is free).
+    assert queue_fixture_pool1.status("ghost") == "failed"
+    assert "real" in queue_fixture_pool1.launcher.launched
 
 
 def test_a_failing_launch_marks_the_job_and_the_drain_continues(queue_fixture):
