@@ -8,6 +8,8 @@ from agency.dispatch.schedule import (
     at_marker_path,
     catch_up_allows,
     every_marker_path,
+    last_at_occurrence,
+    last_every_occurrence,
     marker_safe,
     parse_catch_up,
     parse_every,
@@ -118,4 +120,40 @@ def test_duration_allows_up_to_and_including_the_bound():
     occurrence = datetime(2026, 7, 29, 8, 0)
     assert catch_up_allows(occurrence, datetime(2026, 7, 30, 8, 0), bound, grace) is True
     assert catch_up_allows(occurrence, datetime(2026, 7, 30, 8, 1), bound, grace) is False
+
+
+def test_at_occurrence_is_today_once_the_time_has_passed():
+    now = datetime(2026, 7, 29, 11, 57)
+    assert last_at_occurrence("08:00", now) == datetime(2026, 7, 29, 8, 0)
+
+
+def test_at_occurrence_is_yesterday_before_the_time():
+    now = datetime(2026, 7, 29, 3, 0)
+    assert last_at_occurrence("08:00", now) == datetime(2026, 7, 28, 8, 0)
+
+
+def test_at_occurrence_at_exactly_the_target_is_today():
+    now = datetime(2026, 7, 29, 8, 0)
+    assert last_at_occurrence("08:00", now) == datetime(2026, 7, 29, 8, 0)
+
+
+def test_malformed_at_has_no_occurrence():
+    assert last_at_occurrence("25:00", datetime(2026, 7, 29, 8, 0)) is None
+
+
+def test_every_occurrence_steps_from_the_anchor():
+    anchor = datetime(2026, 7, 26, 9, 0)
+    now = datetime(2026, 7, 29, 11, 57)
+    assert last_every_occurrence(anchor, "6h", now) == datetime(2026, 7, 29, 9, 0)
+
+
+def test_every_occurrence_is_none_before_the_first_period_elapses():
+    anchor = datetime(2026, 7, 29, 9, 0)
+    now = datetime(2026, 7, 29, 11, 0)
+    assert last_every_occurrence(anchor, "6h", now) is None
+
+
+def test_malformed_every_has_no_occurrence():
+    anchor = datetime(2026, 7, 29, 9, 0)
+    assert last_every_occurrence(anchor, "soon", datetime(2026, 7, 30, 9, 0)) is None
 

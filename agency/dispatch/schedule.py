@@ -74,3 +74,31 @@ def catch_up_allows(
         return age <= bound.period
     return age < grace
 
+
+def last_at_occurrence(at: str, now: datetime) -> datetime | None:
+    """The newest ``at`` occurrence at or before ``now``, or None if malformed."""
+    try:
+        target = datetime.strptime(at.strip(), "%H:%M").time()
+    except (AttributeError, ValueError):
+        return None
+    today = datetime.combine(now.date(), target)
+    if now >= today:
+        return today
+    return today - timedelta(days=1)
+
+
+def last_every_occurrence(
+    anchor: datetime,
+    every: str,
+    now: datetime,
+) -> datetime | None:
+    """The newest ``every`` occurrence at or before ``now``, counted from the anchor."""
+    period = parse_every(every)
+    if period is None or period.total_seconds() <= 0:
+        return None
+    elapsed = (now - anchor).total_seconds()
+    if elapsed < period.total_seconds():
+        return None
+    steps = int(elapsed // period.total_seconds())
+    return anchor + steps * period
+
