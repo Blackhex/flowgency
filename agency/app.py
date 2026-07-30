@@ -953,7 +953,6 @@ templates.env.filters["relative_future"] = relative_future
 
 
 def queue_due_time(value: "datetime | str | None") -> str:
-    """Format a job due time: HH:MM today, Mon HH:MM for any other day."""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -1861,26 +1860,26 @@ async def home(request: Request, group: str):
 
     # Work queue strip (between Pipeline and Attention Queue)
     try:
-        _qs = _load_snapshot()
-        _ms = _qs.config.agency.memory_store
-        if _ms is not None:
-            _view = queue_snapshot(_qs.config, memory_store=_ms)
+        snapshot = _load_snapshot()
+        ms = snapshot.config.agency.memory_store
+        if ms is not None:
+            view = queue_snapshot(snapshot.config, memory_store=ms)
         else:
-            _view = QueueView(running=0, waiting=(), pool=_qs.config.agency.jobs.pool)
+            view = QueueView(running=0, waiting=(), pool=snapshot.config.agency.jobs.pool)
     except Exception:
-        _view = QueueView(running=0, waiting=(), pool=4)
+        view = QueueView(running=0, waiting=(), pool=4)
     work_queue = {
-        "running": _view.running,
-        "pool": _view.pool,
+        "running": view.running,
+        "pool": view.pool,
         "waiting": [
             {
-                "position": _i + 1,
-                "agent": _e.record.spec.agent_name,
-                "routine": _e.record.spec.routine_id or "task",
-                "due": _e.record.due_at or _e.record.spec.created_at,
-                "href": f"/{_e.group_id}/jobs/{_e.record.spec.job_id}",
+                "position": i + 1,
+                "agent": e.record.spec.agent_name,
+                "routine": e.record.spec.routine_id or "task",
+                "due": e.record.due_at or e.record.spec.created_at,
+                "href": f"/{e.group_id}/jobs/{e.record.spec.job_id}",
             }
-            for _i, _e in enumerate(_view.waiting)
+            for i, e in enumerate(view.waiting)
         ],
     }
 
