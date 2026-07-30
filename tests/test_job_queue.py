@@ -3,6 +3,7 @@
 from dataclasses import replace as dc_replace
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -19,6 +20,7 @@ from agency.jobs.models import (
 )
 from agency.jobs.queue import drain, has_drainer, queue_snapshot
 from agency.jobs.store import read_job, write_job
+from agency.jobs.worker import main as worker_main
 
 
 def _make_spec(tmp_path: Path, job_id: str) -> JobSpec:
@@ -109,6 +111,12 @@ class _QueueFixture:
     def status(self, job_id):
         path = self._store.path("newsletter", job_id)
         return read_job(path).status
+
+    def worker_argv(self, job_id):
+        path = self._store.path("newsletter", job_id)
+        record = read_job(path)
+        ref = self._store.reference("newsletter", job_id, record.authority_digest)
+        return ref.worker_args()
 
 
 def _make_queue_fixture(tmp_path, *, pool: int = 3) -> _QueueFixture:
@@ -244,3 +252,12 @@ def test_with_nothing_alive_the_installed_timer_decides(queue_fixture, monkeypat
         memory_store=queue_fixture.memory_store,
         config_path=queue_fixture.config_path,
     ) is False
+
+
+def test_a_finishing_worker_starts_the_next_waiting_job(queue_fixture, monkeypatch):
+    calls = []
+    monkeypatch.setattr("agency.jobs.worker.drain", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr("agency.jobs.worker.execute_job", lambda ref: SimpleNamespace(status="complete"))
+    queue_fixture.enqueue("only", due_at="2026-07-29T08:00:00")
+    worker_main(queue_fixture.worker_argv("only"))
+    assert calls == [1]
