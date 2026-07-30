@@ -135,6 +135,27 @@ colours all keep their present meaning. Markers are written at submission, so a
 recovered routine stops reading overdue the moment it is queued, and the runner
 and the dashboard cannot disagree.
 
+### What a marker means
+
+A marker records that an occurrence was *submitted*, not that it ran. Because
+submission no longer launches, the two can come apart: a job queued behind a
+full pool is started by a later drain, and that drain can fail. The firing rule
+therefore reads the occurrence's outcome alongside its marker.
+
+A scheduled job that is `failed` with no `launched_at` never reached a worker,
+so its occurrence is unserved and the routine owes it again. A later job for the
+same routine that launched, or that is still pending, makes an earlier
+occurrence moot — the same rule the candidate definition already uses — and that
+is what stops a retry from replaying an occurrence already served.
+
+Nothing outside the runner reads or writes a marker. The drain records the
+launch failure honestly and knows nothing about markers or log directories; the
+runner maps `agent`, `routine` and `due_at` from the job record onto its own
+marker layout. No marker is deleted or rewound, so an `every` anchor keeps its
+meaning. For `every` the anchor has already advanced to the lost occurrence, so
+the runner offers that occurrence by name while the anchor still points at it,
+instead of waiting a whole period for the next one.
+
 ## Queue and pool
 
 ### States
@@ -275,6 +296,12 @@ collapsed into general activity.
   error recorded, and the drain continues to the next job rather than stopping.
   The submission that queued it raises, so a scheduled submission leaves the
   marker unwritten and the occurrence stays eligible for `catch_up`.
+- **A deferred launch fails.** A job queued behind a full pool has already had
+  its marker written, so the submission cannot report the failure. The next
+  cycle sees a scheduled job that is `failed` with no `launched_at`, treats its
+  occurrence as unserved, and fires it again subject to the ordinary `catch_up`
+  bound. A stale occurrence is still forgotten on schedule; the default bound
+  forgets it at midnight.
 - **A worker dies without draining.** Its record is cleared by the reconcile at
   the head of the next drain, so it never permanently consumes a slot, and the
   dispatch cycle guarantees a drain happens within `interval`.
@@ -291,7 +318,11 @@ of `today` when the key is absent; the candidate occurrence for `at` before and
 after the daily time; the marker landing on the recovered occurrence's day
 rather than today; expiry at `none`, `today`, `always` and a duration; the
 `every` anchor advancing to the occurrence rather than to the launch moment;
-exactly one run per routine per cycle.
+exactly one run per routine per cycle; a job queued behind a full pool whose
+deferred launch fails, and the next cycle firing that occurrence again for both
+`at` and `every`; the same occurrence not firing a third time once a retry has
+launched; the `catch_up` bound still forgetting a lost occurrence; a launched,
+cancelled, complete or manually triggered job never reopening an occurrence.
 
 **Queue.** Capacity counting with live records, with confirmed-dead records, and
 with records whose liveness cannot be determined; a claim that reports no pid
@@ -329,6 +360,17 @@ the Jobs list; cancelling a queued job; the queued state on an agent card.
   genuinely needs recovery across days can say so.
 - *No configuration at all*, with the recovery bound hard-coded. Rejected
   because the rule then cannot be written down, overridden, or displayed.
+- *Clearing the marker when a job carrying a `due_at` fails to launch.*
+  Rejected: it makes the drain write the runner's files, and deleting a
+  back-dated `at` marker or rewinding an `every` anchor destroys the record of
+  what was attempted. Reading the outcome beside the marker needs no write at
+  all.
+- *Returning a failed launch to `queued` for one retry.* Rejected as unsound:
+  it lowers the probability of losing an occurrence without restoring the
+  property, because the retry can fail too and the second failure loses the
+  occurrence exactly as the first did. Any bound on the retries leaves the same
+  hole at the bound, and an unbounded retry is a relaunch loop against a
+  launcher that always fails.
 
 **Queue**
 
