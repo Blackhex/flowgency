@@ -971,6 +971,57 @@ class TestWorkQueueStrip:
         body = client.get("/newsletter/").text
         assert re.search(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{2}:\d{2}", body)
 
+    def test_load_snapshot_exception_falls_back_to_idle(self, client, monkeypatch):
+        # Patch queue_snapshot to raise while _load_snapshot (used by get_group) still works;
+        # the work queue's try/except catches this and falls back to the idle line.
+        import agency.app as app_mod
+
+        def _raise(config, *, memory_store):
+            raise RuntimeError("config unavailable")
+
+        monkeypatch.setattr(app_mod, "queue_snapshot", _raise)
+        body = client.get("/newsletter/").text
+        assert "idle" in body and "pool 4" in body
+
+    def test_memory_store_none_falls_back_to_idle(self, client, monkeypatch):
+        # Patch the snapshot so the work queue section sees memory_store=None with pool=8.
+        # Patching runtime_group prevents the earlier get_group call from failing on None.
+        # The guard sends pool=8 (configured); without the guard queue_snapshot(…, None)
+        # raises TypeError → except fires → pool=4, causing the assertion to fail.
+        import agency.app as app_mod
+        from agency.web.state import runtime_group as real_runtime_group
+        from dataclasses import replace as dc_replace
+
+        real_snapshot = app_mod._load_snapshot()
+        real_group = real_runtime_group(real_snapshot, "newsletter")
+
+        modified_agency = real_snapshot.config.agency.model_copy(
+            update={
+                "memory_store": None,
+                "jobs": real_snapshot.config.agency.jobs.model_copy(update={"pool": 8}),
+            }
+        )
+        mock_snapshot = dc_replace(
+            real_snapshot,
+            config=real_snapshot.config.model_copy(update={"agency": modified_agency}),
+        )
+
+        monkeypatch.setattr(app_mod, "_load_snapshot", lambda: mock_snapshot)
+        monkeypatch.setattr(app_mod, "runtime_group", lambda snap, gid: real_group)
+
+        body = client.get("/newsletter/").text
+        assert "idle" in body and "pool 8" in body
+
+    def test_missing_job_directory_exception_falls_back_to_idle(self, client, monkeypatch):
+        import agency.app as app_mod
+
+        def _raise(config, *, memory_store):
+            raise FileNotFoundError("job store directory missing")
+
+        monkeypatch.setattr(app_mod, "queue_snapshot", _raise)
+        body = client.get("/newsletter/").text
+        assert "idle" in body and "pool 4" in body
+
 
 class TestQueueDueTimeFilter:
     """Unit tests for the queue_due_time Jinja filter."""
@@ -980,15 +1031,13 @@ class TestQueueDueTimeFilter:
         assert queue_due_time(None) == ""
 
     def test_today_formats_as_hhmm(self, monkeypatch):
-        from datetime import timezone
         from agency.app import queue_due_time
-        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-16T12:00:00")
-        due = datetime(2026, 7, 16, 8, 0, 0, tzinfo=timezone.utc)
-        local = due.astimezone()
-        result = queue_due_time(due)
-        # If UTC+8 or beyond, local date may differ; guard gracefully
         import re
-        assert re.fullmatch(r"\d{2}:\d{2}|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}", result)
+        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-16T12:00:00")
+        # Noon local time: local date is always 2026-07-16 on every machine
+        due = datetime(2026, 7, 16, 12, 0, 0).astimezone()
+        result = queue_due_time(due)
+        assert re.fullmatch(r"\d{2}:\d{2}", result)
 
     def test_other_day_formats_with_weekday_prefix(self, monkeypatch):
         from datetime import timezone
