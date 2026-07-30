@@ -1,5 +1,6 @@
 """Agency Dashboard — multi-group agent management interface."""
 
+import logging
 import os
 import re
 import stat
@@ -360,12 +361,18 @@ def install_dispatch(interval: int | None = None, replace: bool = False) -> str 
     return install_timer(str(CONFIG_PATH.resolve()), desired_interval, replace=replace)
 
 
+log = logging.getLogger("agency.app")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     services = refresh_services()
     if services.startup_error is None:
         snapshot = services.config_store.load()
-        drain(snapshot.config, memory_store=snapshot.config.agency.memory_store)
+        try:
+            drain(snapshot.config, memory_store=snapshot.config.agency.memory_store)
+        except Exception:
+            log.exception("startup drain failed")
     yield
 
 
