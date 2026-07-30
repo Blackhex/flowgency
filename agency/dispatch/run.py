@@ -59,18 +59,11 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
 
         log.info("Processing group: %s", group_key)
         paths = resolve_group_paths(group)
-        daily_limit = group.dispatch.daily_limit
 
         logs_root = paths.logs
         today = datetime.now().strftime("%Y-%m-%d")
         log_dir = logs_root / today
         log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Daily limit
-        out_count = len(list(log_dir.glob("*.out")))
-        if out_count >= daily_limit:
-            log.info("  SKIP: daily limit reached (%d/%d)", out_count, daily_limit)
-            continue
 
         for agent_name, agent in group.agents.items():
             for routine in agent.routines:
@@ -88,12 +81,6 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                         routine.condition,
                     )
                     continue
-
-                # Re-check daily limit
-                out_count = len(list(log_dir.glob("*.out")))
-                if out_count >= daily_limit:
-                    log.info("  SKIP: daily limit reached")
-                    break
 
                 should_run = False
                 if at_time:

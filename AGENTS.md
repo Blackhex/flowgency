@@ -47,7 +47,6 @@ groups:
         names: [read, search]
     dispatch:
       enabled: true
-      daily_limit: 20
     agents:
       - name: advisor
         blueprint: advisor

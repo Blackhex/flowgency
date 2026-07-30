@@ -86,7 +86,7 @@ def _make_client(monkeypatch, tmp_path, raw_config):
         "sandbox": {"mode": "restricted", "roots": [str(tmp_path / "repo-root")]},
         "tools": {"mode": "allowlist", "names": ["shell"]},
     }
-    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True, "daily_limit": 12}
+    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
     for agent in raw["groups"]["newsletter"].get("agents", []):
         blueprint_root = library_root / agent["blueprint"]
         blueprint_root.mkdir(parents=True, exist_ok=True)
@@ -169,7 +169,6 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):
             "tool_mode": "allowlist",
             "tool_names": "shell",
             "dispatch_enabled": "on",
-            "daily_limit": "12",
             "workspaces_json": "[]",
         },
         follow_redirects=False,

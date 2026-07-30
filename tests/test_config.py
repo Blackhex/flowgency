@@ -86,7 +86,6 @@ def test_current_defaults_are_explicit(raw_config, config_paths):
     assert group.runtime.sandbox.mode == "unrestricted"
     assert group.runtime.tools.mode == "all"
     assert group.dispatch.enabled is False
-    assert group.dispatch.daily_limit == 20
 
 
 def test_rejects_routine_default_without_routine_context(raw_config, config_paths):
@@ -102,7 +101,6 @@ def test_validate_config_reports_group_dispatch_agents_not_supported(raw_config,
 
     raw_config["groups"]["newsletter"]["dispatch"] = {
         "enabled": False,
-        "daily_limit": 20,
     }
     raw_config["groups"]["newsletter"]["dispatch"]["agents"] = {
         "builder": [{"at": "09:00"}]
@@ -124,7 +122,6 @@ def test_parse_config_rejects_group_dispatch_agents_not_supported(raw_config, co
 
     raw_config["groups"]["newsletter"]["dispatch"] = {
         "enabled": False,
-        "daily_limit": 20,
     }
     raw_config["groups"]["newsletter"]["dispatch"]["agents"] = {
         "builder": [{"at": "09:00"}]
@@ -141,7 +138,6 @@ def test_accepts_supported_group_dispatch_and_routines(raw_config, config_paths)
 
     raw_config["groups"]["newsletter"]["dispatch"] = {
         "enabled": True,
-        "daily_limit": 12,
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -149,7 +145,6 @@ def test_accepts_supported_group_dispatch_and_routines(raw_config, config_paths)
 
     assert not any(issue.field == "groups.newsletter.dispatch.agents" for issue in issues)
     assert parsed.groups["newsletter"].dispatch.enabled is True
-    assert parsed.groups["newsletter"].dispatch.daily_limit == 12
     assert parsed.groups["newsletter"].agents["builder"].routines[0].schedule.at == "09:00"
 
 
@@ -170,7 +165,6 @@ def test_rejects_other_unknown_group_dispatch_keys(raw_config, config_paths):
 
     raw_config["groups"]["newsletter"]["dispatch"] = {
         "enabled": True,
-        "daily_limit": 12,
         "owner": "ops",
     }
 
@@ -928,7 +922,7 @@ def test_parse_config_rejects_malformed_nested_shapes(raw_config, config_paths, 
 # catch_up field on ScheduleRule
 # ---------------------------------------------------------------------------
 
-def _write_minimal_config(tmp_path, *, catch_up=None):
+def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None):
     import yaml
 
     lib = tmp_path / "lib"
@@ -959,6 +953,7 @@ def _write_minimal_config(tmp_path, *, catch_up=None):
                 "workspace_path": str(ws),
                 "path": str(tmp_path / "groups" / "grp"),
                 "default_integration": "copilot",
+                **({"dispatch": {"daily_limit": dispatch_daily_limit}} if dispatch_daily_limit is not None else {}),
                 "agents": [
                     {
                         "name": "product",
@@ -1010,3 +1005,9 @@ def test_malformed_catch_up_is_rejected(tmp_path):
     with pytest.raises(ValidationFailed) as error:
         load_config(config)
     assert any(issue.code == "invalid-dispatch-rule" for issue in error.value.issues)
+
+
+def test_group_dispatch_rejects_daily_limit(tmp_path):
+    config = _write_minimal_config(tmp_path, dispatch_daily_limit=20)
+    with pytest.raises(ValidationFailed):
+        load_config(config)

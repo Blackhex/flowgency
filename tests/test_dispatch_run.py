@@ -82,7 +82,6 @@ def _write_config(
     *,
     routines: list[dict],
     enabled: bool = True,
-    daily_limit: int = 20,
 ) -> None:
     routine_yaml = "".join(
         (
@@ -141,7 +140,6 @@ def _write_config(
         "    default_integration: copilot\n"
         "    dispatch:\n"
         f"      enabled: {str(enabled).lower()}\n"
-        f"      daily_limit: {daily_limit}\n"
         "    agents:\n"
         "      - name: product\n"
         "        blueprint: builder-blueprint\n"

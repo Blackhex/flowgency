@@ -94,7 +94,6 @@ groups:
         names: [read, search]
     dispatch:
       enabled: true
-      daily_limit: 15
     agents:
       - name: builder
         blueprint: builder

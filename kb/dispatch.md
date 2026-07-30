@@ -1,6 +1,6 @@
 # Dispatch And Routines
 
-Agency has one platform-native singleton heartbeat. Global `agency.dispatch.interval` controls how often it checks all groups. Group `dispatch.enabled` and `daily_limit` control whether and how often that group submits work.
+Agency has one platform-native singleton heartbeat. Global `agency.dispatch.interval` controls how often it checks all groups. Group `dispatch.enabled` controls whether that group submits work.
 
 Schedules are instance routines, not prompt files. A routine selects one saved prompt from the effective catalog:
 
@@ -53,10 +53,6 @@ Lateness is measured against the markers the dispatch runner writes:
 an `every` schedule produces no signal, because there is no reference point
 before its first dispatch. Routines that are disabled or carry a `condition` are
 never counted as late, matching what the runner actually fires.
-
-A group that reaches its `dispatch.daily_limit` makes the runner skip the
-remaining routines without writing markers, so an `at` routine whose time has
-passed reads as late even though the runner itself is healthy.
 
 ## Superseded layouts
 

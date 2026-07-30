@@ -39,7 +39,6 @@ class GroupSettingsPatch:
 @dataclass(frozen=True)
 class GroupDispatchPatch:
     enabled: bool
-    daily_limit: int
 
 
 @dataclass(frozen=True)
@@ -54,7 +53,6 @@ class GroupSettingsStatePatch:
     tool_mode: ToolMode = "all"
     tool_names: tuple[str, ...] = ()
     dispatch_enabled: bool = False
-    dispatch_daily_limit: int = 20
     workspaces: tuple[dict[str, Any], ...] = ()
 
 
@@ -70,7 +68,6 @@ class GroupCreateStatePatch:
     tool_mode: ToolMode = "all"
     tool_names: tuple[str, ...] = ()
     dispatch_enabled: bool = False
-    dispatch_daily_limit: int = 20
     workspaces: tuple[dict[str, Any], ...] = ()
 
 
@@ -206,7 +203,6 @@ def create_group_state(
             },
             "dispatch": {
                 "enabled": patch.dispatch_enabled,
-                "daily_limit": patch.dispatch_daily_limit,
             },
             "workspaces": deepcopy(list(patch.workspaces)),
             "agents": [],
@@ -241,7 +237,6 @@ def patch_group_dispatch(
         group = _group(raw, group_id)
         group["dispatch"] = {
             "enabled": patch.enabled,
-            "daily_limit": patch.daily_limit,
         }
 
     return store.patch(expected_revision, apply)
@@ -285,7 +280,6 @@ def patch_group_settings_state(
         if not isinstance(dispatch, dict):
             raise TypeError(f"groups.{group_id}.dispatch must be a mapping")
         dispatch["enabled"] = patch.dispatch_enabled
-        dispatch["daily_limit"] = patch.dispatch_daily_limit
 
         group["workspaces"] = deepcopy(list(patch.workspaces))
 
