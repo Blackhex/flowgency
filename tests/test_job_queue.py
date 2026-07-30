@@ -328,9 +328,18 @@ def test_a_malformed_record_is_reported_rather_than_dropped(queue_fixture, caplo
 
 
 def test_a_finishing_worker_starts_the_next_waiting_job(queue_fixture, monkeypatch):
-    calls = []
-    monkeypatch.setattr("agency.jobs.worker.drain", lambda *a, **k: calls.append(1))
-    monkeypatch.setattr("agency.jobs.worker.execute_job", lambda ref: SimpleNamespace(status="complete"))
-    queue_fixture.enqueue("only", due_at="2026-07-29T08:00:00")
-    worker_main(queue_fixture.worker_argv("only"))
-    assert calls == [1]
+    """The exiting worker's drain is what keeps a backlog moving headlessly."""
+    monkeypatch.setattr(
+        "agency.jobs.worker.execute_job",
+        lambda ref: SimpleNamespace(status="complete"),
+    )
+    monkeypatch.setattr(
+        "agency.jobs.queue.default_launcher", lambda: queue_fixture.launcher
+    )
+    queue_fixture.enqueue("first", status="running", worker_pid=os.getpid())
+    queue_fixture.enqueue("second", due_at="2026-07-29T09:00:00")
+    argv = queue_fixture.worker_argv("first")
+
+    worker_main(argv)
+
+    assert queue_fixture.launcher.launched == ["second"]

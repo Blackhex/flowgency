@@ -101,6 +101,7 @@ def _write_job_record(
     group_id: str = "newsletter",
     job_id: str = "job-1",
     status: str = "queued",
+    due_at: str | None = None,
 ) -> Path:
     job_store = JobStore(group_root.parent.parent / "memory-store")
     workspace_root = group_root.parent.parent / "workspaces" / group_id
@@ -146,7 +147,7 @@ def _write_job_record(
         created_at="2026-07-16T00:00:00+00:00",
     )
     path = job_store.path(group_id, job_id)
-    record = JobRecord.from_spec(spec)
+    record = JobRecord.from_spec(spec, due_at=due_at)
     write_job(path, record)
     if status != "queued":
         transition_job(path, "queued", status)
@@ -530,6 +531,45 @@ def test_waiting_jobs_show_their_position(monkeypatch, tmp_path, raw_config):
 
     assert response.status_code == 200
     assert "1 of 3" in response.text
+
+
+def test_a_position_counts_the_whole_queue_not_just_this_group(
+    monkeypatch, tmp_path, raw_config
+):
+    """The pool is machine-wide, so a position must be too."""
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    research_paths = create_group_environment(tmp_path, "research")
+    other_group = research_paths.state_root
+    (other_group / "logs" / "2026-07-16").mkdir(parents=True, exist_ok=True)
+    raw["groups"]["research"] = {
+        **apply_group_paths({}, research_paths),
+        "name": "Research",
+        "default_integration": "copilot",
+        "agents": deepcopy(raw["groups"]["newsletter"]["agents"]),
+    }
+    _write_yaml(config_path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    _write_job_record(
+        other_group,
+        config_path,
+        group_id="research",
+        job_id="job-earlier",
+        due_at="2026-07-16T08:00:00",
+    )
+    _write_job_record(
+        group_root,
+        config_path,
+        job_id="job-later",
+        due_at="2026-07-16T09:00:00",
+    )
+
+    response = client.get("/newsletter/jobs")
+
+    assert response.status_code == 200
+    assert "job-earlier" not in response.text
+    assert "2 of 2" in response.text
 
 
 def test_a_running_job_has_no_position(monkeypatch, tmp_path, raw_config):
