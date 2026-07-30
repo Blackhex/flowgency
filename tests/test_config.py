@@ -922,3 +922,91 @@ def test_parse_config_rejects_malformed_nested_shapes(raw_config, config_paths, 
         parse_config(raw_config, config_paths["config_path"])
 
     assert any(issue.field == expected_field for issue in excinfo.value.issues)
+
+
+# ---------------------------------------------------------------------------
+# catch_up field on ScheduleRule
+# ---------------------------------------------------------------------------
+
+def _write_minimal_config(tmp_path, *, catch_up=None):
+    import yaml
+
+    lib = tmp_path / "lib"
+    lib.mkdir(exist_ok=True)
+    ws = tmp_path / "workspace"
+    ws.mkdir(exist_ok=True)
+    prompts = tmp_path / "prompts"
+    prompts.mkdir(exist_ok=True)
+
+    schedule = {"at": "08:00"}
+    if catch_up is not None:
+        schedule["catch_up"] = catch_up
+
+    raw = {
+        "schema_version": 4,
+        "agency": {
+            "title": "Test",
+            "default_group": "grp",
+            "ai_backend": "copilot",
+            "agent_library": str(lib),
+            "compilation_cache": str(tmp_path / "cache"),
+            "memory_store": str(tmp_path / "memory"),
+            "prompt_store": str(prompts),
+        },
+        "groups": {
+            "grp": {
+                "name": "Grp",
+                "workspace_path": str(ws),
+                "path": str(tmp_path / "groups" / "grp"),
+                "default_integration": "copilot",
+                "agents": [
+                    {
+                        "name": "product",
+                        "blueprint": "product-bp",
+                        "integration": "copilot",
+                        "routines": [
+                            {
+                                "id": "daily",
+                                "prompt": {"scope": "blueprint", "name": "daily"},
+                                "schedule": schedule,
+                                "memory": {"scope": "routine"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        },
+    }
+
+    config = tmp_path / "config.yaml"
+    config.write_text(yaml.dump(raw))
+    return config
+
+
+def load_config(config_path):
+    import yaml
+    from agency.configuration.models import parse_config
+
+    raw = yaml.safe_load(config_path.read_text())
+    return parse_config(raw, config_path)
+
+
+def test_schedule_accepts_a_catch_up_value(tmp_path):
+    config = _write_minimal_config(tmp_path, catch_up="always")
+    parsed = load_config(config)
+    routine = parsed.groups["grp"].agents["product"].routines[0]
+    assert routine.schedule.catch_up == "always"
+
+
+def test_schedule_catch_up_defaults_to_none_in_the_model(tmp_path):
+    config = _write_minimal_config(tmp_path)
+    parsed = load_config(config)
+    routine = parsed.groups["grp"].agents["product"].routines[0]
+    assert routine.schedule.catch_up is None
+
+
+def test_malformed_catch_up_is_rejected(tmp_path):
+    config = _write_minimal_config(tmp_path, catch_up="sometimes")
+    with pytest.raises(ValidationFailed) as error:
+        load_config(config)
+    assert any(issue.code == "invalid-dispatch-rule" for issue in error.value.issues)
