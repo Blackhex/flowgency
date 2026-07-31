@@ -764,10 +764,12 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
         str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()),
     )
     assert spec.skill_arguments == ()
-    assert spec.task_input == build_prompt_task_input(
+    expected_base = build_prompt_task_input(
         "Run it.\n",
         arguments=("--mode=review", "literal value"),
     )
+    assert spec.task_input.startswith(expected_base)
+    assert "## Agency reporting protocol" in spec.task_input
 
 
 def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
@@ -797,10 +799,12 @@ def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
 
     record = read_job(handle.path)
     assert record.spec.skill_arguments == ()
-    assert record.spec.task_input == build_prompt_task_input(
+    expected_base = build_prompt_task_input(
         "Run it.\n",
         arguments=("--mode=review", "literal value"),
     )
+    assert record.spec.task_input.startswith(expected_base)
+    assert "## Agency reporting protocol" in record.spec.task_input
 
 
 def test_decision_jobs_keep_empty_skill_arguments(tmp_path):
@@ -1092,6 +1096,53 @@ def test_resolution_does_not_infer_routine_or_skill_from_prompt_source_path(tmp_
             prompt_store=PromptStore(tmp_path / "prompts"),
             integrations={"copilot": FakeIntegration()},
         )
+
+
+# --- Reporting protocol wiring ---
+
+
+def _resolve(tmp_path, **request_kwargs):
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
+    return resolve_job_request(
+        JobRequest(
+            config_path=config,
+            group_key="newsletter",
+            agent_name="builder",
+            **request_kwargs,
+        ),
+        config_store=ConfigStore(config),
+        library=BlueprintLibrary(tmp_path / "agent-library"),
+        cache=CompilationCache(
+            tmp_path / "compiled-agents", {"copilot": _projector()}
+        ),
+        prompt_store=PromptStore(tmp_path / "prompts"),
+        integrations={"copilot": FakeIntegration()},
+    )
+
+
+def test_decision_task_input_carries_the_reporting_protocol(tmp_path):
+    spec = _resolve(tmp_path, trigger="decision", task_input="Decide what changed.")
+
+    assert spec.task_input.startswith("Decide what changed.")
+    assert "## Agency reporting protocol" in spec.task_input
+    assert ".agency/outbox/observations" in spec.task_input
+
+
+def test_ad_hoc_prompt_task_input_carries_the_reporting_protocol(tmp_path):
+    spec = _resolve(tmp_path, trigger="manual_prompt", task_input="Run the suite.")
+
+    assert spec.task_input.startswith("Run the suite.")
+    assert ".agency/outbox/proposals" in spec.task_input
+    assert ".agency/memory" in spec.task_input
+
+
+def test_reporting_protocol_reports_the_granted_tool_policy(tmp_path):
+    """`_write_config` grants `allowlist [shell, write]` to the builder agent."""
+    spec = _resolve(tmp_path, trigger="decision", task_input="Decide.")
+
+    assert spec.runtime_policy.tool_mode == "allowlist"
+    assert "shell, write" in spec.task_input
 
 
 # --- Pool-aware submission ---
