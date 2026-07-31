@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import os
 import stat
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from .outbox import OutboxPaths
 
 MAX_RECORDS_PER_KIND = 20
 MAX_RECORD_BYTES = 65536
+MAX_OUTBOX_ENTRIES_PER_KIND = 100
 
 
 @dataclass(frozen=True)
@@ -55,7 +57,17 @@ def _validate_kind(
     accepted: list[RecordCandidate],
     rejected: list[OutboxRejection],
 ) -> None:
-    entries = sorted(directory.iterdir(), key=lambda item: item.name.casefold())
+    scanned = list(itertools.islice(directory.iterdir(), MAX_OUTBOX_ENTRIES_PER_KIND + 1))
+    if len(scanned) > MAX_OUTBOX_ENTRIES_PER_KIND:
+        rejected.append(
+            OutboxRejection(
+                kind=kind,
+                source_name=directory.name,
+                reason=f"too many entries: more than {MAX_OUTBOX_ENTRIES_PER_KIND}",
+            )
+        )
+        return
+    entries = sorted(scanned, key=lambda item: item.name.casefold())
     markdown_entries = [item for item in entries if item.suffix.casefold() == ".md"]
     if len(markdown_entries) > MAX_RECORDS_PER_KIND:
         rejected.append(
@@ -97,7 +109,13 @@ def _validate_kind(
             )
             continue
 
-        raw = entry.read_text(encoding="utf-8", errors="replace")
+        try:
+            raw = entry.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            rejected.append(
+                OutboxRejection(kind, entry.name, "record is not valid UTF-8")
+            )
+            continue
         meta, body = parse_frontmatter(raw)
         if raw.startswith("---") and not meta:
             rejected.append(
@@ -120,11 +138,12 @@ def _validate_kind(
                 continue
             executor = str(meta.get("execution_agent", "")).strip()
             if executor not in writable_agents:
+                executor_truncated = executor[:80]
                 rejected.append(
                     OutboxRejection(
                         kind,
                         entry.name,
-                        f"execution_agent '{executor}' is not a writable, "
+                        f"execution_agent '{executor_truncated}' is not a writable, "
                         "executable configured agent",
                     )
                 )

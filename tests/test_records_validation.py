@@ -7,6 +7,7 @@ import pytest
 
 from agency.records.outbox import create_outbox
 from agency.records.validation import (
+    MAX_OUTBOX_ENTRIES_PER_KIND,
     MAX_RECORD_BYTES,
     MAX_RECORDS_PER_KIND,
     validate_outbox,
@@ -149,3 +150,61 @@ def test_symlinked_record_is_rejected(outbox, tmp_path: Path):
 
     assert not result.ok
     assert "not a regular file" in result.rejected[0].reason
+
+
+def test_too_many_entries_with_non_markdown_files_are_rejected(outbox):
+    # Create more than MAX_OUTBOX_ENTRIES_PER_KIND non-.md files
+    # This tests the fix for memory exhaustion: the code should reject
+    # the kind before materializing all entries, not after filtering to .md files
+    for index in range(MAX_OUTBOX_ENTRIES_PER_KIND + 5):
+        write(outbox.observations / f"entry_{index:03d}.txt", "not markdown")
+
+    result = validate_outbox(outbox, writable_agents=WRITABLE)
+
+    assert not result.ok
+    # The entire kind should be rejected due to too many entries
+    assert len([r for r in result.rejected if r.kind == "observation"]) == 1
+    rejection = [r for r in result.rejected if r.kind == "observation"][0]
+    assert "too many entries: more than" in rejection.reason
+    # No records should be accepted
+    assert len(result.accepted) == 0
+
+
+def test_proposal_with_long_executor_name_is_truncated_in_rejection(outbox):
+    long_executor = "a" * 150  # Executor name longer than 80 chars
+    proposal = (
+        f"---\n"
+        f"execution_agent: {long_executor}\n"
+        f"questions:\n"
+        f"  - id: fix\n"
+        f"    prompt: Fix?\n"
+        f"    type: boolean\n"
+        f"---\n\n"
+        f"**Proposal body.**\n"
+    )
+    write(outbox.proposals / "p.md", proposal)
+
+    result = validate_outbox(outbox, writable_agents=WRITABLE)
+
+    assert not result.ok
+    reason = result.rejected[0].reason
+    # The reason should contain a truncated executor (max 80 chars)
+    assert "execution_agent" in reason
+    # The truncated version should be in the reason
+    assert "a" * 80 in reason
+    # The full oversized executor should NOT be in the reason
+    assert long_executor not in reason
+    # Ensure it's actually truncated to 80 chars, not more
+    assert reason.count("a" * 80) >= 1
+
+
+def test_record_with_invalid_utf8_is_rejected(outbox):
+    # Write a file with genuinely invalid UTF-8 bytes
+    invalid_file = outbox.observations / "invalid.md"
+    invalid_file.write_bytes(b"---\nx: 1\n---\n\n\xff\xfe body")
+
+    result = validate_outbox(outbox, writable_agents=WRITABLE)
+
+    assert not result.ok
+    assert "record is not valid UTF-8" in result.rejected[0].reason
+
