@@ -47,6 +47,7 @@ Create `tests/test_records_frontmatter.py`:
 ```python
 from __future__ import annotations
 
+import subprocess
 import sys
 
 from agency.records.frontmatter import (
@@ -95,11 +96,14 @@ def test_slugify_returns_empty_string_when_nothing_survives():
 
 
 def test_importing_frontmatter_does_not_import_the_web_app():
-    for module in ("agency.app", "agency.records.frontmatter"):
-        sys.modules.pop(module, None)
-    import agency.records.frontmatter  # noqa: F401
+    """The worker imports this module; it must not drag in the FastAPI layer."""
+    code = (
+        "import sys, agency.records.frontmatter; "
+        "sys.exit(1 if 'agency.app' in sys.modules else 0)"
+    )
+    completed = subprocess.run([sys.executable, "-c", code], capture_output=True)
 
-    assert "agency.app" not in sys.modules
+    assert completed.returncode == 0, completed.stderr.decode()
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1244,19 +1248,59 @@ This single site covers every trigger — routine, saved prompt, ad hoc, decisio
 
 - [ ] **Step 7: Add the resolution regression test**
 
-Append to `tests/test_records_protocol.py`:
+This proves the claim that one wiring point covers every trigger, so it exercises
+`resolve_job_request` for two different triggers rather than inspecting source text.
+Add to `tests/test_job_submission.py`, reusing that module's existing
+`_write_config`, `_write_blueprint`, `_projector`, and `FakeIntegration` helpers:
 
 ```python
-def test_resolution_appends_the_protocol_to_every_job_spec():
-    """Guards the single wiring point in agency/jobs/resolution.py."""
-    import inspect
+def _resolve(tmp_path, **request_kwargs):
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
+    return resolve_job_request(
+        JobRequest(
+            config_path=config,
+            group_key="newsletter",
+            agent_name="builder",
+            **request_kwargs,
+        ),
+        config_store=ConfigStore(config),
+        library=BlueprintLibrary(tmp_path / "agent-library"),
+        cache=CompilationCache(
+            tmp_path / "compiled-agents", {"copilot": _projector()}
+        ),
+        prompt_store=PromptStore(tmp_path / "prompts"),
+        integrations={"copilot": FakeIntegration()},
+    )
 
-    from agency.jobs import resolution
 
-    source = inspect.getsource(resolution)
-    assert "append_reporting_protocol(" in source
-    assert source.count("task_input=append_reporting_protocol(") == 1
+def test_decision_task_input_carries_the_reporting_protocol(tmp_path):
+    spec = _resolve(tmp_path, trigger="decision", task_input="Decide what changed.")
+
+    assert spec.task_input.startswith("Decide what changed.")
+    assert "## Agency reporting protocol" in spec.task_input
+    assert ".agency/outbox/observations" in spec.task_input
+
+
+def test_ad_hoc_prompt_task_input_carries_the_reporting_protocol(tmp_path):
+    spec = _resolve(tmp_path, trigger="manual_prompt", task_input="Run the suite.")
+
+    assert spec.task_input.startswith("Run the suite.")
+    assert ".agency/outbox/proposals" in spec.task_input
+    assert ".agency/memory" in spec.task_input
+
+
+def test_reporting_protocol_reports_the_granted_tool_policy(tmp_path):
+    """`_write_config` grants `allowlist [shell, write]` to the builder agent."""
+    spec = _resolve(tmp_path, trigger="decision", task_input="Decide.")
+
+    assert spec.runtime_policy.tool_mode == "allowlist"
+    assert "shell, write" in spec.task_input
 ```
+
+`_write_config` configures a single agent named `builder` on the `copilot`
+integration with `tools: allowlist [shell, write]`, which is why the third test
+asserts that exact string.
 
 - [ ] **Step 8: Run the full suite**
 
