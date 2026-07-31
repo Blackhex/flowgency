@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,7 +15,8 @@ from agency.fs.atomic import atomic_write_text
 from .frontmatter import extract_display_title, slugify
 from .validation import OutboxValidation, RecordCandidate
 
-_SLUG_PATTERN = re.compile(r"^[a-z0-9-]{1,60}$")
+_SLUG_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$")
+_MAX_COLLISION_SUFFIX = 200
 
 # Agency owns these; an author-supplied value is discarded.
 _STAMPED_FIELDS = ("agent", "date", "status")
@@ -36,15 +38,35 @@ def _record_slug(candidate: RecordCandidate, job_id: str) -> str:
 
 
 def _unique_path(directory: Path, date_prefix: str, slug: str) -> Path:
+    # Try the base name first
     candidate = directory / f"{date_prefix}-{slug}.md"
-    if not candidate.exists():
+    try:
+        fd = os.open(str(candidate), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        # Verify path confinement
+        if candidate.parent != directory:
+            raise ValueError(f"record destination escaped its directory: {candidate}")
         return candidate
-    suffix = 2
-    while True:
+    except FileExistsError:
+        pass
+
+    # Try suffixes up to _MAX_COLLISION_SUFFIX
+    for suffix in range(2, _MAX_COLLISION_SUFFIX + 1):
         candidate = directory / f"{date_prefix}-{slug}-{suffix}.md"
-        if not candidate.exists():
+        try:
+            fd = os.open(str(candidate), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.close(fd)
+            # Verify path confinement
+            if candidate.parent != directory:
+                raise ValueError(f"record destination escaped its directory: {candidate}")
             return candidate
-        suffix += 1
+        except FileExistsError:
+            continue
+
+    raise RuntimeError(
+        f"cannot create record in {directory}: "
+        f"all {_MAX_COLLISION_SUFFIX} collision suffixes exhausted for {date_prefix}-{slug}"
+    )
 
 
 def _render(meta: dict, body: str) -> str:
@@ -83,7 +105,15 @@ def ingest_records(
         meta["status"] = "open"
 
         path = _unique_path(directory, date_prefix, _record_slug(candidate, job_id))
-        atomic_write_text(path, _render(meta, candidate.body))
+        try:
+            atomic_write_text(path, _render(meta, candidate.body))
+        except Exception:
+            # Clean up the empty placeholder if the write fails
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            raise
         written.append(IngestedRecord(kind=candidate.kind, path=path))
 
     return tuple(written)
