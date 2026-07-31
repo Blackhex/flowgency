@@ -867,6 +867,13 @@ def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, 
 
     with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
+        # Must be computed under the same frozen clock as the rendered page,
+        # otherwise this compares a page built at 2026-07-16 12:00 against
+        # health recomputed at real wall-clock time.
+        expected_attention = len(app_mod.build_health_items(
+            app_mod.get_group("newsletter"),
+            [a for a in app_mod.build_dashboard_fleet(app_mod.get_group("newsletter"))],
+        ))
 
     # advisor is overdue and NOT running → counts as 1 attention
     # writer has a running job (even if its last job later fails), NOT counted in queue
@@ -877,10 +884,7 @@ def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, 
     footer_match = re.search(r"(\d+) needs attention", text)
     queue_items = text.count('class="text-xs font-mono text-amber-700') + text.count('class="text-xs font-mono text-rose-700')
     if footer_match:
-        assert int(footer_match.group(1)) == len(app_mod.build_health_items(
-            app_mod.get_group("newsletter"),
-            [a for a in app_mod.build_dashboard_fleet(app_mod.get_group("newsletter"))],
-        ))
+        assert int(footer_match.group(1)) == expected_attention
 
 
 def test_startup_drain_failure_does_not_prevent_startup(monkeypatch):
