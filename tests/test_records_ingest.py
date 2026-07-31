@@ -129,3 +129,60 @@ def test_ingest_creates_missing_target_directories(tmp_path: Path):
     )
 
     assert written[0].path.is_file()
+
+
+def test_reservation_reserves_the_filename_atomically(dirs):
+    """Verify that choosing a destination reserves it, preventing concurrent overwrite."""
+    observations, _ = dirs
+    
+    # Ingest two candidates with the same slug in the same call
+    written = ingest(dirs, candidate(), candidate())
+    
+    # First should get the base name, second should get -2 (not reuse the base)
+    assert written[0].path.name == "2026-07-31-suite-is-red.md"
+    assert written[1].path.name == "2026-07-31-suite-is-red-2.md"
+    
+    # Both files should exist and contain content
+    assert written[0].path.exists()
+    assert written[1].path.exists()
+
+
+def test_exhausting_collision_cap_raises_runtime_error(dirs):
+    """Verify that exhausting the collision suffix cap raises RuntimeError."""
+    from agency.records.ingest import _MAX_COLLISION_SUFFIX
+    
+    observations, _ = dirs
+    base_name = "2026-07-31-suite-is-red"
+    
+    # Pre-create the base name and all suffixes up to _MAX_COLLISION_SUFFIX
+    (observations / f"{base_name}.md").write_text("existing", encoding="utf-8")
+    for i in range(2, _MAX_COLLISION_SUFFIX + 1):
+        (observations / f"{base_name}-{i}.md").write_text("existing", encoding="utf-8")
+    
+    # Trying to ingest should raise RuntimeError
+    with pytest.raises(RuntimeError, match="all.*collision suffixes exhausted"):
+        ingest(dirs, candidate())
+
+
+def test_slug_with_leading_or_trailing_hyphen_falls_back_to_title(dirs):
+    """Verify that slugs with leading or trailing hyphens are treated as invalid."""
+    written_leading = ingest(dirs, candidate(meta={"slug": "-invalid"}))
+    assert written_leading[0].path.name == "2026-07-31-suite-is-red.md"
+    
+    written_trailing = ingest(dirs, candidate(meta={"slug": "invalid-"}))
+    assert written_trailing[0].path.name == "2026-07-31-suite-is-red-2.md"
+
+
+def test_successful_ingest_leaves_no_empty_placeholders(dirs):
+    """Verify that a successful ingest leaves no empty placeholder files."""
+    observations, _ = dirs
+    
+    written = ingest(dirs, candidate(), candidate(), candidate())
+    
+    # All ingested paths should have non-empty content
+    for ingested in written:
+        content = ingested.path.read_text(encoding="utf-8")
+        assert len(content) > 0, f"Placeholder file {ingested.path} has empty content"
+        # Verify it contains YAML frontmatter
+        assert content.startswith("---"), f"File {ingested.path} does not start with frontmatter"
+
