@@ -1,6 +1,7 @@
 from .frontmatter import extract_display_title, parse_frontmatter, slugify
 from .ingest import IngestedRecord, ingest_records
 from .outbox import OutboxPaths, create_outbox
+from .protocol import append_reporting_protocol, build_reporting_protocol
 from .validation import (
     MAX_RECORD_BYTES,
     MAX_RECORDS_PER_KIND,
@@ -20,3 +21,4 @@ __all__ += [
     "validate_outbox",
 ]
 __all__ += ["IngestedRecord", "ingest_records"]
+__all__ += ["append_reporting_protocol", "build_reporting_protocol"]

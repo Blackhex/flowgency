@@ -18,6 +18,7 @@ from agency.memory.selectors import (
     select_effective_memory,
 )
 from agency.prompts import PromptNotFoundError, PromptStore, build_prompt_task_input, resolve_catalog_prompt
+from agency.records.protocol import append_reporting_protocol
 
 from .models import BlueprintRef, JobRequest, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
 
@@ -283,7 +284,11 @@ def resolve_job_request(
         routine_id=routine.id if routine is not None else None,
         skill=None,
         skill_arguments=(),
-        task_input=task_input,
+        task_input=append_reporting_protocol(
+            task_input,
+            tool_mode=runtime_policy.tools.mode,
+            tool_names=tuple(runtime_policy.tools.names),
+        ),
         runtime_policy=RuntimePolicySnapshot.from_effective_policy(runtime_policy),
         memory=MemoryBinding(
             selector=resolved_memory.selector.model_dump(mode="python"),
