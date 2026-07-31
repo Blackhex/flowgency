@@ -37,31 +37,32 @@ def _record_slug(candidate: RecordCandidate, job_id: str) -> str:
     return slug or slugify(job_id) or "record"
 
 
-def _unique_path(directory: Path, date_prefix: str, slug: str) -> Path:
-    # Try the base name first
-    candidate = directory / f"{date_prefix}-{slug}.md"
+def _reserve(directory: Path, name: str) -> Path | None:
+    """Atomically claim `name` in `directory`, or return None if it is taken.
+
+    The confinement check runs before the file is created, so a future widening
+    of `_SLUG_PATTERN` cannot create anything outside `directory`.
+    """
+    candidate = directory / name
+    if candidate.parent != directory:
+        raise ValueError(f"record destination escaped its directory: {candidate}")
     try:
         fd = os.open(str(candidate), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        os.close(fd)
-        # Verify path confinement
-        if candidate.parent != directory:
-            raise ValueError(f"record destination escaped its directory: {candidate}")
-        return candidate
     except FileExistsError:
-        pass
+        return None
+    os.close(fd)
+    return candidate
 
-    # Try suffixes up to _MAX_COLLISION_SUFFIX
+
+def _unique_path(directory: Path, date_prefix: str, slug: str) -> Path:
+    reserved = _reserve(directory, f"{date_prefix}-{slug}.md")
+    if reserved is not None:
+        return reserved
+
     for suffix in range(2, _MAX_COLLISION_SUFFIX + 1):
-        candidate = directory / f"{date_prefix}-{slug}-{suffix}.md"
-        try:
-            fd = os.open(str(candidate), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.close(fd)
-            # Verify path confinement
-            if candidate.parent != directory:
-                raise ValueError(f"record destination escaped its directory: {candidate}")
-            return candidate
-        except FileExistsError:
-            continue
+        reserved = _reserve(directory, f"{date_prefix}-{slug}-{suffix}.md")
+        if reserved is not None:
+            return reserved
 
     raise RuntimeError(
         f"cannot create record in {directory}: "
