@@ -10,7 +10,11 @@
 
 ## Global Constraints
 
-- Run tests from the worktree root: `.venv/Scripts/python -m pytest tests/ -q`
+- Run tests from the worktree root: `python -m pytest tests/ -q`. There is no
+  `.venv` in this repository despite what `AGENTS.md` says; the interpreter on
+  `PATH` is Python 3.13. The full suite takes about five minutes, so run the
+  focused test file while iterating and the full suite once before committing.
+- Baseline before this plan: 1630 passed, 2 skipped.
 - Work happens in the worktree `.worktrees/agent-reporting-protocol` on branch `agent-reporting-protocol`.
 - Commit messages follow Conventional Commits; subject ≤ 72 chars, imperative, lowercase, no trailing period; body wrapped at 72.
 - No new third-party dependencies.
@@ -108,7 +112,7 @@ def test_importing_frontmatter_does_not_import_the_web_app():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_frontmatter.py -v`
+Run: `python -m pytest tests/test_records_frontmatter.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records'`
 
 - [ ] **Step 3: Create the package and module**
@@ -181,7 +185,7 @@ def slugify(value: str) -> str:
 
 - [ ] **Step 4: Run the new test**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_frontmatter.py -v`
+Run: `python -m pytest tests/test_records_frontmatter.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Re-point `agency/app.py` at the shared module**
@@ -196,7 +200,7 @@ Leave every call site unchanged — the names stay in `agency.app`'s namespace, 
 
 - [ ] **Step 6: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 Expected: PASS, same count as the pre-task baseline.
 
 - [ ] **Step 7: Commit**
@@ -293,7 +297,7 @@ def test_create_outbox_rejects_memory_file_names_with_separators(tmp_path: Path)
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_outbox.py -v`
+Run: `python -m pytest tests/test_records_outbox.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records.outbox'`
 
 - [ ] **Step 3: Implement the module**
@@ -371,7 +375,7 @@ __all__ += ["OutboxPaths", "create_outbox"]
 
 - [ ] **Step 5: Run the tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_outbox.py -v`
+Run: `python -m pytest tests/test_records_outbox.py -v`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
@@ -561,7 +565,7 @@ def test_symlinked_record_is_rejected(outbox, tmp_path: Path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_validation.py -v`
+Run: `python -m pytest tests/test_records_validation.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records.validation'`
 
 - [ ] **Step 3: Implement the module**
@@ -755,7 +759,7 @@ __all__ += [
 
 - [ ] **Step 5: Run the tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_validation.py -v`
+Run: `python -m pytest tests/test_records_validation.py -v`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
@@ -922,7 +926,7 @@ def test_ingest_creates_missing_target_directories(tmp_path: Path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_ingest.py -v`
+Run: `python -m pytest tests/test_records_ingest.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records.ingest'`
 
 - [ ] **Step 3: Implement the module**
@@ -1033,7 +1037,7 @@ __all__ += ["IngestedRecord", "ingest_records"]
 
 - [ ] **Step 5: Run the tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_ingest.py -v`
+Run: `python -m pytest tests/test_records_ingest.py -v`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
@@ -1128,7 +1132,7 @@ def test_append_is_idempotent():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_protocol.py -v`
+Run: `python -m pytest tests/test_records_protocol.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records.protocol'`
 
 - [ ] **Step 3: Implement the module**
@@ -1223,7 +1227,7 @@ __all__ += ["append_reporting_protocol", "build_reporting_protocol"]
 
 - [ ] **Step 5: Run the module tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_protocol.py -v`
+Run: `python -m pytest tests/test_records_protocol.py -v`
 Expected: PASS
 
 - [ ] **Step 6: Wire it into job resolution**
@@ -1304,7 +1308,7 @@ asserts that exact string.
 
 - [ ] **Step 8: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 Expected: PASS. If a job-resolution test asserts an exact `task_input` string, update that assertion to check `startswith` on the original text plus presence of the protocol marker.
 
 - [ ] **Step 9: Commit**
@@ -1418,7 +1422,7 @@ def test_all_mode_is_unchanged(tmp_path: Path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_reporting_tool_grant.py -v`
+Run: `python -m pytest tests/test_reporting_tool_grant.py -v`
 Expected: FAIL with `AttributeError: type object 'BaseIntegration' has no attribute 'reporting_tools'`
 
 - [ ] **Step 3: Declare the attribute on the base class**
@@ -1462,12 +1466,12 @@ with:
 
 - [ ] **Step 5: Run the tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_reporting_tool_grant.py -v`
+Run: `python -m pytest tests/test_reporting_tool_grant.py -v`
 Expected: PASS
 
 - [ ] **Step 6: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 Expected: PASS. Existing integration-contract tests that assert an exact `--allow-tool` sequence for Copilot need updating to include the trailing `write`.
 
 - [ ] **Step 7: Commit**
@@ -1582,7 +1586,7 @@ def test_subdirectories_in_the_memory_directory_are_rejected(launch, tmp_path: P
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_memory_round_trip.py -v`
+Run: `python -m pytest tests/test_memory_round_trip.py -v`
 Expected: FAIL with `ImportError: cannot import name 'copy_outbox_memory_to_stage'`
 
 - [ ] **Step 3: Implement the copy-back helper**
@@ -1623,7 +1627,7 @@ __all__ += ["copy_outbox_memory_to_stage"]
 
 - [ ] **Step 4: Run the tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_memory_round_trip.py -v`
+Run: `python -m pytest tests/test_memory_round_trip.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit the helper**
@@ -1708,7 +1712,7 @@ def test_unknown_group_yields_an_empty_set(raw_config):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_worker.py -v`
+Run: `python -m pytest tests/test_records_worker.py -v`
 Expected: FAIL with `ImportError: cannot import name 'writable_agent_names'`
 
 - [ ] **Step 3: Implement the helper**
@@ -1739,7 +1743,7 @@ def writable_agent_names(config, group_key: str) -> frozenset[str]:
 
 - [ ] **Step 4: Run the helper tests**
 
-Run: `.venv/Scripts/python -m pytest tests/test_records_worker.py -v`
+Run: `python -m pytest tests/test_records_worker.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Wire the outbox into execution**
@@ -1845,7 +1849,7 @@ Then extend the existing success summary so the operator can see what was filed.
 
 - [ ] **Step 7: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 Expected: PASS
 
 - [ ] **Step 8: Commit**
@@ -1884,6 +1888,15 @@ decision execution only; it never prevents an agent from recording an
 observation, creating a proposal, or updating its own memory.
 ```
 
+Then fix the stale Development block at `AGENTS.md:106-109`. There is no `.venv`
+in this repository, so every agent told to run `.venv/Scripts/python` reports a
+false blocker — one already did. Replace the block with:
+
+```text
+python -m pytest tests/ -q
+python -m agency.app
+```
+
 - [ ] **Step 2: Mirror it in `kb/configuration.md`**
 
 Append to the paragraph at line 20:
@@ -1913,12 +1926,12 @@ with:
 
 - [ ] **Step 4: Verify the skill test still passes**
 
-Run: `.venv/Scripts/python -m pytest tests/test_agency_setup_skill.py -v`
+Run: `python -m pytest tests/test_agency_setup_skill.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `.venv/Scripts/python -m pytest tests/ -q`
+Run: `python -m pytest tests/ -q`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
