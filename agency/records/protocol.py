@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from agency.proposals import SUPPORTED_QUESTION_TYPES
+from agency.records.validation import MAX_RECORD_BYTES, MAX_RECORDS_PER_KIND
+
 from .outbox import (
     OUTBOX_RELATIVE_MEMORY,
     OUTBOX_RELATIVE_OBSERVATIONS,
@@ -30,6 +33,7 @@ def build_reporting_protocol(
     tool_mode: str,
     tool_names: tuple[str, ...],
 ) -> str:
+    sorted_types = ", ".join(sorted(SUPPORTED_QUESTION_TYPES))
     return "\n".join(
         [
             _MARKER,
@@ -47,9 +51,18 @@ def build_reporting_protocol(
             "Agency assigns the `agent`, `date`, and `status` fields and the file",
             "name, so anything you set for those is discarded.",
             "",
+            "Record file requirements: each file must have a `.md` extension,",
+            f"be under {MAX_RECORD_BYTES} bytes, contain valid UTF-8 text, and have",
+            "a non-empty body. Write files directly into the listed directories;",
+            f"subdirectories are rejected. At most {MAX_RECORDS_PER_KIND} records per",
+            "directory; if you exceed this, Agency rejects the entire directory.",
+            "",
             "A proposal additionally requires `execution_agent` naming a",
             "configured agent that is allowed to write, and a non-empty",
-            "`questions` list whose entries each have `id`, `prompt`, and `type`.",
+            "`questions` list whose entries each have a unique non-empty `id`,",
+            f"a non-empty `prompt`, and a `type` in: {sorted_types}.",
+            "A question of type `choice` additionally requires a non-empty `options`",
+            "list.",
             "",
             "The memory directory is seeded with your current memory. Edit those",
             "files to change what you remember; leave them alone to keep it.",

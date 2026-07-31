@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from agency.proposals import SUPPORTED_QUESTION_TYPES
 from agency.records.outbox import (
     OUTBOX_RELATIVE_MEMORY,
     OUTBOX_RELATIVE_OBSERVATIONS,
     OUTBOX_RELATIVE_PROPOSALS,
 )
 from agency.records.protocol import append_reporting_protocol, build_reporting_protocol
+from agency.records.validation import MAX_RECORD_BYTES, MAX_RECORDS_PER_KIND
 
 
 def test_protocol_names_every_outbox_directory():
@@ -19,9 +21,7 @@ def test_protocol_names_every_outbox_directory():
 def test_protocol_states_that_agency_assigns_identity_fields():
     text = build_reporting_protocol(tool_mode="all", tool_names=())
 
-    assert "agent" in text
-    assert "date" in text
-    assert "status" in text
+    assert "Agency assigns the `agent`, `date`, and `status` fields" in text
 
 
 def test_protocol_reports_an_allowlisted_tool_policy():
@@ -56,3 +56,70 @@ def test_append_is_idempotent():
     twice = append_reporting_protocol(once, tool_mode="all", tool_names=())
 
     assert once == twice
+
+
+def test_protocol_requires_markdown_extension():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "`.md`" in text
+
+
+def test_protocol_states_max_record_byte_limit():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert str(MAX_RECORD_BYTES) in text
+
+
+def test_protocol_states_max_records_per_kind_limit():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert str(MAX_RECORDS_PER_KIND) in text
+
+
+def test_protocol_warns_exceeding_record_limit_rejects_entire_directory():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "rejects the entire directory" in text or "rejects the whole directory" in text
+
+
+def test_protocol_forbids_subdirectories():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "subdirectories are rejected" in text or "subdirectories" in text
+
+
+def test_protocol_lists_all_supported_question_types():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    for question_type in SUPPORTED_QUESTION_TYPES:
+        assert question_type in text
+
+
+def test_protocol_requires_non_empty_options_for_choice_questions():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "choice" in text and "options" in text
+
+
+def test_protocol_requires_unique_non_empty_question_id():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "unique non-empty `id`" in text
+
+
+def test_protocol_requires_non_empty_question_prompt():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "non-empty `prompt`" in text
+
+
+def test_protocol_requires_utf8_encoding():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "UTF-8" in text or "utf-8" in text or "UTF8" in text
+
+
+def test_protocol_requires_non_empty_body():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "non-empty body" in text
