@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from agency.proposals import SUPPORTED_QUESTION_TYPES
 from agency.records.outbox import (
+    MAX_MEMORY_FILE_BYTES,
+    MAX_MEMORY_FILES,
     OUTBOX_RELATIVE_MEMORY,
     OUTBOX_RELATIVE_OBSERVATIONS,
     OUTBOX_RELATIVE_PROPOSALS,
@@ -22,6 +24,27 @@ def test_protocol_states_that_agency_assigns_identity_fields():
     text = build_reporting_protocol(tool_mode="all", tool_names=())
 
     assert "Agency assigns the `agent`, `date`, and `status` fields" in text
+
+
+def test_protocol_states_that_unknown_front_matter_is_dropped():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "Agency does not understand are dropped" in text
+
+
+def test_protocol_describes_partial_ingest_and_the_failed_run():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert "files every record that passes validation" in text
+    assert "still fails" in text
+    assert "names each rejection" in text
+
+
+def test_protocol_states_the_memory_limits():
+    text = build_reporting_protocol(tool_mode="all", tool_names=())
+
+    assert str(MAX_MEMORY_FILES) in text
+    assert str(MAX_MEMORY_FILE_BYTES) in text
 
 
 def test_protocol_reports_an_allowlisted_tool_policy():
