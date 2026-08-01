@@ -78,17 +78,28 @@ runtime:
         tools: []                                            # reachable, untouchable
 ```
 
-A rule is `{path?, tools}`. With a `path` it grants those tools on that path;
-without one it governs tools that do not act on a path at all. Every tool has
-exactly one rule that governs it, so there is no outer gate to keep in sync and
-no second list to contradict the first.
+A rule is `{path?, tools?}`. With a `path` it governs that path; without one it
+governs tools that do not act on a path at all. Every tool has exactly one rule
+that governs it, so there is no outer gate to keep in sync and no second list to
+contradict the first.
+
+`tools` has three states, and the distinction carries weight:
+
+| `tools` | Meaning |
+|---|---|
+| omitted | every tool the integration offers |
+| `[read, search]` | exactly those tools |
+| `[]` | no tool may act here |
+
+Omission is what makes "all tools" expressible without Agency enumerating an
+integration's tool names, which it has no way to know.
 
 Rules are a list rather than a mapping keyed by path. Windows paths are hostile
 as YAML keys, and a list keeps ordering explicit and merging predictable.
 
-`tools: []` is meaningful and distinct from omission: the path remains reachable
-— a parent rule may still grant reads of the tree — but no tool may act on that
-entry. Under `restricted`, a path no listed rule covers is inaccessible.
+When several rules match a path, the rule with the longest matching `path`
+governs it. That is what makes a narrow rule a real carve-out: `tools: []` on a
+single file overrides a broader grant covering its directory.
 
 ### The same schema everywhere
 
@@ -109,19 +120,30 @@ agents:
             tools: []
 ```
 
-An agent rule whose `path` matches a group rule replaces it; a rule with a new
-path is added; a pathless agent rule replaces the pathless group rule. This is
-the merge behaviour `roots` and `additional_roots` already have, made symmetric.
+Instance rules are **additive** to the group's: the two lists are concatenated,
+never replaced. An instance can widen or refine what its group grants but cannot
+delete a group rule — the same one-way relationship `roots` and
+`additional_roots` already have, now expressed once instead of twice.
+
+Where a group rule and an instance rule name the exact same path, their tools are
+unioned. Where they name different paths, longest match decides, so an instance
+refines its group by naming a narrower path rather than by overriding a broader
+one.
 
 ### `mode`
 
-`restricted` means the rules are authoritative and anything they do not cover is
-inaccessible. `unrestricted` means no path restriction applies.
+The mode decides one thing: what happens to a path no rule covers.
 
-Under `unrestricted`, a rule carrying a `path` is a contradiction and is
-rejected, exactly as combining an unrestricted sandbox with `additional_roots`
-is rejected today. A pathless rule remains meaningful, because it still names
-which tools exist.
+| Mode | An uncovered path |
+|---|---|
+| `restricted` | is forbidden — what is not allowed is denied |
+| `unrestricted` | is allowed — what is not forbidden is permitted |
+
+Rules mean the same thing under both. Under `unrestricted` they read as
+restrictions, because anything they do not narrow is already permitted; under
+`restricted` they read as grants. A `tools: []` rule forbids its path under
+either mode, which is how an otherwise-open agent is kept away from one secret
+file.
 
 `mode` is retained for one reason that is not obvious: it is how an integration
 declares that it cannot restrict paths at all. Eight of the nine shipped
@@ -147,6 +169,57 @@ The split also closes a hole phase 1 left open. Because the launch view is the
 working directory and was writable in its entirety, an agent could rewrite the
 instruction file it was executing under. Only the outbox and the memory
 directory are writable now; the projected instructions beside them are read-only.
+
+### Compilation becomes a per-instance projection
+
+Those generated rules need something to point at, and today nothing is rendered
+per instance. `_entry_path` in `agency/blueprints/cache.py` is
+`<integration>/<projector_version>/<source_digest>`, so an artifact is a
+projection of *blueprint × integration* and two instances sharing a blueprint
+share one directory.
+
+Compilation becomes a projection of *blueprint × integration × the instance
+properties that affect what is rendered*. The entry path gains one component:
+
+```
+<cache>/<integration>/<projector_version>/<blueprint_digest>/<instance_digest>
+```
+
+`instance_digest` covers exactly those instance properties, and nothing else:
+
+- **identity** — `display_name`, `title`, `emoji` — because it is projected into
+  the instruction file;
+- **the permission model** — the mode and the resolved rules.
+
+Deliberately excluded, because they change nothing that is rendered: `timeout`,
+the memory selector and channel, routines and schedules, and prompt
+registrations, since private prompts are projected into the launch view per job
+rather than into the artifact.
+
+Putting the permission model in the key rather than in a manifest keeps the
+artifact genuinely immutable, which is what `AGENTS.md` claims of the
+compilation cache. A policy edit yields a different digest and therefore a
+different directory, so nothing is ever rewritten under a running job and a job
+launched against one policy can never read another.
+
+`BlueprintRef` on the job spec carries the instance digest, so a recovered or
+resumed job resolves the entry it was launched against rather than whatever the
+configuration says at the time it resumes.
+
+### The rendered instance has access zones
+
+The launch view stops being one flat copy. It is rendered as zones whose access
+levels are exactly the generated rules above:
+
+| Zone | Contents | Rule |
+|---|---|---|
+| `instructions/` | projected instruction file, skills, prompts | `read` |
+| `.agency/outbox/` | `observations/`, `proposals/` | `read`, `write` |
+| `.agency/memory/` | the seeded memory directory | `read`, `write` |
+
+An agent can therefore read exactly what it was told to do — which is what lets
+it report its own constraints accurately instead of guessing, the failure that
+began this work — while being unable to alter them.
 
 ### Effective policy
 
@@ -216,14 +289,17 @@ A CLI command rewrites a `schema_version: 4` configuration in place, translating
 | `sandbox.mode: unrestricted` | `permissions.mode: unrestricted` |
 | `sandbox.mode: restricted` | `permissions.mode: restricted` |
 | `sandbox.roots`, `sandbox.additional_roots` | one rule per root |
-| `tools.mode: all` | every rule grants every tool the integration exposes |
-| `tools.mode: allowlist`, `tools.names` | those tools on each root's rule |
-| `tools.mode: none` | every rule gets `tools: []` |
-| `capabilities.write: true` | `write` added to the workspace path's rule |
+| `tools.mode: all` | `tools` omitted on every rule |
+| `tools.mode: allowlist`, `tools.names` | those tools on each rule |
+| `tools.mode: none` | `tools: []` on every rule |
+| `capabilities.write: true` | `write` present on the workspace path's rule |
 | `capabilities.write: false` | `write` absent from every rule |
 
 Under `sandbox.mode: unrestricted` there are no roots and therefore no path
 rules; the tool policy becomes a single pathless rule.
+
+Migrating `tools.mode: all` to an omitted `tools` list is what avoids having to
+enumerate an integration's tool names during migration.
 
 The command writes through the same locked, revision-checked, atomic path as
 every other configuration write, and refuses to run when the file is already at
@@ -236,13 +312,25 @@ old shape could not express or got wrong:
 
 - A rule granting `write` on one path and not another resolves to exactly that,
   rather than to all-or-nothing.
-- `tools: []` leaves the path reachable but ungranted.
-- Under `restricted`, a path no rule covers is absent from the effective policy.
-- An agent rule replaces a group rule with the same path; a new path is added; a
-  pathless agent rule replaces the pathless group rule.
+- `tools` omitted grants every tool; `tools: []` grants none; an explicit list
+  grants exactly itself.
+- Longest match governs: `tools: []` on a file overrides a broader grant on its
+  directory, under both modes.
+- Under `restricted` an uncovered path is forbidden; under `unrestricted` it is
+  permitted.
+- Instance rules are additive: a group rule cannot be deleted by an instance,
+  rules for the same path union their tools, and a narrower instance path
+  refines a broader group one.
 - The generated launch-view rules are present in every effective policy, grant
   `read` on the instructions and `read`/`write` on the outbox and memory, and
   cannot be removed or widened by configuration.
+- The rendered instance places each zone where its generated rule says, and the
+  instructions zone is not writable.
+- Two instances of one blueprint that differ only in identity, or only in their
+  permission rules, resolve to different cache entries; two that differ only in
+  `timeout` or memory selector resolve to the same one.
+- A job spec carries the instance digest and resolves the entry it was launched
+  against after a configuration change.
 - An integration lacking `write` in `path_scopable_tools` rejects a policy whose
   rules differ in `write`, and the message names the tool and the differing
   paths.
@@ -259,17 +347,16 @@ old shape could not express or got wrong:
 
 ## Out of scope
 
-- **Any integration implementing the model.** Every shipped integration
-  continues to declare no per-path scoping, so behaviour is unchanged and agents
-  whose rules narrow a tool still cannot run. That is the accepted state phase 1
-  established, and it is what the next specification addresses.
-- **The Copilot rendering** — sandbox policy, `COPILOT_HOME`, the zoned instance
-  projection, and re-keying the compilation cache on the instance's
-  runtime-affecting properties. Deferred to phase 3, where the platform
-  limitations recorded below must be confronted.
+- **The Copilot CLI implementation of this model.** Copilot continues to declare
+  no per-path scoping, so behaviour is unchanged and an agent whose rules narrow
+  a tool still cannot run — the accepted state phase 1 established. Rendering the
+  model into Copilot's sandbox policy and `settings.json`, relocating its
+  configuration directory per instance, and deriving the capability from a
+  runtime probe are the next specification's subject.
 - **Cache pruning.** Nothing collects unreferenced compilation entries today and
-  every blueprint edit already strands one. A pre-existing defect, and not this
-  change's to fix.
+  every blueprint edit already strands one, so this is a pre-existing defect
+  rather than one this change introduces. Re-keying multiplies the rate at which
+  entries accumulate without changing the nature of the problem.
 - **The working-directory ancestry weakness** recorded in the phase-1
   specification.
 
