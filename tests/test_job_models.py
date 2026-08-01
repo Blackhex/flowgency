@@ -73,10 +73,7 @@ def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=("C:/repo",),
-            tool_mode="allowlist",
-            tool_names=("shell", "write"),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": "placeholder"},
@@ -336,10 +333,7 @@ def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_p
                 ),
                 runtime_policy=RuntimePolicySnapshot(
                     timeout=1800,
-                    sandbox_mode="restricted",
-                    sandbox_roots=("C:/repo",),
-                    tool_mode="allowlist",
-                    tool_names=("shell",),
+                    mode="restricted",
                 ),
                 memory=MemoryBinding(
                     selector={"scope": "run", "version": 1, "job": "placeholder"},
@@ -444,10 +438,7 @@ def test_decision_jobs_require_null_routine_and_skill(tmp_path):
         ),
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=("C:/repo",),
-            tool_mode="allowlist",
-            tool_names=("shell",),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "agent", "version": 1, "group": "newsletter", "agent": "product"},

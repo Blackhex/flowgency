@@ -52,10 +52,7 @@ def running_decision_job(
         task_input="run",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": "decision-job"},
@@ -300,10 +297,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
         task_input="run",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "agent"},

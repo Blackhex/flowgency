@@ -130,10 +130,7 @@ def _write_job_record(
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(workspace_root.resolve()), str(group_root.resolve())),
-            tool_mode="allowlist",
-            tool_names=("shell",),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "channel", "channel": "support"},

@@ -47,10 +47,7 @@ def publication_fixture(tmp_path):
         task_input="Publish memory",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "agent"},

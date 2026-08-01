@@ -136,10 +136,7 @@ def _make_spec(
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(group_path.resolve()),),
-            tool_mode="allowlist",
-            tool_names=("shell", "write"),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": "placeholder"},

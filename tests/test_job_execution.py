@@ -99,10 +99,7 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
         task_input="Immutable instructions",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run"},
@@ -166,10 +163,7 @@ def memory_bound_job(tmp_path: Path):
         task_input="Immutable instructions",
         runtime_policy=RuntimePolicySnapshot(
             timeout=30,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "agent"},

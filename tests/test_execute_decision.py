@@ -78,10 +78,7 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
         task_input="Immutable instructions",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run"},

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from agency.blueprints.cache import CacheRef, CompiledArtifact
 from agency.configuration.models import MemorySelector, PromptSelector
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
+from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule, ResolvedToolPolicy
 
 
 SCHEMA_VERSION = 4
@@ -33,12 +33,8 @@ VALID_STATUSES = {
 @dataclass(frozen=True)
 class RuntimePolicySnapshot:
     timeout: int
-    sandbox_mode: str
-    sandbox_roots: tuple[str, ...]
-    tool_mode: str
-    tool_names: tuple[str, ...] = ()
-    writable_roots: tuple[str, ...] = ()
-    writes_narrowed: bool = False
+    mode: str
+    rules: tuple[dict, ...] = ()
 
     @classmethod
     def from_effective_policy(
@@ -47,41 +43,30 @@ class RuntimePolicySnapshot:
     ) -> "RuntimePolicySnapshot":
         return cls(
             timeout=policy.timeout,
-            sandbox_mode=policy.sandbox_mode,
-            sandbox_roots=tuple(
-                str(Path(root).resolve(strict=False))
-                for root in policy.sandbox_roots
+            mode=policy.mode,
+            rules=tuple(
+                {
+                    "path": None if rule.path is None else str(Path(rule.path).resolve(strict=False)),
+                    "tools": None if rule.tools is None else list(rule.tools),
+                }
+                for rule in policy.rules
             ),
-            tool_mode=policy.tools.mode,
-            tool_names=tuple(policy.tools.names),
-            writable_roots=tuple(
-                str(Path(root).resolve(strict=False))
-                for root in policy.writable_roots
-            ),
-            writes_narrowed=policy.writes_narrowed,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize, omitting the write-boundary fields at their defaults.
-
-        A spec persisted before the write boundary existed carries neither key.
-        Emitting them would change its authority digest and kill the job.
-        """
-        payload = asdict(self)
-        if not payload["writable_roots"]:
-            del payload["writable_roots"]
-        if not payload["writes_narrowed"]:
-            del payload["writes_narrowed"]
-        return payload
+        return {"timeout": self.timeout, "mode": self.mode, "rules": list(self.rules)}
 
     def to_effective_policy(self) -> EffectiveRuntimePolicy:
         return EffectiveRuntimePolicy(
             timeout=self.timeout,
-            sandbox_mode=self.sandbox_mode,
-            sandbox_roots=tuple(Path(root) for root in self.sandbox_roots),
-            tools=ResolvedToolPolicy(self.tool_mode, self.tool_names),
-            writable_roots=tuple(Path(root) for root in self.writable_roots),
-            writes_narrowed=self.writes_narrowed,
+            mode=self.mode,
+            rules=tuple(
+                ResolvedPermissionRule(
+                    path=None if entry["path"] is None else Path(entry["path"]),
+                    tools=None if entry["tools"] is None else tuple(entry["tools"]),
+                )
+                for entry in self.rules
+            ),
         )
 
 
@@ -92,6 +77,7 @@ class BlueprintRef:
     integration: str
     projector_version: str
     cache_path: str
+    instance_digest: str = ""
 
     @property
     def cache_ref(self) -> CacheRef:
@@ -290,14 +276,19 @@ class JobSpec:
         values = dict(data)
         values["integration_config"] = dict(values.get("integration_config") or {})
         values["blueprint"] = BlueprintRef(**values["blueprint"])
-        runtime_policy = dict(values["runtime_policy"])
-        runtime_policy["sandbox_roots"] = tuple(runtime_policy.get("sandbox_roots") or ())
-        runtime_policy["tool_names"] = tuple(runtime_policy.get("tool_names") or ())
-        runtime_policy["writable_roots"] = tuple(runtime_policy.get("writable_roots") or ())
-        # Specs persisted before the write boundary existed carry no value; a
-        # missing one means the agent's writes were never narrowed.
-        runtime_policy["writes_narrowed"] = bool(runtime_policy.get("writes_narrowed"))
-        values["runtime_policy"] = RuntimePolicySnapshot(**runtime_policy)
+        runtime_policy_data = dict(values["runtime_policy"])
+        if "sandbox_mode" in runtime_policy_data:
+            # Legacy format: convert to new permission-rule shape.
+            values["runtime_policy"] = RuntimePolicySnapshot(
+                timeout=runtime_policy_data["timeout"],
+                mode=runtime_policy_data["sandbox_mode"],
+            )
+        else:
+            values["runtime_policy"] = RuntimePolicySnapshot(
+                timeout=runtime_policy_data["timeout"],
+                mode=runtime_policy_data.get("mode", "unrestricted"),
+                rules=tuple(runtime_policy_data.get("rules") or ()),
+            )
         values["memory"] = MemoryBinding(**values["memory"])
         values["skill_arguments"] = tuple(values.get("skill_arguments") or ())
         values["private_prompts"] = tuple(

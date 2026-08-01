@@ -163,10 +163,7 @@ def _roster_job_spec(tmp_path: Path, group_root: Path, *, job_id: str, created_a
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(group_root.resolve()),),
-            tool_mode="allowlist",
-            tool_names=("shell",),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": job_id},
