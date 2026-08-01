@@ -56,6 +56,7 @@ def policy(*, writable, roots=(Path("/ws").resolve(),), mode="restricted"):
         sandbox_roots=roots,
         tools=ResolvedToolPolicy(mode="all", names=()),
         writable_roots=roots if writable else (),
+        writes_narrowed=not writable,
     )
 
 
@@ -161,3 +162,29 @@ def test_snapshot_round_trips_a_narrowed_policy():
 
     assert restored.writable_roots == ()
     assert restored.narrows_writes is True
+
+
+def test_a_narrowed_policy_serializes_the_flag():
+    payload = RuntimePolicySnapshot.from_effective_policy(policy(writable=False)).to_dict()
+
+    assert payload["writes_narrowed"] is True
+    assert RuntimePolicySnapshot(**payload).to_effective_policy().narrows_writes is True
+
+
+def test_a_job_spec_persisted_before_the_write_boundary_still_loads(tmp_path):
+    """Pre-upgrade job payloads must keep their shape, digest, and meaning."""
+    from agency.jobs.models import JobRecord
+    from test_job_execution import queued_job
+
+    _, spec = queued_job(tmp_path)
+    payload = JobRecord.from_spec(spec).to_dict()
+
+    assert "writable_roots" not in payload["spec"]["runtime_policy"]
+    assert "writes_narrowed" not in payload["spec"]["runtime_policy"]
+    assert "writable_agents" not in payload["spec"]
+
+    restored = JobRecord.from_dict(payload)
+
+    assert restored.spec.runtime_policy.writes_narrowed is False
+    assert restored.spec.runtime_policy.to_effective_policy().narrows_writes is False
+    assert restored.spec.writable_agents is None

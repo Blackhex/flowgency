@@ -38,7 +38,7 @@ class RuntimePolicySnapshot:
     tool_mode: str
     tool_names: tuple[str, ...] = ()
     writable_roots: tuple[str, ...] = ()
-    writes_narrowed: bool | None = None
+    writes_narrowed: bool = False
 
     @classmethod
     def from_effective_policy(
@@ -60,6 +60,19 @@ class RuntimePolicySnapshot:
             ),
             writes_narrowed=policy.writes_narrowed,
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize, omitting the write-boundary fields at their defaults.
+
+        A spec persisted before the write boundary existed carries neither key.
+        Emitting them would change its authority digest and kill the job.
+        """
+        payload = asdict(self)
+        if not payload["writable_roots"]:
+            del payload["writable_roots"]
+        if not payload["writes_narrowed"]:
+            del payload["writes_narrowed"]
+        return payload
 
     def to_effective_policy(self) -> EffectiveRuntimePolicy:
         return EffectiveRuntimePolicy(
@@ -171,6 +184,9 @@ class JobSpec:
     timeout_override: int | None
     created_at: str
     private_prompts: tuple[PromptSnapshot, ...] = ()
+    # Instances that may be named as a proposal's execution_agent, resolved from
+    # the pinned configuration at submission. None means "not snapshotted".
+    writable_agents: tuple[str, ...] | None = None
 
     def validate(self) -> None:
         if self.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
@@ -247,7 +263,7 @@ class JobSpec:
             "skill": self.skill,
             "skill_arguments": list(self.skill_arguments),
             "task_input": self.task_input,
-            "runtime_policy": asdict(self.runtime_policy),
+            "runtime_policy": self.runtime_policy.to_dict(),
             "memory": asdict(self.memory),
             "trigger_context": self.trigger_context,
             "prompt_source": self.prompt_source,
@@ -256,6 +272,8 @@ class JobSpec:
         }
         if self.schema_version >= 4:
             payload["private_prompts"] = [asdict(item) for item in self.private_prompts]
+        if self.writable_agents is not None:
+            payload["writable_agents"] = list(self.writable_agents)
         return payload
 
     def immutable_digest(self) -> str:
@@ -276,11 +294,18 @@ class JobSpec:
         runtime_policy["sandbox_roots"] = tuple(runtime_policy.get("sandbox_roots") or ())
         runtime_policy["tool_names"] = tuple(runtime_policy.get("tool_names") or ())
         runtime_policy["writable_roots"] = tuple(runtime_policy.get("writable_roots") or ())
+        # Specs persisted before the write boundary existed carry no value; a
+        # missing one means the agent's writes were never narrowed.
+        runtime_policy["writes_narrowed"] = bool(runtime_policy.get("writes_narrowed"))
         values["runtime_policy"] = RuntimePolicySnapshot(**runtime_policy)
         values["memory"] = MemoryBinding(**values["memory"])
         values["skill_arguments"] = tuple(values.get("skill_arguments") or ())
         values["private_prompts"] = tuple(
             PromptSnapshot(**item) for item in (values.get("private_prompts") or ())
+        )
+        writable_agents = values.get("writable_agents")
+        values["writable_agents"] = (
+            None if writable_agents is None else tuple(writable_agents)
         )
         spec = cls(**values)
         spec.validate()

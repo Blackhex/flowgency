@@ -23,16 +23,14 @@ class EffectiveRuntimePolicy:
     sandbox_roots: tuple[Path, ...]
     tools: ResolvedToolPolicy
     writable_roots: tuple[Path, ...] = ()
-    # Set when an unrestricted policy still forbids writes, where empty
-    # sandbox_roots means "everything" and cannot be compared to writable_roots.
-    writes_narrowed: bool | None = None
+    # Authoritative: under an unrestricted sandbox, empty sandbox_roots means
+    # "everything", so writable_roots cannot be compared against it.
+    writes_narrowed: bool = False
 
     @property
     def narrows_writes(self) -> bool:
         """Whether this policy grants read access it does not grant write access to."""
-        if self.writes_narrowed is not None:
-            return self.writes_narrowed
-        return tuple(self.writable_roots) != tuple(self.sandbox_roots)
+        return self.writes_narrowed
 
 
 @dataclass(frozen=True)
