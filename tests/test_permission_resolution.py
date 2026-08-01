@@ -132,6 +132,8 @@ def _config(tmp_path: Path, raw_config, *, group_rules, agent_rules):
     # agents is a list in raw_config; strip any stale capability/sandbox keys
     agent = raw["groups"]["newsletter"]["agents"][0]
     agent.pop("capabilities", None)
+    # Use copilot so that restricted mode is accepted by the integration validator.
+    agent["integration"] = "copilot"
     agent_runtime = {"permissions": {"rules": agent_rules}}
     agent["runtime"] = agent_runtime
     path = tmp_path / "config.yaml"
@@ -144,7 +146,7 @@ def test_instance_rules_are_additive(tmp_path, raw_config):
         tmp_path,
         raw_config,
         group_rules=[{"path": "C:/ws", "tools": ["read"]}],
-        agent_rules=[{"path": "C:/ws/tests", "tools": ["read", "write"]}],
+        agent_rules=[{"path": "C:/ws/tests", "tools": ["read"]}],
     )
 
     resolved = resolve_effective_policy(config, "newsletter", "builder")

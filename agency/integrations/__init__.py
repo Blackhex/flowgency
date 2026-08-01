@@ -175,52 +175,37 @@ class BaseIntegration:
         policy: EffectiveRuntimePolicy,
     ) -> tuple[ValidationIssue, ...]:
         issues: list[ValidationIssue] = []
-        if policy.sandbox_mode not in self.runtime_capabilities.path_modes:
+        if policy.mode not in self.runtime_capabilities.permission_modes:
             issues.append(
                 ValidationIssue(
-                    code="unsupported-path-policy",
+                    code="unsupported-permission-mode",
                     scope=f"integrations.{self.name}",
-                    field="runtime.sandbox.mode",
+                    field="runtime.permissions.mode",
                     message=(
-                        f"Integration '{self.name}' cannot enforce sandbox mode "
-                        f"'{policy.sandbox_mode}'."
+                        f"Integration '{self.name}' cannot enforce permission "
+                        f"mode '{policy.mode}'."
                     ),
-                    corrective_hint="Use a supported sandbox mode for this integration.",
+                    corrective_hint="Use a mode this integration supports.",
                 )
             )
-        if policy.tools.mode not in self.runtime_capabilities.tool_modes:
-            issues.append(
-                ValidationIssue(
-                    code="unsupported-tool-policy",
-                    scope=f"integrations.{self.name}",
-                    field="runtime.tools.mode",
-                    message=(
-                        f"Integration '{self.name}' cannot enforce tool mode "
-                        f"'{policy.tools.mode}'."
-                    ),
-                    corrective_hint="Use a supported tool mode for this integration.",
-                )
+        unscopable = policy.scoped_tools - self.runtime_capabilities.path_scopable_tools
+        if unscopable:
+            differing = ", ".join(
+                str(rule.path) for rule in policy.rules if rule.path is not None
             )
-        if policy.narrows_writes and not self.runtime_capabilities.enforces_write_boundary:
             issues.append(
                 ValidationIssue(
-                    code="unsupported-write-boundary",
+                    code="unsupported-tool-scoping",
                     scope=f"integrations.{self.name}",
-                    field="capabilities.write",
+                    field="runtime.permissions.rules",
                     message=(
-                        f"Integration '{self.name}' does not implement the write-"
-                        f"boundary contract. This agent has capabilities.write "
-                        f"false, so Agency must grant it read access to its "
-                        f"workspace while withholding write access, and "
-                        f"'{self.name}' cannot enforce that separation. Running "
-                        f"the agent anyway would give it write access it is "
-                        f"configured not to have."
+                        f"Integration '{self.name}' cannot vary "
+                        f"{', '.join(sorted(unscopable))} between paths. The "
+                        f"rules grant it differently across: {differing}."
                     ),
                     corrective_hint=(
-                        "Set capabilities.write true for this agent if it is "
-                        "genuinely trusted to modify the workspace, or run it on "
-                        "an integration that declares "
-                        "RuntimeCapabilities.enforces_write_boundary."
+                        "Grant these tools identically on every rule, or run "
+                        "this agent on an integration that can scope them."
                     ),
                 )
             )

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.configuration.models import AgencyConfig, AgentInstance, GroupConfig, PermissionMode
-from agency.integrations import BaseIntegration
+from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
@@ -90,8 +90,26 @@ def resolve_effective_policy(
 ) -> EffectiveRuntimePolicy:
     group = _get_group(config, group_id)
     agent = _get_agent(group, agent_id)
-    return EffectiveRuntimePolicy(
+    policy = EffectiveRuntimePolicy(
         timeout=_resolve_timeout(group, agent, timeout_override),
         mode=_resolve_mode(group, agent),
         rules=_merge_rules(group, agent),
     )
+
+    if integration is None:
+        try:
+            integration = get_integration(agent.integration)
+        except KeyError as exc:
+            issue = _build_issue(
+                code="unknown-integration",
+                scope=f"groups.{group_id}.agents.{agent_id}",
+                field="integration",
+                message=f"Integration '{agent.integration}' is not registered.",
+                hint="Choose an installed integration or register it before running this agent.",
+            )
+            raise ValidationFailed((issue,)) from exc
+
+    issues = integration.validate_runtime_policy(policy)
+    if issues:
+        raise ValidationFailed(issues)
+    return policy

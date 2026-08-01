@@ -20,8 +20,7 @@ class CodexIntegration(BaseIntegration):
     detect_priority = 10
     projector = BaseIntegration._default_projector("AGENTS.md", discovers_instructions=True)
     runtime_capabilities = RuntimeCapabilities(
-        path_modes=frozenset({"unrestricted"}),
-        tool_modes=frozenset({"all"}),
+        permission_modes=frozenset({"unrestricted"}),
     )
 
     def identity_filename(self) -> str:
