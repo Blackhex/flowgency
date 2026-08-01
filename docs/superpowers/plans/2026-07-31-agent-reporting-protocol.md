@@ -1320,165 +1320,380 @@ git commit -m "feat(records): tell agents how to report in the task input"
 
 ---
 
-### Task 6: Guarantee the reporting write primitive
+### Task 6: The write-boundary contract
 
-`runtime.tools` is a complete override today, so an agent configured with `allowlist [read, search]` has no way to create the outbox files the protocol asks for. Agency adds the minimum tool its own protocol needs.
+Express the write boundary as paths. `capabilities.write` stops being a label and becomes an input to the effective runtime policy. This task defines the contract only — **no integration is adapted to satisfy it**, and integrations that cannot honour it must reject narrowed policies verbosely.
+
+An earlier draft of this task granted a write *tool* instead. It was wrong: without path-scoped write permissions, granting the tool grants write to every readable root, so a `capabilities.write: false` agent would gain workspace write access. Do not reintroduce a tool grant. `runtime.tools` stays a complete override with no exception.
 
 **Files:**
-- Modify: `agency/integrations/__init__.py` (add `reporting_tools` to `BaseIntegration`)
-- Modify: `agency/integrations/agency/copilot.py` (lines 446-451, the allowlist branch)
-- Test: `tests/test_reporting_tool_grant.py`
+- Modify: `agency/integrations/models.py` (`EffectiveRuntimePolicy`, `RuntimeCapabilities`)
+- Modify: `agency/configuration/effective.py` (`_resolve_sandbox` / `resolve_effective_policy`)
+- Modify: `agency/integrations/__init__.py` (`BaseIntegration.validate_runtime_policy`)
+- Modify: `agency/jobs/models.py` (`RuntimePolicySnapshot` must round-trip the new field)
+- Test: `tests/test_write_boundary_contract.py`
 
 **Interfaces:**
-- Consumes: nothing.
-- Produces: `BaseIntegration.reporting_tools: tuple[str, ...]` (default `()`); `CopilotIntegration.reporting_tools == ("write",)`.
+- Consumes: nothing from earlier tasks.
+- Produces:
+  - `EffectiveRuntimePolicy.writable_roots: tuple[Path, ...] = ()`
+  - `RuntimeCapabilities.enforces_write_boundary: bool = False`
+  - `RuntimePolicySnapshot.writable_roots: tuple[str, ...] = ()`
+  - Validation issue code `unsupported-write-boundary`
+
+**Contract semantics (exact):**
+- `sandbox_roots` is everything readable. Unchanged.
+- `writable_roots` is the subset that may be written.
+- `capabilities.write: true` → `writable_roots == sandbox_roots`.
+- `capabilities.write: false` → `writable_roots == ()`.
+- Under `sandbox_mode == "unrestricted"`, `sandbox_roots` is `()` and means "everything"; `writable_roots` is `()` when `capabilities.write` is false and `()` when true as well — so unrestricted plus `write: false` is a narrowed policy and must be detectable. Use the helper `policy.narrows_writes` defined below rather than comparing tuples at call sites.
+- The launch view is **never** placed in `writable_roots`. Its writability is implicit and travels on `IntegrationRunRequest.launch_dir` / `memory_working_dir`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_reporting_tool_grant.py`:
+Create `tests/test_write_boundary_contract.py`:
 
 ```python
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
+import yaml
 
-from agency.integrations import BaseIntegration, get_integration
+from agency.configuration.effective import resolve_effective_policy
+from agency.configuration.issues import ValidationFailed
+from agency.configuration.store import ConfigStore
+from agency.integrations import BaseIntegration
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
-    IntegrationRunRequest,
     ResolvedToolPolicy,
+    RuntimeCapabilities,
 )
+from agency.jobs.models import RuntimePolicySnapshot
 
 
-def make_request(tmp_path: Path, mode: str, names: tuple[str, ...]):
-    task_file = tmp_path / "task.prompt"
-    task_file.write_text("do the thing", encoding="utf-8")
-    launch = tmp_path / "launch"
-    launch.mkdir(exist_ok=True)
-    return IntegrationRunRequest(
-        workspace_root=tmp_path,
-        launch_dir=launch,
-        task_file=task_file,
-        timeout=60,
-        runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="restricted",
-            sandbox_roots=(tmp_path,),
-            tools=ResolvedToolPolicy(mode=mode, names=names),
-        ),
-        skill=None,
-        skill_arguments=(),
-        enforce_validation=False,
-        memory_working_dir=None,
+class EnforcingIntegration(BaseIntegration):
+    name = "enforcing"
+    display_name = "Enforcing"
+    supports_execution = True
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"restricted", "unrestricted"}),
+        tool_modes=frozenset({"all", "allowlist"}),
+        enforces_write_boundary=True,
+    )
+
+    def identity_filename(self) -> str:
+        return "AGENTS.md"
+
+    def parse_identity(self, agent_dir: Path):
+        return None
+
+    def write_identity(self, agent_dir: Path, identity):
+        raise NotImplementedError
+
+    def run(self, request):
+        raise NotImplementedError
+
+
+class NonEnforcingIntegration(EnforcingIntegration):
+    name = "nonenforcing"
+    runtime_capabilities = RuntimeCapabilities(
+        path_modes=frozenset({"restricted", "unrestricted"}),
+        tool_modes=frozenset({"all", "allowlist"}),
     )
 
 
-def captured_args(request):
-    seen = {}
-
-    def fake_run(cmd_args, **kwargs):
-        seen["cmd_args"] = cmd_args
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    integration = get_integration("copilot")
-    with patch.object(integration, "require_executable", return_value="copilot"), \
-         patch("agency.integrations.agency.copilot.subprocess.run", fake_run):
-        integration.run(request)
-    return seen["cmd_args"]
+def policy(*, writable, roots=(Path("/ws"),), mode="restricted"):
+    return EffectiveRuntimePolicy(
+        timeout=60,
+        sandbox_mode=mode,
+        sandbox_roots=roots,
+        tools=ResolvedToolPolicy(mode="all", names=()),
+        writable_roots=roots if writable else (),
+    )
 
 
-def test_base_integration_grants_no_reporting_tools_by_default():
-    assert BaseIntegration.reporting_tools == ()
+def _config(tmp_path: Path, raw_config, *, write: bool):
+    raw = deepcopy(raw_config)
+    raw["groups"]["newsletter"]["agents"][0]["capabilities"] = {"write": write}
+    raw["groups"]["newsletter"]["runtime"] = {
+        "sandbox": {"mode": "restricted", "roots": []}
+    }
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return ConfigStore(path).load().config
 
 
-def test_copilot_declares_write_as_its_reporting_tool():
-    assert get_integration("copilot").reporting_tools == ("write",)
+def test_capabilities_write_true_makes_the_workspace_writable(tmp_path, raw_config):
+    config = _config(tmp_path, raw_config, write=True)
+
+    resolved = resolve_effective_policy(
+        config, "newsletter", "builder", integration=EnforcingIntegration()
+    )
+
+    assert resolved.writable_roots == resolved.sandbox_roots
+    assert resolved.writable_roots != ()
 
 
-def test_allowlist_gains_the_reporting_tool(tmp_path: Path):
-    args = captured_args(make_request(tmp_path, "allowlist", ("read", "search")))
+def test_capabilities_write_false_yields_no_writable_roots(tmp_path, raw_config):
+    config = _config(tmp_path, raw_config, write=False)
 
-    allowed = [args[i + 1] for i, item in enumerate(args) if item == "--allow-tool"]
-    assert allowed == ["read", "search", "write"]
+    resolved = resolve_effective_policy(
+        config, "newsletter", "builder", integration=EnforcingIntegration()
+    )
 
-
-def test_reporting_tool_is_not_duplicated(tmp_path: Path):
-    args = captured_args(make_request(tmp_path, "allowlist", ("read", "write")))
-
-    allowed = [args[i + 1] for i, item in enumerate(args) if item == "--allow-tool"]
-    assert allowed == ["read", "write"]
+    assert resolved.writable_roots == ()
+    assert resolved.sandbox_roots != ()
 
 
-def test_all_mode_is_unchanged(tmp_path: Path):
-    args = captured_args(make_request(tmp_path, "all", ()))
+def test_read_only_policy_narrows_writes():
+    assert policy(writable=False).narrows_writes is True
 
-    assert "--allow-all-tools" in args
-    assert "--allow-tool" not in args
+
+def test_writable_policy_does_not_narrow_writes():
+    assert policy(writable=True).narrows_writes is False
+
+
+def test_unrestricted_read_only_policy_still_narrows_writes():
+    unrestricted = EffectiveRuntimePolicy(
+        timeout=60,
+        sandbox_mode="unrestricted",
+        sandbox_roots=(),
+        tools=ResolvedToolPolicy(mode="all", names=()),
+        writable_roots=(),
+        writes_narrowed=True,
+    )
+
+    assert unrestricted.narrows_writes is True
+
+
+def test_non_enforcing_integration_rejects_a_narrowed_policy():
+    issues = NonEnforcingIntegration().validate_runtime_policy(policy(writable=False))
+
+    assert [issue.code for issue in issues] == ["unsupported-write-boundary"]
+    message = issues[0].message
+    assert "nonenforcing" in message
+    assert "capabilities.write" in message
+
+
+def test_non_enforcing_integration_accepts_a_writable_policy():
+    assert NonEnforcingIntegration().validate_runtime_policy(policy(writable=True)) == ()
+
+
+def test_enforcing_integration_accepts_a_narrowed_policy():
+    assert EnforcingIntegration().validate_runtime_policy(policy(writable=False)) == ()
+
+
+def test_resolve_rejects_a_read_only_agent_on_a_non_enforcing_integration(
+    tmp_path, raw_config
+):
+    config = _config(tmp_path, raw_config, write=False)
+
+    with pytest.raises(ValidationFailed) as excinfo:
+        resolve_effective_policy(
+            config, "newsletter", "builder", integration=NonEnforcingIntegration()
+        )
+
+    assert [issue.code for issue in excinfo.value.issues] == [
+        "unsupported-write-boundary"
+    ]
+
+
+def test_snapshot_round_trips_writable_roots():
+    original = policy(writable=True)
+
+    restored = RuntimePolicySnapshot.from_effective_policy(original).to_effective_policy()
+
+    assert restored.writable_roots == original.writable_roots
+    assert restored.narrows_writes is False
+
+
+def test_snapshot_round_trips_a_narrowed_policy():
+    original = policy(writable=False)
+
+    restored = RuntimePolicySnapshot.from_effective_policy(original).to_effective_policy()
+
+    assert restored.writable_roots == ()
+    assert restored.narrows_writes is True
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_reporting_tool_grant.py -v`
-Expected: FAIL with `AttributeError: type object 'BaseIntegration' has no attribute 'reporting_tools'`
+Run: `python -m pytest tests/test_write_boundary_contract.py -v`
+Expected: FAIL with `TypeError: EffectiveRuntimePolicy.__init__() got an unexpected keyword argument 'writable_roots'`
 
-- [ ] **Step 3: Declare the attribute on the base class**
+- [ ] **Step 3: Extend the policy and capability models**
 
-In `agency/integrations/__init__.py`, inside the `BaseIntegration` class body next to `runtime_capabilities`, add:
-
-```python
-    # Tool names Agency must grant for its own reporting protocol, even when
-    # runtime.tools is a restrictive allowlist.
-    reporting_tools: tuple[str, ...] = ()
-```
-
-- [ ] **Step 4: Declare and honour it in the Copilot integration**
-
-In `agency/integrations/agency/copilot.py`, add to the class attributes beside `runtime_capabilities`:
+In `agency/integrations/models.py`, replace `EffectiveRuntimePolicy` and `RuntimeCapabilities` with:
 
 ```python
-    reporting_tools = ("write",)
+@dataclass(frozen=True)
+class EffectiveRuntimePolicy:
+    timeout: int
+    sandbox_mode: PathPolicyMode
+    sandbox_roots: tuple[Path, ...]
+    tools: ResolvedToolPolicy
+    writable_roots: tuple[Path, ...] = ()
+    # Set when an unrestricted policy still forbids writes, where empty
+    # sandbox_roots means "everything" and cannot be compared to writable_roots.
+    writes_narrowed: bool | None = None
+
+    @property
+    def narrows_writes(self) -> bool:
+        """Whether this policy grants read access it does not grant write access to."""
+        if self.writes_narrowed is not None:
+            return self.writes_narrowed
+        return tuple(self.writable_roots) != tuple(self.sandbox_roots)
+
+
+@dataclass(frozen=True)
+class RuntimeCapabilities:
+    path_modes: frozenset[PathPolicyMode] = frozenset()
+    tool_modes: frozenset[ToolPolicyMode] = frozenset()
+    enforces_write_boundary: bool = False
 ```
 
-Then replace the allowlist branch (currently lines 447-451):
+- [ ] **Step 4: Derive the writable set from `capabilities.write`**
+
+In `agency/configuration/effective.py`, change `_resolve_sandbox` to return the writable set as well. Replace its signature and both `return` statements:
 
 ```python
-        if tools.mode == "allowlist":
-            for t in tools.names:
-                cmd_args += ["--allow-tool", t]
-        else:
-            cmd_args += ["--allow-all-tools", "--autopilot"]
+def _resolve_sandbox(
+    group: GroupConfig,
+    agent: AgentInstance,
+    *,
+    group_id: str,
+    agent_id: str,
+) -> tuple[str, tuple[Path, ...], tuple[Path, ...], bool]:
+    agent_sandbox = agent.runtime.sandbox
+    group_sandbox = group.runtime.sandbox
+    agent_overrides_mode = "mode" in agent_sandbox.model_fields_set
+    mode = agent_sandbox.mode if agent_overrides_mode else group_sandbox.mode
+    additional_roots = tuple(agent_sandbox.additional_roots)
+    may_write = agent.capabilities.write
+
+    if mode == "unrestricted":
+        if additional_roots:
+            issue = _build_issue(
+                code="sandbox-contradiction",
+                scope=f"groups.{group_id}.agents.{agent_id}",
+                field="runtime.sandbox.additional_roots",
+                message="Unrestricted sandbox cannot add roots.",
+                hint="Remove additional roots or switch to restricted mode.",
+            )
+            raise ValidationFailed((issue,))
+        return mode, (), (), not may_write
+
+    paths = resolve_group_paths(group)
+    roots = _merge_roots(
+        (paths.workspace_root, paths.group_root),
+        tuple(group_sandbox.roots),
+        additional_roots,
+    )
+    return mode, roots, (roots if may_write else ()), not may_write
 ```
 
-with:
+Then in `resolve_effective_policy`, replace the unpacking and the policy construction:
 
 ```python
-        if tools.mode == "allowlist":
-            granted = dict.fromkeys((*tools.names, *self.reporting_tools))
-            for t in granted:
-                cmd_args += ["--allow-tool", t]
-        else:
-            cmd_args += ["--allow-all-tools", "--autopilot"]
+    sandbox_mode, sandbox_roots, writable_roots, writes_narrowed = _resolve_sandbox(
+        group,
+        agent,
+        group_id=group_id,
+        agent_id=agent_id,
+    )
+    policy = EffectiveRuntimePolicy(
+        timeout=_resolve_timeout(group, agent, timeout_override),
+        sandbox_mode=sandbox_mode,
+        sandbox_roots=sandbox_roots,
+        tools=_resolve_tools(group, agent),
+        writable_roots=writable_roots,
+        writes_narrowed=writes_narrowed,
+    )
 ```
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 5: Fail closed in the integration contract**
 
-Run: `python -m pytest tests/test_reporting_tool_grant.py -v`
+In `agency/integrations/__init__.py`, inside `BaseIntegration.validate_runtime_policy`, append this check after the existing tool-mode check and before `return tuple(issues)`:
+
+```python
+        if policy.narrows_writes and not self.runtime_capabilities.enforces_write_boundary:
+            issues.append(
+                ValidationIssue(
+                    code="unsupported-write-boundary",
+                    scope=f"integrations.{self.name}",
+                    field="capabilities.write",
+                    message=(
+                        f"Integration '{self.name}' does not implement the write-"
+                        f"boundary contract. This agent has capabilities.write "
+                        f"false, so Agency must grant it read access to its "
+                        f"workspace while withholding write access, and "
+                        f"'{self.name}' cannot enforce that separation. Running "
+                        f"the agent anyway would give it write access it is "
+                        f"configured not to have."
+                    ),
+                    corrective_hint=(
+                        "Set capabilities.write true for this agent if it is "
+                        "genuinely trusted to modify the workspace, or run it on "
+                        "an integration that declares "
+                        "RuntimeCapabilities.enforces_write_boundary."
+                    ),
+                )
+            )
+```
+
+Do **not** set `enforces_write_boundary` on any shipped integration. Every existing integration keeps the default `False`, so read-only agents stop resolving. That is the intended outcome of this task.
+
+- [ ] **Step 6: Round-trip the field through the job spec**
+
+In `agency/jobs/models.py`, add the field to `RuntimePolicySnapshot` and carry it both ways:
+
+```python
+@dataclass(frozen=True)
+class RuntimePolicySnapshot:
+    timeout: int
+    sandbox_mode: str
+    sandbox_roots: tuple[str, ...]
+    tool_mode: str
+    tool_names: tuple[str, ...] = ()
+    writable_roots: tuple[str, ...] = ()
+    writes_narrowed: bool | None = None
+```
+
+In `from_effective_policy`, add:
+
+```python
+            writable_roots=tuple(
+                str(Path(root).resolve(strict=False))
+                for root in policy.writable_roots
+            ),
+            writes_narrowed=policy.writes_narrowed,
+```
+
+In `to_effective_policy`, add:
+
+```python
+            writable_roots=tuple(Path(root) for root in self.writable_roots),
+            writes_narrowed=self.writes_narrowed,
+```
+
+- [ ] **Step 7: Run the tests**
+
+Run: `python -m pytest tests/test_write_boundary_contract.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Run the full suite**
+- [ ] **Step 8: Run the full suite**
 
 Run: `python -m pytest tests/ -q`
-Expected: PASS. Existing integration-contract tests that assert an exact `--allow-tool` sequence for Copilot need updating to include the trailing `write`.
+Expected: failures are likely, and each needs judging rather than silencing. Tests that construct `EffectiveRuntimePolicy` or `RuntimePolicySnapshot` positionally may need keyword arguments. Tests that resolve a policy for an agent with `capabilities.write` false on a stock integration will now raise `ValidationFailed` — that is the contract working, so update those tests to expect it, or give the fixture agent `capabilities.write: true` where the test is not about the boundary. Do not add `enforces_write_boundary=True` to a shipped integration to make a test pass; report it as a concern instead.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add agency/integrations/__init__.py agency/integrations/agency/copilot.py tests/test_reporting_tool_grant.py
-git commit -m "feat(integrations): always grant the reporting write tool"
+git add agency/integrations/models.py agency/integrations/__init__.py agency/configuration/effective.py agency/jobs/models.py tests/test_write_boundary_contract.py
+git commit -m "feat(integrations): define the write-boundary contract"
 ```
 
 ---
@@ -1864,20 +2079,23 @@ git commit -m "feat(jobs): validate and ingest agent records after a run"
 ### Task 9: Documentation
 
 **Files:**
-- Modify: `AGENTS.md` (the authority-boundaries and configuration sections)
+- Modify: `AGENTS.md` (the authority-boundaries and configuration sections, and the stale Development block)
 - Modify: `kb/configuration.md:20`
 - Modify: `skills/agency-setup/references/templates.md:86`
 - Modify: `.github/skills/agency-setup/references/templates.md:86`
 
-- [ ] **Step 1: Record the tools exception in `AGENTS.md`**
+- [ ] **Step 1: Record the write-boundary contract in `AGENTS.md`**
 
 In the configuration section, after the sentence "Agent tools are a complete override, not an addition.", add:
 
 ```markdown
-Agency additionally grants the minimum tool set its own reporting protocol
-requires, so every agent can write observations, proposals, and memory into its
-per-job outbox regardless of the configured allowlist. This is the only
-exception to the complete-override rule.
+Writability is a separate axis from tools. `capabilities.write` decides whether
+an agent may write its workspace: true grants write to the sandbox roots, false
+grants none of them. The per-job launch view holding the agent's outbox and
+memory is implicitly writable for every agent and never appears in
+configuration. An integration that cannot enforce that separation must not run
+an agent whose writes are narrowed; it declares
+`RuntimeCapabilities.enforces_write_boundary` when it can.
 ```
 
 In the authority-boundaries section, after the sentence about explicit instances, add:
@@ -1902,8 +2120,8 @@ python -m agency.app
 Append to the paragraph at line 20:
 
 ```markdown
-Agency always grants the minimum tool set its reporting protocol needs on top of
-the configured policy.
+`capabilities.write` selects the writable subset of those roots: all of them
+when true, none of them when false. The tool policy is unaffected by it.
 ```
 
 - [ ] **Step 3: Replace the vague pipeline sentence in both skill copies**
