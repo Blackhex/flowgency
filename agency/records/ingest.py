@@ -126,7 +126,7 @@ def ingest_records(
         }
         meta["agent"] = agent_name
         meta["date"] = date_prefix
-        meta["status"] = "open"
+        meta["status"] = "open" if candidate.kind == "observation" else "proposed"
         if candidate.kind == "proposal":
             meta["origin_agent"] = agent_name
 
