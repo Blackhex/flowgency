@@ -202,11 +202,47 @@ Validation rules:
 ### Failure handling
 
 Validation failures neither discard the agent's work nor silently succeed.
-Invalid records are retained as job artifacts through the existing
-`retain_failed_stage` path, and the job's execution summary names what was
-rejected and why. A run that produced only invalid records is a failed run;
-completing quietly is how the current system produces a green job with nothing
-recorded.
+
+Valid records are ingested even when the same run also produced invalid ones.
+Discarding five good observations because a sixth file was malformed throws away
+work the agent did and that Agency already judged sound. The run still **fails**
+and the summary still names every rejection, so nothing is hidden — but the good
+records land.
+
+Invalid records are retained as job artifacts, from **both** the `observations`
+and `proposals` directories; a rejected proposal's body is as valuable to an
+operator as a rejected observation's.
+
+Retention must survive the very inputs that caused the rejection. The existing
+`retain_failed_stage` refuses non-markdown files, subdirectories, symlinks and
+reserved names — exactly what a rejected outbox contains. Retention therefore
+copies only retainable entries, and a retention failure must never replace the
+per-record reasons with a generic error. Losing those reasons reintroduces the
+"failure reporting lies" defect this design exists to remove.
+
+A run that produced no valid records is a failed run; completing quietly is how
+the current system produces a green job with nothing recorded.
+
+### Bounds
+
+Records are capped at 20 per directory per run and 64 KiB each. The memory
+directory carries the same exposure — agent-written, destined for canonical
+storage, read by the worker — so it is bounded the same way, by entry count and
+per-file size, and streamed per file rather than accumulated whole. An unbounded
+memory outbox lets a single run exhaust the worker.
+
+### Where the writable-agent set comes from
+
+Proposal validation must know which agents may be named as `execution_agent`.
+That set is resolved at **submission**, from the configuration snapshot the job
+already pins, and carried on the job spec.
+
+Resolving it at execution instead would read a mutable file after the agent had
+already done its work, so an unrelated configuration edit between submission and
+execution could fail the run — and would report it as though the agent had named
+a bad executor. The job spec already snapshots the task input, the runtime
+policy, the blueprint digest and the memory binding for exactly this reason; the
+writable-agent set is the same kind of fact.
 
 ### Ordering
 
