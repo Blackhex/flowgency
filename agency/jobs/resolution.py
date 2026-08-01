@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agency.blueprints import BlueprintLibrary, CompilationCache
+from agency.blueprints.cache import instance_digest as _instance_digest
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import AgentInstance, Routine
 from agency.configuration.issues import ValidationFailed, ValidationIssue
@@ -185,7 +186,8 @@ def resolve_job_request(
         integration=integration,
     )
     inspection = library.inspect(agent.blueprint)
-    artifact = cache.ensure_compiled(agent.integration, inspection)
+    digest = _instance_digest(agent.identity, runtime_policy)
+    artifact = cache.ensure_compiled(agent.integration, inspection, instance_digest=digest)
 
     selector = select_effective_memory(
         request.memory_override,
@@ -281,6 +283,7 @@ def resolve_job_request(
             integration=artifact.ref.integration,
             projector_version=artifact.ref.projector_version,
             cache_path=str(artifact.entry_path.resolve()),
+            instance_digest=digest,
         ),
         routine_id=routine.id if routine is not None else None,
         skill=None,
