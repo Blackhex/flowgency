@@ -778,20 +778,13 @@ templates.env.filters["render_md"] = render_md
 
 def execution_agent_options(g: dict) -> list[str]:
     """List configured writable instances whose integration supports execution."""
+    from agency.permissions.eligibility import may_execute_decisions
+    config = _load_snapshot().config
     options = []
     for name in g["agents"]:
         try:
             integration = get_agent_integration(g, name)
-            instance = next(
-                (
-                    candidate
-                    for candidate in g.get("agents_full", [])
-                    if candidate.get("name") == name
-                ),
-                None,
-            )
-            capabilities = instance.get("capabilities", {}) if instance else {}
-            if integration.supports_execution and capabilities.get("write") is True:
+            if integration.supports_execution and may_execute_decisions(config, g["key"], name):
                 options.append(name)
         except KeyError:
             continue

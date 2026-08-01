@@ -183,6 +183,7 @@ def validate_outbox(
 def writable_agent_names(config, group_key: str) -> frozenset[str]:
     """Configured instances in a group that may be trusted to execute."""
     from agency.integrations import get_integration
+    from agency.permissions.eligibility import may_execute_decisions
 
     group = config.groups.get(group_key)
     if group is None:
@@ -190,7 +191,7 @@ def writable_agent_names(config, group_key: str) -> frozenset[str]:
 
     names: set[str] = set()
     for name, agent in group.agents.items():
-        if not agent.capabilities.write:
+        if not may_execute_decisions(config, group_key, name):
             continue
         try:
             integration = get_integration(agent.integration)
