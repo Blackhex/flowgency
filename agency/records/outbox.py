@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +16,13 @@ OUTBOX_RELATIVE_PROPOSALS = ".agency/outbox/proposals"
 OUTBOX_RELATIVE_MEMORY = ".agency/memory"
 
 _AGENCY_DIRNAME = ".agency"
+
+
+def _is_reparse_point(file_stat: os.stat_result) -> bool:
+    """Check if a file is a symlink or reparse point."""
+    attributes = getattr(file_stat, "st_file_attributes", 0)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return bool(attributes & reparse_flag)
 
 
 @dataclass(frozen=True)
@@ -63,6 +72,11 @@ def copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> N
 
     produced: dict[str, bytes] = {}
     for entry in sorted(outbox.memory.iterdir(), key=lambda item: item.name.casefold()):
+        entry_stat = entry.stat(follow_symlinks=False)
+        if _is_reparse_point(entry_stat):
+            raise ValueError(
+                f"memory directory must not contain symlinks or reparse points: {entry.name}"
+            )
         if entry.is_dir():
             raise ValueError(
                 f"memory directory must not contain subdirectories: {entry.name}"
@@ -72,8 +86,18 @@ def copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> N
         produced[entry.name] = entry.read_bytes()
 
     for name, payload in produced.items():
-        atomic_write_bytes(stage_directory / name, payload)
+        stage_file = stage_directory / name
+        existing = None
+        if stage_file.exists():
+            existing = stage_file.read_bytes()
+        if existing != payload:
+            atomic_write_bytes(stage_file, payload)
 
     for entry in list(stage_directory.iterdir()):
-        if entry.is_file() and entry.name not in produced:
-            entry.unlink()
+        if entry.is_file():
+            if entry.name not in produced:
+                entry.unlink()
+        elif entry.is_dir():
+            raise ValueError(
+                f"stage directory must not contain subdirectories: {entry.name}"
+            )
