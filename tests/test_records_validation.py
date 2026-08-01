@@ -76,6 +76,19 @@ def test_non_markdown_file_is_rejected(outbox):
     assert "not a markdown file" in result.rejected[0].reason
 
 
+def test_an_uppercase_suffix_is_not_a_markdown_file(outbox):
+    """`.md` matching is case-sensitive here, in retention, and in the store."""
+    write(outbox.observations / "a.MD", OBSERVATION)
+
+    result = validate_outbox(outbox, writable_agents=WRITABLE)
+
+    assert not result.ok
+    assert result.accepted == ()
+    assert "a.MD: not a markdown file" in (
+        f"{result.rejected[0].source_name}: {result.rejected[0].reason}"
+    )
+
+
 def test_subdirectory_is_rejected(outbox):
     (outbox.observations / "nested").mkdir()
 
