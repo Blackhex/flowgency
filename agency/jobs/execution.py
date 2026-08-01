@@ -39,7 +39,7 @@ from agency.records.validation import validate_outbox, writable_agent_names
 
 from .atomic import atomic_write_text
 from .authority import JobAuthorityError, JobAuthorityRef, JobStore
-from .artifacts import JobArtifact, retain_failed_stage
+from .artifacts import JobArtifact, retain_failed_stage, retain_rejected_records
 from .changes import capture_base_sha, capture_git_changes
 from .launch_view import create_launch_view
 from .models import JobRecord
@@ -51,6 +51,63 @@ from .store import (
 )
 
 logger = logging.getLogger(__name__)
+
+# The rejection summary quotes agent-controlled filenames back to the operator
+# and is persisted and rendered, so it is bounded.
+MAX_SUMMARY_REASONS = 2000
+MAX_SUMMARY_SOURCE_NAME = 120
+
+
+def _writable_agents(spec) -> frozenset[str]:
+    """Instances a proposal may name as its executor.
+
+    Resolved at submission and carried on the spec, so a configuration edit
+    between submission and execution cannot fail a run the agent got right.
+    Specs persisted before the field existed fall back to the live read.
+    """
+    if spec.writable_agents is not None:
+        return frozenset(spec.writable_agents)
+    snapshot = load_config_snapshot(Path(spec.config_path))
+    return writable_agent_names(snapshot.config, spec.group_key)
+
+
+def _rejection_summary(rejected, ingested_count: int) -> str:
+    joined = "; ".join(
+        f"{item.kind} {item.source_name[:MAX_SUMMARY_SOURCE_NAME]}: {item.reason}"
+        for item in rejected
+    )
+    if len(joined) > MAX_SUMMARY_REASONS:
+        joined = f"{joined[:MAX_SUMMARY_REASONS]} … (truncated)"
+    filed = (
+        f" Filed {ingested_count} valid "
+        f"{'record' if ingested_count == 1 else 'records'}."
+        if ingested_count
+        else ""
+    )
+    return f"Rejected agent records: {joined}{filed}"
+
+
+def _retained_outbox_artifacts(
+    job_path: Path,
+    job_id: str,
+    outbox,
+) -> list[dict[str, object]]:
+    """Retain what survives of a rejected outbox, never at the cost of the reasons."""
+    try:
+        artifacts = retain_rejected_records(
+            job_store=_jobs_dir(job_path),
+            job_id=job_id,
+            sources={
+                "observations": outbox.observations,
+                "proposals": outbox.proposals,
+            },
+        )
+    except Exception as error:
+        logger.warning(
+            "Failed to retain rejected records for job %s: %s", job_id, error
+        )
+        return []
+    return [artifact.to_dict() for artifact in artifacts]
 
 
 def _resolved_memory(spec) -> ResolvedMemory:
@@ -485,15 +542,9 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     )
                 else:
                     try:
-                        snapshot_cfg = load_config_snapshot(Path(spec.config_path))
+                        writable_agents = _writable_agents(spec)
                     except Exception as cfg_error:
                         cfg_path = spec.config_path
-                        artifacts = retain_failed_stage(
-                            job_store=_jobs_dir(job_path),
-                            job_id=spec.job_id,
-                            stage_directory=outbox.observations,
-                            diff_bytes=None,
-                        )
                         # Must fall through to tail — project_decision must run.
                         final = _terminalize_failure(
                             job_path,
@@ -509,34 +560,34 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                             changed_files=changes,
                             base_sha=base_sha,
                             memory_publication={
-                                "failed_artifacts": [
-                                    artifact.to_dict() for artifact in artifacts
-                                ]
+                                "failed_artifacts": _retained_outbox_artifacts(
+                                    job_path, spec.job_id, outbox
+                                )
                             },
                             session_id=result.session_id,
                         )
                     else:
                         validation = validate_outbox(
                             outbox,
-                            writable_agents=writable_agent_names(
-                                snapshot_cfg.config, spec.group_key
-                            ),
+                            writable_agents=writable_agents,
                         )
-                        if not validation.ok:
-                            reasons = "; ".join(
-                                f"{item.kind} {item.source_name}: {item.reason}"
-                                for item in validation.rejected
-                            )
-                            artifacts = retain_failed_stage(
-                                job_store=_jobs_dir(job_path),
-                                job_id=spec.job_id,
-                                stage_directory=outbox.observations,
-                                diff_bytes=None,
-                            )
+                        # Valid records land even when the same run produced
+                        # invalid ones, and always before memory publishes.
+                        ingested = ingest_records(
+                            validation,
+                            observations_dir=Path(context.group_root) / "observations",
+                            proposals_dir=Path(context.group_root) / "proposals",
+                            agent_name=spec.agent_name,
+                            now=started,
+                            job_id=spec.job_id,
+                        )
+                        if validation.rejected:
                             # Must fall through to tail — project_decision must run.
                             final = _terminalize_failure(
                                 job_path,
-                                summary=f"Rejected agent records: {reasons}",
+                                summary=_rejection_summary(
+                                    validation.rejected, len(ingested)
+                                ),
                                 started_at=started.isoformat(),
                                 stdout_path=str(stdout_path.resolve()),
                                 stderr_path=persisted_stderr_path,
@@ -545,23 +596,15 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 changed_files=changes,
                                 base_sha=base_sha,
                                 memory_publication={
-                                    "failed_artifacts": [
-                                        artifact.to_dict() for artifact in artifacts
-                                    ]
+                                    "failed_artifacts": _retained_outbox_artifacts(
+                                        job_path, spec.job_id, outbox
+                                    )
                                 },
                                 session_id=result.session_id,
                             )
                         else:
-                            ingested = ingest_records(
-                                validation,
-                                observations_dir=Path(context.group_root) / "observations",
-                                proposals_dir=Path(context.group_root) / "proposals",
-                                agent_name=spec.agent_name,
-                                now=started,
-                                job_id=spec.job_id,
-                            )
-                            copy_outbox_memory_to_stage(outbox, stage.directory)
                             try:
+                                copy_outbox_memory_to_stage(outbox, stage.directory)
                                 prepared = prepare_publication(
                                     stage,
                                     job_store=_jobs_dir(job_path),
@@ -607,7 +650,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                         session_id=result.session_id,
                                     )
                                     write_job(job_path, final)
-                            except MemoryPublicationError as error:
+                            except (MemoryPublicationError, ValueError) as error:
                                 current = read_job(job_path)
                                 artifacts = _retained_failed_artifacts(job_path)
                                 if not artifacts:

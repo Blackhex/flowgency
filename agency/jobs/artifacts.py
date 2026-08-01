@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -36,22 +37,7 @@ def retain_failed_stage(
     stage_directory: Path,
     diff_bytes: bytes | None,
 ) -> list[JobArtifact]:
-    job_store = _validate_job_store(job_store)
-    safe_job_id = _validate_job_id(job_id)
-    artifacts_root = _ensure_child_directory(
-        job_store,
-        "artifacts",
-        label="artifacts",
-    )
-    target = artifacts_root / safe_job_id
-    if target.exists():
-        _safe_rmtree(target, label="artifacts")
-    target = _ensure_child_directory(
-        artifacts_root,
-        safe_job_id,
-        label="artifacts",
-    )
-
+    target = _prepare_artifact_target(job_store, job_id)
     stage_root = _ensure_actual_directory(
         Path(stage_directory),
         label="artifacts",
@@ -78,6 +64,52 @@ def retain_failed_stage(
             )
         )
     return artifacts
+
+
+def retain_rejected_records(
+    *,
+    job_store: Path,
+    job_id: str,
+    sources: Mapping[str, Path],
+) -> list[JobArtifact]:
+    """Retain what can be retained from each labelled outbox directory.
+
+    Rejection is caused by exactly the entries `retain_failed_stage` refuses, so
+    this skips anything unretainable instead of raising and losing the reasons.
+    Names are prefixed with their label so the two directories cannot collide.
+    """
+    target = _prepare_artifact_target(job_store, job_id)
+    artifacts: list[JobArtifact] = []
+    for label, directory in sources.items():
+        for name, payload in _read_retainable_files(Path(directory)).items():
+            artifact_path = target / f"{label}-{name}"
+            atomic_write_bytes(artifact_path, payload)
+            artifacts.append(
+                JobArtifact(
+                    name=artifact_path.name,
+                    path=str(artifact_path.resolve()),
+                    size=len(payload),
+                )
+            )
+    return artifacts
+
+
+def _prepare_artifact_target(job_store: Path, job_id: str) -> Path:
+    job_store = _validate_job_store(job_store)
+    safe_job_id = _validate_job_id(job_id)
+    artifacts_root = _ensure_child_directory(
+        job_store,
+        "artifacts",
+        label="artifacts",
+    )
+    target = artifacts_root / safe_job_id
+    if target.exists():
+        _safe_rmtree(target, label="artifacts")
+    return _ensure_child_directory(
+        artifacts_root,
+        safe_job_id,
+        label="artifacts",
+    )
 
 
 def _validate_job_store(job_store: Path) -> Path:
@@ -113,6 +145,26 @@ def _read_stage_files(directory: Path) -> dict[str, bytes]:
             raise ValueError(
                 f"artifacts contain non-markdown file: {entry.name}"
             )
+        files[entry.name] = entry.read_bytes()
+    return files
+
+
+def _read_retainable_files(directory: Path) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    if not directory.is_dir():
+        return files
+    for entry in sorted(
+        directory.iterdir(),
+        key=lambda item: item.name.casefold(),
+    ):
+        if _is_symlink_or_reparse(entry) or not entry.is_file():
+            continue
+        if entry.suffix != ".md":
+            continue
+        try:
+            _validate_stage_filename(entry.name)
+        except ValueError:
+            continue
         files[entry.name] = entry.read_bytes()
     return files
 
