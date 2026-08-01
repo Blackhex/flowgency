@@ -843,6 +843,34 @@ def _print_dispatch_status(status: dict[str, Any]) -> None:
         print(f"Dispatcher active: heartbeat every {status['expected_interval']} minutes")
 
 
+def cmd_config(args: Namespace) -> int:
+    try:
+        return _cmd_config_inner(args)
+    except BaseException as error:
+        if isinstance(error, (KeyboardInterrupt, SystemExit)):
+            raise
+        return _render_failure(error, json_output=False)
+
+
+def _cmd_config_inner(args: Namespace) -> int:
+    if args.config_command == "migrate":
+        from agency.configuration.migrate import migrate_v4_to_v5
+
+        store = ConfigStore(_config_path(args))
+        file_snapshot = store.inspect()
+        if not file_snapshot.exists:
+            raise CliFailure(ExitCode.OPERATIONAL_FAILURE, "config-not-found", "config.yaml not found")
+        raw = yaml.safe_load(file_snapshot.payload.decode("utf-8")) or {}
+        try:
+            migrated = migrate_v4_to_v5(raw)
+        except ValueError as error:
+            raise CliFailure(ExitCode.VALIDATION, "migration-failed", str(error)) from error
+        store.replace(file_snapshot.revision, migrated)
+        print(str(store.path))
+        return 0
+    return 0
+
+
 def cmd_dispatch(args: Namespace) -> int:
     try:
         return _cmd_dispatch_inner(args)
@@ -1137,6 +1165,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config(uninstall)
     uninstall.add_argument("--force", action="store_true")
     uninstall.set_defaults(handler=cmd_dispatch, interval=None, replace=False, json=False)
+
+    config_cmd = subparsers.add_parser("config", help="Manage Agency configuration")
+    config_subparsers = config_cmd.add_subparsers(dest="config_command", required=True)
+    migrate_cmd = config_subparsers.add_parser("migrate", help="Migrate config from schema version 4 to 5")
+    _add_config(migrate_cmd)
+    migrate_cmd.set_defaults(handler=cmd_config)
 
     jobs = subparsers.add_parser("jobs", help="List durable agent jobs")
     _add_group_json(jobs)
