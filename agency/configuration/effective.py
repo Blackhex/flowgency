@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from agency.configuration.issues import ValidationFailed, ValidationIssue
-from agency.configuration.models import AgencyConfig, AgentInstance, GroupConfig
+from agency.configuration.models import AgencyConfig, AgentInstance, GroupConfig, PermissionMode
 from agency.integrations import BaseIntegration
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
@@ -43,7 +43,7 @@ def _resolve_timeout(group: GroupConfig, agent: AgentInstance, timeout_override:
     return group.runtime.timeout
 
 
-def _resolve_mode(group: GroupConfig, agent: AgentInstance) -> str:
+def _resolve_mode(group: GroupConfig, agent: AgentInstance) -> PermissionMode:
     if "permissions" in agent.runtime.model_fields_set and (
         "mode" in agent.runtime.permissions.model_fields_set
     ):

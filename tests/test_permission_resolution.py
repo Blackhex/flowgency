@@ -63,6 +63,50 @@ def test_scoped_tools_is_empty_when_every_rule_agrees():
     assert p.scoped_tools == frozenset()
 
 
+def test_scoped_tools_none_plus_explicit_reports_explicit_names():
+    # A None rule grants everything; an explicit tuple is narrower — every
+    # named tool in the explicit rule is potentially scoped differently.
+    p = policy(rule("/ws", None), rule("/ws/sub", ("read",)))
+
+    assert p.scoped_tools == frozenset({"read"})
+
+
+def test_scoped_tools_none_plus_none_is_empty():
+    p = policy(rule("/ws", None), rule("/ws/sub", None))
+
+    assert p.scoped_tools == frozenset()
+
+
+def test_scoped_tools_explicit_plus_explicit_standard_diff():
+    p = policy(rule("/a", ("read",)), rule("/b", ("read", "write")))
+
+    assert p.scoped_tools == frozenset({"write"})
+
+
+def test_path_prefix_boundary():
+    # /ws-other must NOT be treated as inside /ws (classic startswith bug).
+    p = policy(rule("/ws", ("read",)), mode="restricted")
+
+    assert p.tools_for(Path("/ws-other/a")) == ()
+
+
+def test_pathless_rule_is_ignored_by_tools_for():
+    # path=None rules are skipped and never match any concrete path.
+    p = policy(rule(None, ("read", "write")), rule("/ws", ("search",)))
+
+    assert p.tools_for(Path("/ws/a")) == ("search",)
+
+    p2 = policy(rule(None, ("read",)), mode="restricted")
+    assert p2.tools_for(Path("/ws/a")) == ()
+
+
+def test_pathless_rule_excluded_from_scoped_tools():
+    # A single path-bearing rule plus a pathless rule — not enough to scope.
+    p = policy(rule(None, ("read",)), rule("/ws", ("write",)))
+
+    assert p.scoped_tools == frozenset()
+
+
 def test_launch_zones_are_appended(tmp_path: Path):
     zoned = policy(rule("/ws", ("read",))).with_launch_zones(tmp_path)
 
