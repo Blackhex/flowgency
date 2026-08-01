@@ -192,7 +192,7 @@ class BaseIntegration:
         if unscopable:
             differing = ", ".join(
                 str(rule.path) for rule in policy.rules if rule.path is not None
-            )
+            ) or "multiple paths"
             issues.append(
                 ValidationIssue(
                     code="unsupported-tool-scoping",

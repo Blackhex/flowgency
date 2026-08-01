@@ -10,8 +10,8 @@ from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
-def _build_issue(code: str, scope: str, field: str, message: str, hint: str) -> ValidationIssue:
-    return ValidationIssue(code=code, scope=scope, field=field, message=message, corrective_hint=hint)
+def _build_issue(code: str, scope: str, field: str, message: str, corrective_hint: str) -> ValidationIssue:
+    return ValidationIssue(code=code, scope=scope, field=field, message=message, corrective_hint=corrective_hint)
 
 
 def _platform_path_key(path: Path) -> str:
@@ -105,7 +105,7 @@ def resolve_effective_policy(
                 scope=f"groups.{group_id}.agents.{agent_id}",
                 field="integration",
                 message=f"Integration '{agent.integration}' is not registered.",
-                hint="Choose an installed integration or register it before running this agent.",
+                corrective_hint="Choose an installed integration or register it before running this agent.",
             )
             raise ValidationFailed((issue,)) from exc
 
