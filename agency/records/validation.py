@@ -175,3 +175,24 @@ def validate_outbox(
             rejected=rejected,
         )
     return OutboxValidation(accepted=tuple(accepted), rejected=tuple(rejected))
+
+
+def writable_agent_names(config, group_key: str) -> frozenset[str]:
+    """Configured instances in a group that may be trusted to execute."""
+    from agency.integrations import get_integration
+
+    group = config.groups.get(group_key)
+    if group is None:
+        return frozenset()
+
+    names: set[str] = set()
+    for name, agent in group.agents.items():
+        if not agent.capabilities.write:
+            continue
+        try:
+            integration = get_integration(agent.integration)
+        except KeyError:
+            continue
+        if integration.supports_execution:
+            names.add(name)
+    return frozenset(names)
