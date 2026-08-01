@@ -15,7 +15,13 @@ Agency is a FastAPI and Jinja2 application with filesystem-backed canonical conf
 
 Reporting is unconditional. `capabilities.write` governs workspace mutation and
 decision execution only; it never prevents an agent from recording an
-observation, creating a proposal, or updating its own memory.
+observation, creating a proposal, or updating its own memory. Reporting is
+unconditional in policy, not yet in practice: because no shipped integration
+declares `RuntimeCapabilities.enforces_write_boundary`, an agent configured with
+`capabilities.write: false` fails policy resolution and cannot run at all, so it
+reports nothing. An existing read-only agent therefore stops working on upgrade
+and must be granted write or removed until an integration implements the
+boundary.
 
 Do not add runtime directory-shape loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup conversion. Native integration files are generated runtime output only and never become authority.
 
