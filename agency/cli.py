@@ -184,6 +184,7 @@ def _group(args: Namespace):
 def _resolve_group(args: Namespace) -> dict[str, Any]:
     snapshot, group_id, group = _group(args)
     paths = resolve_group_paths(group)
+    from agency.permissions.eligibility import may_execute_decisions
     return {
         "key": group_id,
         "name": group.name,
@@ -199,7 +200,7 @@ def _resolve_group(args: Namespace) -> dict[str, Any]:
                 "name": instance.name,
                 "integration": instance.integration,
                 "integration_config": dict(instance.integration_config),
-                "capabilities": {"write": instance.capabilities.write},
+                "capabilities": {"write": may_execute_decisions(snapshot.config, group_id, instance.name)},
             }
             for instance in group.agents.values()
         ],
