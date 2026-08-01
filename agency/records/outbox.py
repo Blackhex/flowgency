@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import os
 import shutil
 import stat
@@ -14,6 +15,12 @@ from agency.fs.atomic import atomic_write_bytes
 OUTBOX_RELATIVE_OBSERVATIONS = ".agency/outbox/observations"
 OUTBOX_RELATIVE_PROPOSALS = ".agency/outbox/proposals"
 OUTBOX_RELATIVE_MEMORY = ".agency/memory"
+
+# Memory lands in canonical storage and is read by the worker, so it carries the
+# same exposure as records and is bounded the same way.
+MAX_MEMORY_FILES = 20
+MAX_MEMORY_FILE_BYTES = 65536
+MAX_MEMORY_ENTRIES = 100
 
 _AGENCY_DIRNAME = ".agency"
 
@@ -71,12 +78,24 @@ def create_outbox(
 
 
 def copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> None:
-    """Mirror the agent-visible memory directory onto the publication stage."""
+    """Mirror the agent-visible memory directory onto the publication stage.
+
+    Bounded the same way records are, and streamed one file at a time, so a
+    looping agent cannot exhaust the worker through its memory directory.
+    """
     stage_directory = Path(stage_directory)
     stage_directory.mkdir(parents=True, exist_ok=True)
 
-    produced: dict[str, bytes] = {}
-    for entry in sorted(outbox.memory.iterdir(), key=lambda item: item.name.casefold()):
+    scanned = list(
+        itertools.islice(outbox.memory.iterdir(), MAX_MEMORY_ENTRIES + 1)
+    )
+    if len(scanned) > MAX_MEMORY_ENTRIES:
+        raise ValueError(
+            f"memory directory holds more than {MAX_MEMORY_ENTRIES} entries"
+        )
+
+    produced: set[str] = set()
+    for entry in sorted(scanned, key=lambda item: item.name.casefold()):
         entry_stat = entry.stat(follow_symlinks=False)
         if stat.S_ISDIR(entry_stat.st_mode):
             raise ValueError(
@@ -86,15 +105,21 @@ def copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> N
             raise ValueError(
                 f"memory directory must not contain symlinks or reparse points: {entry.name}"
             )
-        if entry.suffix.casefold() != ".md":
+        if entry.suffix != ".md":
             continue
-        produced[entry.name] = entry.read_bytes()
-
-    for name, payload in produced.items():
-        stage_file = stage_directory / name
-        existing = None
-        if stage_file.exists():
-            existing = stage_file.read_bytes()
+        if len(produced) >= MAX_MEMORY_FILES:
+            raise ValueError(
+                f"memory directory holds more than {MAX_MEMORY_FILES} markdown files"
+            )
+        if entry_stat.st_size > MAX_MEMORY_FILE_BYTES:
+            raise ValueError(
+                f"memory file {entry.name} is {entry_stat.st_size} bytes, "
+                f"over the {MAX_MEMORY_FILE_BYTES} byte limit"
+            )
+        produced.add(entry.name)
+        payload = entry.read_bytes()
+        stage_file = stage_directory / entry.name
+        existing = stage_file.read_bytes() if stage_file.exists() else None
         if existing != payload:
             atomic_write_bytes(stage_file, payload)
 
