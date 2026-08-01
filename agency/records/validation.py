@@ -144,7 +144,10 @@ def _validate_kind(
                         kind,
                         entry.name,
                         f"execution_agent '{executor_truncated}' is not a writable, "
-                        "executable configured agent",
+                        "executable configured agent (writable-agent set resolved "
+                        "from config at execution time; may differ from config at "
+                        "submission time if an agent was renamed or its capabilities "
+                        "changed)",
                     )
                 )
                 continue

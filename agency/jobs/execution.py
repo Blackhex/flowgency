@@ -484,7 +484,36 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                         session_id=result.session_id,
                     )
                 else:
-                    snapshot_cfg = load_config_snapshot(Path(spec.config_path))
+                    try:
+                        snapshot_cfg = load_config_snapshot(Path(spec.config_path))
+                    except Exception as cfg_error:
+                        cfg_path = spec.config_path
+                        artifacts = retain_failed_stage(
+                            job_store=_jobs_dir(job_path),
+                            job_id=spec.job_id,
+                            stage_directory=outbox.observations,
+                            diff_bytes=None,
+                        )
+                        return _terminalize_failure(
+                            job_path,
+                            summary=(
+                                f"Config load failed for '{cfg_path}': "
+                                f"{cfg_error}"
+                            ),
+                            started_at=started.isoformat(),
+                            stdout_path=str(stdout_path.resolve()),
+                            stderr_path=persisted_stderr_path,
+                            exit_code=result.exit_code,
+                            duration_seconds=result.duration_seconds,
+                            changed_files=changes,
+                            base_sha=base_sha,
+                            memory_publication={
+                                "failed_artifacts": [
+                                    artifact.to_dict() for artifact in artifacts
+                                ]
+                            },
+                            session_id=result.session_id,
+                        )
                     validation = validate_outbox(
                         outbox,
                         writable_agents=writable_agent_names(
@@ -502,7 +531,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                             stage_directory=outbox.observations,
                             diff_bytes=None,
                         )
-                        final = _terminalize_failure(
+                        return _terminalize_failure(
                             job_path,
                             summary=f"Rejected agent records: {reasons}",
                             started_at=started.isoformat(),
