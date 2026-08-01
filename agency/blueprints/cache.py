@@ -24,6 +24,7 @@ class CacheRef:
     integration: str
     projector_version: str
     source_digest: str
+    instance_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -38,12 +39,46 @@ class CompiledArtifact:
         return json.loads(self.manifest_path.read_text(encoding="utf-8"))
 
 
+def instance_digest(identity, policy) -> str:
+    """Digest the instance properties that change what is rendered.
+
+    Timeout, memory selection, routines and prompt registrations are excluded:
+    none of them alters the projected runtime.
+    """
+    payload = {
+        "identity": {
+            "display_name": identity.display_name,
+            "title": identity.title,
+            "emoji": identity.emoji,
+        },
+        "mode": policy.mode,
+        "rules": [
+            {
+                "path": None if rule.path is None else str(Path(rule.path).resolve(strict=False)),
+                "tools": None if rule.tools is None else sorted(rule.tools),
+            }
+            for rule in policy.rules
+        ],
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
 def _cache_key(ref: CacheRef) -> str:
-    return f"{ref.integration}--{ref.projector_version}--{ref.source_digest}"
+    return (
+        f"{ref.integration}--{ref.projector_version}--"
+        f"{ref.source_digest}--{ref.instance_digest}"
+    )
 
 
 def _entry_path(root: Path, ref: CacheRef) -> Path:
-    return root / ref.integration / ref.projector_version / ref.source_digest
+    return (
+        root
+        / ref.integration
+        / ref.projector_version
+        / ref.source_digest
+        / ref.instance_digest
+    )
 
 
 def _artifact_from_entry(root: Path, ref: CacheRef) -> CompiledArtifact:
@@ -354,12 +389,15 @@ class CompilationCache:
         self,
         integration: str,
         inspection: BlueprintInspection,
+        *,
+        instance_digest: str = "",
     ) -> CompiledArtifact:
         projector = self.projectors[integration]
         ref = CacheRef(
             integration,
             projector.version,
             inspection.snapshot.digest,
+            instance_digest,
         )
         return ensure_compiled(self.root, ref, inspection.snapshot, projector)
 
@@ -376,6 +414,7 @@ __all__ = [
     "CompilationCache",
     "active_pins",
     "ensure_compiled",
+    "instance_digest",
     "pin_artifact",
     "release_pin",
     "validate_artifact",

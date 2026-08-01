@@ -132,4 +132,5 @@ def test_two_process_cache_miss_builds_one_artifact(tmp_path: Path):
         "integration": "copilot",
         "projector_version": "v-lock",
         "source_digest": manifest["ref"]["source_digest"],
+        "instance_digest": "",
     }

@@ -260,7 +260,7 @@ def test_corrupt_artifact_is_quarantined_and_rebuilt(
     quarantined = list((cache_root / "_quarantine").iterdir())
     assert quarantined
     assert any(
-        item.name.endswith(f"copilot--v-test--{inspection.snapshot.digest}")
+        item.name.endswith(f"copilot--v-test--{inspection.snapshot.digest}--")
         for item in quarantined
     )
 
@@ -308,7 +308,7 @@ def test_pin_lifecycle_and_active_pins(cache, inspection):
     assert pin_path == (
         cache.root
         / "_pins"
-        / f"copilot--v-test--{inspection.snapshot.digest}"
+        / f"copilot--v-test--{inspection.snapshot.digest}--"
         / "job-123"
     )
     assert active_pins(cache.root, artifact.ref) == ("job-123",)
@@ -432,7 +432,7 @@ def test_active_pins_ignores_unexpected_entries(cache, inspection):
     pins_dir = (
         cache.root
         / "_pins"
-        / f"copilot--v-test--{inspection.snapshot.digest}"
+        / f"copilot--v-test--{inspection.snapshot.digest}--"
     )
     pins_dir.mkdir(parents=True, exist_ok=True)
     (pins_dir / "job-123").write_text("", encoding="utf-8")
