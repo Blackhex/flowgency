@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -76,6 +78,50 @@ def test_subdirectories_in_the_memory_directory_are_rejected(launch, tmp_path: P
     stage.mkdir()
     outbox = create_outbox(launch, memory_files={})
     (outbox.memory / "nested").mkdir()
+
+    with pytest.raises(ValueError, match="subdirector"):
+        copy_outbox_memory_to_stage(outbox, stage)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_symlinked_markdown_file_in_the_memory_directory_is_rejected(launch, tmp_path: Path):
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    target = tmp_path / "outside.md"
+    target.write_text("secret", encoding="utf-8")
+    outbox = create_outbox(launch, memory_files={})
+    (outbox.memory / "link.md").symlink_to(target)
+
+    with pytest.raises(ValueError, match="symlink|reparse"):
+        copy_outbox_memory_to_stage(outbox, stage)
+
+
+def test_untouched_memory_preserves_stage_mtime(launch, tmp_path: Path):
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    stage_file = stage / "memory.md"
+    stage_file.write_text("canonical", encoding="utf-8")
+    # Set mtime to a known past time
+    os.utime(stage_file, (1000000000, 1000000000))
+    original_mtime_ns = stage_file.stat().st_mtime_ns
+    
+    outbox = create_outbox(launch, memory_files={"memory.md": b"canonical"})
+    # Wait a tiny bit to ensure time would move forward if we rewrote
+    time.sleep(0.01)
+
+    copy_outbox_memory_to_stage(outbox, stage)
+
+    # Verify bytes are unchanged
+    assert stage_file.read_bytes() == b"canonical"
+    # Verify mtime was NOT updated (proving the file was not rewritten)
+    assert stage_file.stat().st_mtime_ns == original_mtime_ns
+
+
+def test_subdirectory_in_the_stage_is_rejected_as_corruption(launch, tmp_path: Path):
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    (stage / "nested").mkdir()
+    outbox = create_outbox(launch, memory_files={})
 
     with pytest.raises(ValueError, match="subdirector"):
         copy_outbox_memory_to_stage(outbox, stage)
