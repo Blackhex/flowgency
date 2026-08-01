@@ -54,3 +54,26 @@ def create_outbox(
         atomic_write_bytes(paths.memory / name, payload)
 
     return paths
+
+
+def copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> None:
+    """Mirror the agent-visible memory directory onto the publication stage."""
+    stage_directory = Path(stage_directory)
+    stage_directory.mkdir(parents=True, exist_ok=True)
+
+    produced: dict[str, bytes] = {}
+    for entry in sorted(outbox.memory.iterdir(), key=lambda item: item.name.casefold()):
+        if entry.is_dir():
+            raise ValueError(
+                f"memory directory must not contain subdirectories: {entry.name}"
+            )
+        if entry.suffix.casefold() != ".md":
+            continue
+        produced[entry.name] = entry.read_bytes()
+
+    for name, payload in produced.items():
+        atomic_write_bytes(stage_directory / name, payload)
+
+    for entry in list(stage_directory.iterdir()):
+        if entry.is_file() and entry.name not in produced:
+            entry.unlink()
