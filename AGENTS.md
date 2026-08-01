@@ -13,6 +13,10 @@ Agency is a FastAPI and Jinja2 application with filesystem-backed canonical conf
 - A group `path` is the Agency-owned group root for pipeline records, locks, and logs.
 - Every group agent entry is an explicit instance with `name`, `blueprint`, and `integration`.
 
+Reporting is unconditional. `capabilities.write` governs workspace mutation and
+decision execution only; it never prevents an agent from recording an
+observation, creating a proposal, or updating its own memory.
+
 Do not add runtime directory-shape loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup conversion. Native integration files are generated runtime output only and never become authority.
 
 ## Configuration
@@ -87,7 +91,13 @@ groups:
               channel: brand-strategy
 ```
 
-Relative global and group paths resolve against the config directory. Relative sandbox roots resolve against the group workspace. Agent roots are additive. Agent tools are a complete override, not an addition. Omitted runtime defaults are timeout 1800, unrestricted sandbox, tools `all`, and dispatch disabled.
+Relative global and group paths resolve against the config directory. Relative sandbox roots resolve against the group workspace. Agent roots are additive. Agent tools are a complete override, not an addition. Writability is a separate axis from tools. `capabilities.write` decides whether
+an agent may write its workspace: true grants write to the sandbox roots, false
+grants none of them. The per-job launch view holding the agent's outbox and
+memory is implicitly writable for every agent and never appears in
+configuration. An integration that cannot enforce that separation must not run
+an agent whose writes are narrowed; it declares
+`RuntimeCapabilities.enforces_write_boundary` when it can. Omitted runtime defaults are timeout 1800, unrestricted sandbox, tools `all`, and dispatch disabled.
 
 The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`; operation locks live in `<group.path>/locks`.
 
@@ -104,8 +114,8 @@ Preserve observation, proposal, decision, log, job, dashboard, and workspace beh
 ## Development
 
 ```text
-.venv/Scripts/python -m pytest tests/ -q
-.venv/Scripts/python -m agency.app
+python -m pytest tests/ -q
+python -m agency.app
 ```
 
 Routes use async FastAPI handlers, POST plus 303 redirects, shared domain validators, revision-checked config patches, and path validation. Config writes must lock, compare the expected revision, preserve unrelated data, validate the current config, and replace atomically.
