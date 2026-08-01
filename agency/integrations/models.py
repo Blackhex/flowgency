@@ -60,7 +60,12 @@ class EffectiveRuntimePolicy:
 
     @property
     def scoped_tools(self) -> frozenset[str]:
-        """Tools whose grant differs between path-bearing rules."""
+        """Tools whose grant differs between path-bearing rules.
+
+        Names granted by tools=None rules outside the explicit vocabulary cannot
+        be enumerated here; treat any non-empty result as indicating that
+        additional unbounded differences may also exist.
+        """
         granted: list[frozenset[str] | None] = [
             None if rule.tools is None else frozenset(rule.tools)
             for rule in self.rules
@@ -68,16 +73,18 @@ class EffectiveRuntimePolicy:
         ]
         if len(granted) < 2:
             return frozenset()
-        universe: set[str] = set()
-        for entry in granted:
-            if entry is not None:
-                universe |= entry
-        return frozenset(
-            name
-            for name in universe
-            if any((entry is None or name in entry) for entry in granted)
-            and any((entry is not None and name not in entry) for entry in granted)
+        has_none = any(entry is None for entry in granted)
+        explicit = [entry for entry in granted if entry is not None]
+        explicit_union = frozenset().union(*explicit) if explicit else frozenset()
+        # Names that differ among the explicit rules.
+        differs = frozenset(
+            name for name in explicit_union if any(name not in entry for entry in explicit)
         )
+        # When an unbounded (None) rule coexists with any explicit tuple, every
+        # named tool is potentially scoped differently across paths.
+        if has_none and explicit:
+            return differs | explicit_union
+        return differs
 
     def with_launch_zones(self, launch_dir: Path) -> "EffectiveRuntimePolicy":
         from agency.permissions.zones import launch_zone_rules
