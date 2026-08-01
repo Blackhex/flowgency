@@ -19,6 +19,7 @@ from agency.memory.selectors import (
 )
 from agency.prompts import PromptNotFoundError, PromptStore, build_prompt_task_input, resolve_catalog_prompt
 from agency.records.protocol import append_reporting_protocol
+from agency.records.validation import writable_agent_names
 
 from .models import BlueprintRef, JobRequest, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
 
@@ -301,4 +302,7 @@ def resolve_job_request(
         timeout_override=request.timeout_override,
         created_at=datetime.now(timezone.utc).isoformat(),
         private_prompts=private_prompts,
+        writable_agents=tuple(
+            sorted(writable_agent_names(snapshot.config, request.group_key))
+        ),
     )
