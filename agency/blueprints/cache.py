@@ -45,6 +45,18 @@ def instance_digest(identity, policy) -> str:
     Timeout, memory selection, routines and prompt registrations are excluded:
     none of them alters the projected runtime.
     """
+    rules = []
+    for rule in policy.rules:
+        if rule.path is not None and not rule.path.is_absolute():
+            raise ValueError(
+                f"instance_digest requires absolute paths; got relative path {rule.path!r}"
+            )
+        rules.append(
+            {
+                "path": None if rule.path is None else str(rule.path.resolve(strict=False)),
+                "tools": None if rule.tools is None else sorted(rule.tools),
+            }
+        )
     payload = {
         "identity": {
             "display_name": identity.display_name,
@@ -52,23 +64,17 @@ def instance_digest(identity, policy) -> str:
             "emoji": identity.emoji,
         },
         "mode": policy.mode,
-        "rules": [
-            {
-                "path": None if rule.path is None else str(Path(rule.path).resolve(strict=False)),
-                "tools": None if rule.tools is None else sorted(rule.tools),
-            }
-            for rule in policy.rules
-        ],
+        "rules": rules,
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def _cache_key(ref: CacheRef) -> str:
-    return (
-        f"{ref.integration}--{ref.projector_version}--"
-        f"{ref.source_digest}--{ref.instance_digest}"
-    )
+    key = f"{ref.integration}--{ref.projector_version}--{ref.source_digest}"
+    if ref.instance_digest:
+        key += f"--{ref.instance_digest}"
+    return key
 
 
 def _entry_path(root: Path, ref: CacheRef) -> Path:
