@@ -1149,6 +1149,14 @@ def test_reporting_protocol_reports_the_granted_tool_policy(tmp_path):
     assert "shell, write" in spec.task_input
 
 
+def test_resolve_snapshots_the_writable_agent_set(tmp_path):
+    """The executors a proposal may name are pinned with the rest of the spec."""
+    spec = _resolve(tmp_path, trigger="decision", task_input="Decide.")
+
+    assert spec.writable_agents == ("builder",)
+    assert JobSpec.from_dict(spec.to_dict()).writable_agents == ("builder",)
+
+
 # --- Pool-aware submission ---
 
 import os
