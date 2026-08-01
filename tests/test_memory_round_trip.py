@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import stat
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
-from agency.records.outbox import copy_outbox_memory_to_stage, create_outbox
+from agency.records.outbox import _is_plain_regular_file, copy_outbox_memory_to_stage, create_outbox
 
 
 @pytest.fixture
@@ -125,3 +128,15 @@ def test_subdirectory_in_the_stage_is_rejected_as_corruption(launch, tmp_path: P
 
     with pytest.raises(ValueError, match="subdirector"):
         copy_outbox_memory_to_stage(outbox, stage)
+
+
+def test_posix_symlink_st_mode_rejected_by_plain_regular_file_guard():
+    fake = SimpleNamespace(st_mode=stat.S_IFLNK | 0o777)
+    assert not _is_plain_regular_file(fake)
+
+
+def test_reparse_point_rejected_by_plain_regular_file_guard():
+    reparse_flag = 0x0400  # FILE_ATTRIBUTE_REPARSE_POINT
+    fake = SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_file_attributes=reparse_flag)
+    with patch.object(stat, "FILE_ATTRIBUTE_REPARSE_POINT", reparse_flag, create=True):
+        assert not _is_plain_regular_file(fake)
