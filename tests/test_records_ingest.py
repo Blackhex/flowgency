@@ -144,15 +144,27 @@ def test_collision_with_a_preexisting_file_is_avoided(dirs):
     assert (observations / "2026-07-31-suite-is-red.md").read_text(encoding="utf-8") == "old"
 
 
-def test_proposal_lands_in_the_proposals_directory_with_open_status(dirs):
+def test_proposal_lands_in_the_proposals_directory_with_proposed_status(dirs):
     _, proposals = dirs
 
     written = ingest(dirs, candidate(kind="proposal", meta={"execution_agent": "paul"}))
 
     assert written[0].path.parent == proposals
     meta, _ = parse_frontmatter(written[0].path.read_text(encoding="utf-8"))
-    assert meta["status"] == "open"
+    assert meta["status"] == "proposed"
     assert meta["execution_agent"] == "paul"
+
+
+def test_agent_filed_proposal_is_visible_to_operator_inbox(dirs):
+    # app.py L461/L1820 and cli.py L636 both filter on ("proposed", "investigating").
+    # An agent-filed proposal must carry one of these statuses to appear in the inbox.
+    written = ingest(dirs, candidate(kind="proposal"))
+
+    meta, _ = parse_frontmatter(written[0].path.read_text(encoding="utf-8"))
+    assert meta["status"] in ("proposed", "investigating"), (
+        f"proposal status {meta['status']!r} is not in the operator-facing filter "
+        "('proposed', 'investigating') used by app.py and cli.py"
+    )
 
 
 def test_ingest_creates_missing_target_directories(tmp_path: Path):
