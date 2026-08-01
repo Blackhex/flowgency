@@ -10,7 +10,7 @@ import subprocess
 import yaml
 
 from agency.integrations import FileChange, RunResult
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedPermissionRule
 from agency.blueprints.projectors import get_projector
 from agency.jobs.authority import JobStore
 from agency.jobs.artifacts import JobArtifact
@@ -25,6 +25,7 @@ from agency.memory.selectors import resolve_memory_selector
 from agency.configuration.models import MemorySelector
 from agency.blueprints.cache import active_pins, pin_artifact
 from agency.fs.locks import exclusive_lock
+from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 
 
 def _authority(spec: JobSpec):
@@ -1076,3 +1077,62 @@ def test_execute_job_persists_session_id_from_failed_run(tmp_path, monkeypatch):
     execute_job(fixture.authority)
 
     assert read_job(fixture.job_path).session_id == "sess-fail-xyz"
+
+
+def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkeypatch):
+    """execution.py must call with_launch_zones so an authored write rule on the
+    instructions zone cannot reach the integration.  This pins the property at
+    the execution level, not just at the EffectiveRuntimePolicy unit level."""
+    path, spec = queued_job(tmp_path)
+    expected_launch_dir = (Path(path).with_suffix("") / "launch").resolve()
+
+    # Authored rule: grant write on the instructions zone — the property under test.
+    authored_policy = EffectiveRuntimePolicy(
+        timeout=30,
+        mode="restricted",
+        rules=(
+            ResolvedPermissionRule(
+                path=expected_launch_dir / ZONE_INSTRUCTIONS,
+                tools=("read", "write"),
+            ),
+        ),
+    )
+    captured: dict = {}
+
+    class Integration:
+        supports_execution = True
+        name = "fake"
+
+        def run(self, request: IntegrationRunRequest):
+            captured["request"] = request
+            return RunResult(0, "done", "", 0.1)
+
+    workspace_root = tmp_path / "group"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            workspace_root=workspace_root,
+            integration=Integration(),
+            timeout=30,
+            sandbox_root=None,
+            group_root=tmp_path / "group",
+            runtime_policy=authored_policy,
+        ),
+    )
+    # queued_job uses a schema_version 4 config; stub writable-agents resolution
+    # so the successful-run path completes without needing a schema v5 config.
+    monkeypatch.setattr("agency.jobs.execution._writable_agents", lambda spec: frozenset())
+
+    result = execute_job(_authority(spec))
+
+    assert result.status == "complete"
+    assert "request" in captured, "Integration.run was not called"
+    policy = captured["request"].runtime_policy
+    launch_dir = captured["request"].launch_dir
+
+    # The authored write on instructions must be stripped.
+    assert policy.tools_for(launch_dir / ZONE_INSTRUCTIONS / "AGENTS.md") == ("read",)
+    # Agent-writable zones must remain read+write.
+    assert policy.tools_for(launch_dir / ZONE_OUTBOX / "observations") == ("read", "write")
+    assert policy.tools_for(launch_dir / ZONE_MEMORY / "memory.md") == ("read", "write")
