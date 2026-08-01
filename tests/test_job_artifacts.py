@@ -1,7 +1,53 @@
 import pytest
 
 from agency.jobs.authority import JobStore
-from agency.jobs.artifacts import JobArtifact, retain_failed_stage
+from agency.jobs.artifacts import JobArtifact, retain_failed_stage, retain_rejected_records
+
+
+def test_retain_rejected_records_labels_both_directories_without_collision(tmp_path):
+    job_store = JobStore(tmp_path / "memory").group_root("group")
+    job_store.mkdir(parents=True)
+    observations = tmp_path / "outbox" / "observations"
+    proposals = tmp_path / "outbox" / "proposals"
+    observations.mkdir(parents=True)
+    proposals.mkdir(parents=True)
+    (observations / "a.md").write_bytes(b"observed\n")
+    (proposals / "a.md").write_bytes(b"proposed\n")
+
+    artifacts = retain_rejected_records(
+        job_store=job_store,
+        job_id="job-123",
+        sources={"observations": observations, "proposals": proposals},
+    )
+
+    assert {artifact.name for artifact in artifacts} == {
+        "observations-a.md",
+        "proposals-a.md",
+    }
+    artifact_root = job_store / "artifacts" / "job-123"
+    assert (artifact_root / "observations-a.md").read_bytes() == b"observed\n"
+    assert (artifact_root / "proposals-a.md").read_bytes() == b"proposed\n"
+
+
+def test_retain_rejected_records_skips_what_it_cannot_retain(tmp_path):
+    """The unretainable entries are the reason for the rejection; keep the rest."""
+    job_store = JobStore(tmp_path / "memory").group_root("group")
+    job_store.mkdir(parents=True)
+    observations = tmp_path / "outbox" / "observations"
+    observations.mkdir(parents=True)
+    (observations / "good.md").write_bytes(b"kept\n")
+    (observations / "notes.txt").write_bytes(b"dropped\n")
+    (observations / "shout.MD").write_bytes(b"dropped\n")
+    (observations / "nested").mkdir()
+    (observations / ".hidden.md").write_bytes(b"dropped\n")
+
+    artifacts = retain_rejected_records(
+        job_store=job_store,
+        job_id="job-123",
+        sources={"observations": observations},
+    )
+
+    assert {artifact.name for artifact in artifacts} == {"observations-good.md"}
 
 
 def test_retain_failed_stage_persists_stage_files_and_diff(tmp_path):
