@@ -472,7 +472,8 @@ class RuntimeCapabilities:
     path_scopable_tools: frozenset[str] = frozenset()
 ```
 
-Add `from dataclasses import dataclass, replace` to the imports.
+Add `from dataclasses import dataclass, replace`, `from pathlib import Path` and
+`from typing import Literal` to the imports.
 
 - [ ] **Step 4: Create the zones module**
 
@@ -1014,7 +1015,9 @@ Expected: FAIL with `TypeError` on the removed `sandbox_mode` argument
 
 - [ ] **Step 3: Reshape the snapshot**
 
-In `agency/jobs/models.py`:
+In `agency/jobs/models.py` (add `from pathlib import Path` and import
+`EffectiveRuntimePolicy` and `ResolvedPermissionRule` from
+`agency.integrations.models`):
 
 ```python
 @dataclass(frozen=True)
@@ -1053,10 +1056,12 @@ class RuntimePolicySnapshot:
 
 Add `instance_digest: str = ""` to `BlueprintRef`.
 
-- [ ] **Step 4: Populate the digest at resolution**
+- [ ] **Step 4: Leave the digest empty for now**
 
-In `agency/jobs/resolution.py`, pass the artifact's instance digest into `BlueprintRef`.
-Task 6 creates it; until then use `artifact.ref.instance_digest`.
+`BlueprintRef.instance_digest` defaults to `""`. Do **not** try to populate it in
+this task — the value is produced by `instance_digest()`, which Task 6 creates.
+Task 6 wires the two together. Leave `agency/jobs/resolution.py` alone apart from
+any change needed to keep it importable.
 
 - [ ] **Step 5: Run the focused tests**
 
@@ -1220,7 +1225,9 @@ Give `ensure_compiled` an `instance_digest` keyword and thread it into the `Cach
 
 - [ ] **Step 4: Pass the digest from resolution**
 
-In `agency/jobs/resolution.py`, compute the digest after the policy is resolved and pass it to `cache.ensure_compiled`, then into `BlueprintRef`:
+In `agency/jobs/resolution.py`, compute the digest after the policy is resolved,
+pass it to `cache.ensure_compiled`, and set it on the `BlueprintRef` that Task 5
+added:
 
 ```python
     digest = instance_digest(agent.identity, runtime_policy)
