@@ -17,7 +17,6 @@ from tests._runtime_probe_helpers import (
     selected_skill_supported,
     snapshot,
     unique_token,
-    write_boundary_supported,
 )
 
 
@@ -244,6 +243,7 @@ else:
             task_file,
             sandbox_mode="restricted",
             sandbox_roots=(workspace_root,),
+            writable_roots=(),
             tool_mode="allowlist",
             tool_names=("read", "search"),
         )
@@ -254,7 +254,7 @@ else:
             REPOSITORY_ROOT,
         )
 
-        if write_boundary_supported(integration):
+        if integration.runtime_capabilities.enforces_write_boundary:
             result = integration.run(probe_request)
             assert_live_success(result, runtime, "write-boundary", token)
             # Whether the model tries the denied write is its own choice; the boundary
@@ -293,10 +293,30 @@ else:
                 )
                 with pytest.raises(ValidationFailed) as excinfo:
                     integration.run(probe_request)
+            # KNOWN GAP: this integration has not declared enforces_write_boundary,
+            # so Agency refuses to run the read-only agent on it.  The following
+            # assertions document the current behaviour; they will need updating when
+            # an implementation lands and sets enforces_write_boundary = True.
             assert [issue.code for issue in excinfo.value.issues] == [
-                "unsupported-path-policy",
-                "unsupported-tool-policy",
-            ]
+                "unsupported-write-boundary"
+            ], (
+                f"{runtime.name}/write-boundary: expected exactly "
+                f"['unsupported-write-boundary'] but got "
+                f"{[i.code for i in excinfo.value.issues]!r}"
+            )
+            assert runtime.name in excinfo.value.issues[0].message, (
+                f"{runtime.name}/write-boundary: integration name not in rejection "
+                f"message: {excinfo.value.issues[0].message!r}"
+            )
+            assert_protected_state_unchanged(
+                before,
+                launch_dir,
+                workspace_root,
+                task_file,
+                REPOSITORY_ROOT,
+                runtime=runtime,
+                scenario="write-boundary",
+            )
 
         assert not target.exists()
         assert_protected_state_unchanged(
