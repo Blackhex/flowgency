@@ -20,7 +20,7 @@ A group owns its execution `workspace_path`, Agency-owned state `path`, runtime 
 Group runtime defaults include timeout, sandbox policy, and tool policy. Restricted sandbox roots are inherited. Instance `additional_roots` are additive and cannot remove a group root. An instance tool policy is a complete override with mode `all`, `allowlist`, or `none`; omission inherits the entire group policy.
 
 Identity and `capabilities.write` live in the instance record. Omitted write capability is false. `capabilities.write` selects the writable subset of those roots: all of them
-when true, none of them when false. The tool policy is unaffected by it.
+when true, none of them when false. The tool policy is unaffected by it. Currently no shipped integration enforces write-boundary separation, so `capabilities.write: false` prevents an agent from running and is by design.
 
 The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
 
