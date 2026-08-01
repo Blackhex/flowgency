@@ -10,13 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .issues import ValidationFailed, ValidationIssue
 
 MemoryScope = Literal["run", "routine", "agent", "group", "channel"]
-ToolMode = Literal["all", "allowlist", "none"]
-SandboxMode = Literal["restricted", "unrestricted"]
+PermissionMode = Literal["restricted", "unrestricted"]
 ScheduleKind = Literal["at", "every"]
 PromptScope = Literal["blueprint", "instance"]
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
-CONFIG_SCHEMA_VERSION = 4
+CONFIG_SCHEMA_VERSION = 5
 _ROOT_KEYS = {"schema_version", "agency", "memory", "groups"}
 
 
@@ -59,29 +58,23 @@ class MemorySelector(BaseModel):
     channel: str | None = None
 
 
-class GroupRuntimeSandbox(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
-    mode: SandboxMode = "unrestricted"
-    roots: tuple[Path, ...] = ()
+class PermissionRule(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    path: Path | None = None
+    # None means every tool the integration offers; () means none.
+    tools: tuple[str, ...] | None = None
 
 
-class AgentRuntimeSandbox(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
-    mode: SandboxMode = "unrestricted"
-    additional_roots: tuple[Path, ...] = ()
-
-
-class RuntimeTools(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
-    mode: ToolMode = "all"
-    names: tuple[str, ...] = ()
+class RuntimePermissions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    mode: PermissionMode = "unrestricted"
+    rules: tuple[PermissionRule, ...] = ()
 
 
 class AgentRuntime(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     timeout: int = 1800
-    sandbox: AgentRuntimeSandbox = Field(default_factory=AgentRuntimeSandbox)
-    tools: RuntimeTools = Field(default_factory=RuntimeTools)
+    permissions: RuntimePermissions = Field(default_factory=RuntimePermissions)
 
 
 class AgentIdentity(BaseModel):
@@ -89,11 +82,6 @@ class AgentIdentity(BaseModel):
     display_name: str = ""
     title: str = ""
     emoji: str = ""
-
-
-class AgentCapabilities(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
-    write: bool = False
 
 
 class ScheduleRule(BaseModel):
@@ -126,7 +114,6 @@ class AgentInstance(BaseModel):
     integration: str
     integration_config: dict[str, Any] = Field(default_factory=dict)
     identity: AgentIdentity = Field(default_factory=AgentIdentity)
-    capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
     runtime: AgentRuntime = Field(default_factory=AgentRuntime)
     default_memory: MemorySelector | None = None
     prompts: tuple[str, ...] = ()
@@ -148,8 +135,7 @@ class WorkspaceConfig(BaseModel):
 class GroupRuntime(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     timeout: int = 1800
-    sandbox: GroupRuntimeSandbox = Field(default_factory=lambda: GroupRuntimeSandbox(mode="unrestricted"))
-    tools: RuntimeTools = Field(default_factory=RuntimeTools)
+    permissions: RuntimePermissions = Field(default_factory=RuntimePermissions)
 
 
 class GroupConfig(BaseModel):
@@ -166,7 +152,7 @@ class GroupConfig(BaseModel):
 
 class AgencyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    schema_version: Literal[4]
+    schema_version: Literal[5]
     agency: AgencySettings
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     groups: dict[str, GroupConfig]
@@ -720,8 +706,11 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 code="unsupported-schema-version",
                 scope="config",
                 field="schema_version",
-                message="schema_version must be 4.",
-                hint="Create a fresh schema_version: 4 configuration.",
+                message="schema_version must be 5.",
+                hint=(
+                    "Run `christag-agency config migrate` to convert a "
+                    "schema_version 4 configuration."
+                ),
             )
         )
     agency = raw.get("agency") if _is_mapping(raw.get("agency")) else {}
