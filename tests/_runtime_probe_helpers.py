@@ -165,6 +165,7 @@ def request(
     tool_names: tuple[str, ...] = (),
     skill: str | None = None,
 ) -> IntegrationRunRequest:
+    resolved_writable = sandbox_roots if writable_roots is None else writable_roots
     return IntegrationRunRequest(
         workspace_root=workspace_root,
         launch_dir=launch_dir,
@@ -174,7 +175,8 @@ def request(
             timeout=180,
             sandbox_mode=sandbox_mode,
             sandbox_roots=sandbox_roots,
-            writable_roots=sandbox_roots if writable_roots is None else writable_roots,
+            writable_roots=resolved_writable,
+            writes_narrowed=tuple(resolved_writable) != tuple(sandbox_roots),
             tools=ResolvedToolPolicy(tool_mode, tool_names),
         ),
         skill=skill,
