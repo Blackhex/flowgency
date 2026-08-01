@@ -12,6 +12,7 @@ import yaml
 
 from agency.blueprints.cache import release_pin
 from agency.configuration.models import MemorySelector
+from agency.permissions.zones import ZONE_INSTRUCTIONS
 from agency.configuration.store import load_config_snapshot
 from agency.fs.locks import LockCancelledError, exclusive_lock
 from agency.integrations import get_integration
@@ -428,7 +429,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     project_prompt_snapshots(
                         projector,
                         spec.private_prompts,
-                        launch_view,
+                        launch_view / ZONE_INSTRUCTIONS,
                     )
                 started = datetime.now(timezone.utc)
                 record = transition_job(
@@ -482,7 +483,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                         "timeout",
                         spec.runtime_policy.timeout,
                     ),
-                    runtime_policy=runtime_policy,
+                    runtime_policy=runtime_policy.with_launch_zones(launch_view),
                     skill=spec.skill,
                     skill_arguments=spec.skill_arguments,
                     enforce_validation=True,
