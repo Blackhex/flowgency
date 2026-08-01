@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
+import pytest
+import yaml
+
+from agency.configuration.effective import resolve_effective_policy
+from agency.configuration.issues import ValidationFailed
+from agency.configuration.store import ConfigStore
 from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
@@ -86,3 +93,58 @@ def test_no_shipped_integration_scopes_write():
     ):
         caps = get_integration(name).runtime_capabilities
         assert "write" not in caps.path_scopable_tools, name
+
+
+# ── Rejection through resolve_effective_policy ──────────────────────────────
+
+
+def _resolved_config(tmp_path, raw_config, *, integration, group_mode, group_rules, agent_rules):
+    raw = deepcopy(raw_config)
+    raw["schema_version"] = 5
+    raw["groups"]["newsletter"]["runtime"] = {
+        "permissions": {"mode": group_mode, "rules": group_rules}
+    }
+    agent = raw["groups"]["newsletter"]["agents"][0]
+    agent.pop("capabilities", None)
+    agent["integration"] = integration
+    agent["runtime"] = {"permissions": {"rules": agent_rules}}
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return ConfigStore(path).load().config
+
+
+def test_restricted_mode_rejected_through_resolution(tmp_path, raw_config):
+    # claude-code only supports "unrestricted"; a restricted policy must be
+    # rejected by resolve_effective_policy, not just the direct validator.
+    config = _resolved_config(
+        tmp_path,
+        raw_config,
+        integration="claude-code",
+        group_mode="restricted",
+        group_rules=[{"path": "C:/ws", "tools": ["read"]}],
+        agent_rules=[],
+    )
+
+    with pytest.raises(ValidationFailed) as exc_info:
+        resolve_effective_policy(config, "newsletter", "builder")
+
+    assert "unsupported-permission-mode" in {i.code for i in exc_info.value.issues}
+
+
+def test_scoped_tools_rejected_through_resolution(tmp_path, raw_config):
+    # claude-code has empty path_scopable_tools; rules that grant "write" on
+    # only one path produce scoped_tools={"write"}, which must be rejected by
+    # resolve_effective_policy, not just the direct validator.
+    config = _resolved_config(
+        tmp_path,
+        raw_config,
+        integration="claude-code",
+        group_mode="unrestricted",
+        group_rules=[{"path": "C:/ws", "tools": ["read"]}],
+        agent_rules=[{"path": "C:/ws/tests", "tools": ["read", "write"]}],
+    )
+
+    with pytest.raises(ValidationFailed) as exc_info:
+        resolve_effective_policy(config, "newsletter", "builder")
+
+    assert "unsupported-tool-scoping" in {i.code for i in exc_info.value.issues}
