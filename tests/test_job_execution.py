@@ -38,7 +38,13 @@ def _authority(spec: JobSpec):
 
 def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content: str | None = None):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text(
+        "schema_version: 4\nagency:\n  title: Test\n  default_group: ''\n"
+        "  ai_backend: copilot\n  agent_library: /nonexistent\n"
+        "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
+        "  prompt_store: /nonexistent\nmemory: {}\ngroups: {}\n",
+        encoding="utf-8",
+    )
     cache_path = tmp_path / ".compat-cache" / "script" / "v1" / "unresolved"
     runtime_path = cache_path / "runtime"
     runtime_path.mkdir(parents=True, exist_ok=True)
@@ -118,7 +124,13 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
 def memory_bound_job(tmp_path: Path):
     group_path = tmp_path / "group"
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text(
+        "schema_version: 4\nagency:\n  title: Test\n  default_group: ''\n"
+        "  ai_backend: copilot\n  agent_library: /nonexistent\n"
+        "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
+        "  prompt_store: /nonexistent\nmemory: {}\ngroups: {}\n",
+        encoding="utf-8",
+    )
     cache_path = tmp_path / "compiled-agents" / "script" / "v1" / "digest"
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),

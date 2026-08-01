@@ -9,6 +9,7 @@ from .validation import (
     OutboxValidation,
     RecordCandidate,
     validate_outbox,
+    writable_agent_names,
 )
 
 __all__ = ["extract_display_title", "parse_frontmatter", "slugify", "OutboxPaths", "create_outbox", "copy_outbox_memory_to_stage"]
@@ -19,6 +20,7 @@ __all__ += [
     "OutboxValidation",
     "RecordCandidate",
     "validate_outbox",
+    "writable_agent_names",
 ]
 __all__ += ["IngestedRecord", "ingest_records"]
 __all__ += ["append_reporting_protocol", "build_reporting_protocol"]
