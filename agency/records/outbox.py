@@ -25,6 +25,11 @@ def _is_reparse_point(file_stat: os.stat_result) -> bool:
     return bool(attributes & reparse_flag)
 
 
+def _is_plain_regular_file(entry_stat: os.stat_result) -> bool:
+    """Return True only for plain regular files (not symlinks, not reparse points)."""
+    return stat.S_ISREG(entry_stat.st_mode) and not _is_reparse_point(entry_stat)
+
+
 @dataclass(frozen=True)
 class OutboxPaths:
     root: Path
@@ -73,13 +78,13 @@ def copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> N
     produced: dict[str, bytes] = {}
     for entry in sorted(outbox.memory.iterdir(), key=lambda item: item.name.casefold()):
         entry_stat = entry.stat(follow_symlinks=False)
-        if _is_reparse_point(entry_stat):
-            raise ValueError(
-                f"memory directory must not contain symlinks or reparse points: {entry.name}"
-            )
-        if entry.is_dir():
+        if stat.S_ISDIR(entry_stat.st_mode):
             raise ValueError(
                 f"memory directory must not contain subdirectories: {entry.name}"
+            )
+        if not _is_plain_regular_file(entry_stat):
+            raise ValueError(
+                f"memory directory must not contain symlinks or reparse points: {entry.name}"
             )
         if entry.suffix.casefold() != ".md":
             continue
