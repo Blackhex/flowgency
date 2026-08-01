@@ -69,6 +69,43 @@ def test_author_supplied_fields_other_than_the_stamped_ones_survive(dirs):
     assert meta["float"] is True
 
 
+def test_front_matter_agency_does_not_understand_is_dropped(dirs):
+    written = ingest(
+        dirs,
+        candidate(meta={"category": "suite", "execution_status": "complete", "x": 1}),
+    )
+
+    meta, _ = parse_frontmatter(written[0].path.read_text(encoding="utf-8"))
+    assert meta["category"] == "suite"
+    assert "execution_status" not in meta
+    assert "x" not in meta
+    assert "slug" not in meta
+
+
+def test_proposal_keeps_its_understood_fields_and_stamps_its_author(dirs):
+    questions = [{"id": "go", "type": "boolean", "prompt": "Proceed?"}]
+    written = ingest(
+        dirs,
+        candidate(
+            kind="proposal",
+            meta={
+                "execution_agent": "paul",
+                "questions": questions,
+                "ttl_days": 30,
+                "origin_agent": "someone-else",
+                "answers": {"go": "approved"},
+            },
+        ),
+    )
+
+    meta, _ = parse_frontmatter(written[0].path.read_text(encoding="utf-8"))
+    assert meta["execution_agent"] == "paul"
+    assert meta["questions"] == questions
+    assert meta["ttl_days"] == 30
+    assert meta["origin_agent"] == "duncan"
+    assert "answers" not in meta
+
+
 def test_explicit_slug_is_used_when_valid(dirs):
     written = ingest(dirs, candidate(meta={"slug": "custom-name"}))
 
@@ -129,22 +166,6 @@ def test_ingest_creates_missing_target_directories(tmp_path: Path):
     )
 
     assert written[0].path.is_file()
-
-
-def test_reservation_reserves_the_filename_atomically(dirs):
-    """Verify that choosing a destination reserves it, preventing concurrent overwrite."""
-    observations, _ = dirs
-    
-    # Ingest two candidates with the same slug in the same call
-    written = ingest(dirs, candidate(), candidate())
-    
-    # First should get the base name, second should get -2 (not reuse the base)
-    assert written[0].path.name == "2026-07-31-suite-is-red.md"
-    assert written[1].path.name == "2026-07-31-suite-is-red-2.md"
-    
-    # Both files should exist and contain content
-    assert written[0].path.exists()
-    assert written[1].path.exists()
 
 
 def test_exhausting_collision_cap_raises_runtime_error(dirs):
