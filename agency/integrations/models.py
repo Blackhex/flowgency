@@ -1,42 +1,115 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from agency.projector_capabilities import ProjectorCapabilities
 
-PathPolicyMode = Literal["restricted", "unrestricted"]
+PermissionMode = Literal["restricted", "unrestricted"]
+
+# Deprecated aliases kept until Tasks 3-7 clean up their call sites.
+PathPolicyMode = PermissionMode
 ToolPolicyMode = Literal["all", "allowlist", "none"]
 
 
 @dataclass(frozen=True)
 class ResolvedToolPolicy:
-    mode: ToolPolicyMode
+    """Deprecated; kept for backward-compat imports until Tasks 3-7."""
+    mode: str
     names: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResolvedPermissionRule:
+    path: Path | None
+    tools: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
 class EffectiveRuntimePolicy:
     timeout: int
-    sandbox_mode: PathPolicyMode
-    sandbox_roots: tuple[Path, ...]
-    tools: ResolvedToolPolicy
+    mode: PermissionMode = "unrestricted"
+    rules: tuple[ResolvedPermissionRule, ...] = ()
+    # Deprecated fields kept for backward-compat until Tasks 3-7 update call sites.
+    sandbox_mode: str = "unrestricted"
+    sandbox_roots: tuple[Path, ...] = ()
+    tools: object = None
     writable_roots: tuple[Path, ...] = ()
-    # Authoritative: under an unrestricted sandbox, empty sandbox_roots means
-    # "everything", so writable_roots cannot be compared against it.
     writes_narrowed: bool = False
 
     @property
     def narrows_writes(self) -> bool:
-        """Whether this policy grants read access it does not grant write access to."""
+        """Deprecated; whether this policy grants read but not write access."""
         return self.writes_narrowed
+
+    def tools_for(self, path: Path) -> tuple[str, ...] | None:
+        """Tools permitted on `path`. None means every tool."""
+        target = Path(path)
+        best: ResolvedPermissionRule | None = None
+        for candidate in self.rules:
+            if candidate.path is None:
+                continue
+            if not _covers(candidate.path, target):
+                continue
+            if best is None or len(candidate.path.parts) > len(best.path.parts):
+                best = candidate
+        if best is not None:
+            return best.tools
+        return None if self.mode == "unrestricted" else ()
+
+    @property
+    def scoped_tools(self) -> frozenset[str]:
+        """Tools whose grant differs between path-bearing rules."""
+        granted: list[frozenset[str] | None] = [
+            None if rule.tools is None else frozenset(rule.tools)
+            for rule in self.rules
+            if rule.path is not None
+        ]
+        if len(granted) < 2:
+            return frozenset()
+        universe: set[str] = set()
+        for entry in granted:
+            if entry is not None:
+                universe |= entry
+        return frozenset(
+            name
+            for name in universe
+            if any((entry is None or name in entry) for entry in granted)
+            and any((entry is not None and name not in entry) for entry in granted)
+        )
+
+    def with_launch_zones(self, launch_dir: Path) -> "EffectiveRuntimePolicy":
+        from agency.permissions.zones import launch_zone_rules
+
+        authored = tuple(
+            rule
+            for rule in self.rules
+            if rule.path is None or not _under_launch(rule.path, launch_dir)
+        )
+        return replace(self, rules=authored + launch_zone_rules(launch_dir))
+
+
+def _covers(rule_path: Path, target: Path) -> bool:
+    try:
+        target.resolve(strict=False).relative_to(rule_path.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def _under_launch(rule_path: Path, launch_dir: Path) -> bool:
+    return _covers(Path(launch_dir), Path(rule_path))
 
 
 @dataclass(frozen=True)
 class RuntimeCapabilities:
-    path_modes: frozenset[PathPolicyMode] = frozenset()
-    tool_modes: frozenset[ToolPolicyMode] = frozenset()
+    # New fields for the permission model.
+    permission_modes: frozenset[PermissionMode] = frozenset()
+    path_scopable_tools: frozenset[str] = frozenset()
+    # Deprecated fields kept for backward-compat until Tasks 3-7 update integrations.
+    path_modes: frozenset[str] = frozenset()
+    tool_modes: frozenset[str] = frozenset()
     enforces_write_boundary: bool = False
 
 

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
-from agency.configuration.group_paths import resolve_group_paths
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.configuration.models import AgencyConfig, AgentInstance, GroupConfig
-from agency.integrations import BaseIntegration, get_integration
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedToolPolicy
+from agency.integrations import BaseIntegration
+from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
 def _build_issue(code: str, scope: str, field: str, message: str, hint: str) -> ValidationIssue:
@@ -19,20 +19,6 @@ def _platform_path_key(path: Path) -> str:
     if os.name == "nt":
         return os.path.normcase(resolved)
     return resolved
-
-
-def _merge_roots(*root_sets: tuple[Path, ...]) -> tuple[Path, ...]:
-    ordered: list[Path] = []
-    seen: set[str] = set()
-    for roots in root_sets:
-        for root in roots:
-            canonical = root.resolve(strict=False)
-            key = _platform_path_key(canonical)
-            if key in seen:
-                continue
-            seen.add(key)
-            ordered.append(canonical)
-    return tuple(ordered)
 
 
 def _get_group(config: AgencyConfig, group_id: str) -> GroupConfig:
@@ -57,47 +43,41 @@ def _resolve_timeout(group: GroupConfig, agent: AgentInstance, timeout_override:
     return group.runtime.timeout
 
 
-def _resolve_tools(group: GroupConfig, agent: AgentInstance) -> ResolvedToolPolicy:
-    if "tools" in agent.runtime.model_fields_set:
-        tools = agent.runtime.tools
-    else:
-        tools = group.runtime.tools
-    return ResolvedToolPolicy(mode=tools.mode, names=tuple(tools.names))
+def _resolve_mode(group: GroupConfig, agent: AgentInstance) -> str:
+    if "permissions" in agent.runtime.model_fields_set and (
+        "mode" in agent.runtime.permissions.model_fields_set
+    ):
+        return agent.runtime.permissions.mode
+    return group.runtime.permissions.mode
 
 
-def _resolve_sandbox(
+def _merge_rules(
     group: GroupConfig,
     agent: AgentInstance,
-    *,
-    group_id: str,
-    agent_id: str,
-) -> tuple[str, tuple[Path, ...], tuple[Path, ...], bool]:
-    agent_sandbox = agent.runtime.sandbox
-    group_sandbox = group.runtime.sandbox
-    agent_overrides_mode = "mode" in agent_sandbox.model_fields_set
-    mode = agent_sandbox.mode if agent_overrides_mode else group_sandbox.mode
-    additional_roots = tuple(agent_sandbox.additional_roots)
-    may_write = agent.capabilities.write
+) -> tuple[ResolvedPermissionRule, ...]:
+    """Instance rules are additive; identical paths union their tools."""
+    merged: list[ResolvedPermissionRule] = []
+    index: dict[str | None, int] = {}
 
-    if mode == "unrestricted":
-        if additional_roots:
-            issue = _build_issue(
-                code="sandbox-contradiction",
-                scope=f"groups.{group_id}.agents.{agent_id}",
-                field="runtime.sandbox.additional_roots",
-                message="Unrestricted sandbox cannot add roots.",
-                hint="Remove additional roots or switch to restricted mode.",
+    for source in (group.runtime.permissions.rules, agent.runtime.permissions.rules):
+        for rule in source:
+            key = None if rule.path is None else _platform_path_key(Path(rule.path))
+            resolved = ResolvedPermissionRule(
+                path=None if rule.path is None else Path(rule.path).resolve(strict=False),
+                tools=None if rule.tools is None else tuple(rule.tools),
             )
-            raise ValidationFailed((issue,))
-        return mode, (), (), not may_write
+            if key in index:
+                existing = merged[index[key]]
+                if existing.tools is None or resolved.tools is None:
+                    union = None
+                else:
+                    union = tuple(dict.fromkeys((*existing.tools, *resolved.tools)))
+                merged[index[key]] = replace(existing, tools=union)
+                continue
+            index[key] = len(merged)
+            merged.append(resolved)
 
-    paths = resolve_group_paths(group)
-    roots = _merge_roots(
-        (paths.workspace_root, paths.group_root),
-        tuple(group_sandbox.roots),
-        additional_roots,
-    )
-    return mode, roots, (roots if may_write else ()), not may_write
+    return tuple(merged)
 
 
 def resolve_effective_policy(
@@ -110,35 +90,8 @@ def resolve_effective_policy(
 ) -> EffectiveRuntimePolicy:
     group = _get_group(config, group_id)
     agent = _get_agent(group, agent_id)
-    sandbox_mode, sandbox_roots, writable_roots, writes_narrowed = _resolve_sandbox(
-        group,
-        agent,
-        group_id=group_id,
-        agent_id=agent_id,
-    )
-    policy = EffectiveRuntimePolicy(
+    return EffectiveRuntimePolicy(
         timeout=_resolve_timeout(group, agent, timeout_override),
-        sandbox_mode=sandbox_mode,
-        sandbox_roots=sandbox_roots,
-        tools=_resolve_tools(group, agent),
-        writable_roots=writable_roots,
-        writes_narrowed=writes_narrowed,
+        mode=_resolve_mode(group, agent),
+        rules=_merge_rules(group, agent),
     )
-
-    if integration is None:
-        try:
-            integration = get_integration(agent.integration)
-        except KeyError as exc:
-            issue = _build_issue(
-                code="unknown-integration",
-                scope=f"groups.{group_id}.agents.{agent_id}",
-                field="integration",
-                message=f"Integration '{agent.integration}' is not registered.",
-                hint="Choose an installed integration or register it before running this agent.",
-            )
-            raise ValidationFailed((issue,)) from exc
-
-    issues = integration.validate_runtime_policy(policy)
-    if issues:
-        raise ValidationFailed(issues)
-    return policy
