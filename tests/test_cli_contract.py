@@ -72,6 +72,7 @@ def cli_config(tmp_path):
                         "blueprint": "builder-blueprint",
                         "integration": "script",
                         "integration_config": {"command": "echo {prompt_file}"},
+                        "capabilities": {"write": True},
                         "identity": {"display_name": "Build Captain", "title": "Lead", "emoji": ""},
                         "default_memory": {"scope": "agent"},
                         "routines": [

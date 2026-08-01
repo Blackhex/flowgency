@@ -37,6 +37,8 @@ class RuntimePolicySnapshot:
     sandbox_roots: tuple[str, ...]
     tool_mode: str
     tool_names: tuple[str, ...] = ()
+    writable_roots: tuple[str, ...] = ()
+    writes_narrowed: bool | None = None
 
     @classmethod
     def from_effective_policy(
@@ -52,6 +54,11 @@ class RuntimePolicySnapshot:
             ),
             tool_mode=policy.tools.mode,
             tool_names=tuple(policy.tools.names),
+            writable_roots=tuple(
+                str(Path(root).resolve(strict=False))
+                for root in policy.writable_roots
+            ),
+            writes_narrowed=policy.writes_narrowed,
         )
 
     def to_effective_policy(self) -> EffectiveRuntimePolicy:
@@ -60,6 +67,8 @@ class RuntimePolicySnapshot:
             sandbox_mode=self.sandbox_mode,
             sandbox_roots=tuple(Path(root) for root in self.sandbox_roots),
             tools=ResolvedToolPolicy(self.tool_mode, self.tool_names),
+            writable_roots=tuple(Path(root) for root in self.writable_roots),
+            writes_narrowed=self.writes_narrowed,
         )
 
 
@@ -266,6 +275,7 @@ class JobSpec:
         runtime_policy = dict(values["runtime_policy"])
         runtime_policy["sandbox_roots"] = tuple(runtime_policy.get("sandbox_roots") or ())
         runtime_policy["tool_names"] = tuple(runtime_policy.get("tool_names") or ())
+        runtime_policy["writable_roots"] = tuple(runtime_policy.get("writable_roots") or ())
         values["runtime_policy"] = RuntimePolicySnapshot(**runtime_policy)
         values["memory"] = MemoryBinding(**values["memory"])
         values["skill_arguments"] = tuple(values.get("skill_arguments") or ())

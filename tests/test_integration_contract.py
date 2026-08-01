@@ -435,6 +435,7 @@ def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
     agent = group["agents"][0]
     agent["name"] = "builder"
     agent["integration"] = "claude-code"
+    agent["capabilities"] = {"write": True}
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
