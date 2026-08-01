@@ -21,8 +21,7 @@ class GeminiIntegration(BaseIntegration):
     detect_priority = 10
     projector = get_projector("gemini")
     runtime_capabilities = RuntimeCapabilities(
-        path_modes=frozenset({"unrestricted"}),
-        tool_modes=frozenset({"all"}),
+        permission_modes=frozenset({"unrestricted"}),
     )
 
     def identity_filename(self) -> str:

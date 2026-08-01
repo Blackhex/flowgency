@@ -23,8 +23,7 @@ class ScriptIntegration(BaseIntegration):
     detect_priority = 1000  # Never auto-detects
     projector = BaseIntegration._default_projector("agent.md", discovers_instructions=False)
     runtime_capabilities = RuntimeCapabilities(
-        path_modes=frozenset({"unrestricted"}),
-        tool_modes=frozenset({"all"}),
+        permission_modes=frozenset({"unrestricted"}),
     )
 
     def __init__(self, integration_config: dict | None = None):

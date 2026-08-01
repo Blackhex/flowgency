@@ -40,8 +40,7 @@ class CopilotIntegration(BaseIntegration):
     detect_priority = 7
     projector = get_projector("copilot")
     runtime_capabilities = RuntimeCapabilities(
-        path_modes=frozenset({"restricted", "unrestricted"}),
-        tool_modes=frozenset({"all", "allowlist"}),
+        permission_modes=frozenset({"restricted", "unrestricted"}),
     )
     _WINDOWS_SHELL_HOSTS = ("powershell.exe", "pwsh.exe")
     _WINDOWS_SCRIPT_EXTENSIONS = (".ps1",)
