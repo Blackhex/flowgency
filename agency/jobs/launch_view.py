@@ -78,6 +78,8 @@ def create_launch_view(artifact: CompiledArtifact, destination: Path) -> Path:
             target = target_dir / entry.name
             shutil.copy2(entry_path, target)
 
+    # Safety net: create writable zone dirs so callers that skip create_outbox
+    # still get a structurally complete launch view.
     destination.joinpath(*ZONE_OUTBOX.split("/")).mkdir(parents=True, exist_ok=True)
     destination.joinpath(*ZONE_MEMORY.split("/")).mkdir(parents=True, exist_ok=True)
     return destination
