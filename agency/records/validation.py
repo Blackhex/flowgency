@@ -68,7 +68,7 @@ def _validate_kind(
         )
         return
     entries = sorted(scanned, key=lambda item: item.name.casefold())
-    markdown_entries = [item for item in entries if item.suffix.casefold() == ".md"]
+    markdown_entries = [item for item in entries if item.suffix == ".md"]
     if len(markdown_entries) > MAX_RECORDS_PER_KIND:
         rejected.append(
             OutboxRejection(
@@ -94,7 +94,9 @@ def _validate_kind(
                 OutboxRejection(kind, entry.name, "not a regular file")
             )
             continue
-        if entry.suffix.casefold() != ".md":
+        # Case-sensitive, matching the memory store and artifact retention: a
+        # name only one layer calls markdown is a name that gets lost.
+        if entry.suffix != ".md":
             rejected.append(
                 OutboxRejection(kind, entry.name, "not a markdown file")
             )
@@ -145,9 +147,7 @@ def _validate_kind(
                         entry.name,
                         f"execution_agent '{executor_truncated}' is not a writable, "
                         "executable configured agent (writable-agent set resolved "
-                        "from config at execution time; may differ from config at "
-                        "submission time if an agent was renamed or its capabilities "
-                        "changed)",
+                        "from the configuration this job pinned at submission)",
                     )
                 )
                 continue
