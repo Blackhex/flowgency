@@ -97,7 +97,10 @@ grants none of them. The per-job launch view holding the agent's outbox and
 memory is implicitly writable for every agent and never appears in
 configuration. An integration that cannot enforce that separation must not run
 an agent whose writes are narrowed; it declares
-`RuntimeCapabilities.enforces_write_boundary` when it can. Omitted runtime defaults are timeout 1800, unrestricted sandbox, tools `all`, and dispatch disabled.
+`RuntimeCapabilities.enforces_write_boundary` when it can. Currently no shipped
+integration declares this capability, so agents configured with `capabilities.write:
+false` fail policy resolution and cannot run until a follow-up integration
+implements the contract. Omitted runtime defaults are timeout 1800, unrestricted sandbox, tools `all`, and dispatch disabled.
 
 The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`; operation locks live in `<group.path>/locks`.
 
