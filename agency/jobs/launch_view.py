@@ -6,6 +6,7 @@ import stat
 from pathlib import Path
 
 from agency.blueprints.cache import CompiledArtifact
+from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 
 
 def _is_reparse_point(file_stat: os.stat_result) -> bool:
@@ -54,7 +55,7 @@ def create_launch_view(artifact: CompiledArtifact, destination: Path) -> Path:
                 f"Cached runtime contains a reparse point: {current}"
             )
         relative_dir = current.relative_to(runtime)
-        target_dir = destination / relative_dir
+        target_dir = destination / ZONE_INSTRUCTIONS / relative_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         for entry in sorted(
             os.scandir(current),
@@ -76,4 +77,7 @@ def create_launch_view(artifact: CompiledArtifact, destination: Path) -> Path:
                 )
             target = target_dir / entry.name
             shutil.copy2(entry_path, target)
+
+    destination.joinpath(*ZONE_OUTBOX.split("/")).mkdir(parents=True, exist_ok=True)
+    destination.joinpath(*ZONE_MEMORY.split("/")).mkdir(parents=True, exist_ok=True)
     return destination

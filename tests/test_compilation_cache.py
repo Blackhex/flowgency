@@ -324,6 +324,7 @@ def test_create_launch_view_copies_runtime_tree_and_is_private(
     tmp_path: Path,
 ):
     from agency.jobs.launch_view import create_launch_view
+    from agency.permissions.zones import ZONE_INSTRUCTIONS
 
     artifact = cache.ensure_compiled("copilot", inspection)
     launch_root = tmp_path / "jobs" / "job-1" / "launch"
@@ -333,11 +334,11 @@ def test_create_launch_view_copies_runtime_tree_and_is_private(
     assert launch_view != artifact.runtime_path
     assert launch_view == launch_root
     assert (
-        launch_view.joinpath("AGENTS.md").read_bytes()
+        launch_view.joinpath(ZONE_INSTRUCTIONS, "AGENTS.md").read_bytes()
         == artifact.runtime_path.joinpath("AGENTS.md").read_bytes()
     )
 
-    launch_view.joinpath("AGENTS.md").write_text("mutated", encoding="utf-8")
+    launch_view.joinpath(ZONE_INSTRUCTIONS, "AGENTS.md").write_text("mutated", encoding="utf-8")
 
     assert (
         artifact.runtime_path.joinpath("AGENTS.md").read_bytes()

@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agency.fs.atomic import atomic_write_bytes
+from agency.permissions.zones import ZONE_MEMORY, ZONE_OUTBOX
 
-OUTBOX_RELATIVE_OBSERVATIONS = ".agency/outbox/observations"
-OUTBOX_RELATIVE_PROPOSALS = ".agency/outbox/proposals"
-OUTBOX_RELATIVE_MEMORY = ".agency/memory"
+OUTBOX_RELATIVE_OBSERVATIONS = f"{ZONE_OUTBOX}/observations"
+OUTBOX_RELATIVE_PROPOSALS = f"{ZONE_OUTBOX}/proposals"
+OUTBOX_RELATIVE_MEMORY = ZONE_MEMORY
 
 # Memory lands in canonical storage and is read by the worker, so it carries the
 # same exposure as records and is bounded the same way.
