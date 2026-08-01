@@ -66,6 +66,8 @@ def _setup_group(tmp_path: Path) -> Path:
         "      - name: product\n"
         "        blueprint: builder-blueprint\n"
         "        integration: script\n"
+        "        capabilities:\n"
+        "          write: true\n"
         "        routines:\n"
         "          - id: daily-review\n"
         "            prompt:\n"

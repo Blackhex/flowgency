@@ -18,6 +18,7 @@ def test_agent_roots_are_additive_and_ordered(raw_config, config_paths):
     agent = group["agents"][0]
     agent["name"] = "advisor"
     agent["integration"] = "copilot"
+    agent["capabilities"] = {"write": True}
     agent["runtime"] = {
         "sandbox": {
             "mode": "restricted",
@@ -53,6 +54,7 @@ def test_restricted_policy_starts_with_workspace_and_group_roots(
         "sandbox": {"mode": "restricted", "roots": [str(extra)]}
     }
     group["agents"][0]["integration"] = "copilot"
+    group["agents"][0]["capabilities"] = {"write": True}
 
     config = parse_config(raw_config, config_paths["config_path"]).resolved
 
@@ -70,6 +72,7 @@ def test_unrestricted_policy_has_no_root_list(raw_config, config_paths):
     from agency.configuration.effective import resolve_effective_policy
 
     raw_config["groups"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    raw_config["groups"]["newsletter"]["agents"][0]["capabilities"] = {"write": True}
     config = parse_config(raw_config, config_paths["config_path"]).resolved
 
     policy = resolve_effective_policy(config, "newsletter", "builder")
@@ -92,6 +95,7 @@ def test_agent_tool_policy_replaces_group(raw_config, config_paths):
     agent = group["agents"][0]
     agent["name"] = "advisor"
     agent["integration"] = "copilot"
+    agent["capabilities"] = {"write": True}
     agent["runtime"] = {
         "tools": {
             "mode": "allowlist",
@@ -121,6 +125,7 @@ def test_agent_omits_tools_and_inherits_group(raw_config, config_paths):
     agent = group["agents"][0]
     agent["name"] = "advisor"
     agent["integration"] = "copilot"
+    agent["capabilities"] = {"write": True}
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
@@ -139,6 +144,7 @@ def test_timeout_override_precedence_is_job_then_agent_then_group(raw_config, co
     agent = group["agents"][0]
     agent["name"] = "advisor"
     agent["integration"] = "copilot"
+    agent["capabilities"] = {"write": True}
     agent["runtime"] = {"timeout": 1200}
 
     parsed = parse_config(raw_config, config_paths["config_path"])

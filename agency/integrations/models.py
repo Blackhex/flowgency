@@ -22,12 +22,24 @@ class EffectiveRuntimePolicy:
     sandbox_mode: PathPolicyMode
     sandbox_roots: tuple[Path, ...]
     tools: ResolvedToolPolicy
+    writable_roots: tuple[Path, ...] = ()
+    # Set when an unrestricted policy still forbids writes, where empty
+    # sandbox_roots means "everything" and cannot be compared to writable_roots.
+    writes_narrowed: bool | None = None
+
+    @property
+    def narrows_writes(self) -> bool:
+        """Whether this policy grants read access it does not grant write access to."""
+        if self.writes_narrowed is not None:
+            return self.writes_narrowed
+        return tuple(self.writable_roots) != tuple(self.sandbox_roots)
 
 
 @dataclass(frozen=True)
 class RuntimeCapabilities:
     path_modes: frozenset[PathPolicyMode] = frozenset()
     tool_modes: frozenset[ToolPolicyMode] = frozenset()
+    enforces_write_boundary: bool = False
 
 
 @dataclass(frozen=True)

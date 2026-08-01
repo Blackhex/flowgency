@@ -349,6 +349,8 @@ def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_pat
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
         "        integration: copilot\n"
+        "        capabilities:\n"
+        "          write: true\n"
         "        integration_config:\n"
         "          command: echo ok\n"
         "        default_memory:\n"
@@ -485,6 +487,8 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
         "        integration: copilot\n"
+        "        capabilities:\n"
+        "          write: true\n"
         "        integration_config:\n"
         f"          command: {command}\n"
         "        default_memory:\n          scope: agent\n"
@@ -1205,6 +1209,7 @@ def _pool_config(tmp_path, *, pool=1):
                         "blueprint": "builder-blueprint",
                         "integration": "copilot",
                         "integration_config": {"command": "echo ok"},
+                        "capabilities": {"write": True},
                         "default_memory": {"scope": "agent"},
                         "routines": [
                             {

@@ -77,6 +77,8 @@ def _write_config(tmp_path: Path, *, schedule: str) -> Path:
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
         "        integration: copilot\n"
+        "        capabilities:\n"
+        "          write: true\n"
         "        integration_config:\n"
         "          command: echo ok\n"
         "        default_memory:\n          scope: agent\n"

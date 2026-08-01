@@ -201,6 +201,29 @@ class BaseIntegration:
                     corrective_hint="Use a supported tool mode for this integration.",
                 )
             )
+        if policy.narrows_writes and not self.runtime_capabilities.enforces_write_boundary:
+            issues.append(
+                ValidationIssue(
+                    code="unsupported-write-boundary",
+                    scope=f"integrations.{self.name}",
+                    field="capabilities.write",
+                    message=(
+                        f"Integration '{self.name}' does not implement the write-"
+                        f"boundary contract. This agent has capabilities.write "
+                        f"false, so Agency must grant it read access to its "
+                        f"workspace while withholding write access, and "
+                        f"'{self.name}' cannot enforce that separation. Running "
+                        f"the agent anyway would give it write access it is "
+                        f"configured not to have."
+                    ),
+                    corrective_hint=(
+                        "Set capabilities.write true for this agent if it is "
+                        "genuinely trusted to modify the workspace, or run it on "
+                        "an integration that declares "
+                        "RuntimeCapabilities.enforces_write_boundary."
+                    ),
+                )
+            )
         return tuple(issues)
 
     def validate_run(self, request: IntegrationRunRequest) -> tuple[ValidationIssue, ...]:

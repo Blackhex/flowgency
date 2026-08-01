@@ -71,12 +71,13 @@ def _resolve_sandbox(
     *,
     group_id: str,
     agent_id: str,
-) -> tuple[str, tuple[Path, ...]]:
+) -> tuple[str, tuple[Path, ...], tuple[Path, ...], bool]:
     agent_sandbox = agent.runtime.sandbox
     group_sandbox = group.runtime.sandbox
     agent_overrides_mode = "mode" in agent_sandbox.model_fields_set
     mode = agent_sandbox.mode if agent_overrides_mode else group_sandbox.mode
     additional_roots = tuple(agent_sandbox.additional_roots)
+    may_write = agent.capabilities.write
 
     if mode == "unrestricted":
         if additional_roots:
@@ -88,14 +89,15 @@ def _resolve_sandbox(
                 hint="Remove additional roots or switch to restricted mode.",
             )
             raise ValidationFailed((issue,))
-        return mode, ()
+        return mode, (), (), not may_write
 
     paths = resolve_group_paths(group)
-    return mode, _merge_roots(
+    roots = _merge_roots(
         (paths.workspace_root, paths.group_root),
         tuple(group_sandbox.roots),
         additional_roots,
     )
+    return mode, roots, (roots if may_write else ()), not may_write
 
 
 def resolve_effective_policy(
@@ -108,7 +110,7 @@ def resolve_effective_policy(
 ) -> EffectiveRuntimePolicy:
     group = _get_group(config, group_id)
     agent = _get_agent(group, agent_id)
-    sandbox_mode, sandbox_roots = _resolve_sandbox(
+    sandbox_mode, sandbox_roots, writable_roots, writes_narrowed = _resolve_sandbox(
         group,
         agent,
         group_id=group_id,
@@ -119,6 +121,8 @@ def resolve_effective_policy(
         sandbox_mode=sandbox_mode,
         sandbox_roots=sandbox_roots,
         tools=_resolve_tools(group, agent),
+        writable_roots=writable_roots,
+        writes_narrowed=writes_narrowed,
     )
 
     if integration is None:

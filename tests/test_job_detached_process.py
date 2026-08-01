@@ -83,6 +83,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
                 "name": "product",
                 "blueprint": "product-blueprint",
                 "integration": "script",
+                "capabilities": {"write": True},
                 "integration_config": {
                     "command": _shell_command([sys.executable, helper, gate, sentinel]),
                 },
