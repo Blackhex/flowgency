@@ -92,10 +92,7 @@ def _setup_jobs_group(
         task_input="Do the work",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": job_id},

@@ -43,10 +43,7 @@ def _spec(tmp_path: Path) -> JobSpec:
         task_input="Run safely",
         runtime_policy=RuntimePolicySnapshot(
             timeout=30,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(workspace.resolve()),),
-            tool_mode="allowlist",
-            tool_names=("shell",),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "agent"},

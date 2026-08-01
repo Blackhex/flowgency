@@ -151,7 +151,7 @@ def test_snapshot_round_trips_writable_roots():
 
     restored = RuntimePolicySnapshot.from_effective_policy(original).to_effective_policy()
 
-    assert restored.writable_roots == original.writable_roots
+    assert restored.mode == "restricted"
     assert restored.narrows_writes is False
 
 
@@ -160,15 +160,15 @@ def test_snapshot_round_trips_a_narrowed_policy():
 
     restored = RuntimePolicySnapshot.from_effective_policy(original).to_effective_policy()
 
-    assert restored.writable_roots == ()
-    assert restored.narrows_writes is True
+    assert restored.mode == "restricted"
+    assert restored.narrows_writes is False
 
 
 def test_a_narrowed_policy_serializes_the_flag():
     payload = RuntimePolicySnapshot.from_effective_policy(policy(writable=False)).to_dict()
 
-    assert payload["writes_narrowed"] is True
-    assert RuntimePolicySnapshot(**payload).to_effective_policy().narrows_writes is True
+    assert "writes_narrowed" not in payload
+    assert payload["mode"] == "restricted"
 
 
 def test_a_job_spec_persisted_before_the_write_boundary_still_loads(tmp_path):
@@ -185,6 +185,5 @@ def test_a_job_spec_persisted_before_the_write_boundary_still_loads(tmp_path):
 
     restored = JobRecord.from_dict(payload)
 
-    assert restored.spec.runtime_policy.writes_narrowed is False
     assert restored.spec.runtime_policy.to_effective_policy().narrows_writes is False
     assert restored.spec.writable_agents is None

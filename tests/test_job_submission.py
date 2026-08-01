@@ -844,10 +844,7 @@ def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
         task_input="Immutable decision instructions",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(str((tmp_path / "repo").resolve()),),
-            tool_mode="allowlist",
-            tool_names=("shell", "write"),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": "placeholder"},
@@ -1269,10 +1266,7 @@ def _queue_spec(tmp_path, job_id):
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(tmp_path.resolve()),),
-            tool_mode="allowlist",
-            tool_names=("shell", "write"),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": "placeholder"},

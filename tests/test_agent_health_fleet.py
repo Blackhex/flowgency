@@ -131,10 +131,7 @@ def _spec(tmp_path, job_id, created_at="2026-07-20T00:00:00+00:00"):
         task_input="# Task\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "agent", "version": 1, "group": "grp", "agent": "product"},

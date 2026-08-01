@@ -128,10 +128,7 @@ def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
         task_input="# Daily review\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1200,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(workspace.resolve()), str(group.resolve()), str((workspace / "editorial").resolve())),
-            tool_mode="allowlist",
-            tool_names=("shell",),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "channel", "channel": "brand-strategy"},

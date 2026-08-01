@@ -55,10 +55,7 @@ def _make_spec(tmp_path: Path, job_id: str) -> JobSpec:
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(tmp_path.resolve()),),
-            tool_mode="allowlist",
-            tool_names=("shell", "write"),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "run", "version": 1, "job": "placeholder"},

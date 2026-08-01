@@ -314,10 +314,7 @@ def _job_spec(
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="restricted",
-            sandbox_roots=(str(group_root.resolve()),),
-            tool_mode="allowlist",
-            tool_names=("shell",),
+            mode="restricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "channel", "channel": "support"},

@@ -308,10 +308,7 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
             task_input="# Routine\n",
             runtime_policy=RuntimePolicySnapshot(
                 timeout=1800,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tool_mode="all",
-                tool_names=(),
+                mode="unrestricted",
             ),
             memory=MemoryBinding(
                 selector={"scope": "agent", "version": 1, "group": "test", "agent": "product"},
@@ -556,10 +553,7 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tool_mode="all",
-            tool_names=(),
+            mode="unrestricted",
         ),
         memory=MemoryBinding(
             selector={"scope": "agent", "version": 1, "group": "test", "agent": "product"},
