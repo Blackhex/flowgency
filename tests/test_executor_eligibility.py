@@ -61,3 +61,9 @@ def test_unknown_group_is_not_eligible(tmp_path, raw_config):
     config = _config(tmp_path, raw_config, [{"path": "<ws>", "tools": ["write"]}])
 
     assert may_execute_decisions(config, "nope", "builder") is False
+
+
+def test_unknown_agent_is_not_eligible(tmp_path, raw_config):
+    config = _config(tmp_path, raw_config, [{"path": "<ws>", "tools": ["write"]}])
+
+    assert may_execute_decisions(config, "newsletter", "nope") is False
