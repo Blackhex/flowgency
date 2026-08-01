@@ -95,10 +95,9 @@ design:
 
 `capabilities.write` and the ability to report become independent axes.
 
-- **`capabilities.write`** keeps its current meaning and its current gate: the
-  agent may mutate the group workspace and may be trusted as a decision
-  `execution_agent`. `execution_agent_options` and the decide-form validation
-  are unchanged.
+- **`capabilities.write`** decides one thing: whether the agent may write its
+  **workspace**. It continues to gate decision-executor selection, and it now
+  also determines the writable path set in the effective runtime policy.
 - **Reporting** — writing observations, proposals, and one's own memory — is an
   unconditional capability of every agent. It is not configurable, because an
   agent that cannot report cannot participate in the pipeline at all.
@@ -107,21 +106,48 @@ A read-only agent therefore gains an outbox it may write, a memory stage it may
 write, and read access to existing group records so it can avoid filing
 duplicates. It gains nothing in the workspace.
 
-Two consequences:
+### The write-boundary contract
 
-- **`runtime.tools` gains a documented exception.** `AGENTS.md` currently states
-  that agent tools are a complete override, not an addition. The reporting
-  protocol needs a write primitive, so Agency always ensures the minimum tool
-  set its own protocol requires, regardless of the configured allowlist. The
-  exception is narrow: it grants the ability to write into the outbox, not into
-  the workspace.
-- **Failure reporting stops lying.** Agency records the effective runtime policy
-  alongside the run, so a blocked agent's self-diagnosis can be checked against
-  what was actually granted.
+The boundary is expressed as **paths**, not tools. `EffectiveRuntimePolicy`
+gains a `writable_roots` field alongside its existing `sandbox_roots`:
 
-This specification does **not** make `capabilities.write: false` runtime
-enforced. Here it remains a trust gate plus convention. The specification says
-so plainly rather than implying containment it does not provide.
+- `sandbox_roots` stays what it is — everything the agent may **read**.
+- `writable_roots` is the subset it may **write**. With
+  `capabilities.write: true` that is the workspace and group roots; with
+  `capabilities.write: false` it is **empty**.
+
+The reporting paths are deliberately absent from that field. The launch view —
+which holds `.agency/outbox/` and `.agency/memory/` — is **implicitly writable
+for every agent**, always, and it never appears in configuration. It is per-job,
+so it reaches integrations through `IntegrationRunRequest.launch_dir` and
+`memory_working_dir`. "Read-only" therefore means read-only to the workspace,
+never mute.
+
+`runtime.tools` gains **no exception**. Tools remain a complete override, as
+`AGENTS.md` already states. Writability is a separate axis, which is why an
+earlier draft of this design — granting a write *tool* to satisfy the protocol —
+was wrong: on an integration without path-scoped write permissions, granting the
+tool grants write to every readable root, including the workspace. That would
+give a `capabilities.write: false` agent more workspace access than it has
+today, which is the opposite of the contract.
+
+`RuntimeCapabilities` gains `enforces_write_boundary: bool = False`. An
+integration must declare whether it can actually honour the split.
+`validate_runtime_policy` **fails closed**: a policy whose writable set is
+narrower than its readable set is rejected, verbosely, by any integration that
+has not declared the capability. The rejection names the integration, the
+contract it fails, and the fact that the agent cannot run until an
+implementation satisfies it.
+
+Failing closed blocks currently configured read-only agents from running on
+integrations that do not yet implement the contract. That is intended and
+accepted: a contract that is declared but not enforced is the failure mode this
+whole design exists to remove. No integration is adapted here — this
+specification defines the contract only.
+
+**Failure reporting stops lying.** Agency records the effective runtime policy
+alongside the run, so a blocked agent's self-diagnosis can be checked against
+what was actually granted.
 
 ### Outbox
 
@@ -240,12 +266,20 @@ fail silently:
   dead `memory_working_dir` wire is live.
 - A run whose records are all invalid fails, retains artifacts, and names the
   reason.
+- `capabilities.write: false` yields an empty `writable_roots` while
+  `sandbox_roots` still contains the workspace; `capabilities.write: true`
+  yields a writable workspace.
+- An integration that has not declared `enforces_write_boundary` rejects a
+  narrowed policy, and the rejection names the integration and the contract.
+- The launch view is never listed in `writable_roots`; its writability is
+  implicit and carried on the run request.
 
 ## Documentation
 
-- `AGENTS.md` gains the `runtime.tools` exception and the reporting capability.
-- `kb/configuration.md` gains the same, alongside its existing statement that an
-  instance tool policy is a complete override.
+- `AGENTS.md` gains the write-boundary contract and the unconditional reporting
+  capability. Its statement that agent tools are a complete override stands
+  unchanged — there is no tools exception.
+- `kb/configuration.md` gains the same.
 - `skills/agency-setup/references/templates.md` replaces "record observations or
   proposals through the project's configured pipeline" with the concrete
   protocol.
@@ -254,11 +288,13 @@ fail silently:
 
 Recorded so they are not relitigated:
 
-- Runtime enforcement of `capabilities.write` through Copilot local sandboxing.
-  This is the dependent specification, and it changes the launch path for every
-  agent: per-job `COPILOT_HOME`, authentication seeding, a generated
-  `settings.json` policy, and the relocation of `session-state/` and `logs/`
-  that the existing `--resume` and usage-summary code reads.
+- **Any integration's implementation of the write-boundary contract.** This
+  specification defines the contract; no integration is adapted to satisfy it.
+  The Copilot implementation is the dependent specification: local sandboxing
+  via `sandbox.userPolicy.filesystem.readonlyPaths` / `readwritePaths`, a
+  per-job `COPILOT_HOME`, authentication seeding, and the relocation of
+  `session-state/` and `logs/` that the existing `--resume` and usage-summary
+  code reads. Until it lands, read-only agents on Copilot do not run at all.
 - The working-directory ancestry isolation weakness.
 - An Agency MCP server as an alternative transport. It is the only mechanism
   that removes the filesystem write primitive entirely, and it remains the
@@ -271,6 +307,12 @@ Recorded so they are not relitigated:
 - **Making reporting a graded capability** (`capabilities: {workspace, records}`)
   was rejected as a knob for a case this design does not have: an agent that runs
   but must produce nothing.
+- **Granting a write tool to satisfy the protocol.** An earlier draft had Agency
+  always append a write tool to the configured allowlist. Rejected after a live
+  runtime test caught it: without path-scoped write permissions, granting the
+  tool grants write to every readable root, so a `capabilities.write: false`
+  agent would gain workspace write access it does not have today. The boundary
+  is a path contract, not a tool grant.
 - **Structured stdout** — the agent emits fenced YAML that the worker parses out
   of the transcript — was rejected despite needing no tools at all. It is
   unvalidated free-form text, it competes with the agent's prose, and it scales
