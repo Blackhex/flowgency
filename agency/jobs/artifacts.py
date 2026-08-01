@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+import itertools
 import os
 from pathlib import Path
 import stat
 import unicodedata
 
 from agency.fs.atomic import atomic_write_bytes
+from agency.records.validation import MAX_OUTBOX_ENTRIES_PER_KIND, MAX_RECORD_BYTES
 
 
 _WINDOWS_RESERVED_NAMES = {
@@ -81,7 +83,7 @@ def retain_rejected_records(
     target = _prepare_artifact_target(job_store, job_id)
     artifacts: list[JobArtifact] = []
     for label, directory in sources.items():
-        for name, payload in _read_retainable_files(Path(directory)).items():
+        for name, payload in _read_retainable_files(Path(directory)):
             artifact_path = target / f"{label}-{name}"
             atomic_write_bytes(artifact_path, payload)
             artifacts.append(
@@ -149,14 +151,14 @@ def _read_stage_files(directory: Path) -> dict[str, bytes]:
     return files
 
 
-def _read_retainable_files(directory: Path) -> dict[str, bytes]:
-    files: dict[str, bytes] = {}
+def _read_retainable_files(directory: Path) -> Iterator[tuple[str, bytes]]:
+    """Yield (name, payload) pairs, capped and streamed to bound memory use."""
     if not directory.is_dir():
-        return files
-    for entry in sorted(
-        directory.iterdir(),
-        key=lambda item: item.name.casefold(),
-    ):
+        return
+    entries = list(
+        itertools.islice(directory.iterdir(), MAX_OUTBOX_ENTRIES_PER_KIND)
+    )
+    for entry in sorted(entries, key=lambda item: item.name.casefold()):
         if _is_symlink_or_reparse(entry) or not entry.is_file():
             continue
         if entry.suffix != ".md":
@@ -165,8 +167,9 @@ def _read_retainable_files(directory: Path) -> dict[str, bytes]:
             _validate_stage_filename(entry.name)
         except ValueError:
             continue
-        files[entry.name] = entry.read_bytes()
-    return files
+        if entry.stat().st_size > MAX_RECORD_BYTES:
+            continue
+        yield entry.name, entry.read_bytes()
 
 
 def _ensure_actual_directory(
