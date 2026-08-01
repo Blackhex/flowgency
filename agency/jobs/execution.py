@@ -494,7 +494,8 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                             stage_directory=outbox.observations,
                             diff_bytes=None,
                         )
-                        return _terminalize_failure(
+                        # Must fall through to tail — project_decision must run.
+                        final = _terminalize_failure(
                             job_path,
                             summary=(
                                 f"Config load failed for '{cfg_path}': "
@@ -514,139 +515,141 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                             },
                             session_id=result.session_id,
                         )
-                    validation = validate_outbox(
-                        outbox,
-                        writable_agents=writable_agent_names(
-                            snapshot_cfg.config, spec.group_key
-                        ),
-                    )
-                    if not validation.ok:
-                        reasons = "; ".join(
-                            f"{item.kind} {item.source_name}: {item.reason}"
-                            for item in validation.rejected
-                        )
-                        artifacts = retain_failed_stage(
-                            job_store=_jobs_dir(job_path),
-                            job_id=spec.job_id,
-                            stage_directory=outbox.observations,
-                            diff_bytes=None,
-                        )
-                        return _terminalize_failure(
-                            job_path,
-                            summary=f"Rejected agent records: {reasons}",
-                            started_at=started.isoformat(),
-                            stdout_path=str(stdout_path.resolve()),
-                            stderr_path=persisted_stderr_path,
-                            exit_code=result.exit_code,
-                            duration_seconds=result.duration_seconds,
-                            changed_files=changes,
-                            base_sha=base_sha,
-                            memory_publication={
-                                "failed_artifacts": [
-                                    artifact.to_dict() for artifact in artifacts
-                                ]
-                            },
-                            session_id=result.session_id,
-                        )
                     else:
-                        ingested = ingest_records(
-                            validation,
-                            observations_dir=Path(context.group_root) / "observations",
-                            proposals_dir=Path(context.group_root) / "proposals",
-                            agent_name=spec.agent_name,
-                            now=started,
-                            job_id=spec.job_id,
+                        validation = validate_outbox(
+                            outbox,
+                            writable_agents=writable_agent_names(
+                                snapshot_cfg.config, spec.group_key
+                            ),
                         )
-                        copy_outbox_memory_to_stage(outbox, stage.directory)
-                        try:
-                            prepared = prepare_publication(
-                                stage,
-                                job_store=_jobs_dir(job_path),
-                                job_path=job_path,
-                                lease=memory_lease,
+                        if not validation.ok:
+                            reasons = "; ".join(
+                                f"{item.kind} {item.source_name}: {item.reason}"
+                                for item in validation.rejected
                             )
-                            finalize_publication(
-                                apply_publication(
-                                    prepared,
-                                    retain_failed_stage_artifacts=True,
+                            artifacts = retain_failed_stage(
+                                job_store=_jobs_dir(job_path),
+                                job_id=spec.job_id,
+                                stage_directory=outbox.observations,
+                                diff_bytes=None,
+                            )
+                            # Must fall through to tail — project_decision must run.
+                            final = _terminalize_failure(
+                                job_path,
+                                summary=f"Rejected agent records: {reasons}",
+                                started_at=started.isoformat(),
+                                stdout_path=str(stdout_path.resolve()),
+                                stderr_path=persisted_stderr_path,
+                                exit_code=result.exit_code,
+                                duration_seconds=result.duration_seconds,
+                                changed_files=changes,
+                                base_sha=base_sha,
+                                memory_publication={
+                                    "failed_artifacts": [
+                                        artifact.to_dict() for artifact in artifacts
+                                    ]
+                                },
+                                session_id=result.session_id,
+                            )
+                        else:
+                            ingested = ingest_records(
+                                validation,
+                                observations_dir=Path(context.group_root) / "observations",
+                                proposals_dir=Path(context.group_root) / "proposals",
+                                agent_name=spec.agent_name,
+                                now=started,
+                                job_id=spec.job_id,
+                            )
+                            copy_outbox_memory_to_stage(outbox, stage.directory)
+                            try:
+                                prepared = prepare_publication(
+                                    stage,
+                                    job_store=_jobs_dir(job_path),
+                                    job_path=job_path,
                                     lease=memory_lease,
                                 )
-                            )
-                            record_note = (
-                                f" Filed {len(ingested)} "
-                                f"{'record' if len(ingested) == 1 else 'records'}."
-                                if ingested
-                                else ""
-                            )
-                            summary = (
-                                f"Agent completed execution; captured "
-                                f"{len(changes)} changed "
-                                f"{'file' if len(changes) == 1 else 'files'}."
-                                f"{record_note}"
-                                if changes
-                                else (
-                                    "Agent completed execution "
-                                    f"(inferred from exit code).{record_note}"
+                                finalize_publication(
+                                    apply_publication(
+                                        prepared,
+                                        retain_failed_stage_artifacts=True,
+                                        lease=memory_lease,
+                                    )
                                 )
-                            )
-                            final = read_job(job_path)
-                            if final.status == "complete":
-                                final = replace(
-                                    final,
-                                    started_at=started.isoformat(),
-                                    stdout_path=str(stdout_path.resolve()),
-                                    stderr_path=persisted_stderr_path,
-                                    exit_code=result.exit_code,
-                                    duration_seconds=result.duration_seconds,
-                                    changed_files=changes,
-                                    execution_summary=summary,
-                                    base_sha=base_sha,
-                                    session_id=result.session_id,
+                                record_note = (
+                                    f" Filed {len(ingested)} "
+                                    f"{'record' if len(ingested) == 1 else 'records'}."
+                                    if ingested
+                                    else ""
                                 )
-                                write_job(job_path, final)
-                        except MemoryPublicationError as error:
-                            current = read_job(job_path)
-                            artifacts = _retained_failed_artifacts(job_path)
-                            if not artifacts:
-                                artifacts = _failed_memory_artifacts(
-                                    job_path,
-                                    stage.directory,
-                                    canonical_files,
+                                summary = (
+                                    f"Agent completed execution; captured "
+                                    f"{len(changes)} changed "
+                                    f"{'file' if len(changes) == 1 else 'files'}."
+                                    f"{record_note}"
+                                    if changes
+                                    else (
+                                        "Agent completed execution "
+                                        f"(inferred from exit code).{record_note}"
+                                    )
                                 )
-                            if current.status == "failed":
-                                final = _merge_failed_terminal_metadata(
-                                    job_path,
-                                    summary=f"Memory publication failed: {error}",
-                                    started_at=started.isoformat(),
-                                    stdout_path=str(stdout_path.resolve()),
-                                    stderr_path=persisted_stderr_path,
-                                    exit_code=result.exit_code,
-                                    duration_seconds=result.duration_seconds,
-                                    changed_files=changes,
-                                    base_sha=base_sha,
-                                    memory_publication={
-                                        "failed_artifacts": artifacts,
-                                    },
-                                    session_id=result.session_id,
-                                )
-                            else:
-                                final = _terminalize_failure(
-                                    job_path,
-                                    summary=(
-                                        f"Memory publication failed: {error}"
-                                    ),
-                                    started_at=started.isoformat(),
-                                    stdout_path=str(stdout_path.resolve()),
-                                    stderr_path=persisted_stderr_path,
-                                    exit_code=result.exit_code,
-                                    duration_seconds=result.duration_seconds,
-                                    changed_files=changes,
-                                    base_sha=base_sha,
-                                    memory_publication={
-                                        "failed_artifacts": artifacts,
-                                    },
-                                    session_id=result.session_id,
-                                )
+                                final = read_job(job_path)
+                                if final.status == "complete":
+                                    final = replace(
+                                        final,
+                                        started_at=started.isoformat(),
+                                        stdout_path=str(stdout_path.resolve()),
+                                        stderr_path=persisted_stderr_path,
+                                        exit_code=result.exit_code,
+                                        duration_seconds=result.duration_seconds,
+                                        changed_files=changes,
+                                        execution_summary=summary,
+                                        base_sha=base_sha,
+                                        session_id=result.session_id,
+                                    )
+                                    write_job(job_path, final)
+                            except MemoryPublicationError as error:
+                                current = read_job(job_path)
+                                artifacts = _retained_failed_artifacts(job_path)
+                                if not artifacts:
+                                    artifacts = _failed_memory_artifacts(
+                                        job_path,
+                                        stage.directory,
+                                        canonical_files,
+                                    )
+                                if current.status == "failed":
+                                    final = _merge_failed_terminal_metadata(
+                                        job_path,
+                                        summary=f"Memory publication failed: {error}",
+                                        started_at=started.isoformat(),
+                                        stdout_path=str(stdout_path.resolve()),
+                                        stderr_path=persisted_stderr_path,
+                                        exit_code=result.exit_code,
+                                        duration_seconds=result.duration_seconds,
+                                        changed_files=changes,
+                                        base_sha=base_sha,
+                                        memory_publication={
+                                            "failed_artifacts": artifacts,
+                                        },
+                                        session_id=result.session_id,
+                                    )
+                                else:
+                                    final = _terminalize_failure(
+                                        job_path,
+                                        summary=(
+                                            f"Memory publication failed: {error}"
+                                        ),
+                                        started_at=started.isoformat(),
+                                        stdout_path=str(stdout_path.resolve()),
+                                        stderr_path=persisted_stderr_path,
+                                        exit_code=result.exit_code,
+                                        duration_seconds=result.duration_seconds,
+                                        changed_files=changes,
+                                        base_sha=base_sha,
+                                        memory_publication={
+                                            "failed_artifacts": artifacts,
+                                        },
+                                        session_id=result.session_id,
+                                    )
         except LockCancelledError:
             final = _mark_cancelled_if_waiting(job_path)
             return final

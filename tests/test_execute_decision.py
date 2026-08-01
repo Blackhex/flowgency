@@ -218,6 +218,47 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
     assert meta["execution_summary"] == "Agent exited with code 3."
 
 
+def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monkeypatch):
+    """A job that fails validation (rejected records) must still project its
+    final status to the decision document via the shared tail, not return early."""
+    group_path, decision, spec = queued_decision_job(
+        tmp_path, decision_name="rejected-records.md"
+    )
+
+    def fake_run(request: IntegrationRunRequest) -> RunResult:
+        # Write a proposal whose execution_agent is not in the writable set;
+        # the test config has no groups, so the writable-agent frozenset is empty.
+        proposals_dir = request.launch_dir / ".agency" / "outbox" / "proposals"
+        (proposals_dir / "change.md").write_text(
+            "---\nexecution_agent: unauthorized-agent\nquestions:\n"
+            "  - id: q1\n    prompt: Should this be done?\n    type: boolean\n"
+            "---\nProposal body text.\n",
+            encoding="utf-8",
+        )
+        return RunResult(
+            exit_code=0,
+            stdout="wrote a proposal",
+            stderr="",
+            duration_seconds=0.5,
+            changed_files=[],
+        )
+
+    context = SimpleNamespace(
+        group_root=group_path,
+        workspace_root=group_path / "worker",
+        timeout=30,
+        sandbox_root=None,
+        integration=SimpleNamespace(run=fake_run),
+    )
+    context.workspace_root.mkdir(parents=True)
+    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
+
+    execute_job(_authority(spec))
+
+    meta = _read_meta(decision)
+    assert meta["execution_status"] == "failed"
+
+
 def test_decide_submits_embedded_snapshot_and_persists_job_id(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     captured = []
