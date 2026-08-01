@@ -18,8 +18,30 @@ from .validation import OutboxValidation, RecordCandidate
 _SLUG_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$")
 _MAX_COLLISION_SUFFIX = 200
 
-# Agency owns these; an author-supplied value is discarded.
-_STAMPED_FIELDS = ("agent", "date", "status")
+# Agency stamps identity and lifecycle itself, and keeps only the author fields
+# it understands. Anything else an untrusted agent writes is discarded rather
+# than persisted into records the web layer reads.
+_ALLOWED_AUTHOR_FIELDS = {
+    "observation": frozenset(
+        {
+            "category",
+            "float",
+            "linked_observations",
+            "linked_proposal",
+            "ttl_days",
+        }
+    ),
+    "proposal": frozenset(
+        {
+            "execution_agent",
+            "feedback_received",
+            "feedback_requested",
+            "observations",
+            "questions",
+            "ttl_days",
+        }
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -96,14 +118,17 @@ def ingest_records(
 
     for candidate in validation.accepted:
         directory = targets[candidate.kind]
+        allowed = _ALLOWED_AUTHOR_FIELDS[candidate.kind]
         meta = {
             key: value
             for key, value in candidate.meta.items()
-            if key not in _STAMPED_FIELDS and key != "slug"
+            if key in allowed
         }
         meta["agent"] = agent_name
         meta["date"] = date_prefix
         meta["status"] = "open"
+        if candidate.kind == "proposal":
+            meta["origin_agent"] = agent_name
 
         path = _unique_path(directory, date_prefix, _record_slug(candidate, job_id))
         try:
