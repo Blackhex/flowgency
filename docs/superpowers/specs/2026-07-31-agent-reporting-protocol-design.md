@@ -64,11 +64,18 @@ design:
 - `--add-dir` is repeatable and each listed root is genuinely writable, but it
   governs read and write together. There is no read-path list and write-path
   list.
-- `write(<path>)` is **not** a recognized permission rule. As an allow rule it
-  matches nothing, so `write` never enters the allowlist and every edit is
-  refused; as a deny rule it matches nothing, so nothing is denied. It fails
-  silently in both directions. Only `shell(...)` and MCP `Server(tool)` accept
-  arguments.
+- `write(<path>)` **is** a recognized permission rule, and works in both
+  directions — but it matches by **trailing path components**, so it targets
+  files rather than directory subtrees. `--deny-tool "write(secret.env)"`
+  blocks that file anywhere; `--allow-tool "write(allowed.md)"` permits that
+  file and refuses others. An absolute *directory* argument matches nothing and
+  fails silently in both directions, which is what an earlier probe here
+  mistook for the rule not existing at all.
+  Wildcards are not supported yet, so there is still no way to scope writes to
+  a subtree through tool permissions — which is why the write boundary is a
+  path contract enforced by the sandbox rather than a tool grant. The
+  conclusion this section supports is unchanged; only its stated reason was
+  wrong.
 - `--add-dir` is what switches path verification on at all. With no `--add-dir`,
   `--allow-tool write` is effectively unbounded. Agency takes that branch today
   by emitting `--allow-all-paths` whenever `sandbox_roots` is empty.
@@ -362,5 +369,7 @@ Recorded so they are not relitigated:
   agent that holds a write tool and reaches the group root can still edit records
   directly. Ingest validation constrains what Agency will accept, not what the
   filesystem will permit.
-- **Path-scoped `write(<path>)` permissions**, proposed during design, were
-  falsified by testing. See the constraints section.
+- **Granting a write tool scoped to the outbox path**, proposed during design.
+  Tool-permission path scoping is file-oriented and has no wildcard support, so
+  it cannot express "writable under this directory". See the constraints
+  section.
