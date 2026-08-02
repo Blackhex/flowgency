@@ -31,24 +31,33 @@ class JobValidationError(ValueError):
 
 def _tool_mode_from_policy(policy) -> str:
     """Derive a tool_mode string from an EffectiveRuntimePolicy."""
-    pathless = [r for r in policy.rules if r.path is None]
-    if pathless and pathless[0].tools is None:
-        return "all"
-    if pathless and pathless[0].tools == ():
-        return "none"
-    if pathless and pathless[0].tools:
-        return "allowlist"
     if policy.mode == "unrestricted":
         return "all"
-    return "none"
+    if not policy.rules:
+        return "none"
+    # Check if any rule grants all tools (tools is None).
+    if any(r.tools is None for r in policy.rules):
+        return "all"
+    # Collect the union of all granted tools across all rules.
+    granted: set[str] = set()
+    for r in policy.rules:
+        if r.tools:
+            granted.update(r.tools)
+    if not granted:
+        return "none"
+    return "allowlist"
 
 
 def _tool_names_from_policy(policy) -> tuple[str, ...]:
-    """Derive tool names from an EffectiveRuntimePolicy."""
-    pathless = [r for r in policy.rules if r.path is None]
-    if pathless and pathless[0].tools is not None:
-        return pathless[0].tools
-    return ()
+    """Derive the union of tool names across all rules."""
+    if policy.mode == "unrestricted":
+        return ()
+    granted: set[str] = set()
+    for r in policy.rules:
+        if r.tools is None:
+            return ()  # blanket grant
+        granted.update(r.tools)
+    return tuple(sorted(granted))
 
 
 def _build_issue(code: str, scope: str, field: str, message: str, hint: str) -> ValidationIssue:

@@ -1155,6 +1155,22 @@ def test_resolve_snapshots_the_writable_agent_set(tmp_path):
     assert JobSpec.from_dict(spec.to_dict()).writable_agents == ("builder",)
 
 
+def test_tool_mode_derives_from_all_rules_not_just_pathless():
+    """Regression: path-bearing rules were previously ignored."""
+    from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+    from agency.jobs.resolution import _tool_mode_from_policy, _tool_names_from_policy
+
+    policy = EffectiveRuntimePolicy(
+        timeout=30,
+        mode="restricted",
+        rules=(
+            ResolvedPermissionRule(path=Path("/repo"), tools=("read", "write")),
+        ),
+    )
+    assert _tool_mode_from_policy(policy) == "allowlist"
+    assert set(_tool_names_from_policy(policy)) == {"read", "write"}
+
+
 # --- Pool-aware submission ---
 
 import os
