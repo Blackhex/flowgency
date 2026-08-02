@@ -409,3 +409,39 @@ constraints that phase 3 cannot design around:
 
 Phase 3 must therefore derive the capability from a runtime probe and the
 agent's own rules rather than declare it statically.
+
+### Unscoped write collides with unconditional reporting
+
+Phase 1 established that reporting is unconditional: every agent, whatever its
+workspace access, can record an observation, raise a proposal, and update its
+own memory. It does that by writing the outbox and memory zones.
+
+Those zones are generated rules, and generated rules are excluded from
+negotiation, so an integration that cannot scope writes never has to reject a
+policy on their account. But it still has to decide what to render. On Copilot
+the tool permission is global: there is no way to grant `write` for the outbox
+and withhold it everywhere else. That leaves two renderings, and both are wrong:
+
+- Grant `write` because the zones need it. An operator who authored `read` gets
+  an agent launched with write over everything it can reach, and the permission
+  model is a lie.
+- Withhold it because the operator authored `read`. The model tells the truth,
+  and the agent silently cannot report.
+
+This branch takes the second. Rendering excludes the generated rules entirely,
+so an agent authored read-only on Copilot cannot currently write its outbox.
+Reporting therefore remains unconditional in policy but not in practice — the
+same gap phase 1 left, relocated rather than closed.
+
+The sandbox resolves it exactly, and the arrangement is already verified above:
+`readwritePaths` on the two writable zones, `readonlyPaths` on everything the
+agent may only read. A read-only agent then reads its workspace and writes
+nothing but its own outbox and memory, which is what both phases have been
+trying to express. That is the point at which Copilot can honestly declare
+`write` in `path_scopable_tools`, and the point at which the zone grants stop
+being advisory.
+
+It is gated on the subprocess limitation recorded above, so it cannot be
+declared statically. Until phase 3 lands, an operator who needs reporting from a
+Copilot agent must grant `write` in the authored rules and accept that it is not
+confined to the zones.
