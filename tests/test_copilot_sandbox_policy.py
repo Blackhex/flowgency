@@ -136,3 +136,37 @@ def test_a_denial_dropped_by_disabling_the_sandbox_is_reported(tmp_path):
 
     assert settings["sandbox"]["enabled"] is False
     assert unenforced == (denied,)
+
+
+def test_generated_zones_alone_do_not_confine_an_unrestricted_policy(tmp_path):
+    """Every job carries zone grants; counting them would sandbox every job.
+
+    The launch arguments say allow-all-paths for this policy, so an allowlist
+    holding only the zones would deny the agent its own workspace.
+    """
+    launch = tmp_path / "launch"
+    settings, _ = build_sandbox_settings(
+        policy(
+            rule(launch / "instructions", ("read",), generated=True),
+            rule(launch / ".agency" / "outbox", ("read", "write"), generated=True),
+            mode="unrestricted",
+        )
+    )
+
+    assert settings["sandbox"]["enabled"] is False
+
+
+def test_an_authored_rule_confines_even_alongside_generated_zones(tmp_path):
+    launch = tmp_path / "launch"
+    settings, _ = build_sandbox_settings(
+        policy(
+            rule(launch / ".agency" / "outbox", ("read", "write"), generated=True),
+            rule(tmp_path / "ws", ("read",)),
+            mode="unrestricted",
+        )
+    )
+    fs = settings["sandbox"]["userPolicy"]["filesystem"]
+
+    assert settings["sandbox"]["enabled"] is True
+    assert str(tmp_path / "ws") in fs["readonlyPaths"]
+    assert str(launch / ".agency" / "outbox") in fs["readwritePaths"]

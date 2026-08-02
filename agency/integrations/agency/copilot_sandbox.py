@@ -32,12 +32,19 @@ def build_sandbox_settings(
     readonly = [p for p in readonly if p not in readwrite_set]
 
     # Copilot's filesystem policy is an allowlist: a path it does not name is
-    # denied. An unrestricted policy that names nothing therefore cannot be
-    # rendered at all -- an empty allowlist would deny everything, the exact
-    # inverse of what the policy grants, and the CLI hangs against it. Confine
-    # only when something actually confines. Restricted with no rule reaches
-    # nothing and is a genuine deny-all, so it stays enabled.
-    confines = bool(readonly or readwrite) or policy.mode == "restricted"
+    # denied. An unrestricted policy that confines nothing cannot be rendered
+    # at all -- an empty allowlist would deny everything, the exact inverse of
+    # what the policy grants, and the CLI hangs against it.
+    #
+    # Only AUTHORED rules decide this. Every job carries generated launch-zone
+    # grants, so counting them would make this test always true and re-create
+    # the defect on the one path that matters: an unrestricted policy with no
+    # authored rule would render an allowlist holding only the zones, denying
+    # the agent its own workspace while the launch arguments say allow-all-paths.
+    confines = any(
+        not r.generated and r.path is not None and (r.tools is None or r.tools)
+        for r in policy.rules
+    ) or policy.mode == "restricted"
     if not confines:
         # Turning the sandbox off drops any denial the operator did author.
         unenforceable.extend(
