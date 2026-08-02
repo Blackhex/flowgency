@@ -54,4 +54,3 @@ Agency runs on any OS with Python 3.11+:
 
 - Agency assumes local/trusted access. There is no built-in authentication. Use a reverse proxy (Traefik, nginx, Caddy) if you need auth.
 - Use a **user-level** systemd service on Linux, not system-level. System services cannot access user home directories on immutable OSes like Fedora Kinoite.
-- The Python venv should be at `.venv/` in the project directory. The service file should reference `.venv/bin/python -m agency.app`.

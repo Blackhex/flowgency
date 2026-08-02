@@ -44,10 +44,10 @@ C:/Agency/
     `-- example/
 ```
 
-Map those derived paths to the schema version 4 fields and keep the execution workspace separate from Agency-owned state:
+Map those derived paths to the schema version 5 fields and keep the execution workspace separate from Agency-owned state:
 
 ```yaml
-schema_version: 4
+schema_version: 5
 agency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents

@@ -7,16 +7,15 @@ Agency is a FastAPI control plane for reusable AI agent blueprints, group-owned 
 Agency requires Python 3.11 or newer.
 
 ```text
-python -m venv .venv
-.venv/Scripts/python -m pip install -e .
-.venv/Scripts/python -m agency.app
+pip install -e .
+python -m agency.app
 ```
 
-On POSIX, use `.venv/bin/python`. The dashboard listens on `http://127.0.0.1:8500` by default. Set `AGENCY_CONFIG` to select the one authoritative config.
+The dashboard listens on `http://127.0.0.1:8500` by default. Set `AGENCY_CONFIG` to select the one authoritative config.
 
 ## Current configuration model
 
-Agency accepts one current `config.yaml` shape headed by `schema_version: 4`. `config.yaml` owns groups, explicit instances, runtime policy, routines, integration selection, identity, capabilities, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
+Agency accepts one current `config.yaml` shape headed by `schema_version: 5`. `config.yaml` owns groups, explicit instances, runtime policy, routines, integration selection, identity, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
 
 Global paths separate reusable and mutable data:
 
@@ -36,7 +35,7 @@ Each group separates its source repository from Agency-owned state:
 
 Each immediate Agent Library child is a blueprint with `AGENTS.md` and optional Agent Skills under `.agents/skills/<skill>/SKILL.md`. An instance belongs to one group and explicitly selects one blueprint and integration. Runtime projectors create disposable native layouts without changing source bytes.
 
-Group runtime values are defaults. Instance `runtime.sandbox.additional_roots` are additive to group roots. A present instance tool policy is a complete override and is never merged with the group tool list.
+Runtime policy is a `permissions` block with a `mode` (`restricted` or `unrestricted`) and a `rules` list. Each rule binds a set of tools to a path. Instance rules are additive to group rules; the longest matching path governs. Agency adds generated rules for the launch view so the agent can read its instructions but cannot rewrite them.
 
 Routines select prompt-backed execution. Each routine has a stable ID, selects one scoped prompt, defines one schedule, and may use semantic memory selectors with `run`, `routine`, `agent`, `group`, or declared `channel` scope.
 

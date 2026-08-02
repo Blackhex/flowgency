@@ -1,6 +1,6 @@
 # Configuration
 
-Agency uses one authoritative YAML document. The top-level `schema_version: 4`, `agency`, and `groups` fields are required. `memory.channels` may be empty.
+Agency uses one authoritative YAML document. The top-level `schema_version: 5`, `agency`, and `groups` fields are required. `memory.channels` may be empty. A document declaring `schema_version: 4` is rejected; run `christag-agency config migrate` to convert it.
 
 ## Global paths
 
@@ -17,10 +17,15 @@ for queue behaviour.
 
 A group owns its execution `workspace_path`, Agency-owned state `path`, runtime defaults, dispatch limits, workspaces, and explicit instances. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned group root. `default_integration` initializes new instances only. Every existing instance pins its own `blueprint` and `integration`.
 
-Group runtime defaults include timeout, sandbox policy, and tool policy. Restricted sandbox roots are inherited. Instance `additional_roots` are additive and cannot remove a group root. An instance tool policy is a complete override with mode `all`, `allowlist`, or `none`; omission inherits the entire group policy.
+Group runtime defaults include timeout and permission policy. A permission is a **tool acting on a path**; `runtime.permissions` holds a `mode` and a `rules` list. Each rule is `{path?, tools?}`: with a `path` it governs that path; without one it governs tools that do not act on a path. `tools` omitted means every tool the integration offers; `[]` means none; a list means exactly those tools. The rule with the longest matching path governs a given path. Instance rules are **additive** to group rules — the two lists are concatenated, never replaced; the same path in both unions its tools.
 
-Identity and `capabilities.write` live in the instance record. Omitted write capability is false. `capabilities.write` selects the writable subset of those roots: all of them
-when true, none of them when false. The tool policy is unaffected by it. Currently no shipped integration enforces write-boundary separation, so `capabilities.write: false` prevents an agent from running and is by design.
+`mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Relative rule paths resolve against the group workspace. Only the `copilot` integration currently supports `mode: restricted`.
+
+Agency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.agency/outbox` and `<launch>/.agency/memory` are `read` and `write`. An agent cannot rewrite the instructions it is executing under.
+
+Executor eligibility is derived, not stored: an agent may execute decisions when its effective permissions grant `write` on a rule whose `path` is the group's `workspace_path` itself — not a subdirectory.
+
+Compilation is a per-instance projection keyed on blueprint × integration × projector version × instance digest, where the digest covers identity and the permission model. Timeout, memory selector, routines, and prompt registrations are excluded from the digest.
 
 The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
 
@@ -44,4 +49,4 @@ See [../config.yaml.example](../config.yaml.example) for a complete example.
 
 ## Superseded layouts
 
-The application does not auto-load directory-coupled agent state, sidecars, prompt schedules, or per-agent memory files. Native integration prompt files are generated from canonical prompt authority and are never edited as source.
+The application does not auto-load directory-coupled agent state, sidecars, prompt schedules, or per-agent memory files. Native integration prompt files are generated from canonical prompt authority and are never edited as source. A `config.yaml` declaring `schema_version: 4` is rejected; the `runtime.sandbox`, `runtime.tools`, and `capabilities` keys from that version are not accepted.

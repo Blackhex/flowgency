@@ -2,7 +2,7 @@
 
 The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces. Generated native prompt files remain derived output.
 
-Every generated config uses `schema_version: 4` and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`. Each group has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned group root). The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
+Every generated config uses `schema_version: 5` and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`. Each group has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned group root). The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
 
 ## Agency Data Root
 

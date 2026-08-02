@@ -4,7 +4,7 @@ Agency is a FastAPI and Jinja2 application with filesystem-backed canonical conf
 
 ## Authority boundaries
 
-- `config.yaml` with `schema_version: 4` is the sole control-plane authority.
+- `config.yaml` with `schema_version: 5` is the sole control-plane authority.
 - `agency.agent_library` contains reusable blueprint source: `AGENTS.md` and `.agents/skills/<name>/SKILL.md`.
 - `agency.compilation_cache` contains disposable immutable integration projections.
 - `agency.memory_store` contains hash-addressed mutable Markdown selected by semantic scope.
@@ -13,22 +13,14 @@ Agency is a FastAPI and Jinja2 application with filesystem-backed canonical conf
 - A group `path` is the Agency-owned group root for pipeline records, locks, and logs.
 - Every group agent entry is an explicit instance with `name`, `blueprint`, and `integration`.
 
-Reporting is unconditional. `capabilities.write` governs workspace mutation and
-decision execution only; it never prevents an agent from recording an
-observation, creating a proposal, or updating its own memory. Reporting is
-unconditional in policy, not yet in practice: because no shipped integration
-declares `RuntimeCapabilities.enforces_write_boundary`, an agent configured with
-`capabilities.write: false` fails policy resolution and cannot run at all, so it
-reports nothing. An existing read-only agent therefore stops working on upgrade
-and must be granted write or removed until an integration implements the
-boundary.
+Reporting is unconditional. Every agent may record observations, create proposals, and update its own memory regardless of its permission policy.
 
 Do not add runtime directory-shape loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup conversion. Native integration files are generated runtime output only and never become authority.
 
 ## Configuration
 
 ```yaml
-schema_version: 4
+schema_version: 5
 agency:
   title: Agency
   default_group: newsletter
@@ -51,12 +43,11 @@ groups:
     default_integration: copilot
     runtime:
       timeout: 1800
-      sandbox:
+      permissions:
         mode: restricted
-        roots: [C:/Projects/newsletter]
-      tools:
-        mode: allowlist
-        names: [read, search]
+        rules:
+          - path: C:/Projects/newsletter
+            tools: [read, search]
     dispatch:
       enabled: true
     agents:
@@ -66,14 +57,13 @@ groups:
         identity:
           display_name: Advisor
           title: Editorial Advisor
-        capabilities:
-          write: false
         runtime:
-          sandbox:
-            additional_roots: [C:/Research/editorial]
-          tools:
-            mode: allowlist
-            names: [read, search, write]
+          permissions:
+            rules:
+              - path: C:/Projects/newsletter
+                tools: [read, search, write]
+              - path: C:/Research/editorial
+                tools: [read, search]
         default_memory:
           scope: agent
         routines:
@@ -97,16 +87,7 @@ groups:
               channel: brand-strategy
 ```
 
-Relative global and group paths resolve against the config directory. Relative sandbox roots resolve against the group workspace. Agent roots are additive. Agent tools are a complete override, not an addition. Writability is a separate axis from tools. `capabilities.write` decides whether
-an agent may write its workspace: true grants write to the sandbox roots, false
-grants none of them. The per-job launch view holding the agent's outbox and
-memory is implicitly writable for every agent and never appears in
-configuration. An integration that cannot enforce that separation must not run
-an agent whose writes are narrowed; it declares
-`RuntimeCapabilities.enforces_write_boundary` when it can. Currently no shipped
-integration declares this capability, so agents configured with `capabilities.write:
-false` fail policy resolution and cannot run until a follow-up integration
-implements the contract. Omitted runtime defaults are timeout 1800, unrestricted sandbox, tools `all`, and dispatch disabled.
+Relative global and group paths resolve against the config directory. Relative rule paths resolve against the group workspace. A permission is a **tool acting on a path**; rules are a list, not YAML keys. The rule with the longest matching path governs; instance rules are additive to group rules and the same path in both unions its tools. `mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Agency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.agency/outbox` and `<launch>/.agency/memory` are `read` and `write`. Executor eligibility is derived: an agent may execute decisions when its effective permissions grant `write` on a rule whose `path` is the group's `workspace_path` itself — not a subdirectory. Only the `copilot` integration currently supports `mode: restricted`; the other integrations support `unrestricted` only. Compilation is a per-instance projection keyed on blueprint × integration × projector version × instance digest. Omitted runtime defaults are timeout 1800, unrestricted permissions, and dispatch disabled.
 
 The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`; operation locks live in `<group.path>/locks`.
 
@@ -116,7 +97,7 @@ The Agents page lists group-owned instances. Agent Detail owns the `Profile/Blue
 
 Configured instance integration is authoritative. Job submission resolves the blueprint digest, projector, effective runtime policy, selected prompt source, immutable task input, and semantic memory before launch. Manual launches may run a saved prompt from the effective catalog or a one-off task. The worker runs from a private launch view and publishes memory only after successful execution and validation.
 
-Decision execution requires an explicit configured `execution_agent` whose integration is executable and whose `capabilities.write` is true. A missing, invalid, non-executable, or non-writable executor blocks the decide form and POST until corrected. It does not silently skip execution.
+Decision execution requires an explicit configured `execution_agent` whose integration is executable and whose effective permissions grant `write` on the group's `workspace_path` itself. A missing, invalid, or ineligible executor blocks the decide form and POST until corrected. It does not silently skip execution.
 
 Preserve observation, proposal, decision, log, job, dashboard, and workspace behavior when changing configuration surfaces.
 
@@ -202,4 +183,4 @@ See-also: #456, #789
 
 ## Superseded layout handling
 
-Only the current control-plane shape is accepted at runtime. Directory-coupled agent folders, native identity sidecars, prompt schedules, per-agent memory files, or `tmux_config` must not be loaded by the application.
+Only the current control-plane shape is accepted at runtime. A `config.yaml` declaring `schema_version: 4` is rejected; run `christag-agency config migrate` to convert it. Directory-coupled agent folders, native identity sidecars, prompt schedules, per-agent memory files, or `tmux_config` must not be loaded by the application.
