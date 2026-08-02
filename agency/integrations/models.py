@@ -24,6 +24,7 @@ class ResolvedToolPolicy:
 class ResolvedPermissionRule:
     path: Path | None
     tools: tuple[str, ...] | None
+    generated: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,12 @@ class EffectiveRuntimePolicy:
 
     @property
     def scoped_tools(self) -> frozenset[str]:
-        """Tools whose grant differs between path-bearing rules.
+        """Tools whose grant differs between path-bearing authored rules.
+
+        Generated rules (Agency's own launch-zone grants) are excluded: they
+        express intent for integrations that can scope writes per path, but are
+        not part of the operator's policy and must not trigger capability
+        negotiation rejection.
 
         Names granted by tools=None rules outside the explicit vocabulary cannot
         be enumerated here; treat any non-empty result as indicating that
@@ -69,7 +75,7 @@ class EffectiveRuntimePolicy:
         granted: list[frozenset[str] | None] = [
             None if rule.tools is None else frozenset(rule.tools)
             for rule in self.rules
-            if rule.path is not None
+            if rule.path is not None and not rule.generated
         ]
         if len(granted) < 2:
             return frozenset()

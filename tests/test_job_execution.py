@@ -1137,3 +1137,54 @@ def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkey
     # Agent-writable zones must remain read+write.
     assert policy.tools_for(launch_dir / ZONE_OUTBOX / "observations") == ("read", "write")
     assert policy.tools_for(launch_dir / ZONE_MEMORY / "memory.md") == ("read", "write")
+
+
+def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, monkeypatch):
+    """A real integration's require_valid_run must accept a zoned policy.
+
+    Previous tests substitute fakes that never call require_valid_run; this
+    test drives the script integration (which calls self.require_valid_run in
+    its run()) to prove generated zone rules do not trigger rejection."""
+    from agency.integrations.agency.script import ScriptIntegration
+
+    path, spec = queued_job(tmp_path, decision_context={"decision_path": "d.md", "proposal_path": "p.md"})
+
+    authored_policy = EffectiveRuntimePolicy(
+        timeout=30,
+        mode="unrestricted",
+        rules=(
+            ResolvedPermissionRule(
+                path=tmp_path / "workspace",
+                tools=("read",),
+            ),
+        ),
+    )
+
+    integration = ScriptIntegration({"command": "echo ok"})
+    captured: dict = {}
+
+    def fake_subprocess_run(*args, **kwargs):
+        captured["called"] = True
+        return subprocess.CompletedProcess(args[0], 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "agency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            workspace_root=workspace_root,
+            integration=integration,
+            timeout=30,
+            sandbox_root=None,
+            group_root=tmp_path / "group",
+            runtime_policy=authored_policy,
+        ),
+    )
+    monkeypatch.setattr("agency.jobs.execution._writable_agents", lambda spec: frozenset())
+
+    result = execute_job(_authority(spec))
+
+    assert result.status == "complete"
+    assert captured.get("called"), "subprocess.run was reached — require_valid_run passed"

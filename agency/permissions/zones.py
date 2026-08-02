@@ -22,13 +22,16 @@ def launch_zone_rules(launch_dir: Path) -> tuple[ResolvedPermissionRule, ...]:
         ResolvedPermissionRule(
             path=launch_dir.joinpath(*ZONE_INSTRUCTIONS.split("/")),
             tools=("read",),
+            generated=True,
         ),
         ResolvedPermissionRule(
             path=launch_dir.joinpath(*ZONE_OUTBOX.split("/")),
             tools=("read", "write"),
+            generated=True,
         ),
         ResolvedPermissionRule(
             path=launch_dir.joinpath(*ZONE_MEMORY.split("/")),
             tools=("read", "write"),
+            generated=True,
         ),
     )
