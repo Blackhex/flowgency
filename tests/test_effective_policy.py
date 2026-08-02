@@ -245,3 +245,72 @@ def test_unsupported_mode_raises_validation_failed(raw_config, config_paths):
         )
 
     assert any(i.code == "unsupported-permission-mode" for i in excinfo.value.issues)
+
+
+def test_relative_rule_path_resolves_against_group_workspace(raw_config, config_paths):
+    """M4: relative rule paths must resolve against workspace_path, not CWD."""
+    ws = raw_config["groups"]["newsletter"]["workspace_path"]
+    group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {
+        "permissions": {
+            "mode": "restricted",
+            "rules": [{"path": "subdir", "tools": ["read"]}],
+        },
+    }
+    group["agents"][0]["integration"] = "copilot"
+
+    parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
+
+    expected = Path(ws) / "subdir"
+    assert len(policy.rules) == 1
+    assert policy.rules[0].path == expected.resolve(strict=False)
+
+
+def test_relative_rule_path_is_stable_across_cwd_changes(raw_config, config_paths, monkeypatch, tmp_path):
+    """M4: the resolved path must not change when the process CWD changes."""
+    group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {
+        "permissions": {
+            "mode": "restricted",
+            "rules": [{"path": "src", "tools": ["read"]}],
+        },
+    }
+    group["agents"][0]["integration"] = "copilot"
+
+    parsed = parse_config(raw_config, config_paths["config_path"])
+
+    monkeypatch.chdir(tmp_path)
+    policy_a = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
+
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    policy_b = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
+
+    assert policy_a.rules[0].path == policy_b.rules[0].path
+
+
+def test_absolute_rule_path_is_unchanged(raw_config, config_paths):
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {
+        "permissions": {
+            "mode": "restricted",
+            "rules": [{"path": ws, "tools": ["read"]}],
+        },
+    }
+    group["agents"][0]["integration"] = "copilot"
+
+    parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
+
+    assert policy.rules[0].path == Path(ws).resolve(strict=False)

@@ -51,6 +51,13 @@ def _resolve_mode(group: GroupConfig, agent: AgentInstance) -> PermissionMode:
     return group.runtime.permissions.mode
 
 
+def _resolve_rule_path(rule_path: Path, workspace: Path) -> Path:
+    """Resolve a rule path against the group workspace when relative."""
+    if rule_path.is_absolute():
+        return rule_path.resolve(strict=False)
+    return (workspace / rule_path).resolve(strict=False)
+
+
 def _merge_rules(
     group: GroupConfig,
     agent: AgentInstance,
@@ -58,12 +65,14 @@ def _merge_rules(
     """Instance rules are additive; identical paths union their tools."""
     merged: list[ResolvedPermissionRule] = []
     index: dict[str | None, int] = {}
+    workspace = group.workspace_path
 
     for source in (group.runtime.permissions.rules, agent.runtime.permissions.rules):
         for rule in source:
-            key = None if rule.path is None else _platform_path_key(Path(rule.path))
+            resolved_path = None if rule.path is None else _resolve_rule_path(Path(rule.path), workspace)
+            key = None if resolved_path is None else _platform_path_key(resolved_path)
             resolved = ResolvedPermissionRule(
-                path=None if rule.path is None else Path(rule.path).resolve(strict=False),
+                path=resolved_path,
                 tools=None if rule.tools is None else tuple(rule.tools),
             )
             if key in index:
