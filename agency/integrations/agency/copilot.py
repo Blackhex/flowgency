@@ -28,9 +28,11 @@ from agency.integrations import (
 )
 from agency.integrations.agency.copilot_sandbox import build_sandbox_settings
 from agency.integrations.models import (
+    EffectiveRuntimePolicy,
     IntegrationRunRequest,
     InteractiveSetupRequest,
     InteractiveSetupResult,
+    ResolvedPermissionRule,
     RuntimeCapabilities,
 )
 
@@ -55,6 +57,63 @@ def _intersect_grants(
         else:
             result = tuple(name for name in result if name in grant)
     return result
+
+
+def _tool_phrase(tools: tuple[str, ...] | None) -> str:
+    if tools is None:
+        return "every tool"
+    if not tools:
+        return "no tool"
+    return ", ".join(sorted(tools))
+
+
+def _describe_unenforced(
+    unenforceable: Iterable[ResolvedPermissionRule],
+    policy: EffectiveRuntimePolicy,
+    *,
+    sandbox_written: bool,
+    sandbox_enabled: bool,
+    degraded: str | None,
+) -> list[str]:
+    """Name every rule the run did not enforce, and why.
+
+    An operator who is told only that "something" was not enforced is no
+    better protected than one told nothing, so each entry carries the path
+    and the tools it asked for.
+    """
+    entries: list[str] = []
+    for rule in unenforceable:
+        if rule.path is None:
+            entries.append(
+                f"Rule granting {_tool_phrase(rule.tools)} on no path: the "
+                "sandbox is a filesystem allowlist, so a grant that names no "
+                "path cannot be expressed and was not enforced."
+            )
+        else:
+            entries.append(
+                f"Rule denying {_tool_phrase(rule.tools)} on {rule.path}: no "
+                "authored rule confines this run, so the sandbox stayed off "
+                "and the denial was dropped."
+            )
+    entries.sort()
+
+    # Losing the settings file only costs enforcement when there was
+    # enforcement to lose; an already-disabled sandbox denies nothing either way.
+    if not sandbox_written and sandbox_enabled:
+        entries = [
+            f"The sandbox filesystem policy was not applied ({degraded}), so "
+            "no path rule was enforced by the filesystem gate; the launch "
+            "arguments still limit which directories the agent can reach.",
+            *sorted(
+                f"Rule granting {_tool_phrase(rule.tools)} on {rule.path}: not "
+                "enforced by the filesystem gate because the sandbox settings "
+                "were not written."
+                for rule in policy.rules
+                if rule.path is not None
+            ),
+            *entries,
+        ]
+    return entries
 
 
 class CopilotIntegration(BaseIntegration):
@@ -608,9 +667,16 @@ class CopilotIntegration(BaseIntegration):
         # The sandbox has to be decided before the tool allowlist is: a tool may
         # only be granted globally on the strength of the sandbox confining it,
         # so we must know the sandbox is actually in force first.
-        settings, _unenforceable = build_sandbox_settings(policy)
+        settings, unenforceable = build_sandbox_settings(policy)
         job_home, degraded = self._prepare_copilot_home(request, settings)
         sandbox_confines = job_home is not None and settings["sandbox"]["enabled"]
+        unenforced = _describe_unenforced(
+            unenforceable,
+            policy,
+            sandbox_written=job_home is not None,
+            sandbox_enabled=settings["sandbox"]["enabled"],
+            degraded=degraded,
+        )
         # A single global allowlist can only grant what every reachable rule
         # permits, so the grants intersect rather than union. None is the
         # identity: a rule that omits `tools` narrows nothing.
@@ -714,6 +780,7 @@ class CopilotIntegration(BaseIntegration):
                 write_attempts=write_attempts,
                 session_id=self._parse_session_id(result.stdout),
                 copilot_home=str(job_home) if job_home is not None else None,
+                unenforced_rules=unenforced,
             )
         except subprocess.TimeoutExpired as error:
             duration = time.monotonic() - start
@@ -745,6 +812,7 @@ class CopilotIntegration(BaseIntegration):
                 write_attempts=write_attempts,
                 session_id=self._parse_session_id(partial_stdout),
                 copilot_home=str(job_home) if job_home is not None else None,
+                unenforced_rules=unenforced,
             )
         except FileNotFoundError:
             raise IntegrationError(f"GitHub Copilot CLI not found. Looked for: {cmd}")
