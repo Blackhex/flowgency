@@ -455,5 +455,5 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
 
     runtime = updated.raw["groups"]["newsletter"]["agents"][0]["runtime"]
     assert "timeout" not in runtime
-    assert "rules" not in runtime.get("permissions", {})
+    assert runtime.get("permissions", {}).get("rules") == []
     assert runtime["runtime_extension"] == {"preserve": True}
