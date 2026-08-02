@@ -437,7 +437,8 @@ def test_rejects_missing_or_blank_group_default_integration(
 
 
 def test_rejects_invalid_group_allowlist(raw_config, config_paths):
-    from agency.configuration.models import parse_config, validate_config
+    """v4 tools key is now rejected outright in v5."""
+    from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["runtime"] = {
         "tools": {"mode": "allowlist", "names": ["", "  ", "ops"]}
@@ -445,17 +446,11 @@ def test_rejects_invalid_group_allowlist(raw_config, config_paths):
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == "invalid-allowlist-name" for issue in issues)
-    assert any(issue.field == "runtime.tools.names[0]" for issue in issues)
-    assert not any(issue.code == "empty-allowlist" for issue in issues)
-
-    with pytest.raises(ValidationFailed) as excinfo:
-        parse_config(raw_config, config_paths["config_path"])
-
-    assert excinfo.value.issues == issues
+    assert any(issue.code == "superseded-config-key" and "tools" in issue.field for issue in issues)
 
 
 def test_rejects_group_additional_roots(raw_config, config_paths):
+    """v4 sandbox key is now rejected outright in v5."""
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["runtime"] = {
@@ -464,10 +459,11 @@ def test_rejects_group_additional_roots(raw_config, config_paths):
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == "invalid-config" and issue.field == "groups.newsletter.runtime.sandbox.additional_roots" for issue in issues)
+    assert any(issue.code == "superseded-config-key" and "sandbox" in issue.field for issue in issues)
 
 
 def test_rejects_agent_roots(raw_config, config_paths):
+    """v4 sandbox key is now rejected outright in v5."""
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
@@ -476,22 +472,18 @@ def test_rejects_agent_roots(raw_config, config_paths):
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == "invalid-config" and issue.field == "groups.newsletter.agents.builder.runtime.sandbox.roots" for issue in issues)
+    assert any(issue.code == "superseded-config-key" and "sandbox" in issue.field for issue in issues)
 
 
 def test_validates_group_sandbox_semantics(raw_config, config_paths):
-    from agency.configuration.models import parse_config, validate_config
+    """v4 sandbox key is now rejected outright in v5."""
+    from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["runtime"] = {"sandbox": {"mode": "unrestricted", "roots": ["tmp"]}}
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == "sandbox-contradiction" and issue.field == "runtime.sandbox.roots" for issue in issues)
-
-    with pytest.raises(ValidationFailed) as excinfo:
-        parse_config(raw_config, config_paths["config_path"])
-
-    assert any(issue.code == "sandbox-contradiction" and issue.field == "runtime.sandbox.roots" for issue in excinfo.value.issues)
+    assert any(issue.code == "superseded-config-key" and "sandbox" in issue.field for issue in issues)
 
 
 def test_accepts_restricted_group_permissions(raw_config, config_paths):
@@ -633,49 +625,53 @@ def test_parse_config_rejects_non_mapping_routine_entries(raw_config, config_pat
 
 
 def test_rejects_empty_allowlist(raw_config, config_paths):
+    """v4 tools key is now rejected outright in v5."""
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
         "tools": {"mode": "allowlist", "names": []}
     }
     issues = validate_config(raw_config, config_paths["config_path"])
-    assert any(issue.code == "empty-allowlist" for issue in issues)
+    assert any(issue.code == "superseded-config-key" and "tools" in issue.field for issue in issues)
 
 
 @pytest.mark.parametrize("names, expected_field", [([""], "runtime.tools.names[0]"), (["   "], "runtime.tools.names[0]")])
 def test_rejects_blank_allowlist_names(raw_config, config_paths, names, expected_field):
+    """v4 tools key is now rejected outright in v5."""
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
         "tools": {"mode": "allowlist", "names": names}
     }
     issues = validate_config(raw_config, config_paths["config_path"])
-    assert any(issue.code == "invalid-allowlist-name" and issue.field == expected_field for issue in issues)
-    assert any(issue.code == "empty-allowlist" for issue in issues)
+    assert any(issue.code == "superseded-config-key" and "tools" in issue.field for issue in issues)
 
 
 def test_rejects_unrestricted_with_additions(raw_config, config_paths):
+    """v4 sandbox key is now rejected outright in v5."""
     from agency.configuration.models import validate_config
 
     raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"mode": "unrestricted", "additional_roots": ["/tmp"]}
     }
     issues = validate_config(raw_config, config_paths["config_path"])
-    assert any(issue.code == "sandbox-contradiction" for issue in issues)
+    assert any(issue.code == "superseded-config-key" and "sandbox" in issue.field for issue in issues)
 
 
-def test_parse_validate_parity_for_sandbox_ownership(raw_config, config_paths):
+def test_parse_validate_parity_for_superseded_keys(raw_config, config_paths):
+    """v4 sandbox/tools keys produce superseded-config-key in v5."""
     from agency.configuration.models import parse_config, validate_config
 
     candidate = _clone_config(raw_config)
     candidate["groups"]["newsletter"]["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": ["editorial"], "additional_roots": ["tmp"]}
+        "sandbox": {"mode": "restricted", "roots": ["editorial"]}
     }
     candidate["groups"]["newsletter"]["agents"][0]["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": ["tmp"]}
+        "sandbox": {"mode": "restricted"}
     }
 
     issues = validate_config(candidate, config_paths["config_path"])
+    assert any(issue.code == "superseded-config-key" for issue in issues)
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(candidate, config_paths["config_path"])
@@ -870,16 +866,11 @@ def test_parse_config_rejects_malformed_group_records(raw_config, config_paths, 
         (["memory", "channels"], [], "memory.channels"),
         (["memory", "channels", "support"], [], "memory.channels.support"),
         (["groups", "newsletter", "runtime"], [], "groups.newsletter.runtime"),
-        (["groups", "newsletter", "runtime", "sandbox"], [], "groups.newsletter.runtime.sandbox"),
-        (["groups", "newsletter", "runtime", "tools"], [], "groups.newsletter.runtime.tools"),
         (["groups", "newsletter", "dispatch"], [], "groups.newsletter.dispatch"),
         (["groups", "newsletter", "workspaces"], {}, "groups.newsletter.workspaces"),
         (["groups", "newsletter", "agents"], {}, "groups.newsletter.agents"),
         (["groups", "newsletter", "agents", 0, "identity"], [], "groups.newsletter.agents[0].identity"),
-        (["groups", "newsletter", "agents", 0, "capabilities"], [], "groups.newsletter.agents[0].capabilities"),
         (["groups", "newsletter", "agents", 0, "runtime"], [], "groups.newsletter.agents[0].runtime"),
-        (["groups", "newsletter", "agents", 0, "runtime", "sandbox"], [], "groups.newsletter.agents[0].runtime.sandbox"),
-        (["groups", "newsletter", "agents", 0, "runtime", "tools"], [], "groups.newsletter.agents[0].runtime.tools"),
         (["groups", "newsletter", "agents", 0, "default_memory"], [], "groups.newsletter.agents[0].default_memory"),
         (["groups", "newsletter", "agents", 0, "routines"], {}, "groups.newsletter.agents[0].routines"),
         (["groups", "newsletter", "agents", 0, "routines", 0, "schedule"], [], "groups.newsletter.agents[0].routines[0].schedule"),
@@ -1015,3 +1006,43 @@ def test_jobs_pool_is_read_from_config(tmp_path):
 def test_jobs_pool_below_one_is_rejected(tmp_path):
     with pytest.raises(ValidationFailed):
         load_config(_write_minimal_config(tmp_path, jobs_pool=0))
+
+
+# ── M6: v4 keys rejected in v5 documents ─────────────────────────────────────
+
+
+@pytest.mark.parametrize("key", ["sandbox", "tools"])
+def test_v5_group_runtime_rejects_v4_key(raw_config, config_paths, key):
+    from agency.configuration.models import validate_config
+
+    raw_config["groups"]["newsletter"]["runtime"][key] = {"mode": "all"}
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    matches = [i for i in issues if i.code == "superseded-config-key" and key in i.field]
+    assert matches, f"Expected rejection of group runtime.{key}"
+    assert "migrate" in matches[0].corrective_hint
+
+
+@pytest.mark.parametrize("key", ["sandbox", "tools"])
+def test_v5_agent_runtime_rejects_v4_key(raw_config, config_paths, key):
+    from agency.configuration.models import validate_config
+
+    raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {key: {"mode": "all"}}
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    matches = [i for i in issues if i.code == "superseded-config-key" and key in i.field]
+    assert matches, f"Expected rejection of agent runtime.{key}"
+
+
+def test_v5_agent_rejects_capabilities_key(raw_config, config_paths):
+    from agency.configuration.models import validate_config
+
+    raw_config["groups"]["newsletter"]["agents"][0]["capabilities"] = {"write": True}
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    matches = [i for i in issues if i.code == "superseded-config-key" and "capabilities" in i.field]
+    assert matches, "Expected rejection of capabilities key"
+    assert "migrate" in matches[0].corrective_hint
