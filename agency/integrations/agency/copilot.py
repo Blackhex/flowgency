@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from agency.blueprints.projectors import get_projector
 from agency.integrations import (
@@ -28,6 +28,25 @@ from agency.integrations.models import (
     InteractiveSetupResult,
     RuntimeCapabilities,
 )
+
+
+def _intersect_grants(
+    grants: Iterable[tuple[str, ...] | None],
+) -> tuple[str, ...] | None:
+    """What every grant permits, in first-seen order.
+
+    None means every tool, so it is the identity: a rule that omits `tools`
+    narrows nothing. An empty tuple means no tool and absorbs everything.
+    """
+    result: tuple[str, ...] | None = None
+    for grant in grants:
+        if grant is None:
+            continue
+        if result is None:
+            result = tuple(dict.fromkeys(grant))
+        else:
+            result = tuple(name for name in result if name in grant)
+    return result
 
 
 class CopilotIntegration(BaseIntegration):
@@ -427,14 +446,24 @@ class CopilotIntegration(BaseIntegration):
         cmd = self.require_executable()
 
         policy = request.runtime_policy
-        roots = [rule.path for rule in policy.rules if rule.path is not None]
-        explicit_tools: set[str] = set()
-        all_tools = False
-        for rule in policy.rules:
-            if rule.tools is None:
-                all_tools = True
-            else:
-                explicit_tools.update(rule.tools)
+        # Only what the operator authored is rendered. Agency's generated
+        # launch-zone rules grant write on the outbox and memory, but Copilot's
+        # allowlist is global: honouring them would hand the agent write on
+        # every reachable path. They stay advisory until Copilot can scope a
+        # tool to a path.
+        authored = tuple(rule for rule in policy.rules if not rule.generated)
+        roots = [rule.path for rule in authored if rule.path is not None]
+        # A single global allowlist can only grant what every reachable rule
+        # permits, so the grants intersect rather than union. None is the
+        # identity: a rule that omits `tools` narrows nothing.
+        granted: tuple[str, ...] | None
+        if roots:
+            granted = _intersect_grants(rule.tools for rule in authored)
+        elif policy.mode == "unrestricted":
+            granted = None
+        else:
+            # Restricted with no rule reaches nothing and grants nothing.
+            granted = ()
 
         cmd_args = [
             cmd, "-p", prompt_text,
@@ -447,16 +476,14 @@ class CopilotIntegration(BaseIntegration):
         if roots:
             for p in roots:
                 cmd_args += ["--add-dir", str(p)]
-        else:
+        elif policy.mode == "unrestricted":
             cmd_args += ["--allow-all-paths"]
 
-        if all_tools or policy.mode == "unrestricted":
+        if granted is None:
             cmd_args += ["--allow-all-tools", "--autopilot"]
-        elif explicit_tools:
-            for t in sorted(explicit_tools):
-                cmd_args += ["--allow-tool", t]
         else:
-            cmd_args += ["--allow-all-tools", "--autopilot"]
+            for t in granted:
+                cmd_args += ["--allow-tool", t]
 
         start = time.monotonic()
         # On Windows `copilot` resolves to a .bat wrapper that spawns
