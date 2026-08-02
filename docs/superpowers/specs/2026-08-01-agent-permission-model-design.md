@@ -351,7 +351,10 @@ old shape could not express or got wrong:
 - Migration produces, for each superseded combination in the table above, a
   version-5 configuration whose effective policy matches what the version-4
   configuration produced — except where version 4 was wrong, namely the group
-  root, which becomes read-only.
+  root, which becomes unreachable rather than implicitly writable.
+  No shipped integration can enforce a read-only grant, so "unreachable"
+  is the safer default; a future specification may add a read-only
+  permission when integrations can enforce it.
 
 ## Out of scope
 
