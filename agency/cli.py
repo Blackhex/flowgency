@@ -865,10 +865,14 @@ def _cmd_config_inner(args: Namespace) -> int:
             raise CliFailure(ExitCode.OPERATIONAL_FAILURE, "config-not-found", "config.yaml not found")
         raw = yaml.safe_load(file_snapshot.payload.decode("utf-8")) or {}
         try:
-            migrated = migrate_v4_to_v5(raw)
+            migrated, dropped = migrate_v4_to_v5(raw)
         except ValueError as error:
             raise CliFailure(ExitCode.VALIDATION, "migration-failed", str(error)) from error
         store.replace(file_snapshot.revision, migrated)
+        if dropped:
+            print("Migration dropped the following constructs — review and reconfigure manually:")
+            for message in dropped:
+                print(f"  - {message}")
         print(str(store.path))
         return 0
     return 0
