@@ -148,6 +148,53 @@ class CopilotIntegration(BaseIntegration):
     # The probe runs on request paths, so it must not be able to stall one for
     # long. Reporting a version is a local read; seconds is already generous.
     _VERSION_PROBE_TIMEOUT = 5
+    # What the CLI is given, by name. Everything else in Agency's environment
+    # stays with Agency. Compared upper-cased: Windows folds the case of
+    # environment names, so the same variable arrives spelled either way.
+    _ENV_ALLOWLIST = frozenset(
+        {
+            # Finding and running the executable.
+            "PATH",
+            "PATHEXT",
+            "COMSPEC",
+            "SHELL",
+            "OS",
+            "SYSTEMDRIVE",
+            "SYSTEMROOT",
+            "WINDIR",
+            "PROCESSOR_ARCHITECTURE",
+            "NUMBER_OF_PROCESSORS",
+            # Scratch space.
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            # The home the CLI reads its own state from.
+            "COPILOT_HOME",
+            "HOME",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "PROGRAMDATA",
+            "USER",
+            "USERNAME",
+            "LOGNAME",
+            # Reaching GitHub from inside a corporate network. Dropping these
+            # does not make a run safer, it makes it fail.
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "NO_PROXY",
+            "NODE_EXTRA_CA_CERTS",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
+            # Text handling, so output is not mangled.
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TERM",
+        }
+    )
 
     def identity_filename(self) -> str:
         return "AGENTS.md"
@@ -516,6 +563,28 @@ class CopilotIntegration(BaseIntegration):
     def resume_command(self, session_id: str) -> tuple[str, ...] | None:
         return (self.cli_command, "--resume", session_id)
 
+    def _launch_environment(self, job_home: Path | None) -> dict[str, str]:
+        """The environment the agent runs in: an allowlist, not an inheritance.
+
+        Agency's own environment may hold cloud keys, registry tokens and
+        anything else the operator happened to export. A permission model made
+        of paths cannot express "and not that variable", so every agent used to
+        see all of it regardless of its rules. Naming what the CLI needs is the
+        only form of that boundary the model can actually hold.
+
+        Kept deliberately: the proxy and certificate variables, because a run
+        behind a corporate proxy fails without them and a failed run teaches an
+        operator to hand the agent more, not less.
+        """
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name.upper() in self._ENV_ALLOWLIST
+        }
+        if job_home is not None:
+            env["COPILOT_HOME"] = str(job_home)
+        return env
+
     def _prepare_copilot_home(
         self,
         request: IntegrationRunRequest,
@@ -667,7 +736,10 @@ class CopilotIntegration(BaseIntegration):
         # The sandbox has to be decided before the tool allowlist is: a tool may
         # only be granted globally on the strength of the sandbox confining it,
         # so we must know the sandbox is actually in force first.
-        settings, unenforceable = build_sandbox_settings(policy)
+        settings, unenforceable = build_sandbox_settings(
+            policy,
+            workspace_root=request.workspace_root,
+        )
         job_home, degraded = self._prepare_copilot_home(request, settings)
         sandbox_confines = job_home is not None and settings["sandbox"]["enabled"]
         unenforced = _describe_unenforced(
@@ -738,11 +810,7 @@ class CopilotIntegration(BaseIntegration):
         # non-interactive -- matching the proven no-console Start-Job launch
         # used by production dispatchers.
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        run_env = (
-            {**os.environ, "COPILOT_HOME": str(job_home)}
-            if job_home is not None
-            else None
-        )
+        run_env = self._launch_environment(job_home)
         try:
             result = subprocess.run(
                 cmd_args,
