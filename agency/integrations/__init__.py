@@ -48,6 +48,8 @@ class RunResult:
     write_attempts: list[str] = field(default_factory=list)
     session_id: str | None = None
     copilot_home: str | None = None
+    # Finished phrases naming what the policy asked for and why it did not hold.
+    unenforced_rules: list[str] = field(default_factory=list)
 
 
 @dataclass

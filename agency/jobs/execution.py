@@ -87,6 +87,19 @@ def _rejection_summary(rejected, ingested_count: int) -> str:
     return f"Rejected agent records: {joined}{filed}"
 
 
+def _unenforced_policy_note(result) -> str:
+    """A Markdown tail naming what the integration could not enforce.
+
+    Integrations report these in a fixed order, most serious first, so the
+    note is reproduced verbatim rather than re-ordered here.
+    """
+    entries = [str(entry) for entry in getattr(result, "unenforced_rules", ()) or ()]
+    if not entries:
+        return ""
+    listed = "\n".join(f"- {entry}" for entry in entries)
+    return f"\n\n**Permission policy not fully enforced**\n\n{listed}"
+
+
 def _retained_outbox_artifacts(
     job_path: Path,
     job_id: str,
@@ -467,6 +480,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     memory_working_dir=outbox.memory,
                 )
                 result = integration.run(request)
+                policy_note = _unenforced_policy_note(result)
                 stdout_path.write_text(result.stdout, encoding="utf-8")
                 persisted_stderr_path = None
                 if result.stderr:
@@ -501,7 +515,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                         summary = f"Agent exited with code {result.exit_code}."
                     final = _terminalize_failure(
                         job_path,
-                        summary=summary,
+                        summary=summary + policy_note,
                         started_at=started.isoformat(),
                         stdout_path=str(stdout_path.resolve()),
                         stderr_path=persisted_stderr_path,
@@ -529,7 +543,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                             job_path,
                             summary=(
                                 f"Config load failed for '{cfg_path}': "
-                                f"{cfg_error}"
+                                f"{cfg_error}{policy_note}"
                             ),
                             started_at=started.isoformat(),
                             stdout_path=str(stdout_path.resolve()),
@@ -567,7 +581,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 job_path,
                                 summary=_rejection_summary(
                                     validation.rejected, len(ingested)
-                                ),
+                                ) + policy_note,
                                 started_at=started.isoformat(),
                                 stdout_path=str(stdout_path.resolve()),
                                 stderr_path=persisted_stderr_path,
@@ -615,7 +629,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                         "Agent completed execution "
                                         f"(inferred from exit code).{record_note}"
                                     )
-                                )
+                                ) + policy_note
                                 final = read_job(job_path)
                                 if final.status == "complete":
                                     final = replace(
@@ -644,7 +658,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 if current.status == "failed":
                                     final = _merge_failed_terminal_metadata(
                                         job_path,
-                                        summary=f"Memory publication failed: {error}",
+                                        summary=f"Memory publication failed: {error}{policy_note}",
                                         started_at=started.isoformat(),
                                         stdout_path=str(stdout_path.resolve()),
                                         stderr_path=persisted_stderr_path,
@@ -663,6 +677,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                         job_path,
                                         summary=(
                                             f"Memory publication failed: {error}"
+                                            f"{policy_note}"
                                         ),
                                         started_at=started.isoformat(),
                                         stdout_path=str(stdout_path.resolve()),
