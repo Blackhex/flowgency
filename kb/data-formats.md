@@ -76,7 +76,7 @@ Two related observations suggest this is a systemic issue, not a one-off.
 | `feedback_received` | no | Agents that responded |
 | `ttl_days` | no | Days before auto-archive |
 | `questions` | yes | List of typed questions (see below) |
-| `execution_agent` | yes | Agent that should implement decisions on this proposal. Must be an agent with `capabilities.write: true`. Omitting this field, or naming an agent that is unavailable, non-executable, or lacks write permission, blocks the decide form and POST until corrected. |
+| `execution_agent` | yes | Agent that should implement decisions on this proposal. Must be an agent whose integration supports execution and whose runtime permissions grant write access. Omitting this field, or naming an agent that is unavailable, non-executable, or lacks write permission, blocks the decide form and POST until corrected. |
 
 ### Question Types
 
@@ -117,7 +117,7 @@ decision_note: Prioritise the pre-processing approach for simplicity.
 | `answers` | yes | Dict of question id → answer value |
 | `execution_status` | no | `pending`, `running`, `complete`, `failed`, `skipped` |
 | `execution_summary` | no | Agent's report of what it did |
-| `execution_agent` | no | Agent selected to implement this decision. Must have `capabilities.write: true`. Set when the decision is created or retried; no origin-agent fallback. |
+| `execution_agent` | no | Agent selected to implement this decision. Must have write permission via runtime permissions. Set when the decision is created or retried; no origin-agent fallback. |
 | `execution_job_id` | no | ID of the current (or most recent) durable job submitted for this decision |
 | `execution_job_history` | no | IDs of prior jobs superseded by retries, oldest first |
 | `decision_note` | no | Free-text context or guidance for the executing agent |
@@ -135,13 +135,14 @@ Agency validates the executor and evaluates execution intent before creating a d
 | All `boolean` answers are `declined` AND at least one substantive non-boolean input is present | `pending` (job submitted) |
 
 `skipped` is a terminal status — no job is submitted and no retry is offered unless the
-decision is re-opened. The executor dropdown on the decide form lists only agents with
-`capabilities.write: true`; agents without this flag do not appear.
+decision is re-opened. The executor dropdown on the decide form lists only agents
+whose integration supports execution and whose runtime permissions grant write
+access; agents without these do not appear.
 
 ### Execution
 
 When you answer a proposal's questions, you select which agent implements the decision
-from the executor dropdown (only agents with `capabilities.write: true` are listed).
+from the executor dropdown (only agents with write permission are listed).
 Agency validates the executor and evaluates execution intent before creating the
 decision — see the table above. When a decision executes, Agency submits a durable job
 for the executor with an immutable snapshot of the proposal body and your answers

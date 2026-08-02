@@ -37,7 +37,7 @@ A routine selects one saved prompt, schedule, optional arguments, and optional s
 
 ### Pipeline
 
-Agency links observations to proposals, human decisions, durable execution jobs, and verification. Proposal execution requires an explicit instance whose integration supports execution and whose `capabilities.write` is true.
+Agency links observations to proposals, human decisions, durable execution jobs, and verification. Proposal execution requires an explicit instance whose integration supports execution and whose runtime permissions grant write access.
 
 ## Development reload
 
