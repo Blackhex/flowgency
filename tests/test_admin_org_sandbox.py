@@ -120,6 +120,7 @@ def test_admin_org_save_sets_unrestricted_by_default(tmp_path, monkeypatch, raw_
             "default_integration": "copilot",
             "runtime_timeout": "1800",
             "permission_mode": "unrestricted",
+            "permission_rules_yaml": "",
         },
         follow_redirects=False,
     )

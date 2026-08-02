@@ -85,36 +85,20 @@
                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
         </div>
         <div>
-          <label for="sandbox_mode" class="block text-sm font-medium text-gray-700 mb-1">Sandbox Mode</label>
-          <select name="sandbox_mode" id="sandbox_mode"
+          <label for="permission_mode" class="block text-sm font-medium text-gray-700 mb-1">Permission Mode</label>
+          <select name="permission_mode" id="permission_mode"
                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-            <option value="unrestricted" {% if sandbox_mode == 'unrestricted' %}selected{% endif %}>unrestricted</option>
-            <option value="restricted" {% if sandbox_mode == 'restricted' %}selected{% endif %}>restricted</option>
+            <option value="unrestricted" {% if permission_mode == 'unrestricted' %}selected{% endif %}>unrestricted</option>
+            <option value="restricted" {% if permission_mode == 'restricted' %}selected{% endif %}>restricted</option>
           </select>
         </div>
       </div>
 
       <div>
-        <label for="sandbox_roots" class="block text-sm font-medium text-gray-700 mb-1">Sandbox Roots</label>
-        <textarea name="sandbox_roots" id="sandbox_roots" rows="3"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">{{ sandbox_roots }}</textarea>
-      </div>
-
-      <div class="grid gap-4 md:grid-cols-2">
-        <div>
-          <label for="tool_mode" class="block text-sm font-medium text-gray-700 mb-1">Tool Mode</label>
-          <select name="tool_mode" id="tool_mode"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-            <option value="all" {% if tool_mode == 'all' %}selected{% endif %}>all</option>
-            <option value="allowlist" {% if tool_mode == 'allowlist' %}selected{% endif %}>allowlist</option>
-            <option value="none" {% if tool_mode == 'none' %}selected{% endif %}>none</option>
-          </select>
-        </div>
-        <div>
-          <label for="tool_names" class="block text-sm font-medium text-gray-700 mb-1">Allowlist Names</label>
-          <textarea name="tool_names" id="tool_names" rows="3"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">{{ tool_names }}</textarea>
-        </div>
+        <label for="permission_rules_yaml" class="block text-sm font-medium text-gray-700 mb-1">Permission Rules</label>
+        <textarea name="permission_rules_yaml" id="permission_rules_yaml" rows="6"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">{{ permission_rules_yaml }}</textarea>
+        <p class="mt-1 text-xs text-gray-500">YAML list of rules. Each rule: path (absolute or relative to workspace), tools (list, omit for all).</p>
       </div>
     </div>
 

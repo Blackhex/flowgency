@@ -48,8 +48,8 @@ class GroupSettingsStatePatch:
     path: str
     default_integration: str
     runtime_timeout: int
-    permission_mode: Literal["restricted", "unrestricted"] = "unrestricted"
-    permission_rules: tuple[dict[str, Any], ...] = ()
+    permission_mode: Literal["restricted", "unrestricted"] | None = None
+    permission_rules: tuple[dict[str, Any], ...] | None = None
     dispatch_enabled: bool = False
     workspaces: tuple[dict[str, Any], ...] = ()
 
@@ -77,7 +77,7 @@ class AgentProfilePatch:
 @dataclass(frozen=True)
 class AgentRuntimePatch:
     timeout: int | None
-    rules: tuple[dict[str, Any], ...] = ()
+    rules: tuple[dict[str, Any], ...] | None = None
 
 
 def _groups(raw: dict[str, Any]) -> dict[str, Any]:
@@ -255,8 +255,10 @@ def patch_group_settings_state(
             raise TypeError(
                 f"groups.{group_id}.runtime.permissions must be a mapping"
             )
-        permissions["mode"] = patch.permission_mode
-        permissions["rules"] = list(deepcopy(patch.permission_rules))
+        if patch.permission_mode is not None:
+            permissions["mode"] = patch.permission_mode
+        if patch.permission_rules is not None:
+            permissions["rules"] = list(deepcopy(patch.permission_rules))
 
         dispatch = group.setdefault("dispatch", {})
         if not isinstance(dispatch, dict):
@@ -327,15 +329,11 @@ def patch_agent_runtime(
         else:
             runtime["timeout"] = patch.timeout
 
-        if patch.rules:
+        if patch.rules is not None:
             permissions = runtime.setdefault("permissions", {})
             if not isinstance(permissions, dict):
                 raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.permissions must be a mapping")
             permissions["rules"] = list(deepcopy(patch.rules))
-        else:
-            permissions = runtime.get("permissions")
-            if isinstance(permissions, dict):
-                permissions.pop("rules", None)
 
     return store.patch(expected_revision, apply)
 

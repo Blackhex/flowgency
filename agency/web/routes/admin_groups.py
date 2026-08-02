@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from ipaddress import ip_address
 from pathlib import Path
+from typing import Any
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
@@ -194,11 +196,23 @@ def _group_settings_response(
             ),
             "runtime_timeout": value("runtime_timeout", runtime.timeout),
             "permission_mode": value("permission_mode", permissions.mode),
-            "permission_rules": value(
-                "permission_rules", "\n".join(
-                    f"{rule.path or '(pathless)'}: {', '.join(rule.tools) if rule.tools is not None else '(all)'}"
-                    for rule in permissions.rules
-                )
+            "permission_rules_yaml": value(
+                "permission_rules_yaml",
+                yaml.safe_dump(
+                    [
+                        {
+                            k: v
+                            for k, v in (
+                                ("path", str(rule.path) if rule.path else None),
+                                ("tools", list(rule.tools) if rule.tools is not None else None),
+                            )
+                            if v is not None
+                        }
+                        for rule in permissions.rules
+                    ],
+                    default_flow_style=False,
+                    sort_keys=False,
+                ).strip() if permissions.rules else "",
             ),
             "dispatch_enabled": value("dispatch_enabled", dispatch.enabled),
             "agent_count": len(group.agents),
@@ -537,10 +551,33 @@ async def admin_org_save(
     path = str(form.get("path", "")).strip()
     default_integration = str(form.get("default_integration", "")).strip()
     runtime_timeout = int(str(form.get("runtime_timeout", "1800")) or "1800")
-    permission_mode = (
-        str(form.get("permission_mode", "unrestricted")).strip()
-        or "unrestricted"
+    # Permission mode: None means "leave unchanged" when the field is absent.
+    raw_permission_mode = form.get("permission_mode")
+    permission_mode: str | None = (
+        str(raw_permission_mode).strip() if raw_permission_mode is not None else None
     )
+    # Permission rules: None means "leave unchanged"; present textarea is parsed.
+    raw_rules_yaml = form.get("permission_rules_yaml")
+    permission_rules: tuple[dict[str, Any], ...] | None = None
+    if raw_rules_yaml is not None:
+        rules_text = str(raw_rules_yaml).strip()
+        if rules_text:
+            try:
+                parsed_rules = yaml.safe_load(rules_text)
+                if not isinstance(parsed_rules, list):
+                    raise TypeError
+                permission_rules = tuple(parsed_rules)
+            except (yaml.YAMLError, TypeError):
+                snapshot = services.config_store.load()
+                return _group_settings_response(
+                    request,
+                    snapshot,
+                    org,
+                    warning="Permission rules must be valid YAML (a list of mappings).",
+                    status_code=409,
+                )
+        else:
+            permission_rules = ()
     dispatch_enabled = form.get("dispatch_enabled") == "on"
     workspaces_json = str(form.get("workspaces_json", "[]"))
     try:
@@ -577,7 +614,7 @@ async def admin_org_save(
                     default_integration=default_integration,
                     runtime_timeout=runtime_timeout,
                     permission_mode=permission_mode,
-                    permission_rules=(),
+                    permission_rules=permission_rules,
                     dispatch_enabled=dispatch_enabled,
                     workspaces=tuple(workspaces),
                 ),

@@ -12,22 +12,19 @@
     <div class="space-y-2">
       <h3 class="font-semibold text-gray-900">Group default</h3>
       <p>Timeout: {{ group_timeout }}s</p>
-      <p>Tools: {{ group_tool_mode }}{% if group_tool_names %} ({{ group_tool_names | replace('\n', ', ') }}){% endif %}</p>
-      <p>Roots:</p>
-      <ul class="space-y-1">
-        {% for root in group_roots %}
-        <li>Group default: <span class="font-mono break-all">{{ root }}</span></li>
-        {% else %}
-        <li>Group default: unrestricted</li>
-        {% endfor %}
-      </ul>
+      <p>Mode: {{ group_permission_mode }}</p>
+      {% if group_rules %}
+      <p>Rules:</p>
+      <pre class="font-mono text-xs bg-gray-100 rounded p-2 whitespace-pre-wrap">{{ group_rules }}</pre>
+      {% else %}
+      <p>Rules: (none)</p>
+      {% endif %}
     </div>
     <div class="space-y-2">
       <h3 class="font-semibold text-gray-900">Effective preview</h3>
       {% if effective %}
       <p>Timeout: {{ effective.timeout }}s</p>
-      <p>Sandbox: {{ effective.sandbox_mode }}</p>
-      <p>Tools: {{ effective.tools.mode }}{% if effective.tools.names %} ({{ effective.tools.names | join(', ') }}){% endif %}</p>
+      <p>Mode: {{ effective.mode }}</p>
       <ul class="space-y-1">
         {% for root in effective_root_rows %}
         <li>{{ root.source }}: <span class="font-mono break-all">{{ root.path }}</span></li>
@@ -40,30 +37,20 @@
       {% endif %}
     </div>
   </div>
-  <form method="post" action="/{{ group }}/agents/{{ agent }}/runtime" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
+  <form method="post" action="/{{ group }}/agents/{{ agent }}/runtime" class="space-y-4 border-t border-gray-200 pt-4">
     <input type="hidden" name="revision" value="{{ config_revision }}">
+    <div class="grid gap-4 md:grid-cols-2">
+      <label class="block text-sm text-gray-700">
+        <span class="mb-1 block font-medium">Agent timeout override</span>
+        <input type="text" name="timeout" value="{{ agent_timeout }}" placeholder="inherit" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+      </label>
+    </div>
     <label class="block text-sm text-gray-700">
-      <span class="mb-1 block font-medium">Agent timeout override</span>
-      <input type="text" name="timeout" value="{{ agent_timeout }}" placeholder="inherit" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+      <span class="mb-1 block font-medium">Agent permission rules (additive to group)</span>
+      <textarea name="permission_rules_yaml" rows="6" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ agent_rules_yaml }}</textarea>
+      <p class="mt-1 text-xs text-gray-500">YAML list of rules. Each rule: path (absolute or relative to workspace), tools (list, omit for all). Instance rules are additive; same path unions tools.</p>
     </label>
-    <label class="block text-sm text-gray-700">
-      <span class="mb-1 block font-medium">Tool override</span>
-      <select name="tool_mode" class="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white">
-        <option value="inherit" {% if agent_tool_mode == 'inherit' %}selected{% endif %}>inherit</option>
-        <option value="all" {% if agent_tool_mode == 'all' %}selected{% endif %}>all</option>
-        <option value="allowlist" {% if agent_tool_mode == 'allowlist' %}selected{% endif %}>allowlist</option>
-        <option value="none" {% if agent_tool_mode == 'none' %}selected{% endif %}>none</option>
-      </select>
-    </label>
-    <label class="block text-sm text-gray-700 md:col-span-2">
-      <span class="mb-1 block font-medium">Additional roots</span>
-      <textarea name="additional_roots" rows="4" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ agent_additional_roots }}</textarea>
-    </label>
-    <label class="block text-sm text-gray-700 md:col-span-2">
-      <span class="mb-1 block font-medium">Allowlisted tools</span>
-      <textarea name="tool_names" rows="4" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ agent_tool_names }}</textarea>
-    </label>
-    <div class="md:col-span-2 flex justify-end">
+    <div class="flex justify-end">
       <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save runtime</button>
     </div>
   </form>

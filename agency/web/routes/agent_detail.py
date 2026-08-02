@@ -328,13 +328,9 @@ def _apply_runtime_patch(raw: dict[str, Any], group_id: str, agent_id: str, patc
         runtime.pop("timeout", None)
     else:
         runtime["timeout"] = patch.timeout
-    if patch.rules:
+    if patch.rules is not None:
         permissions = runtime.setdefault("permissions", {})
         permissions["rules"] = list(patch.rules)
-    else:
-        permissions = runtime.get("permissions")
-        if isinstance(permissions, dict):
-            permissions.pop("rules", None)
 
 
 def _patch_default_memory(raw: dict[str, Any], group_id: str, agent_id: str, selector: MemorySelector | None) -> None:
@@ -592,11 +588,21 @@ def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
         path_str = str(rule.path).replace("\\", "/") if rule.path else "(pathless)"
         tools_str = ", ".join(rule.tools) if rule.tools is not None else "(all)"
         group_rule_lines.append(f"{path_str}: {tools_str}")
-    agent_rule_lines = []
-    for rule in agent_rules:
-        path_str = str(rule.path).replace("\\", "/") if rule.path else "(pathless)"
-        tools_str = ", ".join(rule.tools) if rule.tools is not None else "(all)"
-        agent_rule_lines.append(f"{path_str}: {tools_str}")
+    agent_rules_dicts = [
+        {
+            k: v
+            for k, v in (
+                ("path", str(rule.path).replace("\\", "/") if rule.path else None),
+                ("tools", list(rule.tools) if rule.tools is not None else None),
+            )
+            if v is not None
+        }
+        for rule in agent_rules
+    ]
+    agent_rules_yaml = (
+        yaml.safe_dump(agent_rules_dicts, default_flow_style=False, sort_keys=False).strip()
+        if agent_rules_dicts else ""
+    )
 
     return {
         "integration_name": instance.integration,
@@ -605,8 +611,7 @@ def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
         "group_permission_mode": group.runtime.permissions.mode,
         "group_rules": "\n".join(group_rule_lines),
         "agent_timeout": instance.runtime.timeout if "timeout" in instance.runtime.model_fields_set else "",
-        "agent_permission_mode": instance.runtime.permissions.mode if "permissions" in instance.runtime.model_fields_set else "inherit",
-        "agent_rules": "\n".join(agent_rule_lines),
+        "agent_rules_yaml": agent_rules_yaml,
         "effective": effective,
         "effective_root_rows": effective_root_rows,
         "issues": issues,
@@ -897,9 +902,27 @@ async def agent_detail_runtime_save(request: Request, group: str, agent: str, se
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     timeout_text = str(form.get("timeout", "")).strip()
+    raw_rules_yaml = form.get("permission_rules_yaml")
+    rules: tuple[dict[str, Any], ...] | None = None
+    if raw_rules_yaml is not None:
+        rules_text = str(raw_rules_yaml).strip()
+        if rules_text:
+            try:
+                parsed_rules = yaml.safe_load(rules_text)
+                if not isinstance(parsed_rules, list):
+                    raise TypeError
+                rules = tuple(parsed_rules)
+            except (yaml.YAMLError, TypeError):
+                return _detail_context(
+                    request, services, group, agent, "runtime",
+                    status_code=409,
+                    banner="Permission rules must be valid YAML (a list of mappings).",
+                )
+        else:
+            rules = ()
     patch = AgentRuntimePatch(
         timeout=int(timeout_text) if timeout_text else None,
-        rules=(),
+        rules=rules,
     )
     try:
         if not revision:
