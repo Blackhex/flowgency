@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 agency:
   title: Agency
   default_group: my-project
@@ -25,13 +25,11 @@ groups:
     default_integration: copilot
     runtime:
       timeout: 1800
-      sandbox:
+      permissions:
         mode: restricted
-        roots:
-          - C:/Projects/my-project
-      tools:
-        mode: allowlist
-        names: [read, search]
+        rules:
+          - path: C:/Projects/my-project
+            tools: [read, search]
     dispatch:
       enabled: true
     agents:
@@ -41,15 +39,13 @@ groups:
         identity:
           display_name: Builder
           title: Implementation Lead
-        capabilities:
-          write: true
         runtime:
-          sandbox:
-            additional_roots:
-              - C:/Research/my-project
-          tools:
-            mode: allowlist
-            names: [read, search, write]
+          permissions:
+            rules:
+              - path: C:/Projects/my-project
+                tools: [read, search, write]
+              - path: C:/Research/my-project
+                tools: [read, search]
         default_memory:
           scope: agent
         routines:
@@ -74,8 +70,6 @@ groups:
       - name: advisor
         blueprint: advisor
         integration: copilot
-        capabilities:
-          write: false
     workspaces:
       - name: Main workspace
         type: ide

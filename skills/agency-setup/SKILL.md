@@ -140,7 +140,7 @@ groups:
 
 Record each approved Phase 2 routine assignment under that instance's `routines`. A routine selects one scoped prompt, one schedule (`at`, `every`, or supported condition), optional arguments, and optional semantic memory. Keep optional cross-task Agent Skills separate from routine prompt selection. Never write prompt filenames or per-agent dispatch maps.
 
-Set `capabilities.write: true` only for an explicitly approved implementation role and `capabilities.write: false` otherwise. Never infer write authority for an existing agent; ask the user when a newly generated role is ambiguous.
+Write authority is expressed through the workspace path rule: include `write` in its `tools` list for an implementation role that should be eligible to execute decisions. Never infer write authority for an existing agent; ask the user when a newly generated role is ambiguous. The superseded schema version 4 expressed this as `capabilities.write: true` for an implementation role and `capabilities.write: false` for an observational one; the permissions model derives eligibility from the rule instead.
 
 Write every approved workspace under the group's `workspaces` list. For a new group, do not omit the list after the user approves a workspace. Keep workspace configuration group-owned and non-authoritative.
 

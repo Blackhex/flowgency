@@ -10,7 +10,7 @@ An integration adapts a configured current instance to one LLM runtime. Config s
 4. Run the integration and projector contract suites.
 
 ```text
-.venv/bin/python -m pytest tests/test_integration_contract.py tests/test_runtime_projectors.py -v
+python -m pytest tests/test_integration_contract.py tests/test_runtime_projectors.py -v
 ```
 
 ## Contract
