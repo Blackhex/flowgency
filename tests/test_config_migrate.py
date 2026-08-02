@@ -108,7 +108,28 @@ def test_capabilities_write_false_adds_no_rules():
 
     assert "capabilities" not in agent
     assert agent.get("runtime", {}).get("permissions", {}).get("rules", []) == []
-    assert not any("capabilities.write" in msg for msg in dropped)
+
+
+def test_capabilities_write_false_is_reported_not_silently_dropped():
+    # In v4 this denied the agent workspace writes. The v5 additive model
+    # cannot narrow the group's grant, so the agent now inherits whatever the
+    # group allows — a widening the operator never asked for. It must be
+    # reported by group and agent name, like every other dropped construct.
+    result, dropped = migrate_v4_to_v5(
+        v4(
+            {"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "allowlist", "names": ["read", "write"]}},
+            {"capabilities": {"write": False}},
+        )
+    )
+    agent = result["groups"]["g"]["agents"][0]
+
+    assert "capabilities" not in agent
+    messages = [msg for msg in dropped if "capabilities.write" in msg]
+    assert messages, "a denied write must be reported, not dropped in silence"
+    assert any("group 'g'" in msg and "agent 'a'" in msg for msg in messages)
+    # Reporting must not be traded for a widening rule.
+    agent_rules = agent.get("runtime", {}).get("permissions", {}).get("rules", [])
+    assert agent_rules == []
 
 
 def test_superseded_keys_are_removed():
