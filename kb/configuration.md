@@ -19,7 +19,7 @@ A group owns its execution `workspace_path`, Agency-owned state `path`, runtime 
 
 Group runtime defaults include timeout and permission policy. A permission is a **tool acting on a path**; `runtime.permissions` holds a `mode` and a `rules` list. Each rule is `{path?, tools?}`: with a `path` it governs that path; without one it governs tools that do not act on a path. `tools` omitted means every tool the integration offers; `[]` means none; a list means exactly those tools. The rule with the longest matching path governs a given path. Instance rules are **additive** to group rules — the two lists are concatenated, never replaced; the same path in both unions its tools.
 
-`mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Relative rule paths resolve against the group workspace. Only the `copilot` integration currently supports `mode: restricted`.
+`mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Relative rule paths resolve against the group workspace. Only the `copilot` integration currently supports `mode: restricted`, and it is the only one that enforces path rules; the others accept `unrestricted` and do not enforce the rules written under it. Writing a narrow rule for one of them expresses intent, not a boundary. What each integration did and did not enforce for a given run is recorded on that job.
 
 Agency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.agency/outbox` and `<launch>/.agency/memory` are `read` and `write`. An agent cannot rewrite the instructions it is executing under.
 

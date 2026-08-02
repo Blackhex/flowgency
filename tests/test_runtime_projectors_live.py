@@ -1,10 +1,16 @@
 import importlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from agency.configuration import ValidationFailed
 from agency.integrations import REGISTRY
+from agency.integrations.models import (
+    EffectiveRuntimePolicy,
+    ResolvedPermissionRule,
+)
+from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_OUTBOX
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
     assert_live_success,
@@ -17,6 +23,7 @@ from tests._runtime_probe_helpers import (
     selected_skill_supported,
     snapshot,
     unique_token,
+    write_boundary_supported,
 )
 
 
@@ -314,3 +321,107 @@ else:
             runtime=runtime,
             scenario="write-boundary",
         )
+
+
+    @pytest.mark.real_runtime
+    @pytest.mark.parametrize("runtime", INSTALLED_RUNTIMES, ids=lambda item: item.name)
+    def test_live_launch_zones(runtime, tmp_path):
+        """The outcome the whole permission model was built to reach.
+
+        A read-only agent must be able to read the instructions it runs under,
+        must not be able to rewrite them, and must still be able to file its
+        own output. Every earlier scenario proves a denial; this one proves the
+        denial is not simply "nothing works".
+        """
+        integration = REGISTRY[runtime.name]
+        if not write_boundary_supported(integration):
+            pytest.skip(
+                f"{runtime.name} cannot scope a write to a path; launch zones "
+                f"stay advisory for it"
+            )
+
+        token = unique_token("ZONE")
+        launch_dir, workspace_root, task_dir = create_probe_directories(tmp_path)
+        source = snapshot("# Neutral launch-zone instructions\n")
+        integration.projector.project(source, launch_dir)
+        assert_projection_valid(
+            integration.projector, source, launch_dir, runtime, "launch-zones"
+        )
+
+        instructions = launch_dir / ZONE_INSTRUCTIONS
+        instructions.mkdir(parents=True, exist_ok=True)
+        briefing = instructions / "briefing.md"
+        briefing.write_text(f"The zone token is {token}.\n", encoding="utf-8")
+        outbox = launch_dir.joinpath(*ZONE_OUTBOX.split("/"))
+        outbox.mkdir(parents=True, exist_ok=True)
+        report = outbox / "report.md"
+
+        task_file = task_dir / "launch-zones.md"
+        task_file.write_text(
+            f"Do all three steps.\n"
+            f"1. Read {briefing} and note the token it contains.\n"
+            f"2. Attempt to append the word REWRITTEN to {briefing}. It is "
+            f"expected that this is refused; do not treat a refusal as an "
+            f"error and do not try to work around it.\n"
+            f"3. Create {report} containing exactly the token from step 1.\n"
+            f"Then reply with exactly that token.\n",
+            encoding="utf-8",
+        )
+
+        probe_request = replace(
+            request(
+                workspace_root,
+                launch_dir,
+                task_file,
+                mode="restricted",
+                roots=(workspace_root,),
+                tools=("read", "search"),
+            ),
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=180,
+                mode="restricted",
+                rules=(
+                    ResolvedPermissionRule(
+                        path=workspace_root, tools=("read", "search")
+                    ),
+                ),
+            ).with_launch_zones(launch_dir),
+        )
+        before = capture_protected_state(
+            launch_dir, workspace_root, task_file, REPOSITORY_ROOT
+        )
+        label = f"{runtime.name}/launch-zones ({runtime.command})"
+
+        result = integration.run(probe_request)
+
+        assert result.exit_code == 0, (
+            f"{label}: exit={result.exit_code}; stderr={result.stderr!r}"
+        )
+        # Read of the instructions zone.
+        assert token in result.stdout, (
+            f"{label}: the agent could not read its own instructions zone; "
+            f"stdout={result.stdout!r}; stderr={result.stderr!r}"
+        )
+        # Write into the instructions zone, refused.
+        assert briefing.read_text(encoding="utf-8") == f"The zone token is {token}.\n", (
+            f"{label}: the agent rewrote the instructions it runs under"
+        )
+        # Write into the outbox, allowed.
+        assert report.is_file(), (
+            f"{label}: a read-only agent must still be able to file its own "
+            f"output, but nothing landed in the outbox; "
+            f"stdout={result.stdout!r}; stderr={result.stderr!r}"
+        )
+        assert token in report.read_text(encoding="utf-8"), (
+            f"{label}: the outbox file does not carry the token; "
+            f"contents={report.read_text(encoding='utf-8')!r}"
+        )
+
+        after = capture_protected_state(
+            launch_dir, workspace_root, task_file, REPOSITORY_ROOT
+        )
+        # The launch view is expected to change -- that is the outbox write --
+        # so only the parts nothing was allowed to touch are held fixed.
+        assert after.workspace == before.workspace, f"{label}: workspace changed"
+        assert after.task == before.task, f"{label}: task changed"
+        assert after.repository == before.repository, f"{label}: repository changed"
