@@ -10,7 +10,9 @@ HOW TO USE:
 6. Restart the service
 
 TESTING:
-  .venv/bin/python -m pytest tests/test_integration_contract.py -v
+  python -m pytest tests/test_integration_contract.py -v
+
+  (Use whatever Python interpreter your project uses — there is no .venv here.)
 """
 
 from pathlib import Path

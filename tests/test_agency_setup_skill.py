@@ -343,12 +343,12 @@ def test_windows_launcher_still_resolves_real_copilot_executable():
     assert "Invoke-Expression" not in launcher
 
 
-def test_registration_writes_explicit_fail_closed_agent_capabilities():
+def test_registration_derives_write_eligibility_from_workspace_path_rule():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
 
-    assert "capabilities.write: true" in normalized
-    assert "capabilities.write: false" in normalized
+    assert "Write authority is expressed through the workspace path rule" in normalized
+    assert "include `write` in its `tools` list for an implementation role" in normalized
     assert "Never infer write authority for an existing agent" in normalized
     assert "ask the user when a newly generated role is ambiguous" in normalized
 
