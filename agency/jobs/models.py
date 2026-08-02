@@ -85,6 +85,7 @@ class BlueprintRef:
             self.integration,
             self.projector_version,
             self.source_digest,
+            self.instance_digest,
         )
 
     @property
@@ -93,7 +94,7 @@ class BlueprintRef:
 
     @property
     def cache_root(self) -> Path:
-        return self.cache_entry_path.parent.parent.parent
+        return self.cache_entry_path.parent.parent.parent.parent
 
     def to_artifact(self) -> CompiledArtifact:
         entry_path = self.cache_entry_path
