@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -29,13 +30,13 @@ def rules_of(result, group="g"):
 
 
 def test_schema_version_becomes_five():
-    result = migrate_v4_to_v5(v4({"sandbox": {"mode": "unrestricted"}}, {}))
+    result, _ = migrate_v4_to_v5(v4({"sandbox": {"mode": "unrestricted"}}, {}))
 
     assert result["schema_version"] == 5
 
 
 def test_restricted_roots_become_one_rule_each():
-    result = migrate_v4_to_v5(
+    result, _ = migrate_v4_to_v5(
         v4(
             {
                 "sandbox": {"mode": "restricted", "roots": ["C:/ws", "C:/other"]},
@@ -53,7 +54,7 @@ def test_restricted_roots_become_one_rule_each():
 
 
 def test_tools_all_omits_the_tools_key():
-    result = migrate_v4_to_v5(
+    result, _ = migrate_v4_to_v5(
         v4({"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "all"}}, {})
     )
 
@@ -61,7 +62,7 @@ def test_tools_all_omits_the_tools_key():
 
 
 def test_tools_none_becomes_an_empty_list():
-    result = migrate_v4_to_v5(
+    result, _ = migrate_v4_to_v5(
         v4({"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "none"}}, {})
     )
 
@@ -69,15 +70,18 @@ def test_tools_none_becomes_an_empty_list():
 
 
 def test_unrestricted_becomes_a_single_pathless_rule():
-    result = migrate_v4_to_v5(
+    result, _ = migrate_v4_to_v5(
         v4({"sandbox": {"mode": "unrestricted"}, "tools": {"mode": "allowlist", "names": ["fetch"]}}, {})
     )
 
     assert rules_of(result) == [{"tools": ["fetch"]}]
 
 
-def test_capabilities_write_true_adds_write_to_the_workspace_rule():
-    result = migrate_v4_to_v5(
+def test_capabilities_write_true_is_dropped_not_migrated():
+    # Old behaviour: a workspace_path write rule was added, widening beyond the
+    # v4 sandbox roots (C4b). New contract: capabilities.write is dropped and
+    # reported; no workspace_path rule is emitted.
+    result, dropped = migrate_v4_to_v5(
         v4(
             {"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "allowlist", "names": ["read"]}},
             {"capabilities": {"write": True}},
@@ -86,11 +90,15 @@ def test_capabilities_write_true_adds_write_to_the_workspace_rule():
     agent = result["groups"]["g"]["agents"][0]
 
     assert "capabilities" not in agent
-    assert {"path": "C:/ws", "tools": ["read", "write"]} in agent["runtime"]["permissions"]["rules"]
+    agent_rules = agent.get("runtime", {}).get("permissions", {}).get("rules", [])
+    rule_paths = [r.get("path") for r in agent_rules]
+    assert "C:/ws" not in rule_paths, "workspace_path rule must be absent — it would widen access"
+    assert any("capabilities.write" in msg for msg in dropped)
+    assert any("g" in msg and "a" in msg for msg in dropped)
 
 
-def test_capabilities_write_false_adds_no_write():
-    result = migrate_v4_to_v5(
+def test_capabilities_write_false_adds_no_rules():
+    result, dropped = migrate_v4_to_v5(
         v4(
             {"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "allowlist", "names": ["read"]}},
             {"capabilities": {"write": False}},
@@ -100,20 +108,54 @@ def test_capabilities_write_false_adds_no_write():
 
     assert "capabilities" not in agent
     assert agent.get("runtime", {}).get("permissions", {}).get("rules", []) == []
+    assert not any("capabilities.write" in msg for msg in dropped)
 
 
 def test_superseded_keys_are_removed():
-    result = migrate_v4_to_v5(v4({"sandbox": {"mode": "unrestricted"}, "tools": {"mode": "all"}}, {}))
+    result, _ = migrate_v4_to_v5(v4({"sandbox": {"mode": "unrestricted"}, "tools": {"mode": "all"}}, {}))
     runtime = result["groups"]["g"]["runtime"]
 
     assert "sandbox" not in runtime
     assert "tools" not in runtime
 
 
-# GAP 1 — additional_roots (lines 67-74 of migrate.py)
+# ── agent runtime.tools override ─────────────────────────────────────────────
+
+def test_agent_tool_override_is_dropped_and_reported():
+    # In v4, runtime.tools was a complete override for all paths. Under v5's
+    # additive model it cannot narrow the group's grant on the group's roots
+    # (C4a). The override is dropped and the drop is reported.
+    result, dropped = migrate_v4_to_v5(
+        v4(
+            {"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "all"}},
+            {"runtime": {"tools": {"mode": "allowlist", "names": ["read"]}}},
+        )
+    )
+
+    assert any("runtime.tools" in msg for msg in dropped)
+    assert any("g" in msg and "a" in msg for msg in dropped)
+    agent = result["groups"]["g"]["agents"][0]
+    # No agent permissions block when there are no additional_roots.
+    assert agent.get("runtime", {}).get("permissions") is None
+
+
+def test_agent_without_tool_override_generates_no_tool_drop():
+    _, dropped = migrate_v4_to_v5(
+        v4(
+            {"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "all"}},
+            {},
+        )
+    )
+
+    assert not any("runtime.tools" in msg for msg in dropped)
+
+
+# ── additional_roots ──────────────────────────────────────────────────────────
 
 def test_additional_roots_single_root_becomes_one_agent_rule():
-    result = migrate_v4_to_v5(
+    # Agent tools match group tools; the tool list on additional_roots is still
+    # expressed correctly. The runtime.tools override is reported regardless.
+    result, dropped = migrate_v4_to_v5(
         v4(
             {"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "allowlist", "names": ["read"]}},
             {"runtime": {"sandbox": {"additional_roots": ["C:/extra"]}, "tools": {"mode": "allowlist", "names": ["read"]}}},
@@ -122,10 +164,11 @@ def test_additional_roots_single_root_becomes_one_agent_rule():
     agent = result["groups"]["g"]["agents"][0]
 
     assert agent["runtime"]["permissions"]["rules"] == [{"path": "C:/extra", "tools": ["read"]}]
+    assert any("runtime.tools" in msg for msg in dropped)
 
 
 def test_additional_roots_multiple_roots_each_become_a_rule():
-    result = migrate_v4_to_v5(
+    result, dropped = migrate_v4_to_v5(
         v4(
             {"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "allowlist", "names": ["read"]}},
             {"runtime": {"sandbox": {"additional_roots": ["C:/a", "C:/b"]}, "tools": {"mode": "allowlist", "names": ["read"]}}},
@@ -137,11 +180,14 @@ def test_additional_roots_multiple_roots_each_become_a_rule():
         {"path": "C:/a", "tools": ["read"]},
         {"path": "C:/b", "tools": ["read"]},
     ]
+    assert any("runtime.tools" in msg for msg in dropped)
 
 
-def test_additional_roots_do_not_receive_write_even_with_capabilities_write():
-    # Write is intentionally granted to workspace_path only; additional_roots are read-only.
-    result = migrate_v4_to_v5(
+def test_additional_roots_with_capabilities_write_drops_workspace_rule():
+    # Old behaviour asserted the workspace write rule was present (C4b).
+    # New contract: capabilities.write is dropped; workspace_path rule must be
+    # absent. The additional_roots rule is still emitted with the agent's tools.
+    result, dropped = migrate_v4_to_v5(
         v4(
             {"sandbox": {"mode": "restricted", "roots": ["C:/ws"]}, "tools": {"mode": "allowlist", "names": ["read"]}},
             {
@@ -157,10 +203,13 @@ def test_additional_roots_do_not_receive_write_even_with_capabilities_write():
     rules = agent["runtime"]["permissions"]["rules"]
 
     assert {"path": "C:/extra", "tools": ["read"]} in rules
-    assert {"path": "C:/ws", "tools": ["read", "write"]} in rules
+    rule_paths = [r.get("path") for r in rules]
+    assert "C:/ws" not in rule_paths, "workspace_path write rule must be absent — it widens access"
+    assert any("capabilities.write" in msg for msg in dropped)
+    assert any("runtime.tools" in msg for msg in dropped)
 
 
-# GAP 2 — untranslated keys must survive migration (data-loss guard)
+# ── Untranslated keys must survive (data-loss guard) ─────────────────────────
 
 def test_untranslated_keys_survive_migration():
     raw = {
@@ -187,7 +236,7 @@ def test_untranslated_keys_survive_migration():
             }
         },
     }
-    result = migrate_v4_to_v5(raw)
+    result, _ = migrate_v4_to_v5(raw)
 
     assert result["agency"]["custom_field"] == "keep-agency"
     assert result["groups"]["g"]["dispatch"] == {"enabled": True}
@@ -198,7 +247,7 @@ def test_untranslated_keys_survive_migration():
     assert agent["default_memory"] == {"scope": "agent"}
 
 
-# GAP 3 — round-trip: migrated output must be accepted by parse_config
+# ── Round-trip: migrated output loads through the real config parser ──────────
 
 def test_round_trip_produces_valid_v5_config(config_paths):
     from agency.configuration.models import parse_config
@@ -231,13 +280,93 @@ def test_round_trip_produces_valid_v5_config(config_paths):
         },
     }
 
-    migrated = migrate_v4_to_v5(v4_input)
+    migrated, _ = migrate_v4_to_v5(v4_input)
     parsed = parse_config(migrated, config_paths["config_path"])
 
     assert parsed.resolved.schema_version == 5
 
 
-# GAP 4 — refusal of non-4 schema versions
+# ── C4 regression: resolve through _merge_rules + tools_for ──────────────────
+
+def test_c4_regression_resolve_through_merge_rules(config_paths):
+    """The Task 8 review checked emitted YAML but never resolved through _merge_rules.
+
+    Reproduces the C4a scenario end-to-end: a v4 agent narrows tools relative
+    to the group. After migration the override is dropped; the migrated config
+    loads successfully; effective tools_for on the group root equals the group's
+    grant (all tools). This confirms the migration does not silently narrow the
+    group rule and that the result is a valid v5 document.
+    """
+    from agency.configuration.models import parse_config
+    from agency.configuration.effective import resolve_effective_policy
+    from agency.integrations import BaseIntegration
+    from agency.integrations.models import RuntimeCapabilities
+
+    class _RestrictedIntegration(BaseIntegration):
+        name = "copilot"
+        display_name = "Copilot"
+        supports_execution = False
+        runtime_capabilities = RuntimeCapabilities(
+            permission_modes=frozenset({"restricted", "unrestricted"}),
+        )
+        def identity_filename(self): return "AGENTS.md"
+        def parse_identity(self, agent_dir): return None
+        def write_identity(self, agent_dir, identity): raise NotImplementedError
+        def run(self, request): raise NotImplementedError
+
+    ws = str(config_paths["workspace_path"])
+    v4_input = {
+        "schema_version": 4,
+        "agency": {
+            "title": "C4 Regression",
+            "default_group": "g",
+            "ai_backend": "copilot",
+            "agent_library": str(config_paths["agent_library"]),
+            "compilation_cache": str(config_paths["compilation_cache"]),
+            "memory_store": str(config_paths["memory_store"]),
+            "prompt_store": str(config_paths["prompt_store"]),
+        },
+        "groups": {
+            "g": {
+                "name": "g",
+                "workspace_path": ws,
+                "path": str(config_paths["group_path"]),
+                "default_integration": "copilot",
+                "runtime": {
+                    "sandbox": {"mode": "restricted", "roots": [ws]},
+                    "tools": {"mode": "all"},
+                },
+                "agents": [
+                    {
+                        "name": "a",
+                        "blueprint": "b",
+                        "integration": "copilot",
+                        "runtime": {
+                            "tools": {"mode": "allowlist", "names": ["read"]},
+                        },
+                    }
+                ],
+            }
+        },
+    }
+
+    migrated, dropped = migrate_v4_to_v5(v4_input)
+
+    assert any("runtime.tools" in msg for msg in dropped)
+    assert any("a" in msg for msg in dropped)
+
+    parsed = parse_config(migrated, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "g", "a", integration=_RestrictedIntegration()
+    )
+
+    # Agent override dropped → only group rule remains → all tools on workspace.
+    assert policy.tools_for(Path(ws)) is None, (
+        "Expected the group's grant (all tools) after the agent override was dropped"
+    )
+
+
+# ── Version gating ───────────────────────────────────────────────────────────
 
 def test_rejects_schema_version_three():
     with pytest.raises(ValueError, match="cannot migrate"):
@@ -249,7 +378,7 @@ def test_rejects_missing_schema_version():
         migrate_v4_to_v5({"groups": {}})
 
 
-# GAP 5 — input isolation: the original mapping must not be mutated
+# ── Input isolation ───────────────────────────────────────────────────────────
 
 def test_does_not_mutate_the_input():
     original = v4(
