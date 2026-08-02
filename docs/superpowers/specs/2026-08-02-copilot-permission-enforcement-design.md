@@ -80,6 +80,13 @@ sandbox policy can be expressed and a repository-level file will not accept a
 `deniedPaths` is not used. Windows ignores it, so the policy grants narrowly
 rather than granting broadly and carving out.
 
+Sandboxing is an **experimental** feature. The `/sandbox` command is registered
+only when experimental features are on, so Agency passes `--experimental` on
+every sandboxed launch. An integration that renders a policy without it produces
+a settings file the CLI will not act on — the worst possible outcome, because it
+looks enforced and is not. Detection therefore treats the absence of the flag as
+an absence of the capability.
+
 The generated zone rules render here rather than being dropped:
 `<launch>/instructions` becomes read-only and the outbox and memory directories
 become read/write. A read-only agent can then read its workspace and write
@@ -92,12 +99,18 @@ the zone grants stop being advisory.
 Agency applies as much of the policy as the integration can enforce and says
 plainly what it could not.
 
-The reason is empirical. Enabling the sandbox on a non-Insiders Windows build
-disables every sandboxed subprocess — `search`, `glob`, `grep` and `shell` all
-fail `backend_unavailable`, because the container backend needs an Insiders build
-and its fallback needs `WRITE_DAC` on directories a normal user does not own.
-In-process file edits still honour the policy. So on that platform the boundary is
-real for file writes and absent for shell.
+The reason is empirical, and was re-measured against the installed CLI
+(1.0.78-2) rather than carried over from the earlier probe. Enabling the sandbox
+on a non-Insiders Windows build disables every sandboxed subprocess — `echo hello`
+through the shell tool fails `backend_unavailable`, because the container backend
+needs an Insiders build and its DACL fallback needs `WRITE_DAC` on the
+Store-installed PowerShell directory, which a normal user does not have.
+
+The file boundary, measured in the same session, holds exactly as designed: a
+read from the read-only zone succeeded, a write into it was refused with
+`Edit (sandbox policy)` and produced no file on disk, and a write into the
+read/write zone succeeded. So on this platform the boundary is real for file
+writes and absent for shell.
 
 Refusing to launch would make the common case unusable. Pretending the boundary
 holds would be worse. So a run reports which rules were enforced and which were
@@ -119,6 +132,13 @@ They are therefore enabled only for an agent that may execute decisions — one
 whose policy grants `write` on the group's `workspace_path` itself. An agent that
 may not change the project may not push it either. This reuses the eligibility
 rule phase 2 derived instead of adding a second notion of trust.
+
+This control covers git and `gh` only. The sandbox inherits the rest of the shell
+environment apart from a fixed blocklist, so any other credential already present
+when Agency launches — a cloud access key, a registry token — remains visible to
+the agent regardless of its rules. A permission model expressed in paths cannot
+reach that. The launch environment is therefore reduced to what a job needs, and
+the spec states plainly that environment-borne secrets are outside the boundary.
 
 ### Relocating `COPILOT_HOME` moves more than settings
 
@@ -168,3 +188,5 @@ over-grants.
 - For each of the nine integrations, a policy granting no tools produces no tool
   grant, and generated zone rules never appear in a global allowlist.
 - `--resume` works against a job launched under a relocated `COPILOT_HOME`.
+- A sandboxed launch passes `--experimental`; without it the rendered policy is
+  treated as unenforced rather than assumed to be in effect.
