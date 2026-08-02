@@ -8,8 +8,11 @@ import yaml
 
 import agency.app as app_mod
 from agency.integrations import FileChange, RunResult
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import (
+    EffectiveRuntimePolicy,
+    IntegrationRunRequest,
+    ResolvedPermissionRule,
+)
 from agency.jobs.authority import JobStore
 from agency.jobs import JobRequest, JobSubmissionError
 from agency.jobs.execution import execute_job
@@ -133,9 +136,14 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
                 changed_files=[FileChange("a.txt", "modified", 2, 1)],
             )
 
+    authored_rule = ResolvedPermissionRule(path=repo, tools=("read", "write"))
     context = SimpleNamespace(
         group_root=group_path,
-        runtime_policy=EffectiveRuntimePolicy(timeout=30),
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=30,
+            mode="restricted",
+            rules=(authored_rule,),
+        ),
         workspace_root=group_path / "worker",
         timeout=30,
         sandbox_root=SimpleNamespace(roots=(repo,), allowed_tools=()),
@@ -148,7 +156,12 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
 
     meta = _read_meta(decision)
     authored_rules = tuple(r for r in seen["rules"] if not r.generated)
-    assert authored_rules == ()
+    assert authored_rules == (authored_rule,)
+    # Execution must not widen the operator's grant on its way to the
+    # integration: only Agency's own launch zones may be added.
+    generated_rules = tuple(r for r in seen["rules"] if r.generated)
+    assert generated_rules, "launch zones should have been attached"
+    assert len(seen["rules"]) == len(authored_rules) + len(generated_rules)
     assert seen["prompt"] == "Immutable instructions"
     assert seen["executed_by"] == "worker"
     assert seen["execution_status"] == "running"
