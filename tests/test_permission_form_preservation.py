@@ -252,6 +252,97 @@ def test_agent_runtime_form_round_trips_rules(tmp_path, monkeypatch, raw_config)
     assert runtime["permissions"]["rules"] == before_rules
 
 
+# ---------- N3: Group create form persists what the operator typed ----------
+
+
+def test_group_create_persists_typed_permission_rules(tmp_path, monkeypatch, raw_config):
+    """The New Group form posts the same permission fields as the edit form.
+    What the operator types must reach the configuration, not be discarded."""
+    client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
+    new_workspace = tmp_path / "new-workspace"
+    (new_workspace / "src").mkdir(parents=True)
+    rules_yaml = yaml.safe_dump(
+        [{"path": str(new_workspace / "src"), "tools": ["read", "search"]}],
+        default_flow_style=False, sort_keys=False,
+    ).strip()
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "revision": store.load().revision,
+            "key": "fresh",
+            "name": "Fresh",
+            "workspace_path": str(new_workspace),
+            "path": str(tmp_path / "groups" / "fresh-state"),
+            "default_integration": "copilot",
+            "workspaces_json": "[]",
+            "permission_mode": "restricted",
+            "permission_rules_yaml": rules_yaml,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    permissions = store.load().raw["groups"]["fresh"]["runtime"]["permissions"]
+    assert permissions["mode"] == "restricted"
+    assert permissions["rules"] == [
+        {"path": str(new_workspace / "src"), "tools": ["read", "search"]}
+    ]
+
+
+def test_group_create_rejects_malformed_permission_rules(tmp_path, monkeypatch, raw_config):
+    """Create and save share the parsing, so both refuse the same input."""
+    client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
+    new_workspace = tmp_path / "new-workspace"
+    new_workspace.mkdir(parents=True)
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "revision": store.load().revision,
+            "key": "fresh",
+            "name": "Fresh",
+            "workspace_path": str(new_workspace),
+            "path": str(tmp_path / "groups" / "fresh-state"),
+            "default_integration": "copilot",
+            "workspaces_json": "[]",
+            "permission_mode": "restricted",
+            "permission_rules_yaml": "not: [a, list",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert "fresh" not in store.load().raw["groups"]
+
+
+def test_group_create_without_permission_fields_is_unrestricted(tmp_path, monkeypatch, raw_config):
+    """An operator who types nothing gets the documented default, not a
+    silently discarded entry."""
+    client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
+    new_workspace = tmp_path / "new-workspace"
+    new_workspace.mkdir(parents=True)
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "revision": store.load().revision,
+            "key": "fresh",
+            "name": "Fresh",
+            "workspace_path": str(new_workspace),
+            "path": str(tmp_path / "groups" / "fresh-state"),
+            "default_integration": "copilot",
+            "workspaces_json": "[]",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    permissions = store.load().raw["groups"]["fresh"]["runtime"]["permissions"]
+    assert permissions["mode"] == "unrestricted"
+    assert permissions["rules"] == []
+
+
 # ---------- Sentinel semantics: None vs () ----------
 
 

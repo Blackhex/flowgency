@@ -263,8 +263,38 @@ def _group_create_response(
     )
 
 
-def _split_lines(text: str) -> list[str]:
-    return [line.strip() for line in text.splitlines() if line.strip()]
+PERMISSION_RULES_WARNING = "Permission rules must be valid YAML (a list of mappings)."
+
+
+class PermissionRulesInvalid(ValueError):
+    """The permission rules textarea did not hold a YAML list of mappings."""
+
+
+def _parse_permission_mode(form) -> str | None:
+    """The posted mode, or None when the field is absent (leave unchanged)."""
+    raw = form.get("permission_mode")
+    return None if raw is None else str(raw).strip()
+
+
+def _parse_permission_rules(form) -> tuple[dict[str, Any], ...] | None:
+    """The posted rules, or None when the field is absent (leave unchanged).
+
+    An empty textarea is an explicit clear, not an absent field. Create and
+    save share this so the two cannot drift apart again.
+    """
+    raw = form.get("permission_rules_yaml")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return ()
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise PermissionRulesInvalid(PERMISSION_RULES_WARNING) from exc
+    if not isinstance(parsed, list):
+        raise PermissionRulesInvalid(PERMISSION_RULES_WARNING)
+    return tuple(parsed)
 
 
 def _integration_names() -> list[str]:
@@ -551,33 +581,18 @@ async def admin_org_save(
     path = str(form.get("path", "")).strip()
     default_integration = str(form.get("default_integration", "")).strip()
     runtime_timeout = int(str(form.get("runtime_timeout", "1800")) or "1800")
-    # Permission mode: None means "leave unchanged" when the field is absent.
-    raw_permission_mode = form.get("permission_mode")
-    permission_mode: str | None = (
-        str(raw_permission_mode).strip() if raw_permission_mode is not None else None
-    )
-    # Permission rules: None means "leave unchanged"; present textarea is parsed.
-    raw_rules_yaml = form.get("permission_rules_yaml")
-    permission_rules: tuple[dict[str, Any], ...] | None = None
-    if raw_rules_yaml is not None:
-        rules_text = str(raw_rules_yaml).strip()
-        if rules_text:
-            try:
-                parsed_rules = yaml.safe_load(rules_text)
-                if not isinstance(parsed_rules, list):
-                    raise TypeError
-                permission_rules = tuple(parsed_rules)
-            except (yaml.YAMLError, TypeError):
-                snapshot = services.config_store.load()
-                return _group_settings_response(
-                    request,
-                    snapshot,
-                    org,
-                    warning="Permission rules must be valid YAML (a list of mappings).",
-                    status_code=409,
-                )
-        else:
-            permission_rules = ()
+    permission_mode = _parse_permission_mode(form)
+    try:
+        permission_rules = _parse_permission_rules(form)
+    except PermissionRulesInvalid as exc:
+        snapshot = services.config_store.load()
+        return _group_settings_response(
+            request,
+            snapshot,
+            org,
+            warning=str(exc),
+            status_code=409,
+        )
     dispatch_enabled = form.get("dispatch_enabled") == "on"
     workspaces_json = str(form.get("workspaces_json", "[]"))
     try:
@@ -694,7 +709,6 @@ async def admin_org_create(
             },
         )
     snapshot = services.config_store.load()
-    roots = _split_lines(str(form.get("sandbox_root", "")))
     default_integration = str(form.get("default_integration", "")).strip()
     if default_integration and default_integration not in REGISTRY:
         return _templates(request).TemplateResponse(
@@ -718,10 +732,26 @@ async def admin_org_create(
             },
             status_code=409,
         )
-    tools = [
-        item.strip() for item in form.getlist("allowed_tools") if item.strip()
-    ]
     workspaces_json = str(form.get("workspaces_json", "[]"))
+    try:
+        permission_rules = _parse_permission_rules(form)
+    except PermissionRulesInvalid as exc:
+        return _group_create_response(
+            request,
+            snapshot,
+            key=key,
+            name=name,
+            workspace_path=workspace_path,
+            path=path,
+            default_integration=default_integration,
+            workspaces_json=workspaces_json,
+            warning=str(exc),
+            revision=snapshot.revision,
+            status_code=409,
+        )
+    # A new group has no stored state to leave unchanged, so an absent field
+    # falls back to the documented default rather than the patch sentinel.
+    permission_mode = _parse_permission_mode(form) or "unrestricted"
     try:
         workspaces = json.loads(workspaces_json)
         if not isinstance(workspaces, list):
@@ -764,8 +794,8 @@ async def admin_org_create(
                     path=path,
                     default_integration=default_integration or "claude-code",
                     runtime_timeout=1800,
-                    permission_mode="restricted" if roots else "unrestricted",
-                    permission_rules=tuple({"path": r} for r in roots),
+                    permission_mode=permission_mode,
+                    permission_rules=permission_rules or (),
                     dispatch_enabled=False,
                     workspaces=tuple(workspaces),
                 ),
