@@ -297,8 +297,18 @@ A CLI command rewrites a `schema_version: 4` configuration in place, translating
 | `tools.mode: all` | `tools` omitted on every rule |
 | `tools.mode: allowlist`, `tools.names` | those tools on each rule |
 | `tools.mode: none` | `tools: []` on every rule |
-| `capabilities.write: true` | `write` present on the workspace path's rule |
-| `capabilities.write: false` | `write` absent from every rule |
+| `capabilities.write: true` | dropped and reported |
+| `capabilities.write: false` | dropped and reported |
+
+Migration makes no fidelity claim. It produces a working version-5
+configuration; whatever the additive model cannot express is dropped and
+reported by group and agent name, never approximated in the widening
+direction. Both `capabilities` settings fall in that category. `write: true`
+would need a write rule on `workspace_path`, which may be a strict ancestor of
+the version-4 sandbox roots and would therefore grant more than version 4 did.
+`write: false` was a narrowing, and an instance rule cannot narrow a group
+grant, so there is nothing to translate. In both cases the operator is told
+what was dropped and what to write by hand.
 
 Under `sandbox.mode: unrestricted` there are no roots and therefore no path
 rules; the tool policy becomes a single pathless rule.
@@ -348,13 +358,11 @@ old shape could not express or got wrong:
   workspace is eligible, one without it is not, and no `capabilities` key is
   consulted.
 - A `schema_version: 4` configuration is rejected with the migration message.
-- Migration produces, for each superseded combination in the table above, a
-  version-5 configuration whose effective policy matches what the version-4
-  configuration produced — except where version 4 was wrong, namely the group
-  root, which becomes unreachable rather than implicitly writable.
-  No shipped integration can enforce a read-only grant, so "unreachable"
-  is the safer default; a future specification may add a read-only
-  permission when integrations can enforce it.
+- Migration produces a working version-5 configuration and claims no fidelity
+  to the version-4 effective policy. Every construct the additive model cannot
+  express — including both `capabilities.write` settings and an instance
+  `runtime.tools` override — is dropped and reported by group and agent name
+  rather than approximated, and no drop widens access.
 
 ## Out of scope
 
