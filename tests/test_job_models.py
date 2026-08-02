@@ -719,3 +719,19 @@ def test_a_pidless_claim_is_relaunchable_once_the_grace_expires(
     record.launched_at = stale.isoformat()
     assert occupies_slot(record) is False
     assert is_launchable(record) is True
+
+
+def test_blueprint_cache_ref_includes_instance_digest():
+    """Pin keys use the same CacheRef that artifact creation uses."""
+    ref = BlueprintRef(
+        key="writer",
+        source_digest="abc123",
+        integration="copilot",
+        projector_version="v2",
+        cache_path="C:/cache/copilot/v2/abc123/inst456",
+        instance_digest="inst456",
+    )
+    artifact = ref.to_artifact()
+    assert ref.cache_ref == artifact.ref
+    assert ref.cache_ref.instance_digest == "inst456"
+    assert ref.cache_root == Path("C:/cache")
