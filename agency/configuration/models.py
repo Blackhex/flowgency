@@ -295,27 +295,6 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
         runtime_map = _mapping_or_none(runtime)
         if runtime is not None and runtime_map is None:
             issues.append(_shape_issue(f"{group_field}.runtime", "mapping"))
-        if runtime_map is not None:
-            sandbox = runtime_map.get("sandbox")
-            sandbox_map = _mapping_or_none(sandbox)
-            if sandbox is not None and sandbox_map is None:
-                issues.append(_shape_issue(f"{group_field}.runtime.sandbox", "mapping"))
-            elif sandbox_map is not None:
-                roots = sandbox_map.get("roots")
-                if roots is not None and not _is_list(roots):
-                    issues.append(_shape_issue(f"{group_field}.runtime.sandbox.roots", "list"))
-                additional_roots = sandbox_map.get("additional_roots")
-                if additional_roots is not None and not _is_list(additional_roots):
-                    issues.append(_shape_issue(f"{group_field}.runtime.sandbox.additional_roots", "list"))
-
-            tools = runtime_map.get("tools")
-            tools_map = _mapping_or_none(tools)
-            if tools is not None and tools_map is None:
-                issues.append(_shape_issue(f"{group_field}.runtime.tools", "mapping"))
-            elif tools_map is not None:
-                names = tools_map.get("names")
-                if names is not None and not _is_list(names):
-                    issues.append(_shape_issue(f"{group_field}.runtime.tools.names", "list"))
 
         dispatch = group_map.get("dispatch")
         if dispatch is not None and not _is_mapping(dispatch):
@@ -355,35 +334,10 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
             if identity is not None and not _is_mapping(identity):
                 issues.append(_shape_issue(f"{agent_field}.identity", "mapping"))
 
-            capabilities = agent_map.get("capabilities")
-            if capabilities is not None and not _is_mapping(capabilities):
-                issues.append(_shape_issue(f"{agent_field}.capabilities", "mapping"))
-
             runtime = agent_map.get("runtime")
             runtime_map = _mapping_or_none(runtime)
             if runtime is not None and runtime_map is None:
                 issues.append(_shape_issue(f"{agent_field}.runtime", "mapping"))
-            if runtime_map is not None:
-                sandbox = runtime_map.get("sandbox")
-                sandbox_map = _mapping_or_none(sandbox)
-                if sandbox is not None and sandbox_map is None:
-                    issues.append(_shape_issue(f"{agent_field}.runtime.sandbox", "mapping"))
-                elif sandbox_map is not None:
-                    roots = sandbox_map.get("roots")
-                    if roots is not None and not _is_list(roots):
-                        issues.append(_shape_issue(f"{agent_field}.runtime.sandbox.roots", "list"))
-                    additional_roots = sandbox_map.get("additional_roots")
-                    if additional_roots is not None and not _is_list(additional_roots):
-                        issues.append(_shape_issue(f"{agent_field}.runtime.sandbox.additional_roots", "list"))
-
-                tools = runtime_map.get("tools")
-                tools_map = _mapping_or_none(tools)
-                if tools is not None and tools_map is None:
-                    issues.append(_shape_issue(f"{agent_field}.runtime.tools", "mapping"))
-                elif tools_map is not None:
-                    names = tools_map.get("names")
-                    if names is not None and not _is_list(names):
-                        issues.append(_shape_issue(f"{agent_field}.runtime.tools.names", "list"))
 
             default_memory = agent_map.get("default_memory")
             if default_memory is not None and not _is_mapping(default_memory):
@@ -553,38 +507,42 @@ def _validate_blueprint(agent: Any, scope: str) -> ValidationIssue | None:
     return _validate_identifier("blueprint", blueprint, scope)
 
 
-def _validate_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
-    return _validate_agent_runtime(runtime, scope)
+_SUPERSEDED_V4_RUNTIME_KEYS = ("sandbox", "tools")
+
+
+def _reject_superseded_keys(
+    mapping: dict[str, Any],
+    scope: str,
+    prefix: str,
+    keys: tuple[str, ...] = _SUPERSEDED_V4_RUNTIME_KEYS,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for key in keys:
+        if key in mapping:
+            issues.append(
+                _build_issue(
+                    code="superseded-config-key",
+                    scope=scope,
+                    field=f"{prefix}.{key}",
+                    message=(
+                        f"'{key}' is a schema_version 4 key that is not "
+                        f"recognised in version 5."
+                    ),
+                    hint=(
+                        "Remove the key and use runtime.permissions instead. "
+                        "Run `christag-agency config migrate` to convert "
+                        "a version-4 configuration."
+                    ),
+                )
+            )
+    return issues
 
 
 def _validate_group_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if not _is_mapping(runtime):
         return issues
-    sandbox = runtime.get("sandbox") or {}
-    if not _is_mapping(sandbox):
-        return issues
-    if sandbox.get("additional_roots"):
-        issues.append(
-            _build_issue(
-                code="invalid-config",
-                scope=scope,
-                field=f"{scope}.runtime.sandbox.additional_roots",
-                message="Group runtime sandbox does not support additional_roots.",
-                hint="Remove runtime.sandbox.additional_roots and use runtime.sandbox.roots for group-owned sandbox roots.",
-            )
-        )
-    if sandbox.get("mode") == "unrestricted" and sandbox.get("roots"):
-        issues.append(
-            _build_issue(
-                code="sandbox-contradiction",
-                scope=scope,
-                field="runtime.sandbox.roots",
-                message="Unrestricted sandbox cannot add roots.",
-                hint="Remove roots or switch to restricted mode.",
-            )
-        )
-    issues.extend(_validate_runtime_tools(runtime, scope))
+    issues.extend(_reject_superseded_keys(runtime, scope, f"{scope}.runtime"))
     return issues
 
 
@@ -592,68 +550,7 @@ def _validate_agent_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if not _is_mapping(runtime):
         return issues
-    sandbox = runtime.get("sandbox") or {}
-    if not _is_mapping(sandbox):
-        return issues
-    if sandbox.get("roots"):
-        issues.append(
-            _build_issue(
-                code="invalid-config",
-                scope=scope,
-                field=f"{scope}.runtime.sandbox.roots",
-                message="Agent runtime sandbox roots are not supported.",
-                hint="Remove runtime.sandbox.roots and use runtime.sandbox.additional_roots instead.",
-            )
-        )
-    if sandbox.get("additional_roots") and sandbox.get("mode") == "unrestricted":
-        issues.append(
-            _build_issue(
-                code="sandbox-contradiction",
-                scope=scope,
-                field="runtime.sandbox.additional_roots",
-                message="Unrestricted sandbox cannot add roots.",
-                hint="Remove additional roots or switch to restricted mode.",
-            )
-        )
-    issues.extend(_validate_runtime_tools(runtime, scope))
-    return issues
-
-
-def _validate_runtime_tools(runtime: Any, scope: str) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    if not _is_mapping(runtime):
-        return issues
-    tools = runtime.get("tools") or {}
-    if not _is_mapping(tools):
-        return issues
-    if tools.get("mode") == "allowlist":
-        names = tools.get("names") or []
-        if not _is_list(names):
-            return issues
-        trimmed_names = []
-        for index, name in enumerate(names):
-            if not isinstance(name, str) or not name.strip():
-                issues.append(
-                    _build_issue(
-                        code="invalid-allowlist-name",
-                        scope=scope,
-                        field=f"runtime.tools.names[{index}]",
-                        message="Allowlist names must be non-empty trimmed strings.",
-                        hint="Remove blank entries and keep each allowlist name as a trimmed string.",
-                    )
-                )
-                continue
-            trimmed_names.append(name.strip())
-        if not trimmed_names:
-            issues.append(
-                _build_issue(
-                    code="empty-allowlist",
-                    scope=scope,
-                    field="runtime.tools.names",
-                    message="Allowlist mode requires at least one tool name.",
-                    hint="Add one or more tool names to the allowlist.",
-                )
-            )
+    issues.extend(_reject_superseded_keys(runtime, scope, f"{scope}.runtime"))
     return issues
 
 
@@ -881,7 +778,14 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     )
             runtime = agent.get("runtime") or {}
             issues.extend(_validate_agent_runtime(runtime, f"groups.{group_name}.agents.{name or '<unknown>'}"))
-
+            if "capabilities" in agent:
+                issues.extend(
+                    _reject_superseded_keys(
+                        agent, f"groups.{group_name}.agents.{name or '<unknown>'}",
+                        f"groups.{group_name}.agents.{name or '<unknown>'}",
+                        keys=("capabilities",),
+                    )
+                )
         dispatch = group.get("dispatch") if _is_mapping(group.get("dispatch")) else {}
         if _is_mapping(dispatch):
             for key in dispatch:
