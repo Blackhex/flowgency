@@ -16,7 +16,6 @@ from agency.configuration import (
     AgentRuntimePatch,
     ConfigConflictError,
     ResolvedGroupPaths,
-    ToolPolicy,
     ValidationFailed,
     parse_config,
     patch_agent_profile,
@@ -302,14 +301,6 @@ def _parse_bool(form_value: Any) -> bool:
 
 def _split_lines(text: str) -> tuple[str, ...]:
     return tuple(line.strip() for line in str(text or "").splitlines() if line.strip())
-
-
-def _parse_tool_policy(form) -> ToolPolicy | None:
-    mode = str(form.get("tool_mode", "")).strip() or "inherit"
-    names = _split_lines(form.get("tool_names", ""))
-    if mode == "inherit":
-        return None
-    return ToolPolicy(mode=mode, names=names)
 
 
 def _apply_runtime_patch(raw: dict[str, Any], group_id: str, agent_id: str, patch: AgentRuntimePatch) -> None:

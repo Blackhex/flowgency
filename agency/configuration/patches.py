@@ -6,14 +6,6 @@ from typing import Any, Literal
 
 from .store import ConfigSnapshot, ConfigStore
 
-ToolMode = Literal["all", "allowlist", "none"]
-
-
-@dataclass(frozen=True)
-class ToolPolicy:
-    mode: ToolMode
-    names: tuple[str, ...] = ()
-
 
 @dataclass(frozen=True)
 class AgencySettingsPatch:
@@ -107,15 +99,6 @@ def _agent(group: dict[str, Any], agent_id: str) -> dict[str, Any]:
         if isinstance(entry, dict) and entry.get("name") == agent_id:
             return entry
     raise KeyError(agent_id)
-
-
-def _tool_mapping(policy: ToolPolicy | None) -> dict[str, Any]:
-    if policy is None:
-        return {"mode": "all"}
-    mapping: dict[str, Any] = {"mode": policy.mode}
-    if policy.mode == "allowlist":
-        mapping["names"] = list(policy.names)
-    return mapping
 
 
 def _merge_mapping(target: dict[str, Any], updates: dict[str, Any]) -> None:

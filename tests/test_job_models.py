@@ -727,8 +727,8 @@ def test_blueprint_cache_ref_includes_instance_digest():
         key="writer",
         source_digest="abc123",
         integration="copilot",
-        projector_version="v2",
-        cache_path="C:/cache/copilot/v2/abc123/inst456",
+        projector_version="p3",
+        cache_path="C:/cache/copilot/p3/abc123/inst456",
         instance_digest="inst456",
     )
     artifact = ref.to_artifact()

@@ -77,29 +77,6 @@ from agency.web.routes import (
 CONFIG_PATH = Path(os.environ.get("AGENCY_CONFIG") or Path.cwd() / "config.yaml").expanduser().resolve()
 
 
-def _parse_sandbox_roots(text: str):
-    """Parse a sandbox_root textarea (one path per line) into config form.
-
-    Returns None when empty, a single string for one path (back-compat), or a
-    list of strings for multiple paths.
-    """
-    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
-    if not lines:
-        return None
-    if len(lines) == 1:
-        return lines[0]
-    return lines
-
-
-def _sandbox_root_text(val) -> str:
-    """Render a config sandbox_root value (str or list) as textarea text."""
-    if not val:
-        return ""
-    if isinstance(val, list):
-        return "\n".join(str(v) for v in val)
-    return str(val)
-
-
 def refresh_services() -> AgencyServices:
     services = build_services(CONFIG_PATH)
     app.state.services = services
