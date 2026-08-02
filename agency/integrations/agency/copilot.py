@@ -3,7 +3,6 @@
 import json
 import os
 import platform
-import shlex
 import shutil
 import subprocess
 import sys
@@ -20,6 +19,7 @@ from agency.integrations import (
     IntegrationError,
     RunResult,
     _register,
+    format_command_with_environment,
     format_interactive_command,
     spawn_interactive_terminal,
     terminal_available,
@@ -436,14 +436,10 @@ class CopilotIntegration(BaseIntegration):
         )
 
         executable = cmd or "copilot"
-        resume_cmd = f"{executable} --resume={result['sessionId']}"
-        if copilot_home is not None:
-            home_str = str(copilot_home)
-            if platform.system() == "Windows":
-                hq = home_str.replace("'", "''")
-                resume_cmd = f"$env:COPILOT_HOME='{hq}'; {resume_cmd}"
-            else:
-                resume_cmd = f"COPILOT_HOME={shlex.quote(home_str)} {resume_cmd}"
+        resume_cmd = format_command_with_environment(
+            [executable, f"--resume={result['sessionId']}"],
+            {"COPILOT_HOME": str(copilot_home)} if copilot_home is not None else {},
+        )
 
         return (
             f"Changes    +{changes.get('linesAdded', 0)} "

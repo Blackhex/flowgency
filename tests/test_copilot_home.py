@@ -315,9 +315,9 @@ def test_usage_summary_resume_posix_format(tmp_path, monkeypatch):
     assert "$env:" not in summary
 
 
-def test_usage_summary_uses_resolved_cmd(tmp_path):
-    session_id = "sess-cmd"
-    home = tmp_path / "cmd_home"
+def _shutdown_home(tmp_path, session_id, home_name=".copilot"):
+    """Build a copilot home holding one finished session, and its result line."""
+    home = tmp_path / home_name
     state_dir = home / "session-state" / session_id
     state_dir.mkdir(parents=True)
     (state_dir / "events.jsonl").write_text(
@@ -328,11 +328,52 @@ def test_usage_summary_uses_resolved_cmd(tmp_path):
         encoding="utf-8",
     )
     raw = json.dumps({"type": "result", "sessionId": session_id, "usage": {}})
+    return home, raw
+
+
+def test_usage_summary_uses_resolved_cmd(tmp_path, monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    session_id = "sess-cmd"
+    home, raw = _shutdown_home(tmp_path, session_id, "cmd_home")
 
     summary = CopilotIntegration._usage_summary(raw, copilot_home=home, cmd="/usr/bin/gh-copilot")
 
-    assert "/usr/bin/gh-copilot --resume=" in summary
-    assert "copilot --resume=" not in summary or "/usr/bin/gh-copilot" in summary
+    assert f"/usr/bin/gh-copilot --resume={session_id}" in summary
+
+
+def test_usage_summary_quotes_executable_with_spaces_on_windows(tmp_path, monkeypatch):
+    """A resolved path under Program Files must stay one argument."""
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    session_id = "sess-space-win"
+    home, raw = _shutdown_home(tmp_path, session_id, "space_win_home")
+    executable = "C:\\Program Files\\GitHub Copilot\\copilot.exe"
+
+    summary = CopilotIntegration._usage_summary(raw, copilot_home=home, cmd=executable)
+
+    assert f"'{executable}'" in summary
+    assert f"; {executable} " not in summary
+
+
+def test_usage_summary_quotes_executable_with_spaces_on_posix(tmp_path, monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    session_id = "sess-space-posix"
+    home, raw = _shutdown_home(tmp_path, session_id, "space_posix_home")
+    executable = "/opt/gh copilot/copilot"
+
+    summary = CopilotIntegration._usage_summary(raw, copilot_home=home, cmd=executable)
+
+    assert "'/opt/gh copilot/copilot'" in summary
+
+
+def test_usage_summary_escapes_quote_in_home_on_windows(tmp_path, monkeypatch):
+    """An apostrophe in the home path must be doubled, not left to terminate the string."""
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    session_id = "sess-quote"
+    home, raw = _shutdown_home(tmp_path, session_id, "o'brien")
+
+    summary = CopilotIntegration._usage_summary(raw, copilot_home=home, cmd="copilot")
+
+    assert f"$env:COPILOT_HOME='{str(home).replace(chr(39), chr(39) * 2)}'" in summary
 
 
 def test_usage_summary_no_home_prefix_when_default(tmp_path):

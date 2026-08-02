@@ -1,3 +1,5 @@
+import platform
+
 import pytest
 from agency.configuration import ValidationFailed
 from agency.integrations import AgentIdentity, detect_integration
@@ -1112,12 +1114,17 @@ class TestCopilot:
 
         summary = CopilotIntegration._usage_summary(raw)
 
+        resume = (
+            "& 'copilot' '--resume=12345678-abcd'"
+            if platform.system() == "Windows"
+            else "copilot --resume=12345678-abcd"
+        )
         assert summary == (
             "Changes    +4 -2\n"
             "AI Credits 62 (1m 57s)\n"
             "Tokens     \u2191 598.0k (568.7k cached, 29.2k written) "
             "\u2022 \u2193 6.1k (3.4k reasoning)\n"
-            "Resume     copilot --resume=12345678-abcd"
+            f"Resume     {resume}"
         )
 
     def test_run_writes_usage_summary_to_stderr(
@@ -1177,9 +1184,14 @@ class TestCopilot:
 
         assert "AI Credits 5 (1s)" in result.stderr
         assert "Tokens     \u2191 60" in result.stderr
-        # The executable is resolved per machine, so pin the affordance, not the path.
-        assert "Resume " in result.stderr
-        assert "--resume=usage-session" in result.stderr
+        # The executable resolves per machine, so build the expectation the same
+        # way rather than pinning this developer's install path.
+        from agency.integrations import format_command_with_environment
+
+        expected = format_command_with_environment(
+            [integration.require_executable(), "--resume=usage-session"], {}
+        )
+        assert f"Resume     {expected}" in result.stderr
 
     def test_parse_jsonl_same_path_aggregation(self):
         """M3: create then edit on same path yields single FileChange with status=added and summed lines."""

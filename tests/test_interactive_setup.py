@@ -355,6 +355,30 @@ def test_spawn_interactive_terminal_windows_launches_direct_process(
     assert calls[0][0][2] == str(project_dir.resolve())
 
 
+def test_spawn_interactive_terminal_hands_environment_to_the_process(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The env argument must cross the seam into Popen, not stop at the helper."""
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda args, **kwargs: calls.append((list(args), kwargs)),
+    )
+
+    from agency.integrations.interactive import spawn_interactive_terminal
+
+    env = {"PATH": "C:\\Windows", "COPILOT_HOME": str(tmp_path / "home")}
+    spawn_interactive_terminal(["copilot"], project_dir, env=env)
+
+    assert calls[0][1]["env"] == env
+
+
 def test_spawn_interactive_terminal_posix_uses_separate_argv_for_xterm_like_terminals(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

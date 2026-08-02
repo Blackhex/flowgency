@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import platform
 import re
 from pathlib import Path
 from typing import Any
@@ -14,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from agency.configuration.models import MemorySelector
 from agency.integrations import (
     IntegrationError,
-    format_interactive_command,
+    format_command_with_environment,
     get_integration,
     spawn_interactive_terminal,
 )
@@ -93,14 +92,10 @@ def _format_resume(
 ) -> str:
     if argv is None:
         return ""
-    base = format_interactive_command(argv)
-    if not copilot_home:
-        return base
-    if platform.system() == "Windows":
-        hq = copilot_home.replace("'", "''")
-        return f"$env:COPILOT_HOME='{hq}'; {base}"
-    import shlex
-    return f"COPILOT_HOME={shlex.quote(copilot_home)} {base}"
+    return format_command_with_environment(
+        argv,
+        {"COPILOT_HOME": copilot_home} if copilot_home else {},
+    )
 
 
 def _integration_display_name(record: JobRecord) -> str:
