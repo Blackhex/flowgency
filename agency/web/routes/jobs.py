@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import re
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,22 @@ def _resume_argv(record: JobRecord) -> tuple[str, ...] | None:
     except KeyError:
         return None
     return integration.resume_command(session_id)
+
+
+def _format_resume(
+    argv: tuple[str, ...] | None,
+    copilot_home: str | None,
+) -> str:
+    if argv is None:
+        return ""
+    base = format_interactive_command(argv)
+    if not copilot_home:
+        return base
+    if platform.system() == "Windows":
+        hq = copilot_home.replace("'", "''")
+        return f"$env:COPILOT_HOME='{hq}'; {base}"
+    import shlex
+    return f"COPILOT_HOME={shlex.quote(copilot_home)} {base}"
 
 
 def _integration_display_name(record: JobRecord) -> str:
@@ -262,7 +279,7 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
         "stderr_href": _log_href(group_id, record.stderr_path),
         "stderr_name": Path(record.stderr_path).name if record.stderr_path else "",
         "diagnostic_memory_hash": record.spec.memory.memory_hash,
-        "resume_command": format_interactive_command(resume_argv) if resume_argv else "",
+        "resume_command": _format_resume(resume_argv, getattr(record, "copilot_home", None)),
         "resume_available": resume_argv is not None,
         "resume_label": f"Resume in {_integration_display_name(record)}",
     }

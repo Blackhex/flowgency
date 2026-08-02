@@ -216,6 +216,7 @@ def _terminalize_failure(
     base_sha: str | None = None,
     memory_publication: dict[str, object] | None = None,
     session_id: str | None = None,
+    copilot_home: str | None = None,
 ) -> JobRecord:
     record = read_job(job_path)
     if record.status == "cancelled":
@@ -238,6 +239,7 @@ def _terminalize_failure(
         base_sha=base_sha,
         memory_publication=memory_publication,
         session_id=session_id,
+        copilot_home=copilot_home,
     )
 
 
@@ -254,6 +256,7 @@ def _merge_failed_terminal_metadata(
     base_sha: str | None = None,
     memory_publication: dict[str, object] | None = None,
     session_id: str | None = None,
+    copilot_home: str | None = None,
 ) -> JobRecord:
     current = read_job(job_path)
     if current.status != "failed":
@@ -285,6 +288,7 @@ def _merge_failed_terminal_metadata(
         base_sha=current.base_sha or base_sha,
         memory_publication=(merged_memory_publication or None),
         session_id=current.session_id or session_id,
+        copilot_home=current.copilot_home or copilot_home,
     )
     write_job(job_path, updated)
     return updated
@@ -513,6 +517,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                             )
                         },
                         session_id=result.session_id,
+                        copilot_home=getattr(result, "copilot_home", None),
                     )
                 else:
                     try:
@@ -539,6 +544,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 )
                             },
                             session_id=result.session_id,
+                            copilot_home=getattr(result, "copilot_home", None),
                         )
                     else:
                         validation = validate_outbox(
@@ -575,6 +581,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                     )
                                 },
                                 session_id=result.session_id,
+                                copilot_home=getattr(result, "copilot_home", None),
                             )
                         else:
                             try:
@@ -622,6 +629,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                         execution_summary=summary,
                                         base_sha=base_sha,
                                         session_id=result.session_id,
+                                        copilot_home=getattr(result, "copilot_home", None),
                                     )
                                     write_job(job_path, final)
                             except (MemoryPublicationError, ValueError) as error:
@@ -648,6 +656,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                             "failed_artifacts": artifacts,
                                         },
                                         session_id=result.session_id,
+                                        copilot_home=getattr(result, "copilot_home", None),
                                     )
                                 else:
                                     final = _terminalize_failure(
@@ -666,6 +675,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                             "failed_artifacts": artifacts,
                                         },
                                         session_id=result.session_id,
+                                        copilot_home=getattr(result, "copilot_home", None),
                                     )
         except LockCancelledError:
             final = _mark_cancelled_if_waiting(job_path)
