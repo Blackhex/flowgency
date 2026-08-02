@@ -10,6 +10,7 @@ import yaml
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.integrations.errors import IntegrationError
 from agency.integrations.interactive import (
+    format_command_with_environment,
     format_interactive_command,
     spawn_interactive_terminal,
     terminal_available,

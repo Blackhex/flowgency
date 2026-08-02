@@ -7,7 +7,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from agency.integrations.errors import IntegrationError
 
@@ -33,6 +33,29 @@ def format_interactive_command(command: Sequence[str]) -> str:
     if platform.system() == "Windows":
         return "& " + " ".join(_powershell_quote(part) for part in parts)
     return shlex.join(parts)
+
+
+def format_command_with_environment(
+    command: Sequence[str],
+    env: Mapping[str, str],
+) -> str:
+    """Render a copy-pasteable command that first sets env vars for this shell.
+
+    The command is quoted for the local shell, so a resolved executable path
+    containing spaces stays a single argument.
+    """
+    base = format_interactive_command(command)
+    if not env:
+        return base
+    if platform.system() == "Windows":
+        prefix = "".join(
+            f"$env:{name}={_powershell_quote(value)}; " for name, value in env.items()
+        )
+    else:
+        prefix = "".join(
+            f"{name}={shlex.quote(value)} " for name, value in env.items()
+        )
+    return prefix + base
 
 
 def _powershell_quote(argument: str) -> str:
@@ -74,6 +97,12 @@ def spawn_interactive_terminal(
     cwd: Path,
     env: dict[str, str] | None = None,
 ) -> str:
+    """Launch command in a new terminal and return the displayed command line.
+
+    A supplied env REPLACES the child environment rather than extending it, so
+    callers must pass a complete environment (merge onto os.environ) or None to
+    inherit.
+    """
     resolved_cwd = cwd.resolve(strict=True)
     argv = [str(part) for part in command]
     command_line = format_interactive_command(argv)
