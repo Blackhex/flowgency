@@ -1,6 +1,7 @@
 """Tests for the admin group settings save/create with the permissions model."""
 
 from copy import deepcopy
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,36 @@ from fastapi.testclient import TestClient
 
 import agency.app as app_mod
 from agency.configuration import ConfigStore
+
+
+class _FormParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.forms = []
+        self._current = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form":
+            self._current = {"attrs": attrs, "inputs": [], "selects": [], "options": []}
+        elif self._current is not None:
+            if tag == "input":
+                self._current["inputs"].append(attrs)
+            elif tag == "select":
+                self._current["selects"].append(attrs)
+            elif tag == "option":
+                self._current["options"].append(attrs)
+
+    def handle_endtag(self, tag):
+        if tag == "form" and self._current is not None:
+            self.forms.append(self._current)
+            self._current = None
+
+
+def _parse_forms(html: str):
+    parser = _FormParser()
+    parser.feed(html)
+    return parser.forms
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -295,3 +326,193 @@ def test_admin_org_save_preserves_workspaces(tmp_path, monkeypatch, raw_config):
     assert saved["groups"]["grp"]["workspaces"] == [
         {"name": "Main", "type": "tmux", "config": {}}
     ]
+
+
+def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
+    tmp_path, monkeypatch, raw_config
+):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
+    (tmp_path / "new-agents").mkdir()
+    (tmp_path / "new-workspace").mkdir()
+    (tmp_path / "repo").mkdir()
+    (tmp_path / "cowork").mkdir()
+    calls = 0
+    original_patch = ConfigStore.patch
+
+    def patched_patch(self, expected_revision, patcher):
+        nonlocal calls
+        if self.path == store.path:
+            calls += 1
+        return original_patch(self, expected_revision, patcher)
+
+    monkeypatch.setattr(ConfigStore, "patch", patched_patch)
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "revision": store.load().revision,
+            "key": "new",
+            "name": "New Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
+            "path": str(tmp_path / "new-agents"),
+            "workspaces_json": '[{"name":"Primary","type":"tmux","config":{"script_path":"tmux-agents.sh"}}]',
+            "sandbox_root": f"{tmp_path / 'repo'}\n{tmp_path / 'cowork'}",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert calls == 1
+
+    saved = store.load().raw["groups"]["new"]
+    assert saved["name"] == "New Group"
+    assert saved["workspace_path"] == str(tmp_path / "new-workspace")
+    assert saved["path"] == str(tmp_path / "new-agents")
+    assert saved["default_integration"] == "claude-code"
+    assert saved["dispatch"] == {"enabled": False}
+    assert saved["runtime"]["permissions"]["mode"] == "restricted"
+    rules = saved["runtime"]["permissions"]["rules"]
+    paths = [r["path"] for r in rules]
+    assert str(tmp_path / "repo") in paths
+    assert str(tmp_path / "cowork") in paths
+    assert saved["workspaces"] == [
+        {
+            "name": "Primary",
+            "type": "tmux",
+            "config": {"script_path": "tmux-agents.sh"},
+        }
+    ]
+    assert saved["agents"] == []
+
+
+def test_admin_org_save_invalid_workspaces_is_all_or_nothing(tmp_path, monkeypatch, raw_config):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
+    before = store.load()
+
+    response = client.post(
+        "/admin/orgs/grp/save",
+        data={
+            "revision": before.revision,
+            "name": "Changed",
+            "workspace_path": str(tmp_path / "workspace"),
+            "path": str(tmp_path / "groups" / "grp-state"),
+            "workspaces_json": "not-json",
+            "default_integration": "copilot",
+            "runtime_timeout": "9999",
+            "permission_mode": "restricted",
+            "dispatch_enabled": "on",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    after = store.load().raw
+    assert after == before.raw
+
+
+@pytest.mark.parametrize(
+    ("workspace_path", "group_path", "diagnostic"),
+    [
+        (
+            "missing-new-workspace",
+            "new-group-state",
+            "Configured path must exist as a directory",
+        ),
+        (
+            "workspace",
+            "workspace",
+            "overlaps",
+        ),
+    ],
+)
+def test_admin_org_create_invalid_paths_rerender_submitted_form_without_writing(
+    tmp_path,
+    monkeypatch,
+    raw_config,
+    workspace_path,
+    group_path,
+    diagnostic,
+):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
+    before = store.load()
+    submitted_workspace = tmp_path / workspace_path
+    submitted_group = tmp_path / group_path
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "revision": before.revision,
+            "key": "submitted-group",
+            "name": "Submitted Group",
+            "workspace_path": str(submitted_workspace),
+            "path": str(submitted_group),
+            "default_integration": "copilot",
+            "workspaces_json": "[]",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert str(submitted_workspace) in response.text
+    assert str(submitted_group) in response.text
+    assert f'name="revision" value="{before.revision}"' in response.text
+    assert diagnostic in response.text
+    assert "submitted-group" not in store.load().raw["groups"]
+    assert store.load().raw == before.raw
+
+
+def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
+    tmp_path, monkeypatch, raw_config
+):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
+    (tmp_path / "new-agents").mkdir()
+    (tmp_path / "new-workspace").mkdir()
+
+    response = client.post(
+        "/admin/orgs/create",
+        data={
+            "revision": store.load().revision,
+            "key": "copilot-group",
+            "name": "Copilot Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
+            "path": str(tmp_path / "new-agents"),
+            "workspaces_json": "[]",
+            "default_integration": "copilot",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert store.load().raw["groups"]["copilot-group"]["default_integration"] == "copilot"
+
+    bad = client.post(
+        "/admin/orgs/create",
+        data={
+            "key": "bad-group",
+            "name": "Bad Group",
+            "workspace_path": str(tmp_path / "new-workspace"),
+            "path": str(tmp_path / "new-agents"),
+            "workspaces_json": "[]",
+            "default_integration": "not-registered",
+        },
+        follow_redirects=False,
+    )
+
+    assert bad.status_code == 409
+    assert "not-registered" in bad.text
+    assert 'name="default_integration"' in bad.text
+    assert "selected" in bad.text
+    assert "bad-group" not in store.load().raw["groups"]
+
+
+def test_admin_org_create_form_parser_smoke_preserves_default_integration_select(
+    monkeypatch, tmp_path, raw_config
+):
+    client, _ = _make_client(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/admin/orgs/new")
+
+    assert response.status_code == 200
+    forms = [form for form in _parse_forms(response.text) if form["attrs"].get("action") == "/admin/orgs/create"]
+    assert len(forms) == 1
+    assert any(option.get("value") == "copilot" for option in forms[0]["options"])
