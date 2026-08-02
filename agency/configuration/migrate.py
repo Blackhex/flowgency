@@ -114,6 +114,18 @@ def migrate_v4_to_v5(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
                     f" sandbox roots. Dropped to avoid widening. Add a write"
                     f" rule on the intended path to restore executor eligibility."
                 )
+            elif "write" in capabilities:
+                # In v4, capabilities.write: false denied the agent workspace
+                # writes. The v5 additive model cannot narrow the group's grant
+                # from an instance, so the agent now inherits whatever the group
+                # allows. Dropped and reported rather than silently widened.
+                dropped.append(
+                    f"group '{group_id}', agent '{agent_name}':"
+                    f" capabilities.write: false — v5 instance rules are additive"
+                    f" and cannot narrow the group's grant, so this agent now"
+                    f" inherits the group's tools. Dropped. Narrow the group's"
+                    f" rules, or move this agent to a group that grants less."
+                )
 
             agent_runtime.pop("sandbox", None)
             agent_runtime.pop("tools", None)
