@@ -186,7 +186,7 @@ git commit -m "feat(integrations): derive capabilities from the environment"
 - Test: `tests/test_copilot_sandbox_policy.py`
 
 **Interfaces:**
-- Produces: `build_sandbox_settings(policy, *, launch_dir) -> tuple[dict, tuple[ResolvedPermissionRule, ...]]` returning the `settings.json` mapping and the rules it could **not** express.
+- Produces: `build_sandbox_settings(policy) -> tuple[dict, tuple[ResolvedPermissionRule, ...]]` returning the `settings.json` mapping and the rules it could **not** express.
 
 This task is pure translation with no process changes — it writes no files and launches nothing. Task 3 wires it in.
 
