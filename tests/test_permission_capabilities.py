@@ -80,6 +80,18 @@ def test_flat_integration_accepts_uniform_grants():
     assert Flat().validate_runtime_policy(uniform) == ()
 
 
+def test_flat_integration_rejects_an_unnameable_difference():
+    # /a grants everything and /b grants nothing. No tool name expresses that
+    # difference, so the sentinel stands in for it — what must not happen is
+    # negotiation reporting "nothing to scope".
+    mixed = policy(("/a", None), ("/b", ()), mode="unrestricted")
+
+    issues = Flat().validate_runtime_policy(mixed)
+
+    assert [i.code for i in issues] == ["unsupported-tool-scoping"]
+    assert "any tool" in issues[0].message
+
+
 def test_scoping_integration_accepts_differing_write_grants():
     assert Scoping().validate_runtime_policy(
         policy(("/a", ("read",)), ("/b", ("read", "write")))
@@ -193,11 +205,9 @@ def test_zoned_policy_passes_validation_for_shipped_integration(name, tmp_path):
     """A fully zoned effective policy must pass validate_runtime_policy for
     every shipped integration. This is the test that would have caught C3."""
     integration = get_integration(name)
-    modes = integration.runtime_capabilities.permission_modes
-    mode = "unrestricted" if "unrestricted" in modes else next(iter(modes))
     authored = EffectiveRuntimePolicy(
         timeout=60,
-        mode=mode,
+        mode="unrestricted",
         rules=(
             ResolvedPermissionRule(path=tmp_path / "workspace", tools=("read",)),
         ),
@@ -207,3 +217,19 @@ def test_zoned_policy_passes_validation_for_shipped_integration(name, tmp_path):
     issues = integration.validate_runtime_policy(zoned)
 
     assert issues == (), f"{name} rejected zoned policy: {[i.code for i in issues]}"
+
+
+def test_zoned_restricted_policy_passes_validation_for_copilot(tmp_path):
+    # Copilot is the only shipped integration that declares `restricted`, and
+    # restricted + zones is the combination it actually runs under.
+    integration = get_integration("copilot")
+    authored = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(
+            ResolvedPermissionRule(path=tmp_path / "workspace", tools=("read",)),
+        ),
+    )
+    zoned = authored.with_launch_zones(tmp_path / "launch")
+
+    assert integration.validate_runtime_policy(zoned) == ()

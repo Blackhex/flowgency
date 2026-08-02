@@ -8,7 +8,11 @@ import yaml
 
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.store import ConfigStore
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from agency.integrations.models import (
+    ANY_TOOL,
+    EffectiveRuntimePolicy,
+    ResolvedPermissionRule,
+)
 from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 
 
@@ -103,6 +107,39 @@ def test_pathless_rule_is_ignored_by_tools_for():
 def test_pathless_rule_excluded_from_scoped_tools():
     # A single path-bearing rule plus a pathless rule — not enough to scope.
     p = policy(rule(None, ("read",)), rule("/ws", ("write",)))
+
+    assert p.scoped_tools == frozenset()
+
+
+def test_unrestricted_carve_out_leaves_the_remainder_unbounded():
+    # `mode` governs only uncovered paths. A carve-out narrows the path it
+    # names; everything outside it still grants every tool.
+    p = policy(rule("/ws", ("read",)), mode="unrestricted")
+
+    assert p.tools_for(Path("/ws/a")) == ("read",)
+    assert p.tools_for(Path("/elsewhere")) is None
+
+
+def test_unrestricted_deny_carve_out_forbids_only_its_own_path():
+    p = policy(rule("/ws/.env", ()), mode="unrestricted")
+
+    assert p.tools_for(Path("/ws/.env")) == ()
+    assert p.tools_for(Path("/ws/src")) is None
+
+
+def test_restricted_deny_rule_beside_blanket_rule_is_scoped():
+    # /ws grants everything, /ws/.env grants nothing: a real difference that
+    # no tool name can express, so the sentinel stands in for it. Returning an
+    # empty set here would tell negotiation there is nothing to scope.
+    p = policy(rule("/ws", None), rule("/ws/.env", ()), mode="restricted")
+
+    assert p.scoped_tools == frozenset({ANY_TOOL})
+
+
+def test_restricted_single_rule_still_needs_no_scoping():
+    # Under restricted the uncovered remainder is outside the sandbox
+    # entirely, so one rule is enforceable by path confinement alone.
+    p = policy(rule("/ws", ("read",)), mode="restricted")
 
     assert p.scoped_tools == frozenset()
 
