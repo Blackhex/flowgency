@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from agency.permissions.eligibility import grants_write_on
 
 
 def build_sandbox_settings(
     policy: EffectiveRuntimePolicy,
+    *,
+    workspace_root: Path | None = None,
 ) -> tuple[dict, tuple[ResolvedPermissionRule, ...]]:
     """Translate permission rules into a Copilot sandbox settings mapping.
 
     Returns the settings dict and any rules that could not be expressed
     (path is None — a filesystem policy cannot represent a pathless grant).
+
+    `workspace_root` decides the git and GitHub credential grants; without it
+    they are withheld, because a caller that cannot name the project cannot
+    show the agent is trusted with it.
     """
     readonly: list[str] = []
     readwrite: list[str] = []
@@ -51,7 +60,16 @@ def build_sandbox_settings(
             r for r in policy.rules if r.path is not None and r.tools == ()
         )
 
+    # A filesystem policy cannot stop a push: the write lands on the remote.
+    # So the credentials that make one possible follow the same rule that
+    # decides who may execute a decision at all -- write on the project root.
+    credentialed = workspace_root is not None and grants_write_on(
+        policy.rules, workspace_root
+    )
+
     return {
+        "gitAuth": credentialed,
+        "ghAuth": credentialed,
         "sandbox": {
             "enabled": confines,
             "allowBypass": False,

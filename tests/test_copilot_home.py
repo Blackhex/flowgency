@@ -156,7 +156,12 @@ def test_missing_config_falls_back_to_shared_home(tmp_path, monkeypatch, repo):
         policy, tmp_path, monkeypatch, real_home=empty_home,
     )
 
-    assert captured["kwargs"].get("env") is None
+    # Falling back to the shared home does not restore the inherited
+    # environment: the agent still gets only what it was named, and the shared
+    # home reaches it through the allowlist rather than through a job-specific
+    # override.
+    env = {name.upper(): value for name, value in captured["kwargs"]["env"].items()}
+    assert env["COPILOT_HOME"] == str(empty_home)
     assert result.copilot_home is None
 
 
