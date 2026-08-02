@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
 def build_sandbox_settings(
     policy: EffectiveRuntimePolicy,
-    *,
-    launch_dir: Path,
 ) -> tuple[dict, tuple[ResolvedPermissionRule, ...]]:
     """Translate permission rules into a Copilot sandbox settings mapping.
 
@@ -31,6 +27,9 @@ def build_sandbox_settings(
         elif r.tools:
             readonly.append(path_str)
         # empty tools tuple: omission is the denial — add to neither list
+
+    readwrite_set = set(readwrite)
+    readonly = [p for p in readonly if p not in readwrite_set]
 
     return {
         "sandbox": {
