@@ -9,7 +9,7 @@ import yaml
 
 from agency.configuration.models import parse_config
 from agency.integrations import RunResult
-from agency.integrations.models import IntegrationRunRequest
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
 from agency.jobs.execution import MAX_SUMMARY_REASONS, execute_job
 from agency.records.validation import writable_agent_names
 from test_job_execution import _authority as _job_authority, queued_job
@@ -84,7 +84,7 @@ def _fake_context(group_root: Path, integration):
         workspace_root=group_root,
         integration=integration,
         timeout=30,
-        sandbox_root=None,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         group_root=group_root,
     )
 
@@ -188,7 +188,6 @@ def test_agents_on_a_non_executable_integration_are_not_writable(raw_config, con
                 "name": "leto",
                 "blueprint": "builder-blueprint",
                 "integration": "sdk",
-                "capabilities": {"write": True},
             }
         ],
     )
@@ -205,7 +204,6 @@ def test_agents_on_an_unregistered_integration_are_not_writable(raw_config, conf
                 "name": "leto",
                 "blueprint": "builder-blueprint",
                 "integration": "claude-code",
-                "capabilities": {"write": True},
             }
         ],
     )

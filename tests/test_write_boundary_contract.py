@@ -219,5 +219,5 @@ def test_a_job_spec_persisted_before_the_write_boundary_still_loads(tmp_path):
 
     restored = JobRecord.from_dict(payload)
 
-    assert restored.spec.runtime_policy.to_effective_policy().narrows_writes is False
+    assert restored.spec.runtime_policy.to_effective_policy().mode == "unrestricted"
     assert restored.spec.writable_agents is None

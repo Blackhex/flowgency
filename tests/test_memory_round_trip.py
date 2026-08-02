@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from agency.integrations import RunResult
+from agency.integrations.models import EffectiveRuntimePolicy
 from agency.jobs.execution import execute_job
 from agency.records.outbox import (
     MAX_MEMORY_ENTRIES,
@@ -211,7 +212,9 @@ def _memory_editing_integration(seen: dict, edit):
         def run(self, request):
             seen["memory_working_dir"] = request.memory_working_dir
             seen["launch_dir"] = request.launch_dir
-            seen["writable_roots"] = request.runtime_policy.writable_roots
+            seen["writable_roots"] = tuple(
+                r.path for r in request.runtime_policy.rules if r.path is not None
+            )
             # Reach the directory through the launch view rather than the
             # request field, so a wire pointing elsewhere fails this test.
             edit(request.launch_dir / ".agency" / "memory")
@@ -229,7 +232,7 @@ def _run_memory_job(tmp_path, monkeypatch, edit):
             workspace_root=fixture.group_root,
             integration=_memory_editing_integration(seen, edit),
             timeout=30,
-            sandbox_root=None,
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
             group_root=fixture.group_root,
         ),
     )

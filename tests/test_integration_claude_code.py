@@ -3,7 +3,7 @@ from pathlib import Path
 from agency.configuration import ValidationFailed
 from agency.integrations.agency.claude_code import ClaudeCodeIntegration
 from agency.integrations import AgentIdentity
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
 
 
 @pytest.fixture
@@ -83,13 +83,10 @@ def test_validate_run_rejects_skill_activation_until_cli_contract_is_verified(in
         task_file=tmp_path / "launch" / "task.md",
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill="daily-review",
-        skill_arguments=("newsletter",),
+        skill_arguments=("newsletter",)
     )
 
     issues = integration.validate_run(request)
@@ -104,13 +101,10 @@ def test_run_rejects_invalid_typed_request_before_reading_task_file(integration,
         task_file=tmp_path / "launch" / "missing-task.md",
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill="daily-review",
-        skill_arguments=(),
+        skill_arguments=()
     )
 
     request.launch_dir.mkdir(parents=True)

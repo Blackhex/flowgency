@@ -2,7 +2,7 @@ import pytest
 from agency.configuration import ValidationFailed
 from agency.integrations.agency.script import ScriptIntegration
 from agency.integrations import AgentIdentity
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
 
 
 @pytest.fixture
@@ -47,13 +47,10 @@ def test_validate_run_requires_runtime_placeholders(tmp_path):
         task_file=tmp_path / "runtime" / "task.md",
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill="daily-review",
-        skill_arguments=(),
+        skill_arguments=()
     )
 
     issues = integration.validate_run(request)
@@ -79,14 +76,11 @@ def test_run_with_config(tmp_agent_dir, tmp_path):
         task_file=prompt,
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill=None,
         skill_arguments=(),
-        enforce_validation=False,
+        enforce_validation=False
     )
     result = configured.run(request)
     assert result.exit_code == 0
@@ -101,13 +95,10 @@ def test_run_rejects_invalid_typed_request_before_script_launch(tmp_path):
         task_file=tmp_path / "runtime" / "missing-task.md",
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill="daily-review",
-        skill_arguments=(),
+        skill_arguments=()
     )
 
     request.launch_dir.mkdir(parents=True)

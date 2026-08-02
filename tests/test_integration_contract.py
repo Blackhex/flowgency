@@ -14,14 +14,13 @@ from agency.integrations import (
     BaseIntegration,
     FileChange,
     IntegrationError,
-    RunResult,
+    RunResult
 )
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ProjectorCapabilities,
-    ResolvedToolPolicy,
-    RuntimeCapabilities,
+    RuntimeCapabilities
 )
 
 
@@ -37,7 +36,7 @@ AI_CLI_COMMANDS = {
 }
 
 UNCONFINED_CAPABILITIES = RuntimeCapabilities(
-    permission_modes=frozenset({"unrestricted"}),
+    permission_modes=frozenset({"unrestricted"})
 )
 
 AI_CLI_RUN_ARGUMENTS = {
@@ -110,13 +109,10 @@ class TestIntegrationContract:
             task_file=tmp_path / "task.md",
             timeout=1800,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=1800,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=1800
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
         result = integration.validate_run(request)
         assert all(isinstance(issue, ValidationIssue) for issue in result)
@@ -124,10 +120,7 @@ class TestIntegrationContract:
     def test_validate_runtime_policy_returns_validation_issues(self, integration):
         result = integration.validate_runtime_policy(
             EffectiveRuntimePolicy(
-                timeout=1800,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=1800
             )
         )
         assert all(isinstance(issue, ValidationIssue) for issue in result)
@@ -136,10 +129,10 @@ class TestIntegrationContract:
 def test_registry_runtime_capabilities_surface_is_fail_closed():
     expected = {
         "copilot": RuntimeCapabilities(
-            permission_modes=frozenset({"restricted", "unrestricted"}),
+            permission_modes=frozenset({"restricted", "unrestricted"})
         ),
         "script": RuntimeCapabilities(
-            permission_modes=frozenset({"unrestricted"}),
+            permission_modes=frozenset({"unrestricted"})
         ),
         "sdk": RuntimeCapabilities(),
         "claude-code": UNCONFINED_CAPABILITIES,
@@ -168,7 +161,7 @@ def test_builtin_ai_cli_integrations_declare_canonical_commands():
 
 def test_builtin_ai_cli_runtime_capabilities_are_truthful():
     assert REGISTRY["copilot"].runtime_capabilities == RuntimeCapabilities(
-        permission_modes=frozenset({"restricted", "unrestricted"}),
+        permission_modes=frozenset({"restricted", "unrestricted"})
     )
     for name in AI_CLI_COMMANDS.keys() - {"copilot"}:
         assert REGISTRY[name].runtime_capabilities == UNCONFINED_CAPABILITIES
@@ -186,7 +179,7 @@ def test_public_executable_resolver_returns_launchable_path(tmp_path, monkeypatc
 
     monkeypatch.setattr(
         "agency.integrations.shutil.which",
-        lambda command: str(executable) if command == "probe" else None,
+        lambda command: str(executable) if command == "probe" else None
     )
 
     assert ProbeIntegration().resolve_executable() == str(executable.resolve())
@@ -262,13 +255,10 @@ def test_decision_run_allows_null_skill():
         task_file=Path("launch/task.md"),
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill=None,
-        skill_arguments=(),
+        skill_arguments=()
     )
     assert integration.validate_run(request) == ()
 
@@ -280,13 +270,10 @@ def test_execution_integrations_enforce_validate_run_before_subprocess_or_prompt
         task_file=tmp_path / "launch" / "task.md",
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill="daily-review",
-        skill_arguments=(),
+        skill_arguments=()
     )
 
     request.launch_dir.mkdir(parents=True)
@@ -322,13 +309,13 @@ def test_execution_integrations_enforce_validate_run_before_subprocess_or_prompt
 
 @pytest.mark.parametrize(
     ("integration_name", "expected_tail"),
-    AI_CLI_RUN_ARGUMENTS.items(),
+    AI_CLI_RUN_ARGUMENTS.items()
 )
 def test_ai_cli_run_uses_declared_command_and_validated_request(
     integration_name,
     expected_tail,
     tmp_path,
-    monkeypatch,
+    monkeypatch
 ):
     integration = REGISTRY[integration_name]
     launch_dir = tmp_path / "launch"
@@ -343,13 +330,10 @@ def test_ai_cli_run_uses_declared_command_and_validated_request(
         task_file=task_file,
         timeout=30,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=30,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=30
         ),
         skill=None,
-        skill_arguments=(),
+        skill_arguments=()
     )
     captured = {}
 
@@ -361,7 +345,7 @@ def test_ai_cli_run_uses_declared_command_and_validated_request(
     monkeypatch.setattr(
         integration,
         "resolve_executable",
-        lambda: "C:/runtime/agent.exe",
+        lambda: "C:/runtime/agent.exe"
     )
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -387,13 +371,10 @@ def test_non_executable_integrations_reject_before_any_result_is_fabricated(tmp_
         task_file=tmp_path / "launch" / "task.md",
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill=None,
-        skill_arguments=(),
+        skill_arguments=()
     )
 
     with pytest.raises(ValidationFailed) as excinfo:

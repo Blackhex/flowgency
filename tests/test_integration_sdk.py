@@ -1,7 +1,7 @@
 import pytest
 from agency.configuration import ValidationFailed
 from agency.integrations.agency.sdk import SdkIntegration
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
 
 
 @pytest.fixture
@@ -30,14 +30,11 @@ def test_run_returns_error_for_external_bridge_request(integration, tmp_agent_di
         task_file=prompt,
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill=None,
         skill_arguments=(),
-        enforce_validation=False,
+        enforce_validation=False
     )
     result = integration.run(request)
     assert result.exit_code != 0
@@ -52,13 +49,10 @@ def test_validate_run_rejects_execution(tmp_path):
         task_file=tmp_path / "runtime" / "task.md",
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill=None,
-        skill_arguments=(),
+        skill_arguments=()
     )
 
     issues = integration.validate_run(request)
@@ -77,13 +71,10 @@ def test_run_raises_validation_failed_before_fabricating_result(tmp_path):
         task_file=tmp_path / "runtime" / "missing-task.md",
         timeout=60,
         runtime_policy=EffectiveRuntimePolicy(
-            timeout=60,
-            sandbox_mode="unrestricted",
-            sandbox_roots=(),
-            tools=ResolvedToolPolicy("all", ()),
+            timeout=60
         ),
         skill=None,
-        skill_arguments=(),
+        skill_arguments=()
     )
 
     with pytest.raises(ValidationFailed) as excinfo:

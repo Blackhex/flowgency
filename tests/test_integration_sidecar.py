@@ -8,7 +8,7 @@ from agency.integrations.agency.goose import GooseIntegration
 from agency.integrations.agency.opencode import OpenCodeIntegration
 from agency.integrations.agency.pi import PiIntegration
 from agency.integrations.agency.copilot import CopilotIntegration
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedToolPolicy
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedPermissionRule
 
 
 class TestCodex:
@@ -70,13 +70,10 @@ class TestGemini:
             task_file=tmp_path / "launch" / "task.md",
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=60,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=60
             ),
             skill="daily-review",
-            skill_arguments=(),
+            skill_arguments=()
         )
 
         issues = integration.validate_run(request)
@@ -390,7 +387,7 @@ class TestCopilot:
             display_name="Copilot Bot",
             title="Builder",
             emoji="",
-            body="# Copilot Bot\n",
+            body="# Copilot Bot\n"
         )
 
         integration.write_identity(tmp_agent_dir, identity)
@@ -417,7 +414,7 @@ class TestCopilot:
             display_name="Copilot Bot",
             title="Builder",
             emoji="",
-            body="# Copilot Bot\n",
+            body="# Copilot Bot\n"
         )
 
         with pytest.raises(PermissionError) as exc_info:
@@ -453,13 +450,10 @@ class TestCopilot:
             task_file=prompt_file,
             timeout=30,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=30,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=30
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
         result = integration.run(request)
         assert result.exit_code == 0
@@ -477,13 +471,10 @@ class TestCopilot:
             task_file=tmp_agent_dir / "runtime" / "missing-task.md",
             timeout=30,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=30,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=30
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
 
         request.launch_dir.mkdir(parents=True)
@@ -539,7 +530,7 @@ class TestCopilot:
         monkeypatch.setattr(
             CopilotIntegration,
             "resolve_executable",
-            lambda self: "copilot",
+            lambda self: "copilot"
         )
 
         request = IntegrationRunRequest(
@@ -548,13 +539,10 @@ class TestCopilot:
             task_file=prompt,
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=60,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=60
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
         CopilotIntegration().run(request)
 
@@ -589,7 +577,7 @@ class TestCopilot:
         monkeypatch.setattr(
             CopilotIntegration,
             "resolve_executable",
-            lambda self: "copilot",
+            lambda self: "copilot"
         )
 
         request = IntegrationRunRequest(
@@ -598,13 +586,10 @@ class TestCopilot:
             task_file=prompt,
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=60,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=60
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
 
         CopilotIntegration().run(request)
@@ -642,7 +627,7 @@ class TestCopilot:
         monkeypatch.setattr(
             CopilotIntegration,
             "resolve_executable",
-            lambda self: "copilot",
+            lambda self: "copilot"
         )
 
         request = IntegrationRunRequest(
@@ -652,13 +637,11 @@ class TestCopilot:
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
                 timeout=60,
-                sandbox_mode="restricted",
-                sandbox_roots=(root,),
-                tools=ResolvedToolPolicy("all", ()),
-                writable_roots=(root,),
+                mode="restricted",
+                rules=(ResolvedPermissionRule(path=root, tools=None),)
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
         CopilotIntegration().run(request)
 
@@ -676,7 +659,7 @@ class TestCopilot:
     def test_copilot_run_injects_selected_skill_contract_before_task_text(
         self,
         tmp_agent_dir,
-        monkeypatch,
+        monkeypatch
     ):
         import agency.integrations.agency.copilot as copilot_mod
 
@@ -698,7 +681,7 @@ class TestCopilot:
         monkeypatch.setattr(
             CopilotIntegration,
             "resolve_executable",
-            lambda self: "copilot",
+            lambda self: "copilot"
         )
 
         request = IntegrationRunRequest(
@@ -707,13 +690,10 @@ class TestCopilot:
             task_file=prompt,
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=60,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=60
             ),
             skill="runtime-probe",
-            skill_arguments=("alpha", "two words"),
+            skill_arguments=("alpha", "two words")
         )
 
         CopilotIntegration().run(request)
@@ -731,7 +711,7 @@ class TestCopilot:
     def test_copilot_run_without_skill_leaves_prompt_text_unchanged(
         self,
         tmp_agent_dir,
-        monkeypatch,
+        monkeypatch
     ):
         import agency.integrations.agency.copilot as copilot_mod
 
@@ -753,7 +733,7 @@ class TestCopilot:
         monkeypatch.setattr(
             CopilotIntegration,
             "resolve_executable",
-            lambda self: "copilot",
+            lambda self: "copilot"
         )
 
         request = IntegrationRunRequest(
@@ -762,13 +742,10 @@ class TestCopilot:
             task_file=prompt,
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=60,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=60
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
 
         CopilotIntegration().run(request)
@@ -803,7 +780,7 @@ class TestCopilot:
         monkeypatch.setattr(
             CopilotIntegration,
             "resolve_executable",
-            lambda self: "copilot",
+            lambda self: "copilot"
         )
 
         request = IntegrationRunRequest(
@@ -813,13 +790,14 @@ class TestCopilot:
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
                 timeout=60,
-                sandbox_mode="restricted",
-                sandbox_roots=(r1, r2),
-                tools=ResolvedToolPolicy("allowlist", ("shell", "write")),
-                writable_roots=(r1, r2),
+                mode="restricted",
+                rules=(
+                    ResolvedPermissionRule(path=r1, tools=("shell", "write")),
+                    ResolvedPermissionRule(path=r2, tools=("shell", "write")),
+                )
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
         CopilotIntegration().run(request)
 
@@ -871,7 +849,7 @@ class TestCopilot:
     def test_copilot_public_resolver_returns_real_windows_executable(
         self,
         monkeypatch,
-        tmp_path,
+        tmp_path
     ):
         import agency.integrations.agency.copilot as copilot_mod
 
@@ -888,7 +866,7 @@ class TestCopilot:
             "which",
             lambda name, path=None: (
                 str(executable) if name == "copilot.exe" else None
-            ),
+            )
         )
 
         assert integration.resolve_executable() == str(executable.resolve())
@@ -1014,13 +992,10 @@ class TestCopilot:
             task_file=prompt_file,
             timeout=30,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=30,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=30
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
         result = integration.run(request)
 
@@ -1060,7 +1035,7 @@ class TestCopilot:
                 cmd,
                 kwargs["timeout"],
                 output=jsonl,
-                stderr=b"Work was still in progress.",
+                stderr=b"Work was still in progress."
             )
 
         monkeypatch.setattr(mod.subprocess, "run", time_out)
@@ -1073,13 +1048,10 @@ class TestCopilot:
             task_file=prompt_file,
             timeout=30,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=30,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=30
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
         result = integration.run(request)
 
@@ -1196,13 +1168,10 @@ class TestCopilot:
             task_file=prompt_file,
             timeout=30,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=30,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=30
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
         result = integration.run(request)
 
@@ -1323,7 +1292,7 @@ class TestCopilot:
         assert CopilotIntegration().resume_command("abc") == (
             "copilot",
             "--resume",
-            "abc",
+            "abc"
         )
 
     def test_copilot_run_captures_session_id(self, tmp_agent_dir, monkeypatch):
@@ -1342,7 +1311,7 @@ class TestCopilot:
         monkeypatch.setattr(
             CopilotIntegration,
             "resolve_executable",
-            lambda self: "copilot",
+            lambda self: "copilot"
         )
 
         request = IntegrationRunRequest(
@@ -1351,13 +1320,10 @@ class TestCopilot:
             task_file=prompt,
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=60,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=60
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
 
         assert CopilotIntegration().run(request).session_id == "sess-42"
@@ -1377,14 +1343,14 @@ class TestCopilot:
                 cmd="copilot",
                 timeout=60,
                 output=partial,
-                stderr="",
+                stderr=""
             )
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(
             CopilotIntegration,
             "resolve_executable",
-            lambda self: "copilot",
+            lambda self: "copilot"
         )
 
         request = IntegrationRunRequest(
@@ -1393,13 +1359,10 @@ class TestCopilot:
             task_file=prompt,
             timeout=60,
             runtime_policy=EffectiveRuntimePolicy(
-                timeout=60,
-                sandbox_mode="unrestricted",
-                sandbox_roots=(),
-                tools=ResolvedToolPolicy("all", ()),
+                timeout=60
             ),
             skill=None,
-            skill_arguments=(),
+            skill_arguments=()
         )
 
         result = CopilotIntegration().run(request)

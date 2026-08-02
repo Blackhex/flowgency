@@ -11,9 +11,7 @@ from agency.integrations import REGISTRY, RunResult
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
-    PathPolicyMode,
-    ResolvedToolPolicy,
-    ToolPolicyMode,
+    ResolvedPermissionRule,
 )
 
 
@@ -67,8 +65,8 @@ def selected_skill_supported(integration) -> bool:
 def write_boundary_supported(integration) -> bool:
     capabilities = integration.runtime_capabilities
     return (
-        "restricted" in capabilities.path_modes
-        and "allowlist" in capabilities.tool_modes
+        "restricted" in capabilities.permission_modes
+        and bool(capabilities.path_scopable_tools)
     )
 
 
@@ -158,14 +156,15 @@ def request(
     launch_dir: Path,
     task_file: Path,
     *,
-    sandbox_mode: PathPolicyMode = "unrestricted",
-    sandbox_roots: tuple[Path, ...] = (),
-    writable_roots: tuple[Path, ...] | None = None,
-    tool_mode: ToolPolicyMode = "all",
-    tool_names: tuple[str, ...] = (),
+    mode: str = "unrestricted",
+    roots: tuple[Path, ...] = (),
+    tools: tuple[str, ...] | None = None,
     skill: str | None = None,
 ) -> IntegrationRunRequest:
-    resolved_writable = sandbox_roots if writable_roots is None else writable_roots
+    rules = tuple(
+        ResolvedPermissionRule(path=root, tools=tools)
+        for root in roots
+    )
     return IntegrationRunRequest(
         workspace_root=workspace_root,
         launch_dir=launch_dir,
@@ -173,11 +172,8 @@ def request(
         timeout=180,
         runtime_policy=EffectiveRuntimePolicy(
             timeout=180,
-            sandbox_mode=sandbox_mode,
-            sandbox_roots=sandbox_roots,
-            writable_roots=resolved_writable,
-            writes_narrowed=tuple(resolved_writable) != tuple(sandbox_roots),
-            tools=ResolvedToolPolicy(tool_mode, tool_names),
+            mode=mode,
+            rules=rules,
         ),
         skill=skill,
         skill_arguments=(),

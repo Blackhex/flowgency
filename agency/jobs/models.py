@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from agency.blueprints.cache import CacheRef, CompiledArtifact
 from agency.configuration.models import MemorySelector, PromptSelector
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule, ResolvedToolPolicy
+from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
 SCHEMA_VERSION = 4

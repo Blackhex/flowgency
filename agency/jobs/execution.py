@@ -19,7 +19,6 @@ from agency.integrations import get_integration
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
-    ResolvedToolPolicy,
 )
 from agency.memory.models import ResolvedMemory
 from agency.prompts.projection import project_prompt_snapshots
@@ -291,28 +290,6 @@ def _merge_failed_terminal_metadata(
     return updated
 
 
-def _fallback_runtime_policy(context, timeout: int) -> EffectiveRuntimePolicy:
-    sandbox = getattr(context, "sandbox_root", None)
-    if sandbox and getattr(sandbox, "roots", ()):
-        sandbox_mode = "restricted"
-        sandbox_roots = tuple(sandbox.roots)
-    else:
-        sandbox_mode = "unrestricted"
-        sandbox_roots = ()
-    allowed_tools = (
-        tuple(getattr(sandbox, "allowed_tools", ()) or ())
-        if sandbox
-        else ()
-    )
-    tool_mode = "allowlist" if allowed_tools else "all"
-    return EffectiveRuntimePolicy(
-        timeout=timeout,
-        sandbox_mode=sandbox_mode,
-        sandbox_roots=sandbox_roots,
-        tools=ResolvedToolPolicy(tool_mode, allowed_tools),
-    )
-
-
 def resolve_job_context(spec):
     runtime_policy = spec.runtime_policy.to_effective_policy()
     integration = get_integration(spec.integration_name)
@@ -389,9 +366,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
         store.read(authority)
         spec = record.spec
         context = resolve_job_context(spec)
-        runtime_policy = getattr(context, "runtime_policy", None)
-        if runtime_policy is None:
-            runtime_policy = _fallback_runtime_policy(context, context.timeout)
+        runtime_policy = context.runtime_policy
         integration = context.integration
         artifact = spec.blueprint.to_artifact()
         launch_dir = Path(job_path).with_suffix("") / "launch"
@@ -457,8 +432,6 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     and getattr(context.sandbox_root, "roots", ())
                 ):
                     git_root = Path(context.sandbox_root.roots[0])
-                elif runtime_policy.sandbox_roots:
-                    git_root = Path(runtime_policy.sandbox_roots[0])
                 elif getattr(context, "workspace_root", None):
                     git_root = Path(context.workspace_root)
                 base_sha = capture_base_sha(git_root)

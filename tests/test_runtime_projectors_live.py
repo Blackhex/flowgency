@@ -241,11 +241,9 @@ else:
             workspace_root,
             launch_dir,
             task_file,
-            sandbox_mode="restricted",
-            sandbox_roots=(workspace_root,),
-            writable_roots=(),
-            tool_mode="allowlist",
-            tool_names=("read", "search"),
+            mode="restricted",
+            roots=(workspace_root,),
+            tools=("read", "search"),
         )
         before = capture_protected_state(
             launch_dir,
@@ -254,7 +252,7 @@ else:
             REPOSITORY_ROOT,
         )
 
-        if integration.runtime_capabilities.enforces_write_boundary:
+        if bool(integration.runtime_capabilities.path_scopable_tools):
             result = integration.run(probe_request)
             assert_live_success(result, runtime, "write-boundary", token)
             # Whether the model tries the denied write is its own choice; the boundary

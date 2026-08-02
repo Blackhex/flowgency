@@ -8,6 +8,7 @@ import yaml
 
 import agency.app as app_mod
 from agency.integrations import FileChange, RunResult
+from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
 from agency.integrations.models import IntegrationRunRequest
 from agency.jobs.authority import JobStore
 from agency.jobs import JobRequest, JobSubmissionError
@@ -119,7 +120,7 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
         name = "copilot"
 
         def run(self, request: IntegrationRunRequest):
-            seen["sandbox_root"] = request.runtime_policy.sandbox_roots
+            seen["rules"] = request.runtime_policy.rules
             seen["prompt"] = request.task_file.read_text(encoding="utf-8")
             meta = _read_meta(decision)
             seen["executed_by"] = meta.get("executed_by")
@@ -134,6 +135,7 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
 
     context = SimpleNamespace(
         group_root=group_path,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         workspace_root=group_path / "worker",
         timeout=30,
         sandbox_root=SimpleNamespace(roots=(repo,), allowed_tools=()),
@@ -145,7 +147,8 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
     execute_job(_authority(spec))
 
     meta = _read_meta(decision)
-    assert seen["sandbox_root"] == (repo,)
+    authored_rules = tuple(r for r in seen["rules"] if not r.generated)
+    assert authored_rules == ()
     assert seen["prompt"] == "Immutable instructions"
     assert seen["executed_by"] == "worker"
     assert seen["execution_status"] == "running"
@@ -164,6 +167,7 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
 
     context = SimpleNamespace(
         group_root=group_path,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         workspace_root=group_path / "worker",
         timeout=30,
         sandbox_root=None,
@@ -192,6 +196,7 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
 
     context = SimpleNamespace(
         group_root=group_path,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         workspace_root=group_path / "worker",
         timeout=30,
         sandbox_root=None,
@@ -242,6 +247,7 @@ def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monk
 
     context = SimpleNamespace(
         group_root=group_path,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         workspace_root=group_path / "worker",
         timeout=30,
         sandbox_root=None,
