@@ -63,8 +63,7 @@ def cli_config(tmp_path):
                 "default_integration": "script",
                 "runtime": {
                     "timeout": 321,
-                    "sandbox": {"mode": "unrestricted"},
-                    "tools": {"mode": "all"},
+                    "permissions": {"mode": "unrestricted"},
                 },
                 "agents": [
                     {
@@ -72,7 +71,6 @@ def cli_config(tmp_path):
                         "blueprint": "builder-blueprint",
                         "integration": "script",
                         "integration_config": {"command": "echo {prompt_file}"},
-                        "capabilities": {"write": True},
                         "identity": {"display_name": "Build Captain", "title": "Lead", "emoji": ""},
                         "default_memory": {"scope": "agent"},
                         "routines": [
@@ -265,11 +263,11 @@ def test_agents_json_uses_friendly_stable_fields_and_policy_parity(cli_config, c
     expected = resolve_effective_policy(snapshot.config, "newsletter", "builder")
     assert agent["effective_policy"] == {
         "timeout": expected.timeout,
-        "sandbox": {
-            "mode": expected.sandbox_mode,
-            "roots": [str(path).replace("\\", "/") for path in expected.sandbox_roots],
-        },
-        "tools": {"mode": expected.tools.mode, "names": list(expected.tools.names)},
+        "mode": expected.mode,
+        "rules": [
+            {"path": str(rule.path).replace("\\", "/") if rule.path else None, "tools": list(rule.tools) if rule.tools is not None else None}
+            for rule in expected.rules
+        ],
     }
     assert agent["routine"] == ["daily-review"]
     assert agent["memory"] == "Agent memory"

@@ -80,7 +80,7 @@ def test_job_store_is_external_and_canonical(tmp_path):
         lambda spec: spec["integration_config"].update({"command": "echo hostile"}),
         lambda spec: spec.update({"workspace_root": "C:/hostile"}),
         lambda spec: spec["blueprint"].update({"cache_path": "C:/hostile-cache"}),
-        lambda spec: spec["runtime_policy"].update({"sandbox_roots": ["C:/hostile-root"], "tool_names": ["all"]}),
+        lambda spec: spec["runtime_policy"].update({"rules": [{"path": "C:/hostile-root", "tools": ["shell"]}]}),
         lambda spec: spec["memory"].update({"path": "C:/hostile-memory", "memory_hash": "b" * 64}),
     ],
 )

@@ -71,7 +71,7 @@ def test_config_store_round_trips_canonical_config(tmp_path, raw_config):
     snapshot = ConfigStore(path).create(raw_config)
 
     assert snapshot.raw == raw_config
-    assert snapshot.raw["schema_version"] == 4
+    assert snapshot.raw["schema_version"] == 5
 
 
 def test_create_requires_absent_file(raw_config, config_paths):

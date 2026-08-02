@@ -214,7 +214,7 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert "\t" not in yaml_text
 
     config = yaml.safe_load(yaml_text)
-    assert config["schema_version"] == 4
+    assert config["schema_version"] == 5
     assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store", "prompt_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
     group = config["groups"]["example"]
@@ -226,10 +226,10 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert "`workspace_path` points to the project workspace" in skill_text
     assert "`path` points to the Agency-owned group-state root" in skill_text
     assert "agents" not in group["dispatch"]
-    assert group["runtime"]["sandbox"]["roots"]
+    assert group["runtime"]["permissions"]["rules"]
     assert all({"name", "blueprint", "integration"} <= set(instance) for instance in group["agents"])
     builder = next(instance for instance in group["agents"] if instance["name"] == "builder")
-    assert builder["runtime"]["sandbox"]["additional_roots"] == []
+    assert "rules" in builder["runtime"]["permissions"]
     selectors = [routine["memory"] for routine in builder["routines"]]
     assert {selector["scope"] for selector in selectors} == {"routine", "channel"}
     assert next(selector for selector in selectors if selector["scope"] == "channel")["channel"] == "project-strategy"
@@ -254,7 +254,13 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     config["agency"]["memory_store"] = str(tmp_path / "memory")
     config["groups"]["example"]["workspace_path"] = str(workspace)
     config["groups"]["example"]["path"] = str(group_state)
-    config["groups"]["example"]["runtime"]["sandbox"]["roots"] = [str(workspace)]
+    config["groups"]["example"]["runtime"]["permissions"]["rules"] = [
+        {"path": str(workspace), "tools": ["read", "search"]}
+    ]
+    builder = next(a for a in config["groups"]["example"]["agents"] if a["name"] == "builder")
+    builder["runtime"]["permissions"]["rules"] = [
+        {"path": str(workspace), "tools": ["read", "search", "write"]}
+    ]
     config_path = tmp_path / "config.yaml"
 
     assert validate_config(config, config_path) == ()

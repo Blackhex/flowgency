@@ -278,7 +278,7 @@ class JobSpec:
         values["blueprint"] = BlueprintRef(**values["blueprint"])
         runtime_policy_data = dict(values["runtime_policy"])
         if "sandbox_mode" in runtime_policy_data:
-            # Legacy format: convert to new permission-rule shape.
+            # Old format: convert to new permission-rule shape.
             values["runtime_policy"] = RuntimePolicySnapshot(
                 timeout=runtime_policy_data["timeout"],
                 mode=runtime_policy_data["sandbox_mode"],

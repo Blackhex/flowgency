@@ -80,7 +80,6 @@ def test_agent_patch_preserves_workspaces_and_other_agents(config_store):
             display_name="Editor",
             title="Lead",
             emoji="",
-            can_write=False,
         ),
     )
 
@@ -131,21 +130,16 @@ def test_patch_agent_profile_preserves_extension_keys(config_store):
             display_name="Editor",
             title="Lead",
             emoji="",
-            can_write=False,
         ),
     )
 
     identity = updated.raw["groups"]["newsletter"]["agents"][0]["identity"]
-    capabilities = updated.raw["groups"]["newsletter"]["agents"][0][
-        "capabilities"
-    ]
     assert identity == {
         "display_name": "Editor",
         "title": "Lead",
         "emoji": "",
         "nickname": "builder-bot",
     }
-    assert capabilities == {"write": False, "approve": True}
 
 
 def test_patch_group_settings_preserves_unowned_group_fields(config_store):
@@ -242,10 +236,8 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
             path=str(refreshed.path.parent / "groups" / "editorial"),
             default_integration="copilot",
             runtime_timeout=2400,
-            sandbox_mode="restricted",
-            sandbox_roots=("repo",),
-            tool_mode="allowlist",
-            tool_names=("shell", "write"),
+            permission_mode="restricted",
+            permission_rules=({"tools": ["shell", "write"]},),
             dispatch_enabled=True,
             workspaces=(
                 {
@@ -317,10 +309,8 @@ def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_stor
                 path=str(snapshot.path.parent / "groups" / "research"),
                 default_integration="copilot",
                 runtime_timeout=2400,
-                sandbox_mode="restricted",
-                sandbox_roots=("repo", "cowork"),
-                tool_mode="allowlist",
-                tool_names=("shell", "write"),
+                permission_mode="restricted",
+                permission_rules=({"tools": ["shell", "write"]},),
                 dispatch_enabled=True,
                 workspaces=(
                     {
@@ -387,7 +377,6 @@ def test_register_and_unregister_agent_prompt(config_store):
 def test_patch_agent_runtime_preserves_extension_keys(config_store):
     from agency.configuration.patches import (
         AgentRuntimePatch,
-        ToolPolicy,
         patch_agent_runtime,
     )
 
@@ -395,15 +384,8 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
     agent = snapshot.raw["groups"]["newsletter"]["agents"][0]
     agent["runtime"] = {
         "timeout": 900,
-        "sandbox": {
-            "mode": "restricted",
-            "additional_roots": ["shared-root"],
-            "sandbox_extension": {"preserve": True},
-        },
-        "tools": {
-            "mode": "allowlist",
-            "names": ["shell"],
-            "tools_extension": {"preserve": True},
+        "permissions": {
+            "rules": [{"path": "/shared-root", "tools": ["shell"]}],
         },
         "runtime_extension": {"preserve": True},
     }
@@ -423,21 +405,19 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         "builder",
         AgentRuntimePatch(
             timeout=1200,
-            additional_roots=("editorial", "assets"),
-            tools=ToolPolicy(mode="allowlist", names=("shell", "write")),
+            rules=(
+                {"path": str(workspace_root / "editorial"), "tools": ["read", "write"]},
+                {"path": str(workspace_root / "assets"), "tools": ["read"]},
+            ),
         ),
     )
 
     runtime = updated.raw["groups"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1200
-    assert runtime["sandbox"]["mode"] == "restricted"
-    assert runtime["sandbox"]["additional_roots"] == ["editorial", "assets"]
-    assert runtime["sandbox"]["sandbox_extension"] == {"preserve": True}
-    assert runtime["tools"] == {
-        "mode": "allowlist",
-        "names": ["shell", "write"],
-        "tools_extension": {"preserve": True},
-    }
+    assert runtime["permissions"]["rules"] == [
+        {"path": str(workspace_root / "editorial"), "tools": ["read", "write"]},
+        {"path": str(workspace_root / "assets"), "tools": ["read"]},
+    ]
     assert runtime["runtime_extension"] == {"preserve": True}
 
 
@@ -451,15 +431,8 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
     agent = snapshot.raw["groups"]["newsletter"]["agents"][0]
     agent["runtime"] = {
         "timeout": 2400,
-        "sandbox": {
-            "mode": "restricted",
-            "additional_roots": ["old"],
-            "sandbox_extension": {"preserve": True},
-        },
-        "tools": {
-            "mode": "allowlist",
-            "names": ["shell"],
-            "tools_extension": {"preserve": True},
+        "permissions": {
+            "rules": [{"path": "/old", "tools": ["shell"]}],
         },
         "runtime_extension": {"preserve": True},
     }
@@ -476,18 +449,11 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
         "builder",
         AgentRuntimePatch(
             timeout=None,
-            additional_roots=(),
-            tools=None,
+            rules=(),
         ),
     )
 
     runtime = updated.raw["groups"]["newsletter"]["agents"][0]["runtime"]
     assert "timeout" not in runtime
-    assert runtime["sandbox"] == {
-        "mode": "restricted",
-        "sandbox_extension": {"preserve": True},
-    }
-    assert runtime["tools"] == {
-        "tools_extension": {"preserve": True},
-    }
+    assert "rules" not in runtime.get("permissions", {})
     assert runtime["runtime_extension"] == {"preserve": True}

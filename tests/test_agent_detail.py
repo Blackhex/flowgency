@@ -78,11 +78,12 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["groups"]["newsletter"]["default_integration"] = "copilot"
     raw["groups"]["newsletter"]["runtime"] = {
         "timeout": 2400,
-        "sandbox": {
+        "permissions": {
             "mode": "restricted",
-            "roots": [str((tmp_path / "Research" / "editorial").resolve())],
+            "rules": [
+                {"path": str((tmp_path / "Research" / "editorial").resolve()), "tools": ["read", "shell", "write"]},
+            ],
         },
-        "tools": {"mode": "allowlist", "names": ["shell", "write"]},
     }
     raw["groups"]["newsletter"]["agents"] = [
         {
@@ -94,15 +95,14 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
                 "title": "Blueprint Librarian",
                 "emoji": ":)",
             },
-            "capabilities": {"write": True},
             "runtime": {
                 "timeout": 1200,
-                "sandbox": {
-                    "additional_roots": [
-                        str((tmp_path / "Research" / "additional").resolve())
-                    ]
+                "permissions": {
+                    "rules": [
+                        {"path": str((tmp_path / "Research" / "additional").resolve()), "tools": ["read", "shell", "write"]},
+                        {"path": str(raw_config["groups"]["newsletter"]["workspace_path"]), "tools": ["read", "shell", "write"]},
+                    ],
                 },
-                "tools": {"mode": "allowlist", "names": ["shell"]},
             },
             "default_memory": {"scope": "agent"},
             "routines": [
@@ -216,7 +216,8 @@ def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_pat
 
     assert response.status_code == 200
     assert "Group default" in response.text
-    assert "Agent addition" in response.text
+    # Effective preview shows rules as "Rule" source labels
+    assert "Rule" in response.text
     assert "Research/editorial" in response.text.replace("\\", "/")
     assert "Research/additional" in response.text.replace("\\", "/")
 
@@ -226,9 +227,10 @@ def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     default_root = str((tmp_path / "Research" / "editorial").resolve())
     additional_root = str((tmp_path / "Research" / "additional").resolve())
-    raw["groups"]["newsletter"]["agents"][0]["runtime"]["sandbox"]["additional_roots"] = [
-        default_root,
-        additional_root,
+    # Add a duplicate rule path that appears in both group and agent (uniform tools)
+    raw["groups"]["newsletter"]["agents"][0]["runtime"]["permissions"]["rules"] = [
+        {"path": default_root, "tools": ["read", "shell", "write"]},
+        {"path": additional_root, "tools": ["read", "shell", "write"]},
     ]
     config_path.write_text(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
@@ -240,9 +242,9 @@ def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch
 
     assert response.status_code == 200
     body = response.text.replace("\\", "/")
-    assert body.count(f"Group default: <span class=\"font-mono break-all\">{default_root.replace('\\', '/')}</span>") == 2
-    assert f"Agent addition: <span class=\"font-mono break-all\">{default_root.replace('\\', '/')}</span>" not in body
-    assert f"Agent addition: <span class=\"font-mono break-all\">{additional_root.replace('\\', '/')}</span>" in body
+    # The effective preview dedups the same path (group + agent merged)
+    assert body.count(f"Rule: <span class=\"font-mono break-all\">{default_root.replace(chr(92), '/')}</span>") == 1
+    assert f"Rule: <span class=\"font-mono break-all\">{additional_root.replace(chr(92), '/')}</span>" in body
 
 
 def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, raw_config):
@@ -438,23 +440,17 @@ def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path
     agent = saved["groups"]["newsletter"]["agents"][0]
     assert agent["identity"]["display_name"] == "Senior Advisor"
     assert agent["identity"]["title"] == "Runtime Curator"
-    assert agent["capabilities"]["write"] is True
 
 
 def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
-    reports_root = (tmp_path / "Research" / "reports").resolve()
-    reports_root.mkdir(parents=True, exist_ok=True)
 
     response = client.post(
         "/newsletter/agents/advisor/runtime",
         data={
             "revision": revision,
             "timeout": "1801",
-            "tool_mode": "allowlist",
-            "tool_names": "shell\nwrite",
-            "additional_roots": f"{(tmp_path / 'Research' / 'editorial').resolve()}\n{reports_root}",
         },
         follow_redirects=False,
     )
@@ -463,17 +459,13 @@ def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_pa
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     runtime = saved["groups"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1801
-    assert runtime["tools"]["mode"] == "allowlist"
-    assert runtime["tools"]["names"] == ["shell", "write"]
-    assert runtime["sandbox"]["additional_roots"] == [
-        str((tmp_path / "Research" / "editorial").resolve()),
-        str(reports_root),
-    ]
 
 
 def test_runtime_post_surfaces_unsupported_capability_issue(monkeypatch, tmp_path, raw_config):
+    """Switching to an integration that can't enforce the mode returns 409."""
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    # script integration only supports unrestricted; group mode is restricted
     raw["groups"]["newsletter"]["agents"][0]["integration"] = "script"
     config_path.write_text(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
@@ -487,14 +479,11 @@ def test_runtime_post_surfaces_unsupported_capability_issue(monkeypatch, tmp_pat
         data={
             "revision": revision,
             "timeout": "",
-            "tool_mode": "allowlist",
-            "tool_names": "shell",
-            "additional_roots": "C:/Research/editorial",
         },
     )
 
     assert response.status_code == 409
-    assert "cannot enforce sandbox mode" in response.text
+    assert "cannot enforce permission mode" in response.text
 
 
 def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):

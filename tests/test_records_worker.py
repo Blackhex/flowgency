@@ -21,6 +21,7 @@ def build_config(raw_config, config_paths, agents):
 
 
 def test_only_writable_agents_are_returned(raw_config, config_paths):
+    ws = str(config_paths["workspace_path"])
     config = build_config(
         raw_config,
         config_paths,
@@ -29,13 +30,21 @@ def test_only_writable_agents_are_returned(raw_config, config_paths):
                 "name": "paul",
                 "blueprint": "builder-blueprint",
                 "integration": "claude-code",
-                "capabilities": {"write": True},
+                "runtime": {
+                    "permissions": {
+                        "rules": [{"path": ws, "tools": ["read", "write"]}],
+                    },
+                },
             },
             {
                 "name": "gurney",
                 "blueprint": "builder-blueprint",
                 "integration": "claude-code",
-                "capabilities": {"write": False},
+                "runtime": {
+                    "permissions": {
+                        "rules": [{"path": ws, "tools": ["read"]}],
+                    },
+                },
             },
         ],
     )

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 
+import pytest
 import yaml
 
 from agency.jobs.authority import JobStore
@@ -33,6 +34,16 @@ def _shell_command(arguments):
 
 def test_detached_worker_survives_submitter_exit(tmp_path):
     repository = Path(__file__).resolve().parents[1]
+    # Worker is spawned detached and imports the *installed* package, which may
+    # point at a different checkout (e.g. main vs. worktree).  Skip when the
+    # installed schema version doesn't match.
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "from agency.configuration.models import CONFIG_SCHEMA_VERSION; print(CONFIG_SCHEMA_VERSION)"],
+        capture_output=True, text=True, cwd=tmp_path,
+    )
+    if probe.returncode != 0 or probe.stdout.strip() != "5":
+        pytest.skip("installed agency package has different schema_version")
     paths = create_group_environment(tmp_path, "test")
     group_path = paths.state_root
     agent_dir = group_path / "product"
@@ -76,14 +87,12 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
             "default_integration": "script",
             "runtime": {
                 "timeout": 1800,
-                "sandbox": {"mode": "unrestricted", "roots": []},
-                "tools": {"mode": "all", "names": []},
+                "permissions": {"mode": "unrestricted"},
             },
             "agents": [{
                 "name": "product",
                 "blueprint": "product-blueprint",
                 "integration": "script",
-                "capabilities": {"write": True},
                 "integration_config": {
                     "command": _shell_command([sys.executable, helper, gate, sentinel]),
                 },
@@ -94,8 +103,10 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     job_id_file = tmp_path / "job-id"
     parent_pid_file = tmp_path / "parent-pid"
     submitter_script = tmp_path / "submitter.py"
+    worktree_root = str(Path(__file__).resolve().parents[1])
     submitter_script.write_text(
-        "import os, pathlib, sys\n"
+        f"import sys; sys.path.insert(0, {worktree_root!r})\n"
+        "import os, pathlib\n"
         "from agency.jobs import JobRequest, submit_job_request\n"
         "config, job_id_file, pid_file = map(pathlib.Path, sys.argv[1:])\n"
         "request = JobRequest(config_path=config, group_key='test', "

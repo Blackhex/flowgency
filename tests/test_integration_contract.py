@@ -37,8 +37,7 @@ AI_CLI_COMMANDS = {
 }
 
 UNCONFINED_CAPABILITIES = RuntimeCapabilities(
-    path_modes=frozenset({"unrestricted"}),
-    tool_modes=frozenset({"all"}),
+    permission_modes=frozenset({"unrestricted"}),
 )
 
 AI_CLI_RUN_ARGUMENTS = {
@@ -137,12 +136,10 @@ class TestIntegrationContract:
 def test_registry_runtime_capabilities_surface_is_fail_closed():
     expected = {
         "copilot": RuntimeCapabilities(
-            path_modes=frozenset({"restricted", "unrestricted"}),
-            tool_modes=frozenset({"all", "allowlist"}),
+            permission_modes=frozenset({"restricted", "unrestricted"}),
         ),
         "script": RuntimeCapabilities(
-            path_modes=frozenset({"unrestricted"}),
-            tool_modes=frozenset({"all"}),
+            permission_modes=frozenset({"unrestricted"}),
         ),
         "sdk": RuntimeCapabilities(),
         "claude-code": UNCONFINED_CAPABILITIES,
@@ -171,8 +168,7 @@ def test_builtin_ai_cli_integrations_declare_canonical_commands():
 
 def test_builtin_ai_cli_runtime_capabilities_are_truthful():
     assert REGISTRY["copilot"].runtime_capabilities == RuntimeCapabilities(
-        path_modes=frozenset({"restricted", "unrestricted"}),
-        tool_modes=frozenset({"all", "allowlist"}),
+        permission_modes=frozenset({"restricted", "unrestricted"}),
     )
     for name in AI_CLI_COMMANDS.keys() - {"copilot"}:
         assert REGISTRY[name].runtime_capabilities == UNCONFINED_CAPABILITIES
@@ -404,8 +400,7 @@ def test_non_executable_integrations_reject_before_any_result_is_fabricated(tmp_
         REGISTRY["sdk"].run(request)
 
     assert [issue.code for issue in excinfo.value.issues] == [
-        "unsupported-path-policy",
-        "unsupported-tool-policy",
+        "unsupported-permission-mode",
         "integration-not-executable",
     ]
 
@@ -429,13 +424,14 @@ def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
 
     group = raw_config["groups"]["newsletter"]
     group["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": ["C:/repo"]},
-        "tools": {"mode": "allowlist", "names": ["read"]},
+        "permissions": {
+            "mode": "restricted",
+            "rules": [{"path": "C:/repo", "tools": ["read"]}],
+        },
     }
     agent = group["agents"][0]
     agent["name"] = "builder"
     agent["integration"] = "claude-code"
-    agent["capabilities"] = {"write": True}
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
@@ -443,15 +439,12 @@ def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
         resolve_effective_policy(parsed.resolved, "newsletter", "builder")
 
     assert [issue.code for issue in excinfo.value.issues] == [
-        "unsupported-path-policy",
-        "unsupported-tool-policy",
+        "unsupported-permission-mode",
     ]
     assert [issue.scope for issue in excinfo.value.issues] == [
         "integrations.claude-code",
-        "integrations.claude-code",
     ]
     assert [issue.field for issue in excinfo.value.issues] == [
-        "runtime.sandbox.mode",
-        "runtime.tools.mode",
+        "runtime.permissions.mode",
     ]
 

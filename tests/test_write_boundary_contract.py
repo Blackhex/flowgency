@@ -1,3 +1,10 @@
+"""Tests for the permission-based executor eligibility model.
+
+These replace the former capabilities.write / writable_roots / writes_narrowed
+tests.  The new model derives executor eligibility from whether the agent's
+effective policy grants the 'write' tool on the group's workspace_path.
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -12,20 +19,25 @@ from agency.configuration.store import ConfigStore
 from agency.integrations import BaseIntegration
 from agency.integrations.models import (
     EffectiveRuntimePolicy,
-    ResolvedToolPolicy,
+    ResolvedPermissionRule,
     RuntimeCapabilities,
 )
 from agency.jobs.models import RuntimePolicySnapshot
+from agency.permissions.eligibility import may_execute_decisions
 
 
-class EnforcingIntegration(BaseIntegration):
-    name = "enforcing"
-    display_name = "Enforcing"
+# ── Integration fixtures ─────────────────────────────────────────────────────
+
+
+class PermissiveIntegration(BaseIntegration):
+    """Accepts both modes and any path-tool scoping."""
+
+    name = "permissive"
+    display_name = "Permissive"
     supports_execution = True
     runtime_capabilities = RuntimeCapabilities(
-        path_modes=frozenset({"restricted", "unrestricted"}),
-        tool_modes=frozenset({"all", "allowlist"}),
-        enforces_write_boundary=True,
+        permission_modes=frozenset({"restricted", "unrestricted"}),
+        path_scopable_tools=frozenset({"read", "search", "write", "shell"}),
     )
 
     def identity_filename(self) -> str:
@@ -41,134 +53,156 @@ class EnforcingIntegration(BaseIntegration):
         raise NotImplementedError
 
 
-class NonEnforcingIntegration(EnforcingIntegration):
-    name = "nonenforcing"
+class RestrictedOnlyIntegration(PermissiveIntegration):
+    """Only supports unrestricted mode."""
+
+    name = "restricted-only"
     runtime_capabilities = RuntimeCapabilities(
-        path_modes=frozenset({"restricted", "unrestricted"}),
-        tool_modes=frozenset({"all", "allowlist"}),
+        permission_modes=frozenset({"unrestricted"}),
     )
 
 
-def policy(*, writable, roots=(Path("/ws").resolve(),), mode="restricted"):
-    return EffectiveRuntimePolicy(
-        timeout=60,
-        sandbox_mode=mode,
-        sandbox_roots=roots,
-        tools=ResolvedToolPolicy(mode="all", names=()),
-        writable_roots=roots if writable else (),
-        writes_narrowed=not writable,
-    )
+# ── Config helpers ───────────────────────────────────────────────────────────
 
 
-def _config(tmp_path: Path, raw_config, *, write: bool):
+def _config_with_rules(
+    tmp_path: Path,
+    raw_config,
+    *,
+    group_rules=None,
+    agent_rules=None,
+    mode="unrestricted",
+):
     raw = deepcopy(raw_config)
-    raw["groups"]["newsletter"]["agents"][0]["capabilities"] = {"write": write}
-    raw["groups"]["newsletter"]["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": []}
+    group = raw["groups"]["newsletter"]
+    group["runtime"] = {
+        "permissions": {
+            "mode": mode,
+            "rules": group_rules or [],
+        },
     }
+    agent = group["agents"][0]
+    if agent_rules is not None:
+        agent["runtime"] = {"permissions": {"rules": agent_rules}}
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return ConfigStore(path).load().config
 
 
-def test_capabilities_write_true_makes_the_workspace_writable(tmp_path, raw_config):
-    config = _config(tmp_path, raw_config, write=True)
+# ── Eligibility tests ────────────────────────────────────────────────────────
 
-    resolved = resolve_effective_policy(
-        config, "newsletter", "builder", integration=EnforcingIntegration()
+
+def test_agent_with_write_on_workspace_is_eligible(tmp_path, raw_config):
+    """An agent whose rules grant write on the workspace_path may execute."""
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    config = _config_with_rules(
+        tmp_path,
+        raw_config,
+        agent_rules=[{"path": ws, "tools": ["read", "write"]}],
     )
-
-    assert resolved.writable_roots == resolved.sandbox_roots
-    assert resolved.writable_roots != ()
+    assert may_execute_decisions(config, "newsletter", "builder") is True
 
 
-def test_capabilities_write_false_yields_no_writable_roots(tmp_path, raw_config):
-    config = _config(tmp_path, raw_config, write=False)
-
-    resolved = resolve_effective_policy(
-        config, "newsletter", "builder", integration=EnforcingIntegration()
+def test_agent_without_write_on_workspace_is_ineligible(tmp_path, raw_config):
+    """An agent whose rules omit write on the workspace_path is ineligible."""
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    config = _config_with_rules(
+        tmp_path,
+        raw_config,
+        agent_rules=[{"path": ws, "tools": ["read", "search"]}],
     )
-
-    assert resolved.writable_roots == ()
-    assert resolved.sandbox_roots != ()
+    assert may_execute_decisions(config, "newsletter", "builder") is False
 
 
-def test_read_only_policy_narrows_writes():
-    assert policy(writable=False).narrows_writes is True
-
-
-def test_writable_policy_does_not_narrow_writes():
-    assert policy(writable=True).narrows_writes is False
-
-
-def test_unrestricted_read_only_policy_still_narrows_writes():
-    unrestricted = EffectiveRuntimePolicy(
-        timeout=60,
-        sandbox_mode="unrestricted",
-        sandbox_roots=(),
-        tools=ResolvedToolPolicy(mode="all", names=()),
-        writable_roots=(),
-        writes_narrowed=True,
+def test_agent_with_no_workspace_rule_is_ineligible(tmp_path, raw_config):
+    """An agent with no rule matching the workspace_path is ineligible."""
+    config = _config_with_rules(
+        tmp_path,
+        raw_config,
+        agent_rules=[{"path": str(tmp_path / "somewhere-else"), "tools": ["write"]}],
     )
-
-    assert unrestricted.narrows_writes is True
-
-
-def test_non_enforcing_integration_rejects_a_narrowed_policy():
-    issues = NonEnforcingIntegration().validate_runtime_policy(policy(writable=False))
-
-    assert [issue.code for issue in issues] == ["unsupported-write-boundary"]
-    message = issues[0].message
-    assert "nonenforcing" in message
-    assert "capabilities.write" in message
+    assert may_execute_decisions(config, "newsletter", "builder") is False
 
 
-def test_non_enforcing_integration_accepts_a_writable_policy():
-    assert NonEnforcingIntegration().validate_runtime_policy(policy(writable=True)) == ()
+def test_agent_with_null_tools_on_workspace_is_eligible(tmp_path, raw_config):
+    """tools=None means all tools including write - eligible."""
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    config = _config_with_rules(
+        tmp_path,
+        raw_config,
+        agent_rules=[{"path": ws, "tools": None}],
+    )
+    assert may_execute_decisions(config, "newsletter", "builder") is True
 
 
-def test_enforcing_integration_accepts_a_narrowed_policy():
-    assert EnforcingIntegration().validate_runtime_policy(policy(writable=False)) == ()
+# ── Integration validation tests ─────────────────────────────────────────────
 
 
-def test_resolve_rejects_a_read_only_agent_on_a_non_enforcing_integration(
-    tmp_path, raw_config
-):
-    config = _config(tmp_path, raw_config, write=False)
+def test_integration_rejects_unsupported_mode(tmp_path, raw_config):
+    """An integration that doesn't support restricted mode rejects it."""
+    config = _config_with_rules(tmp_path, raw_config, mode="restricted")
 
     with pytest.raises(ValidationFailed) as excinfo:
         resolve_effective_policy(
-            config, "newsletter", "builder", integration=NonEnforcingIntegration()
+            config, "newsletter", "builder", integration=RestrictedOnlyIntegration()
         )
 
-    assert [issue.code for issue in excinfo.value.issues] == [
-        "unsupported-write-boundary"
-    ]
+    codes = [issue.code for issue in excinfo.value.issues]
+    assert "unsupported-permission-mode" in codes
 
 
-def test_snapshot_round_trips_writable_roots():
-    original = policy(writable=True)
+def test_permissive_integration_accepts_restricted_mode(tmp_path, raw_config):
+    """An integration that supports both modes validates successfully."""
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    config = _config_with_rules(
+        tmp_path,
+        raw_config,
+        mode="restricted",
+        agent_rules=[{"path": ws, "tools": ["read", "write"]}],
+    )
+    policy = resolve_effective_policy(
+        config, "newsletter", "builder", integration=PermissiveIntegration()
+    )
+    assert policy.mode == "restricted"
 
-    restored = RuntimePolicySnapshot.from_effective_policy(original).to_effective_policy()
+
+# ── Snapshot round-trip tests ────────────────────────────────────────────────
+
+
+def test_snapshot_round_trips_rules():
+    """Snapshot serializes and restores rules faithfully."""
+    original = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(
+            ResolvedPermissionRule(path=Path("/ws"), tools=("read", "write")),
+            ResolvedPermissionRule(path=None, tools=("read",)),
+        ),
+    )
+
+    snapshot = RuntimePolicySnapshot.from_effective_policy(original)
+    restored = snapshot.to_effective_policy()
 
     assert restored.mode == "restricted"
-    assert restored.narrows_writes is False
+    assert len(restored.rules) == 2
+    assert restored.rules[0].tools == ("read", "write")
+    assert restored.rules[1].path is None
+    assert restored.rules[1].tools == ("read",)
 
 
-def test_snapshot_round_trips_a_narrowed_policy():
-    original = policy(writable=False)
-
-    restored = RuntimePolicySnapshot.from_effective_policy(original).to_effective_policy()
-
-    assert restored.mode == "restricted"
-    assert restored.narrows_writes is False
-
-
-def test_a_narrowed_policy_serializes_the_flag():
-    payload = RuntimePolicySnapshot.from_effective_policy(policy(writable=False)).to_dict()
+def test_snapshot_dict_does_not_contain_deprecated_fields():
+    """Serialized payload has no writes_narrowed or writable_roots."""
+    original = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=Path("/ws"), tools=("read",)),),
+    )
+    payload = RuntimePolicySnapshot.from_effective_policy(original).to_dict()
 
     assert "writes_narrowed" not in payload
+    assert "writable_roots" not in payload
     assert payload["mode"] == "restricted"
+    assert len(payload["rules"]) == 1
 
 
 def test_a_job_spec_persisted_before_the_write_boundary_still_loads(tmp_path):
