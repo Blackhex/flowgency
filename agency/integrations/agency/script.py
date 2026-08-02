@@ -22,7 +22,7 @@ class ScriptIntegration(BaseIntegration):
     supports_ai_backend = False
     detect_priority = 1000  # Never auto-detects
     projector = BaseIntegration._default_projector("agent.md", discovers_instructions=False)
-    runtime_capabilities = RuntimeCapabilities(
+    declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"unrestricted"}),
     )
 

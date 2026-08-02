@@ -82,8 +82,32 @@ class BaseIntegration:
     supports_ai_backend: bool = False
     supports_sandbox: bool = False
     detect_priority: int = 100
-    runtime_capabilities: RuntimeCapabilities = RuntimeCapabilities()
+    declared_runtime_capabilities: RuntimeCapabilities = RuntimeCapabilities()
     projector = None
+
+    def _capability_cache_key(self) -> str | None:
+        """Identifies the environment the detection result describes."""
+        return None
+
+    def detect_runtime_capabilities(self) -> RuntimeCapabilities:
+        """What this integration can enforce here. Never wider than declared."""
+        return self.declared_runtime_capabilities
+
+    def invalidate_capability_cache(self) -> None:
+        self._capability_cache = None
+
+    @property
+    def runtime_capabilities(self) -> RuntimeCapabilities:
+        key = self._capability_cache_key()
+        cached = getattr(self, "_capability_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        try:
+            detected = self.detect_runtime_capabilities()
+        except Exception:
+            detected = self.declared_runtime_capabilities
+        self._capability_cache = (key, detected)
+        return detected
 
     def run(self, request: IntegrationRunRequest) -> RunResult:
         """Execute an agent with a typed immutable run request."""

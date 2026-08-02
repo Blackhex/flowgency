@@ -25,7 +25,7 @@ class ClaudeCodeIntegration(BaseIntegration):
     supports_ai_backend = True
     detect_priority = 10
     projector = get_projector("claude-code")
-    runtime_capabilities = RuntimeCapabilities(
+    declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"unrestricted"}),
     )
 
