@@ -165,10 +165,15 @@ set is one list:
 These are generated, not authored — an operator cannot remove them — but they
 are visible, which the phase-1 arrangement was not.
 
-The split also closes a hole phase 1 left open. Because the launch view is the
-working directory and was writable in its entirety, an agent could rewrite the
-instruction file it was executing under. Only the outbox and the memory
-directory are writable now; the projected instructions beside them are read-only.
+Generated rules are excluded from capability negotiation. `scoped_tools`
+considers only authored rules when determining whether an integration can
+enforce the operator's policy, because the generated grants are Agency's own
+intent rather than a demand the operator placed on the integration. The zone
+rules stay in the effective policy: an integration that declares `write` in
+`path_scopable_tools` will honour them. Until an integration exists that can
+scope writes per path, the zones are advisory — they express the intended
+boundary but nothing at runtime enforces it. Making integrations actually
+enforce them is a follow-up feature (phase 3), not part of this branch.
 
 ### Compilation becomes a per-instance projection
 
@@ -323,19 +328,22 @@ old shape could not express or got wrong:
   refines a broader group one.
 - The generated launch-view rules are present in every effective policy, grant
   `read` on the instructions and `read`/`write` on the outbox and memory, and
-  cannot be removed or widened by configuration.
-- The rendered instance places each zone where its generated rule says, and the
-  instructions zone is not writable.
+  cannot be removed or widened by configuration. They are excluded from
+  capability negotiation, so their varying grants do not trigger tool-scoping
+  rejection on integrations that cannot scope per path.
+- The rendered instance places each zone where its generated rule says. The
+  instructions zone is intended to be non-writable, but that boundary is
+  advisory until an integration declares path-scoped write enforcement.
 - Two instances of one blueprint that differ only in identity, or only in their
   permission rules, resolve to different cache entries; two that differ only in
   `timeout` or memory selector resolve to the same one.
 - A job spec carries the instance digest and resolves the entry it was launched
   against after a configuration change.
 - An integration lacking `write` in `path_scopable_tools` rejects a policy whose
-  rules differ in `write`, and the message names the tool and the differing
-  paths.
-- A policy granting identical tools on every rule is accepted by an integration
-  with empty `path_scopable_tools`.
+  authored rules differ in `write`, and the message names the tool and the
+  differing paths.
+- A policy granting identical tools on every authored rule is accepted by an
+  integration with empty `path_scopable_tools`.
 - Executor eligibility follows the rules: an agent granted `write` on the
   workspace is eligible, one without it is not, and no `capabilities` key is
   consulted.
@@ -377,7 +385,9 @@ constraints that phase 3 cannot design around:
   a directory subtree. Wildcards are not supported yet.
 - The access-zone arrangement works: a read-only zone stays readable, writes to
   it are refused by sandbox policy, a read/write subdirectory works, and the CLI
-  runs with a non-writable working directory.
+  runs with a non-writable working directory. Until an integration actually
+  declares path-scoped write enforcement, the zone grants remain advisory at the
+  Agency layer.
 - **Enabling the sandbox on this platform disables every sandboxed subprocess.**
   `search`, `glob`, `grep` and `shell` fail with `backend_unavailable`: the MXC
   ProcessContainer backend requires a Windows Insiders build, and its DACL

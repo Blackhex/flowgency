@@ -148,3 +148,62 @@ def test_scoped_tools_rejected_through_resolution(tmp_path, raw_config):
         resolve_effective_policy(config, "newsletter", "builder")
 
     assert "unsupported-tool-scoping" in {i.code for i in exc_info.value.issues}
+
+
+# ── Generated rules excluded from negotiation ───────────────────────────────
+
+
+def test_scoped_tools_ignores_generated_rules():
+    # Generated rules differ in tools (read vs read+write), but since they are
+    # generated they must not appear in scoped_tools.
+    p = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(
+            ResolvedPermissionRule(path=Path("/ws"), tools=("read",)),
+            ResolvedPermissionRule(path=Path("/launch/instructions"), tools=("read",), generated=True),
+            ResolvedPermissionRule(path=Path("/launch/outbox"), tools=("read", "write"), generated=True),
+            ResolvedPermissionRule(path=Path("/launch/memory"), tools=("read", "write"), generated=True),
+        ),
+    )
+
+    assert p.scoped_tools == frozenset()
+
+
+def test_scoped_tools_still_reports_differing_authored_rules():
+    # Authored rules that genuinely differ must still be reported.
+    p = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(
+            ResolvedPermissionRule(path=Path("/ws"), tools=("read",)),
+            ResolvedPermissionRule(path=Path("/ws/tests"), tools=("read", "write")),
+            ResolvedPermissionRule(path=Path("/launch/outbox"), tools=("read", "write"), generated=True),
+        ),
+    )
+
+    assert "write" in p.scoped_tools
+
+
+@pytest.mark.parametrize("name", [
+    "copilot", "claude-code", "script",
+    "codex", "gemini", "aider", "goose", "opencode", "pi",
+])
+def test_zoned_policy_passes_validation_for_shipped_integration(name, tmp_path):
+    """A fully zoned effective policy must pass validate_runtime_policy for
+    every shipped integration. This is the test that would have caught C3."""
+    integration = get_integration(name)
+    modes = integration.runtime_capabilities.permission_modes
+    mode = "unrestricted" if "unrestricted" in modes else next(iter(modes))
+    authored = EffectiveRuntimePolicy(
+        timeout=60,
+        mode=mode,
+        rules=(
+            ResolvedPermissionRule(path=tmp_path / "workspace", tools=("read",)),
+        ),
+    )
+    zoned = authored.with_launch_zones(tmp_path / "launch")
+
+    issues = integration.validate_runtime_policy(zoned)
+
+    assert issues == (), f"{name} rejected zoned policy: {[i.code for i in issues]}"
