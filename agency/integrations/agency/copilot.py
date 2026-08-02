@@ -3,6 +3,7 @@
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -63,13 +64,88 @@ class CopilotIntegration(BaseIntegration):
     projector = get_projector("copilot")
     declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"restricted", "unrestricted"}),
+        path_scopable_tools=frozenset({"write"}),
     )
     _WINDOWS_SHELL_HOSTS = ("powershell.exe", "pwsh.exe")
     _WINDOWS_SCRIPT_EXTENSIONS = (".ps1",)
     _WINDOWS_WRAPPER_EXTENSIONS = (".bat", ".cmd")
+    # Measured on 1.0.78-2: a write into a `readonlyPaths` entry was refused
+    # with "Edit (sandbox policy)" and left no file on disk, while a write into
+    # a `readwritePaths` entry succeeded.
+    _SANDBOX_MEASURED_VERSION = (1, 0, 78, 2)
+    # A major bump is the only signal the publisher gives that behaviour may
+    # change, so the claim stops there until it is measured again.
+    _SANDBOX_UNMEASURED_VERSION = (2, 0, 0, 0)
+    _VERSION_PATTERN = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(\d+))?")
 
     def identity_filename(self) -> str:
         return "AGENTS.md"
+
+    def _probe_cli_version(self, command: str) -> str | None:
+        """The version the installed CLI reports, or None when it will not say."""
+        result = subprocess.run(
+            [command, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode != 0:
+            return None
+        return (result.stdout or result.stderr or "").strip() or None
+
+    @staticmethod
+    def _executable_stamp(command: str) -> object:
+        """Identity of the installed binary, so an in-place upgrade re-probes."""
+        try:
+            info = os.stat(command)
+        except OSError:
+            return command
+        return (command, info.st_mtime_ns, info.st_size)
+
+    def _cli_version(self) -> str | None:
+        """The installed CLI version, probed once per installed binary.
+
+        Capabilities are read on request paths, so the subprocess runs only
+        when the binary behind `copilot` has changed.
+        """
+        command = self.resolve_executable()
+        stamp = self._executable_stamp(command) if command else None
+        cached = getattr(self, "_version_cache", None)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        try:
+            version = self._probe_cli_version(command) if command else None
+        except Exception:
+            version = None
+        self._version_cache = (stamp, version)
+        return version
+
+    @classmethod
+    def _sandbox_enforces_writes(cls, reported: str | None) -> bool:
+        """Is this a CLI whose sandbox was measured to refuse a denied write?"""
+        if reported is None:
+            return False
+        match = cls._VERSION_PATTERN.search(reported)
+        if match is None:
+            return False
+        major, minor, patch, build = match.groups()
+        version = (int(major), int(minor), int(patch), int(build or 0))
+        return cls._SANDBOX_MEASURED_VERSION <= version < cls._SANDBOX_UNMEASURED_VERSION
+
+    def _capability_cache_key(self) -> str | None:
+        return self._cli_version()
+
+    def detect_runtime_capabilities(self) -> RuntimeCapabilities:
+        declared = self.declared_runtime_capabilities
+        if self._sandbox_enforces_writes(self._cli_version()):
+            return declared
+        return RuntimeCapabilities(permission_modes=declared.permission_modes)
+
+    def invalidate_capability_cache(self) -> None:
+        super().invalidate_capability_cache()
+        self._version_cache = None
 
     def _identity_file(self, agent_dir: Path) -> Path:
         return agent_dir / "AGENTS.md"

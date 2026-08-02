@@ -98,9 +98,28 @@ def test_scoping_integration_accepts_differing_write_grants():
     ) == ()
 
 
-def test_no_shipped_integration_scopes_write():
+def test_only_copilot_scopes_write_and_only_when_detection_succeeds(monkeypatch):
+    # Copilot enforces per-path write through its sandbox; the other eight have
+    # no boundary to offer, so a scoped write grant must still be refused.
+    copilot = get_integration("copilot")
+    # Stubbed so the assertion holds whether or not a CLI is installed here.
+    monkeypatch.setattr(type(copilot), "_cli_version", lambda self: "1.0.78-2")
+    copilot.invalidate_capability_cache()
+    try:
+        assert "write" in copilot.runtime_capabilities.path_scopable_tools
+    finally:
+        copilot.invalidate_capability_cache()
+
+    # Detection failing must cost the claim, not be assumed away.
+    monkeypatch.setattr(type(copilot), "_cli_version", lambda self: None)
+    copilot.invalidate_capability_cache()
+    try:
+        assert "write" not in copilot.runtime_capabilities.path_scopable_tools
+    finally:
+        copilot.invalidate_capability_cache()
+
     for name in (
-        "copilot", "claude-code", "codex", "gemini",
+        "claude-code", "codex", "gemini",
         "aider", "goose", "opencode", "pi", "script",
     ):
         caps = get_integration(name).runtime_capabilities

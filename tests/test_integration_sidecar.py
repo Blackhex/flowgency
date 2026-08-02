@@ -572,7 +572,9 @@ class TestCopilot:
         results = []
 
         def fake_run(args, **kwargs):
-            results.append((list(args), kwargs.get("cwd")))
+            # The capability probe is not a launch; only record launches.
+            if "--version" not in args:
+                results.append((list(args), kwargs.get("cwd")))
             return FakeCompleted()
 
         monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
