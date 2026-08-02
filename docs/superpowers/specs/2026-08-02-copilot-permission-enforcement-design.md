@@ -71,11 +71,21 @@ sandbox policy can be expressed and a repository-level file will not accept a
 
 | Setting | Value | Why |
 |---|---|---|
-| `sandbox.enabled` | `true` | the boundary |
+| `sandbox.enabled` | `true` only when the policy confines something | see below |
 | `sandbox.allowBypass` | `false` | defaults true; left alone the boundary is decorative |
 | `sandbox.addCurrentWorkingDirectory` | `false` | the launch view is granted explicitly, not implicitly |
 | `userPolicy.filesystem.readonlyPaths` | rules granting read but not write | |
 | `userPolicy.filesystem.readwritePaths` | rules granting write | |
+
+The filesystem policy is an **allowlist**: a path nobody names is denied. So
+`enabled: true` with empty path lists denies everything, which is the exact
+inverse of an unrestricted policy that names no path — and the CLI hangs on it
+rather than reporting an error. The sandbox is therefore switched on only when
+the policy actually confines something: a `restricted` policy, or an
+`unrestricted` one carrying an operator-authored rule that names a path. The
+generated zone rules do not count towards that decision; they are attached to
+every job, so counting them would sandbox every job including the default
+configuration that is meant to be unconfined.
 
 `deniedPaths` is not used. Windows ignores it, so the policy grants narrowly
 rather than granting broadly and carving out.
@@ -93,6 +103,22 @@ become read/write. A read-only agent can then read its workspace and write
 nothing but its own outbox — which is what both earlier phases were reaching for.
 At that point Copilot can honestly declare `write` in `path_scopable_tools`, and
 the zone grants stop being advisory.
+
+For that to be more than a declaration, the tool gate has to stop vetoing it.
+The gates intersect, so a tool the global allowlist withholds is unreachable no
+matter what the filesystem policy grants. A tool the sandbox scopes per path is
+therefore granted globally when any reachable rule asks for it — the sandbox,
+not the allowlist, is what holds it to those paths. This is what makes the
+outbox writable to a read-only agent, and it is why two authored rules that
+disagree about `write` are now rendered as a global `write` bounded to the
+granting path rather than as their intersection.
+
+The union is conditional on the sandbox actually being in force: it applies only
+when the settings file was written. Where credentials are missing the job falls
+back to the shared home, no policy is written, and nothing would confine the
+grant — so the claim lapses with it and the allowlist reverts to the
+intersection. A capability that is asserted rather than checked is exactly the
+failure this phase exists to remove.
 
 ### Enforcement is best effort, and the gaps are stated
 

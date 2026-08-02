@@ -1,6 +1,7 @@
 """GitHub Copilot CLI integration."""
 
 import json
+import logging
 import os
 import platform
 import re
@@ -32,6 +33,9 @@ from agency.integrations.models import (
     InteractiveSetupResult,
     RuntimeCapabilities,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _intersect_grants(
@@ -76,7 +80,15 @@ class CopilotIntegration(BaseIntegration):
     # A major bump is the only signal the publisher gives that behaviour may
     # change, so the claim stops there until it is measured again.
     _SANDBOX_UNMEASURED_VERSION = (2, 0, 0, 0)
-    _VERSION_PATTERN = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:-(\d+))?")
+    # A build suffix marks a prerelease of its patch, so the plain release is
+    # NEWER than any of them. Sorting a missing suffix last says that.
+    _RELEASE_BUILD = float("inf")
+    # Anchored: an unanchored search would take the first dotted triple in any
+    # banner text, and a date-like prefix could land inside the trusted window.
+    _VERSION_PATTERN = re.compile(r"v?(\d+)\.(\d+)\.(\d+)(?:-(\d+))?")
+    # The probe runs on request paths, so it must not be able to stall one for
+    # long. Reporting a version is a local read; seconds is already generous.
+    _VERSION_PROBE_TIMEOUT = 5
 
     def identity_filename(self) -> str:
         return "AGENTS.md"
@@ -87,7 +99,7 @@ class CopilotIntegration(BaseIntegration):
             [command, "--version"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=self._VERSION_PROBE_TIMEOUT,
             stdin=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -118,6 +130,14 @@ class CopilotIntegration(BaseIntegration):
         try:
             version = self._probe_cli_version(command) if command else None
         except Exception:
+            # Losing the claim is the safe outcome, but losing it silently is
+            # undiagnosable: enforcement would just quietly stop.
+            logger.warning(
+                "copilot: could not read the CLI version from %s; "
+                "path-scoped enforcement is not claimed",
+                command,
+                exc_info=True,
+            )
             version = None
         self._version_cache = (stamp, version)
         return version
@@ -127,11 +147,24 @@ class CopilotIntegration(BaseIntegration):
         """Is this a CLI whose sandbox was measured to refuse a denied write?"""
         if reported is None:
             return False
-        match = cls._VERSION_PATTERN.search(reported)
-        if match is None:
+        # The CLI answers with a banner ("GitHub Copilot CLI 1.0.78-2.") and
+        # may add an upgrade notice below it. Only the first line states the
+        # installed version, and a line offering a newer one must never be
+        # read as the version in hand -- so a first line carrying more than
+        # one version is ambiguous and is refused rather than guessed at.
+        first_line = reported.strip().splitlines()[0] if reported.strip() else ""
+        found = cls._VERSION_PATTERN.findall(first_line)
+        if len(found) != 1:
             return False
-        major, minor, patch, build = match.groups()
-        version = (int(major), int(minor), int(patch), int(build or 0))
+        major, minor, patch, build = found[0]
+        version = (
+            int(major),
+            int(minor),
+            int(patch),
+            # The suffix counts pre-release builds, so a bare 1.0.78 ships
+            # after 1.0.78-2 rather than before it.
+            int(build) if build else cls._RELEASE_BUILD,
+        )
         return cls._SANDBOX_MEASURED_VERSION <= version < cls._SANDBOX_UNMEASURED_VERSION
 
     def _capability_cache_key(self) -> str | None:
@@ -427,8 +460,9 @@ class CopilotIntegration(BaseIntegration):
     def _prepare_copilot_home(
         self,
         request: IntegrationRunRequest,
+        settings: dict,
     ) -> tuple[Path | None, str | None]:
-        """Create a per-job COPILOT_HOME with sandbox settings and auth.
+        """Create a per-job COPILOT_HOME holding sandbox settings and auth.
 
         Returns ``(home, None)`` on success or ``(None, reason)`` when the
         caller should fall back to the shared home.
@@ -448,9 +482,6 @@ class CopilotIntegration(BaseIntegration):
             source_config.read_text(encoding="utf-8"),
         )
 
-        settings, _unenforceable = build_sandbox_settings(
-            request.runtime_policy,
-        )
         atomic_write_text(
             job_home / "settings.json",
             json.dumps(settings, indent=2) + "\n",
@@ -574,12 +605,34 @@ class CopilotIntegration(BaseIntegration):
         # tool to a path.
         authored = tuple(rule for rule in policy.rules if not rule.generated)
         roots = [rule.path for rule in authored if rule.path is not None]
+        # The sandbox has to be decided before the tool allowlist is: a tool may
+        # only be granted globally on the strength of the sandbox confining it,
+        # so we must know the sandbox is actually in force first.
+        settings, _unenforceable = build_sandbox_settings(policy)
+        job_home, degraded = self._prepare_copilot_home(request, settings)
+        sandbox_confines = job_home is not None and settings["sandbox"]["enabled"]
         # A single global allowlist can only grant what every reachable rule
         # permits, so the grants intersect rather than union. None is the
         # identity: a rule that omits `tools` narrows nothing.
         granted: tuple[str, ...] | None
         if roots:
             granted = _intersect_grants(rule.tools for rule in authored)
+            if granted is not None and sandbox_confines:
+                # Copilot's two gates intersect: the tool gate decides whether a
+                # tool may be used at all, the sandbox decides where its effects
+                # may land. A tool the sandbox scopes per path can therefore be
+                # granted globally -- the sandbox is what holds it to the rules.
+                # Without this the tool gate would veto the sandbox's own zone
+                # grants, and a read-only agent could not write its outbox.
+                granted = granted + tuple(
+                    tool
+                    for tool in sorted(self.runtime_capabilities.path_scopable_tools)
+                    if tool not in granted
+                    and any(
+                        rule.tools is None or tool in rule.tools
+                        for rule in policy.rules
+                    )
+                )
         elif policy.mode == "unrestricted":
             granted = None
         else:
@@ -619,7 +672,6 @@ class CopilotIntegration(BaseIntegration):
         # non-interactive -- matching the proven no-console Start-Job launch
         # used by production dispatchers.
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        job_home, degraded = self._prepare_copilot_home(request)
         run_env = (
             {**os.environ, "COPILOT_HOME": str(job_home)}
             if job_home is not None

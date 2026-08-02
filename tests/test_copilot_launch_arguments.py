@@ -163,8 +163,9 @@ def test_unrestricted_carve_out_does_not_promote_to_every_tool(tmp_path, monkeyp
 
 def test_differing_grants_render_the_intersection(tmp_path, monkeypatch):
     """Copilot's allowlist is global, so the only sound rendering of two rules
-    that disagree is what both permit. Negotiation rejects this policy before
-    it reaches run(); the rendering must still be sound if it ever arrives."""
+    that disagree is what both permit. This is the rendering used when the
+    sandbox cannot scope the differing tool; when it can, the tool is granted
+    globally and the sandbox holds it to the paths."""
     a = tmp_path / "a"
     b = tmp_path / "b"
     a.mkdir()
@@ -187,8 +188,9 @@ def test_differing_grants_render_the_intersection(tmp_path, monkeypatch):
 
 
 def test_zone_grants_do_not_widen_the_allowlist(tmp_path, monkeypatch, repo):
-    """The zones grant write on the outbox and memory. Copilot cannot confine a
-    grant to a path, so honouring them would hand the agent write everywhere.
+    """With no sandbox to confine it, a global write grant would reach every
+    path, so the zones stay advisory. The fake CLI here reports an
+    unparseable version, which is what withholds the scoping claim.
     An operator who granted read must launch with read."""
     authored = EffectiveRuntimePolicy(
         timeout=60,
@@ -231,3 +233,92 @@ def test_zones_alone_do_not_open_an_empty_restricted_policy(tmp_path, monkeypatc
     assert "--allow-all-tools" not in args
     assert "--autopilot" not in args
     assert _granted(args) == []
+
+
+# ── Tools the sandbox can scope ─────────────────────────────────────────────
+
+
+def _with_sandbox(monkeypatch, tmp_path, *, confines=True):
+    """Make the scoping claim and the sandbox's presence explicit, not ambient.
+
+    Otherwise both depend on the CLI installed on the machine running the suite
+    and on whether it has ever been logged in.
+    """
+    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
+    home = (tmp_path / "job_home") if confines else None
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_prepare_copilot_home",
+        lambda self, request, settings: (home, None if confines else "no credentials"),
+    )
+
+
+def test_a_zone_write_is_granted_when_the_sandbox_confines_it(tmp_path, monkeypatch, repo):
+    """The tool gate decides whether write may be used, the sandbox decides
+    where it lands. Vetoing write here would make the sandbox's own outbox
+    grant unreachable, which is the whole point of the zones."""
+    _with_sandbox(monkeypatch, tmp_path)
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    ).with_launch_zones(tmp_path / "runtime")
+
+    args = _launch(policy, tmp_path, monkeypatch)
+
+    assert _granted(args) == ["read", "write"]
+    assert "--allow-all-tools" not in args
+    # The paths stay scoped: write is only reachable where the sandbox allows.
+    added = [args[i + 1] for i, a in enumerate(args) if a == "--add-dir"]
+    assert added == [str(repo)]
+
+
+def test_a_scoped_write_is_not_granted_without_a_sandbox(tmp_path, monkeypatch, repo):
+    """Falling back to the shared home writes no settings, so nothing would
+    confine a global write grant. The claim must lapse with the sandbox."""
+    _with_sandbox(monkeypatch, tmp_path, confines=False)
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    ).with_launch_zones(tmp_path / "runtime")
+
+    args = _launch(policy, tmp_path, monkeypatch)
+
+    assert _granted(args) == ["read"]
+
+
+def test_write_is_not_granted_when_no_rule_grants_it(tmp_path, monkeypatch, repo):
+    """A scopable tool is still only granted where some rule asked for it."""
+    _with_sandbox(monkeypatch, tmp_path)
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(ResolvedPermissionRule(path=repo, tools=("read",)),),
+    )
+
+    args = _launch(policy, tmp_path, monkeypatch)
+
+    assert _granted(args) == ["read"]
+
+
+def test_an_authored_scoped_write_survives_the_intersection(tmp_path, monkeypatch):
+    """Two rules disagreeing on write used to render as read-only. The sandbox
+    can now hold write to the path that was granted it, so it is granted."""
+    _with_sandbox(monkeypatch, tmp_path)
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    policy = EffectiveRuntimePolicy(
+        timeout=60,
+        mode="restricted",
+        rules=(
+            ResolvedPermissionRule(path=a, tools=("read", "write")),
+            ResolvedPermissionRule(path=b, tools=("read",)),
+        ),
+    )
+
+    args = _launch(policy, tmp_path, monkeypatch, enforce_validation=False)
+
+    assert _granted(args) == ["read", "write"]
