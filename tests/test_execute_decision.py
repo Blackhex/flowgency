@@ -34,7 +34,7 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
     decision_path.parent.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 4\nagency:\n  title: Test\n  default_group: ''\n"
+        "schema_version: 5\nagency:\n  title: Test\n  default_group: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
         "  prompt_store: /nonexistent\nmemory: {}\ngroups: {}\n",

@@ -61,7 +61,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         encoding="utf-8",
     )
     config_path.write_text(yaml.safe_dump({
-        "schema_version": 4,
+        "schema_version": 5,
         "agency": {
             "title": "Agency",
             "default_group": "test",

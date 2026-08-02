@@ -105,7 +105,7 @@ def test_an_agent_whose_last_run_is_ancient_is_still_green_without_a_schedule(tm
 def _spec(tmp_path, job_id, created_at="2026-07-20T00:00:00+00:00"):
     config_path = tmp_path / "config.yaml"
     if not config_path.exists():
-        config_path.write_text("schema_version: 4\ngroups: {}\n", encoding="utf-8")
+        config_path.write_text("schema_version: 5\ngroups: {}\n", encoding="utf-8")
     return JobSpec(
         schema_version=3,
         job_id=job_id,

@@ -47,7 +47,7 @@ def cli_config(tmp_path):
     )
     _write_blueprint(tmp_path / "agent-library")
     raw = {
-        "schema_version": 4,
+        "schema_version": 5,
         "agency": {
             "title": "Contract Agency",
             "default_group": "newsletter",

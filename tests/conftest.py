@@ -33,7 +33,7 @@ def config_paths(tmp_path):
 @pytest.fixture
 def raw_config(config_paths):
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "agency": {
             "title": "Agency",
             "default_group": "newsletter",
@@ -54,6 +54,12 @@ def raw_config(config_paths):
                 "workspace_path": str(config_paths["workspace_path"]),
                 "path": str(config_paths["group_path"]),
                 "default_integration": "claude-code",
+                "runtime": {
+                    "permissions": {
+                        "mode": "unrestricted",
+                        "rules": [{"tools": None}],
+                    },
+                },
                 "agents": [
                     {
                         "name": "builder",

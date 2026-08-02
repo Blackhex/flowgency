@@ -21,7 +21,7 @@ def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
     (tmp_path / "prompts").mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         (
-            "schema_version: 4\n"
+            "schema_version: 5\n"
             "agency:\n"
             "  title: Agency\n"
             "  default_group: ''\n"

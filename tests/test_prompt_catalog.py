@@ -27,7 +27,7 @@ def _write_config(tmp_path: Path, agents: list[dict]) -> Path:
     workspace.mkdir(parents=True, exist_ok=True)
     group_root.mkdir(parents=True, exist_ok=True)
     raw = {
-        "schema_version": 4,
+        "schema_version": 5,
         "agency": {
             "title": "Agency",
             "default_group": "reviewers",

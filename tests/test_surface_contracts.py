@@ -84,7 +84,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "agency": {
                     "title": "Agency",
                     "default_group": "newsletter",
