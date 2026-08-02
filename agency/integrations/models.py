@@ -8,17 +8,6 @@ from agency.projector_capabilities import ProjectorCapabilities
 
 PermissionMode = Literal["restricted", "unrestricted"]
 
-# Deprecated aliases kept until Tasks 3-7 clean up their call sites.
-PathPolicyMode = PermissionMode
-ToolPolicyMode = Literal["all", "allowlist", "none"]
-
-
-@dataclass(frozen=True)
-class ResolvedToolPolicy:
-    """Deprecated; kept for backward-compat imports until Tasks 3-7."""
-    mode: str
-    names: tuple[str, ...] = ()
-
 
 @dataclass(frozen=True)
 class ResolvedPermissionRule:
@@ -32,17 +21,6 @@ class EffectiveRuntimePolicy:
     timeout: int
     mode: PermissionMode = "unrestricted"
     rules: tuple[ResolvedPermissionRule, ...] = ()
-    # Deprecated fields kept for backward-compat until Tasks 3-7 update call sites.
-    sandbox_mode: str = "unrestricted"
-    sandbox_roots: tuple[Path, ...] = ()
-    tools: object = None
-    writable_roots: tuple[Path, ...] = ()
-    writes_narrowed: bool = False
-
-    @property
-    def narrows_writes(self) -> bool:
-        """Deprecated; whether this policy grants read but not write access."""
-        return self.writes_narrowed
 
     def tools_for(self, path: Path) -> tuple[str, ...] | None:
         """Tools permitted on `path`. None means every tool."""
@@ -117,13 +95,8 @@ def _under_launch(rule_path: Path, launch_dir: Path) -> bool:
 
 @dataclass(frozen=True)
 class RuntimeCapabilities:
-    # New fields for the permission model.
     permission_modes: frozenset[PermissionMode] = frozenset()
     path_scopable_tools: frozenset[str] = frozenset()
-    # Deprecated fields kept for backward-compat until Tasks 3-7 update integrations.
-    path_modes: frozenset[str] = frozenset()
-    tool_modes: frozenset[str] = frozenset()
-    enforces_write_boundary: bool = False
 
 
 @dataclass(frozen=True)

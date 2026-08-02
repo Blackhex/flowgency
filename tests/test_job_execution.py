@@ -247,6 +247,7 @@ def test_execute_job_waits_for_memory_before_starting_run(tmp_path, monkeypatch)
         timeout=30,
         sandbox_root=None,
         group_root=fixture.group_root,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
@@ -293,6 +294,7 @@ def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_pat
         timeout=30,
         sandbox_root=None,
         group_root=fixture.group_root,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
@@ -345,6 +347,7 @@ def test_execute_job_failed_run_keeps_canonical_memory_and_retains_stage(tmp_pat
         timeout=30,
         sandbox_root=None,
         group_root=fixture.group_root,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context", lambda ignored: context
@@ -376,6 +379,7 @@ def test_execute_job_releases_cache_pin_after_terminal_state(tmp_path, monkeypat
             timeout=30,
             sandbox_root=None,
             group_root=fixture.group_root,
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
         ),
     )
 
@@ -423,6 +427,7 @@ def test_execute_job_persists_execution_evidence_when_publication_failure_pre_fa
         timeout=30,
         sandbox_root=None,
         group_root=fixture.group_root,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
@@ -504,6 +509,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
         timeout=30,
         sandbox_root=None,
         group_root=tmp_path / "group",
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
@@ -547,7 +553,7 @@ def test_execute_job_preserves_historical_v3_selected_skill(tmp_path, monkeypatc
 
         def run(self, request: IntegrationRunRequest):
             seen["skill"] = request.skill
-            seen["sandbox_mode"] = request.runtime_policy.sandbox_mode
+            seen["mode"] = request.runtime_policy.mode
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
@@ -556,6 +562,7 @@ def test_execute_job_preserves_historical_v3_selected_skill(tmp_path, monkeypatc
         timeout=30,
         sandbox_root=None,
         group_root=tmp_path / "group",
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
@@ -565,7 +572,7 @@ def test_execute_job_preserves_historical_v3_selected_skill(tmp_path, monkeypatc
     result = execute_job(_authority(spec))
 
     assert result.status == "complete"
-    assert seen == {"skill": "daily-review", "sandbox_mode": "unrestricted"}
+    assert seen == {"skill": "daily-review", "mode": "unrestricted"}
 
 
 def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch):
@@ -588,7 +595,7 @@ def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch
 
         def run(self, request: IntegrationRunRequest):
             seen["skill"] = request.skill
-            seen["sandbox_mode"] = request.runtime_policy.sandbox_mode
+            seen["mode"] = request.runtime_policy.mode
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
@@ -597,6 +604,7 @@ def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch
         timeout=30,
         sandbox_root=None,
         group_root=tmp_path / "group",
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
@@ -606,7 +614,7 @@ def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch
     result = execute_job(_authority(spec))
 
     assert result.status == "complete"
-    assert seen == {"skill": None, "sandbox_mode": "unrestricted"}
+    assert seen == {"skill": None, "mode": "unrestricted"}
 
 
 def test_worker_projects_private_prompt_snapshot_without_rereading_source(
@@ -653,6 +661,7 @@ def test_worker_projects_private_prompt_snapshot_without_rereading_source(
     context = SimpleNamespace(
         workspace_root=Path(spec.workspace_root),
         group_root=Path(spec.group_root),
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
@@ -710,6 +719,7 @@ def test_worker_private_prompt_overlay_does_not_mutate_shared_cache_bytes(
     context = SimpleNamespace(
         workspace_root=Path(spec.workspace_root),
         group_root=Path(spec.group_root),
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
@@ -758,6 +768,7 @@ def test_worker_rejects_private_overlay_collision_with_shared_runtime(
     context = SimpleNamespace(
         workspace_root=Path(spec.workspace_root),
         group_root=Path(spec.group_root),
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
@@ -788,6 +799,7 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
             timeout=30,
             sandbox_root=None,
             group_root=tmp_path / "group",
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
         ),
     )
 
@@ -804,6 +816,7 @@ def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
         timeout=30,
         sandbox_root=None,
         group_root=tmp_path / "group",
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=SimpleNamespace(
             run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
         ),
@@ -841,6 +854,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
             timeout=30,
             sandbox_root=None,
             group_root=tmp_path / "group",
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(0, "done", "", 0.1)
             ),
@@ -864,6 +878,7 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
             timeout=30,
             sandbox_root=None,
             group_root=tmp_path / "group",
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(124, "partial", "timeout", 30.0)
             ),
@@ -892,6 +907,7 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
             timeout=30,
             sandbox_root=None,
             group_root=tmp_path / "group",
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(run=lambda request: minimal_result),
         ),
     )
@@ -919,6 +935,7 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
             timeout=30,
             sandbox_root=None,
             group_root=tmp_path / "group",
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(0, "done", "", 0.1)
             ),
@@ -950,6 +967,7 @@ def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeyp
             timeout=30,
             sandbox_root=None,
             group_root=tmp_path / "group",
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
             ),
@@ -990,6 +1008,7 @@ def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkey
         timeout=30,
         sandbox_root=None,
         group_root=tmp_path / "group",
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True)
     monkeypatch.setattr(
@@ -1046,6 +1065,7 @@ def test_execute_job_persists_session_id_from_successful_run(tmp_path, monkeypat
             timeout=30,
             sandbox_root=None,
             group_root=tmp_path / "group",
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
         ),
     )
 
@@ -1070,6 +1090,7 @@ def test_execute_job_persists_session_id_from_failed_run(tmp_path, monkeypatch):
         timeout=30,
         sandbox_root=None,
         group_root=fixture.group_root,
+        runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context", lambda ignored: context

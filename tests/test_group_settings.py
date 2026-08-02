@@ -83,8 +83,12 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     )
     raw["groups"]["newsletter"]["runtime"] = {
         "timeout": 2400,
-        "sandbox": {"mode": "restricted", "roots": [str(tmp_path / "repo-root")]},
-        "tools": {"mode": "allowlist", "names": ["shell"]},
+        "permissions": {
+            "mode": "restricted",
+            "rules": [
+                {"path": str(tmp_path / "repo-root"), "tools": ["shell"]},
+            ],
+        },
     }
     raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
     for agent in raw["groups"]["newsletter"].get("agents", []):
@@ -164,10 +168,7 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):
             "path": str(tmp_path / "groups" / "newsletter-state"),
             "default_integration": "claude-code",
             "runtime_timeout": "1800",
-            "sandbox_mode": "restricted",
-            "sandbox_roots": str(tmp_path / "repo-root"),
-            "tool_mode": "allowlist",
-            "tool_names": "shell",
+            "permission_mode": "restricted",
             "dispatch_enabled": "on",
             "workspaces_json": "[]",
         },

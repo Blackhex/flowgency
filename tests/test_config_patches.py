@@ -114,7 +114,7 @@ def test_patch_agent_profile_preserves_extension_keys(config_store):
         "emoji": "🤖",
         "nickname": "builder-bot",
     }
-    agent["capabilities"] = {"write": True, "approve": True}
+    agent["custom_extension"] = {"approve": True}
     snapshot.path.write_text(
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
@@ -152,8 +152,7 @@ def test_patch_group_settings_preserves_unowned_group_fields(config_store):
     snapshot.raw["groups"]["newsletter"]["ui_extension"] = {"theme": "sunset"}
     snapshot.raw["groups"]["newsletter"]["runtime"] = {
         "timeout": 2400,
-        "sandbox": {"mode": "unrestricted"},
-        "tools": {"mode": "all"},
+        "permissions": {"mode": "unrestricted"},
     }
     snapshot.path.write_text(
         yaml.safe_dump(snapshot.raw, sort_keys=False),
@@ -203,8 +202,10 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
     snapshot.raw["groups"]["newsletter"]["runtime"] = {
         "timeout": 1200,
         "runtime_extension": {"preserve": True},
-        "sandbox": {"mode": "restricted", "roots": ["shared-root"], "sandbox_extension": {"preserve": True}},
-        "tools": {"mode": "allowlist", "names": ["shell"], "tools_extension": {"preserve": True}},
+        "permissions": {
+            "mode": "restricted",
+            "rules": [{"path": "shared-root", "tools": ["shell"]}],
+        },
     }
     snapshot.raw["groups"]["newsletter"]["dispatch"] = {
         "enabled": False,
@@ -257,8 +258,6 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
     assert group["path"] == str(refreshed.path.parent / "groups" / "editorial")
     assert group["group_extension"] == {"theme": "sunset"}
     assert group["runtime"]["runtime_extension"] == {"preserve": True}
-    assert group["runtime"]["sandbox"]["sandbox_extension"] == {"preserve": True}
-    assert group["runtime"]["tools"]["tools_extension"] == {"preserve": True}
     assert group["workspaces"][0]["workspace_extension"] == {"preserve": True}
 
 

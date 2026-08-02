@@ -426,8 +426,15 @@ class CopilotIntegration(BaseIntegration):
         )
         cmd = self.require_executable()
 
-        roots = request.runtime_policy.sandbox_roots
-        tools = request.runtime_policy.tools
+        policy = request.runtime_policy
+        roots = [rule.path for rule in policy.rules if rule.path is not None]
+        explicit_tools: set[str] = set()
+        all_tools = False
+        for rule in policy.rules:
+            if rule.tools is None:
+                all_tools = True
+            else:
+                explicit_tools.update(rule.tools)
 
         cmd_args = [
             cmd, "-p", prompt_text,
@@ -443,8 +450,10 @@ class CopilotIntegration(BaseIntegration):
         else:
             cmd_args += ["--allow-all-paths"]
 
-        if tools.mode == "allowlist":
-            for t in tools.names:
+        if all_tools or policy.mode == "unrestricted":
+            cmd_args += ["--allow-all-tools", "--autopilot"]
+        elif explicit_tools:
+            for t in sorted(explicit_tools):
                 cmd_args += ["--allow-tool", t]
         else:
             cmd_args += ["--allow-all-tools", "--autopilot"]

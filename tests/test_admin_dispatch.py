@@ -68,11 +68,12 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
                 "default_integration": "copilot",
                 "runtime": {
                     "timeout": 1800,
-                    "sandbox": {
+                    "permissions": {
                         "mode": "restricted",
-                        "roots": [str(paths.workspace_root)],
+                        "rules": [
+                            {"path": str(paths.workspace_root), "tools": ["shell"]},
+                        ],
                     },
-                    "tools": {"mode": "allowlist", "names": ["shell"]},
                 },
                 "agents": [
                     {
