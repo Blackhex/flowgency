@@ -64,8 +64,7 @@ def test_validate_run_rejects_execution(tmp_path):
     issues = integration.validate_run(request)
 
     assert [issue.code for issue in issues] == [
-        "unsupported-path-policy",
-        "unsupported-tool-policy",
+        "unsupported-permission-mode",
         "integration-not-executable",
     ]
 
@@ -91,7 +90,6 @@ def test_run_raises_validation_failed_before_fabricating_result(tmp_path):
         integration.run(request)
 
     assert [issue.code for issue in excinfo.value.issues] == [
-        "unsupported-path-policy",
-        "unsupported-tool-policy",
+        "unsupported-permission-mode",
         "integration-not-executable",
     ]

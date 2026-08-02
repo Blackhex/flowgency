@@ -42,7 +42,7 @@ def build_setup_prompt(
         "By default derive agency.agent_library as <root>/agent-library, "
         "agency.compilation_cache as <root>/compiled-agents, agency.memory_store as "
         "<root>/memory, agency.prompt_store as <root>/prompts, and groups.<group-id>.path as <root>/groups/<group-id>. "
-        "Configure schema_version: 4. For every group, set workspace_path to the project "
+        "Configure schema_version: 5. For every group, set workspace_path to the project "
         "execution workspace and path to a disjoint Agency-owned group root. "
         "Never create or reference a project-local shared directory. "
         "After the group ID is approved, ask `Customize the derived storage paths?` once. "

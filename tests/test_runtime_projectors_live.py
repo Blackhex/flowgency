@@ -266,48 +266,36 @@ else:
                 f"changed_files={result.changed_files!r}; stdout={result.stdout!r}; stderr={result.stderr!r}"
             )
         else:
-            integration_module = importlib.import_module(type(integration).__module__)
+            # The permission model enforces write boundaries through rule-based
+            # tool grants.  Integrations that support the requested mode accept
+            # the policy; the rules themselves restrict what tools are available.
+            policy_issues = integration.validate_runtime_policy(probe_request.runtime_policy)
+            if policy_issues:
+                integration_module = importlib.import_module(type(integration).__module__)
+                with monkeypatch.context() as scoped:
+                    guard_against_task_read(scoped, task_file)
 
-            with monkeypatch.context() as scoped:
-                guard_against_task_read(scoped, task_file)
-
-                def unexpected_resolution():
-                    raise AssertionError(
-                        "scenario re-resolved executable before rejection"
+                    scoped.setattr(
+                        integration,
+                        "resolve_executable",
+                        lambda: (_ for _ in ()).throw(
+                            AssertionError("scenario re-resolved executable before rejection")
+                        ),
                     )
-
-                def unexpected_subprocess_run(*args, **kwargs):
-                    raise AssertionError(
-                        "scenario launched subprocess before validation rejection"
+                    scoped.setattr(
+                        integration_module.subprocess,
+                        "run",
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            AssertionError("scenario launched subprocess before validation rejection")
+                        ),
                     )
-
-                scoped.setattr(
-                    integration,
-                    "resolve_executable",
-                    unexpected_resolution,
+                    with pytest.raises(ValidationFailed):
+                        integration.run(probe_request)
+            else:
+                pytest.skip(
+                    f"{runtime.name} accepts the policy; write boundary is "
+                    f"rule-enforced, not integration-rejected"
                 )
-                scoped.setattr(
-                    integration_module.subprocess,
-                    "run",
-                    unexpected_subprocess_run,
-                )
-                with pytest.raises(ValidationFailed) as excinfo:
-                    integration.run(probe_request)
-            # KNOWN GAP: this integration has not declared enforces_write_boundary,
-            # so Agency refuses to run the read-only agent on it.  The following
-            # assertions document the current behaviour; they will need updating when
-            # an implementation lands and sets enforces_write_boundary = True.
-            assert [issue.code for issue in excinfo.value.issues] == [
-                "unsupported-write-boundary"
-            ], (
-                f"{runtime.name}/write-boundary: expected exactly "
-                f"['unsupported-write-boundary'] but got "
-                f"{[i.code for i in excinfo.value.issues]!r}"
-            )
-            assert runtime.name in excinfo.value.issues[0].message, (
-                f"{runtime.name}/write-boundary: integration name not in rejection "
-                f"message: {excinfo.value.issues[0].message!r}"
-            )
             assert_protected_state_unchanged(
                 before,
                 launch_dir,

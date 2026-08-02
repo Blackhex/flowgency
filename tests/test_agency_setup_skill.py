@@ -61,8 +61,7 @@ def test_setup_registers_explicit_instances_routines_and_memory():
     assert "scope: agent" in skill
     assert "scope: routine" in skill
     assert "scope: channel" in skill
-    assert "additional_roots" in skill
-    assert "complete override" in skill
+    assert "rules:" in skill
     assert "dispatch.agents" not in skill
 
 

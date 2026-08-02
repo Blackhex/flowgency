@@ -941,6 +941,25 @@ def _prepare_runtime(runtime: Any, base_path: Path | None) -> dict[str, Any]:
     return runtime_entry
 
 
+def _resolve_permission_paths(runtime_entry: dict[str, Any], config_dir: Path) -> None:
+    """Resolve relative rule paths in permissions against config_dir."""
+    permissions = runtime_entry.get("permissions")
+    if not _is_mapping(permissions):
+        return
+    permissions = dict(permissions)
+    rules = permissions.get("rules")
+    if rules is None:
+        return
+    resolved_rules = []
+    for rule in rules:
+        rule = dict(rule) if _is_mapping(rule) else {}
+        if rule.get("path") is not None:
+            rule["path"] = _path_from_config(rule["path"], config_dir)
+        resolved_rules.append(rule)
+    permissions["rules"] = resolved_rules
+    runtime_entry["permissions"] = permissions
+
+
 def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]:
     config_dir = config_path.parent.resolve()
     prepared = dict(raw)
@@ -974,6 +993,7 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
         resolved_group["runtime"] = _prepare_runtime(
             resolved_group.get("runtime") or {}, workspace_root
         )
+        _resolve_permission_paths(resolved_group["runtime"], config_dir)
         agents = {}
         for agent in resolved_group.get("agents") or []:
             if not isinstance(agent, dict):
@@ -985,6 +1005,7 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
             agent_entry["runtime"] = _prepare_runtime(
                 agent_entry.get("runtime") or {}, workspace_root
             )
+            _resolve_permission_paths(agent_entry["runtime"], config_dir)
             if agent_entry.get("prompts") is not None:
                 agent_entry["prompts"] = tuple(agent_entry.get("prompts") or ())
             if agent_entry.get("routines") is not None:

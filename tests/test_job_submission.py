@@ -340,7 +340,7 @@ def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_pat
         "        mode: restricted\n"
         "        rules:\n"
         "          - path: workspaces/newsletter/repo\n"
-        "            tools: [shell, write]\n"
+        "            tools: [read, search, write]\n"
         "    agents:\n"
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
@@ -410,8 +410,8 @@ class FakeIntegration(BaseIntegration):
     supports_execution = True
     projector = _projector()
     runtime_capabilities = RuntimeCapabilities(
-        path_modes=frozenset({"restricted", "unrestricted"}),
-        tool_modes=frozenset({"allowlist", "all"}),
+        permission_modes=frozenset({"restricted", "unrestricted"}),
+        path_scopable_tools=frozenset({"read", "search", "write", "shell"}),
     )
 
     def identity_filename(self) -> str:
@@ -480,7 +480,7 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "    path: agents/newsletter\n"
         "    default_integration: copilot\n"
         f"    runtime:\n      timeout: {timeout}\n"
-        "      permissions:\n        mode: restricted\n        rules:\n          - path: workspaces/newsletter/repo\n            tools: [shell, write]\n"
+        "      permissions:\n        mode: restricted\n        rules:\n          - tools: [read, search, write]\n          - path: workspaces/newsletter/repo\n            tools: [read, search, write]\n"
         "    agents:\n"
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
@@ -551,10 +551,10 @@ def test_submit_request_persists_validated_current_snapshot(tmp_path):
     assert record.spec.group_root == str((tmp_path / "agents" / "newsletter").resolve())
     assert not hasattr(record.spec, "agent_dir")
     assert not hasattr(record.spec, "workspace_path")
-    assert record.spec.runtime_policy.sandbox_roots == (
-        str((tmp_path / "workspaces" / "newsletter").resolve()),
-        str((tmp_path / "agents" / "newsletter").resolve()),
-        str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()),
+    assert record.spec.runtime_policy.rules == (
+        {"path": None, "tools": ["read", "search", "write"]},
+        {"path": str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()), "tools": ["read", "search", "write"]},
+        {"path": str((tmp_path / "workspaces" / "newsletter").resolve()), "tools": ["read", "search", "write"]},
     )
     assert record.spec.skill is None
     assert record.spec.routine_id == "daily-review"
@@ -763,10 +763,10 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
     assert spec.group_root == str((tmp_path / "agents" / "newsletter").resolve())
     assert not hasattr(spec, "agent_dir")
     assert not hasattr(spec, "workspace_path")
-    assert spec.runtime_policy.sandbox_roots == (
-        str((tmp_path / "workspaces" / "newsletter").resolve()),
-        str((tmp_path / "agents" / "newsletter").resolve()),
-        str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()),
+    assert spec.runtime_policy.rules == (
+        {"path": None, "tools": ["read", "search", "write"]},
+        {"path": str((tmp_path / "workspaces" / "newsletter" / "repo").resolve()), "tools": ["read", "search", "write"]},
+        {"path": str((tmp_path / "workspaces" / "newsletter").resolve()), "tools": ["read", "search", "write"]},
     )
     assert spec.skill_arguments == ()
     expected_base = build_prompt_task_input(
@@ -1140,11 +1140,11 @@ def test_ad_hoc_prompt_task_input_carries_the_reporting_protocol(tmp_path):
 
 
 def test_reporting_protocol_reports_the_granted_tool_policy(tmp_path):
-    """`_write_config` grants `allowlist [shell, write]` to the builder agent."""
+    """`_write_config` grants allowlist [read, search, write] via the pathless rule."""
     spec = _resolve(tmp_path, trigger="decision", task_input="Decide.")
 
-    assert spec.runtime_policy.tool_mode == "allowlist"
-    assert "shell, write" in spec.task_input
+    assert spec.runtime_policy.mode == "restricted"
+    assert "read, search, write" in spec.task_input
 
 
 def test_resolve_snapshots_the_writable_agent_set(tmp_path):
@@ -1206,8 +1206,13 @@ def _pool_config(tmp_path, *, pool=1):
                 "default_integration": "copilot",
                 "runtime": {
                     "timeout": 1800,
-                    "sandbox": {"mode": "restricted", "roots": ["repo"]},
-                    "tools": {"mode": "allowlist", "names": ["shell", "write"]},
+                    "permissions": {
+                        "mode": "restricted",
+                        "rules": [
+                            {"tools": ["read", "search", "write"]},
+                            {"path": str(workspace / "repo"), "tools": ["read", "search", "write"]},
+                        ],
+                    },
                 },
                 "agents": [
                     {
@@ -1215,7 +1220,13 @@ def _pool_config(tmp_path, *, pool=1):
                         "blueprint": "builder-blueprint",
                         "integration": "copilot",
                         "integration_config": {"command": "echo ok"},
-                        "capabilities": {"write": True},
+                        "runtime": {
+                            "permissions": {
+                                "rules": [
+                                    {"path": str(workspace), "tools": ["read", "search", "write"]},
+                                ],
+                            },
+                        },
                         "default_memory": {"scope": "agent"},
                         "routines": [
                             {

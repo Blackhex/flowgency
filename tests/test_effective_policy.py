@@ -1,201 +1,247 @@
+"""Tests for effective runtime policy resolution under the permission model."""
+
 from pathlib import Path
 
 import pytest
 
+from agency.configuration import parse_config
+from agency.configuration.effective import resolve_effective_policy
+from agency.configuration.issues import ValidationFailed
+from agency.integrations import BaseIntegration
+from agency.integrations.models import RuntimeCapabilities
 
-def test_agent_roots_are_additive_and_ordered(raw_config, config_paths):
-    from agency.configuration import parse_config
-    from agency.configuration.effective import resolve_effective_policy
 
-    group = raw_config["groups"]["newsletter"]
-    group["path"] = "C:/Projects/newsletter"
-    group["runtime"] = {
-        "sandbox": {
-            "mode": "restricted",
-            "roots": ["C:/Projects/newsletter", "C:/projects/newsletter", "C:/Shared/research"],
-        }
-    }
-    agent = group["agents"][0]
-    agent["name"] = "advisor"
-    agent["integration"] = "copilot"
-    agent["capabilities"] = {"write": True}
-    agent["runtime"] = {
-        "sandbox": {
-            "mode": "restricted",
-            "additional_roots": ["C:/Research/editorial", "c:/Research/RESEARCH"],
-        }
-    }
-
-    parsed = parse_config(raw_config, config_paths["config_path"])
-
-    policy = resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
-
-    assert policy.sandbox_mode == "restricted"
-    assert policy.sandbox_roots == (
-        config_paths["workspace_path"].resolve(strict=False),
-        Path("C:/Projects/newsletter").resolve(strict=False),
-        Path("C:/Shared/research").resolve(strict=False),
-        Path("C:/Research/editorial").resolve(strict=False),
-        Path("C:/Research/RESEARCH").resolve(strict=False),
+class _PermissiveIntegration(BaseIntegration):
+    name = "copilot"
+    display_name = "Copilot"
+    supports_execution = True
+    runtime_capabilities = RuntimeCapabilities(
+        permission_modes=frozenset({"restricted", "unrestricted"}),
+        path_scopable_tools=frozenset({"read", "search", "write", "shell"}),
     )
 
+    def identity_filename(self) -> str:
+        return "AGENTS.md"
 
-def test_restricted_policy_starts_with_workspace_and_group_roots(
-    raw_config,
-    config_paths,
-):
-    from agency.configuration import parse_config
-    from agency.configuration.effective import resolve_effective_policy
+    def parse_identity(self, agent_dir: Path):
+        return None
 
-    extra = config_paths["config_dir"] / "research"
-    extra.mkdir()
+    def write_identity(self, agent_dir: Path, identity):
+        raise NotImplementedError
+
+    def run(self, request):
+        raise NotImplementedError
+
+
+_INTEGRATION = _PermissiveIntegration()
+
+
+def test_group_rules_are_present_in_effective_policy(raw_config, config_paths):
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
     group = raw_config["groups"]["newsletter"]
     group["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": [str(extra)]}
+        "permissions": {
+            "mode": "restricted",
+            "rules": [
+                {"path": ws, "tools": ["read", "search"]},
+            ],
+        },
     }
     group["agents"][0]["integration"] = "copilot"
-    group["agents"][0]["capabilities"] = {"write": True}
 
-    config = parse_config(raw_config, config_paths["config_path"]).resolved
-
-    policy = resolve_effective_policy(config, "newsletter", "builder")
-
-    assert policy.sandbox_roots[:2] == (
-        config.groups["newsletter"].workspace_path.resolve(strict=False),
-        config.groups["newsletter"].path.resolve(strict=False),
+    parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
     )
-    assert policy.sandbox_roots[2:] == (extra.resolve(),)
+
+    assert policy.mode == "restricted"
+    assert len(policy.rules) == 1
+    assert policy.rules[0].tools == ("read", "search")
 
 
-def test_unrestricted_policy_has_no_root_list(raw_config, config_paths):
-    from agency.configuration import parse_config
-    from agency.configuration.effective import resolve_effective_policy
-
-    raw_config["groups"]["newsletter"]["agents"][0]["integration"] = "copilot"
-    raw_config["groups"]["newsletter"]["agents"][0]["capabilities"] = {"write": True}
-    config = parse_config(raw_config, config_paths["config_path"]).resolved
-
-    policy = resolve_effective_policy(config, "newsletter", "builder")
-
-    assert policy.sandbox_mode == "unrestricted"
-    assert policy.sandbox_roots == ()
-
-
-def test_agent_tool_policy_replaces_group(raw_config, config_paths):
-    from agency.configuration import parse_config
-    from agency.configuration.effective import resolve_effective_policy
-
+def test_agent_rules_are_additive_to_group(raw_config, config_paths):
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
     group = raw_config["groups"]["newsletter"]
     group["runtime"] = {
-        "tools": {
-            "mode": "allowlist",
-            "names": ["read", "search"],
-        }
+        "permissions": {
+            "mode": "restricted",
+            "rules": [
+                {"path": ws, "tools": ["read"]},
+            ],
+        },
     }
     agent = group["agents"][0]
-    agent["name"] = "advisor"
     agent["integration"] = "copilot"
-    agent["capabilities"] = {"write": True}
     agent["runtime"] = {
-        "tools": {
-            "mode": "allowlist",
-            "names": ["read", "search", "write"],
-        }
+        "permissions": {
+            "rules": [
+                {"path": ws, "tools": ["write"]},
+            ],
+        },
     }
 
     parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
 
-    policy = resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
+    # Same path: tools are unioned.
+    assert len(policy.rules) == 1
+    assert set(policy.rules[0].tools) == {"read", "write"}
 
-    assert policy.tools.mode == "allowlist"
-    assert policy.tools.names == ("read", "search", "write")
 
-
-def test_agent_omits_tools_and_inherits_group(raw_config, config_paths):
-    from agency.configuration import parse_config
-    from agency.configuration.effective import resolve_effective_policy
-
+def test_distinct_paths_remain_separate_rules(raw_config, config_paths):
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    other = str(config_paths["config_dir"] / "other")
+    (config_paths["config_dir"] / "other").mkdir(exist_ok=True)
     group = raw_config["groups"]["newsletter"]
     group["runtime"] = {
-        "tools": {
-            "mode": "allowlist",
-            "names": ["read", "search"],
-        }
+        "permissions": {
+            "mode": "restricted",
+            "rules": [
+                {"path": ws, "tools": ["read"]},
+            ],
+        },
     }
     agent = group["agents"][0]
-    agent["name"] = "advisor"
     agent["integration"] = "copilot"
-    agent["capabilities"] = {"write": True}
+    agent["runtime"] = {
+        "permissions": {
+            "rules": [
+                {"path": other, "tools": ["write"]},
+            ],
+        },
+    }
 
     parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
 
-    policy = resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
+    assert len(policy.rules) == 2
 
-    assert policy.tools.mode == "allowlist"
-    assert policy.tools.names == ("read", "search")
+
+def test_unrestricted_policy_has_empty_rules_by_default(raw_config, config_paths):
+    group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {
+        "permissions": {"mode": "unrestricted"},
+    }
+    group["agents"][0]["integration"] = "copilot"
+
+    parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
+
+    assert policy.mode == "unrestricted"
+    assert policy.rules == ()
 
 
 def test_timeout_override_precedence_is_job_then_agent_then_group(raw_config, config_paths):
-    from agency.configuration import parse_config
-    from agency.configuration.effective import resolve_effective_policy
-
     group = raw_config["groups"]["newsletter"]
-    group["runtime"] = {"timeout": 900}
+    group["runtime"] = {"timeout": 900, "permissions": {"mode": "unrestricted"}}
     agent = group["agents"][0]
-    agent["name"] = "advisor"
     agent["integration"] = "copilot"
-    agent["capabilities"] = {"write": True}
     agent["runtime"] = {"timeout": 1200}
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
-    inherited = resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
-    overridden = resolve_effective_policy(parsed.resolved, "newsletter", "advisor", timeout_override=1800)
+    inherited = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
+    overridden = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder",
+        timeout_override=1800, integration=_INTEGRATION
+    )
 
     assert inherited.timeout == 1200
     assert overridden.timeout == 1800
 
 
-def test_agent_additional_roots_cannot_make_unrestricted_policy_ambiguous(raw_config, config_paths):
-    from agency.configuration import parse_config
-    from agency.configuration import ValidationFailed
-    from agency.configuration.effective import resolve_effective_policy
-
+def test_mode_inherits_from_group_when_agent_omits(raw_config, config_paths):
     group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {"permissions": {"mode": "restricted"}}
+    group["agents"][0]["integration"] = "copilot"
+
+    parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
+
+    assert policy.mode == "restricted"
+
+
+def test_agent_mode_overrides_group(raw_config, config_paths):
+    group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {"permissions": {"mode": "restricted"}}
     agent = group["agents"][0]
-    agent["name"] = "advisor"
+    agent["integration"] = "copilot"
+    agent["runtime"] = {"permissions": {"mode": "unrestricted"}}
+
+    parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
+
+    assert policy.mode == "unrestricted"
+
+
+def test_pathless_rule_tools_union(raw_config, config_paths):
+    group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {
+        "permissions": {
+            "mode": "restricted",
+            "rules": [{"tools": ["read"]}],
+        },
+    }
+    agent = group["agents"][0]
     agent["integration"] = "copilot"
     agent["runtime"] = {
-        "sandbox": {
-            "additional_roots": ["C:/Research/editorial"],
-        }
+        "permissions": {"rules": [{"tools": ["write"]}]},
     }
 
     parsed = parse_config(raw_config, config_paths["config_path"])
+    policy = resolve_effective_policy(
+        parsed.resolved, "newsletter", "builder", integration=_INTEGRATION
+    )
 
-    with pytest.raises(ValidationFailed) as excinfo:
-        resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
-
-    assert len(excinfo.value.issues) == 1
-    issue = excinfo.value.issues[0]
-    assert issue.code == "sandbox-contradiction"
-    assert issue.scope == "groups.newsletter.agents.advisor"
-    assert issue.field == "runtime.sandbox.additional_roots"
-    assert issue.message == "Unrestricted sandbox cannot add roots."
-    assert issue.corrective_hint == "Remove additional roots or switch to restricted mode."
+    pathless = [r for r in policy.rules if r.path is None]
+    assert len(pathless) == 1
+    assert set(pathless[0].tools) == {"read", "write"}
 
 
-def test_unknown_integration_fails_closed(raw_config, config_paths):
-    from agency.configuration import ValidationFailed, parse_config
-    from agency.configuration.effective import resolve_effective_policy
+def test_unsupported_mode_raises_validation_failed(raw_config, config_paths):
+    """An integration that doesn't support restricted rejects the policy."""
 
-    agent = raw_config["groups"]["newsletter"]["agents"][0]
-    agent["name"] = "advisor"
-    agent["integration"] = "missing-runtime"
+    class _UnrestrictedOnly(BaseIntegration):
+        name = "limited"
+        display_name = "Limited"
+        supports_execution = True
+        runtime_capabilities = RuntimeCapabilities(
+            permission_modes=frozenset({"unrestricted"}),
+        )
+
+        def identity_filename(self):
+            return "AGENTS.md"
+
+        def parse_identity(self, agent_dir):
+            return None
+
+        def write_identity(self, agent_dir, identity):
+            raise NotImplementedError
+
+        def run(self, request):
+            raise NotImplementedError
+
+    group = raw_config["groups"]["newsletter"]
+    group["runtime"] = {"permissions": {"mode": "restricted"}}
+    group["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
     with pytest.raises(ValidationFailed) as excinfo:
-        resolve_effective_policy(parsed.resolved, "newsletter", "advisor")
+        resolve_effective_policy(
+            parsed.resolved, "newsletter", "builder", integration=_UnrestrictedOnly()
+        )
 
-    assert {issue.code for issue in excinfo.value.issues} == {"unknown-integration"}
+    assert any(i.code == "unsupported-permission-mode" for i in excinfo.value.issues)

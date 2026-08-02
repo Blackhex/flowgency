@@ -666,6 +666,7 @@ def test_worker_projects_private_prompt_snapshot_without_rereading_source(
     projected = (
         path.with_suffix("")
         / "launch"
+        / "instructions"
         / ".github"
         / "prompts"
         / "local-triage.prompt.md"
@@ -676,7 +677,7 @@ def test_worker_projects_private_prompt_snapshot_without_rereading_source(
     assert b"Original private task." in payload
     assert b"Changed after submission." not in payload
     assert not (
-        path.with_suffix("") / "launch" / ".github" / "prompts" / "private-debug.prompt.md"
+        path.with_suffix("") / "launch" / "instructions" / ".github" / "prompts" / "private-debug.prompt.md"
     ).exists()
 
 

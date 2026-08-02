@@ -29,7 +29,10 @@ def _resolved_config(tmp_path: Path, raw_config: dict):
     group["workspace_path"] = str(workspace)
     group["path"] = str(tmp_path / "groups" / "newsletter")
     group["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": [str(restricted)]}
+        "permissions": {
+            "mode": "restricted",
+            "rules": [{"path": str(restricted), "tools": ["read"]}],
+        }
     }
     return raw, parse_config(raw, tmp_path / "config.yaml").resolved
 
@@ -85,14 +88,14 @@ def test_missing_or_non_directory_group_workspace_path_fails_closed(tmp_path, ra
 
 def test_missing_restricted_root_fails_closed(tmp_path, raw_config):
     raw, _ = _resolved_config(tmp_path, raw_config)
-    raw["groups"]["newsletter"]["runtime"]["sandbox"]["roots"] = [
-        str(tmp_path / "missing-root")
+    raw["groups"]["newsletter"]["runtime"]["permissions"]["rules"] = [
+        {"path": str(tmp_path / "missing-root"), "tools": ["read"]}
     ]
     config = parse_config(raw, tmp_path / "config.yaml").resolved
 
     issues = validate_resolved_paths(config)
 
-    assert any(issue.code == "invalid-sandbox-root" for issue in issues)
+    assert any(issue.code == "invalid-permission-path" for issue in issues)
 
 
 @pytest.mark.parametrize("control_is_ancestor", [True, False])

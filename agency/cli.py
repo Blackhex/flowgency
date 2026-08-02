@@ -314,11 +314,14 @@ def _memory_label(selector: MemorySelector | None, channels) -> str:
 def _policy_payload(policy) -> dict[str, Any]:
     return {
         "timeout": policy.timeout,
-        "sandbox": {
-            "mode": policy.sandbox_mode,
-            "roots": [str(path).replace("\\", "/") for path in policy.sandbox_roots],
-        },
-        "tools": {"mode": policy.tools.mode, "names": list(policy.tools.names)},
+        "mode": policy.mode,
+        "rules": [
+            {
+                "path": str(rule.path).replace("\\", "/") if rule.path else None,
+                "tools": list(rule.tools) if rule.tools is not None else None,
+            }
+            for rule in policy.rules
+        ],
     }
 
 

@@ -74,11 +74,9 @@ def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_inp
             "integration_config": {"model": "gpt-5"},
             "prompts": [],
             "identity": {"display_name": "", "title": "", "emoji": ""},
-            "capabilities": {"write": False},
             "runtime": {
                 "timeout": 1800,
-                "sandbox": {"mode": "unrestricted", "additional_roots": []},
-                "tools": {"mode": "all", "names": []},
+                "permissions": {"mode": "unrestricted", "rules": []},
             },
             "default_memory": None,
             "routines": [],

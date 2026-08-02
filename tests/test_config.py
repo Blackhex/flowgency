@@ -18,20 +18,11 @@ def test_parse_config_accepts_canonical_root(raw_config, config_paths):
 
     assert parsed.raw == raw_config
     assert parsed.resolved.agency.title == "Agency"
-    assert parsed.resolved.schema_version == 4
+    assert parsed.resolved.schema_version == 5
 
 
-def test_schema_four_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
+def test_schema_five_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
     from agency.configuration.models import PromptSelector, parse_config
-
-    raw_config["schema_version"] = 4
-    raw_config["agency"]["prompt_store"] = str(config_paths["prompt_store"])
-    raw_config["groups"]["newsletter"]["agents"][0]["routines"][0] = {
-        "id": "daily-review",
-        "prompt": {"scope": "blueprint", "name": "daily-review"},
-        "schedule": {"at": "09:00"},
-        "memory": {"scope": "routine"},
-    }
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
@@ -40,32 +31,25 @@ def test_schema_four_requires_prompt_store_and_scoped_routine(raw_config, config
     assert not hasattr(routine, "skill")
 
 
-def test_schema_three_is_rejected_with_fresh_v4_hint(raw_config, config_paths):
+def test_schema_four_is_rejected_with_migrate_hint(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
-    raw_config["schema_version"] = 3
-    raw_config["agency"]["prompt_store"] = str(config_paths["prompt_store"])
-    raw_config["groups"]["newsletter"]["agents"][0]["routines"][0] = {
-        "id": "daily-review",
-        "prompt": {"scope": "blueprint", "name": "daily-review"},
-        "schedule": {"at": "09:00"},
-        "memory": {"scope": "routine"},
-    }
+    raw_config["schema_version"] = 4
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
 
     assert excinfo.value.issues[0].code == "unsupported-schema-version"
-    assert "schema_version: 5" in excinfo.value.issues[0].corrective_hint
+    assert "migrate" in excinfo.value.issues[0].corrective_hint
 
 
-def test_parse_config_requires_schema_version_four(raw_config, config_paths):
+def test_parse_config_requires_schema_version_five(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.resolved.schema_version == 4
+    assert parsed.resolved.schema_version == 5
 
-    for value in (None, 1, 2, 3):
+    for value in (None, 1, 2, 3, 4):
         candidate = _clone_config(raw_config)
         if value is None:
             candidate.pop("schema_version")
@@ -83,8 +67,7 @@ def test_current_defaults_are_explicit(raw_config, config_paths):
 
     assert parsed.agency.dispatch.interval == 15
     assert group.runtime.timeout == 1800
-    assert group.runtime.sandbox.mode == "unrestricted"
-    assert group.runtime.tools.mode == "all"
+    assert group.runtime.permissions.mode == "unrestricted"
     assert group.dispatch.enabled is False
 
 
@@ -511,33 +494,35 @@ def test_validates_group_sandbox_semantics(raw_config, config_paths):
     assert any(issue.code == "sandbox-contradiction" and issue.field == "runtime.sandbox.roots" for issue in excinfo.value.issues)
 
 
-def test_accepts_restricted_group_roots(raw_config, config_paths):
+def test_accepts_restricted_group_permissions(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
     raw_config["groups"]["newsletter"]["runtime"] = {
-        "sandbox": {"mode": "restricted", "roots": ["editorial"]}
+        "permissions": {"mode": "restricted", "rules": [{"tools": ["read"]}]}
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
     assert not any(issue.code == "invalid-field-shape" for issue in issues)
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.groups["newsletter"].runtime.sandbox.mode == "restricted"
-    assert parsed.groups["newsletter"].runtime.sandbox.roots[0].name == "editorial"
+    assert parsed.groups["newsletter"].runtime.permissions.mode == "restricted"
+    assert parsed.groups["newsletter"].runtime.permissions.rules[0].tools == ("read",)
 
 
-def test_accepts_agent_additions(raw_config, config_paths):
+def test_accepts_agent_permission_rules(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
+    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
     raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
-        "sandbox": {"mode": "restricted", "additional_roots": ["tmp"]}
+        "permissions": {"rules": [{"path": ws, "tools": ["read", "write"]}]}
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
     assert not any(issue.code == "invalid-field-shape" for issue in issues)
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.groups["newsletter"].agents["builder"].runtime.sandbox.additional_roots[0].name == "tmp"
+    rule = parsed.groups["newsletter"].agents["builder"].runtime.permissions.rules[0]
+    assert rule.tools == ("read", "write")
 
 
 def test_rejects_channel_memory_reference_without_channel(raw_config, config_paths):

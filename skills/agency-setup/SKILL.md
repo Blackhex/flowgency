@@ -65,7 +65,7 @@ Upsert one group whose `workspace_path` points to the project workspace and whos
 Use this canonical shape:
 
 ```yaml
-schema_version: 4
+schema_version: 5
 agency:
   title: Agency
   default_group: example
@@ -88,12 +88,11 @@ groups:
     default_integration: copilot
     runtime:
       timeout: 1800
-      sandbox:
+      permissions:
         mode: restricted
-        roots: [C:/Projects/example]
-      tools:
-        mode: allowlist
-        names: [read, search]
+        rules:
+          - path: C:/Projects/example
+            tools: [read, search]
     dispatch:
       enabled: true
     agents:
@@ -103,14 +102,11 @@ groups:
         identity:
           display_name: Builder
           title: Implementation Lead
-        capabilities:
-          write: true
         runtime:
-          sandbox:
-            additional_roots: []
-          tools:
-            mode: allowlist
-            names: [read, search, write]
+          permissions:
+            rules:
+              - path: C:/Projects/example
+                tools: [read, search, write]
         default_memory:
           scope: agent
         routines:
@@ -134,8 +130,6 @@ groups:
       - name: advisor
         blueprint: advisor
         integration: copilot
-        capabilities:
-          write: false
     workspaces:
       - name: Main workspace
         type: ide

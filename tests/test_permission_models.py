@@ -66,7 +66,7 @@ def test_schema_version_four_is_rejected(config_paths):
     from agency.configuration.models import parse_config
 
     raw = {
-        "schema_version": 5,
+        "schema_version": 4,
         "agency": {
             "agent_library": str(config_paths["agent_library"]),
             "compilation_cache": str(config_paths["compilation_cache"]),
@@ -106,7 +106,7 @@ def test_unsupported_schema_version_hint_mentions_migrate(config_paths):
     from agency.configuration.models import parse_config
 
     raw = {
-        "schema_version": 5,
+        "schema_version": 4,
         "agency": {
             "agent_library": str(config_paths["agent_library"]),
             "compilation_cache": str(config_paths["compilation_cache"]),
