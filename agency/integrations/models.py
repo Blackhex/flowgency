@@ -8,6 +8,14 @@ from agency.projector_capabilities import ProjectorCapabilities
 
 PermissionMode = Literal["restricted", "unrestricted"]
 
+ANY_TOOL = "*"
+"""Stands in for a per-path difference that no tool name can express.
+
+An unbounded grant (``tools`` omitted) on one region beside a bounded one on
+another differs across the integration's entire tool vocabulary, which this
+model cannot enumerate.
+"""
+
 
 @dataclass(frozen=True)
 class ResolvedPermissionRule:
@@ -67,7 +75,7 @@ class EffectiveRuntimePolicy:
         # When an unbounded (None) rule coexists with any explicit tuple, every
         # named tool is potentially scoped differently across paths.
         if has_none and explicit:
-            return differs | explicit_union
+            return (differs | explicit_union) or frozenset({ANY_TOOL})
         return differs
 
     def with_launch_zones(self, launch_dir: Path) -> "EffectiveRuntimePolicy":

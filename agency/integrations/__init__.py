@@ -15,6 +15,7 @@ from agency.integrations.interactive import (
     terminal_available,
 )
 from agency.integrations.models import (
+    ANY_TOOL,
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     InteractiveSetupRequest,
@@ -193,6 +194,9 @@ class BaseIntegration:
             differing = ", ".join(
                 str(rule.path) for rule in policy.rules if rule.path is not None
             ) or "multiple paths"
+            names = ", ".join(
+                "any tool" if name == ANY_TOOL else name for name in sorted(unscopable)
+            )
             issues.append(
                 ValidationIssue(
                     code="unsupported-tool-scoping",
@@ -200,7 +204,7 @@ class BaseIntegration:
                     field="runtime.permissions.rules",
                     message=(
                         f"Integration '{self.name}' cannot vary "
-                        f"{', '.join(sorted(unscopable))} between paths. The "
+                        f"{names} between paths. The "
                         f"rules grant it differently across: {differing}."
                     ),
                     corrective_hint=(
