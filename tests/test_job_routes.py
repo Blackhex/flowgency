@@ -444,7 +444,7 @@ def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config)
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
     captured = {}
 
-    def fake_spawn(command, cwd):
+    def fake_spawn(command, cwd, env=None):
         captured["command"] = list(command)
         captured["cwd"] = cwd
         return "copilot --resume sess-2"
@@ -468,7 +468,7 @@ def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
     _write_resumable_job(group_root, config_path, job_id="job-nospawn", session_id="sess-3")
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
 
-    def fake_spawn(command, cwd):
+    def fake_spawn(command, cwd, env=None):
         raise IntegrationError("no terminal")
 
     monkeypatch.setattr(jobs_mod, "spawn_interactive_terminal", fake_spawn)
@@ -490,7 +490,7 @@ def test_resume_rejects_unsafe_session_id(monkeypatch, tmp_path, raw_config):
         session_id="a; rm -rf ~",
     )
 
-    def fail_spawn(command, cwd):
+    def fail_spawn(command, cwd, env=None):
         raise AssertionError("spawn must not be reached")
 
     monkeypatch.setattr(jobs_mod, "spawn_interactive_terminal", fail_spawn)
@@ -506,6 +506,56 @@ def test_resume_unknown_job_is_not_found(monkeypatch, tmp_path, raw_config):
     response = client.post("/newsletter/jobs/job-missing/resume", follow_redirects=False)
 
     assert response.status_code == 404
+
+
+def test_resume_spawns_terminal_carries_copilot_home(monkeypatch, tmp_path, raw_config):
+    import os
+    import agency.web.routes.jobs as jobs_mod
+    from agency.integrations.agency.copilot import CopilotIntegration
+
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    home_path = tmp_path / ".copilot-job"
+    path = _write_job_record(group_root, config_path, job_id="job-home", status="queued")
+    record = read_job(path)
+    write_job(path, replace(record, status="complete", session_id="sess-h", copilot_home=str(home_path)))
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
+    captured = {}
+
+    def fake_spawn(command, cwd, env=None):
+        captured["command"] = list(command)
+        captured["cwd"] = cwd
+        captured["env"] = env
+        return "ok"
+
+    monkeypatch.setattr(jobs_mod, "spawn_interactive_terminal", fake_spawn)
+
+    response = client.post("/newsletter/jobs/job-home/resume", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert captured["env"] is not None
+    assert captured["env"]["COPILOT_HOME"] == str(home_path)
+    assert captured["env"].get("PATH") == os.environ.get("PATH")
+
+
+def test_resume_spawns_terminal_no_env_without_copilot_home(monkeypatch, tmp_path, raw_config):
+    import agency.web.routes.jobs as jobs_mod
+    from agency.integrations.agency.copilot import CopilotIntegration
+
+    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(group_root, config_path, job_id="job-noenv", session_id="sess-ne")
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
+    captured = {}
+
+    def fake_spawn(command, cwd, env=None):
+        captured["env"] = env
+        return "ok"
+
+    monkeypatch.setattr(jobs_mod, "spawn_interactive_terminal", fake_spawn)
+
+    response = client.post("/newsletter/jobs/job-noenv/resume", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert captured["env"] is None
 
 
 def test_job_detail_shows_failure_notice_when_resume_failed(monkeypatch, tmp_path, raw_config):

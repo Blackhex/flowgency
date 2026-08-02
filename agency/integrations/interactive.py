@@ -69,15 +69,21 @@ def _posix_terminal_command(terminal: str, command: Sequence[str]) -> list[str]:
     return [terminal, "-e", shlex.join(parts)]
 
 
-def spawn_interactive_terminal(command: Sequence[str], cwd: Path) -> str:
+def spawn_interactive_terminal(
+    command: Sequence[str],
+    cwd: Path,
+    env: dict[str, str] | None = None,
+) -> str:
     resolved_cwd = cwd.resolve(strict=True)
     argv = [str(part) for part in command]
     command_line = format_interactive_command(argv)
+    extra = {"env": env} if env is not None else {}
     if platform.system() == "Windows":
         subprocess.Popen(
             argv,
             cwd=str(resolved_cwd),
             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010),
+            **extra,
         )
         return command_line
     terminal = _find_posix_terminal()
@@ -86,6 +92,7 @@ def spawn_interactive_terminal(command: Sequence[str], cwd: Path) -> str:
             _posix_terminal_command(terminal, argv),
             cwd=str(resolved_cwd),
             start_new_session=True,
+            **extra,
         )
         return command_line
 

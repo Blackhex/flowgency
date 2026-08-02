@@ -3,6 +3,7 @@
 import json
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -382,7 +383,7 @@ class CopilotIntegration(BaseIntegration):
         return job_home, None
 
     @staticmethod
-    def _usage_summary(raw: str, *, copilot_home: Path | None = None) -> str:
+    def _usage_summary(raw: str, *, copilot_home: Path | None = None, cmd: str | None = None) -> str:
         result = None
         for line in raw.splitlines():
             try:
@@ -434,9 +435,15 @@ class CopilotIntegration(BaseIntegration):
             usage.get("sessionDurationMs", 0)
         )
 
-        resume_cmd = f"copilot --resume={result['sessionId']}"
+        executable = cmd or "copilot"
+        resume_cmd = f"{executable} --resume={result['sessionId']}"
         if copilot_home is not None:
-            resume_cmd = f"COPILOT_HOME={copilot_home} {resume_cmd}"
+            home_str = str(copilot_home)
+            if platform.system() == "Windows":
+                hq = home_str.replace("'", "''")
+                resume_cmd = f"$env:COPILOT_HOME='{hq}'; {resume_cmd}"
+            else:
+                resume_cmd = f"COPILOT_HOME={shlex.quote(home_str)} {resume_cmd}"
 
         return (
             f"Changes    +{changes.get('linesAdded', 0)} "
@@ -562,7 +569,7 @@ class CopilotIntegration(BaseIntegration):
                 parse_root,
             )
             usage_summary = self._usage_summary(
-                result.stdout, copilot_home=job_home,
+                result.stdout, copilot_home=job_home, cmd=cmd,
             )
             stderr = result.stderr
             if degraded:
