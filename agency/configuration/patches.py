@@ -48,10 +48,8 @@ class GroupSettingsStatePatch:
     path: str
     default_integration: str
     runtime_timeout: int
-    sandbox_mode: Literal["restricted", "unrestricted"]
-    sandbox_roots: tuple[str, ...] = ()
-    tool_mode: ToolMode = "all"
-    tool_names: tuple[str, ...] = ()
+    permission_mode: Literal["restricted", "unrestricted"] = "unrestricted"
+    permission_rules: tuple[dict[str, Any], ...] = ()
     dispatch_enabled: bool = False
     workspaces: tuple[dict[str, Any], ...] = ()
 
@@ -63,10 +61,8 @@ class GroupCreateStatePatch:
     path: str
     default_integration: str
     runtime_timeout: int
-    sandbox_mode: Literal["restricted", "unrestricted"]
-    sandbox_roots: tuple[str, ...] = ()
-    tool_mode: ToolMode = "all"
-    tool_names: tuple[str, ...] = ()
+    permission_mode: Literal["restricted", "unrestricted"] = "unrestricted"
+    permission_rules: tuple[dict[str, Any], ...] = ()
     dispatch_enabled: bool = False
     workspaces: tuple[dict[str, Any], ...] = ()
 
@@ -76,14 +72,12 @@ class AgentProfilePatch:
     display_name: str
     title: str
     emoji: str
-    can_write: bool
 
 
 @dataclass(frozen=True)
 class AgentRuntimePatch:
     timeout: int | None
-    additional_roots: tuple[str, ...]
-    tools: ToolPolicy | None
+    rules: tuple[dict[str, Any], ...] = ()
 
 
 def _groups(raw: dict[str, Any]) -> dict[str, Any]:
@@ -192,13 +186,9 @@ def create_group_state(
             "default_integration": patch.default_integration,
             "runtime": {
                 "timeout": patch.runtime_timeout,
-                "sandbox": {
-                    "mode": patch.sandbox_mode,
-                    "roots": list(patch.sandbox_roots),
-                },
-                "tools": {
-                    "mode": patch.tool_mode,
-                    "names": list(patch.tool_names),
+                "permissions": {
+                    "mode": patch.permission_mode,
+                    "rules": list(deepcopy(patch.permission_rules)),
                 },
             },
             "dispatch": {
@@ -260,21 +250,13 @@ def patch_group_settings_state(
             raise TypeError(f"groups.{group_id}.runtime must be a mapping")
         runtime["timeout"] = patch.runtime_timeout
 
-        sandbox = runtime.setdefault("sandbox", {})
-        if not isinstance(sandbox, dict):
+        permissions = runtime.setdefault("permissions", {})
+        if not isinstance(permissions, dict):
             raise TypeError(
-                f"groups.{group_id}.runtime.sandbox must be a mapping"
+                f"groups.{group_id}.runtime.permissions must be a mapping"
             )
-        sandbox["mode"] = patch.sandbox_mode
-        sandbox["roots"] = list(patch.sandbox_roots)
-
-        tools = runtime.setdefault("tools", {})
-        if not isinstance(tools, dict):
-            raise TypeError(
-                f"groups.{group_id}.runtime.tools must be a mapping"
-            )
-        tools["mode"] = patch.tool_mode
-        tools["names"] = list(patch.tool_names)
+        permissions["mode"] = patch.permission_mode
+        permissions["rules"] = list(deepcopy(patch.permission_rules))
 
         dispatch = group.setdefault("dispatch", {})
         if not isinstance(dispatch, dict):
@@ -324,10 +306,6 @@ def patch_agent_profile(
                 "emoji": patch.emoji,
             },
         )
-        capabilities = agent.setdefault("capabilities", {})
-        if not isinstance(capabilities, dict):
-            raise TypeError(f"groups.{group_id}.agents.{agent_id}.capabilities must be a mapping")
-        _merge_mapping(capabilities, {"write": patch.can_write})
 
     return store.patch(expected_revision, apply)
 
@@ -349,25 +327,15 @@ def patch_agent_runtime(
         else:
             runtime["timeout"] = patch.timeout
 
-        sandbox = runtime.setdefault("sandbox", {})
-        if not isinstance(sandbox, dict):
-            raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.sandbox must be a mapping")
-        _merge_mapping(sandbox, {"additional_roots": list(patch.additional_roots)})
-
-        tools = runtime.setdefault("tools", {})
-        if not isinstance(tools, dict):
-            raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.tools must be a mapping")
-        if patch.tools is None:
-            _clear_known_keys(tools, ("mode", "names"))
+        if patch.rules:
+            permissions = runtime.setdefault("permissions", {})
+            if not isinstance(permissions, dict):
+                raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.permissions must be a mapping")
+            permissions["rules"] = list(deepcopy(patch.rules))
         else:
-            _merge_mapping(tools, _tool_mapping(patch.tools))
-            if patch.tools.mode != "allowlist":
-                tools.pop("names", None)
-
-        if patch.additional_roots:
-            sandbox["additional_roots"] = list(patch.additional_roots)
-        else:
-            _clear_known_keys(sandbox, ("additional_roots",))
+            permissions = runtime.get("permissions")
+            if isinstance(permissions, dict):
+                permissions.pop("rules", None)
 
     return store.patch(expected_revision, apply)
 

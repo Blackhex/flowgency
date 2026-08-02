@@ -240,7 +240,7 @@ class TestWorkspaceRoutes:
         config_path.write_text(
             yaml.safe_dump(
                 {
-                    "schema_version": 4,
+                    "schema_version": 5,
 
                     "agency": {
                         "title": "Test",

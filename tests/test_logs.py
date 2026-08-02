@@ -91,7 +91,7 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 4,
+                "schema_version": 5,
 
                 "agency": {
                     "title": "Agency",
@@ -154,7 +154,7 @@ def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatc
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "agency": {
                     "title": "Agency",
                     "default_group": "test",

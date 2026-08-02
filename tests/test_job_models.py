@@ -45,7 +45,7 @@ def _canonical_group_store(tmp_path: Path) -> Path:
 
 def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 4\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 5\ngroups: {}\n", encoding="utf-8")
     workspace_root = tmp_path / "workspace"
     group_root = tmp_path / "group"
     return JobSpec(

@@ -82,7 +82,7 @@ def _write_config(
         for routine in routines
     )
     config_path.write_text(
-        "schema_version: 4\n"
+        "schema_version: 5\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"

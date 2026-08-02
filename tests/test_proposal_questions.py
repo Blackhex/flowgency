@@ -150,7 +150,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
             "name": "engineer",
             "integration": "script",
             "integration_config": {"command": "echo ok"},
-            "capabilities": {"write": True},
+            "runtime": {"permissions": {"rules": [{"path": str(group), "tools": ["read", "search", "write"]}]}},
         },
         {"name": "sdk-agent", "integration": "sdk"},
     ]
@@ -165,7 +165,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         (blueprint_root / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 4\n"
+        "schema_version: 5\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: test\n"
@@ -187,8 +187,11 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         "      - name: engineer\n"
         "        blueprint: engineer-blueprint\n"
         "        integration: script\n"
-        "        capabilities:\n"
-        "          write: true\n"
+        "        runtime:\n"
+        "          permissions:\n"
+        "            rules:\n"
+        f"              - path: {group.as_posix()}\n"
+        "                tools: [read, search, write]\n"
         "      - name: sdk-agent\n"
         "        blueprint: sdk-blueprint\n"
         "        integration: sdk\n",

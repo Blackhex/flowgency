@@ -319,7 +319,7 @@ def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_pat
     (tmp_path / "workspaces" / "newsletter" / "repo").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 4\n"
+        "schema_version: 5\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: newsletter\n"
@@ -336,21 +336,20 @@ def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_pat
         "    default_integration: copilot\n"
         "    runtime:\n"
         "      timeout: 1800\n"
-        "      sandbox:\n"
+        "      permissions:\n"
         "        mode: restricted\n"
-        "        roots:\n"
-        "          - repo\n"
-        "      tools:\n"
-        "        mode: allowlist\n"
-        "        names:\n"
-        "          - shell\n"
-        "          - write\n"
+        "        rules:\n"
+        "          - path: workspaces/newsletter/repo\n"
+        "            tools: [shell, write]\n"
         "    agents:\n"
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
         "        integration: copilot\n"
-        "        capabilities:\n"
-        "          write: true\n"
+        "        runtime:\n"
+        "          permissions:\n"
+        "            rules:\n"
+        "              - path: workspaces/newsletter\n"
+        "                tools: [read, search, write]\n"
         "        integration_config:\n"
         "          command: echo ok\n"
         "        default_memory:\n"
@@ -465,7 +464,7 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 4\n"
+        "schema_version: 5\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: newsletter\n"
@@ -481,14 +480,16 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "    path: agents/newsletter\n"
         "    default_integration: copilot\n"
         f"    runtime:\n      timeout: {timeout}\n"
-        "      sandbox:\n        mode: restricted\n        roots:\n          - repo\n"
-        "      tools:\n        mode: allowlist\n        names:\n          - shell\n          - write\n"
+        "      permissions:\n        mode: restricted\n        rules:\n          - path: workspaces/newsletter/repo\n            tools: [shell, write]\n"
         "    agents:\n"
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
         "        integration: copilot\n"
-        "        capabilities:\n"
-        "          write: true\n"
+        "        runtime:\n"
+        "          permissions:\n"
+        "            rules:\n"
+        "              - path: workspaces/newsletter\n"
+        "                tools: [read, search, write]\n"
         "        integration_config:\n"
         f"          command: {command}\n"
         "        default_memory:\n          scope: agent\n"
@@ -1186,7 +1187,7 @@ def _pool_config(tmp_path, *, pool=1):
     memory_store = tmp_path / "memory"
 
     raw = {
-        "schema_version": 4,
+        "schema_version": 5,
         "agency": {
             "title": "Agency",
             "default_group": "newsletter",

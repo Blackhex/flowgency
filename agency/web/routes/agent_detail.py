@@ -25,6 +25,7 @@ from agency.configuration import (
 )
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
+from agency.permissions.eligibility import may_execute_decisions
 from agency.dispatch.schedule import parse_catch_up
 from agency.fs import ResourceBusyError
 from agency.health import (
@@ -327,21 +328,13 @@ def _apply_runtime_patch(raw: dict[str, Any], group_id: str, agent_id: str, patc
         runtime.pop("timeout", None)
     else:
         runtime["timeout"] = patch.timeout
-    sandbox = runtime.setdefault("sandbox", {})
-    if patch.additional_roots:
-        sandbox["additional_roots"] = list(patch.additional_roots)
+    if patch.rules:
+        permissions = runtime.setdefault("permissions", {})
+        permissions["rules"] = list(patch.rules)
     else:
-        sandbox.pop("additional_roots", None)
-    tools = runtime.setdefault("tools", {})
-    if patch.tools is None:
-        tools.pop("mode", None)
-        tools.pop("names", None)
-    else:
-        tools["mode"] = patch.tools.mode
-        if patch.tools.mode == "allowlist":
-            tools["names"] = list(patch.tools.names)
-        else:
-            tools.pop("names", None)
+        permissions = runtime.get("permissions")
+        if isinstance(permissions, dict):
+            permissions.pop("rules", None)
 
 
 def _patch_default_memory(raw: dict[str, Any], group_id: str, agent_id: str, selector: MemorySelector | None) -> None:
@@ -579,37 +572,41 @@ def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
     effective_root_rows: list[dict[str, str]] = []
     try:
         effective = resolve_effective_policy(snapshot.config, group_id, agent_id)
-        group_roots = tuple(group.runtime.sandbox.roots)
-        additional_roots = tuple(instance.runtime.sandbox.additional_roots)
-        group_keys = {str(path.resolve(strict=False)).lower(): path for path in group_roots}
-        seen: set[str] = set()
-        for root in effective.sandbox_roots:
-            resolved = root.resolve(strict=False)
-            key = str(resolved).lower()
-            if key in seen:
+        for index, rule in enumerate(effective.rules):
+            if rule.path is None:
                 continue
-            seen.add(key)
+            resolved = rule.path.resolve(strict=False)
             effective_root_rows.append(
                 {
                     "path": str(resolved).replace("\\", "/"),
-                    "source": "Group default" if key in group_keys else "Agent addition",
+                    "source": "Rule",
                 }
             )
     except ValidationFailed as exc:
         issues = _issue_dicts(exc)
-    group_tool_names = tuple(group.runtime.tools.names)
-    instance_tool_names = tuple(instance.runtime.tools.names) if "tools" in instance.runtime.model_fields_set else ()
+
+    group_rules = group.runtime.permissions.rules
+    agent_rules = instance.runtime.permissions.rules
+    group_rule_lines = []
+    for rule in group_rules:
+        path_str = str(rule.path).replace("\\", "/") if rule.path else "(pathless)"
+        tools_str = ", ".join(rule.tools) if rule.tools is not None else "(all)"
+        group_rule_lines.append(f"{path_str}: {tools_str}")
+    agent_rule_lines = []
+    for rule in agent_rules:
+        path_str = str(rule.path).replace("\\", "/") if rule.path else "(pathless)"
+        tools_str = ", ".join(rule.tools) if rule.tools is not None else "(all)"
+        agent_rule_lines.append(f"{path_str}: {tools_str}")
+
     return {
         "integration_name": instance.integration,
         "integration_display_name": integration.display_name,
         "group_timeout": group.runtime.timeout,
-        "group_roots": _path_lines(tuple(group.runtime.sandbox.roots)),
-        "group_tool_mode": group.runtime.tools.mode,
-        "group_tool_names": "\n".join(group_tool_names),
+        "group_permission_mode": group.runtime.permissions.mode,
+        "group_rules": "\n".join(group_rule_lines),
         "agent_timeout": instance.runtime.timeout if "timeout" in instance.runtime.model_fields_set else "",
-        "agent_additional_roots": "\n".join(_path_lines(tuple(instance.runtime.sandbox.additional_roots))),
-        "agent_tool_mode": instance.runtime.tools.mode if "tools" in instance.runtime.model_fields_set else "inherit",
-        "agent_tool_names": "\n".join(instance_tool_names),
+        "agent_permission_mode": instance.runtime.permissions.mode if "permissions" in instance.runtime.model_fields_set else "inherit",
+        "agent_rules": "\n".join(agent_rule_lines),
         "effective": effective,
         "effective_root_rows": effective_root_rows,
         "issues": issues,
@@ -798,7 +795,7 @@ def _detail_context(
         "emoji": instance.identity.emoji,
         "integration": instance.integration,
         "blueprint": instance.blueprint,
-        "can_write": instance.capabilities.write,
+        "can_write": may_execute_decisions(snapshot.config, group_id, agent_id),
         "issues": handler_issues,
         "banner": banner,
         "memory_conflict": memory_conflict,
@@ -811,7 +808,7 @@ def _detail_context(
                     "display_name": instance.identity.display_name,
                     "title": instance.identity.title,
                     "emoji": instance.identity.emoji,
-                    "can_write": instance.capabilities.write,
+                    "can_write": may_execute_decisions(snapshot.config, group_id, agent_id),
                 }
             }
         )
@@ -875,7 +872,6 @@ async def agent_detail_profile_save(request: Request, group: str, agent: str, se
                 display_name=str(form.get("display_name", "")).strip(),
                 title=str(form.get("title", "")).strip(),
                 emoji=str(form.get("emoji", "")).strip(),
-                can_write=_parse_bool(form.get("can_write", "")),
             ),
         )
     except ValidationFailed as exc:
@@ -903,8 +899,7 @@ async def agent_detail_runtime_save(request: Request, group: str, agent: str, se
     timeout_text = str(form.get("timeout", "")).strip()
     patch = AgentRuntimePatch(
         timeout=int(timeout_text) if timeout_text else None,
-        additional_roots=_split_lines(form.get("additional_roots", "")),
-        tools=_parse_tool_policy(form),
+        rules=(),
     )
     try:
         if not revision:

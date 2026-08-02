@@ -162,8 +162,7 @@ def _group_settings_response(
 ):
     group = snapshot.config.groups[group_id]
     runtime = group.runtime
-    sandbox = runtime.sandbox
-    tools = runtime.tools
+    permissions = runtime.permissions
     dispatch = group.dispatch
     values = form_values or {}
 
@@ -194,12 +193,13 @@ def _group_settings_response(
                 "default_integration", group.default_integration
             ),
             "runtime_timeout": value("runtime_timeout", runtime.timeout),
-            "sandbox_mode": value("sandbox_mode", sandbox.mode),
-            "sandbox_roots": value(
-                "sandbox_roots", "\n".join(str(root) for root in sandbox.roots)
+            "permission_mode": value("permission_mode", permissions.mode),
+            "permission_rules": value(
+                "permission_rules", "\n".join(
+                    f"{rule.path or '(pathless)'}: {', '.join(rule.tools) if rule.tools is not None else '(all)'}"
+                    for rule in permissions.rules
+                )
             ),
-            "tool_mode": value("tool_mode", tools.mode),
-            "tool_names": value("tool_names", "\n".join(tools.names)),
             "dispatch_enabled": value("dispatch_enabled", dispatch.enabled),
             "agent_count": len(group.agents),
             "manage_agents_href": f"/{group_id}/agents",
@@ -537,13 +537,10 @@ async def admin_org_save(
     path = str(form.get("path", "")).strip()
     default_integration = str(form.get("default_integration", "")).strip()
     runtime_timeout = int(str(form.get("runtime_timeout", "1800")) or "1800")
-    sandbox_mode = (
-        str(form.get("sandbox_mode", "unrestricted")).strip()
+    permission_mode = (
+        str(form.get("permission_mode", "unrestricted")).strip()
         or "unrestricted"
     )
-    sandbox_roots = _split_lines(str(form.get("sandbox_roots", "")))
-    tool_mode = str(form.get("tool_mode", "all")).strip() or "all"
-    tool_names = _split_lines(str(form.get("tool_names", "")))
     dispatch_enabled = form.get("dispatch_enabled") == "on"
     workspaces_json = str(form.get("workspaces_json", "[]"))
     try:
@@ -579,10 +576,8 @@ async def admin_org_save(
                     path=path,
                     default_integration=default_integration,
                     runtime_timeout=runtime_timeout,
-                    sandbox_mode=sandbox_mode,
-                    sandbox_roots=tuple(sandbox_roots),
-                    tool_mode=tool_mode,
-                    tool_names=tuple(tool_names),
+                    permission_mode=permission_mode,
+                    permission_rules=(),
                     dispatch_enabled=dispatch_enabled,
                     workspaces=tuple(workspaces),
                 ),
@@ -735,10 +730,8 @@ async def admin_org_create(
                     path=path,
                     default_integration=default_integration or "claude-code",
                     runtime_timeout=1800,
-                    sandbox_mode="restricted" if roots else "unrestricted",
-                    sandbox_roots=tuple(roots),
-                    tool_mode="allowlist" if tools else "all",
-                    tool_names=tuple(tools),
+                    permission_mode="restricted" if roots else "unrestricted",
+                    permission_rules=tuple({"path": r} for r in roots),
                     dispatch_enabled=False,
                     workspaces=tuple(workspaces),
                 ),

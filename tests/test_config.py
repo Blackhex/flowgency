@@ -56,7 +56,7 @@ def test_schema_three_is_rejected_with_fresh_v4_hint(raw_config, config_paths):
         parse_config(raw_config, config_paths["config_path"])
 
     assert excinfo.value.issues[0].code == "unsupported-schema-version"
-    assert "schema_version: 4" in excinfo.value.issues[0].corrective_hint
+    assert "schema_version: 5" in excinfo.value.issues[0].corrective_hint
 
 
 def test_parse_config_requires_schema_version_four(raw_config, config_paths):
@@ -949,7 +949,7 @@ def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None,
         agency["jobs"] = {"pool": jobs_pool}
 
     raw = {
-        "schema_version": 4,
+        "schema_version": 5,
         "agency": agency,
         "groups": {
             "grp": {

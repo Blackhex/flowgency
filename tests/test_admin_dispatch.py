@@ -49,7 +49,7 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     _write_blueprint(library_root, "advisor", "Advisor")
     config_path = tmp_path / "config.yaml"
     config = {
-        "schema_version": 4,
+        "schema_version": 5,
 
         "agency": {
             "title": "Agency",

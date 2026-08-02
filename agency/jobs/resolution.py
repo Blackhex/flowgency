@@ -29,6 +29,28 @@ class JobValidationError(ValueError):
     pass
 
 
+def _tool_mode_from_policy(policy) -> str:
+    """Derive a tool_mode string from an EffectiveRuntimePolicy."""
+    pathless = [r for r in policy.rules if r.path is None]
+    if pathless and pathless[0].tools is None:
+        return "all"
+    if pathless and pathless[0].tools == ():
+        return "none"
+    if pathless and pathless[0].tools:
+        return "allowlist"
+    if policy.mode == "unrestricted":
+        return "all"
+    return "none"
+
+
+def _tool_names_from_policy(policy) -> tuple[str, ...]:
+    """Derive tool names from an EffectiveRuntimePolicy."""
+    pathless = [r for r in policy.rules if r.path is None]
+    if pathless and pathless[0].tools is not None:
+        return pathless[0].tools
+    return ()
+
+
 def _build_issue(code: str, scope: str, field: str, message: str, hint: str) -> ValidationIssue:
     return ValidationIssue(
         code=code,
@@ -290,8 +312,8 @@ def resolve_job_request(
         skill_arguments=(),
         task_input=append_reporting_protocol(
             task_input,
-            tool_mode=runtime_policy.tools.mode,
-            tool_names=tuple(runtime_policy.tools.names),
+            tool_mode=_tool_mode_from_policy(runtime_policy),
+            tool_names=_tool_names_from_policy(runtime_policy),
         ),
         runtime_policy=RuntimePolicySnapshot.from_effective_policy(runtime_policy),
         memory=MemoryBinding(

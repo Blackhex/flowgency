@@ -48,7 +48,7 @@ def _write_config(tmp_path: Path, *, schedule: str) -> Path:
     _write_blueprint(tmp_path / "agent-library")
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 4\n"
+        "schema_version: 5\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_group: newsletter\n"

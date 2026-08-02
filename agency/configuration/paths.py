@@ -273,41 +273,44 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
 
     for group_id, group in config.groups.items():
         scope = f"groups.{group_id}"
-        if group.runtime.sandbox.mode == "restricted":
-            for index, root in enumerate(group.runtime.sandbox.roots):
-                field = f"runtime.sandbox.roots[{index}]"
-                issues.extend(
-                    _validate_existing_directory(
-                        root,
-                        code="invalid-sandbox-root",
-                        scope=scope,
-                        field=field,
-                        writable=True,
-                    )
+        for index, rule in enumerate(group.runtime.permissions.rules):
+            if rule.path is None:
+                continue
+            field = f"runtime.permissions.rules[{index}].path"
+            issues.extend(
+                _validate_existing_directory(
+                    rule.path,
+                    code="invalid-permission-path",
+                    scope=scope,
+                    field=field,
+                    writable=True,
                 )
-                root_authority = _Authority(
-                    scope,
-                    field,
-                    f"{scope}.{field}",
-                    root.resolve(strict=False),
-                )
-                for control in control_authorities:
-                    if _overlap(control.path, root_authority.path):
-                        issues.append(
-                            _overlap_issue(
-                                root_authority,
-                                control,
-                                hint="Move control-plane storage and configured runtime-writable roots into disjoint directories.",
-                            )
+            )
+            root_authority = _Authority(
+                scope,
+                field,
+                f"{scope}.{field}",
+                rule.path.resolve(strict=False),
+            )
+            for control in control_authorities:
+                if _overlap(control.path, root_authority.path):
+                    issues.append(
+                        _overlap_issue(
+                            root_authority,
+                            control,
+                            hint="Move control-plane storage and configured runtime-writable roots into disjoint directories.",
                         )
+                    )
         for agent_id, agent in group.agents.items():
             agent_scope = f"{scope}.agents.{agent_id}"
-            for index, root in enumerate(agent.runtime.sandbox.additional_roots):
-                field = f"runtime.sandbox.additional_roots[{index}]"
+            for index, rule in enumerate(agent.runtime.permissions.rules):
+                if rule.path is None:
+                    continue
+                field = f"runtime.permissions.rules[{index}].path"
                 issues.extend(
                     _validate_existing_directory(
-                        root,
-                        code="invalid-sandbox-root",
+                        rule.path,
+                        code="invalid-permission-path",
                         scope=agent_scope,
                         field=field,
                         writable=True,
@@ -317,7 +320,7 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
                     agent_scope,
                     field,
                     f"{agent_scope}.{field}",
-                    root.resolve(strict=False),
+                    rule.path.resolve(strict=False),
                 )
                 for control in control_authorities:
                     if _overlap(control.path, root_authority.path):

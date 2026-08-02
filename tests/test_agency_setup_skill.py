@@ -234,7 +234,7 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
         assert phrase in combined
     assert "agency-migration" not in combined
     assert "tools/migrate_agent_model.py" not in combined
-    assert "schema_version: 4" in skill
+    assert "schema_version: 5" in skill
 
 
 def test_setup_maintains_one_authoritative_canonical_config():
