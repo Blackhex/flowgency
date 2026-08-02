@@ -102,3 +102,37 @@ def test_a_pathless_rule_cannot_be_expressed_and_is_reported(tmp_path):
 
     assert len(unenforced) == 1
     assert unenforced[0] is pathless
+
+
+def test_an_unrestricted_policy_naming_nothing_is_not_sandboxed():
+    """An allowlist cannot say everything, and an empty one says nothing."""
+    settings, _ = build_sandbox_settings(policy(mode="unrestricted"))
+    sandbox = settings["sandbox"]
+
+    assert sandbox["enabled"] is False
+    assert sandbox["userPolicy"]["filesystem"]["readonlyPaths"] == []
+    assert sandbox["userPolicy"]["filesystem"]["readwritePaths"] == []
+
+
+def test_a_restricted_policy_naming_nothing_stays_sandboxed():
+    """Restricted with no rule reaches nothing; denying everything is the point."""
+    settings, _ = build_sandbox_settings(policy(mode="restricted"))
+
+    assert settings["sandbox"]["enabled"] is True
+
+
+def test_an_unrestricted_policy_that_names_a_path_is_sandboxed(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(rule(tmp_path / "ws", ("read",)), mode="unrestricted")
+    )
+
+    assert settings["sandbox"]["enabled"] is True
+    assert str(tmp_path / "ws") in settings["sandbox"]["userPolicy"]["filesystem"]["readonlyPaths"]
+
+
+def test_a_denial_dropped_by_disabling_the_sandbox_is_reported(tmp_path):
+    denied = rule(tmp_path / "secret", ())
+    settings, unenforced = build_sandbox_settings(policy(denied, mode="unrestricted"))
+
+    assert settings["sandbox"]["enabled"] is False
+    assert unenforced == (denied,)

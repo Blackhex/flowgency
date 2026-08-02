@@ -31,9 +31,22 @@ def build_sandbox_settings(
     readwrite_set = set(readwrite)
     readonly = [p for p in readonly if p not in readwrite_set]
 
+    # Copilot's filesystem policy is an allowlist: a path it does not name is
+    # denied. An unrestricted policy that names nothing therefore cannot be
+    # rendered at all -- an empty allowlist would deny everything, the exact
+    # inverse of what the policy grants, and the CLI hangs against it. Confine
+    # only when something actually confines. Restricted with no rule reaches
+    # nothing and is a genuine deny-all, so it stays enabled.
+    confines = bool(readonly or readwrite) or policy.mode == "restricted"
+    if not confines:
+        # Turning the sandbox off drops any denial the operator did author.
+        unenforceable.extend(
+            r for r in policy.rules if r.path is not None and r.tools == ()
+        )
+
     return {
         "sandbox": {
-            "enabled": True,
+            "enabled": confines,
             "allowBypass": False,
             "addCurrentWorkingDirectory": False,
             "userPolicy": {
