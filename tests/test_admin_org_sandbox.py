@@ -145,7 +145,8 @@ def test_admin_org_create_sets_restricted_when_roots_given(tmp_path, monkeypatch
             "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": "[]",
-            "sandbox_root": str(tmp_path / "repo"),
+            "permission_mode": "restricted",
+            "permission_rules_yaml": f"- path: {tmp_path / 'repo'}\n",
         },
         follow_redirects=False,
     )
@@ -171,7 +172,8 @@ def test_admin_org_create_sets_unrestricted_when_no_roots(tmp_path, monkeypatch,
             "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": "[]",
-            "sandbox_root": "",
+            "permission_mode": "unrestricted",
+            "permission_rules_yaml": "",
         },
         follow_redirects=False,
     )
@@ -197,7 +199,11 @@ def test_admin_org_create_multiline_roots(tmp_path, monkeypatch, raw_config):
             "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": "[]",
-            "sandbox_root": f"{tmp_path / 'repo'}\n{tmp_path / 'cowork'}",
+            "permission_mode": "restricted",
+            "permission_rules_yaml": (
+                f"- path: {tmp_path / 'repo'}\n"
+                f"- path: {tmp_path / 'cowork'}\n"
+            ),
         },
         follow_redirects=False,
     )
@@ -357,7 +363,11 @@ def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
             "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
             "workspaces_json": '[{"name":"Primary","type":"tmux","config":{"script_path":"tmux-agents.sh"}}]',
-            "sandbox_root": f"{tmp_path / 'repo'}\n{tmp_path / 'cowork'}",
+            "permission_mode": "restricted",
+            "permission_rules_yaml": (
+                f"- path: {tmp_path / 'repo'}\n"
+                f"- path: {tmp_path / 'cowork'}\n"
+            ),
         },
         follow_redirects=False,
     )
