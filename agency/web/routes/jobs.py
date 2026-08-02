@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import platform
 import re
 from pathlib import Path
@@ -353,10 +354,13 @@ async def job_resume(request: Request, group: str, job_id: str, services: Agency
     try:
         integration = get_integration(record.spec.integration_name)
         command = (integration.require_executable(), *argv[1:])
+        copilot_home = record.copilot_home
+        job_env = {**os.environ, "COPILOT_HOME": copilot_home} if copilot_home else None
         await run_in_threadpool(
             spawn_interactive_terminal,
             command,
             record.spec.resolved_workspace_root,
+            env=job_env,
         )
     except (IntegrationError, OSError):
         outcome = "failed"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import platform
 from pathlib import Path
 
 import pytest
@@ -261,8 +262,77 @@ def test_usage_summary_resume_line_includes_copilot_home(tmp_path):
     })
 
     summary = CopilotIntegration._usage_summary(raw, copilot_home=home)
-    assert f"COPILOT_HOME={home}" in summary
     assert f"--resume={session_id}" in summary
+    home_str = str(home)
+    if platform.system() == "Windows":
+        assert f"$env:COPILOT_HOME='{home_str}'" in summary
+    else:
+        assert f"COPILOT_HOME={home_str}" in summary
+
+
+def test_usage_summary_resume_windows_format(tmp_path, monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    session_id = "sess-win"
+    home = tmp_path / "win_home"
+    state_dir = home / "session-state" / session_id
+    state_dir.mkdir(parents=True)
+    (state_dir / "events.jsonl").write_text(
+        json.dumps({
+            "type": "session.shutdown",
+            "data": {"tokenDetails": {}, "codeChanges": {}, "totalPremiumRequests": 0},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    raw = json.dumps({"type": "result", "sessionId": session_id, "usage": {}})
+
+    summary = CopilotIntegration._usage_summary(raw, copilot_home=home)
+
+    assert f"$env:COPILOT_HOME='{home}'" in summary
+    assert f"--resume={session_id}" in summary
+    assert "COPILOT_HOME=" not in summary.replace("$env:COPILOT_HOME=", "")
+
+
+def test_usage_summary_resume_posix_format(tmp_path, monkeypatch):
+    import shlex
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    session_id = "sess-posix"
+    home = tmp_path / "posix_home"
+    state_dir = home / "session-state" / session_id
+    state_dir.mkdir(parents=True)
+    (state_dir / "events.jsonl").write_text(
+        json.dumps({
+            "type": "session.shutdown",
+            "data": {"tokenDetails": {}, "codeChanges": {}, "totalPremiumRequests": 0},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    raw = json.dumps({"type": "result", "sessionId": session_id, "usage": {}})
+
+    summary = CopilotIntegration._usage_summary(raw, copilot_home=home)
+
+    assert f"COPILOT_HOME={shlex.quote(str(home))} " in summary
+    assert f"--resume={session_id}" in summary
+    assert "$env:" not in summary
+
+
+def test_usage_summary_uses_resolved_cmd(tmp_path):
+    session_id = "sess-cmd"
+    home = tmp_path / "cmd_home"
+    state_dir = home / "session-state" / session_id
+    state_dir.mkdir(parents=True)
+    (state_dir / "events.jsonl").write_text(
+        json.dumps({
+            "type": "session.shutdown",
+            "data": {"tokenDetails": {}, "codeChanges": {}, "totalPremiumRequests": 0},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    raw = json.dumps({"type": "result", "sessionId": session_id, "usage": {}})
+
+    summary = CopilotIntegration._usage_summary(raw, copilot_home=home, cmd="/usr/bin/gh-copilot")
+
+    assert "/usr/bin/gh-copilot --resume=" in summary
+    assert "copilot --resume=" not in summary or "/usr/bin/gh-copilot" in summary
 
 
 def test_usage_summary_no_home_prefix_when_default(tmp_path):

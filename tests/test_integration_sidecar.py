@@ -1177,7 +1177,9 @@ class TestCopilot:
 
         assert "AI Credits 5 (1s)" in result.stderr
         assert "Tokens     \u2191 60" in result.stderr
-        assert "Resume     copilot --resume=usage-session" in result.stderr
+        # The executable is resolved per machine, so pin the affordance, not the path.
+        assert "Resume " in result.stderr
+        assert "--resume=usage-session" in result.stderr
 
     def test_parse_jsonl_same_path_aggregation(self):
         """M3: create then edit on same path yields single FileChange with status=added and summed lines."""

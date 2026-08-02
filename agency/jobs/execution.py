@@ -517,7 +517,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                             )
                         },
                         session_id=result.session_id,
-                        copilot_home=getattr(result, "copilot_home", None),
+                        copilot_home=result.copilot_home,
                     )
                 else:
                     try:
@@ -544,7 +544,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 )
                             },
                             session_id=result.session_id,
-                            copilot_home=getattr(result, "copilot_home", None),
+                            copilot_home=result.copilot_home,
                         )
                     else:
                         validation = validate_outbox(
@@ -581,7 +581,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                     )
                                 },
                                 session_id=result.session_id,
-                                copilot_home=getattr(result, "copilot_home", None),
+                                copilot_home=result.copilot_home,
                             )
                         else:
                             try:
@@ -629,7 +629,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                         execution_summary=summary,
                                         base_sha=base_sha,
                                         session_id=result.session_id,
-                                        copilot_home=getattr(result, "copilot_home", None),
+                                        copilot_home=result.copilot_home,
                                     )
                                     write_job(job_path, final)
                             except (MemoryPublicationError, ValueError) as error:
@@ -656,7 +656,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                             "failed_artifacts": artifacts,
                                         },
                                         session_id=result.session_id,
-                                        copilot_home=getattr(result, "copilot_home", None),
+                                        copilot_home=result.copilot_home,
                                     )
                                 else:
                                     final = _terminalize_failure(
@@ -675,7 +675,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                             "failed_artifacts": artifacts,
                                         },
                                         session_id=result.session_id,
-                                        copilot_home=getattr(result, "copilot_home", None),
+                                        copilot_home=result.copilot_home,
                                     )
         except LockCancelledError:
             final = _mark_cancelled_if_waiting(job_path)
