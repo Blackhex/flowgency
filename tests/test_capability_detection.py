@@ -65,6 +65,43 @@ def test_detection_failure_narrows_rather_than_widens(monkeypatch):
     assert caps.permission_modes <= integration.declared_runtime_capabilities.permission_modes
 
 
+def test_detection_failure_drops_a_declared_scoping_claim(monkeypatch):
+    """Aider declares nothing scopable, so it cannot show the fallback widening.
+
+    Copilot declares write, and a failed detector must not hand that claim back
+    unmeasured: the whole point of detecting is that the claim is conditional.
+    """
+    integration = get_integration("copilot")
+
+    def failing_detect():
+        raise OSError("cli not found")
+
+    monkeypatch.setattr(integration, "detect_runtime_capabilities", failing_detect)
+    monkeypatch.setattr(integration, "_capability_cache_key", lambda: "boom")
+    integration.invalidate_capability_cache()
+
+    assert "write" in integration.declared_runtime_capabilities.path_scopable_tools
+    assert integration.runtime_capabilities.path_scopable_tools == frozenset()
+
+    integration.invalidate_capability_cache()
+
+
+def test_a_failing_cache_key_does_not_fail_the_read(monkeypatch):
+    """Identifying the environment is bookkeeping; it must not break a read."""
+    integration = get_integration("aider")
+
+    def exploding_key():
+        raise OSError("cannot stat the binary")
+
+    monkeypatch.setattr(integration, "_capability_cache_key", exploding_key)
+    integration.invalidate_capability_cache()
+
+    caps = integration.runtime_capabilities
+
+    assert isinstance(caps, RuntimeCapabilities)
+    assert caps.permission_modes <= integration.declared_runtime_capabilities.permission_modes
+
+
 def test_widening_permission_modes_is_capped(monkeypatch):
     integration = get_integration("aider")
 

@@ -100,7 +100,12 @@ class BaseIntegration:
 
     @property
     def runtime_capabilities(self) -> RuntimeCapabilities:
-        key = self._capability_cache_key()
+        declared = self.declared_runtime_capabilities
+        try:
+            key = self._capability_cache_key()
+        except Exception:
+            # Identifying the environment must never be able to fail a request.
+            key = None
         if key is not None:
             cached = getattr(self, "_capability_cache", None)
             if cached is not None and cached[0] == key:
@@ -108,8 +113,13 @@ class BaseIntegration:
         try:
             detected = self.detect_runtime_capabilities()
         except Exception:
-            detected = self.declared_runtime_capabilities
-        declared = self.declared_runtime_capabilities
+            # Detection failure narrows; it never widens. The declared set is
+            # the optimistic claim, so falling back to it would promise
+            # enforcement in exactly the case where none could be confirmed.
+            # Permission modes stay: they are a static promise no shipped
+            # integration detects, and dropping them would make every policy
+            # invalid rather than merely unenforced.
+            detected = RuntimeCapabilities(permission_modes=declared.permission_modes)
         detected = RuntimeCapabilities(
             permission_modes=detected.permission_modes & declared.permission_modes,
             path_scopable_tools=detected.path_scopable_tools & declared.path_scopable_tools,
