@@ -516,3 +516,57 @@ def test_admin_org_create_form_parser_smoke_preserves_default_integration_select
     forms = [form for form in _parse_forms(response.text) if form["attrs"].get("action") == "/admin/orgs/create"]
     assert len(forms) == 1
     assert any(option.get("value") == "copilot" for option in forms[0]["options"])
+
+
+@pytest.mark.parametrize(
+    ("workspace_path", "group_path", "permission_mode", "diagnostic"),
+    [
+        (
+            "nonexistent-workspace",
+            "groups/grp-state",
+            "unrestricted",
+            "Configured path must exist as a directory",
+        ),
+        (
+            "workspace",
+            "workspace",
+            "restricted",
+            "overlaps",
+        ),
+    ],
+)
+def test_admin_org_save_invalid_paths_rerender_submitted_form_without_writing(
+    tmp_path,
+    monkeypatch,
+    raw_config,
+    workspace_path,
+    group_path,
+    permission_mode,
+    diagnostic,
+):
+    client, store = _make_client(monkeypatch, tmp_path, raw_config)
+    before = store.load()
+    submitted_workspace = tmp_path / workspace_path
+    submitted_group = tmp_path / group_path
+
+    response = client.post(
+        "/admin/orgs/grp/save",
+        data={
+            "revision": before.revision,
+            "name": "Grp",
+            "workspace_path": str(submitted_workspace),
+            "path": str(submitted_group),
+            "default_integration": "copilot",
+            "workspaces_json": "[]",
+            "runtime_timeout": "1800",
+            "permission_mode": permission_mode,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert str(submitted_workspace) in response.text
+    assert str(submitted_group) in response.text
+    assert f'name="revision" value="{before.revision}"' in response.text
+    assert diagnostic in response.text
+    assert store.load().raw == before.raw
