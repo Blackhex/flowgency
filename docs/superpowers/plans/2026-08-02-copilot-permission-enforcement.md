@@ -74,7 +74,7 @@ def test_detection_is_cached_per_key(monkeypatch):
         return RuntimeCapabilities(permission_modes=frozenset({"unrestricted"}))
 
     monkeypatch.setattr(integration, "detect_runtime_capabilities", counting_detect)
-    monkeypatch.setattr(integration, "_capability_cache_key", lambda: "v1")
+    monkeypatch.setattr(integration, "_capability_cache_key", lambda: "alpha")
     integration.invalidate_capability_cache()
 
     integration.runtime_capabilities
@@ -86,7 +86,7 @@ def test_detection_is_cached_per_key(monkeypatch):
 def test_cache_invalidates_when_the_key_changes(monkeypatch):
     integration = get_integration("aider")
     calls = {"n": 0}
-    key = {"value": "v1"}
+    key = {"value": "alpha"}
 
     def counting_detect():
         calls["n"] += 1
@@ -97,7 +97,7 @@ def test_cache_invalidates_when_the_key_changes(monkeypatch):
     integration.invalidate_capability_cache()
 
     integration.runtime_capabilities
-    key["value"] = "v2"
+    key["value"] = "beta"
     integration.runtime_capabilities
 
     assert calls["n"] == 2

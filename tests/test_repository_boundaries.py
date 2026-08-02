@@ -14,7 +14,6 @@ PROHIBITED_TERMS = (
 COORDINATION_PATHS = (
     ":(exclude)docs/superpowers/plans/2026-07-18-*.md",
     ":(exclude)docs/superpowers/plans/2026-08-01-*.md",
-    ":(exclude)docs/superpowers/plans/2026-08-02-*.md",
     ":(exclude)docs/superpowers/specs/2026-07-18-first-run-setup-launcher-design.md",
 )
 

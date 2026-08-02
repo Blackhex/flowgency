@@ -99,14 +99,21 @@ class BaseIntegration:
     @property
     def runtime_capabilities(self) -> RuntimeCapabilities:
         key = self._capability_cache_key()
-        cached = getattr(self, "_capability_cache", None)
-        if cached is not None and cached[0] == key:
-            return cached[1]
+        if key is not None:
+            cached = getattr(self, "_capability_cache", None)
+            if cached is not None and cached[0] == key:
+                return cached[1]
         try:
             detected = self.detect_runtime_capabilities()
         except Exception:
             detected = self.declared_runtime_capabilities
-        self._capability_cache = (key, detected)
+        declared = self.declared_runtime_capabilities
+        detected = RuntimeCapabilities(
+            permission_modes=detected.permission_modes & declared.permission_modes,
+            path_scopable_tools=detected.path_scopable_tools & declared.path_scopable_tools,
+        )
+        if key is not None:
+            self._capability_cache = (key, detected)
         return detected
 
     def run(self, request: IntegrationRunRequest) -> RunResult:
