@@ -156,6 +156,39 @@ def test_registry_runtime_capabilities_surface_is_fail_closed():
         )
 
 
+def test_widening_detector_is_capped_to_declared():
+    """A detector that returns capabilities wider than declared must be silently capped."""
+    class WidenedIntegration(BaseIntegration):
+        name = "test-widen"
+        display_name = "Test Widen"
+        declared_runtime_capabilities = RuntimeCapabilities(
+            permission_modes=frozenset({"unrestricted"}),
+        )
+
+        def detect_runtime_capabilities(self):
+            return RuntimeCapabilities(
+                permission_modes=frozenset({"unrestricted", "restricted"}),
+                path_scopable_tools=frozenset({"write"}),
+            )
+
+        def _capability_cache_key(self):
+            return "fixed"
+
+        def identity_filename(self):
+            return ".instructions.md"
+
+        def parse_identity(self, agent_dir):
+            return None
+
+        def write_identity(self, agent_dir, identity):
+            pass
+
+    integration = WidenedIntegration()
+    caps = integration.runtime_capabilities
+    assert caps.permission_modes <= integration.declared_runtime_capabilities.permission_modes
+    assert caps.path_scopable_tools <= integration.declared_runtime_capabilities.path_scopable_tools
+
+
 def test_builtin_ai_cli_integrations_declare_canonical_commands():
     declared = {
         name: integration.cli_command
