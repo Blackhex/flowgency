@@ -337,6 +337,7 @@ class JobRecord:
     base_sha: str | None = None
     memory_publication: dict[str, Any] | None = None
     session_id: str | None = None
+    copilot_home: str | None = None
     due_at: str | None = None
     launched_at: str | None = None
 

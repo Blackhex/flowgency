@@ -46,6 +46,7 @@ class RunResult:
     changed_files: list["FileChange"] = field(default_factory=list)
     write_attempts: list[str] = field(default_factory=list)
     session_id: str | None = None
+    copilot_home: str | None = None
 
 
 @dataclass

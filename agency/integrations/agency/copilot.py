@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from agency.blueprints.projectors import get_projector
+from agency.fs.atomic import atomic_write_text
 from agency.integrations import (
     AgentIdentity,
     BaseIntegration,
@@ -22,6 +23,7 @@ from agency.integrations import (
     spawn_interactive_terminal,
     terminal_available,
 )
+from agency.integrations.agency.copilot_sandbox import build_sandbox_settings
 from agency.integrations.models import (
     IntegrationRunRequest,
     InteractiveSetupRequest,
@@ -345,8 +347,42 @@ class CopilotIntegration(BaseIntegration):
     def resume_command(self, session_id: str) -> tuple[str, ...] | None:
         return (self.cli_command, "--resume", session_id)
 
+    def _prepare_copilot_home(
+        self,
+        request: IntegrationRunRequest,
+    ) -> tuple[Path | None, str | None]:
+        """Create a per-job COPILOT_HOME with sandbox settings and auth.
+
+        Returns ``(home, None)`` on success or ``(None, reason)`` when the
+        caller should fall back to the shared home.
+        """
+        real_home = Path(
+            os.environ.get("COPILOT_HOME", Path.home() / ".copilot")
+        )
+        source_config = real_home / "config.json"
+        if not source_config.is_file():
+            return None, "copilot credentials not found; using shared home"
+
+        job_home = request.launch_dir.parent / ".copilot"
+        job_home.mkdir(parents=True, exist_ok=True)
+
+        atomic_write_text(
+            job_home / "config.json",
+            source_config.read_text(encoding="utf-8"),
+        )
+
+        settings, _unenforceable = build_sandbox_settings(
+            request.runtime_policy,
+        )
+        atomic_write_text(
+            job_home / "settings.json",
+            json.dumps(settings, indent=2) + "\n",
+        )
+
+        return job_home, None
+
     @staticmethod
-    def _usage_summary(raw: str) -> str:
+    def _usage_summary(raw: str, *, copilot_home: Path | None = None) -> str:
         result = None
         for line in raw.splitlines():
             try:
@@ -358,9 +394,11 @@ class CopilotIntegration(BaseIntegration):
         if not result or not result.get("sessionId"):
             return ""
 
-        copilot_home = Path(os.environ.get("COPILOT_HOME", Path.home() / ".copilot"))
+        home = copilot_home or Path(
+            os.environ.get("COPILOT_HOME", Path.home() / ".copilot")
+        )
         events_path = (
-            copilot_home / "session-state" / result["sessionId"] / "events.jsonl"
+            home / "session-state" / result["sessionId"] / "events.jsonl"
         )
         try:
             lines = events_path.read_text(encoding="utf-8").splitlines()
@@ -396,6 +434,10 @@ class CopilotIntegration(BaseIntegration):
             usage.get("sessionDurationMs", 0)
         )
 
+        resume_cmd = f"copilot --resume={result['sessionId']}"
+        if copilot_home is not None:
+            resume_cmd = f"COPILOT_HOME={copilot_home} {resume_cmd}"
+
         return (
             f"Changes    +{changes.get('linesAdded', 0)} "
             f"-{changes.get('linesRemoved', 0)}\n"
@@ -405,7 +447,7 @@ class CopilotIntegration(BaseIntegration):
             f"{CopilotIntegration._compact_number(written_tokens)} written) "
             f"\u2022 \u2193 {CopilotIntegration._compact_number(output_tokens)} "
             f"({CopilotIntegration._compact_number(reasoning_tokens)} reasoning)\n"
-            f"Resume     copilot --resume={result['sessionId']}"
+            f"Resume     {resume_cmd}"
         )
 
     @staticmethod
@@ -498,6 +540,12 @@ class CopilotIntegration(BaseIntegration):
         # non-interactive -- matching the proven no-console Start-Job launch
         # used by production dispatchers.
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        job_home, degraded = self._prepare_copilot_home(request)
+        run_env = (
+            {**os.environ, "COPILOT_HOME": str(job_home)}
+            if job_home is not None
+            else None
+        )
         try:
             result = subprocess.run(
                 cmd_args,
@@ -505,6 +553,7 @@ class CopilotIntegration(BaseIntegration):
                 cwd=str(request.launch_dir),
                 stdin=subprocess.DEVNULL,
                 creationflags=creationflags,
+                env=run_env,
             )
             duration = time.monotonic() - start
             parse_root = request.workspace_root
@@ -512,8 +561,13 @@ class CopilotIntegration(BaseIntegration):
                 result.stdout,
                 parse_root,
             )
-            usage_summary = self._usage_summary(result.stdout)
+            usage_summary = self._usage_summary(
+                result.stdout, copilot_home=job_home,
+            )
             stderr = result.stderr
+            if degraded:
+                warning = f"sandbox: {degraded}\n"
+                stderr = f"{warning}{stderr}" if stderr else warning
             if usage_summary:
                 stderr = (
                     f"{stderr.rstrip()}\n\n{usage_summary}"
@@ -528,6 +582,7 @@ class CopilotIntegration(BaseIntegration):
                 changed_files=changed_files,
                 write_attempts=write_attempts,
                 session_id=self._parse_session_id(result.stdout),
+                copilot_home=str(job_home) if job_home is not None else None,
             )
         except subprocess.TimeoutExpired as error:
             duration = time.monotonic() - start
@@ -548,6 +603,8 @@ class CopilotIntegration(BaseIntegration):
                 if partial_stderr
                 else timeout_message
             )
+            if degraded:
+                stderr = f"sandbox: {degraded}\n{stderr}"
             return RunResult(
                 exit_code=124,
                 stdout=parsed_text,
@@ -556,6 +613,7 @@ class CopilotIntegration(BaseIntegration):
                 changed_files=changed_files,
                 write_attempts=write_attempts,
                 session_id=self._parse_session_id(partial_stdout),
+                copilot_home=str(job_home) if job_home is not None else None,
             )
         except FileNotFoundError:
             raise IntegrationError(f"GitHub Copilot CLI not found. Looked for: {cmd}")
