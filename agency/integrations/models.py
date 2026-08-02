@@ -78,6 +78,29 @@ class EffectiveRuntimePolicy:
             return (differs | explicit_union) or frozenset({ANY_TOOL})
         return differs
 
+    @property
+    def grants_write(self) -> bool:
+        """Did the operator grant write anywhere?
+
+        Asked by integrations whose only enforcement is their own CLI's
+        permission model, to decide whether switching that model off would
+        hand the agent more than the policy allows.
+
+        Generated rules are excluded for the same reason `scoped_tools`
+        excludes them: Agency attaches launch-zone write grants to every job,
+        so counting them would answer yes for every agent, including exactly
+        the read-only ones the question exists to protect.
+
+        With no authored rule at all, an unrestricted policy withholds
+        nothing, and there is nothing to protect by answering no.
+        """
+        authored = [rule for rule in self.rules if not rule.generated]
+        if not authored:
+            return self.mode == "unrestricted"
+        return any(
+            rule.tools is None or "write" in rule.tools for rule in authored
+        )
+
     def with_launch_zones(self, launch_dir: Path) -> "EffectiveRuntimePolicy":
         from agency.permissions.zones import launch_zone_rules
 

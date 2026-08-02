@@ -76,9 +76,16 @@ class ClaudeCodeIntegration(BaseIntegration):
         prompt_text = request.task_file.read_text()
         cmd = self.require_executable()
         start = time.monotonic()
+        # The CLI's own permission model is the only enforcement this
+        # integration has. Switching it off for an agent the operator withheld
+        # write from would hand back exactly what the policy took away.
+        cmd_args = [cmd]
+        if request.runtime_policy.grants_write:
+            cmd_args.append("--dangerously-skip-permissions")
+        cmd_args += ["-p", prompt_text]
         try:
             result = subprocess.run(
-                [cmd, "--dangerously-skip-permissions", "-p", prompt_text],
+                cmd_args,
                 capture_output=True, text=True, timeout=request.timeout,
                 cwd=str(request.launch_dir),
             )
