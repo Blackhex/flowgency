@@ -129,7 +129,8 @@ class TestIntegrationContract:
 def test_registry_runtime_capabilities_surface_is_fail_closed():
     expected = {
         "copilot": RuntimeCapabilities(
-            permission_modes=frozenset({"restricted", "unrestricted"})
+            permission_modes=frozenset({"restricted", "unrestricted"}),
+            path_scopable_tools=frozenset({"write"}),
         ),
         "script": RuntimeCapabilities(
             permission_modes=frozenset({"unrestricted"})
@@ -201,10 +202,30 @@ def test_builtin_ai_cli_integrations_declare_canonical_commands():
     assert REGISTRY["sdk"].cli_command is None
 
 
-def test_builtin_ai_cli_runtime_capabilities_are_truthful():
-    assert REGISTRY["copilot"].runtime_capabilities == RuntimeCapabilities(
-        permission_modes=frozenset({"restricted", "unrestricted"})
-    )
+def test_builtin_ai_cli_runtime_capabilities_are_truthful(monkeypatch):
+    copilot = REGISTRY["copilot"]
+
+    # Stubbed both ways so the claim is pinned regardless of what this machine
+    # happens to have installed.
+    monkeypatch.setattr(type(copilot), "_cli_version", lambda self: "1.0.78-2")
+    copilot.invalidate_capability_cache()
+    try:
+        assert copilot.runtime_capabilities == RuntimeCapabilities(
+            permission_modes=frozenset({"restricted", "unrestricted"}),
+            path_scopable_tools=frozenset({"write"}),
+        )
+    finally:
+        copilot.invalidate_capability_cache()
+
+    monkeypatch.setattr(type(copilot), "_cli_version", lambda self: None)
+    copilot.invalidate_capability_cache()
+    try:
+        assert copilot.runtime_capabilities == RuntimeCapabilities(
+            permission_modes=frozenset({"restricted", "unrestricted"})
+        )
+    finally:
+        copilot.invalidate_capability_cache()
+
     for name in AI_CLI_COMMANDS.keys() - {"copilot"}:
         assert REGISTRY[name].runtime_capabilities == UNCONFINED_CAPABILITIES
 
