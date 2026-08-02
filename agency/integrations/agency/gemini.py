@@ -20,7 +20,7 @@ class GeminiIntegration(BaseIntegration):
     supports_ai_backend = False
     detect_priority = 10
     projector = get_projector("gemini")
-    runtime_capabilities = RuntimeCapabilities(
+    declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"unrestricted"}),
     )
 

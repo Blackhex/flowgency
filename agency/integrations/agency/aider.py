@@ -19,7 +19,7 @@ class AiderIntegration(BaseIntegration):
     supports_ai_backend = False
     detect_priority = 10
     projector = BaseIntegration._default_projector("CONVENTIONS.md", discovers_instructions=True)
-    runtime_capabilities = RuntimeCapabilities(
+    declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"unrestricted"}),
     )
 

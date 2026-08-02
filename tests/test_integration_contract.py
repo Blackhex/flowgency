@@ -144,7 +144,16 @@ def test_registry_runtime_capabilities_surface_is_fail_closed():
         "pi": UNCONFINED_CAPABILITIES,
     }
 
-    assert {name: integration.runtime_capabilities for name, integration in REGISTRY.items()} == expected
+    assert {name: integration.declared_runtime_capabilities for name, integration in REGISTRY.items()} == expected
+
+    for name, integration in REGISTRY.items():
+        detected = integration.runtime_capabilities
+        assert detected.permission_modes <= integration.declared_runtime_capabilities.permission_modes, (
+            f"{name}: detected modes wider than declared"
+        )
+        assert detected.path_scopable_tools <= integration.declared_runtime_capabilities.path_scopable_tools, (
+            f"{name}: detected path_scopable_tools wider than declared"
+        )
 
 
 def test_builtin_ai_cli_integrations_declare_canonical_commands():

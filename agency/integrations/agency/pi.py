@@ -18,7 +18,7 @@ class PiIntegration(BaseIntegration):
     supports_ai_backend = False
     detect_priority = 8
     projector = BaseIntegration._default_projector("AGENTS.md", discovers_instructions=True)
-    runtime_capabilities = RuntimeCapabilities(
+    declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"unrestricted"}),
     )
 
