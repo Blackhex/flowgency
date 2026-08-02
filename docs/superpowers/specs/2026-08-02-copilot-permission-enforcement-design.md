@@ -36,13 +36,13 @@ depends on the CLI version, the operating system build, and the ACLs on every
 direction: `path_scopable_tools` is empty everywhere, which is why nothing
 enforces anything.
 
-### Eight integrations were never audited
+### Eight integrations enforce nothing
 
-Copilot carried two defects found only in the final review: a policy granting no
-tools fell through to `--allow-all-tools --autopilot`, and generated zone rules
-leaked into the global allowlist so an agent authored `read` launched with
-`--allow-tool write`. Both were rendering mistakes, not model mistakes. The other
-eight integrations were never checked for either.
+Copilot's rendering is careful: a policy granting no tools produces no grant, and
+Agency's generated zone rules are kept out of the global allowlist. The other
+eight translate no rule into any argument, and two of them — `claude_code` and
+`codex` — unconditionally pass a flag that disables their own permission model.
+An operator writing narrow rules for those agents is writing documentation.
 
 ## Design
 
@@ -152,18 +152,34 @@ implementation must handle rather than discover:
 - `logs/` and `permissions-config.json` move too, and the existing usage-summary
   reader already consults `COPILOT_HOME`.
 
-### The other eight integrations are audited
+### The other eight integrations disarm themselves
 
-For `aider`, `claude_code`, `codex`, `gemini`, `goose`, `opencode`, `pi` and
-`script`, each is checked for the two defects Copilot had:
+Reading them established something worse than the defects this section was
+originally written to hunt. None of the eight translates a permission rule into
+a command-line argument at all. The two rendering defects Copilot carried
+therefore cannot exist in them — there is no rendering.
 
-- a policy granting **no** tools must not fall through to a permissive branch
-- generated zone rules must not leak into a global grant
+What they do instead is give the agent everything, twice over:
 
-Each gets tests asserting its rendered invocation for `tools=()`, `tools=None`, an
-explicit narrow list with zone rules present, and `restricted` mode. Where an
-integration cannot express something, it under-grants and says so; it never
-over-grants.
+- `claude_code` passes `--dangerously-skip-permissions` on every run
+- `codex` passes `--yolo` on every run
+
+Both are unconditional. Each disables the CLI's *own* permission model, so the
+one enforcement mechanism these integrations still had is switched off before
+the agent starts. The remaining six pass no policy-derived flag either, but at
+least leave their tool's defaults intact.
+
+The only thing standing between an operator's rules and an unrestricted agent is
+that all eight declare `unrestricted` alone, so negotiation rejects a
+`restricted` policy before launch. That is a refusal, not an enforcement: an
+operator who writes narrow rules under `unrestricted` gets them silently ignored.
+
+This phase does not give these integrations sandboxes. It does two smaller
+things. The unconditional bypass flags stop being unconditional — an integration
+may only disarm its own safety when the policy it was handed actually grants
+that much. And each grows the same rendered-invocation tests Copilot has, so a
+future change that introduces the empty-tools or generated-rule defect is caught
+rather than shipped.
 
 ## Out of scope
 
@@ -187,6 +203,8 @@ over-grants.
   and the rules it could not enforce are recorded against the job.
 - For each of the nine integrations, a policy granting no tools produces no tool
   grant, and generated zone rules never appear in a global allowlist.
+- No integration disables its own permission model unless the policy it was
+  handed grants that much.
 - `--resume` works against a job launched under a relocated `COPILOT_HOME`.
 - A sandboxed launch passes `--experimental`; without it the rendered policy is
   treated as unenforced rather than assumed to be in effect.
