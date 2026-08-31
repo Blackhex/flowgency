@@ -65,6 +65,21 @@ def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
         assert phrase in prompt
 
 
+def test_build_setup_prompt_survives_deleted_data_root(tmp_path: Path):
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
+    resolved = data_root.resolve(strict=True)
+    data_root.rmdir()
+
+    prompt = build_setup_prompt(
+        resolved,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
+
+    assert f"Agency data root: {resolved}." in prompt
+
+
 def test_status_waits_when_config_is_absent(tmp_path: Path) -> None:
     status = inspect_setup_status(ConfigStore(tmp_path / "config.yaml"))
 

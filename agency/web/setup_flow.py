@@ -28,7 +28,7 @@ def build_setup_prompt(
     return (
         "Use the agency-setup skill to configure Agency.\n"
         "Setup mode: guided-first-run.\n"
-        f"Agency data root: {data_root.resolve(strict=True)}.\n"
+        f"Agency data root: {data_root.resolve()}.\n"
         f"Authoritative config: {config_path.resolve()}.\n"
         f"Selected integration: {selected_integration}.\n"
         "The Agency data root was selected in the browser; do not ask for it again. "
