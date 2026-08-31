@@ -58,6 +58,61 @@ def _nearest_existing_parent(path: Path) -> Path | None:
     return candidate
 
 
+class DirectoryPreparationError(ValueError):
+    """A requested writable directory could not be prepared safely."""
+
+
+def prepare_writable_directory(path: Path, *, label: str) -> Path:
+    """Create if needed, revalidate, and return a strict real writable path."""
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        raise DirectoryPreparationError(f"{label} must be an absolute path.")
+
+    try:
+        if is_symlink_or_reparse(candidate):
+            raise DirectoryPreparationError(
+                f"{label} must be a real directory, not a symlink or reparse point: "
+                f"{candidate}"
+            )
+        if candidate.exists() and not candidate.is_dir():
+            raise DirectoryPreparationError(
+                f"{label} must be a directory: {candidate}"
+            )
+        if not candidate.exists():
+            parent = _nearest_existing_parent(candidate)
+            if (
+                parent is None
+                or is_symlink_or_reparse(parent)
+                or not parent.is_dir()
+                or not os.access(parent, os.W_OK)
+            ):
+                raise DirectoryPreparationError(
+                    f"No writable real parent can create {label}: {candidate}"
+                )
+            candidate.mkdir(parents=True, exist_ok=True)
+
+        if is_symlink_or_reparse(candidate):
+            raise DirectoryPreparationError(
+                f"{label} must be a real directory, not a symlink or reparse point: "
+                f"{candidate}"
+            )
+        resolved = candidate.resolve(strict=True)
+    except DirectoryPreparationError:
+        raise
+    except OSError as exc:
+        raise DirectoryPreparationError(
+            f"Could not create or inspect {label}: {candidate}"
+        ) from exc
+
+    if not resolved.is_dir():
+        raise DirectoryPreparationError(f"{label} must be a directory: {resolved}")
+    if not os.access(resolved, os.R_OK | os.W_OK):
+        raise DirectoryPreparationError(
+            f"{label} is not readable and writable: {resolved}"
+        )
+    return resolved
+
+
 def _stat_is_symlink_or_reparse(stat_result: os.stat_result) -> bool:
     file_attributes = getattr(stat_result, "st_file_attributes", 0) or 0
     return bool(
@@ -69,7 +124,7 @@ def _stat_is_symlink_or_reparse(stat_result: os.stat_result) -> bool:
     )
 
 
-def _is_symlink_or_reparse(path: Path) -> bool:
+def is_symlink_or_reparse(path: Path) -> bool:
     try:
         stat_result = path.lstat()
     except FileNotFoundError:
@@ -87,7 +142,7 @@ def _validate_existing_directory(
 ) -> list[ValidationIssue]:
     path = path.resolve(strict=False)
     issues: list[ValidationIssue] = []
-    if _is_symlink_or_reparse(path):
+    if is_symlink_or_reparse(path):
         issues.append(
             _issue(
                 code,
@@ -142,7 +197,7 @@ def _validate_creatable_directory(
     parent = _nearest_existing_parent(path)
     if (
         parent is None
-        or _is_symlink_or_reparse(parent)
+        or is_symlink_or_reparse(parent)
         or not parent.is_dir()
         or not os.access(parent, os.W_OK)
     ):

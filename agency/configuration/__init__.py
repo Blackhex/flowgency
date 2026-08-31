@@ -35,6 +35,7 @@ from .patches import (
     replace_agent_routines,
     unregister_agent_prompt,
 )
+from .paths import DirectoryPreparationError, is_symlink_or_reparse, prepare_writable_directory
 from .store import (
     ABSENT_REVISION,
     ConfigFileSnapshot,
@@ -55,6 +56,7 @@ __all__ = [
     "ConfigConflictError",
     "ConfigSnapshot",
     "ConfigStore",
+    "DirectoryPreparationError",
     "GroupCreateStatePatch",
     "GroupDispatchPatch",
     "GroupSettingsPatch",
@@ -71,6 +73,7 @@ __all__ = [
     "delete_group",
     "dismiss_tip",
     "hide_all_tips",
+    "is_symlink_or_reparse",
     "load_config_snapshot",
     "patch_agency_settings",
     "patch_agent_profile",
@@ -80,6 +83,7 @@ __all__ = [
     "patch_group_settings_state",
     "patch_memory_channels",
     "parse_config",
+    "prepare_writable_directory",
     "register_agent_prompt",
     "remove_agent_instance",
     "replace_agent_routines",

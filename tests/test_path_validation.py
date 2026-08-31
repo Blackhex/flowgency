@@ -6,7 +6,12 @@ import stat
 import pytest
 
 from agency.configuration.models import parse_config
-from agency.configuration.paths import job_store_root, validate_resolved_paths
+from agency.configuration.paths import (
+    DirectoryPreparationError,
+    job_store_root,
+    prepare_writable_directory,
+    validate_resolved_paths,
+)
 
 
 def _resolved_config(tmp_path: Path, raw_config: dict):
@@ -256,3 +261,103 @@ def test_initialize_storage_directories_rejects_symlink_or_reparse_cache_root(
         initialize_storage_directories(config)
 
     assert mode in {"real-link", "simulated-reparse"}
+
+
+def test_prepare_writable_directory_creates_only_requested_root(tmp_path):
+    root = tmp_path / "new" / "Agency"
+
+    resolved = prepare_writable_directory(root, label="Agency data root")
+
+    assert resolved == root.resolve(strict=True)
+    assert resolved.is_dir()
+    assert list(resolved.iterdir()) == []
+
+
+def test_prepare_writable_directory_revalidates_existing_root(tmp_path):
+    root = tmp_path / "Agency"
+    root.mkdir()
+    marker = root / "user-content.txt"
+    marker.write_text("keep\n", encoding="utf-8")
+
+    first = prepare_writable_directory(root, label="Agency data root")
+    second = prepare_writable_directory(root, label="Agency data root")
+
+    assert first == second == root.resolve(strict=True)
+    assert marker.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_prepare_writable_directory_requires_absolute_path():
+    with pytest.raises(
+        DirectoryPreparationError,
+        match="Agency data root must be an absolute path",
+    ):
+        prepare_writable_directory(Path("relative/Agency"), label="Agency data root")
+
+
+def test_prepare_writable_directory_rejects_file(tmp_path):
+    root = tmp_path / "Agency"
+    root.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(
+        DirectoryPreparationError,
+        match="Agency data root must be a directory",
+    ):
+        prepare_writable_directory(root, label="Agency data root")
+
+
+def test_prepare_writable_directory_rejects_link_or_reparse(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "target"
+    target.mkdir()
+    root = tmp_path / "Agency"
+    _make_hostile_directory_entry(root, target, monkeypatch)
+
+    with pytest.raises(
+        DirectoryPreparationError,
+        match="symlink or reparse point",
+    ):
+        prepare_writable_directory(root, label="Agency data root")
+
+
+def test_prepare_writable_directory_rejects_unwritable_parent(
+    tmp_path, monkeypatch
+):
+    parent = tmp_path / "locked"
+    parent.mkdir()
+    root = parent / "Agency"
+    original_access = os.access
+    monkeypatch.setattr(
+        "agency.configuration.paths.os.access",
+        lambda path, mode: False
+        if Path(path) == parent and mode & os.W_OK
+        else original_access(path, mode),
+    )
+
+    with pytest.raises(
+        DirectoryPreparationError,
+        match="No writable real parent can create Agency data root",
+    ):
+        prepare_writable_directory(root, label="Agency data root")
+
+    assert not root.exists()
+
+
+def test_prepare_writable_directory_rejects_inaccessible_existing_root(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "Agency"
+    root.mkdir()
+    original_access = os.access
+    monkeypatch.setattr(
+        "agency.configuration.paths.os.access",
+        lambda path, mode: False
+        if Path(path) == root and mode == os.R_OK | os.W_OK
+        else original_access(path, mode),
+    )
+
+    with pytest.raises(
+        DirectoryPreparationError,
+        match="Agency data root is not readable and writable",
+    ):
+        prepare_writable_directory(root, label="Agency data root")
