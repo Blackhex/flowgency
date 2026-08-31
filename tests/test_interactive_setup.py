@@ -16,7 +16,7 @@ from agency.integrations.models import InteractiveSetupRequest
 def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -> None:
     integration = BaseIntegration()
     request = InteractiveSetupRequest(
-        project_dir=tmp_path,
+        data_root=tmp_path,
         config_path=tmp_path / "config.yaml",
         prompt="Set up Agency.",
     )
@@ -58,7 +58,7 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
 
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
-        project_dir=tmp_path,
+        data_root=tmp_path,
         config_path=tmp_path / "agency.yaml",
         prompt="Use the agency-setup skill.",
     )
@@ -99,7 +99,7 @@ def test_copilot_builds_fallback_command_without_launch(
 
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
-        project_dir=tmp_path,
+        data_root=tmp_path,
         config_path=tmp_path / "agency.yaml",
         prompt="Use the agency-setup skill.",
     )
@@ -151,7 +151,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
 
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
-        project_dir=project_dir,
+        data_root=project_dir,
         config_path=tmp_path / "agency.yaml",
         prompt="Use the agency-setup skill.",
     )
@@ -223,7 +223,7 @@ def test_copilot_interactive_setup_unavailable_without_safe_windows_route(
 
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
-        project_dir=project_dir,
+        data_root=project_dir,
         config_path=tmp_path / "agency.yaml",
         prompt="Use the agency-setup skill.",
     )

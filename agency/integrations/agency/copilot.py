@@ -378,11 +378,11 @@ class CopilotIntegration(BaseIntegration):
         self,
         request: InteractiveSetupRequest,
     ) -> Sequence[str]:
-        project_dir = request.project_dir.resolve(strict=True)
+        data_root = request.data_root.resolve(strict=True)
         return (
             *self._interactive_setup_command_prefix(),
             "-C",
-            str(project_dir),
+            str(data_root),
             "-i",
             request.prompt,
             "--name",
@@ -390,9 +390,9 @@ class CopilotIntegration(BaseIntegration):
         )
 
     def launch_interactive_setup(self, request: InteractiveSetupRequest) -> InteractiveSetupResult:
-        project_dir = request.project_dir.resolve(strict=True)
+        data_root = request.data_root.resolve(strict=True)
         command = self._interactive_setup_command(request)
-        fallback_command = spawn_interactive_terminal(command, project_dir)
+        fallback_command = spawn_interactive_terminal(command, data_root)
         return InteractiveSetupResult(fallback_command=fallback_command)
 
     def interactive_setup_fallback_command(

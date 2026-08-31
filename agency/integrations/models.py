@@ -145,7 +145,7 @@ class IntegrationRunRequest:
 
 @dataclass(frozen=True)
 class InteractiveSetupRequest:
-    project_dir: Path
+    data_root: Path
     config_path: Path
     prompt: str
 

@@ -228,19 +228,19 @@ def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path)
     config_path.write_bytes(original)
     app_mod.refresh_services()
 
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
     integration = _LauncherIntegration()
     monkeypatch.setattr(
         "agency.web.routes.admin_groups.launchable_integrations",
-        lambda integrations, project_dir: (integration,),
+        lambda integrations, root: (integration,),
     )
     client = TestClient(app_mod.app)
 
     response = client.post(
         "/setup/launch",
         data={
-            "project_dir": str(project_dir.resolve()),
+            "data_root": str(data_root.resolve()),
             "integration": "copilot",
         },
         follow_redirects=False,
@@ -263,7 +263,7 @@ def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_pat
 
     assert response.status_code == 200
     assert "Startup diagnostics" in response.text
-    assert "project folder" in response.text.lower()
+    assert "agency data root" in response.text.lower()
     assert 'name="agent_library"' not in response.text
     assert 'name="workspace_config"' not in response.text
 
@@ -281,7 +281,7 @@ def test_setup_page_includes_launcher_fields_for_existing_bootstrap_config(
 
     assert response.status_code == 200
     assert 'action="/setup/launch"' in response.text
-    assert 'name="project_dir"' in response.text
+    assert 'name="data_root"' in response.text
     assert 'name="integration"' in response.text
     assert 'name="expected_revision"' not in response.text
 
@@ -307,6 +307,7 @@ def test_setup_form_posts_only_launcher_inputs(
     setup_form = forms[0]
     inputs = {input_["name"]: input_ for input_ in setup_form["inputs"] if input_.get("name")}
 
-    assert "project_dir" in inputs
+    assert "data_root" in inputs
+    assert "project_dir" not in inputs
     assert "group_key" not in inputs
     assert "expected_revision" not in inputs

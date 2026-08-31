@@ -83,11 +83,13 @@ class _LaunchIntegration:
         *,
         fallback_command: str = "copilot -C C:\\project -i \"prompt\" --name \"Agency setup\"",
         error: Exception | None = None,
+        fallback_error: Exception | None = None,
     ) -> None:
         self.name = name
         self.display_name = display_name
         self._fallback_command = fallback_command
         self._error = error
+        self._fallback_error = fallback_error
         self.requests = []
         self.fallback_requests = []
 
@@ -103,6 +105,8 @@ class _LaunchIntegration:
 
     def interactive_setup_fallback_command(self, request) -> str:
         self.fallback_requests.append(request)
+        if self._fallback_error is not None:
+            raise self._fallback_error
         return self._fallback_command
 
 
@@ -308,35 +312,25 @@ def test_run_server_reports_first_run_before_starting_uvicorn(
     assert "/setup" in output
 
 
-def test_setup_get_renders_only_project_and_integration_fields(tmp_path, monkeypatch):
+def test_setup_get_renders_only_data_root_and_integration_fields(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "agency.web.routes.admin_groups.launchable_integrations",
-        lambda integrations, project_dir: (
+        lambda integrations, data_root: (
             _LaunchIntegration("copilot", "GitHub Copilot"),
-            _LaunchIntegration("claude-code", "Claude Code"),
         ),
     )
-    client = TestClient(app_mod.app)
-
-    response = client.get("/setup")
+    response = TestClient(app_mod.app).get("/setup")
 
     assert response.status_code == 200
-    assert "project folder" in response.text.lower()
-    assert "agent_library" not in response.text
-    assert "workspace config json" not in response.text.lower()
-    assert 'name="project_dir"' in response.text
-    assert 'name="integration"' in response.text
-    assert 'name="group_name"' not in response.text
-    assert 'name="workspace_config"' not in response.text
-    assert 'id="browse-feedback"' in response.text
-    assert 'id="directory-browser"' in response.text
-    assert 'id="choose-current-directory"' in response.text
-    assert "document.createElement" in response.text
-    assert ".textContent =" in response.text
-    assert "chooseCurrentDirectory.disabled = true" in response.text
-    assert "chooseCurrentDirectory.disabled = false" in response.text
-    assert "if (!currentDirectory)" in response.text
+    assert "Agency data root" in response.text
+    assert "Project folder" not in response.text
+    assert 'name="data_root"' in response.text
+    assert 'name="project_dir"' not in response.text
+    assert 'placeholder="C:\\Agency"' in response.text
+    assert 'id="browse-data-root"' in response.text
+    assert "Choose Agency data root" in response.text
+    assert "Agency data root selected." in response.text
 
 
 def test_setup_get_redirects_to_dashboard_when_setup_is_ready(
@@ -378,32 +372,34 @@ def test_setup_get_rebuilds_services_before_redirect_when_config_appears_out_of_
     assert app_mod.app.state.services.startup_error is None
 
 
-def test_setup_launch_requires_absolute_existing_project_dir(tmp_path, monkeypatch):
+def test_setup_launch_rejects_relative_data_root(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
-    client = TestClient(app_mod.app)
-
-    response = client.post(
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.launchable_integrations",
+        lambda integrations, root: (_LaunchIntegration(),),
+    )
+    response = TestClient(app_mod.app).post(
         "/setup/launch",
-        data={"project_dir": "relative-project", "integration": "copilot"},
+        data={"data_root": "relative/Agency", "integration": "copilot"},
     )
 
     assert response.status_code == 200
-    assert "Select an absolute existing project folder." in response.text
+    assert "Agency data root must be an absolute path." in response.text
 
 
 def test_setup_launch_rejects_unavailable_integration(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
     monkeypatch.setattr(
         "agency.web.routes.admin_groups.launchable_integrations",
-        lambda integrations, project_dir: (_LaunchIntegration("claude-code", "Claude Code"),),
+        lambda integrations, root: (_LaunchIntegration("claude-code", "Claude Code"),),
     )
     client = TestClient(app_mod.app)
 
     response = client.post(
         "/setup/launch",
-        data={"project_dir": str(project_dir.resolve()), "integration": "copilot"},
+        data={"data_root": str(data_root.resolve()), "integration": "copilot"},
     )
 
     assert response.status_code == 200
@@ -412,12 +408,12 @@ def test_setup_launch_rejects_unavailable_integration(tmp_path, monkeypatch):
 
 def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     config_path = _configure_missing_config(tmp_path, monkeypatch)
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
     integration = _LaunchIntegration()
     monkeypatch.setattr(
         "agency.web.routes.admin_groups.launchable_integrations",
-        lambda integrations, project_dir: (integration,),
+        lambda integrations, root: (integration,),
     )
 
     async def fake_run_in_threadpool(func, *args, **kwargs):
@@ -434,7 +430,7 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
 
     response = client.post(
         "/setup/launch",
-        data={"project_dir": str(project_dir.resolve()), "integration": "copilot"},
+        data={"data_root": str(data_root.resolve()), "integration": "copilot"},
     )
 
     assert response.status_code == 200
@@ -442,7 +438,8 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     assert "Waiting for setup to complete" in response.text
     assert "setTimeout(" in response.text
     assert "setInterval(" not in response.text
-    assert integration.requests[0].project_dir == project_dir.resolve()
+    assert integration.requests[0].data_root == data_root.resolve()
+    assert not hasattr(integration.requests[0], "project_dir")
     assert integration.requests[0].config_path == config_path.resolve()
     assert "agency-setup" in integration.requests[0].prompt
     assert "Selected integration: copilot." in integration.requests[0].prompt
@@ -452,8 +449,8 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
     tmp_path, monkeypatch
 ):
     _configure_missing_config(tmp_path, monkeypatch)
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
     integration = _LaunchIntegration(
         name="custom-launcher",
         display_name="Custom Launcher",
@@ -462,7 +459,7 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
     )
     monkeypatch.setattr(
         "agency.web.routes.admin_groups.launchable_integrations",
-        lambda integrations, project_dir: (integration,),
+        lambda integrations, root: (integration,),
     )
 
     async def fake_run_in_threadpool(func, *args, **kwargs):
@@ -479,7 +476,7 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
     response = client.post(
         "/setup/launch",
         data={
-            "project_dir": str(project_dir.resolve()),
+            "data_root": str(data_root.resolve()),
             "integration": "custom-launcher",
         },
     )
@@ -489,6 +486,55 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
     assert "custom-launcher --resume-setup" in response.text
     assert "copilot -C" not in response.text
     assert integration.fallback_requests == integration.requests
+
+
+def test_setup_launch_creates_and_uses_missing_data_root(tmp_path, monkeypatch):
+    config_path = _configure_missing_config(tmp_path, monkeypatch)
+    data_root = tmp_path / "new" / "Agency"
+    integration = _LaunchIntegration()
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.launchable_integrations",
+        lambda integrations, root: (integration,),
+    )
+    client = TestClient(app_mod.app)
+
+    response = client.post(
+        "/setup/launch",
+        data={"data_root": str(data_root), "integration": "copilot"},
+    )
+
+    assert response.status_code == 200
+    assert data_root.is_dir()
+    assert list(data_root.iterdir()) == []
+    assert not config_path.exists()
+    assert integration.requests[0].data_root == data_root.resolve(strict=True)
+    assert "Waiting for setup to complete" in response.text
+    assert "Agency data root" in response.text
+
+
+def test_setup_launch_returns_to_form_when_launch_and_fallback_fail(
+    tmp_path, monkeypatch
+):
+    _configure_missing_config(tmp_path, monkeypatch)
+    data_root = tmp_path / "Agency"
+    integration = _LaunchIntegration(
+        error=IntegrationError("Bundled setup skill is unavailable."),
+        fallback_error=IntegrationError("No valid fallback command."),
+    )
+    monkeypatch.setattr(
+        "agency.web.routes.admin_groups.launchable_integrations",
+        lambda integrations, root: (integration,),
+    )
+
+    response = TestClient(app_mod.app).post(
+        "/setup/launch",
+        data={"data_root": str(data_root), "integration": "copilot"},
+    )
+
+    assert response.status_code == 200
+    assert data_root.is_dir()
+    assert "Bundled setup skill is unavailable." in response.text
+    assert "Waiting for setup to complete" not in response.text
 
 
 def test_setup_browse_returns_directory_listing(tmp_path, monkeypatch):

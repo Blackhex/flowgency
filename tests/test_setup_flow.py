@@ -16,48 +16,42 @@ from agency.web.setup_flow import (
 )
 
 
-def test_build_setup_prompt_names_project_and_config(tmp_path: Path) -> None:
+def test_build_setup_prompt_supplies_guided_data_root_context(tmp_path: Path):
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
+    config_path = tmp_path / "config.yaml"
+
     prompt = build_setup_prompt(
-        tmp_path,
-        tmp_path / "config.yaml",
+        data_root,
+        config_path,
         selected_integration="copilot",
     )
 
-    assert "agency-setup" in prompt
-    assert "Discuss and obtain approval for the group name" in prompt
-    assert "storage paths" in prompt
-    assert str(tmp_path.resolve()) in prompt
-    assert str((tmp_path / "config.yaml").resolve()) in prompt
-    assert "Selected integration: copilot." in prompt
-    assert "group.default_integration" in prompt
-    assert "initial agent instances" in prompt
-    assert "unless the user explicitly approves a different registered integration" in prompt
-    assert "Configure schema_version: 5." in prompt
-    assert "workspace_path to the project execution workspace" in prompt
-    assert "path to a disjoint Agency-owned group root" in prompt
-    assert "Never create or reference a project-local shared directory." in prompt
-    assert "one complete configuration" in prompt
-    assert "validation" in prompt.lower()
-    assert "one atomic write" in prompt.lower()
-    assert "Do not write a partial configuration" in prompt
+    for line in (
+        "Setup mode: guided-first-run.",
+        f"Agency data root: {data_root.resolve()}.",
+        f"Authoritative config: {config_path.resolve()}.",
+        "Selected integration: copilot.",
+    ):
+        assert line in prompt
+    assert "The Agency data root was selected in the browser; do not ask for it again." in prompt
+    assert (
+        "Ask for the first group project workspace as the first user-facing question."
+        in prompt
+    )
+    assert "Project workspace:" not in prompt
 
 
-def test_build_setup_prompt_requires_root_first_storage_flow(tmp_path: Path) -> None:
+def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
     prompt = build_setup_prompt(
-        tmp_path,
+        data_root,
         tmp_path / "config.yaml",
         selected_integration="copilot",
     )
 
     for phrase in (
-        "Agency data root the first user-facing question",
-        "separate home for reusable agent blueprints",
-        "project workspace remains source",
-        "authoritative config remains at the supplied path",
-        "existing directory or a new absolute path",
-        "nearest existing parent is a writable real directory that can safely create it",
-        r"C:\Agency",
-        "~/Agency",
         "agency.agent_library as <root>/agent-library",
         "agency.compilation_cache as <root>/compiled-agents",
         "agency.memory_store as <root>/memory",
@@ -65,8 +59,8 @@ def test_build_setup_prompt_requires_root_first_storage_flow(tmp_path: Path) -> 
         "groups.<group-id>.path as <root>/groups/<group-id>",
         "Customize the derived storage paths?",
         "review all five derived paths together",
-        "do not ask about individual storage paths",
-        "before creating any directory or blueprint",
+        "consolidated path summary",
+        "before creating any derived directory or blueprint",
     ):
         assert phrase in prompt
 

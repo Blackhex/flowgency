@@ -13,11 +13,13 @@ from starlette.concurrency import run_in_threadpool
 from agency.configuration import (
     ConfigConflictError,
     delete_group,
+    DirectoryPreparationError,
     GroupCreateStatePatch,
     GroupSettingsStatePatch,
     ValidationFailed,
     create_group_state,
     patch_group_settings_state,
+    prepare_writable_directory,
     resolve_group_paths,
 )
 from agency.integrations import BaseIntegration, REGISTRY
@@ -119,7 +121,7 @@ def _setup_response(
     *,
     status,
     waiting: bool = False,
-    project_dir_value: str = "",
+    data_root_value: str = "",
     selected_integration: str = "",
     selected_integration_name: str = "",
     integrations: tuple[BaseIntegration, ...] = (),
@@ -141,7 +143,7 @@ def _setup_response(
             "status_state": status.state,
             "status_message": status.message,
             "waiting": waiting,
-            "project_dir_value": project_dir_value,
+            "data_root_value": data_root_value,
             "selected_integration": selected_integration,
             "selected_integration_name": selected_integration_name,
             "integrations": integrations,
@@ -308,10 +310,10 @@ def _canonical_group_path(config_path: Path, value: str) -> Path:
     return candidate.resolve()
 
 
-def _setup_project_seed(services: AgencyServices, project_dir_value: str) -> Path:
+def _setup_data_root_seed(services: AgencyServices, data_root_value: str) -> Path:
     candidate = (
-        Path(project_dir_value).expanduser()
-        if project_dir_value
+        Path(data_root_value).expanduser()
+        if data_root_value
         else services.config_path.parent
     )
     try:
@@ -322,12 +324,12 @@ def _setup_project_seed(services: AgencyServices, project_dir_value: str) -> Pat
 
 def _setup_integrations(
     services: AgencyServices,
-    project_dir_value: str,
+    data_root_value: str,
 ) -> tuple[BaseIntegration, ...]:
     return tuple(
         launchable_integrations(
             services.integrations,
-            _setup_project_seed(services, project_dir_value),
+            _setup_data_root_seed(services, data_root_value),
         )
     )
 
@@ -400,50 +402,47 @@ async def setup_launch(
     if status.state == "ready":
         return RedirectResponse("/", status_code=303)
     form = await request.form()
-    project_dir_value = str(form.get("project_dir", "")).strip()
+    data_root_value = str(form.get("data_root", "")).strip()
     requested_integration = str(form.get("integration", "")).strip()
-    integrations = _setup_integrations(services, project_dir_value)
+    integrations = _setup_integrations(services, data_root_value)
     selected_integration, selected_integration_name = _select_integration(
         integrations,
         requested_integration,
     )
-
-    project_dir = Path(project_dir_value).expanduser() if project_dir_value else None
-    if (
-        project_dir is None
-        or not project_dir.is_absolute()
-        or not project_dir.exists()
-        or not project_dir.is_dir()
-    ):
-        return _setup_response(
-            request,
-            services,
-            status=status,
-            project_dir_value=project_dir_value,
-            integrations=integrations,
-            selected_integration=selected_integration,
-            selected_integration_name=selected_integration_name,
-            error="Select an absolute existing project folder.",
-        )
     launchable_by_name = {item.name: item for item in integrations}
     if requested_integration not in launchable_by_name:
         return _setup_response(
             request,
             services,
             status=status,
-            project_dir_value=str(project_dir.resolve()),
+            data_root_value=data_root_value,
             integrations=integrations,
             selected_integration=selected_integration,
             selected_integration_name=selected_integration_name,
             error="Choose an available integration.",
         )
-    resolved_project_dir = project_dir.resolve()
+    try:
+        resolved_data_root = prepare_writable_directory(
+            Path(data_root_value),
+            label="Agency data root",
+        )
+    except DirectoryPreparationError as exc:
+        return _setup_response(
+            request,
+            services,
+            status=status,
+            data_root_value=data_root_value,
+            integrations=integrations,
+            selected_integration=selected_integration,
+            selected_integration_name=selected_integration_name,
+            error=str(exc),
+        )
     integration = launchable_by_name[requested_integration]
     setup_request = InteractiveSetupRequest(
-        project_dir=resolved_project_dir,
+        data_root=resolved_data_root,
         config_path=services.config_path.resolve(),
         prompt=build_setup_prompt(
-            resolved_project_dir,
+            resolved_data_root,
             services.config_path,
             selected_integration=requested_integration,
         ),
@@ -461,17 +460,31 @@ async def setup_launch(
             fallback_command = integration.interactive_setup_fallback_command(
                 setup_request
             )
-    except Exception as exc:
-        fallback_command = integration.interactive_setup_fallback_command(
-            setup_request
-        )
-        launch_notice = str(exc).strip()
+    except Exception as launch_error:
+        launch_notice = str(launch_error).strip() or "Interactive setup could not be launched."
+        try:
+            fallback_command = integration.interactive_setup_fallback_command(
+                setup_request
+            )
+        except Exception:
+            return _setup_response(
+                request,
+                services,
+                status=status,
+                data_root_value=str(resolved_data_root),
+                integrations=integrations,
+                selected_integration=requested_integration,
+                selected_integration_name=launchable_by_name[
+                    requested_integration
+                ].display_name,
+                error=launch_notice,
+            )
     return _setup_response(
         request,
         services,
         status=status,
         waiting=True,
-        project_dir_value=str(resolved_project_dir),
+        data_root_value=str(resolved_data_root),
         integrations=integrations,
         selected_integration=requested_integration,
         selected_integration_name=launchable_by_name[requested_integration].display_name,
