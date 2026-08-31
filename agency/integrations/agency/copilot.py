@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from agency.blueprints.projectors import get_projector
+from agency.configuration import is_symlink_or_reparse
 from agency.fs.atomic import atomic_write_text
+from agency.setup_assets import copilot_discovery_root
 from agency.integrations import (
     AgentIdentity,
     BaseIntegration,
@@ -374,15 +376,56 @@ class CopilotIntegration(BaseIntegration):
             script,
         )
 
+    def _interactive_setup_discovery_root(self, data_root: Path) -> Path:
+        root = copilot_discovery_root()
+        skill_root = root / ".github" / "skills" / "agency-setup"
+        skill_file = skill_root / "SKILL.md"
+        try:
+            resolved_root = root.resolve(strict=True)
+            resolved_skill_root = skill_root.resolve(strict=True)
+        except OSError as exc:
+            raise IntegrationError(
+                "Bundled agency-setup skill is missing or unreadable; "
+                "reinstall christag-agency."
+            ) from exc
+        if (
+            is_symlink_or_reparse(skill_file)
+            or not skill_file.is_file()
+            or not os.access(skill_file, os.R_OK)
+        ):
+            raise IntegrationError(
+                "Bundled agency-setup skill is missing or unreadable; "
+                "reinstall christag-agency."
+            )
+
+        local_skill = data_root / ".github" / "skills" / "agency-setup"
+        if local_skill.exists() or is_symlink_or_reparse(local_skill):
+            try:
+                local_resolved = local_skill.resolve(strict=True)
+            except OSError as exc:
+                raise IntegrationError(
+                    "Agency data root contains a conflicting agency-setup skill at "
+                    f"{local_skill}. Remove or rename it before launching setup."
+                ) from exc
+            if local_resolved != resolved_skill_root:
+                raise IntegrationError(
+                    "Agency data root contains a conflicting agency-setup skill at "
+                    f"{local_skill}. Remove or rename it before launching setup."
+                )
+        return resolved_root
+
     def _interactive_setup_command(
         self,
         request: InteractiveSetupRequest,
     ) -> Sequence[str]:
         data_root = request.data_root.resolve(strict=True)
+        discovery_root = self._interactive_setup_discovery_root(data_root)
         return (
             *self._interactive_setup_command_prefix(),
             "-C",
             str(data_root),
+            "--add-dir",
+            str(discovery_root),
             "-i",
             request.prompt,
             "--name",

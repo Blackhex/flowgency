@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -11,6 +12,7 @@ import pytest
 from agency.integrations import BaseIntegration, IntegrationError
 from agency.integrations.agency.copilot import CopilotIntegration
 from agency.integrations.models import InteractiveSetupRequest
+from agency.setup_assets import copilot_discovery_root
 
 
 def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -> None:
@@ -69,6 +71,8 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
         r"C:\Program Files\GitHub Copilot\copilot.exe",
         "-C",
         str(tmp_path.resolve()),
+        "--add-dir",
+        str(copilot_discovery_root()),
         "-i",
         "Use the agency-setup skill.",
         "--name",
@@ -107,6 +111,7 @@ def test_copilot_builds_fallback_command_without_launch(
     assert integration.interactive_setup_fallback_command(request) == (
         "& 'C:\\Program Files\\GitHub Copilot\\copilot.exe' "
         f"'-C' '{tmp_path.resolve()}' "
+        f"'--add-dir' '{copilot_discovery_root()}' "
         "'-i' 'Use the agency-setup skill.' "
         "'--name' 'Agency setup'"
     )
@@ -172,6 +177,8 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
     assert captured["command"][8:] == (
         "-C",
         str(project_dir.resolve()),
+        "--add-dir",
+        str(copilot_discovery_root()),
         "-i",
         "Use the agency-setup skill.",
         "--name",
@@ -186,6 +193,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
         f"& '{powershell}' '-NoLogo' '-NoProfile' '-NonInteractive' "
         f"'-ExecutionPolicy' 'Bypass' '-File' '{ps1_wrapper}' "
         f"'-C' '{project_dir.resolve()}' "
+        f"'--add-dir' '{copilot_discovery_root()}' "
         "'-i' 'Use the agency-setup skill.' "
         "'--name' 'Agency setup'"
     )
@@ -508,3 +516,91 @@ def test_spawn_interactive_terminal_raises_for_nonexistent_cwd(
 
     with pytest.raises(FileNotFoundError):
         spawn_interactive_terminal(["copilot"], tmp_path / "missing")
+
+
+def test_copilot_rejects_missing_packaged_setup_skill(monkeypatch, tmp_path):
+    import agency.integrations.agency.copilot as copilot_mod
+
+    missing = tmp_path / "missing-discovery-root"
+    monkeypatch.setattr(copilot_mod, "copilot_discovery_root", lambda: missing)
+    integration = CopilotIntegration()
+    request = InteractiveSetupRequest(
+        data_root=tmp_path,
+        config_path=tmp_path / "config.yaml",
+        prompt="Use the agency-setup skill.",
+    )
+
+    with pytest.raises(IntegrationError, match="reinstall christag-agency"):
+        integration.interactive_setup_fallback_command(request)
+
+
+def test_copilot_rejects_shadowing_data_root_skill(monkeypatch, tmp_path):
+    data_root = tmp_path / "Agency"
+    local_skill = data_root / ".github" / "skills" / "agency-setup"
+    local_skill.mkdir(parents=True)
+    (local_skill / "SKILL.md").write_text("local\n", encoding="utf-8")
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_interactive_setup_command_prefix",
+        lambda self: ("copilot",),
+    )
+    integration = CopilotIntegration()
+    request = InteractiveSetupRequest(
+        data_root=data_root,
+        config_path=tmp_path / "config.yaml",
+        prompt="Use the agency-setup skill.",
+    )
+
+    with pytest.raises(IntegrationError, match=re.escape(str(local_skill))):
+        integration.interactive_setup_fallback_command(request)
+
+
+def test_copilot_accepts_repository_link_to_canonical_skill(monkeypatch):
+    repository_root = Path(__file__).parents[1]
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_interactive_setup_command_prefix",
+        lambda self: ("copilot",),
+    )
+    request = InteractiveSetupRequest(
+        data_root=repository_root,
+        config_path=repository_root / "config.yaml",
+        prompt="Use the agency-setup skill.",
+    )
+
+    command = CopilotIntegration()._interactive_setup_command(request)
+
+    assert command[1:5] == (
+        "-C",
+        str(repository_root.resolve()),
+        "--add-dir",
+        str(copilot_discovery_root()),
+    )
+
+
+def test_copilot_rejects_unreadable_packaged_setup_skill(monkeypatch, tmp_path):
+    import agency.integrations.agency.copilot as copilot_mod
+
+    skill_file = (
+        copilot_discovery_root()
+        / ".github"
+        / "skills"
+        / "agency-setup"
+        / "SKILL.md"
+    )
+    original_access = copilot_mod.os.access
+    monkeypatch.setattr(
+        copilot_mod.os,
+        "access",
+        lambda path, mode: False
+        if Path(path) == skill_file and mode == copilot_mod.os.R_OK
+        else original_access(path, mode),
+    )
+    request = InteractiveSetupRequest(
+        data_root=tmp_path,
+        config_path=tmp_path / "config.yaml",
+        prompt="Use the agency-setup skill.",
+    )
+
+    with pytest.raises(IntegrationError, match="reinstall christag-agency"):
+        CopilotIntegration().interactive_setup_fallback_command(request)
