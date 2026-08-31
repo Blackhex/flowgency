@@ -1,6 +1,6 @@
 # Agency Setup Skill
 
-The `agency-setup` skill owns the one authoritative canonical Agency config. After the user chooses a project folder and supported AI integration, the skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces. Generated native prompt files remain derived output.
+The `agency-setup` skill owns the one authoritative canonical Agency config. Guided first-run setup supplies an approved Agency data root, authoritative config path, and supported AI integration; the guided conversation asks for the project workspace as its first question. Without guided context, the skill asks for the data root and then the workspace explicitly. The skill takes over group naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces. Generated native prompt files remain derived output.
 
 Every generated config uses `schema_version: 5` and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`. Each group has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned group root). The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`.
 
@@ -32,20 +32,15 @@ mkdir -p ~/.claude/skills
 ln -s /path/to/agency/skills/agency-setup ~/.claude/skills/agency-setup
 ```
 
-### GitHub Copilot on Windows
+### GitHub Copilot
 
-Expose the canonical skill at `.github\skills\agency-setup`. A junction keeps one source copy:
-
-```powershell
-New-Item -ItemType Directory -Force .github\skills | Out-Null
-New-Item -ItemType Junction `
-  -Path .github\skills\agency-setup `
-  -Target C:\path\to\agency\skills\agency-setup | Out-Null
-```
+The first-run launcher exposes the package-owned `agency-setup` skill to
+Copilot automatically. A normal editable or wheel installation does not need a
+project-local junction or user-global skill installation.
 
 ## Run
 
-Invoke `agency-setup` from the project workspace after the first-run page launches it with the project folder, exact authoritative config path, and supported AI integration. The skill uses that exact config path and selected integration unless the user explicitly approves another registered integration. If no config exists, it builds the complete candidate first and performs one revision-checked atomic write after approval and validation. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
+Invoke `agency-setup` after the first-run page launches it from the selected data root with the exact authoritative config path and supported AI integration. The skill uses that exact config path and selected integration unless the user explicitly approves another registered integration. If no config exists, it builds the complete candidate first and performs one revision-checked atomic write after approval and validation. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
 
 1. Inspects project instructions, source, tests, deployment, and available integrations without asking setup questions.
 2. Asks for the Agency data root as the first question and derives the canonical global paths.

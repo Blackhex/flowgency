@@ -83,16 +83,29 @@ def test_setup_requires_user_selected_agent_count_and_roles():
     assert "do not infer extra instances" in normalized
 
 
-def test_setup_asks_for_data_root_before_team_questions():
+def test_guided_setup_asks_for_workspace_before_inspection_and_team_questions():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    normalized = " ".join(skill.split()).lower()
+    normalized = " ".join(skill.split())
 
-    root_question = normalized.index(
-        "ask for the agency data root as the first user-facing question"
+    guided = normalized.index("Setup mode: guided-first-run.")
+    workspace = normalized.index(
+        "ask for the first group project workspace as the first user-facing question"
     )
-    team_question = normalized.index("how many agents to create")
+    inspection = normalized.index("inspect that workspace read-only")
+    team = normalized.index("how many agents to create")
 
-    assert root_question < team_question
+    assert guided < workspace < inspection < team
+    assert "do not ask for the data root again" in normalized
+
+
+def test_manual_setup_collects_root_then_workspace_without_hidden_mode_state():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "without that complete guided context" in normalized
+    assert "ask for the Agency data root first" in normalized
+    assert "then ask for the first group project workspace" in normalized
+    assert "No environment variable or hidden process state selects a mode." in skill
 
 
 def test_setup_derives_canonical_paths_from_one_data_root():
@@ -177,7 +190,7 @@ def test_setup_keeps_path_overrides_behind_one_grouped_review():
     assert "one grouped review" in skill
     assert "Do not ask about individual storage paths in the default flow." in skill
     assert "one consolidated path summary" in skill
-    assert "No directory or blueprint may be created before" in skill
+    assert "No derived directory or blueprint may be created before" in skill
 def test_setup_skill_owns_group_naming_storage_workspaces_and_atomic_write():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split()).lower()

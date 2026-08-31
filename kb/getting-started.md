@@ -13,9 +13,9 @@ Open `http://127.0.0.1:8500`.
 
 ## First run
 
-Start Agency, choose the project folder and supported AI integration, complete the agency-setup conversation, and return to the dashboard automatically. The Agency Setup Skill owns group naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
+Start Agency, choose the Agency data root and supported AI integration, complete the agency-setup conversation, and return to the dashboard automatically. The launcher safely creates a missing root, attaches the bundled skill, and the guided conversation asks for the project workspace as its first question. The Agency Setup Skill owns group naming, storage paths, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
 
-On first run, open `/setup` and hand off the project folder and supported integration to `agency-setup`. After setup, create reusable blueprints, Agent Skills, and shared prompts in Agent Library. Open the group's Agents page to add explicit instances that select a blueprint and integration. Configure identity, private prompts, runtime overrides, routines, and semantic memory from Agent Detail.
+On first run, open `/setup` and choose the data root and supported integration to launch `agency-setup`. After setup, create reusable blueprints, Agent Skills, and shared prompts in Agent Library. Open the group's Agents page to add explicit instances that select a blueprint and integration. Configure identity, private prompts, runtime overrides, routines, and semantic memory from Agent Detail.
 
 ## Core concepts
 

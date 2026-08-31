@@ -280,23 +280,27 @@ def test_active_documentation_omits_unexpected_ascii_control_characters():
     assert not invalid, "\n".join(invalid)
 
 
-def test_setup_skill_windows_examples_use_literal_paths():
+def test_setup_skill_copilot_setup_is_automatic_not_manual_junction():
     setup_skill = (REPO_ROOT / "kb" / "setup-skill.md").read_text(encoding="utf-8")
-    assert "`.github\\skills\\agency-setup`" in setup_skill
-    assert "-Path .github\\skills\\agency-setup" in setup_skill
-    assert "-Target C:\\path\\to\\agency\\skills\\agency-setup" in setup_skill
+    assert "automatically" in setup_skill
+    assert "New-Item -ItemType Junction" not in setup_skill
 
 
-def test_readme_and_getting_started_describe_the_project_handoff():
+def test_readme_and_getting_started_describe_the_data_root_handoff():
     expected = (
-        "Start Agency, choose the project folder and supported AI integration, "
+        "Start Agency, choose the Agency data root and supported AI integration, "
         "complete the agency-setup conversation, and return to the dashboard automatically."
     )
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    getting_started = (REPO_ROOT / "kb" / "getting-started.md").read_text(encoding="utf-8")
+    getting_started = (REPO_ROOT / "kb" / "getting-started.md").read_text(
+        encoding="utf-8"
+    )
 
     assert expected in readme
     assert expected in getting_started
+    for text in (readme, getting_started):
+        assert "project workspace as its first question" in text
+        assert "choose the project folder" not in text.lower()
 
 
 def test_local_links_in_active_documentation_resolve():
