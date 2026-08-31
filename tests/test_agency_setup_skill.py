@@ -1,8 +1,13 @@
 from pathlib import Path
 
+from agency.setup_assets import copilot_discovery_root
+
 
 REPO_ROOT = Path(__file__).parents[1]
-CANONICAL_SKILL_DIR = REPO_ROOT / "skills" / "agency-setup"
+CANONICAL_SKILL_DIR = (
+    copilot_discovery_root() / ".github" / "skills" / "agency-setup"
+)
+REPOSITORY_SKILL_DIR = REPO_ROOT / "skills" / "agency-setup"
 DISCOVERY_SKILL_DIR = REPO_ROOT / ".github" / "skills" / "agency-setup"
 SKILL_PATH = CANONICAL_SKILL_DIR / "SKILL.md"
 DISPATCH_TEMPLATES_PATH = CANONICAL_SKILL_DIR / "references" / "dispatch-templates.md"
@@ -11,8 +16,11 @@ TEMPLATES_PATH = CANONICAL_SKILL_DIR / "references" / "templates.md"
 README_PATH = REPO_ROOT / "README.md"
 
 
-def test_copilot_skill_discovery_resolves_to_canonical_source():
-    assert DISCOVERY_SKILL_DIR.resolve() == CANONICAL_SKILL_DIR.resolve()
+def test_repository_skill_paths_resolve_to_package_owned_source():
+    canonical = CANONICAL_SKILL_DIR.resolve(strict=True)
+
+    assert REPOSITORY_SKILL_DIR.resolve(strict=True) == canonical
+    assert DISCOVERY_SKILL_DIR.resolve(strict=True) == canonical
 
 
 def test_setup_creates_standard_global_agent_library_blueprints():

@@ -27,6 +27,10 @@ include = ["agency*"]
 
 [tool.setuptools.package-data]
 agency = ["templates/*.html", "static/*", "themes/*.yaml"]
+"agency.setup_assets" = [
+    "copilot/.github/skills/agency-setup/*.md",
+    "copilot/.github/skills/agency-setup/references/*.md",
+]
 
 [tool.pytest.ini_options]
 markers = [
