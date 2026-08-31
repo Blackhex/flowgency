@@ -181,6 +181,10 @@ def test_setup_docs_present_one_data_root_default():
     assert "first question" in guide.lower()
     assert "first question" in readme.lower()
     assert "`Customize the derived storage paths?`" in guide
+    # Important 1: guided/manual modes must be described; stale inspection-first ordering must be absent
+    assert "After read-only project inspection, the first question asks" not in guide
+    # Important 2: stale Run list that puts inspection before root/workspace must be absent
+    assert "Asks for the Agency data root as the first question" not in guide
 
 
 def test_setup_keeps_path_overrides_behind_one_grouped_review():

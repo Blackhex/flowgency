@@ -6,7 +6,7 @@ Every generated config uses `schema_version: 5` and requires `agency.agent_libra
 
 ## Agency Data Root
 
-After read-only project inspection, the first question asks for one Agency data root. This is a separate home for reusable agent blueprints, disposable compiled projections, semantic memory and durable jobs, and per-group records. The project workspace remains source code and execution context, while `config.yaml` remains at its authoritative path.
+In guided mode, the data root is pre-supplied by the launcher; the project workspace is the first question. In manual mode, the skill asks for the data root first and then the project workspace. Read-only inspection follows workspace selection in both modes. The data root is a separate home for reusable agent blueprints, disposable compiled projections, semantic memory and durable jobs, and per-group records. The project workspace remains source code and execution context, while `config.yaml` remains at its authoritative path.
 
 The root may be an existing directory or a new absolute path whose nearest existing parent is a writable real directory that can safely create it. For a root at `C:/Agency` and group ID `example`, setup derives:
 
@@ -42,8 +42,8 @@ project-local junction or user-global skill installation.
 
 Invoke `agency-setup` after the first-run page launches it from the selected data root with the exact authoritative config path and supported AI integration. The skill uses that exact config path and selected integration unless the user explicitly approves another registered integration. If no config exists, it builds the complete candidate first and performs one revision-checked atomic write after approval and validation. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
 
-1. Inspects project instructions, source, tests, deployment, and available integrations without asking setup questions.
-2. Asks for the Agency data root as the first question and derives the canonical global paths.
+1. In guided mode, receives the approved data root from the launcher and asks for the project workspace as the first question. In manual mode, asks for the data root first and then the project workspace.
+2. Inspects project instructions, source, tests, deployment, and available integrations without asking setup questions, then derives the canonical global paths.
 3. Proposes reusable roles and asks how many agents to create plus which roles to create for the first team.
 4. Approves the group ID, derives `groups/<group-id>`, and offers one optional grouped path override.
 5. Plans Agent Skills, schedules, runtime policy, workspaces, and semantic memory for approval.
