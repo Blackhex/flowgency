@@ -102,23 +102,29 @@ When the launch prompt contains `Selected integration:`, use that registered
 integration for `group.default_integration` and the initial agent instances
 unless the user explicitly approves a different registered integration.
 
-Use this complete operating-profile format for every proposed agent:
+For every proposed agent, communicate all of the following semantic categories
+in any clear layout that remains unambiguous and reviewable. Closely related
+optional categories may be combined (for example, routines and schedules may be
+addressed together); team-wide assumptions may appear once in the consolidated
+coverage summary:
 
 ```text
-### {identity.display_name} (`{name}`)
-
-- Blueprint / broad role: {blueprint} / {role}
-- Title / emoji: {identity.title} / {identity.emoji or "None proposed"}
-- Mission: {mission}
-- Responsibilities and ownership: {distinct responsibilities}
-- Handoffs: {other proposed agents and exchange points}
-- Rationale: {project facts and prior answers; labeled assumptions}
-- Integration / workspace: {integration} / {exact workspace path and use}
-- Permissions: {exact path and tools; explain write when present}
-- Routines and prompts: {grounded assignments or "None proposed"}
-- Schedules: {supported cadence or "None proposed"}
-- Memory and channels: {grounded selectors/channels or "None proposed"}
-- Assumptions: {remaining assumptions or "None"}
+- stable name (`name`) using a valid lowercase hyphenated slug;
+  reusable blueprint slug and broad role
+- display identity: display_name, title, and optional emoji
+- mission
+- distinct responsibilities and ownership boundaries
+- explicit handoffs to other proposed agents
+- rationale citing inspected project characteristics and prior answers,
+  with labeled assumptions
+- selected integration and intended workspace use
+- proposed runtime permissions on exact paths;
+  write rationale where write access is present
+- routine tasks and prompt purposes, or explicit absence
+- schedules where a recurring cadence is supported, or explicit absence
+- memory scopes and shared channels where continuity requires them,
+  or explicit absence
+- remaining assumptions or none
 ```
 
 The rationale names which inspected project characteristics and prior answers
@@ -127,13 +133,11 @@ not sufficient. `None proposed` is valid for optional emoji, routines,
 schedules, memory, and channels. Do not invent recurring work, cadence, or
 shared memory merely to populate the profile.
 
-Render every proposed profile with every exact label from the operating-profile
-template. Do not abbreviate, rename, merge, or omit any label; use `None
-proposed` at every optional label the profile does not populate. Before
-presenting the team-decision form, verify that the number of profile headings
-equals the approved count and every required label appears exactly once in each
-profile. Put the complete profiles in the message that precedes the
-team-decision form; do not replace them with compact prose or a summary.
+Before presenting the team-decision form, verify that the number of complete
+profiles equals the approved count and every required semantic category is
+identifiable in each profile. Put the complete profiles in the message that
+precedes the team-decision form; do not replace them with compact prose or a
+summary.
 
 When the approved group concept clearly establishes a naming theme, adapt
 display names, titles, and optional emoji coherently without obscuring each

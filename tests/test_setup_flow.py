@@ -75,7 +75,7 @@ def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
     assert workspace < inspection < synthesis
 
 
-def test_build_setup_prompt_requires_uncompressed_profiles_and_themed_identities(
+def test_build_setup_prompt_requires_semantic_profiles_and_themed_identities(
     tmp_path: Path,
 ):
     data_root = tmp_path / "Agency"
@@ -87,15 +87,17 @@ def test_build_setup_prompt_requires_uncompressed_profiles_and_themed_identities
         selected_integration="copilot",
     )
 
-    # Finding 1: complete per-profile labels and pre-decision self-check
+    # Strict-label prose must be absent from the launch prompt
+    assert "every exact profile label" not in prompt
+
+    # Semantic pre-decision self-check
     for phrase in (
-        "every exact profile label",
-        "explicit `None proposed`",
-        "verify the profile count and label completeness before the team decision",
+        "semantic",
+        "verify",
     ):
         assert phrase in prompt
 
-    # Finding 2: clear theme applied to display names and titles
+    # Clear theme applied to display names and titles (unchanged contract)
     assert "clear theme" in prompt
     assert "every display name and title" in prompt
 

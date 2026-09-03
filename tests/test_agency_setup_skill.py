@@ -429,24 +429,26 @@ def test_setup_drafts_exact_count_complete_grounded_operating_profiles():
         "\n## 3.", 1
     )[0]
 
-    for marker in (
-        "### {identity.display_name} (`{name}`)",
-        "Blueprint / broad role",
-        "Title / emoji",
-        "Mission",
-        "Responsibilities and ownership",
-        "Handoffs",
-        "Rationale",
-        "Integration / workspace",
-        "Permissions",
-        "Routines and prompts",
-        "Schedules",
-        "Memory and channels",
-        "Assumptions",
-    ):
-        assert marker in team
-
     normalized = " ".join(team.split())
+
+    # Semantic categories must be described; literal label names are not required.
+    for phrase in (
+        "stable name",
+        "reusable blueprint",
+        "display",
+        "mission",
+        "responsibilities",
+        "handoffs",
+        "rationale",
+        "integration",
+        "permissions",
+        "routines",
+        "schedules",
+        "memory",
+        "assumptions",
+    ):
+        assert phrase.lower() in normalized.lower(), f"semantic category missing: {phrase}"
+
     assert "exactly the approved initial count" in normalized
     assert "inspected project facts" in normalized
     assert "approved group concept" in normalized
@@ -455,9 +457,9 @@ def test_setup_drafts_exact_count_complete_grounded_operating_profiles():
     assert "None proposed" in team
 
 
-def test_setup_requires_complete_uncompressed_profiles_with_pre_decision_check():
-    """Every profile must use every exact label from the template without
-    compression, and the skill must verify label and count completeness
+def test_setup_requires_complete_semantic_profiles_with_pre_decision_check():
+    """Every profile must communicate all required semantic categories in any
+    clear layout; the skill must verify count and semantic-category completeness
     before presenting the team decision."""
     skill = SKILL_PATH.read_text(encoding="utf-8")
     section = skill.split("## 2. Synthesize And Approve The Team", 1)[1].split(
@@ -465,17 +467,19 @@ def test_setup_requires_complete_uncompressed_profiles_with_pre_decision_check()
     )[0]
     normalized = " ".join(section.split())
 
-    # No-compression contract: every exact label, no abbreviation
-    for phrase in (
-        "Render every proposed profile with every exact label from the operating-profile template",
-        "Do not abbreviate, rename, merge, or omit any label",
-        "use `None proposed` at every optional label the profile does not populate",
-    ):
-        assert phrase in normalized
+    # Strict-label prose must be absent
+    assert "every exact label from the operating-profile template" not in normalized
+    assert "Do not abbreviate, rename, merge, or omit any label" not in normalized
+    assert "every required label appears exactly once in each profile" not in normalized
 
-    # Pre-decision self-check
-    assert "verify that the number of profile headings equals the approved count" in normalized
-    assert "every required label appears exactly once in each profile" in normalized
+    # Semantic layout flexibility
+    assert "any clear layout" in normalized
+    assert "Closely related optional categories may be combined" in normalized
+    assert "team-wide assumptions may appear once" in normalized
+
+    # Pre-decision self-check: count and semantic-category completeness
+    assert "verify that the number of complete profiles equals the approved count" in normalized
+    assert "every required semantic category is identifiable in each profile" in normalized
 
     # Complete profiles precede the team decision, not a summary
     assert "complete profiles in the message that precedes the team-decision form" in normalized

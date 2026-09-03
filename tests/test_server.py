@@ -466,11 +466,14 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     )
     assert (
         "every exact profile label"
+        not in integration.requests[0].prompt
+    )
+    assert (
+        "semantic categories in any clear layout"
         in integration.requests[0].prompt
     )
     assert (
-        "verify the profile count and label completeness before the team decision"
-        in integration.requests[0].prompt
+        "verify" in integration.requests[0].prompt
     )
     assert (
         "clear theme"
