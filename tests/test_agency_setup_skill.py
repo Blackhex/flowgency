@@ -98,7 +98,27 @@ def test_manual_setup_collects_root_then_workspace_without_hidden_mode_state():
     assert "without that complete guided context" in normalized
     assert "ask for the Agency data root first" in normalized
     assert "then ask for the first group project workspace" in normalized
-    assert "No environment variable or hidden process state selects a mode." in skill
+
+
+def test_setup_guide_describes_context_aware_team_synthesis():
+    guide = SETUP_KB_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(guide.split())
+
+    for phrase in (
+        "summarizes concrete project facts",
+        "approves the group display name and stable ID",
+        "initial positive agent count",
+        "exactly that many complete operating profiles",
+        "may change the count after reviewing the draft",
+        "selected survivor profiles remain unchanged",
+        "responsibilities and operating profiles remain materially distinct",
+        "Write access follows approved implementation responsibilities",
+        "one consolidated team review",
+        "rationale and coverage summary remain conversational",
+    ):
+        assert phrase in normalized
+
+    assert "Proposes reusable roles and asks how many agents" not in guide
 
 
 def test_setup_derives_canonical_paths_from_one_data_root():

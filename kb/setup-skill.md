@@ -23,6 +23,32 @@ Users may enter home syntax such as `~/Agency`; setup expands it to the user's h
 
 Setup then asks `Customize the derived storage paths?` once. Declining keeps the complete derived layout without individual path questions. Accepting opens one grouped review of all five paths. Nothing is created until the consolidated path summary is approved.
 
+## Context-Aware Team Design
+
+After workspace selection, setup inspects the project read-only and summarizes
+concrete project facts before team design. If those facts are too sparse for a
+grounded proposal, it asks one focused priorities question. It then approves the
+group display name and stable ID, asks for an initial positive agent count, and
+drafts exactly that many complete operating profiles.
+
+Each profile combines identity, mission, distinct responsibilities, handoffs,
+project and prior-answer rationale, integration and workspace use, permissions,
+routines and prompts, supported schedules, memory or channels, and explicit
+assumptions. Optional operating choices may be `None proposed`. A clear group
+theme may shape display identities; otherwise setup uses functional names.
+Agents may share a broad role or blueprint only when their responsibilities and
+operating profiles remain materially distinct. Write access follows approved
+implementation responsibilities and is shown on the exact project workspace for
+approval.
+
+The user reviews the draft in one consolidated team review and may change the
+count after reviewing the draft. When the count changes, selected survivor
+profiles remain unchanged and every other slot is synthesized again from the
+project, group, priorities, and current coverage gaps. Setup shows coverage,
+overlaps, handoffs, permissions, cadence, memory, and assumptions before final
+team approval. The rationale and coverage summary remain conversational; only
+existing config, blueprint, and prompt fields are written after approval.
+
 ## Install
 
 ### Claude Code on Linux
@@ -43,10 +69,16 @@ project-local junction or user-global skill installation.
 Invoke `agency-setup` after the first-run page launches it from the selected data root with the exact authoritative config path and supported AI integration. The skill uses that exact config path and selected integration unless the user explicitly approves another registered integration. If no config exists, it builds the complete candidate first and performs one revision-checked atomic write after approval and validation. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
 
 1. In guided mode, receives the approved data root from the launcher and asks for the project workspace as the first question. In manual mode, asks for the data root first and then the project workspace.
-2. Inspects project instructions, source, tests, deployment, and available integrations without asking setup questions, then derives the canonical global paths.
-3. Proposes reusable roles and asks how many agents to create plus which roles to create for the first team.
-4. Approves the group ID, derives `groups/<group-id>`, and offers one optional grouped path override.
-5. Plans Agent Skills, schedules, runtime policy, workspaces, and semantic memory for approval.
+2. Inspects project instructions, architecture, source, tests, deployment, and
+   available integrations read-only, then summarizes project facts and asks one
+   priorities question only when evidence is sparse.
+3. Approves the group name and stable ID, asks for the initial count, and drafts
+   exactly that many context-aware operating profiles for consolidated review.
+4. Accepts targeted edits or a revised count, preserves selected full survivor
+   profiles, resynthesizes remaining slots, and approves team coverage,
+   permissions, routines, cadence, memory, and assumptions.
+5. Derives `groups/<group-id>`, offers one optional grouped path override, and
+   obtains the consolidated storage-path approval.
 6. Resolves exactly one canonical config with only the supported root sections (`agency`, `memory`, and `groups`) and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`.
 7. Writes each approved blueprint with global `AGENTS.md` source. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, writes `.agents/skills/<skill>/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities.
 8. Registers explicit group-owned instances and every approved group workspace. Every instance pins a blueprint and integration; routines select scoped saved prompts and semantic memory selectors, and approved private prompts are registered for the instance when needed.
