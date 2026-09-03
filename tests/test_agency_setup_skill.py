@@ -451,6 +451,22 @@ def test_setup_drafts_exact_count_complete_grounded_operating_profiles():
     assert "None proposed" in team
 
 
+def test_section_two_enforces_phase_barrier_before_any_other_question():
+    """Regression: skill must explicitly forbid batching later-stage questions
+    into group/count collection (live-session finding 2026-09-03)."""
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    section = skill.split("## 2. Synthesize And Approve The Team", 1)[1].split(
+        "\n## 3.", 1
+    )[0]
+    normalized = " ".join(section.split())
+
+    assert "do not ask the user to select candidate roles or profiles" in normalized.lower()
+    assert "present the first complete team draft before asking any other question" in normalized
+    assert "do not ask about storage paths" in normalized.lower()
+    assert "until after one consolidated team approval" in normalized
+    assert "complete operating profiles, not a role-selection form" in normalized
+
+
 def test_setup_adapts_identity_and_distinguishes_shared_roles():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split())

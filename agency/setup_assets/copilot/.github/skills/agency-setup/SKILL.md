@@ -86,6 +86,13 @@ positive integer agent count. Do not generate a team draft until the group name,
 ID, and count are approved. Derive `groups.<group-id>.path` after the ID is
 approved.
 
+Do not ask the user to select candidate roles or profiles during group and count
+collection. Once the group name, ID, and count are approved, present the first
+complete team draft before asking any other question. Do not ask about storage
+paths, routines, schedules, memory, or channels until after one consolidated
+team approval. The first draft contains complete operating profiles, not a
+role-selection form.
+
 Generate the first complete team draft with exactly that many profiles. The
 draft must contain exactly the approved initial count. Synthesize it from inspected project facts,
 the approved group concept, the requested count, any priority answer, the
