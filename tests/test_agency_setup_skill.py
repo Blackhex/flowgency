@@ -98,6 +98,7 @@ def test_manual_setup_collects_root_then_workspace_without_hidden_mode_state():
     assert "without that complete guided context" in normalized
     assert "ask for the Agency data root first" in normalized
     assert "then ask for the first group project workspace" in normalized
+    assert "No environment variable or hidden process state selects a mode." in skill
 
 
 def test_setup_guide_describes_context_aware_team_synthesis():
