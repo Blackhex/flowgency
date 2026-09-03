@@ -42,6 +42,39 @@ def test_build_setup_prompt_supplies_guided_data_root_context(tmp_path: Path):
     assert "Project workspace:" not in prompt
 
 
+def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
+    tmp_path: Path,
+):
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
+
+    prompt = build_setup_prompt(
+        data_root,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
+
+    for phrase in (
+        "carry inspected project facts and every approved setup answer forward",
+        "Approve the group display name and stable ID, then an initial positive agent count",
+        "first complete team draft with exactly that many profiles",
+        "Do not use a fixed role slate",
+        "Keep team drafts and revisions inside this interactive conversation",
+        "The canonical config remains the only setup completion output",
+        "do not emit or request a second application-side team payload",
+    ):
+        assert phrase in prompt
+
+    workspace = prompt.index(
+        "Ask for the first group project workspace as the first user-facing question."
+    )
+    inspection = prompt.index("inspect that project read-only")
+    synthesis = prompt.index(
+        "carry inspected project facts and every approved setup answer forward"
+    )
+    assert workspace < inspection < synthesis
+
+
 def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
     data_root = tmp_path / "Agency"
     data_root.mkdir()
