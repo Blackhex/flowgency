@@ -464,6 +464,18 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
         "Storage paths are approved afterward"
         in integration.requests[0].prompt
     )
+    assert (
+        "every exact profile label"
+        in integration.requests[0].prompt
+    )
+    assert (
+        "verify the profile count and label completeness before the team decision"
+        in integration.requests[0].prompt
+    )
+    assert (
+        "clear theme"
+        in integration.requests[0].prompt
+    )
     assert integration.fallback_requests == []
 
 def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(

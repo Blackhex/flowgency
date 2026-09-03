@@ -75,6 +75,31 @@ def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
     assert workspace < inspection < synthesis
 
 
+def test_build_setup_prompt_requires_uncompressed_profiles_and_themed_identities(
+    tmp_path: Path,
+):
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
+
+    prompt = build_setup_prompt(
+        data_root,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
+
+    # Finding 1: complete per-profile labels and pre-decision self-check
+    for phrase in (
+        "every exact profile label",
+        "explicit `None proposed`",
+        "verify the profile count and label completeness before the team decision",
+    ):
+        assert phrase in prompt
+
+    # Finding 2: clear theme applied to display names and titles
+    assert "clear theme" in prompt
+    assert "every display name and title" in prompt
+
+
 def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
     data_root = tmp_path / "Agency"
     data_root.mkdir()

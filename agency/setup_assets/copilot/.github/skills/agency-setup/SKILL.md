@@ -127,11 +127,23 @@ not sufficient. `None proposed` is valid for optional emoji, routines,
 schedules, memory, and channels. Do not invent recurring work, cadence, or
 shared memory merely to populate the profile.
 
+Render every proposed profile with every exact label from the operating-profile
+template. Do not abbreviate, rename, merge, or omit any label; use `None
+proposed` at every optional label the profile does not populate. Before
+presenting the team-decision form, verify that the number of profile headings
+equals the approved count and every required label appears exactly once in each
+profile. Put the complete profiles in the message that precedes the
+team-decision form; do not replace them with compact prose or a summary.
+
 When the approved group concept clearly establishes a naming theme, adapt
 display names, titles, and optional emoji coherently without obscuring each
-agent's function. When the theme is ambiguous, use domain-specific functional
-identities; do not force a theme or invent unexplained personas. Stable instance
-and blueprint slugs remain valid and unique.
+agent's function; every `identity.display_name` and `identity.title` must
+visibly acknowledge it. Stable slugs and broad role labels alone do not satisfy
+themed identity. When the theme is ambiguous, use domain-specific functional
+identities; do not force a theme or invent unexplained personas. Use purely
+functional identities only when the theme is ambiguous or the user explicitly
+declines themed identities. Stable instance and blueprint slugs remain valid
+and unique.
 
 Agents may share a broad role when their responsibilities, ownership boundaries,
 or routines differ materially. They may share a blueprint only when their

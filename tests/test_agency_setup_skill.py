@@ -455,6 +455,33 @@ def test_setup_drafts_exact_count_complete_grounded_operating_profiles():
     assert "None proposed" in team
 
 
+def test_setup_requires_complete_uncompressed_profiles_with_pre_decision_check():
+    """Every profile must use every exact label from the template without
+    compression, and the skill must verify label and count completeness
+    before presenting the team decision."""
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    section = skill.split("## 2. Synthesize And Approve The Team", 1)[1].split(
+        "\n## 3.", 1
+    )[0]
+    normalized = " ".join(section.split())
+
+    # No-compression contract: every exact label, no abbreviation
+    for phrase in (
+        "Render every proposed profile with every exact label from the operating-profile template",
+        "Do not abbreviate, rename, merge, or omit any label",
+        "use `None proposed` at every optional label the profile does not populate",
+    ):
+        assert phrase in normalized
+
+    # Pre-decision self-check
+    assert "verify that the number of profile headings equals the approved count" in normalized
+    assert "every required label appears exactly once in each profile" in normalized
+
+    # Complete profiles precede the team decision, not a summary
+    assert "complete profiles in the message that precedes the team-decision form" in normalized
+    assert "do not replace them with compact prose or a summary" in normalized
+
+
 def test_section_two_enforces_phase_barrier_before_any_other_question():
     """Regression: skill must explicitly forbid batching later-stage questions
     into group/count collection (live-session finding 2026-09-03)."""
@@ -484,6 +511,20 @@ def test_setup_adapts_identity_and_distinguishes_shared_roles():
         "Agents may share a broad role",
         "responsibilities, ownership boundaries, or routines differ materially",
         "share a blueprint only when their reusable behavior and working method are genuinely the same",
+    ):
+        assert phrase in normalized
+
+
+def test_setup_requires_clear_theme_applied_to_every_identity():
+    """When the group has a clear theme, every display_name and title must
+    acknowledge it; slugs and broad roles alone are insufficient."""
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    for phrase in (
+        "every `identity.display_name` and `identity.title` must visibly acknowledge it",
+        "Stable slugs and broad role labels alone do not satisfy themed identity",
+        "Use purely functional identities only when the theme is ambiguous or the user explicitly declines themed identities",
     ):
         assert phrase in normalized
 
