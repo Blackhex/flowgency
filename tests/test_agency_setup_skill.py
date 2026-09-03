@@ -120,6 +120,10 @@ def test_setup_guide_describes_context_aware_team_synthesis():
         assert phrase in normalized
 
     assert "Proposes reusable roles and asks how many agents" not in guide
+    # Actionable 4: Run step 3 uses "complete operating profiles" (not "context-aware")
+    assert "context-aware operating profiles" not in guide
+    # Actionable 4: Run step 2 unambiguously marks the inspection as read-only
+    assert "Performs read-only inspection" in guide
 
 
 def test_setup_derives_canonical_paths_from_one_data_root():
@@ -465,6 +469,8 @@ def test_section_two_enforces_phase_barrier_before_any_other_question():
     assert "do not ask about storage paths" in normalized.lower()
     assert "until after one consolidated team approval" in normalized
     assert "complete operating profiles, not a role-selection form" in normalized
+    # Phase-barrier transition: storage path approval is explicitly gated on team approval
+    assert "Obtain one consolidated team approval before continuing to storage-path approval." in normalized
 
 
 def test_setup_adapts_identity_and_distinguishes_shared_roles():
@@ -530,6 +536,18 @@ def test_setup_derives_new_agent_write_access_from_approved_responsibilities():
     assert "Team approval includes approval of every displayed permission grant" in normalized
     assert "Never infer write authority for an existing agent" in normalized
     assert "Exactly one builder normally receives write capability" not in skill
+
+
+def test_section_four_permission_contract_is_scoped_to_register_instances():
+    """Characterization: all four permission contract phrases exist in Section 4 specifically."""
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    section = skill.split("## 4. Register Instances", 1)[1].split("\n## ", 1)[0]
+    normalized = " ".join(section.split())
+
+    assert "For each new agent whose approved implementation responsibilities require write access" in normalized
+    assert "multiple new agents may receive write" in normalized
+    assert "Never infer write authority for an existing agent" in normalized
+    assert "return the grant to targeted team review" in normalized
 
 
 def test_setup_maps_review_profiles_only_to_existing_authority_surfaces():

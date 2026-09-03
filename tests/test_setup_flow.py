@@ -98,6 +98,21 @@ def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
         assert phrase in prompt
 
 
+def test_build_setup_prompt_phases_team_and_storage_approvals(tmp_path: Path):
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
+    prompt = build_setup_prompt(
+        data_root,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
+
+    # Team approval covers complete operating profiles (not storage paths)
+    assert "consolidated team approval covers complete operating profiles" in prompt
+    # Storage paths come after team approval in a separate step
+    assert "Storage paths are approved afterward" in prompt
+
+
 def test_build_setup_prompt_storage_question_deferred_until_team_approval(
     tmp_path: Path,
 ):

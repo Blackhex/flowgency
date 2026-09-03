@@ -456,6 +456,14 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
         in integration.requests[0].prompt
     )
     assert "After the group ID is approved, ask" not in integration.requests[0].prompt
+    assert (
+        "consolidated team approval covers complete operating profiles"
+        in integration.requests[0].prompt
+    )
+    assert (
+        "Storage paths are approved afterward"
+        in integration.requests[0].prompt
+    )
     assert integration.fallback_requests == []
 
 def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(

@@ -57,11 +57,12 @@ def build_setup_prompt(
         "team approval, ask `Customize the derived storage paths?` once. Only if accepted, "
         "review all five derived paths together; otherwise do not ask about individual "
         "storage paths. Show one consolidated path summary and obtain approval before "
-        "creating any derived directory or blueprint. Discuss and obtain approval for "
-        "the group name, storage paths, agent team, integrations, routines, runtime "
-        "policy, workspaces, and memory. Perform validation on the final config and "
-        "make one atomic write for one complete configuration. Do not write a partial "
-        "configuration."
+        "creating any derived directory or blueprint. "
+        "The consolidated team approval covers complete operating profiles including "
+        "integration, routines, runtime policy, workspaces, and memory for each agent. "
+        "Storage paths are approved afterward in the separate grouped path review. "
+        "Perform validation on the final config and make one atomic write for one "
+        "complete configuration. Do not write a partial configuration."
     )
 
 

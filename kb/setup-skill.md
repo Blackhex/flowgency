@@ -69,11 +69,11 @@ project-local junction or user-global skill installation.
 Invoke `agency-setup` after the first-run page launches it from the selected data root with the exact authoritative config path and supported AI integration. The skill uses that exact config path and selected integration unless the user explicitly approves another registered integration. If no config exists, it builds the complete candidate first and performs one revision-checked atomic write after approval and validation. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
 
 1. In guided mode, receives the approved data root from the launcher and asks for the project workspace as the first question. In manual mode, asks for the data root first and then the project workspace.
-2. Inspects project instructions, architecture, source, tests, deployment, and
-   available integrations read-only, then summarizes project facts and asks one
-   priorities question only when evidence is sparse.
+2. Performs read-only inspection of project instructions, architecture, source,
+   tests, deployment, and available integrations, then summarizes project facts
+   and asks one priorities question only when evidence is sparse.
 3. Approves the group name and stable ID, asks for the initial count, and drafts
-   exactly that many context-aware operating profiles for consolidated review.
+   exactly that many complete operating profiles for consolidated review.
 4. Accepts targeted edits or a revised count, preserves selected full survivor
    profiles, resynthesizes remaining slots, and approves team coverage,
    permissions, routines, cadence, memory, and assumptions.
