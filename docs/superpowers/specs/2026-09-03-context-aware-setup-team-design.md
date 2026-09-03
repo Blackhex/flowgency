@@ -37,14 +37,19 @@ coherent identities.
    grant for approval.
 9. Preserve configuration authority, reusable-blueprint boundaries, path
    approval, validation, and one atomic config write.
+10. Confine any application changes to launching `agency-setup` and processing
+    that setup session's outputs.
 
 ## Non-Goals
 
 - Adding configuration fields or changing schema version 5.
 - Persisting an inspection digest or conversational setup state.
 - Adding a browser form for team design.
-- Changing setup launch, data-root selection, skill discovery, or integration
-  command construction.
+- Changing application functionality outside the canonical `agency-setup`
+  skill, the way that setup skill is launched, and the way its session outputs
+  are processed.
+- Changing data-root selection semantics, canonical skill packaging or
+  discovery, normal agent execution, or non-setup integration behavior.
 - Using external repository analysis services or network research.
 - Forcing every agent to have a routine, schedule, memory selector, emoji, or
   write access.
@@ -261,14 +266,30 @@ canonical source. No mirrored skill copy is introduced.
 team review without duplicating the full implementation instructions. It makes
 clear that the initial count precedes the draft and remains editable.
 
+### Setup Session Boundary
+
+The existing first-run launch path may change only where necessary to supply the
+canonical skill with the context needed for this workflow. Processing of the
+setup session's outputs may change only where necessary to preserve and validate
+the context-aware team result. These changes remain inside the setup-session
+boundary: they do not alter normal agent launches, job execution, configuration
+authority, dashboard behavior after setup, group administration, or unrelated
+integration behavior.
+
+The design does not require an application-layer change when the canonical
+skill can carry the context and approval flow itself. Any launch or output
+processing change must have a specific setup-workflow requirement and focused
+regression coverage; it is not a license to add a second team model or persist
+conversational scratch state.
+
 ### Contract Tests
 
 `tests/test_agency_setup_skill.py` pins the skill behavior and ordering. Existing
 skill, packaging, surface, schema, path, and atomic-write tests continue to
 protect unchanged authority boundaries.
 
-No application route, configuration model, template, integration, or runtime
-component changes.
+No application functionality outside the canonical skill and this setup-session
+launch/output boundary changes.
 
 ## Failure Behavior
 
