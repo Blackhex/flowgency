@@ -153,6 +153,13 @@ Every draft and final agent entry is a complete operating profile containing:
 channels, or emoji. Completeness means every category was considered and the
 result is explicit, not that every optional field is populated.
 
+The profile communicates these semantic categories in any clear layout; literal
+label names and fixed Markdown structure are not required. Closely related
+optional categories may be combined (for example, routines and schedules may be
+addressed together). Assumptions that apply to the entire team may appear once
+in the consolidated team summary rather than repeat under every individual
+profile.
+
 The profile rationale summarizes evidence without requiring a file-path list.
 It names which project needs and prior answers shaped the proposal and labels
 unsupported assumptions. A generic description such as "helps with the
@@ -326,7 +333,7 @@ partial config writes, or pre-approval filesystem creation.
 ### Team Draft Contract
 
 - Require the first draft to contain exactly the initial count.
-- Require every profile category from the operating-profile contract.
+- Require every semantic category from the operating-profile contract to be identifiable; literal label names and fixed Markdown layout are not required.
 - Require rationale based on project characteristics and prior answers, with
   assumptions labeled.
 - Require adaptive group-aware identity with functional fallback.
@@ -360,7 +367,8 @@ Verify that:
 - the draft has exactly the requested number of agents;
 - identities reflect the approved group concept without obscuring function;
 - roles, responsibilities, and operating choices reflect the inspected project;
-- each profile includes a meaningful project/prior-answer rationale;
+- each profile's semantic categories — rationale, operating choices, permissions,
+  and assumptions — are identifiable and grounded in project facts;
 - permission grants follow responsibilities;
 - the consolidated coverage summary is present; and
 - no config, blueprint, prompt, or derived storage is created.
@@ -390,6 +398,17 @@ check rather than a brittle exact-text automated test.
 10. No team drafting or revision creates files or mutates configuration.
 11. Existing schema-version-5, path-safety, blueprint-authority, validation,
     and atomic-write behavior remains unchanged.
+
+## Approved Format Amendment
+
+On 2026-09-03 the user ruled that the operating profile is a semantic contract,
+not a layout contract. Every category must be identifiable and reviewable but
+need not use literal label names or a fixed Markdown structure. Related optional
+categories may be combined; team-wide assumptions may appear once in the
+consolidated team summary. All other requirements — project grounding, group
+theming, exact count, survivor preservation, responsibility-derived permissions,
+phase ordering, authority mapping, and no pre-approval writes — remain
+unchanged.
 
 ## Rejected Alternatives
 

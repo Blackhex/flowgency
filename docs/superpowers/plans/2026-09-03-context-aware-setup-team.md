@@ -8,6 +8,22 @@
 
 **Tech Stack:** Python 3.13, Markdown Agent Skills, FastAPI setup launch prompt, pytest text-contract tests, GitHub Copilot CLI live acceptance. No new dependency.
 
+## Amendment: Semantic Profile Completeness (2026-09-03)
+
+Following partial execution of Tasks 1–4, the user ruled that the operating
+profile is a semantic contract. Every category must be identifiable and
+reviewable in the draft but need not use literal label names or a fixed Markdown
+structure. Closely related optional categories may be combined; team-wide
+assumptions may appear once in the consolidated coverage summary. This ruling
+amends Global Constraints, the Shared Contracts profile shape note, Task 2's
+profile format instruction and test, and Task 4's live acceptance criteria. All
+other plan requirements — project grounding, group theming, exact count, survivor
+preservation, responsibility-derived permissions, phase ordering, authority
+mapping, and no pre-approval writes — remain unchanged.
+
+Future and final verification language in this plan reflects the
+semantic-category standard rather than exact-label presence.
+
 ## Global Constraints
 
 - Approved specification: `docs/superpowers/specs/2026-09-03-context-aware-setup-team-design.md`, committed in `deb8f0d` and clarified in `76f4751`.
@@ -21,6 +37,7 @@
 - Multiple agents may share a broad role or blueprint only when the relevant responsibilities or reusable behavior justify it.
 - Infer new-agent write access from approved implementation responsibilities; expose the exact workspace path and rationale. Never widen an existing agent's authority implicitly.
 - Optional emoji, routines, schedules, memory, and channels may be explicitly absent when evidence does not support them.
+- Operating profiles communicate all required semantic categories in any clear layout; literal label names and fixed Markdown structure are not required. Closely related optional categories may be combined; team-wide assumptions may appear once in the consolidated coverage summary.
 - Team drafts, rationales, coverage maps, and survivor choices remain conversational state. Persist only existing schema, blueprint, and prompt fields after approval.
 - No blueprint, prompt, derived storage, or config write occurs while drafting or revising the team.
 - Preserve the data-root, grouped path approval, path safety, skill packaging/discovery, config validation, revision checking, atomic write, scheduler, and polling contracts.
@@ -69,7 +86,9 @@ def build_setup_prompt(
 ```
 
 The skill uses this conversational profile shape for both draft and final
-review; it is not YAML and is never persisted wholesale:
+review; it is not YAML and is never persisted wholesale. These are semantic
+categories; literal label names and Markdown layout may vary, and closely
+related optional categories may be combined:
 
 ```markdown
 ### {identity.display_name} (`{name}`)
@@ -313,24 +332,26 @@ def test_setup_drafts_exact_count_complete_grounded_operating_profiles():
         "\n## 3.", 1
     )[0]
 
-    for marker in (
-        "### {identity.display_name} (`{name}`)",
-        "Blueprint / broad role",
-        "Title / emoji",
-        "Mission",
-        "Responsibilities and ownership",
-        "Handoffs",
-        "Rationale",
-        "Integration / workspace",
-        "Permissions",
-        "Routines and prompts",
-        "Schedules",
-        "Memory and channels",
-        "Assumptions",
-    ):
-        assert marker in team
-
     normalized = " ".join(team.split())
+
+    # Semantic categories must be described; literal label names are not required.
+    for phrase in (
+        "stable name",
+        "reusable blueprint",
+        "display",
+        "mission",
+        "responsibilities",
+        "handoffs",
+        "rationale",
+        "integration",
+        "permissions",
+        "routines",
+        "schedules",
+        "memory",
+        "assumptions",
+    ):
+        assert phrase.lower() in normalized.lower(), f"semantic category missing: {phrase}"
+
     assert "exactly the approved initial count" in normalized
     assert "inspected project facts" in normalized
     assert "approved group concept" in normalized
@@ -499,23 +520,29 @@ When the launch prompt contains `Selected integration:`, use that registered
 integration for `group.default_integration` and the initial agent instances
 unless the user explicitly approves a different registered integration.
 
-Use this complete operating-profile format for every proposed agent:
+For every proposed agent, communicate all of the following semantic categories
+in any clear layout that remains unambiguous and reviewable. Closely related
+optional categories may be combined (for example, routines and schedules may be
+addressed together); team-wide assumptions may appear once in the consolidated
+coverage summary:
 
 ```text
-### {identity.display_name} (`{name}`)
-
-- Blueprint / broad role: {blueprint} / {role}
-- Title / emoji: {identity.title} / {identity.emoji or "None proposed"}
-- Mission: {mission}
-- Responsibilities and ownership: {distinct responsibilities}
-- Handoffs: {other proposed agents and exchange points}
-- Rationale: {project facts and prior answers; labeled assumptions}
-- Integration / workspace: {integration} / {exact workspace path and use}
-- Permissions: {exact path and tools; explain write when present}
-- Routines and prompts: {grounded assignments or "None proposed"}
-- Schedules: {supported cadence or "None proposed"}
-- Memory and channels: {grounded selectors/channels or "None proposed"}
-- Assumptions: {remaining assumptions or "None"}
+- stable name (`name`) using a valid lowercase hyphenated slug;
+  reusable blueprint slug and broad role
+- display identity: display_name, title, and optional emoji
+- mission
+- distinct responsibilities and ownership boundaries
+- explicit handoffs to other proposed agents
+- rationale citing inspected project characteristics and prior answers,
+  with labeled assumptions
+- selected integration and intended workspace use
+- proposed runtime permissions on exact paths;
+  write rationale where write access is present
+- routine tasks and prompt purposes, or explicit absence
+- schedules where a recurring cadence is supported, or explicit absence
+- memory scopes and shared channels where continuity requires them,
+  or explicit absence
+- remaining assumptions or none
 ```
 
 The rationale names which inspected project characteristics and prior answers
@@ -870,9 +897,10 @@ Review the transcript and record evidence that:
 - group name/ID and count were collected before the draft;
 - exactly 3 complete profiles are present;
 - identities coherently acknowledge "Mentat Council" without hiding function;
-- each profile has mission, responsibilities, handoffs, rationale,
-  integration/workspace, permissions, routines/prompts, schedules,
-  memory/channels, and assumptions (including explicit None proposed values);
+- each profile's semantic categories — mission, responsibilities, handoffs,
+  rationale, integration/workspace, permissions, routines/prompts, schedules,
+  memory/channels, and assumptions — are identifiable; related optional
+  categories may be combined and team-wide assumptions may appear once;
 - rationale uses project facts and prior answers rather than stock prose;
 - write grants, if any, follow implementation responsibilities and name the
   exact workspace path;
