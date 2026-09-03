@@ -36,6 +36,25 @@ deployment files, and recent git history. Detect the host OS and available
 agent CLI. Do not ask about the group, agents, roles, routines, workspaces,
 memory channels, or individual storage paths before this inspection completes.
 
+Build and retain a working context from inspected facts: the project's domain
+and stated purpose; languages, frameworks, and architectural boundaries;
+repository maturity, source and test organization, and documentation quality;
+build, deployment, CI, release, and operational signals; apparent work streams,
+risks, maintenance pressure, and missing capabilities; the selected integration;
+and the exact project workspace. Include any user-stated near-term priorities.
+Keep this context in the conversation only; do not write a digest or scratch
+file.
+
+Before team design, summarize this working context in user-facing prose. Name
+concrete project characteristics and distinguish inspected facts from
+assumptions; file-path citations are not required. Do not invent technologies,
+delivery cadence, business goals, or operational needs. If the workspace cannot
+be inspected, identify what was inaccessible and return to project workspace
+selection before proposing a team. If the evidence is too sparse to support a
+grounded proposal, ask exactly one focused question about near-term priorities
+or current pain points, incorporate that answer into the working context, and
+then continue. Do not fall back to a stock team.
+
 Derive these paths in memory without creating them:
 
 ```text
@@ -58,13 +77,106 @@ If validation fails in guided mode, return to the project-workspace choice or
 the grouped path review; do not ask for the supplied data root again. In manual
 mode, validation may return to the root choice or grouped path review.
 
-## 2. Plan The Team And Resolve Agency
+## 2. Synthesize And Approve The Team
 
-After the root is selected, summarize the project and propose three to five distinct roles. Exactly one builder normally receives write capability; observational roles remain fail-closed.
+After inspection and any sparse-evidence clarification, ask the user to approve
+the group display name and stable group ID. Require a lowercase stable ID using
+only letters, digits, and single hyphen separators. Then ask for an initial
+positive integer agent count. Do not generate a team draft until the group name,
+ID, and count are approved. Derive `groups.<group-id>.path` after the ID is
+approved.
 
-Before registration, ask the user how many agents to create for the first team and which proposed roles to create now. Do not infer extra instances beyond the approved count and selected roles. Ask the user to approve the group name and ID, team, each role's routine tasks, schedules, workspace definitions, and any shared memory channels. When the launch prompt contains `Selected integration:`, use that registered integration for `group.default_integration` and the initial agent instances unless the user explicitly approves a different registered integration.
+Generate the first complete team draft with exactly that many profiles. The
+draft must contain exactly the approved initial count. Synthesize it from inspected project facts,
+the approved group concept, the requested count, any priority answer, the
+selected integration, and the exact workspace. Do not offer a fixed candidate
+slate or ask which generic roles to instantiate. Label unsupported assumptions.
+When the launch prompt contains `Selected integration:`, use that registered
+integration for `group.default_integration` and the initial agent instances
+unless the user explicitly approves a different registered integration.
 
-After the group ID is approved, derive `groups.<group-id>.path`. Ask exactly once: `Customize the derived storage paths?` If declined, keep every derived path. Do not ask about individual storage paths in the default flow. If accepted, present all five storage paths in one grouped review and allow any of them to be replaced.
+Use this complete operating-profile format for every proposed agent:
+
+```text
+### {identity.display_name} (`{name}`)
+
+- Blueprint / broad role: {blueprint} / {role}
+- Title / emoji: {identity.title} / {identity.emoji or "None proposed"}
+- Mission: {mission}
+- Responsibilities and ownership: {distinct responsibilities}
+- Handoffs: {other proposed agents and exchange points}
+- Rationale: {project facts and prior answers; labeled assumptions}
+- Integration / workspace: {integration} / {exact workspace path and use}
+- Permissions: {exact path and tools; explain write when present}
+- Routines and prompts: {grounded assignments or "None proposed"}
+- Schedules: {supported cadence or "None proposed"}
+- Memory and channels: {grounded selectors/channels or "None proposed"}
+- Assumptions: {remaining assumptions or "None"}
+```
+
+The rationale names which inspected project characteristics and prior answers
+justify the profile; a generic statement that an agent helps with the project is
+not sufficient. `None proposed` is valid for optional emoji, routines,
+schedules, memory, and channels. Do not invent recurring work, cadence, or
+shared memory merely to populate the profile.
+
+When the approved group concept clearly establishes a naming theme, adapt
+display names, titles, and optional emoji coherently without obscuring each
+agent's function. When the theme is ambiguous, use domain-specific functional
+identities; do not force a theme or invent unexplained personas. Stable instance
+and blueprint slugs remain valid and unique.
+
+Agents may share a broad role when their responsibilities, ownership boundaries,
+or routines differ materially. They may share a blueprint only when their
+reusable behavior and working method are genuinely the same. Different reusable
+behavior requires distinct blueprints even when agents share a broad role.
+
+For proposed new agents, read and search are the baseline. Derive write access
+from approved implementation responsibilities. Multiple new agents may receive
+write when their distinct responsibilities require it. For every write-enabled
+profile, show the exact project workspace path and explain why write is required.
+Team approval includes approval of every displayed permission grant. Never infer
+write authority for an existing agent; keep an ambiguous new-agent grant visible
+as an assumption for targeted review.
+
+Present all profiles together for one consolidated team review. Follow them with
+a coverage summary naming major project needs and their owning agents;
+intentional shared roles and how they differ; handoffs and collaboration paths;
+uncovered needs and explicit assumptions; every write-enabled agent and exact
+writable path; routine cadence and memory or channel relationships; and the
+current exact agent count and preserved survivors. Allow targeted edits without
+forcing agent-by-agent approval.
+
+The user may accept the first draft, edit profiles, or replace the agent count.
+When the count changes, ask which existing profiles must survive unchanged. If
+the selected survivors outnumber the revised count, require the user to reduce
+the survivor set or increase the count. Preserve every selected survivor profile
+verbatim, including identity, mission, responsibilities, permissions, routines,
+schedules, workspace use, and memory. Synthesize every remaining slot from the
+complete working context and current team coverage gaps. Do not mechanically
+truncate the previous draft or append generic roles.
+
+If survivors consume all slots while leaving an important need uncovered, show
+the uncovered need instead of rewriting a survivor. Let the user edit or release
+a survivor, change the count, or approve the documented gap. Re-run the
+team-level consistency check after every count or profile change: exact count,
+stable names, coverage, overlaps, handoffs, permissions, cadence, memory, and
+assumptions. If the user accepts the first draft without changing count or
+profiles, it becomes the final team without a redundant second proposal. Obtain
+one consolidated team approval before continuing to storage-path approval.
+
+The operating profile is a conversational review model. After approval, map
+stable name, identity, integration, runtime permissions, routines, default
+memory, and prompt registrations to existing instance config fields; map
+workspace and shared-channel choices to existing group and memory config fields;
+reusable behavior becomes blueprint instructions; and project-specific task
+instructions become scoped prompt documents. Proposal rationale, coverage
+analysis, and handoff explanation remain conversational unless an approved
+detail belongs in one of those existing surfaces. Do not persist new `mission`,
+`rationale`, `ownership`, `handoffs`, or `coverage` keys. Keep team drafts,
+survivor choices, and the working context in this conversation only.
+
+Ask exactly once: `Customize the derived storage paths?` If declined, keep every derived path. Do not ask about individual storage paths in the default flow. If accepted, present all five storage paths in one grouped review and allow any of them to be replaced.
 
 Resolve every effective path before creation. Require that each missing effective path's nearest existing parent is a writable real directory that can safely create it, reject files, symlinks, and unsafe Windows reparse points, keep the global stores mutually disjoint, and keep every Agency-owned path disjoint from the project workspace. If validation fails, name the conflicting fields and resolved paths and return to the root choice or grouped review. Never choose a fallback location or project-local storage.
 
@@ -87,7 +199,15 @@ After the consolidated path summary is approved, create the approved `agency.age
 
 Write `{agent_library}/{blueprint}/AGENTS.md` from `references/templates.md`. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, create `{agent_library}/{blueprint}/.agents/skills/{skill}/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities. Skill frontmatter must contain a directory-matching `name` and a trigger-only `description`. Put supporting scripts, references, and assets inside the skill directory.
 
-Blueprint files contain reusable instructions only. They do not contain identity, integration, schedules, runtime policy, or mutable memory. Do not create runtime-native `CLAUDE.md` or `GEMINI.md`; Agency's projector creates disposable native layouts in `agency.compilation_cache`.
+Blueprint files contain reusable instructions only. Translate only behavior
+that remains reusable across projects into the blueprint mission,
+responsibilities, boundaries, and working method. Put project-specific task
+instructions in scoped prompt documents. Do not copy the conversational
+rationale, coverage map, or project-specific ownership text into blueprint
+source merely because it appeared in the approved profile. They do not contain
+identity, integration, schedules, runtime policy, or mutable memory. Do not
+create runtime-native `CLAUDE.md` or `GEMINI.md`; Agency's projector creates
+disposable native layouts in `agency.compilation_cache`.
 
 ## 4. Register Instances
 
@@ -171,7 +291,15 @@ groups:
 
 Record each approved Phase 2 routine assignment under that instance's `routines`. A routine selects one scoped prompt, one schedule (`at`, `every`, or supported condition), optional arguments, and optional semantic memory. Keep optional cross-task Agent Skills separate from routine prompt selection. Never write prompt filenames or per-agent dispatch maps.
 
-Write authority is expressed through the workspace path rule: include `write` in its `tools` list for an implementation role that should be eligible to execute decisions. An agent may execute decisions only when its effective policy grants `write` on a rule whose `path` is the group's `workspace_path` itself — not a subdirectory. There is no `capabilities` key. Never infer write authority for an existing agent; ask the user when a newly generated role is ambiguous. The superseded schema version 4 expressed this with a separate `capabilities.write: true/false` key — if your config still contains that key, it is the old v4 shape; run `christag-agency config migrate` to upgrade to v5.
+Write authority is expressed through the workspace path rule. For each new
+agent whose approved implementation responsibilities require write access,
+include `write` in the `tools` list on a rule whose `path` is the group's exact
+`workspace_path`; multiple new agents may receive write when their distinct
+responsibilities require it. An agent may execute decisions only when its
+effective policy grants `write` on that exact path, not a subdirectory. There is
+no `capabilities` key. Never infer write authority for an existing agent. If a
+new agent's approved responsibilities do not clearly require write, leave it
+read/search-only or return the grant to targeted team review. The superseded schema version 4 expressed this with a separate `capabilities.write: true/false` key — if your config still contains that key, it is the old v4 shape; run `christag-agency config migrate` to upgrade to v5.
 
 Write every approved workspace under the group's `workspaces` list. For a new group, do not omit the list after the user approves a workspace. Keep workspace configuration group-owned and non-authoritative.
 

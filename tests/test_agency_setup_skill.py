@@ -74,15 +74,6 @@ def test_setup_registers_explicit_instances_routines_and_memory():
 
 
 
-def test_setup_requires_user_selected_agent_count_and_roles():
-    skill = SKILL_PATH.read_text(encoding="utf-8")
-    normalized = " ".join(skill.split()).lower()
-
-    assert "how many agents to create" in normalized
-    assert "which proposed roles to create now" in normalized
-    assert "do not infer extra instances" in normalized
-
-
 def test_guided_setup_asks_for_workspace_before_inspection_and_team_questions():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
@@ -92,7 +83,9 @@ def test_guided_setup_asks_for_workspace_before_inspection_and_team_questions():
         "ask for the first group project workspace as the first user-facing question"
     )
     inspection = normalized.index("inspect that workspace read-only")
-    team = normalized.index("how many agents to create")
+    team = normalized.index(
+        "ask the user to approve the group display name and stable group ID"
+    )
 
     assert guided < workspace < inspection < team
     assert "do not ask for the data root again" in normalized
@@ -368,14 +361,155 @@ def test_windows_launcher_still_resolves_real_copilot_executable():
     assert "Invoke-Expression" not in launcher
 
 
-def test_registration_derives_write_eligibility_from_workspace_path_rule():
+def test_setup_summarizes_project_before_group_count_and_first_draft():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    inspection = normalized.index(
+        "After the project workspace is selected, inspect that workspace read-only."
+    )
+    summary = normalized.index(
+        "Before team design, summarize this working context in user-facing prose."
+    )
+    group = normalized.index(
+        "ask the user to approve the group display name and stable group ID"
+    )
+    count = normalized.index("ask for an initial positive integer agent count")
+    draft = normalized.index(
+        "Generate the first complete team draft with exactly that many profiles."
+    )
+
+    assert inspection < summary < group < count < draft
+    assert "propose three to five distinct roles" not in normalized.lower()
+    assert "which proposed roles to create now" not in normalized.lower()
+
+
+def test_setup_uses_one_priority_question_only_when_project_evidence_is_sparse():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "If the workspace cannot be inspected" in normalized
+    assert "return to project workspace selection before proposing a team" in normalized
+    assert (
+        "ask exactly one focused question about near-term priorities or current pain points"
+        in normalized
+    )
+    assert "incorporate that answer into the working context" in normalized
+    assert "Do not fall back to a stock team" in normalized
+
+
+def test_setup_drafts_exact_count_complete_grounded_operating_profiles():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    team = skill.split("## 2. Synthesize And Approve The Team", 1)[1].split(
+        "\n## 3.", 1
+    )[0]
+
+    for marker in (
+        "### {identity.display_name} (`{name}`)",
+        "Blueprint / broad role",
+        "Title / emoji",
+        "Mission",
+        "Responsibilities and ownership",
+        "Handoffs",
+        "Rationale",
+        "Integration / workspace",
+        "Permissions",
+        "Routines and prompts",
+        "Schedules",
+        "Memory and channels",
+        "Assumptions",
+    ):
+        assert marker in team
+
+    normalized = " ".join(team.split())
+    assert "exactly the approved initial count" in normalized
+    assert "inspected project facts" in normalized
+    assert "approved group concept" in normalized
+    assert "selected integration" in normalized
+    assert "Label unsupported assumptions" in normalized
+    assert "None proposed" in team
+
+
+def test_setup_adapts_identity_and_distinguishes_shared_roles():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    for phrase in (
+        "When the approved group concept clearly establishes a naming theme",
+        "use domain-specific functional identities",
+        "do not force a theme",
+        "Agents may share a broad role",
+        "responsibilities, ownership boundaries, or routines differ materially",
+        "share a blueprint only when their reusable behavior and working method are genuinely the same",
+    ):
+        assert phrase in normalized
+
+
+def test_setup_revises_count_with_verbatim_survivors_and_coherent_resynthesis():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    for phrase in (
+        "The user may accept the first draft, edit profiles, or replace the agent count",
+        "ask which existing profiles must survive unchanged",
+        "survivors outnumber the revised count",
+        "reduce the survivor set or increase the count",
+        "Preserve every selected survivor profile verbatim",
+        "Synthesize every remaining slot from the complete working context",
+        "Do not mechanically truncate the previous draft or append generic roles",
+        "show the uncovered need instead of rewriting a survivor",
+        "becomes the final team without a redundant second proposal",
+    ):
+        assert phrase in normalized
+
+
+def test_setup_requires_one_consolidated_team_review_and_consistency_pass():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    for phrase in (
+        "Present all profiles together for one consolidated team review",
+        "major project needs and their owning agents",
+        "intentional shared roles",
+        "handoffs and collaboration paths",
+        "uncovered needs and explicit assumptions",
+        "every write-enabled agent and exact writable path",
+        "routine cadence and memory or channel relationships",
+        "current exact agent count and preserved survivors",
+        "Re-run the team-level consistency check after every count or profile change",
+    ):
+        assert phrase in normalized
+
+
+def test_setup_derives_new_agent_write_access_from_approved_responsibilities():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
 
     assert "Write authority is expressed through the workspace path rule" in normalized
-    assert "include `write` in its `tools` list for an implementation role" in normalized
+    assert "read and search are the baseline" in normalized
+    assert "Derive write access from approved implementation responsibilities" in normalized
+    assert "Multiple new agents may receive write" in normalized
+    assert "exact project workspace path and explain why write is required" in normalized
+    assert "Team approval includes approval of every displayed permission grant" in normalized
     assert "Never infer write authority for an existing agent" in normalized
-    assert "ask the user when a newly generated role is ambiguous" in normalized
+    assert "Exactly one builder normally receives write capability" not in skill
+
+
+def test_setup_maps_review_profiles_only_to_existing_authority_surfaces():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    for phrase in (
+        "The operating profile is a conversational review model",
+        "existing instance config fields",
+        "existing group and memory config fields",
+        "reusable behavior becomes blueprint instructions",
+        "project-specific task instructions become scoped prompt documents",
+        "rationale, coverage analysis, and handoff explanation remain conversational",
+        "Do not persist new `mission`, `rationale`, `ownership`, `handoffs`, or `coverage` keys",
+        "Keep team drafts, survivor choices, and the working context in this conversation only",
+    ):
+        assert phrase in normalized
 
 
 def test_docs_clarify_execution_agent_blocks_not_skips():
