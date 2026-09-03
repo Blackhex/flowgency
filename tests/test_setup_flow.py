@@ -98,6 +98,25 @@ def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
         assert phrase in prompt
 
 
+def test_build_setup_prompt_storage_question_deferred_until_team_approval(
+    tmp_path: Path,
+):
+    data_root = tmp_path / "Agency"
+    data_root.mkdir()
+
+    prompt = build_setup_prompt(
+        data_root,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
+
+    assert (
+        "After one consolidated team approval, ask `Customize the derived storage paths?` once."
+        in prompt
+    )
+    assert "After the group ID is approved, ask" not in prompt
+
+
 def test_build_setup_prompt_survives_deleted_data_root(tmp_path: Path):
     data_root = tmp_path / "Agency"
     data_root.mkdir()

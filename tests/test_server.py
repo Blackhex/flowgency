@@ -451,6 +451,11 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
         "The canonical config remains the only setup completion output"
         in integration.requests[0].prompt
     )
+    assert (
+        "After one consolidated team approval, ask `Customize the derived storage paths?` once."
+        in integration.requests[0].prompt
+    )
+    assert "After the group ID is approved, ask" not in integration.requests[0].prompt
     assert integration.fallback_requests == []
 
 def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
