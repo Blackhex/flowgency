@@ -4,11 +4,11 @@ Use this reference when writing an observation-oriented Agent Skill in the globa
 
 ## Outcome
 
-The routine inspects its assigned domain, avoids duplicate observations, links related signals, and proposes action only when evidence converges. Agency supplies the configured group workspace, projected blueprint, selected skill, runtime policy, and semantic memory snapshot.
+The routine inspects its assigned domain, avoids duplicate observations, links related signals, and proposes action only when evidence converges. Agency supplies the configured team workspace, projected blueprint, selected skill, runtime policy, and semantic memory snapshot.
 
 ## Recommended steps
 
-1. Read current non-terminal observations in the group's pipeline records.
+1. Read current non-terminal observations in the team's pipeline records.
 2. Compare each new signal with existing observations. Update or link an existing record instead of creating a duplicate.
 3. Write a specific observation with the configured instance name, ISO-8601 date, category, status, links, and TTL.
 4. Float a signal only when another domain may contribute evidence.

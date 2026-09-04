@@ -1,16 +1,16 @@
 # Optional Workspace Launchers
 
-Launchers are convenience frontends for configured instances. They always use the group's workspace and never create agent directories, identity files, prompt files, memory files, schedules, or configuration authority.
+Launchers are convenience frontends for configured instances. They always use the team's workspace and never create agent directories, identity files, prompt files, memory files, schedules, or configuration authority.
 
 ## Tmux Workspace Template
 
-Generate a launcher only when the group uses a tmux workspace. Each configured instance gets a labeled pane whose working directory is `{GROUP_WORKSPACE}`. Start the selected integration CLI normally; Agency supplies projected instructions during jobs.
+Generate a launcher only when the team uses a tmux workspace. Each configured instance gets a labeled pane whose working directory is `{TEAM_WORKSPACE}`. Start the selected integration CLI normally; Agency supplies projected instructions during jobs.
 
 ```bash
 #!/bin/sh
 set -eu
-SESSION="{GROUP_KEY}-agents"
-WORKSPACE="{GROUP_WORKSPACE}"
+SESSION="{TEAM_KEY}-agents"
+WORKSPACE="{TEAM_WORKSPACE}"
 tmux new-session -d -s "$SESSION" -c "$WORKSPACE"
 {TMUX_SPLITS}
 {INSTANCE_COMMANDS}
@@ -24,7 +24,7 @@ tmux attach-session -t "$SESSION"
 param()
 
 $ErrorActionPreference = 'Stop'
-$ProjectRoot = '{GROUP_WORKSPACE}'
+$ProjectRoot = '{TEAM_WORKSPACE}'
 $Agents = @({AGENT_NAME_LITERALS})
 $shell = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
 if (-not $shell) { $shell = (Get-Command powershell.exe -ErrorAction Stop).Source }

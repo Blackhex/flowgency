@@ -17,16 +17,16 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
    cp -r examples/content-team /path/to/your/content-agents
    ```
 
-2. Add the group to your Agency `config.yaml`:
+2. Add the team to your Agency `config.yaml`:
    ```yaml
-   schema_version: 4
+   schema_version: 6
    agency:
      prompt_store: /path/to/agency/prompts
-   groups:
+   teams:
      content:
        name: Content Team
        workspace_path: /path/to/your/project
-       path: /path/to/agency/groups/content
+       path: /path/to/agency/teams/content
        default_integration: claude-code  # or whichever tool you use
        agents:
        - name: writer
@@ -50,12 +50,12 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
 
 4. Assign saved prompts and schedules under each instance's `routines` in `config.yaml`, and register any instance-private prompts you want to launch from the roster.
 
-5. Restart Agency and your new group appears in the sidebar.
+5. Restart Agency and your new team appears in the sidebar.
 
 ## Routine Schedule (Suggested)
 
 ```yaml
-groups:
+teams:
   content:
     agents:
       - name: researcher

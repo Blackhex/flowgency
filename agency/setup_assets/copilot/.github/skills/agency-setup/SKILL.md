@@ -9,8 +9,8 @@ user_invocable: true
 The `agency-setup` skill owns the one authoritative canonical Agency config.
 Guided first-run setup supplies an approved Agency data root, authoritative
 config path, and supported AI integration; manual invocation collects missing
-context explicitly. The skill selects and inspects the first group project
-workspace, derives canonical storage paths, and then owns group naming,
+context explicitly. The skill selects and inspects the first team project
+workspace, derives canonical storage paths, and then owns team naming,
 blueprint source, explicit instances, routines, runtime policy, workspaces,
 memory, validation, and the one atomic config write.
 
@@ -19,21 +19,21 @@ memory, validation, and the one atomic config write.
 Consume the launch context before asking questions. Guided mode requires both
 the exact `Setup mode: guided-first-run.` marker and an `Agency data root:`
 line. In guided mode, use that root as already selected and do not ask for the
-data root again; ask for the first group project workspace as the first
+data root again; ask for the first team project workspace as the first
 user-facing question.
 
 In manual mode, without that complete guided context, ask for the Agency data
 root first. Explain that it is a separate home for Agency-owned data: reusable
 agent blueprints, disposable compiled projections, semantic memory and durable
-jobs, and per-group records. Accept an existing directory or a new absolute path,
+jobs, and per-team records. Accept an existing directory or a new absolute path,
 expand user-home syntax, and require a writable real nearest parent for a
 missing root. Give `C:\Agency` and `~/Agency` as examples, then ask for the first
-group project workspace. No environment variable or hidden process state selects a mode.
+team project workspace. No environment variable or hidden process state selects a mode.
 
 After the project workspace is selected, inspect that workspace read-only.
 Read project instructions, README, dependency manifests, source layout, tests,
 deployment files, and recent git history. Detect the host OS and available
-agent CLI. Do not ask about the group, agents, roles, routines, workspaces,
+agent CLI. Do not ask about the team, agents, roles, routines, workspaces,
 memory channels, or individual storage paths before this inspection completes.
 
 Build and retain a working context from inspected facts: the project's domain
@@ -62,11 +62,11 @@ agency.agent_library = <root>/agent-library
 agency.compilation_cache = <root>/compiled-agents
 agency.memory_store = <root>/memory
 agency.prompt_store = <root>/prompts
-groups.<group-id>.path = <root>/groups/<group-id>
-groups.<group-id>.workspace_path = <project workspace>
+teams.<team-id>.path = <root>/teams/<team-id>
+teams.<team-id>.workspace_path = <project workspace>
 ```
 
-The group path remains pending until the group ID is approved.
+The team path remains pending until the team ID is approved.
 
 The guided launcher may already have created the selected data root so it can
 serve as the session working directory. Derive every child path in memory only.
@@ -80,14 +80,14 @@ mode, validation may return to the root choice or grouped path review.
 ## 2. Synthesize And Approve The Team
 
 After inspection and any sparse-evidence clarification, ask the user to approve
-the group display name and stable group ID. Require a lowercase stable ID using
+the team display name and stable team ID. Require a lowercase stable ID using
 only letters, digits, and single hyphen separators. Then ask for an initial
-positive integer agent count. Do not generate a team draft until the group name,
-ID, and count are approved. Derive `groups.<group-id>.path` after the ID is
+positive integer agent count. Do not generate a team draft until the team name,
+ID, and count are approved. Derive `teams.<team-id>.path` after the ID is
 approved.
 
-Do not ask the user to select candidate roles or profiles during group and count
-collection. Once the group name, ID, and count are approved, present the first
+Do not ask the user to select candidate roles or profiles during team and count
+collection. Once the team name, ID, and count are approved, present the first
 complete team draft before asking any other question. Do not ask about storage
 paths, routines, schedules, memory, or channels until after one consolidated
 team approval. The first draft contains complete operating profiles, not a
@@ -99,7 +99,7 @@ the approved group concept, the requested count, any priority answer, the
 selected integration, and the exact workspace. Do not offer a fixed candidate
 slate or ask which generic roles to instantiate. Label unsupported assumptions.
 When the launch prompt contains `Selected integration:`, use that registered
-integration for `group.default_integration` and the initial agent instances
+integration for `team.default_integration` and the initial agent instances
 unless the user explicitly approves a different registered integration.
 
 For every proposed agent, communicate all of the following semantic categories
@@ -191,7 +191,7 @@ one consolidated team approval before continuing to storage-path approval.
 The operating profile is a conversational review model. After approval, map
 stable name, identity, integration, runtime permissions, routines, default
 memory, and prompt registrations to existing instance config fields; map
-workspace and shared-channel choices to existing group and memory config fields;
+workspace and shared-channel choices to existing team and memory config fields;
 reusable behavior becomes blueprint instructions; and project-specific task
 instructions become scoped prompt documents. Proposal rationale, coverage
 analysis, and handoff explanation remain conversational unless an approved
@@ -209,7 +209,7 @@ When the launch prompt contains `Authoritative config:`, use that exact path and
 
 If no config exists, record the absent revision and defer creation and replacement until Section 5. Do not write a placeholder or partial config. If an existing candidate is invalid or superseded, report validation errors and stop; never invoke another skill, never scan or convert superseded authority, and never convert old layouts. During manual invocation, if multiple canonical configs remain, ask the user which is authoritative; never choose implicitly.
 
-Load the current revision before editing, or use the absent revision when the file does not exist. Preserve unrelated keys and groups while building the complete candidate in memory. Do not replace the authoritative config during inspection, blueprint creation, or instance registration.
+Load the current revision before editing, or use the absent revision when the file does not exist. Preserve unrelated keys and teams while building the complete candidate in memory. Do not replace the authoritative config during inspection, blueprint creation, or instance registration.
 
 ## 3. Build The Agent Library
 
@@ -234,15 +234,15 @@ disposable native layouts in `agency.compilation_cache`.
 
 ## 4. Register Instances
 
-Upsert one group whose `workspace_path` points to the project workspace and whose `path` points to the Agency-owned group-state root. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned group root. The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<group.path>/locks`. Preserve existing group workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the group; instance roots are additive and an instance tool policy is a complete override.
+Upsert one team whose `workspace_path` points to the project workspace and whose `path` points to the Agency-owned team-state root. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned team root. The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`. Preserve existing team workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the team; instance roots are additive and an instance tool policy is a complete override.
 
 Use this canonical shape:
 
 ```yaml
-schema_version: 5
+schema_version: 6
 agency:
   title: Agency
-  default_group: example
+  default_team: example
   ai_backend: copilot
   jobs:
     pool: 4
@@ -254,11 +254,11 @@ memory:
   channels:
     project-strategy:
       display_name: Project Strategy
-groups:
+teams:
   example:
     name: Example
     workspace_path: C:/Projects/example
-    path: C:/Agency/groups/example
+    path: C:/Agency/teams/example
     default_integration: copilot
     runtime:
       timeout: 1800
@@ -316,21 +316,21 @@ Record each approved Phase 2 routine assignment under that instance's `routines`
 
 Write authority is expressed through the workspace path rule. For each new
 agent whose approved implementation responsibilities require write access,
-include `write` in the `tools` list on a rule whose `path` is the group's exact
+include `write` in the `tools` list on a rule whose `path` is the team's exact
 `workspace_path`; multiple new agents may receive write when their distinct
 responsibilities require it. An agent may execute decisions only when its
 effective policy grants `write` on that exact path, not a subdirectory. There is
 no `capabilities` key. Never infer write authority for an existing agent. If a
 new agent's approved responsibilities do not clearly require write, leave it
-read/search-only or return the grant to targeted team review. The superseded schema version 4 expressed this with a separate `capabilities.write: true/false` key — if your config still contains that key, it is the old v4 shape; run `christag-agency config migrate` to upgrade to v5.
+read/search-only or return the grant to targeted team review.
 
-Write every approved workspace under the group's `workspaces` list. For a new group, do not omit the list after the user approves a workspace. Keep workspace configuration group-owned and non-authoritative.
+Write every approved workspace under the team's `workspaces` list. For a new team, do not omit the list after the user approves a workspace. Keep workspace configuration team-owned and non-authoritative.
 
 ## 5. Verify And Schedule
 
-Validate every blueprint, Agent Skill, and prompt document, plus config cross-reference, registered explicit integration, effective root union, complete tool override, routine prompt selection, channel, workspace, group naming, and storage path. Confirm every prompt document against the Standard Task Prompt contract in `references/templates.md` before writing the config.
+Validate every blueprint, Agent Skill, and prompt document, plus config cross-reference, registered explicit integration, effective root union, complete tool override, routine prompt selection, channel, workspace, team naming, and storage path. Confirm every prompt document against the Standard Task Prompt contract in `references/templates.md` before writing the config.
 
-Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Agency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, group, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written.
+Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Agency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, team, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written.
 
 Then run the mechanical check and stop on a non-zero exit:
 

@@ -226,17 +226,17 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert "\t" not in yaml_text
 
     config = yaml.safe_load(yaml_text)
-    assert config["schema_version"] == 5
+    assert config["schema_version"] == 6
     assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store", "prompt_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
     group = config["teams"]["example"]
     assert group["workspace_path"] == "C:/Projects/example"
-    assert group["path"] == "C:/Agency/groups/example"
+    assert group["path"] == "C:/Agency/teams/example"
     skill_text = (
         REPO_ROOT / "skills" / "agency-setup" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "`workspace_path` points to the project workspace" in skill_text
-    assert "`path` points to the Agency-owned group-state root" in skill_text
+    assert "`path` points to the Agency-owned team-state root" in skill_text
     assert "agents" not in group["dispatch"]
     assert group["runtime"]["permissions"]["rules"]
     assert all({"name", "blueprint", "integration"} <= set(instance) for instance in group["agents"])
@@ -296,6 +296,18 @@ def test_setup_skill_copilot_setup_is_automatic_not_manual_junction():
     setup_skill = (REPO_ROOT / "kb" / "setup-skill.md").read_text(encoding="utf-8")
     assert "automatically" in setup_skill
     assert "New-Item -ItemType Junction" not in setup_skill
+
+
+def test_non_domain_group_tokens_remain_unchanged():
+    base = (REPO_ROOT / "agency" / "templates" / "base.html").read_text(encoding="utf-8")
+    home = (REPO_ROOT / "agency" / "templates" / "home.html").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "agency" / "templates" / "agents.html").read_text(encoding="utf-8")
+    schedule = (REPO_ROOT / "agency" / "dispatch" / "schedule.py").read_text(encoding="utf-8")
+
+    assert " group" in base or " group" in home
+    assert "group-hover:" in base or "group-hover:" in home
+    assert "<optgroup" in agents
+    assert "match.group(" in schedule
 
 
 def test_readme_and_getting_started_describe_the_data_root_handoff():

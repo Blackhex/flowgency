@@ -17,16 +17,16 @@ A 3-agent team for software projects: automated code review, security scanning, 
    cp -r examples/code-review-team /path/to/your/review-agents
    ```
 
-2. Add the group to your Agency `config.yaml`:
+2. Add the team to your Agency `config.yaml`:
    ```yaml
-   schema_version: 4
+   schema_version: 6
    agency:
      prompt_store: /path/to/agency/prompts
-   groups:
+   teams:
      review:
        name: Code Review Team
        workspace_path: /path/to/your/project
-       path: /path/to/agency/groups/review
+       path: /path/to/agency/teams/review
        default_integration: claude-code
        agents:
        - name: reviewer
@@ -50,12 +50,12 @@ A 3-agent team for software projects: automated code review, security scanning, 
 
 4. Assign saved prompts and schedules under each instance's `routines` in `config.yaml`, and register any instance-private prompts you want to launch from the roster.
 
-5. Restart Agency and your new group appears in the sidebar.
+5. Restart Agency and your new team appears in the sidebar.
 
 ## Routine Schedule (Suggested)
 
 ```yaml
-groups:
+teams:
   review:
     agents:
       - name: reviewer

@@ -80,11 +80,11 @@ def test_guided_setup_asks_for_workspace_before_inspection_and_team_questions():
 
     guided = normalized.index("Setup mode: guided-first-run.")
     workspace = normalized.index(
-        "ask for the first group project workspace as the first user-facing question"
+        "ask for the first team project workspace as the first user-facing question"
     )
     inspection = normalized.index("inspect that workspace read-only")
     team = normalized.index(
-        "ask the user to approve the group display name and stable group ID"
+        "ask the user to approve the team display name and stable team ID"
     )
 
     assert guided < workspace < inspection < team
@@ -97,7 +97,7 @@ def test_manual_setup_collects_root_then_workspace_without_hidden_mode_state():
 
     assert "without that complete guided context" in normalized
     assert "ask for the Agency data root first" in normalized
-    assert "then ask for the first group project workspace" in normalized
+    assert "then ask for the first team project workspace" in normalized
     assert "No environment variable or hidden process state selects a mode." in skill
 
 
@@ -107,7 +107,7 @@ def test_setup_guide_describes_context_aware_team_synthesis():
 
     for phrase in (
         "summarizes concrete project facts",
-        "approves the group display name and stable ID",
+        "approves the team display name and stable ID",
         "initial positive agent count",
         "exactly that many complete operating profiles",
         "may change the count after reviewing the draft",
@@ -138,8 +138,8 @@ def test_setup_derives_canonical_paths_from_one_data_root():
         "agency.compilation_cache = <root>/compiled-agents",
         "agency.memory_store = <root>/memory",
         "agency.prompt_store = <root>/prompts",
-        "groups.<group-id>.path = <root>/groups/<group-id>",
-        "groups.<group-id>.workspace_path = <project workspace>",
+        "teams.<team-id>.path = <root>/teams/<team-id>",
+        "teams.<team-id>.workspace_path = <project workspace>",
     ):
         assert phrase in skill
 
@@ -168,7 +168,7 @@ def test_setup_docs_present_one_data_root_default():
         "C:/Agency/compiled-agents",
         "C:/Agency/memory",
         "C:/Agency/prompts",
-        "C:/Agency/groups/example",
+        "C:/Agency/teams/example",
     ):
         assert path in templates
         assert path in guide
@@ -178,10 +178,10 @@ def test_setup_docs_present_one_data_root_default():
     )
     for phrase in (
         "workspace_path is project source and execution",
-        "path is Agency-owned group state",
+        "path is Agency-owned team state",
         "Agency never loads or creates <workspace_path>/shared",
         "durable jobs live in agency.memory_store/.jobs",
-        "operation locks live in <group.path>/locks",
+        "operation locks live in <team.path>/locks",
     ):
         assert phrase in templates
     assert templates.count("## Standard Agent Skill") == 1
@@ -218,7 +218,7 @@ def test_setup_skill_owns_group_naming_storage_workspaces_and_atomic_write():
     normalized = " ".join(skill.split()).lower()
 
     for phrase in (
-        "group naming",
+        "team naming",
         "storage paths",
         "blueprints",
         "instances",
@@ -240,7 +240,7 @@ def test_first_run_uses_exact_prompt_path_and_selected_integration():
     assert "use that exact path" in normalized
     assert "do not search for or choose another config" in normalized
     assert "Selected integration:" in normalized
-    assert "group.default_integration" in normalized
+    assert "team.default_integration" in normalized
     assert "initial agent instances" in normalized
 
 
@@ -256,7 +256,7 @@ def test_setup_defers_the_only_config_write_until_final_verification():
 def test_setup_persists_every_approved_workspace():
     skill = SKILL_PATH.read_text(encoding="utf-8")
 
-    assert "Write every approved workspace under the group's `workspaces` list." in skill
+    assert "Write every approved workspace under the team's `workspaces` list." in skill
     assert "workspaces:" in skill
     assert "type: ide" in skill
     assert "project_path: C:/Projects/example" in skill
@@ -276,7 +276,7 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
         assert phrase in combined
     assert "agency-migration" not in combined
     assert "tools/migrate_agent_model.py" not in combined
-    assert "schema_version: 5" in skill
+    assert "schema_version: 6" in skill
 
 
 def test_setup_maintains_one_authoritative_canonical_config():
@@ -397,7 +397,7 @@ def test_setup_summarizes_project_before_group_count_and_first_draft():
         "Before team design, summarize this working context in user-facing prose."
     )
     group = normalized.index(
-        "ask the user to approve the group display name and stable group ID"
+        "ask the user to approve the team display name and stable team ID"
     )
     count = normalized.index("ask for an initial positive integer agent count")
     draft = normalized.index(
@@ -602,7 +602,7 @@ def test_setup_maps_review_profiles_only_to_existing_authority_surfaces():
     for phrase in (
         "The operating profile is a conversational review model",
         "existing instance config fields",
-        "existing group and memory config fields",
+        "existing team and memory config fields",
         "reusable behavior becomes blueprint instructions",
         "project-specific task instructions become scoped prompt documents",
         "rationale, coverage analysis, and handoff explanation remain conversational",

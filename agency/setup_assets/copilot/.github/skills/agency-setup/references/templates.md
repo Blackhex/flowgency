@@ -32,36 +32,36 @@ You are a {ROLE_NAME} for projects that use {LANGUAGE_OR_DOMAIN}.
 
 Keep project-specific identity, integration, runtime policy, schedules, and mutable memory out of this file.
 
-## Canonical Group Registration
-Default setup starts from one user-selected Agency data root. For an Agency data root at `C:/Agency` and a group ID of `example`, derive:
+## Canonical Team Registration
+Default setup starts from one user-selected Agency data root. For an Agency data root at `C:/Agency` and a team ID of `example`, derive:
 
 ```text
 C:/Agency/
 |-- agent-library/
 |-- compiled-agents/
 |-- memory/
-`-- groups/
+`-- teams/
     `-- example/
 ```
 
-Map those derived paths to the schema version 5 fields and keep the execution workspace separate from Agency-owned state:
+Map those derived paths to the schema version 6 fields and keep the execution workspace separate from Agency-owned state:
 
 ```yaml
-schema_version: 5
+schema_version: 6
 agency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
   prompt_store: C:/Agency/prompts
-groups:
+teams:
   example:
     workspace_path: C:/Projects/example
-    path: C:/Agency/groups/example
+    path: C:/Agency/teams/example
 ```
 
-workspace_path is project source and execution. path is Agency-owned group state. Agency never loads or creates <workspace_path>/shared. durable jobs live in agency.memory_store/.jobs, and operation locks live in <group.path>/locks.
+workspace_path is project source and execution. path is Agency-owned team state. Agency never loads or creates <workspace_path>/shared. durable jobs live in agency.memory_store/.jobs, and operation locks live in <team.path>/locks.
 
-The project workspace stays at `groups.<group-id>.workspace_path`, while the derived root-backed fields remain Agency-owned storage.
+The project workspace stays at `teams.<team-id>.workspace_path`, while the derived root-backed fields remain Agency-owned storage.
 
 ## Standard Agent Skill
 

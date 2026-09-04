@@ -17,9 +17,9 @@ memory/
 |   `-- memory.md
 `-- .jobs/
 prompts/
-`-- <group>/<instance>/<prompt>.prompt.md
-groups/
-`-- <group-id>/
+`-- <team>/<instance>/<prompt>.prompt.md
+teams/
+`-- <team-id>/
     |-- observations/
     |-- proposals/
     |-- decisions/
@@ -31,7 +31,7 @@ The Agent Library follows `AGENTS.md`, Agent Skills, and shared prompt standards
 
 The prompt store contains canonical instance-private saved prompts selected by config. Runtime-native prompt locations inside compiled integrations are generated output only.
 
-The project workspace belongs to the group as `workspace_path`. The Agency-owned group root is `path`; configured instances run from the workspace and do not own physical subdirectories. Optional tmux, IDE, or Windows Terminal launchers also start from this group workspace and never become configuration authority. The group root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `memory/.jobs`, and operation locks live in `<group.path>/locks`.
+The project workspace belongs to the team as `workspace_path`. The Agency-owned team root is `path`; configured instances run from the workspace and do not own physical subdirectories. Optional tmux, IDE, or Windows Terminal launchers also start from this team workspace and never become configuration authority. The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `memory/.jobs`, and operation locks live in `<team.path>/locks`.
 
 ## Superseded layouts
 

@@ -1,6 +1,6 @@
 # Dispatch And Routines
 
-Agency has one platform-native singleton heartbeat. Global `agency.dispatch.interval` controls how often it checks all groups. Group `dispatch.enabled` controls whether that group submits work.
+Agency has one platform-native singleton heartbeat. Global `agency.dispatch.interval` controls how often it checks all teams. Team `dispatch.enabled` controls whether that team submits work.
 
 Schedules are instance routines, not prompt files. A routine selects one saved prompt from the effective catalog:
 
@@ -68,7 +68,7 @@ whole installation. The default is 4; the minimum is 1.
 When a job is submitted and the pool has a free slot it launches immediately.
 When the pool is full the job waits in the `queued` status until a slot opens.
 Jobs drain in ascending due-time order, ties broken by job id, globally across
-all groups.
+all teams.
 
 Draining runs at the end of every submission, inside every worker as it exits,
 and at the start of every dispatch cycle. A backlog drains through worker exits

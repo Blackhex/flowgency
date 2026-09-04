@@ -6,7 +6,7 @@ Integrations declare executable support, enforceable sandbox/tool modes, a versi
 
 Runtime projectors consume standards-based Agent Library source plus prompt snapshots. They may relocate root `AGENTS.md`, whole `.agents/skills` directories, and saved prompts into native discovery paths, but must preserve canonical instruction, `SKILL.md`, and prompt bytes. Compiled artifacts are immutable and keyed by integration, projector version, and source digest.
 
-Group sandbox roots form the baseline; instance `additional_roots` are additive. A present instance tool policy is a complete override. Integrations reject modes or names they cannot enforce rather than widening access.
+Team sandbox roots form the baseline; instance `additional_roots` are additive. A present instance tool policy is a complete override. Integrations reject modes or names they cannot enforce rather than widening access.
 
 ## What is actually enforced
 
@@ -23,7 +23,7 @@ The boundary has real limits, and the job record names them rather than implying
 
 The other integrations do not enforce path rules. They declare `unrestricted` only, so `mode: restricted` is rejected before launch; narrow rules written under `unrestricted` are not enforced by them. `claude-code` and `codex` previously disabled their own CLI permission models on every run, which is the only enforcement those integrations have. They now do so only when the policy grants write somewhere. Where the flag is withheld those CLIs may prompt, and such a run may not complete unattended -- the alternative was to keep over-granting silently.
 
-`agency/integrations/integrations.yaml` controls which Python plugins are loadable. It is plugin discovery metadata, not group, instance, routine, identity, or memory configuration.
+`agency/integrations/integrations.yaml` controls which Python plugins are loadable. It is plugin discovery metadata, not team, instance, routine, identity, or memory configuration.
 
 ## Superseded layouts
 
