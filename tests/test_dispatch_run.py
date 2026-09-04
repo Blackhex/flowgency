@@ -82,10 +82,10 @@ def _write_config(
         for routine in routines
     )
     config_path.write_text(
-        "schema_version: 5\n"
+        "schema_version: 6\n"
         "agency:\n"
         "  title: Agency\n"
-        "  default_group: test\n"
+        "  default_team: test\n"
         "  ai_backend: claude-code\n"
         "  agent_library: agent-library\n"
         "  compilation_cache: compiled-agents\n"
@@ -93,7 +93,7 @@ def _write_config(
         "  prompt_store: prompts\n"
         "  dispatch:\n"
         "    interval: 15\n"
-        "groups:\n"
+        "teams:\n"
         "  test:\n"
         "    name: Test\n"
         f"    workspace_path: {workspace_path.as_posix()}\n"
@@ -115,7 +115,7 @@ def _write_config(
 
 def _request_summary(request):
     return {
-        "group_key": request.group_key,
+        "team_key": request.team_key,
         "agent_name": request.agent_name,
         "trigger": request.trigger,
         "routine_id": request.routine_id,
@@ -143,7 +143,7 @@ def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monk
     run_dispatch_cycle({}, config_path)
 
     assert _request_summary(captured[0]) == {
-        "group_key": "test",
+        "team_key": "test",
         "agent_name": "product",
         "trigger": "scheduled_prompt",
         "routine_id": "daily-review",
@@ -240,7 +240,7 @@ def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, mo
     submitted = []
     monkeypatch.setattr(
         "agency.dispatch.run.submit_job_request",
-        lambda request, launcher=None: submitted.append((request.group_key, request.agent_name)),
+        lambda request, launcher=None: submitted.append((request.team_key, request.agent_name)),
     )
     run_dispatch_cycle({}, first_config)
     run_dispatch_cycle({}, second_config)
@@ -284,7 +284,7 @@ def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
     submitted = []
     monkeypatch.setattr(
         "agency.dispatch.run.submit_job_request",
-        lambda request, launcher=None: submitted.append(request.group_key),
+        lambda request, launcher=None: submitted.append(request.team_key),
     )
     run_dispatch_cycle({}, enabled_config)
     run_dispatch_cycle({}, disabled_config)

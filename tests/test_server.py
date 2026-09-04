@@ -21,15 +21,15 @@ def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
     (tmp_path / "prompts").mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         (
-            "schema_version: 5\n"
+            "schema_version: 6\n"
             "agency:\n"
             "  title: Agency\n"
-            "  default_group: ''\n"
+            "  default_team: ''\n"
             f"  agent_library: {(tmp_path / 'agent-library').as_posix()}\n"
             f"  compilation_cache: {(tmp_path / 'compiled-agents').as_posix()}\n"
             f"  memory_store: {(tmp_path / 'memory-store').as_posix()}\n"
             f"  prompt_store: {(tmp_path / 'prompts').as_posix()}\n"
-            "groups: {}\n"
+            "teams: {}\n"
         ),
         encoding="utf-8",
     )
@@ -58,7 +58,7 @@ def _materialize_ready_config(tmp_path: Path, raw_config: dict) -> dict:
     raw["agency"]["compilation_cache"] = str(compiled_root.resolve())
     raw["agency"]["memory_store"] = str(memory_root.resolve())
     raw["agency"]["prompt_store"] = str(prompt_root.resolve())
-    for group in raw.get("groups", {}).values():
+    for group in raw.get("teams", {}).values():
         for agent in group.get("agents", []):
             blueprint_root = library_root / agent["blueprint"]
             blueprint_root.mkdir(parents=True, exist_ok=True)
@@ -638,7 +638,7 @@ def test_setup_status_returns_waiting_when_config_is_absent(tmp_path, monkeypatc
 def test_setup_status_returns_invalid_with_message(tmp_path, monkeypatch, raw_config):
     config_path = tmp_path / "config.yaml"
     raw_config = _materialize_ready_config(tmp_path, raw_config)
-    raw_config["groups"]["newsletter"]["default_integration"] = ""
+    raw_config["teams"]["newsletter"]["default_integration"] = ""
     config_path.write_text(
         __import__("yaml").safe_dump(raw_config, sort_keys=False),
         encoding="utf-8",
@@ -652,7 +652,7 @@ def test_setup_status_returns_invalid_with_message(tmp_path, monkeypatch, raw_co
     assert response.status_code == 200
     assert response.json() == {
         "state": "invalid",
-        "message": "Group default integration is required.",
+        "message": "Team default integration is required.",
     }
 
 
@@ -661,8 +661,8 @@ def test_setup_status_returns_incomplete_when_config_has_no_groups(
 ):
     config_path = tmp_path / "config.yaml"
     raw_config = _materialize_ready_config(tmp_path, raw_config)
-    raw_config["agency"]["default_group"] = ""
-    raw_config["groups"] = {}
+    raw_config["agency"]["default_team"] = ""
+    raw_config["teams"] = {}
     config_path.write_text(
         __import__("yaml").safe_dump(raw_config, sort_keys=False),
         encoding="utf-8",
@@ -762,9 +762,9 @@ def test_build_services_validates_before_initializing_storage(
 ):
     raw = dict(raw_config)
     raw["agency"] = dict(raw_config["agency"])
-    raw["groups"] = dict(raw_config["groups"])
-    raw["groups"]["newsletter"] = dict(raw_config["groups"]["newsletter"])
-    raw["groups"]["newsletter"]["workspace_path"] = str(
+    raw["teams"] = dict(raw_config["teams"])
+    raw["teams"]["newsletter"] = dict(raw_config["teams"]["newsletter"])
+    raw["teams"]["newsletter"]["workspace_path"] = str(
         tmp_path / "missing-workspace"
     )
     config_path = tmp_path / "config.yaml"
@@ -778,4 +778,4 @@ def test_build_services_validates_before_initializing_storage(
     assert isinstance(services.startup_error, ValidationFailed)
     assert not (tmp_path / "compiled-agents").exists()
     assert not (tmp_path / "memory").exists()
-    assert not (tmp_path / "groups" / "newsletter").exists()
+    assert not (tmp_path / "teams" / "newsletter").exists()

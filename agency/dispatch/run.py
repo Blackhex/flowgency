@@ -87,7 +87,7 @@ def lost_occurrences(records) -> dict[tuple[str, str], datetime]:
 
 def _group_job_records(memory_store: Path, group_key: str):
     try:
-        group_dir = JobStore(memory_store).group_root(group_key)
+        group_dir = JobStore(memory_store).team_root(group_key)
     except (OSError, ValueError):
         return
     if not group_dir.is_dir():
@@ -227,7 +227,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                 try:
                     request = JobRequest(
                         config_path=snapshot.path,
-                        group_key=group_key,
+                        team_key=group_key,
                         agent_name=agent_name,
                         trigger="scheduled_prompt",
                         task_input="",

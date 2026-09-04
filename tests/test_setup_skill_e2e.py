@@ -81,25 +81,25 @@ def _materialize(tmp_path: Path) -> Path:
 
 def _write_config(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
-    group_root = tmp_path / "groups" / "reviewers"
+    team_root = tmp_path / "teams" / "reviewers"
     workspace.mkdir(parents=True, exist_ok=True)
-    group_root.mkdir(parents=True, exist_ok=True)
+    team_root.mkdir(parents=True, exist_ok=True)
     raw = {
-        "schema_version": 5,
+        "schema_version": 6,
         "agency": {
             "title": "Agency",
-            "default_group": "reviewers",
+            "default_team": "reviewers",
             "ai_backend": "copilot",
             "agent_library": str(tmp_path / "agent-library"),
             "compilation_cache": str(tmp_path / "compiled-agents"),
             "memory_store": str(tmp_path / "memory-store"),
             "prompt_store": str(tmp_path / "prompts"),
         },
-        "groups": {
+        "teams": {
             "reviewers": {
                 "name": "Reviewers",
                 "workspace_path": str(workspace),
-                "path": str(group_root),
+                "path": str(team_root),
                 "default_integration": "copilot",
                 "agents": [
                     {

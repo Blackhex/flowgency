@@ -36,10 +36,25 @@ def test_build_setup_prompt_supplies_guided_data_root_context(tmp_path: Path):
         assert line in prompt
     assert "The Agency data root was selected in the browser; do not ask for it again." in prompt
     assert (
-        "Ask for the first group project workspace as the first user-facing question."
+        "Ask for the first team project workspace as the first user-facing question."
         in prompt
     )
     assert "Project workspace:" not in prompt
+
+
+def test_build_setup_prompt_emits_v6_team_shape(tmp_path: Path):
+    prompt = build_setup_prompt(tmp_path, tmp_path / "config.yaml", selected_integration="copilot")
+
+    for phrase in (
+        "first team project workspace",
+        "team display name and stable team ID",
+        "agency.default_team",
+        "teams.<team-id>.path as <root>/teams/<team-id>",
+        "Configure schema_version: 6.",
+    ):
+        assert phrase in prompt
+    assert "group.default_integration" not in prompt
+    assert "groups.<group-id>" not in prompt
 
 
 def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
@@ -56,7 +71,7 @@ def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
 
     for phrase in (
         "carry inspected project facts and every approved setup answer forward",
-        "Approve the group display name and stable ID, then an initial positive agent count",
+        "Approve the team display name and stable team ID, then an initial positive agent count",
         "first complete team draft with exactly that many profiles",
         "Do not use a fixed role slate",
         "Keep team drafts and revisions inside this interactive conversation",
@@ -66,7 +81,7 @@ def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
         assert phrase in prompt
 
     workspace = prompt.index(
-        "Ask for the first group project workspace as the first user-facing question."
+        "Ask for the first team project workspace as the first user-facing question."
     )
     inspection = prompt.index("inspect that project read-only")
     synthesis = prompt.index(
@@ -116,7 +131,7 @@ def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
         "agency.compilation_cache as <root>/compiled-agents",
         "agency.memory_store as <root>/memory",
         "agency.prompt_store as <root>/prompts",
-        "groups.<group-id>.path as <root>/groups/<group-id>",
+        "teams.<team-id>.path as <root>/teams/<team-id>",
         "Customize the derived storage paths?",
         "review all five derived paths together",
         "consolidated path summary",
@@ -183,13 +198,13 @@ def test_status_waits_when_config_is_absent(tmp_path: Path) -> None:
 def test_status_is_invalid_for_validation_errors(tmp_path: Path, raw_config) -> None:
     store = ConfigStore(tmp_path / "config.yaml")
     invalid = copy.deepcopy(raw_config)
-    invalid["groups"]["newsletter"]["default_integration"] = ""
+    invalid["teams"]["newsletter"]["default_integration"] = ""
     store.path.write_text(yaml.safe_dump(invalid, sort_keys=False), encoding="utf-8")
 
     status = inspect_setup_status(store)
 
     assert status.state == "invalid"
-    assert status.message == "Group default integration is required."
+    assert status.message == "Team default integration is required."
 
 
 def test_status_is_invalid_for_yaml_parse_errors(tmp_path: Path) -> None:
@@ -205,8 +220,8 @@ def test_status_is_invalid_for_yaml_parse_errors(tmp_path: Path) -> None:
 def test_status_is_incomplete_when_no_groups(tmp_path: Path, raw_config) -> None:
     store = ConfigStore(tmp_path / "config.yaml")
     incomplete = copy.deepcopy(raw_config)
-    incomplete["agency"]["default_group"] = ""
-    incomplete["groups"] = {}
+    incomplete["agency"]["default_team"] = ""
+    incomplete["teams"] = {}
     store.create(incomplete)
 
     status = inspect_setup_status(store)

@@ -12,8 +12,8 @@ from agency.configuration.models import (
 )
 
 
-def test_schema_version_is_five():
-    assert CONFIG_SCHEMA_VERSION == 5
+def test_schema_version_is_six():
+    assert CONFIG_SCHEMA_VERSION == 6
 
 
 def test_omitted_tools_means_every_tool():
@@ -82,18 +82,18 @@ def test_schema_version_four_is_rejected(config_paths):
     assert any(issue.code == "unsupported-schema-version" for issue in excinfo.value.issues)
 
 
-def test_schema_version_five_is_accepted(config_paths):
+def test_schema_version_six_is_accepted(config_paths):
     from agency.configuration.models import validate_config
 
     raw = {
-        "schema_version": 5,
+        "schema_version": 6,
         "agency": {
             "agent_library": str(config_paths["agent_library"]),
             "compilation_cache": str(config_paths["compilation_cache"]),
             "memory_store": str(config_paths["memory_store"]),
             "prompt_store": str(config_paths["prompt_store"]),
         },
-        "groups": {},
+        "teams": {},
     }
 
     issues = validate_config(raw, config_paths["config_path"])
@@ -101,7 +101,7 @@ def test_schema_version_five_is_accepted(config_paths):
     assert not any(issue.code == "unsupported-schema-version" for issue in issues)
 
 
-def test_unsupported_schema_version_hint_mentions_migrate(config_paths):
+def test_unsupported_schema_version_hint_mentions_teams(config_paths):
     from agency.configuration import ValidationFailed
     from agency.configuration.models import parse_config
 
@@ -113,11 +113,11 @@ def test_unsupported_schema_version_hint_mentions_migrate(config_paths):
             "memory_store": str(config_paths["memory_store"]),
             "prompt_store": str(config_paths["prompt_store"]),
         },
-        "groups": {},
+        "teams": {},
     }
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw, config_paths["config_path"])
 
     issue = next(issue for issue in excinfo.value.issues if issue.code == "unsupported-schema-version")
-    assert "config migrate" in issue.corrective_hint
+    assert "teams" in issue.corrective_hint

@@ -156,69 +156,69 @@ def _snapshot_read_only(path: Path) -> ConfigSnapshot:
     )
 
 
-def _group_id(args: Namespace, snapshot) -> str:
-    group_id = getattr(args, "group", None) or snapshot.config.agency.default_group
-    if not group_id:
+def _team_id(args: Namespace, snapshot) -> str:
+    team_id = getattr(args, "team", None) or snapshot.config.agency.default_team
+    if not team_id:
         raise _validation_failure(
-            "missing-group",
-            "No group was selected and no default group is configured.",
-            field="group",
-            hint="Pass --group or configure agency.default_group.",
+            "missing-team",
+            "No team was selected and no default team is configured.",
+            field="team",
+            hint="Pass --team or configure agency.default_team.",
         )
-    if group_id not in snapshot.config.groups:
+    if team_id not in snapshot.config.teams:
         raise _validation_failure(
-            "unknown-group",
-            f"Unknown group: {group_id}",
-            field="group",
-            hint="Choose a group defined in config.yaml.",
+            "unknown-team",
+            f"Unknown team: {team_id}",
+            field="team",
+            hint="Choose a team defined in config.yaml.",
         )
-    return group_id
+    return team_id
 
 
-def _group(args: Namespace):
+def _team(args: Namespace):
     snapshot = _snapshot(args)
-    group_id = _group_id(args, snapshot)
-    return snapshot, group_id, snapshot.config.groups[group_id]
+    team_id = _team_id(args, snapshot)
+    return snapshot, team_id, snapshot.config.teams[team_id]
 
 
-def _resolve_group(args: Namespace) -> dict[str, Any]:
-    snapshot, group_id, group = _group(args)
-    paths = resolve_team_paths(group)
+def _resolve_team(args: Namespace) -> dict[str, Any]:
+    snapshot, team_id, team = _team(args)
+    paths = resolve_team_paths(team)
     from agency.permissions.eligibility import may_execute_decisions
     return {
-        "key": group_id,
-        "name": group.name,
+        "key": team_id,
+        "name": team.name,
         "workspace_root": paths.workspace_root,
-        "group_root": paths.group_root,
+        "group_root": paths.team_root,
         "observations": paths.observations,
         "proposals": paths.proposals,
         "decisions": paths.decisions,
         "logs": paths.logs,
-        "agents": list(group.agents),
+        "agents": list(team.agents),
         "_agents_normalized": [
             {
                 "name": instance.name,
                 "integration": instance.integration,
                 "integration_config": dict(instance.integration_config),
-                "capabilities": {"write": may_execute_decisions(snapshot.config, group_id, instance.name)},
+                "capabilities": {"write": may_execute_decisions(snapshot.config, team_id, instance.name)},
             }
-            for instance in group.agents.values()
+            for instance in team.agents.values()
         ],
         "_snapshot": snapshot,
-        "_group_config": group,
+        "_team_config": team,
     }
 
 
-def _instance(snapshot, group_id: str, agent_id: str):
+def _instance(snapshot, team_id: str, agent_id: str):
     try:
-        return snapshot.config.groups[group_id].agents[agent_id]
+        return snapshot.config.teams[team_id].agents[agent_id]
     except KeyError as error:
         raise _validation_failure(
             "unknown-agent",
             f"Unknown agent: {agent_id}",
-            scope=f"groups.{group_id}",
+            scope=f"teams.{team_id}",
             field="agent",
-            hint="Choose an agent instance owned by this group.",
+            hint="Choose an agent instance owned by this team.",
         ) from error
 
 
@@ -276,10 +276,10 @@ def _markdown_items(directory: Path) -> list[dict[str, Any]]:
     return items
 
 
-def _job_records(snapshot, group_id: str):
+def _job_records(snapshot, team_id: str):
     job_store = JobStore(snapshot.config.agency.memory_store)
     records = []
-    for path in job_store.paths(group_id):
+    for path in job_store.paths(team_id):
         try:
             records.append((path, read_job(path)))
         except Exception:
@@ -297,8 +297,8 @@ def _job_records(snapshot, group_id: str):
     return records
 
 
-def _active_job(snapshot, group_id: str, agent_name: str):
-    records = JobStore(snapshot.config.agency.memory_store).active(group_id, agent_name)
+def _active_job(snapshot, team_id: str, agent_name: str):
+    records = JobStore(snapshot.config.agency.memory_store).active(team_id, agent_name)
     return max(records, key=lambda record: (record.spec.created_at, record.spec.job_id), default=None)
 
 
@@ -347,12 +347,12 @@ def _cache_status_read_only(snapshot, integrations: dict[str, Any], instance, in
     return "compiled" if (entry / "manifest.json").is_file() else "missing"
 
 
-def _agent_payload_read_only(snapshot, group_id: str, instance) -> dict[str, Any]:
-    group = snapshot.config.groups[group_id]
-    current = _active_job(snapshot, group_id, instance.name)
+def _agent_payload_read_only(snapshot, team_id: str, instance) -> dict[str, Any]:
+    team = snapshot.config.teams[team_id]
+    current = _active_job(snapshot, team_id, instance.name)
     library, integrations = _read_only_runtime(snapshot)
     inspection = library.inspect(instance.blueprint)
-    policy = resolve_effective_policy(snapshot.config, group_id, instance.name)
+    policy = resolve_effective_policy(snapshot.config, team_id, instance.name)
     return {
         "name": instance.name,
         "display_name": instance.identity.display_name or instance.name,
@@ -371,11 +371,11 @@ def _agent_payload_read_only(snapshot, group_id: str, instance) -> dict[str, Any
     }
 
 
-def _agent_payload(services: AgencyServices, snapshot, group_id: str, instance) -> dict[str, Any]:
-    group = snapshot.config.groups[group_id]
-    current = _active_job(snapshot, group_id, instance.name)
+def _agent_payload(services: AgencyServices, snapshot, team_id: str, instance) -> dict[str, Any]:
+    team = snapshot.config.teams[team_id]
+    current = _active_job(snapshot, team_id, instance.name)
     inspection = services.blueprint_library.inspect(instance.blueprint)
-    policy = resolve_effective_policy(snapshot.config, group_id, instance.name)
+    policy = resolve_effective_policy(snapshot.config, team_id, instance.name)
     return {
         "name": instance.name,
         "display_name": instance.identity.display_name or instance.name,
@@ -437,25 +437,25 @@ def cmd_status(args: Namespace) -> int:
     snapshot = _snapshot(args)
     job_store = JobStore(snapshot.config.agency.memory_store)
     result = {}
-    for group_id, group in snapshot.config.groups.items():
-        paths = resolve_team_paths(group)
+    for team_id, team in snapshot.config.teams.items():
+        paths = resolve_team_paths(team)
         observations = _markdown_items(paths.observations)
         proposals = _markdown_items(paths.proposals)
         decisions = _markdown_items(paths.decisions)
-        result[group_id] = {
-            "name": group.name,
+        result[team_id] = {
+            "name": team.name,
             "observations": len(observations),
             "proposals": len(proposals),
             "decisions": len(decisions),
-            "agents": len(group.agents),
-            "active": sum(bool(job_store.active(group_id, name)) for name in group.agents),
+            "agents": len(team.agents),
+            "active": sum(bool(job_store.active(team_id, name)) for name in team.agents),
         }
     if args.json:
         _print_json(result)
     else:
         print(f"\n{bold(snapshot.config.agency.title)} - Fleet Status\n")
-        for group_id, item in result.items():
-            print(f"  {bold(item['name'])} ({group_id})")
+        for team_id, item in result.items():
+            print(f"  {bold(item['name'])} ({team_id})")
             print(
                 f"    {item['agents']} agents - {item['active']} active - {item['observations']} observations - "
                 f"{item['proposals']} proposals - {item['decisions']} decisions"
@@ -466,13 +466,13 @@ def cmd_status(args: Namespace) -> int:
 
 def cmd_agents(args: Namespace) -> int:
     snapshot = _snapshot(args)
-    group_id = _group_id(args, snapshot)
-    group = snapshot.config.groups[group_id]
-    payload = [_agent_payload_read_only(snapshot, group_id, instance) for instance in group.agents.values()]
+    team_id = _team_id(args, snapshot)
+    team = snapshot.config.teams[team_id]
+    payload = [_agent_payload_read_only(snapshot, team_id, instance) for instance in team.agents.values()]
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold('Agents')} - {group.name}\n")
+        print(f"\n{bold('Agents')} - {team.name}\n")
         for item in payload:
             job = item["job"]["status"] if item["job"] else "idle"
             print(
@@ -485,9 +485,9 @@ def cmd_agents(args: Namespace) -> int:
 
 def cmd_agent_show(args: Namespace) -> int:
     snapshot = _snapshot(args)
-    group_id = _group_id(args, snapshot)
-    instance = _instance(snapshot, group_id, args.agent)
-    payload = _agent_payload_read_only(snapshot, group_id, instance)
+    team_id = _team_id(args, snapshot)
+    instance = _instance(snapshot, team_id, args.agent)
+    payload = _agent_payload_read_only(snapshot, team_id, instance)
     payload.update(
         title=instance.identity.title,
         emoji=instance.identity.emoji,
@@ -538,14 +538,14 @@ def _memory_override(args: Namespace, snapshot) -> MemorySelector | None:
 def cmd_agent_run(args: Namespace) -> int:
     config_path = _config_path(args)
     snapshot = _snapshot(args)
-    group_id = _group_id(args, snapshot)
-    instance = _instance(snapshot, group_id, args.agent)
+    team_id = _team_id(args, snapshot)
+    instance = _instance(snapshot, team_id, args.agent)
     routine = next((item for item in instance.routines if item.id == args.routine), None)
     if routine is None:
         raise _validation_failure(
             "unknown-routine",
             f"Unknown routine '{args.routine}' for agent '{args.agent}'.",
-            scope=f"groups.{group_id}.agents.{args.agent}",
+            scope=f"teams.{team_id}.agents.{args.agent}",
             field="routine",
             hint="Choose an existing stable routine ID.",
         )
@@ -553,13 +553,13 @@ def cmd_agent_run(args: Namespace) -> int:
         raise _validation_failure(
             "routine-disabled",
             f"Routine '{routine.id}' is disabled; enable it before running.",
-            scope=f"groups.{group_id}.agents.{args.agent}",
+            scope=f"teams.{team_id}.agents.{args.agent}",
             field="routine",
             hint="Enable the routine in Agent Detail before submitting it.",
         )
     request = JobRequest(
         config_path=config_path,
-        group_key=group_id,
+        team_key=team_id,
         agent_name=instance.name,
         trigger="manual_prompt",
         task_input="",
@@ -573,8 +573,8 @@ def cmd_agent_run(args: Namespace) -> int:
 
 
 def _list_command(args: Namespace, kind: str) -> int:
-    group = _resolve_group(args)
-    items = _markdown_items(group[kind])
+    resolved = _resolve_team(args)
+    items = _markdown_items(resolved[kind])
     if getattr(args, "status", None):
         items = [item for item in items if item.get("status") == args.status]
     agent_key = "origin_agent" if kind == "proposals" else "agent"
@@ -593,7 +593,7 @@ def _list_command(args: Namespace, kind: str) -> int:
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold(kind.title())} - {group['name']} ({len(payload)} total)\n")
+        print(f"\n{bold(kind.title())} - {resolved['name']} ({len(payload)} total)\n")
         for item in payload:
             print(f"  {item['agent'][:16].rjust(16)}  {item['title'][:60]}  {dim(item['status'])}")
         print()
@@ -609,8 +609,8 @@ def cmd_proposals(args: Namespace) -> int:
 
 
 def cmd_decisions(args: Namespace) -> int:
-    group = _resolve_group(args)
-    items = _markdown_items(group["decisions"])
+    resolved = _resolve_team(args)
+    items = _markdown_items(resolved["decisions"])
     payload = [
         {
             "slug": item["_slug"],
@@ -623,7 +623,7 @@ def cmd_decisions(args: Namespace) -> int:
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold('Decisions')} - {group['name']} ({len(payload)} total)\n")
+        print(f"\n{bold('Decisions')} - {resolved['name']} ({len(payload)} total)\n")
         for item in payload:
             print(f"  decided  {item['title'][:60]}  {dim(item['date'])}")
         print()
@@ -631,17 +631,17 @@ def cmd_decisions(args: Namespace) -> int:
 
 
 def cmd_inbox(args: Namespace) -> int:
-    group = _resolve_group(args)
-    snapshot = group["_snapshot"]
-    group_id = group["key"]
-    observations = _markdown_items(group["observations"])
-    proposals = _markdown_items(group["proposals"])
-    decisions = _markdown_items(group["decisions"])
+    resolved = _resolve_team(args)
+    snapshot = resolved["_snapshot"]
+    team_id = resolved["key"]
+    observations = _markdown_items(resolved["observations"])
+    proposals = _markdown_items(resolved["proposals"])
+    decisions = _markdown_items(resolved["decisions"])
     actionable = [item for item in proposals if item.get("status") in {"proposed", "investigating"}]
     floated = [item for item in observations if item.get("float") and item.get("status") == "open"]
     open_items = [item for item in observations if item.get("status") == "open"]
     payload = {
-        "group": group_id,
+        "team": team_id,
         "actionable_proposals": [
             {"slug": item["_slug"], "title": item["_title"], "status": item.get("status", ""), "agent": item.get("origin_agent", "")}
             for item in actionable
@@ -656,7 +656,7 @@ def cmd_inbox(args: Namespace) -> int:
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold(snapshot.config.agency.title)} - {group['name']}\n")
+        print(f"\n{bold(snapshot.config.agency.title)} - {resolved['name']}\n")
         print(f"  Needs decision: {len(actionable)}")
         print(f"  Floated signals: {len(floated)}")
         print(f"  Open observations: {len(open_items)}\n")
@@ -664,8 +664,8 @@ def cmd_inbox(args: Namespace) -> int:
 
 
 def cmd_jobs(args: Namespace) -> int:
-    snapshot, group_id, group = _group(args)
-    records = _job_records(snapshot, group_id)
+    snapshot, team_id, team = _team(args)
+    records = _job_records(snapshot, team_id)
     if args.status:
         records = [(path, record) for path, record in records if record and record.status == args.status]
     if args.agent:
@@ -688,7 +688,7 @@ def cmd_jobs(args: Namespace) -> int:
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold('Jobs')} - {group.name} ({len(records)} total)\n")
+        print(f"\n{bold('Jobs')} - {team.name} ({len(records)} total)\n")
         for item in payload:
             print(
                 f"  {item['status'].ljust(18)} {item['agent'][:16].ljust(16)} "
@@ -711,11 +711,11 @@ def cmd_logs(args: Namespace) -> int:
 
 
 def _cmd_logs_inner(args: Namespace) -> int:
-    snapshot, group_id, group = _group(args)
-    records = _job_records(snapshot, group_id)
+    snapshot, team_id, team = _team(args)
+    records = _job_records(snapshot, team_id)
     if not args.job_id:
         rows = [record for _, record in records if record is not None and record.stdout_path]
-        print(f"\n{bold('Execution logs')} - {group.name}\n")
+        print(f"\n{bold('Execution logs')} - {team.name}\n")
         for record in rows[:20]:
             print(f"  {record.status.ljust(18)} {record.spec.job_id}  {record.spec.agent_name}")
         if not rows:
@@ -739,15 +739,15 @@ def _cmd_logs_inner(args: Namespace) -> int:
 
 
 def _resolve_memory(args: Namespace, services: AgencyServices, snapshot):
-    group_id = _group_id(args, snapshot)
-    _instance(snapshot, group_id, args.agent)
+    team_id = _team_id(args, snapshot)
+    _instance(snapshot, team_id, args.agent)
     selector = MemorySelector(scope=args.scope, channel=args.channel)
     if selector.scope == "routine" and not args.routine:
         raise _validation_failure("invalid-memory-selector", "Routine memory requires --routine.", field="routine")
     return resolve_memory_selector(
         selector,
-        job_id=f"cli-preview-{group_id}-{args.agent}",
-        group_key=group_id,
+        job_id=f"cli-preview-{team_id}-{args.agent}",
+        team_key=team_id,
         agent_name=args.agent,
         routine_id=args.routine,
         channels=snapshot.config.memory.channels,
@@ -846,37 +846,6 @@ def _print_dispatch_status(status: dict[str, Any]) -> None:
         print(f"Dispatcher active: heartbeat every {status['expected_interval']} minutes")
 
 
-def cmd_config(args: Namespace) -> int:
-    try:
-        return _cmd_config_inner(args)
-    except BaseException as error:
-        if isinstance(error, (KeyboardInterrupt, SystemExit)):
-            raise
-        return _render_failure(error, json_output=False)
-
-
-def _cmd_config_inner(args: Namespace) -> int:
-    if args.config_command == "migrate":
-        from agency.configuration.migrate import migrate_v4_to_v5
-
-        store = ConfigStore(_config_path(args))
-        file_snapshot = store.inspect()
-        if not file_snapshot.exists:
-            raise CliFailure(ExitCode.OPERATIONAL_FAILURE, "config-not-found", "config.yaml not found")
-        raw = yaml.safe_load(file_snapshot.payload.decode("utf-8")) or {}
-        try:
-            migrated, dropped = migrate_v4_to_v5(raw)
-        except ValueError as error:
-            raise CliFailure(ExitCode.VALIDATION, "migration-failed", str(error)) from error
-        store.replace(file_snapshot.revision, migrated)
-        if dropped:
-            print("Migration dropped the following constructs — review and reconfigure manually:")
-            for message in dropped:
-                print(f"  - {message}")
-        print(str(store.path))
-        return 0
-    return 0
-
 
 def cmd_dispatch(args: Namespace) -> int:
     try:
@@ -945,11 +914,11 @@ def cmd_decide(args: Namespace) -> int:
 
 def _cmd_decide_inner(args: Namespace) -> int:
     config_path = _config_path(args)
-    runtime_group = _resolve_group(args)
-    snapshot = runtime_group.get("_snapshot")
-    group_id = runtime_group["key"]
-    proposal_path = runtime_group["proposals"] / f"{args.slug}.md"
-    decision_path = runtime_group["decisions"] / f"{args.slug}.md"
+    resolved = _resolve_team(args)
+    snapshot = resolved.get("_snapshot")
+    team_id = resolved["key"]
+    proposal_path = resolved["proposals"] / f"{args.slug}.md"
+    decision_path = resolved["decisions"] / f"{args.slug}.md"
     if not proposal_path.is_file():
         raise CliFailure(ExitCode.OPERATIONAL_FAILURE, "proposal-not-found", f"Proposal '{args.slug}' not found.")
     metadata, body = _parse_frontmatter(proposal_path.read_text(encoding="utf-8"))
@@ -962,7 +931,7 @@ def _cmd_decide_inner(args: Namespace) -> int:
         raise CliFailure(ExitCode.VALIDATION, "invalid-proposal", "Proposal is invalid", issues)
     eligible = [
         item["name"]
-        for item in runtime_group.get("_agents_normalized", ())
+        for item in resolved.get("_agents_normalized", ())
         if bool(item.get("capabilities", {}).get("write"))
     ]
     declared = metadata["execution_agent"].strip()
@@ -1048,7 +1017,7 @@ def _cmd_decide_inner(args: Namespace) -> int:
     if should_execute_decision(questions, answers, note):
         request = JobRequest(
             config_path=config_path,
-            group_key=group_id,
+            team_key=team_id,
             agent_name=execution_agent,
             trigger="decision",
             task_input=build_decision_prompt(body, answers, note),
@@ -1073,9 +1042,9 @@ def _add_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", default=argparse.SUPPRESS, help="Path to canonical config.yaml")
 
 
-def _add_group_json(parser: argparse.ArgumentParser) -> None:
+def _add_team_json(parser: argparse.ArgumentParser) -> None:
     _add_config(parser)
-    parser.add_argument("--group", "-g")
+    parser.add_argument("--team", "-t")
     parser.add_argument("--json", action="store_true")
 
 
@@ -1091,7 +1060,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--reload", action="store_true")
     serve.set_defaults(handler=cmd_serve)
 
-    status = subparsers.add_parser("status", help="Fleet overview across all groups")
+    status = subparsers.add_parser("status", help="Fleet overview across all teams")
     _add_config(status)
     status.add_argument("--json", action="store_true")
     status.set_defaults(handler=cmd_status)
@@ -1107,38 +1076,38 @@ def build_parser() -> argparse.ArgumentParser:
         ("decisions", "List decisions", cmd_decisions),
     ):
         command = subparsers.add_parser(name, help=help_text)
-        _add_group_json(command)
+        _add_team_json(command)
         command.set_defaults(handler=handler)
 
     observations = subparsers.add_parser("observations", help="List observations")
-    _add_group_json(observations)
+    _add_team_json(observations)
     observations.add_argument("--status", "-s")
     observations.add_argument("--agent", "-a")
     observations.set_defaults(handler=cmd_observations)
 
     proposals = subparsers.add_parser("proposals", help="List proposals")
-    _add_group_json(proposals)
+    _add_team_json(proposals)
     proposals.add_argument("--status", "-s")
     proposals.set_defaults(handler=cmd_proposals)
 
     decide = subparsers.add_parser("decide", help="Answer a proposal's questions")
     _add_config(decide)
     decide.add_argument("slug")
-    decide.add_argument("--group", "-g")
+    decide.add_argument("--team", "-t")
     decide.set_defaults(handler=cmd_decide, json=False)
 
     agent = subparsers.add_parser("agent", help="Inspect or run one agent")
     _add_config(agent)
     agent_subparsers = agent.add_subparsers(dest="agent_command", required=True)
     show = agent_subparsers.add_parser("show", help="Show one agent")
-    _add_group_json(show)
+    _add_team_json(show)
     show.add_argument("agent")
     show.set_defaults(handler=cmd_agent_show)
     run_agent = agent_subparsers.add_parser("run", help="Run an existing routine")
-    _add_group_json(run_agent)
+    _add_team_json(run_agent)
     run_agent.add_argument("agent")
     run_agent.add_argument("routine")
-    run_agent.add_argument("--memory-scope", choices=("run", "routine", "agent", "group", "channel"))
+    run_agent.add_argument("--memory-scope", choices=("run", "routine", "agent", "team", "channel"))
     run_agent.add_argument("--memory-channel")
     run_agent.set_defaults(handler=cmd_agent_run)
 
@@ -1147,9 +1116,9 @@ def build_parser() -> argparse.ArgumentParser:
     memory_subparsers = memory.add_subparsers(dest="memory_command", required=True)
     for name, handler in (("show", cmd_memory_show), ("save", cmd_memory_save)):
         command = memory_subparsers.add_parser(name)
-        _add_group_json(command)
+        _add_team_json(command)
         command.add_argument("agent")
-        command.add_argument("--scope", choices=("run", "routine", "agent", "group", "channel"), default="agent")
+        command.add_argument("--scope", choices=("run", "routine", "agent", "team", "channel"), default="agent")
         command.add_argument("--channel")
         command.add_argument("--routine")
         command.set_defaults(handler=handler)
@@ -1173,14 +1142,8 @@ def build_parser() -> argparse.ArgumentParser:
     uninstall.add_argument("--force", action="store_true")
     uninstall.set_defaults(handler=cmd_dispatch, interval=None, replace=False, json=False)
 
-    config_cmd = subparsers.add_parser("config", help="Manage Agency configuration")
-    config_subparsers = config_cmd.add_subparsers(dest="config_command", required=True)
-    migrate_cmd = config_subparsers.add_parser("migrate", help="Migrate config from schema version 4 to 5")
-    _add_config(migrate_cmd)
-    migrate_cmd.set_defaults(handler=cmd_config)
-
     jobs = subparsers.add_parser("jobs", help="List durable agent jobs")
-    _add_group_json(jobs)
+    _add_team_json(jobs)
     jobs.add_argument("--status", "-s")
     jobs.add_argument("--agent", "-a")
     jobs.set_defaults(handler=cmd_jobs)
@@ -1188,7 +1151,7 @@ def build_parser() -> argparse.ArgumentParser:
     logs = subparsers.add_parser("logs", help="Tail or list execution logs")
     _add_config(logs)
     logs.add_argument("job_id", nargs="?")
-    logs.add_argument("--group", "-g")
+    logs.add_argument("--team", "-t")
     logs.add_argument("--lines", "-n", type=int, default=40)
     logs.add_argument("--stderr", action="store_true")
     logs.set_defaults(handler=cmd_logs, json=False)

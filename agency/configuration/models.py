@@ -529,9 +529,7 @@ def _reject_superseded_keys(
                         f"recognised in version 6."
                     ),
                     hint=(
-                        "Remove the key and use runtime.permissions instead. "
-                        "Run `christag-agency config migrate` to convert "
-                        "a version-4 configuration."
+                        "Remove the key and use runtime.permissions instead."
                     ),
                 )
             )

@@ -18,7 +18,7 @@ from agency.fs.locks import exclusive_lock
 from agency.jobs import JobHandle, JobSubmissionError
 from agency.memory import resolve_memory_selector
 from agency.web.dependencies import build_services
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 @dataclass(frozen=True)
@@ -41,24 +41,24 @@ def _write_blueprint(root: Path) -> None:
 
 @pytest.fixture
 def cli_config(tmp_path):
-    paths = create_group_environment(
+    paths = create_team_environment(
         tmp_path,
         "newsletter",
     )
     _write_blueprint(tmp_path / "agent-library")
     raw = {
-        "schema_version": 5,
+        "schema_version": 6,
         "agency": {
             "title": "Contract Agency",
-            "default_group": "newsletter",
+            "default_team": "newsletter",
             "agent_library": str((tmp_path / "agent-library").resolve()),
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),
             "prompt_store": str((tmp_path / "prompts").resolve()),
         },
         "memory": {"channels": {"support": {"display_name": "Support Desk"}}},
-        "groups": {
-            "newsletter": apply_group_paths({
+        "teams": {
+            "newsletter": apply_team_paths({
                 "name": "Newsletter",
                 "default_integration": "script",
                 "runtime": {
@@ -93,19 +93,31 @@ def cli_config(tmp_path):
 
 
 def test_cli_reads_group_records_without_workspace_shared(cli_config, cli_runner):
-    group_root = cli_config.parent / "groups" / "newsletter"
-    observation = group_root / "observations" / "signal.md"
+    team_root = cli_config.parent / "teams" / "newsletter"
+    observation = team_root / "observations" / "signal.md"
     observation.parent.mkdir(parents=True, exist_ok=True)
     observation.write_text(
         "---\nagent: builder\nstatus: open\n---\n# Signal\n",
         encoding="utf-8",
     )
 
-    result = cli_runner("observations", "--group", "newsletter", "--json", config=cli_config)
+    result = cli_runner("observations", "--team", "newsletter", "--json", config=cli_config)
 
     assert result.exit_code == 0
     assert "signal" in result.stdout
-    assert not (group_root / "shared").exists()
+    assert not (team_root / "shared").exists()
+
+
+def test_cli_selects_explicit_or_default_team(cli_config, cli_runner):
+    assert cli_runner("agents", "--team", "newsletter", config=cli_config).exit_code == 0
+    assert cli_runner("agents", config=cli_config).exit_code == 0
+
+
+def test_cli_rejects_removed_group_flag(cli_config, cli_runner):
+    result = cli_runner("agents", "--group", "newsletter", config=cli_config)
+
+    assert result.exit_code != 0
+    assert "--group" in result.stderr
 
 
 @pytest.fixture
@@ -139,7 +151,7 @@ def _resolved_agent_memory(config_path: Path):
     return services, resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="cli-preview-newsletter-builder",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         routine_id=None,
         channels=snapshot.config.memory.channels,
@@ -248,7 +260,7 @@ def test_invalid_config_json_shape_is_exact(tmp_path, cli_runner):
 
 
 def test_agents_json_uses_friendly_stable_fields_and_policy_parity(cli_config, cli_runner):
-    result = cli_runner("agents", "--group", "newsletter", "--json", config=cli_config)
+    result = cli_runner("agents", "--team", "newsletter", "--json", config=cli_config)
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert len(payload) == 1
@@ -277,13 +289,13 @@ def test_agents_json_uses_friendly_stable_fields_and_policy_parity(cli_config, c
     "arguments",
     [
         ("status", "--json"),
-        ("agents", "--group", "newsletter", "--json"),
-        ("inbox", "--group", "newsletter", "--json"),
-        ("observations", "--group", "newsletter", "--json"),
-        ("proposals", "--group", "newsletter", "--json"),
-        ("decisions", "--group", "newsletter", "--json"),
-        ("jobs", "--group", "newsletter", "--json"),
-        ("logs", "--group", "newsletter"),
+        ("agents", "--team", "newsletter", "--json"),
+        ("inbox", "--team", "newsletter", "--json"),
+        ("observations", "--team", "newsletter", "--json"),
+        ("proposals", "--team", "newsletter", "--json"),
+        ("decisions", "--team", "newsletter", "--json"),
+        ("jobs", "--team", "newsletter", "--json"),
+        ("logs", "--team", "newsletter"),
     ],
 )
 def test_read_commands_do_not_change_config_cache_or_memory(cli_config, cli_runner, arguments):
@@ -295,7 +307,7 @@ def test_read_commands_do_not_change_config_cache_or_memory(cli_config, cli_runn
 
 
 def test_agent_show_reports_instance_without_hashes(cli_config, cli_runner):
-    result = cli_runner("agent", "show", "builder", "--group", "newsletter", "--json", config=cli_config)
+    result = cli_runner("agent", "show", "builder", "--team", "newsletter", "--json", config=cli_config)
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["name"] == "builder"
@@ -312,14 +324,14 @@ def test_agent_run_submits_existing_routine_with_allowed_memory_override(cli_con
         lambda request: submitted.append(request) or JobHandle(request.job_id, "queued", Path("job.yaml"), None),
     )
     result = cli_runner(
-        "agent", "run", "builder", "daily-review", "--group", "newsletter",
+        "agent", "run", "builder", "daily-review", "--team", "newsletter",
         "--memory-scope", "channel", "--memory-channel", "support", "--json",
         config=cli_config,
     )
     assert result.exit_code == 0
     assert len(submitted) == 1
     request = submitted[0]
-    assert request.group_key == "newsletter"
+    assert request.team_key == "newsletter"
     assert request.agent_name == "builder"
     assert request.routine_id == "daily-review"
     assert request.trigger == "manual_prompt"
@@ -331,7 +343,7 @@ def test_agent_run_rejects_unknown_routine_without_submission(cli_config, cli_ru
     submitted = []
     monkeypatch.setattr(cli, "submit_job_request", submitted.append)
     result = cli_runner(
-        "agent", "run", "builder", "missing", "--group", "newsletter",
+        "agent", "run", "builder", "missing", "--team", "newsletter",
         config=cli_config,
     )
     assert result.exit_code == 3
@@ -344,7 +356,7 @@ def test_agent_run_job_failure_returns_operational_exit(cli_config, cli_runner, 
 
     monkeypatch.setattr(cli, "submit_job_request", fail)
     result = cli_runner(
-        "agent", "run", "builder", "daily-review", "--group", "newsletter",
+        "agent", "run", "builder", "daily-review", "--team", "newsletter",
         config=cli_config,
     )
     assert result.exit_code == 1
@@ -355,7 +367,7 @@ def test_memory_show_json_exposes_revision_and_content_without_hash(cli_config, 
     services, resolved = _resolved_agent_memory(cli_config)
     snapshot = services.memory_store.ensure(resolved)
     result = cli_runner(
-        "memory", "show", "builder", "--group", "newsletter", "--scope", "agent", "--json",
+        "memory", "show", "builder", "--team", "newsletter", "--scope", "agent", "--json",
         config=cli_config,
     )
     assert result.exit_code == 0
@@ -371,7 +383,7 @@ def test_memory_save_uses_expected_revision(cli_config, cli_runner):
     services, resolved = _resolved_agent_memory(cli_config)
     snapshot = services.memory_store.ensure(resolved)
     result = cli_runner(
-        "memory", "save", "builder", "--group", "newsletter", "--scope", "agent",
+        "memory", "save", "builder", "--team", "newsletter", "--scope", "agent",
         "--file", "memory.md", "--revision", snapshot.revision, "--json",
         config=cli_config,
         stdin="# Updated\n",
@@ -406,7 +418,7 @@ def test_memory_save_preserves_other_markdown_files(cli_config, cli_runner):
         {"memory.md": b"# Original\n", "notes.md": b"# Keep me\n"},
     )
     result = cli_runner(
-        "memory", "save", "builder", "--group", "newsletter", "--scope", "agent",
+        "memory", "save", "builder", "--team", "newsletter", "--scope", "agent",
         "--file", "memory.md", "--revision", seeded.revision, "--json",
         config=cli_config,
         stdin="# Updated\n",
@@ -439,7 +451,7 @@ def test_memory_save_rejects_unsafe_filename_without_writing(
     snapshot = services.memory_store.ensure(resolved)
     before = _tree_snapshot(services.memory_store.root)
     result = cli_runner(
-        "memory", "save", "builder", "--group", "newsletter", "--scope", "agent",
+        "memory", "save", "builder", "--team", "newsletter", "--scope", "agent",
         "--file", filename, "--revision", snapshot.revision,
         config=cli_config,
         stdin="# Escape\n",
@@ -454,7 +466,7 @@ def test_memory_save_stale_revision_preserves_newer_content(cli_config, cli_runn
     stale = services.memory_store.ensure(resolved)
     newer = services.memory_store.try_save(resolved, stale.revision, {"memory.md": b"# Newer\n"})
     result = cli_runner(
-        "memory", "save", "builder", "--group", "newsletter", "--scope", "agent",
+        "memory", "save", "builder", "--team", "newsletter", "--scope", "agent",
         "--file", "memory.md", "--revision", stale.revision,
         config=cli_config,
         stdin="# Stale\n",
@@ -469,7 +481,7 @@ def test_memory_save_busy_returns_resource_busy_exit(cli_config, cli_runner):
     snapshot = services.memory_store.ensure(resolved)
     with exclusive_lock(services.memory_store._lock_path(resolved), wait=True):
         result = cli_runner(
-            "memory", "save", "builder", "--group", "newsletter", "--scope", "agent",
+            "memory", "save", "builder", "--team", "newsletter", "--scope", "agent",
             "--file", "memory.md", "--revision", snapshot.revision,
             config=cli_config,
             stdin="# Busy\n",

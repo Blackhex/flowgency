@@ -1818,7 +1818,7 @@ async def home(request: Request, group: str):
                 "agent": e.record.spec.agent_name,
                 "routine": e.record.spec.routine_id or "task",
                 "due": e.record.due_at or e.record.spec.created_at,
-                "href": f"/{e.group_id}/jobs/{e.record.spec.job_id}",
+                "href": f"/{e.team_id}/jobs/{e.record.spec.job_id}",
             }
             for i, e in enumerate(view.waiting)
         ],

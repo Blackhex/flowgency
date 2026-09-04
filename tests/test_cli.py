@@ -15,7 +15,7 @@ from agency import cli
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import write_job
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 def _setup_jobs_group(
@@ -27,7 +27,7 @@ def _setup_jobs_group(
 ):
     """Create a group with one complete job that has changed files, and wire it
     into the app registry the CLI reads through get_group."""
-    paths = create_group_environment(
+    paths = create_team_environment(
         tmp_path,
         "test",
         create_state=True,
@@ -37,18 +37,18 @@ def _setup_jobs_group(
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 5,
+                "schema_version": 6,
                 "agency": {
                     "title": "Agency",
-                    "default_group": "test",
+                    "default_team": "test",
                     "ai_backend": "claude-code",
                     "agent_library": str((tmp_path / "agent-library").resolve()),
                     "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
                     "memory_store": str((tmp_path / "memory").resolve()),
                     "prompt_store": str((tmp_path / "prompts").resolve()),
                 },
-                "groups": {
-                    "test": apply_group_paths({
+                "teams": {
+                    "test": apply_team_paths({
                         "name": "Test",
                         "default_integration": "script",
                         "agents": [
@@ -68,12 +68,12 @@ def _setup_jobs_group(
     )
 
     spec = JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="test",
-        group_root=str(group.resolve()),
+        team_key="test",
+        team_root=str(group.resolve()),
         agent_name="engineer",
         workspace_root=str(group.resolve()),
         trigger="decision",
@@ -123,7 +123,7 @@ def _setup_jobs_group(
     snapshot = cli._snapshot_read_only(config_path.resolve())
     monkeypatch.setattr(
         cli,
-        "_group",
+        "_team",
         lambda args: (
             snapshot,
             "test",
@@ -284,7 +284,7 @@ def _write_dispatch_config(path):
     path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 5,
+                "schema_version": 6,
                 "agency": {
                     "agent_library": "agent-library",
                     "compilation_cache": "compiled-agents",
@@ -292,7 +292,7 @@ def _write_dispatch_config(path):
                     "prompt_store": "prompts",
                     "dispatch": {"interval": 15},
                 },
-                "groups": {},
+                "teams": {},
             },
             sort_keys=False,
         ),
@@ -442,12 +442,12 @@ def test_cmd_jobs_and_logs_ignore_forged_group_jobs_records(tmp_path, monkeypatc
     forged_path.parent.mkdir(parents=True, exist_ok=True)
     forged_record = JobRecord.from_spec(
         JobSpec(
-            schema_version=3,
+            schema_version=5,
             job_id="forged-job",
             config_path=spec.config_path,
             config_revision=spec.config_revision,
-            group_key="test",
-            group_root=spec.group_root,
+            team_key="test",
+            team_root=spec.team_root,
             agent_name=spec.agent_name,
             workspace_root=spec.workspace_root,
             trigger=spec.trigger,
@@ -513,7 +513,7 @@ def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", ques
             "capabilities": {"write": True},
         },
     ]
-    runtime_group = {
+    resolved = {
         "key": "test",
         "name": "Test",
         "workspace_root": group,
@@ -525,8 +525,8 @@ def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", ques
         "agents": ["builder"],
         "_agents_normalized": agents,
     }
-    monkeypatch.setattr(cli, "_resolve_group", lambda args: runtime_group)
-    return Namespace(group="test", slug="change", config=str(tmp_path / "config.yaml")), group / "decisions" / "change.md", proposal_path
+    monkeypatch.setattr(cli, "_resolve_team", lambda args: resolved)
+    return Namespace(team="test", slug="change", config=str(tmp_path / "config.yaml")), group / "decisions" / "change.md", proposal_path
 
 
 def test_cmd_decide_rejects_invalid_proposal_schema(tmp_path, monkeypatch, capsys):

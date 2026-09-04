@@ -48,10 +48,10 @@ def _write_config(tmp_path: Path, *, schedule: str) -> Path:
     _write_blueprint(tmp_path / "agent-library")
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 5\n"
+        "schema_version: 6\n"
         "agency:\n"
         "  title: Agency\n"
-        "  default_group: newsletter\n"
+        "  default_team: newsletter\n"
         "  ai_backend: claude-code\n"
         "  agent_library: agent-library\n"
         "  compilation_cache: compiled-agents\n"
@@ -61,7 +61,7 @@ def _write_config(tmp_path: Path, *, schedule: str) -> Path:
         "    interval: 15\n"
         "  jobs:\n"
         "    pool: 1\n"
-        "groups:\n"
+        "teams:\n"
         "  newsletter:\n"
         "    name: Newsletter\n"
         "    workspace_path: workspaces/newsletter\n"
@@ -105,7 +105,7 @@ class _Bench:
         self._blocker = submit_job_request(
             JobRequest(
                 config_path=self.config_path,
-                group_key="newsletter",
+                team_key="newsletter",
                 agent_name="builder",
                 trigger="manual_prompt",
                 task_input="",
@@ -122,7 +122,7 @@ class _Bench:
         run_dispatch_cycle(None, self.config_path, self.launcher)
 
     def scheduled(self) -> list:
-        group_dir = JobStore(self.memory_store).group_root("newsletter")
+        group_dir = JobStore(self.memory_store).team_root("newsletter")
         records = [read_job(path) for path in sorted(group_dir.glob("*.yaml"))]
         return [
             record
