@@ -30,10 +30,10 @@ def _resolved_config(tmp_path: Path, raw_config: dict):
         memory_store=str(memory),
         prompt_store=str(prompt_store),
     )
-    group = raw["teams"]["newsletter"]
-    group["workspace_path"] = str(workspace)
-    group["path"] = str(tmp_path / "groups" / "newsletter")
-    group["runtime"] = {
+    team = raw["teams"]["newsletter"]
+    team["workspace_path"] = str(workspace)
+    team["path"] = str(tmp_path / "groups" / "newsletter")
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [{"path": str(restricted), "tools": ["read"]}],
@@ -151,11 +151,11 @@ def test_resolved_group_paths_have_no_shared_segment(tmp_path, raw_config):
     raw_config["teams"]["newsletter"]["path"] = str(
         tmp_path / "groups" / "newsletter"
     )
-    group = parse_config(raw_config, tmp_path / "config.yaml").resolved.teams[
+    team = parse_config(raw_config, tmp_path / "config.yaml").resolved.teams[
         "newsletter"
     ]
 
-    paths = resolve_team_paths(group)
+    paths = resolve_team_paths(team)
 
     assert paths.workspace_root == workspace.resolve()
     assert paths.team_root == (tmp_path / "groups" / "newsletter").resolve()
@@ -185,9 +185,9 @@ def test_initialization_creates_group_state_but_not_workspace_shared(
 
     initialize_storage_directories(config)
 
-    group_root = tmp_path / "groups" / "newsletter"
+    team_root = tmp_path / "groups" / "newsletter"
     assert {
-        child.name for child in group_root.iterdir() if child.is_dir()
+        child.name for child in team_root.iterdir() if child.is_dir()
     } == {"observations", "proposals", "decisions", "locks", "logs"}
     assert not (workspace / "shared").exists()
 
@@ -206,28 +206,28 @@ def test_group_authorities_must_not_overlap(
     tmp_path, raw_config, field, other_authority
 ):
     raw = deepcopy(raw_config)
-    group = raw["teams"]["newsletter"]
+    team = raw["teams"]["newsletter"]
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
-    group["workspace_path"] = str(workspace)
-    group["path"] = str(tmp_path / "groups" / "newsletter")
+    team["workspace_path"] = str(workspace)
+    team["path"] = str(tmp_path / "groups" / "newsletter")
 
     if other_authority.startswith("agency."):
         _, agency_field = other_authority.split(".", 1)
-        group[field] = raw["agency"][agency_field]
+        team[field] = raw["agency"][agency_field]
     elif other_authority == "path":
-        group[field] = group["path"]
+        team[field] = team["path"]
     else:
         other_workspace = tmp_path / "other-workspace"
         other_workspace.mkdir()
         raw["teams"]["other"] = {
-            **deepcopy(group),
+            **deepcopy(team),
             "name": "Other",
             "workspace_path": str(other_workspace),
             "path": str(tmp_path / "groups" / "other"),
         }
         other_field = other_authority.rsplit(".", 1)[-1]
-        group[field] = raw["teams"]["other"][other_field]
+        team[field] = raw["teams"]["other"][other_field]
 
     config = parse_config(raw, tmp_path / "config.yaml").resolved
 

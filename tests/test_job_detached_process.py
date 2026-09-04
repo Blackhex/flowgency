@@ -45,8 +45,8 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     if probe.returncode != 0 or probe.stdout.strip() != "5":
         pytest.skip("installed agency package has different schema_version")
     paths = create_team_environment(tmp_path, "test")
-    group_path = paths.state_root
-    agent_dir = group_path / "product"
+    team_path = paths.state_root
+    agent_dir = team_path / "product"
     agent_dir.mkdir(parents=True)
     gate = tmp_path / "continue"
     sentinel = tmp_path / "completed"

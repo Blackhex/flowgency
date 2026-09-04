@@ -22,8 +22,8 @@ def running_decision_job(
     team_key: str = "test",
     memory_store_root: Path | None = None,
 ):
-    team = tmp_path / "team"
-    decision = team / "decisions" / "change.md"
+    team_dir = tmp_path / "team"
+    decision = team_dir / "decisions" / "change.md"
     decision.parent.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
@@ -33,9 +33,9 @@ def running_decision_job(
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key=team_key,
-        team_root=str(team.resolve()),
+        team_root=str(team_dir.resolve()),
         agent_name="product",
-        workspace_root=str(team.resolve()),
+        workspace_root=str(team_dir.resolve()),
         trigger="decision",
         integration_name="script",
         integration_config={},
@@ -76,12 +76,12 @@ def running_decision_job(
         path,
         replace(JobRecord.from_spec(spec), status="running", worker_pid=pid),
     )
-    return team, decision, path
+    return team_dir, decision, path
 
 
-def reconcile_for_test(groups, tmp_path, *, memory_store_root=None):
+def reconcile_for_test(teams, tmp_path, *, memory_store_root=None):
     return reconcile_jobs(
-        groups,
+        teams,
         memory_store_root=memory_store_root or (tmp_path / "memory"),
     )
 
@@ -96,18 +96,18 @@ def test_reconcile_accepts_teams_keyword_argument(tmp_path, monkeypatch):
 
 
 def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
-    group, decision, path = running_decision_job(tmp_path)
+    team_dir, decision, path = running_decision_job(tmp_path)
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: True)
-    result = reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
     assert result.left_running == 1
     assert read_job(path).status == "running"
     assert "execution_status: running" in decision.read_text()
 
 
 def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
-    group, decision, path = running_decision_job(tmp_path)
+    team_dir, decision, path = running_decision_job(tmp_path)
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
-    result = reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
     assert result.failed == 1
     record = read_job(path)
     assert record.status == "failed"
@@ -117,7 +117,7 @@ def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
 
 
 def test_reconcile_releases_pin_for_dead_waiting_worker(tmp_path, monkeypatch):
-    group, _, path = running_decision_job(tmp_path)
+    team_dir, _, path = running_decision_job(tmp_path)
     record = read_job(path)
     artifact = record.spec.blueprint.to_artifact()
     artifact.runtime_path.mkdir(parents=True, exist_ok=True)
@@ -130,7 +130,7 @@ def test_reconcile_releases_pin_for_dead_waiting_worker(tmp_path, monkeypatch):
 
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
 
-    result = reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
     assert result.failed == 1
     assert active_pins(record.spec.blueprint.cache_root, artifact.ref) == ()
@@ -185,7 +185,7 @@ def test_reconcile_releases_pin_for_dead_running_worker_but_keeps_live_pin(
 
 
 def test_reconcile_projects_terminal_job_to_stale_decision(tmp_path):
-    group, decision, path = running_decision_job(tmp_path)
+    team_dir, decision, path = running_decision_job(tmp_path)
     record = read_job(path)
     write_job(
         path,
@@ -197,7 +197,7 @@ def test_reconcile_projects_terminal_job_to_stale_decision(tmp_path):
         ),
     )
 
-    reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
     decision_text = decision.read_text()
     assert "execution_status: failed" in decision_text
@@ -209,7 +209,7 @@ def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
     project both its status and the captured files onto a stale ``running``
     decision. This is the exact behaviour the cross-tool capture advertises and
     was previously only asserted for a failed, empty-changes job."""
-    group, decision, path = running_decision_job(tmp_path)
+    team_dir, decision, path = running_decision_job(tmp_path)
     record = read_job(path)
     changed_files = [
         {"path": "a.py", "status": "modified", "lines_added": 3, "lines_removed": 1},
@@ -226,7 +226,7 @@ def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
         ),
     )
 
-    reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
     metadata = yaml.safe_load(decision.read_text().split("---")[1])
     assert metadata["execution_status"] == "complete"
@@ -238,15 +238,15 @@ def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
 
 
 def test_reconcile_leaves_uncertain_worker_running(tmp_path, monkeypatch):
-    group, _, path = running_decision_job(tmp_path)
+    team_dir, _, path = running_decision_job(tmp_path)
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: None)
-    result = reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
     assert result.left_running == 1
     assert read_job(path).status == "running"
 
 
 def test_reconcile_fails_dead_waiting_worker(tmp_path, monkeypatch):
-    group, _, path = running_decision_job(tmp_path)
+    team_dir, _, path = running_decision_job(tmp_path)
     record = read_job(path)
     write_job(
         path,
@@ -255,7 +255,7 @@ def test_reconcile_fails_dead_waiting_worker(tmp_path, monkeypatch):
 
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
 
-    result = reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
     assert result.failed == 1
     reconciled = read_job(path)
@@ -269,7 +269,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
     from agency.memory import MemoryStore, resolve_memory_selector
     from agency.memory.publication import apply_publication, prepare_publication
 
-    group = tmp_path / "group"
+    team_dir = tmp_path / "team"
     config_path = tmp_path / "config.yaml"
     config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
     memory_binding = resolve_memory_selector(
@@ -287,9 +287,9 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key="test",
-        team_root=str(group.resolve()),
+        team_root=str(team_dir.resolve()),
         agent_name="product",
-        workspace_root=str(group.resolve()),
+        workspace_root=str(team_dir.resolve()),
         trigger="manual_prompt",
         integration_name="script",
         integration_config={},
@@ -352,7 +352,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
 
     result = reconcile_for_test(
-        {"test": {"team_root": str(group)}},
+        {"test": {"team_root": str(team_dir)}},
         tmp_path,
         memory_store_root=store_root,
     )
@@ -363,11 +363,11 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
 
 
 def test_running_decision_without_job_id_is_not_failed(tmp_path):
-    group = tmp_path / "group"
-    decision = group / "decisions" / "orphan.md"
+    team_dir = tmp_path / "team"
+    decision = team_dir / "decisions" / "orphan.md"
     decision.parent.mkdir(parents=True)
     decision.write_text("---\nexecution_status: running\n---\n")
-    reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
     assert "execution_status: running" in decision.read_text()
 
 
@@ -377,7 +377,7 @@ def test_reconcile_ignores_malformed_job_and_logs_warning(tmp_path, caplog):
     (jobs / "broken.yaml").write_text("spec: [")
 
     result = reconcile_for_test(
-        {"test": {"team_root": str(tmp_path / "group")}},
+        {"test": {"team_root": str(tmp_path / "team")}},
         tmp_path,
     )
 
@@ -434,7 +434,7 @@ def test_reconcile_does_not_fail_recovery_blocked_dead_job(
 ):
     from agency.memory.recovery import RecoveryResult
 
-    group, _, path = running_decision_job(tmp_path)
+    team_dir, _, path = running_decision_job(tmp_path)
     monkeypatch.setattr(
         "agency.jobs.reconciliation.recover_publications",
         lambda *args: RecoveryResult(
@@ -444,7 +444,7 @@ def test_reconcile_does_not_fail_recovery_blocked_dead_job(
     )
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
 
-    result = reconcile_for_test({"test": {"team_root": str(group)}}, tmp_path)
+    result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
     assert result.failed == 0
     assert read_job(path).status == "running"

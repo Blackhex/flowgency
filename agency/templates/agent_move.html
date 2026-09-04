@@ -11,13 +11,13 @@
 
   <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">Move {{ preview.agent_name }} to {{ preview.target_group|title }}</h1>
+      <h1 class="text-2xl font-bold text-gray-900">Move {{ preview.agent_name }} to {{ preview.target_team|title }}</h1>
       <p class="mt-2 text-sm text-gray-500">Review the config-backed move before applying it.</p>
     </div>
 
     <div class="rounded-lg bg-gray-50 border border-gray-200 p-4 text-sm text-gray-700 space-y-2">
-      <div><span class="font-medium">Source team:</span> {{ preview.source_group }}</div>
-      <div><span class="font-medium">Target team:</span> {{ preview.target_group }}</div>
+      <div><span class="font-medium">Source team:</span> {{ preview.source_team }}</div>
+      <div><span class="font-medium">Target team:</span> {{ preview.target_team }}</div>
       <div><span class="font-medium">Memory mode:</span> {{ preview.memory_mode }}</div>
       <div><span class="font-medium">Preview revision:</span> {{ preview.config_revision }}</div>
       {% if preview.blocked_by %}
@@ -26,7 +26,7 @@
     </div>
 
     <form method="post" action="/{{ team }}/agents/{{ preview.agent_name }}/move/apply" class="flex items-center gap-3 flex-wrap">
-      <input type="hidden" name="target_team" value="{{ preview.target_group }}">
+      <input type="hidden" name="target_team" value="{{ preview.target_team }}">
       <input type="hidden" name="memory_mode" value="{{ preview.memory_mode }}">
       <input type="hidden" name="preview_revision" value="{{ preview.config_revision }}">
       <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">Apply move</button>

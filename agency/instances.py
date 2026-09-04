@@ -24,7 +24,7 @@ from agency.configuration.patches import (
 )
 from agency.integrations import get_integration
 from agency.jobs.authority import JobStore
-from agency.jobs.store import acquire_group_operation_locks
+from agency.jobs.store import acquire_team_operation_locks
 from agency.memory import (
     MemoryStore,
     ResolvedMemory,
@@ -84,8 +84,8 @@ class MoveInstanceResult:
 
 @dataclass(frozen=True)
 class MovePreview:
-    source_group: str
-    target_group: str
+    source_team: str
+    target_team: str
     agent_name: str
     memory_mode: MemoryMode
     source_memories: tuple[ResolvedMemory, ...]
@@ -111,28 +111,28 @@ class InstanceMoveRollbackError(RuntimeError):
 
 def list_instances(
     snapshot: ConfigSnapshot,
-    group_id: str,
+    team_id: str,
 ) -> tuple[AgentInstance, ...]:
-    return tuple(snapshot.config.teams[group_id].agents.values())
+    return tuple(snapshot.config.teams[team_id].agents.values())
 
 
 def get_instance(
     snapshot: ConfigSnapshot,
-    group_id: str,
+    team_id: str,
     agent_id: str,
 ) -> AgentInstance:
-    return snapshot.config.teams[group_id].agents[agent_id]
+    return snapshot.config.teams[team_id].agents[agent_id]
 
 
 def create_instance(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent: AgentInstance,
 ) -> ConfigSnapshot:
     snapshot = store.load()
-    group_path = snapshot.config.teams[group_id].path
-    with acquire_group_operation_locks(group_path):
+    team_path = snapshot.config.teams[team_id].path
+    with acquire_team_operation_locks(team_path):
         refreshed = store.load()
         if refreshed.revision != expected_revision:
             raise ConfigConflictError(
@@ -141,7 +141,7 @@ def create_instance(
         return create_agent_instance(
             store,
             refreshed.revision,
-            group_id,
+            team_id,
             agent.model_dump(mode="json", exclude_none=True),
         )
 
@@ -149,12 +149,12 @@ def create_instance(
 def remove_instance(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent_id: str,
 ) -> ConfigSnapshot:
     snapshot = store.load()
-    group_path = snapshot.config.teams[group_id].path
-    with acquire_group_operation_locks(group_path):
+    team_path = snapshot.config.teams[team_id].path
+    with acquire_team_operation_locks(team_path):
         refreshed = store.load()
         if refreshed.revision != expected_revision:
             raise ConfigConflictError(
@@ -163,7 +163,7 @@ def remove_instance(
         return remove_agent_instance(
             store,
             refreshed.revision,
-            group_id,
+            team_id,
             agent_id,
         )
 
@@ -172,22 +172,22 @@ def preview_move(
     snapshot: ConfigSnapshot,
     memory_store: MemoryStore,
     prompt_store: PromptStore,
-    source_group: str,
+    source_team: str,
     agent_id: str,
-    target_group: str,
+    target_team: str,
     memory_mode: MemoryMode,
 ) -> MovePreview:
-    source = get_instance(snapshot, source_group, agent_id)
+    source = get_instance(snapshot, source_team, agent_id)
     source_prompts = _registered_prompt_entries(
         prompt_store,
-        source_group,
+        source_team,
         source,
     )
     memory_pairs = _resolve_owned_memory_pairs(
         snapshot,
         memory_store,
-        source_group=source_group,
-        target_group=target_group,
+        source_team=source_team,
+        target_team=target_team,
         agent=source,
     )
     source_memories = tuple(source for source, _ in memory_pairs)
@@ -197,8 +197,8 @@ def preview_move(
     blocked = list(
         _preview_blocks(
             snapshot,
-            source_group,
-            target_group,
+            source_team,
+            target_team,
             agent_id,
             destination_memories,
             prompt_store,
@@ -213,8 +213,8 @@ def preview_move(
         for resolved in source_memories
     )
     return MovePreview(
-        source_group=source_group,
-        target_group=target_group,
+        source_team=source_team,
+        target_team=target_team,
         agent_name=agent_id,
         memory_mode=memory_mode,
         source_memories=source_memories,
@@ -238,17 +238,17 @@ def move_instance(
 
     created_targets: list[ResolvedMemory] = []
     snapshot = store.load()
-    source_group_path = snapshot.config.teams[preview.source_group].path
-    target_group_path = snapshot.config.teams[preview.target_group].path
+    source_team_path = snapshot.config.teams[preview.source_team].path
+    target_team_path = snapshot.config.teams[preview.target_team].path
     orphaned_prompt_namespace: Path | None = None
     with ExitStack() as stack:
         stack.enter_context(
-            acquire_group_operation_locks(source_group_path, target_group_path)
+            acquire_team_operation_locks(source_team_path, target_team_path)
         )
         prompt_lease = stack.enter_context(
             prompt_store.namespace_transaction(
-                (preview.source_group, preview.agent_name),
-                (preview.target_group, preview.agent_name),
+                (preview.source_team, preview.agent_name),
+                (preview.target_team, preview.agent_name),
             )
         )
 
@@ -259,11 +259,11 @@ def move_instance(
             )
         source_agent = get_instance(
             refreshed,
-            preview.source_group,
+            preview.source_team,
             preview.agent_name,
         )
         source_prompts = prompt_lease.registered_entries(
-            preview.source_group,
+            preview.source_team,
             source_agent.name,
             tuple(source_agent.prompts),
         )
@@ -272,8 +272,8 @@ def move_instance(
         memory_pairs = _resolve_owned_memory_pairs(
             refreshed,
             memory_store,
-            source_group=preview.source_group,
-            target_group=preview.target_group,
+            source_team=preview.source_team,
+            target_team=preview.target_team,
             agent=source_agent,
         )
         source_memories = tuple(source for source, _ in memory_pairs)
@@ -283,8 +283,8 @@ def move_instance(
         blocked = tuple(
             _preview_blocks(
                 refreshed,
-                preview.source_group,
-                preview.target_group,
+                preview.source_team,
+                preview.target_team,
                 preview.agent_name,
                 destination_memories,
                 prompt_store,
@@ -344,9 +344,9 @@ def move_instance(
 
             if source_prompts:
                 prompt_lease.copy_registered(
-                    preview.source_group,
+                    preview.source_team,
                     preview.agent_name,
-                    preview.target_group,
+                    preview.target_team,
                     preview.agent_name,
                     registered=source_prompts,
                 )
@@ -355,8 +355,8 @@ def move_instance(
                 refreshed.revision,
                 lambda raw: _apply_move_patch(
                     raw,
-                    source_group=preview.source_group,
-                    target_group=preview.target_group,
+                    source_team=preview.source_team,
+                    target_team=preview.target_team,
                     agent_name=preview.agent_name,
                 ),
             )
@@ -375,7 +375,7 @@ def move_instance(
             if source_prompts:
                 try:
                     prompt_lease.delete_registered(
-                        preview.target_group,
+                        preview.target_team,
                         preview.agent_name,
                         registered=source_prompts,
                     )
@@ -387,13 +387,13 @@ def move_instance(
         if source_prompts:
             try:
                 prompt_lease.delete_registered(
-                    preview.source_group,
+                    preview.source_team,
                     preview.agent_name,
                     registered=source_prompts,
                 )
             except Exception:
                 orphaned_prompt_namespace = prompt_store.namespace_path(
-                    preview.source_group,
+                    preview.source_team,
                     preview.agent_name,
                 )
     return MoveInstanceResult(
@@ -418,17 +418,17 @@ class InstanceService:
             prompt_store = PromptStore(snapshot.config.agency.prompt_store)
         self.prompt_store = prompt_store
 
-    def list(self, group_id: str) -> tuple[AgentInstance, ...]:
+    def list(self, team_id: str) -> tuple[AgentInstance, ...]:
         snapshot = self.config_store.load()
-        return list_instances(snapshot, group_id)
+        return list_instances(snapshot, team_id)
 
-    def get(self, group_id: str, agent_id: str) -> AgentInstance:
+    def get(self, team_id: str, agent_id: str) -> AgentInstance:
         snapshot = self.config_store.load()
-        return get_instance(snapshot, group_id, agent_id)
+        return get_instance(snapshot, team_id, agent_id)
 
     def create(
         self,
-        group_id: str,
+        team_id: str,
         request: AgentInstanceCreate,
         expected_revision: str | None = None,
     ) -> InstanceMutationResult:
@@ -439,51 +439,51 @@ class InstanceService:
         updated = create_instance(
             self.config_store,
             expected_revision,
-            group_id,
+            team_id,
             request.to_model(),
         )
         return InstanceMutationResult(
             snapshot=updated,
-            instance=updated.config.teams[group_id].agents[request.name],
+            instance=updated.config.teams[team_id].agents[request.name],
         )
 
     def remove(
         self,
-        group_id: str,
+        team_id: str,
         agent_id: str,
         expected_revision: str | None = None,
     ) -> RemoveInstanceResult:
         snapshot = self.config_store.load()
-        agent = get_instance(snapshot, group_id, agent_id)
+        agent = get_instance(snapshot, team_id, agent_id)
         if expected_revision is None:
             expected_revision = snapshot.revision
         orphaned = _resolve_owned_memories(
             snapshot,
             self.memory_store,
-            group_id=group_id,
+            team_id=team_id,
             agent=agent,
         )
         registered_prompts = _registered_prompt_entries(
             self.prompt_store,
-            group_id,
+            team_id,
             agent,
         )
         updated = remove_instance(
             self.config_store,
             expected_revision,
-            group_id,
+            team_id,
             agent_id,
         )
         orphaned_prompt_namespace: Path | None = None
         if registered_prompts:
             namespace = self.prompt_store.path(
-                group_id,
+                team_id,
                 agent_id,
                 registered_prompts[0][0],
             ).parent
             try:
                 self.prompt_store.delete_namespace(
-                    group_id,
+                    team_id,
                     agent_id,
                     registered=registered_prompts,
                 )
@@ -500,9 +500,9 @@ class InstanceService:
 
     def preview_move(
         self,
-        source_group: str,
+        source_team: str,
         agent_id: str,
-        target_group: str,
+        target_team: str,
         memory_mode: MemoryMode,
         expected_revision: str | None = None,
     ) -> MovePreview:
@@ -517,9 +517,9 @@ class InstanceService:
             snapshot,
             self.memory_store,
             self.prompt_store,
-            source_group,
+            source_team,
             agent_id,
-            target_group,
+            target_team,
             memory_mode,
         )
 
@@ -588,7 +588,7 @@ def _resolve_owned_memories(
     snapshot: ConfigSnapshot,
     memory_store: MemoryStore,
     *,
-    group_id: str,
+    team_id: str,
     agent: AgentInstance,
 ) -> tuple[ResolvedMemory, ...]:
     resolved: dict[str, ResolvedMemory] = {}
@@ -596,7 +596,7 @@ def _resolve_owned_memories(
         item = resolve_memory_selector(
             selector,
             job_id="instance-preview",
-            team_key=group_id,
+            team_key=team_id,
             agent_name=agent.name,
             routine_id=routine_id,
             channels=snapshot.config.memory.channels,
@@ -610,8 +610,8 @@ def _resolve_owned_memory_pairs(
     snapshot: ConfigSnapshot,
     memory_store: MemoryStore,
     *,
-    source_group: str,
-    target_group: str,
+    source_team: str,
+    target_team: str,
     agent: AgentInstance,
 ) -> tuple[tuple[ResolvedMemory, ResolvedMemory], ...]:
     pairs: list[tuple[ResolvedMemory, ResolvedMemory]] = []
@@ -621,7 +621,7 @@ def _resolve_owned_memory_pairs(
                 resolve_memory_selector(
                     selector,
                     job_id="instance-preview",
-                    team_key=source_group,
+                    team_key=source_team,
                     agent_name=agent.name,
                     routine_id=routine_id,
                     channels=snapshot.config.memory.channels,
@@ -630,7 +630,7 @@ def _resolve_owned_memory_pairs(
                 resolve_memory_selector(
                     selector,
                     job_id="instance-preview",
-                    team_key=target_group,
+                    team_key=target_team,
                     agent_name=agent.name,
                     routine_id=routine_id,
                     channels=snapshot.config.memory.channels,
@@ -698,17 +698,17 @@ def _ensure_empty_memory_without_relocking(resolved: ResolvedMemory) -> str:
 
 def _preview_blocks(
     snapshot: ConfigSnapshot,
-    source_group: str,
-    target_group: str,
+    source_team: str,
+    target_team: str,
     agent_id: str,
     destination_memories: tuple[ResolvedMemory, ...],
     prompt_store: PromptStore,
     source_prompts: tuple[tuple[str, str], ...],
 ):
-    if agent_id in snapshot.config.teams[target_group].agents:
+    if agent_id in snapshot.config.teams[target_team].agents:
         yield "target-instance-exists"
         return
-    if _has_active_jobs(snapshot, source_group, target_group, agent_id):
+    if _has_active_jobs(snapshot, source_team, target_team, agent_id):
         yield "active-jobs"
         return
     if any(resolved.directory.exists() for resolved in destination_memories):
@@ -716,7 +716,7 @@ def _preview_blocks(
         return
     if _prompt_namespace_exists(
         prompt_store,
-        target_group,
+        target_team,
         agent_id,
         source_prompts[0][0] if source_prompts else "placeholder",
     ):
@@ -725,27 +725,27 @@ def _preview_blocks(
 
 def _has_active_jobs(
     snapshot: ConfigSnapshot,
-    source_group: str,
-    target_group: str,
+    source_team: str,
+    target_team: str,
     agent_id: str,
 ) -> bool:
     job_store = JobStore(snapshot.config.agency.memory_store)
     return bool(
-        job_store.active(source_group, agent_id)
-        or job_store.active(target_group, agent_id)
+        job_store.active(source_team, agent_id)
+        or job_store.active(target_team, agent_id)
     )
 
 
 def _apply_move_patch(
     raw: dict,
     *,
-    source_group: str,
-    target_group: str,
+    source_team: str,
+    target_team: str,
     agent_name: str,
 ) -> None:
     teams = raw["teams"]
-    source_agents = teams[source_group].setdefault("agents", [])
-    target_agents = teams[target_group].setdefault("agents", [])
+    source_agents = teams[source_team].setdefault("agents", [])
+    target_agents = teams[target_team].setdefault("agents", [])
     if any(
         isinstance(entry, dict) and entry.get("name") == agent_name
         for entry in target_agents
@@ -764,23 +764,23 @@ def _apply_move_patch(
 
 def _registered_prompt_entries(
     prompt_store: PromptStore,
-    group_id: str,
+    team_id: str,
     agent: AgentInstance,
 ) -> tuple[tuple[str, str], ...]:
     entries: list[tuple[str, str]] = []
     for name in agent.prompts:
-        stored = prompt_store.read(group_id, agent.name, name)
+        stored = prompt_store.read(team_id, agent.name, name)
         entries.append((name, stored.document.digest))
     return tuple(entries)
 
 
 def _prompt_namespace_exists(
     prompt_store: PromptStore,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     sample_prompt_name: str,
 ) -> bool:
-    return prompt_store.path(group_id, agent_id, sample_prompt_name).parent.exists()
+    return prompt_store.path(team_id, agent_id, sample_prompt_name).parent.exists()
 
 
 __all__ = [

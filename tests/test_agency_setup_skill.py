@@ -396,7 +396,7 @@ def test_setup_summarizes_project_before_group_count_and_first_draft():
     summary = normalized.index(
         "Before team design, summarize this working context in user-facing prose."
     )
-    group = normalized.index(
+    group_idx = normalized.index(
         "ask the user to approve the team display name and stable team ID"
     )
     count = normalized.index("ask for an initial positive integer agent count")
@@ -404,7 +404,7 @@ def test_setup_summarizes_project_before_group_count_and_first_draft():
         "Generate the first complete team draft with exactly that many profiles."
     )
 
-    assert inspection < summary < group < count < draft
+    assert inspection < summary < group_idx < count < draft
     assert "propose three to five distinct roles" not in normalized.lower()
     assert "which proposed roles to create now" not in normalized.lower()
 
@@ -488,7 +488,7 @@ def test_setup_requires_complete_semantic_profiles_with_pre_decision_check():
 
 def test_section_two_enforces_phase_barrier_before_any_other_question():
     """Regression: skill must explicitly forbid batching later-stage questions
-    into group/count collection (live-session finding 2026-09-03)."""
+    into team/count collection (live-session finding 2026-09-03)."""
     skill = SKILL_PATH.read_text(encoding="utf-8")
     section = skill.split("## 2. Synthesize And Approve The Team", 1)[1].split(
         "\n## 3.", 1
@@ -520,7 +520,7 @@ def test_setup_adapts_identity_and_distinguishes_shared_roles():
 
 
 def test_setup_requires_clear_theme_applied_to_every_identity():
-    """When the group has a clear theme, every display_name and title must
+    """When the team has a clear theme, every display_name and title must
     acknowledge it; slugs and broad roles alone are insufficient."""
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split())

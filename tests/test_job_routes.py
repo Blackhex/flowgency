@@ -46,7 +46,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
     paths = create_team_environment(tmp_path, "newsletter")
-    group_root = paths.state_root
+    team_root = paths.state_root
     for rel in [
         ("logs", "2026-07-16"),
         ("observations",),
@@ -54,7 +54,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
         ("decisions",),
         ("locks",),
     ]:
-        group_root.joinpath(*rel).mkdir(parents=True, exist_ok=True)
+        team_root.joinpath(*rel).mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
 
     raw["agency"]["agent_library"] = str(library_root)
@@ -91,27 +91,27 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    return TestClient(app_mod.app), config_path, group_root
+    return TestClient(app_mod.app), config_path, team_root
 
 
 def _write_job_record(
-    group_root: Path,
+    team_root: Path,
     config_path: Path,
     *,
-    group_id: str = "newsletter",
+    team_id: str = "newsletter",
     job_id: str = "job-1",
     status: str = "queued",
     due_at: str | None = None,
 ) -> Path:
-    job_store = JobStore(group_root.parent.parent / "memory-store")
-    workspace_root = group_root.parent.parent / "workspaces" / group_id
+    job_store = JobStore(team_root.parent.parent / "memory-store")
+    workspace_root = team_root.parent.parent / "workspaces" / team_id
     spec = JobSpec(
         schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        team_key=group_id,
-        team_root=str(group_root.resolve()),
+        team_key=team_id,
+        team_root=str(team_root.resolve()),
         agent_name="advisor",
         workspace_root=str(workspace_root.resolve()),
         trigger="scheduled_prompt",
@@ -122,7 +122,7 @@ def _write_job_record(
             source_digest="digest-1",
             integration="copilot",
             projector_version="v1",
-            cache_path=str((group_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
+            cache_path=str((team_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
         ),
         routine_id="daily-review",
         skill=None,
@@ -136,14 +136,14 @@ def _write_job_record(
             selector={"scope": "channel", "channel": "support"},
             canonical_json='{"channel":"support","scope":"channel"}',
             memory_hash="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-            path=str((group_root.parent.parent / "memory-store" / "channel-support").resolve()),
+            path=str((team_root.parent.parent / "memory-store" / "channel-support").resolve()),
         ),
         trigger_context={"source": "test"},
         prompt_source={"type": "routine", "routine_id": "daily-review", "title": "Daily review"},
         timeout_override=None,
         created_at="2026-07-16T00:00:00+00:00",
     )
-    path = job_store.path(group_id, job_id)
+    path = job_store.path(team_id, job_id)
     record = JobRecord.from_spec(spec, due_at=due_at)
     write_job(path, record)
     if status != "queued":
@@ -151,9 +151,9 @@ def _write_job_record(
     return path
 
 
-def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_job_record(group_root, config_path, job_id="job-1", status="queued")
+def test_job_list_is_team_scoped(monkeypatch, tmp_path, raw_config):
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-1", status="queued")
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     research_paths = create_team_environment(tmp_path, "research")
@@ -168,7 +168,7 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    _write_job_record(other_group, config_path, group_id="research", job_id="job-2", status="queued")
+    _write_job_record(other_group, config_path, team_id="research", job_id="job-2", status="queued")
 
     response = client.get("/newsletter/jobs")
 
@@ -178,16 +178,16 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
 
 
 def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     job_store = JobStore(tmp_path / "memory-store")
-    path = _write_job_record(group_root, config_path, job_id="job-failed", status="queued")
+    path = _write_job_record(team_root, config_path, job_id="job-failed", status="queued")
     record = read_job(path)
     failed = JobRecord(
         spec=record.spec,
         authority_digest=record.authority_digest,
         status="failed",
-        stdout_path=str((group_root / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.out").resolve()),
-        stderr_path=str((group_root / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.err").resolve()),
+        stdout_path=str((team_root / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.out").resolve()),
+        stderr_path=str((team_root / "logs" / "2026-07-16" / "advisor-scheduled_prompt-job-failed.err").resolve()),
         changed_files=[{"path": "docs/brief.md", "status": "modified", "lines_added": 3, "lines_removed": 1}],
         execution_summary="Memory publication failed.",
         memory_publication={
@@ -231,8 +231,8 @@ def test_job_detail_uses_friendly_memory_and_artifacts(monkeypatch, tmp_path, ra
 
 
 def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_job_record(group_root, config_path, job_id="job-historical", status="failed")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-historical", status="failed")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["teams"]["newsletter"]["agents"] = []
     _write_yaml(config_path, raw)
@@ -254,8 +254,8 @@ def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, raw_con
 
 
 def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_job_record(group_root, config_path, job_id="job-moved", status="failed")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-moved", status="failed")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["teams"]["newsletter"]["agents"].pop()
     moved_paths = create_team_environment(tmp_path, "research")
@@ -282,8 +282,8 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
 
 
 def test_job_metadata_uses_spec_snapshot_when_instance_still_exists(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    path = _write_job_record(group_root, config_path, job_id="job-snapshot", status="failed")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(team_root, config_path, job_id="job-snapshot", status="failed")
     record = read_job(path)
     snapshot_spec = replace(
         record.spec,
@@ -313,8 +313,8 @@ def test_job_metadata_uses_spec_snapshot_when_instance_still_exists(monkeypatch,
 
 
 def test_cancel_waiting_job(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    path = _write_job_record(group_root, config_path, job_id="job-waiting", status="waiting_for_memory")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(team_root, config_path, job_id="job-waiting", status="waiting_for_memory")
 
     response = client.post("/newsletter/jobs/job-waiting/cancel", follow_redirects=False)
 
@@ -323,8 +323,8 @@ def test_cancel_waiting_job(monkeypatch, tmp_path, raw_config):
 
 
 def test_cancel_running_job_returns_conflict(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_job_record(group_root, config_path, job_id="job-running", status="running")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-running", status="running")
 
     response = client.post("/newsletter/jobs/job-running/cancel")
 
@@ -332,8 +332,8 @@ def test_cancel_running_job_returns_conflict(monkeypatch, tmp_path, raw_config):
 
 
 def test_job_artifact_path_must_be_canonical(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_job_record(group_root, config_path, job_id="job-safe", status="failed")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-safe", status="failed")
 
     response = client.get("/newsletter/jobs/job-safe?artifact=..%2F..%2Fsecret.txt")
 
@@ -341,9 +341,9 @@ def test_job_artifact_path_must_be_canonical(monkeypatch, tmp_path, raw_config):
 
 
 def test_job_detail_links_logs_to_viewer(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    path = _write_job_record(group_root, config_path, job_id="job-logs", status="queued")
-    log_dir = group_root / "logs" / "2026-07-16"
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(team_root, config_path, job_id="job-logs", status="queued")
+    log_dir = team_root / "logs" / "2026-07-16"
     stdout_log = log_dir / "advisor-scheduled_prompt-job-logs.out"
     stderr_log = log_dir / "advisor-scheduled_prompt-job-logs.err"
     stdout_log.write_text("stdout", encoding="utf-8")
@@ -369,9 +369,9 @@ def test_job_detail_links_logs_to_viewer(monkeypatch, tmp_path, raw_config):
 
 
 def test_job_detail_omits_log_link_without_path(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    path = _write_job_record(group_root, config_path, job_id="job-nolog", status="queued")
-    log_dir = group_root / "logs" / "2026-07-16"
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(team_root, config_path, job_id="job-nolog", status="queued")
+    log_dir = team_root / "logs" / "2026-07-16"
     stdout_log = log_dir / "advisor-scheduled_prompt-job-nolog.out"
     stdout_log.write_text("stdout", encoding="utf-8")
     record = read_job(path)
@@ -392,16 +392,16 @@ def test_job_detail_omits_log_link_without_path(monkeypatch, tmp_path, raw_confi
     assert "Stderr log:" not in response.text
 
 
-def _write_resumable_job(group_root, config_path, *, job_id, session_id):
-    path = _write_job_record(group_root, config_path, job_id=job_id, status="queued")
+def _write_resumable_job(team_root, config_path, *, job_id, session_id):
+    path = _write_job_record(team_root, config_path, job_id=job_id, status="queued")
     record = read_job(path)
     write_job(path, replace(record, status="complete", session_id=session_id))
     return path
 
 
 def test_job_detail_offers_resume_when_session_known(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_resumable_job(group_root, config_path, job_id="job-resume", session_id="sess-1")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(team_root, config_path, job_id="job-resume", session_id="sess-1")
 
     response = client.get("/newsletter/jobs/job-resume")
 
@@ -412,8 +412,8 @@ def test_job_detail_offers_resume_when_session_known(monkeypatch, tmp_path, raw_
 
 
 def test_job_detail_hides_resume_without_session(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    path = _write_job_record(group_root, config_path, job_id="job-nosess", status="queued")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    path = _write_job_record(team_root, config_path, job_id="job-nosess", status="queued")
     write_job(path, replace(read_job(path), status="complete"))
 
     response = client.get("/newsletter/jobs/job-nosess")
@@ -425,8 +425,8 @@ def test_job_detail_hides_resume_without_session(monkeypatch, tmp_path, raw_conf
 def test_job_detail_hides_resume_without_integration_support(monkeypatch, tmp_path, raw_config):
     from agency.integrations.agency.copilot import CopilotIntegration
 
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_resumable_job(group_root, config_path, job_id="job-unsup", session_id="sess-9")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(team_root, config_path, job_id="job-unsup", session_id="sess-9")
     monkeypatch.setattr(CopilotIntegration, "resume_command", lambda self, session_id: None)
 
     response = client.get("/newsletter/jobs/job-unsup")
@@ -439,8 +439,8 @@ def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config)
     import agency.web.routes.jobs as jobs_mod
     from agency.integrations.agency.copilot import CopilotIntegration
 
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_resumable_job(group_root, config_path, job_id="job-spawn", session_id="sess-2")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(team_root, config_path, job_id="job-spawn", session_id="sess-2")
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
     captured = {}
 
@@ -456,7 +456,7 @@ def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config)
     assert response.status_code == 303
     assert response.headers["location"] == "/newsletter/jobs/job-spawn?resume=launched"
     assert captured["command"] == ["/opt/copilot", "--resume", "sess-2"]
-    assert captured["cwd"] == Path(group_root.parent.parent / "workspaces" / "newsletter")
+    assert captured["cwd"] == Path(team_root.parent.parent / "workspaces" / "newsletter")
 
 
 def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
@@ -464,8 +464,8 @@ def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
     from agency.integrations import IntegrationError
     from agency.integrations.agency.copilot import CopilotIntegration
 
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_resumable_job(group_root, config_path, job_id="job-nospawn", session_id="sess-3")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(team_root, config_path, job_id="job-nospawn", session_id="sess-3")
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
 
     def fake_spawn(command, cwd, env=None):
@@ -482,9 +482,9 @@ def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
 def test_resume_rejects_unsafe_session_id(monkeypatch, tmp_path, raw_config):
     import agency.web.routes.jobs as jobs_mod
 
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(
-        group_root,
+        team_root,
         config_path,
         job_id="job-evil",
         session_id="a; rm -rf ~",
@@ -513,9 +513,9 @@ def test_resume_spawns_terminal_carries_copilot_home(monkeypatch, tmp_path, raw_
     import agency.web.routes.jobs as jobs_mod
     from agency.integrations.agency.copilot import CopilotIntegration
 
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     home_path = tmp_path / ".copilot-job"
-    path = _write_job_record(group_root, config_path, job_id="job-home", status="queued")
+    path = _write_job_record(team_root, config_path, job_id="job-home", status="queued")
     record = read_job(path)
     write_job(path, replace(record, status="complete", session_id="sess-h", copilot_home=str(home_path)))
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
@@ -541,8 +541,8 @@ def test_resume_spawns_terminal_no_env_without_copilot_home(monkeypatch, tmp_pat
     import agency.web.routes.jobs as jobs_mod
     from agency.integrations.agency.copilot import CopilotIntegration
 
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_resumable_job(group_root, config_path, job_id="job-noenv", session_id="sess-ne")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(team_root, config_path, job_id="job-noenv", session_id="sess-ne")
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "/opt/copilot")
     captured = {}
 
@@ -559,8 +559,8 @@ def test_resume_spawns_terminal_no_env_without_copilot_home(monkeypatch, tmp_pat
 
 
 def test_job_detail_shows_failure_notice_when_resume_failed(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_resumable_job(group_root, config_path, job_id="job-notice", session_id="sess-n")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_resumable_job(team_root, config_path, job_id="job-notice", session_id="sess-n")
 
     response = client.get("/newsletter/jobs/job-notice?resume=failed")
 
@@ -569,10 +569,10 @@ def test_job_detail_shows_failure_notice_when_resume_failed(monkeypatch, tmp_pat
 
 
 def test_waiting_jobs_show_their_position(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_job_record(group_root, config_path, job_id="job-pos-a", status="queued")
-    _write_job_record(group_root, config_path, job_id="job-pos-b", status="queued")
-    _write_job_record(group_root, config_path, job_id="job-pos-c", status="queued")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-pos-a", status="queued")
+    _write_job_record(team_root, config_path, job_id="job-pos-b", status="queued")
+    _write_job_record(team_root, config_path, job_id="job-pos-c", status="queued")
 
     response = client.get("/newsletter/jobs")
 
@@ -584,7 +584,7 @@ def test_a_position_counts_the_whole_queue_not_just_this_group(
     monkeypatch, tmp_path, raw_config
 ):
     """The pool is machine-wide, so a position must be too."""
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     research_paths = create_team_environment(tmp_path, "research")
     other_group = research_paths.state_root
@@ -601,12 +601,12 @@ def test_a_position_counts_the_whole_queue_not_just_this_group(
     _write_job_record(
         other_group,
         config_path,
-        group_id="research",
+        team_id="research",
         job_id="job-earlier",
         due_at="2026-07-16T08:00:00",
     )
     _write_job_record(
-        group_root,
+        team_root,
         config_path,
         job_id="job-later",
         due_at="2026-07-16T09:00:00",
@@ -620,8 +620,8 @@ def test_a_position_counts_the_whole_queue_not_just_this_group(
 
 
 def test_a_running_job_has_no_position(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_job_record(group_root, config_path, job_id="job-pos-running", status="running")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-pos-running", status="running")
 
     response = client.get("/newsletter/jobs")
 
@@ -631,8 +631,8 @@ def test_a_running_job_has_no_position(monkeypatch, tmp_path, raw_config):
 
 
 def test_a_queued_job_offers_cancel(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    _write_job_record(group_root, config_path, job_id="job-pos-q", status="queued")
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    _write_job_record(team_root, config_path, job_id="job-pos-q", status="queued")
 
     response = client.get("/newsletter/jobs")
 

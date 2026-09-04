@@ -33,15 +33,15 @@ def _authority(spec: JobSpec):
 
 
 def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tuple[Path, Path, JobSpec]:
-    group_path = tmp_path / "agents"
-    decision_path = group_path / "decisions" / decision_name
+    team_path = tmp_path / "agents"
+    decision_path = team_path / "decisions" / decision_name
     decision_path.parent.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 5\nagency:\n  title: Test\n  default_team: ''\n"
+        "schema_version: 6\nagency:\n  title: Test\n  default_team: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
-        "  prompt_store: /nonexistent\nmemory: {}\ngroups: {}\n",
+        "  prompt_store: /nonexistent\nmemory: {}\nteams: {}\n",
         encoding="utf-8",
     )
     cache_path = tmp_path / ".compat-cache" / "script" / "v1" / "unresolved"
@@ -63,9 +63,9 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key="grp",
-        team_root=str(group_path.resolve()),
+        team_root=str(team_path.resolve()),
         agent_name="worker",
-        workspace_root=str(group_path.resolve()),
+        workspace_root=str(team_path.resolve()),
         trigger="decision",
         integration_name="script",
         integration_config={},
@@ -104,7 +104,7 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
     )
     job_path = JobStore(tmp_path / ".compat-memory-root").path(spec.team_key, spec.job_id)
     write_job(job_path, JobRecord.from_spec(spec))
-    return group_path, decision_path, spec
+    return team_path, decision_path, spec
 
 
 def _read_meta(path: Path) -> dict:
@@ -114,7 +114,7 @@ def _read_meta(path: Path) -> dict:
 
 
 def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeypatch):
-    group_path, decision, spec = queued_decision_job(tmp_path)
+    team_path, decision, spec = queued_decision_job(tmp_path)
     seen = {}
     repo = tmp_path / "repo"
 
@@ -138,13 +138,13 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
 
     authored_rule = ResolvedPermissionRule(path=repo, tools=("read", "write"))
     context = SimpleNamespace(
-        team_root=group_path,
+        team_root=team_path,
         runtime_policy=EffectiveRuntimePolicy(
             timeout=30,
             mode="restricted",
             rules=(authored_rule,),
         ),
-        workspace_root=group_path / "worker",
+        workspace_root=team_path / "worker",
         timeout=30,
         sandbox_root=SimpleNamespace(roots=(repo,), allowed_tools=()),
         integration=FakeIntegration(),
@@ -176,12 +176,12 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
 
 
 def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch):
-    group_path, decision, spec = queued_decision_job(tmp_path, decision_name="retry.md")
+    team_path, decision, spec = queued_decision_job(tmp_path, decision_name="retry.md")
 
     context = SimpleNamespace(
-        team_root=group_path,
+        team_root=team_path,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
-        workspace_root=group_path / "worker",
+        workspace_root=team_path / "worker",
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(
@@ -205,12 +205,12 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
 
 
 def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
-    group_path, decision, spec = queued_decision_job(tmp_path, decision_name="failed.md")
+    team_path, decision, spec = queued_decision_job(tmp_path, decision_name="failed.md")
 
     context = SimpleNamespace(
-        team_root=group_path,
+        team_root=team_path,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
-        workspace_root=group_path / "worker",
+        workspace_root=team_path / "worker",
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(
@@ -236,7 +236,7 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
 def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monkeypatch):
     """A job that fails validation (rejected records) must still project its
     final status to the decision document via the shared tail, not return early."""
-    group_path, decision, spec = queued_decision_job(
+    team_path, decision, spec = queued_decision_job(
         tmp_path, decision_name="rejected-records.md"
     )
 
@@ -259,9 +259,9 @@ def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monk
         )
 
     context = SimpleNamespace(
-        team_root=group_path,
+        team_root=team_path,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
-        workspace_root=group_path / "worker",
+        workspace_root=team_path / "worker",
         timeout=30,
         sandbox_root=None,
         integration=SimpleNamespace(run=fake_run),

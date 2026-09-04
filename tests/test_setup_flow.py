@@ -54,7 +54,7 @@ def test_build_setup_prompt_emits_v6_team_shape(tmp_path: Path):
     ):
         assert phrase in prompt
     assert "group.default_integration" not in prompt
-    assert "groups.<group-id>" not in prompt
+    assert "teams.<group-id>" not in prompt
 
 
 def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(

@@ -24,7 +24,7 @@ class CatalogPrompt:
 
 def _validate_effective_catalog(
     prompts: tuple[CatalogPrompt, ...],
-    group_id: str,
+    team_id: str,
     agent_id: str,
 ) -> tuple[CatalogPrompt, ...]:
     seen: dict[str, str] = {}
@@ -35,11 +35,11 @@ def _validate_effective_catalog(
                 (
                     ValidationIssue(
                         code="invalid-prompt-catalog",
-                        scope=f"groups.{group_id}.agents.{agent_id}",
+                        scope=f"teams.{team_id}.agents.{agent_id}",
                         field="prompts",
                         message=(
                             f"Prompt '{item.document.name}' exists in both blueprint and "
-                            f"instance scopes for {group_id}/{agent_id}."
+                            f"instance scopes for {team_id}/{agent_id}."
                         ),
                         corrective_hint="Use unique prompt names across blueprint and instance scopes.",
                     ),
@@ -53,11 +53,11 @@ def effective_prompt_catalog(
     snapshot: ConfigSnapshot,
     library: BlueprintLibrary,
     store: PromptStore,
-    group_id: str,
+    team_id: str,
     agent_id: str,
 ) -> tuple[CatalogPrompt, ...]:
-    group = snapshot.config.teams[group_id]
-    instance = group.agents[agent_id]
+    team = snapshot.config.teams[team_id]
+    instance = team.agents[agent_id]
     inspection = library.inspect(instance.blueprint)
     shared = tuple(
         CatalogPrompt(
@@ -70,32 +70,32 @@ def effective_prompt_catalog(
     private = tuple(
         CatalogPrompt(
             "instance",
-            store.read(group_id, agent_id, name).document,
-            str(store.path(group_id, agent_id, name)),
+            store.read(team_id, agent_id, name).document,
+            str(store.path(team_id, agent_id, name)),
         )
         for name in instance.prompts
     )
-    return _validate_effective_catalog(shared + private, group_id, agent_id)
+    return _validate_effective_catalog(shared + private, team_id, agent_id)
 
 
 def resolve_catalog_prompt(
     snapshot: ConfigSnapshot,
     library: BlueprintLibrary,
     store: PromptStore,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     *,
     scope: Literal["blueprint", "instance"],
     name: str,
 ) -> CatalogPrompt:
-    for item in effective_prompt_catalog(snapshot, library, store, group_id, agent_id):
+    for item in effective_prompt_catalog(snapshot, library, store, team_id, agent_id):
         if item.scope == scope and item.document.name == name:
             return item
     raise KeyError(name)
 
 
-def _agent_scoped(issue: ValidationIssue, group_id: str, agent_id: str) -> ValidationIssue:
-    scope = f"groups.{group_id}.agents.{agent_id}"
+def _agent_scoped(issue: ValidationIssue, team_id: str, agent_id: str) -> ValidationIssue:
+    scope = f"teams.{team_id}.agents.{agent_id}"
     return issue if issue.scope == scope else replace(issue, scope=scope)
 
 
@@ -106,22 +106,22 @@ def validate_prompt_catalogs(
 ) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
     seen: set[tuple[str, str, str]] = set()
-    for group_id, group in snapshot.config.teams.items():
-        for agent_id in group.agents:
+    for team_id, team in snapshot.config.teams.items():
+        for agent_id in team.agents:
             try:
-                effective_prompt_catalog(snapshot, library, store, group_id, agent_id)
+                effective_prompt_catalog(snapshot, library, store, team_id, agent_id)
             except PromptNotFoundError as exc:
                 collected: tuple[ValidationIssue, ...] = (
                     ValidationIssue(
                         code="missing-instance-prompt",
-                        scope=f"groups.{group_id}.agents.{agent_id}",
+                        scope=f"teams.{team_id}.agents.{agent_id}",
                         field="prompts",
                         message=str(exc),
                         corrective_hint="Register only prompt names that exist in the configured prompt store.",
                     ),
                 )
             except ValidationFailed as exc:
-                collected = tuple(_agent_scoped(issue, group_id, agent_id) for issue in exc.issues)
+                collected = tuple(_agent_scoped(issue, team_id, agent_id) for issue in exc.issues)
             else:
                 continue
             for issue in collected:

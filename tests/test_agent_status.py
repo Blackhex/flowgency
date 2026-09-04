@@ -341,15 +341,15 @@ def test_relative_future_under_a_minute():
 
 
 def test_collect_agents_includes_running_and_next_run(tmp_path):
-    group_path = tmp_path / "grp"
+    team_path = tmp_path / "grp"
     memory_root = tmp_path / "memory"
-    agent_dir = group_path / "product"
+    agent_dir = team_path / "product"
     agent_dir.mkdir(parents=True)
     (agent_dir / "CLAUDE.md").write_text("# Product\n")
     for sub in ("observations", "proposals", "decisions", "locks", "logs"):
-        (group_path / sub).mkdir(parents=True)
+        (team_path / sub).mkdir(parents=True)
 
-    stdout_dir = group_path / "logs" / "2026-07-11"
+    stdout_dir = team_path / "logs" / "2026-07-11"
     stdout_dir.mkdir()
     stdout_path = stdout_dir / "product-manual_prompt-job-1.out"
     stdout_path.write_text("")
@@ -362,17 +362,17 @@ def test_collect_agents_includes_running_and_next_run(tmp_path):
             "integration": "claude-code",
             "routines": [{"id": "r", "prompt": {"scope": "blueprint", "name": "r"}, "schedule": {"every": "6h"}}],
         }],
-        "observations": group_path / "observations",
-        "proposals": group_path / "proposals",
-        "decisions": group_path / "decisions",
-        "logs": group_path / "logs",
+        "observations": team_path / "observations",
+        "proposals": team_path / "proposals",
+        "decisions": team_path / "decisions",
+        "logs": team_path / "logs",
         "job_paths": tuple(JobStore(memory_root).paths("grp")),
         "dispatch": {"enabled": True},
         "dispatch_interval": 15,
         "runtime": {"timeout": 1800},
     }
 
-    _write_job(group_path, "running")
+    _write_job(team_path, "running")
     g["job_paths"] = tuple(JobStore(memory_root).paths("grp"))
 
     agents, _subagents = app_module.collect_agents_with_identity(g)

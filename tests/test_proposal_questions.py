@@ -129,18 +129,18 @@ class TestProposalFrontmatter:
 
 
 def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
-    group = tmp_path / "group"
+    team_dir = tmp_path / "team"
     for agent in ("product", "engineer", "sdk-agent"):
-        (group / agent).mkdir(parents=True)
+        (team_dir / agent).mkdir(parents=True)
     for name in ("proposals", "decisions", "observations", "logs", "locks"):
-        (group / name).mkdir(parents=True)
+        (team_dir / name).mkdir(parents=True)
     metadata = {
         "origin_agent": "product", "status": "proposed",
         "questions": [{"id": "approve", "type": "boolean", "prompt": "Proceed?"}],
     }
     if explicit_executor:
         metadata["execution_agent"] = "engineer"
-    proposal_path = group / "proposals" / "change.md"
+    proposal_path = team_dir / "proposals" / "change.md"
     proposal_path.write_text(
         "---\n" + yaml.safe_dump(metadata, sort_keys=False) + "---\n\nProposal body\n"
     )
@@ -150,7 +150,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
             "name": "engineer",
             "integration": "script",
             "integration_config": {"command": "echo ok"},
-            "runtime": {"permissions": {"rules": [{"path": str(group), "tools": ["read", "search", "write"]}]}},
+            "runtime": {"permissions": {"rules": [{"path": str(team_dir), "tools": ["read", "search", "write"]}]}},
         },
         {"name": "sdk-agent", "integration": "sdk"},
     ]
@@ -165,7 +165,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         (blueprint_root / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 5\n"
+        "schema_version: 6\n"
         "agency:\n"
         "  title: Agency\n"
         "  default_team: test\n"
@@ -174,11 +174,11 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         f"  compilation_cache: {(tmp_path / 'compiled-agents').as_posix()}\n"
         f"  memory_store: {(tmp_path / 'memory').as_posix()}\n"
         f"  prompt_store: {(tmp_path / 'prompts').as_posix()}\n"
-        "groups:\n"
+        "teams:\n"
         "  test:\n"
         "    name: Test\n"
-        f"    workspace_path: {group.as_posix()}\n"
-        f"    path: {group.as_posix()}\n"
+        f"    workspace_path: {team_dir.as_posix()}\n"
+        f"    path: {team_dir.as_posix()}\n"
         "    default_integration: script\n"
         "    agents:\n"
         "      - name: product\n"
@@ -190,7 +190,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         "        runtime:\n"
         "          permissions:\n"
         "            rules:\n"
-        f"              - path: {group.as_posix()}\n"
+        f"              - path: {team_dir.as_posix()}\n"
         "                tools: [read, search, write]\n"
         "      - name: sdk-agent\n"
         "        blueprint: sdk-blueprint\n"
@@ -199,12 +199,12 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
-    return TestClient(app), proposal_path, group / "decisions" / "change.md"
+    return TestClient(app), proposal_path, team_dir / "decisions" / "change.md"
 
 
 def test_executor_options_exclude_agents_without_explicit_write_capability(tmp_path, monkeypatch):
     _setup_decision_group(tmp_path, monkeypatch)
-    assert app_mod.execution_agent_options(app_mod.get_group("test")) == ["engineer"]
+    assert app_mod.execution_agent_options(app_mod.get_team("test")) == ["engineer"]
 
 
 def test_proposal_form_defaults_executor_to_explicit_execution_agent(tmp_path, monkeypatch):

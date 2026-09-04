@@ -189,7 +189,7 @@ def _resolve_team(args: Namespace) -> dict[str, Any]:
         "key": team_id,
         "name": team.name,
         "workspace_root": paths.workspace_root,
-        "group_root": paths.team_root,
+        "team_root": paths.team_root,
         "observations": paths.observations,
         "proposals": paths.proposals,
         "decisions": paths.decisions,

@@ -29,15 +29,15 @@ def _session_id_from_stderr(stderr_path: str | None) -> str | None:
 
 def backfill(
     config_path: Path,
-    group: str | None = None,
+    team: str | None = None,
     dry_run: bool = False,
 ) -> list[tuple[str, str]]:
     snapshot = _snapshot_read_only(Path(config_path))
     store = JobStore(snapshot.config.agency.memory_store)
-    group_ids = [group] if group else list(snapshot.config.groups)
+    team_ids = [team] if team else list(snapshot.config.teams)
     results: list[tuple[str, str]] = []
-    for group_id in group_ids:
-        for path in store.paths(group_id):
+    for team_id in team_ids:
+        for path in store.paths(team_id):
             try:
                 record = read_job(path)
             except Exception:
@@ -63,10 +63,10 @@ def backfill(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--group")
+    parser.add_argument("--team")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
-    results = backfill(args.config, args.group, args.dry_run)
+    results = backfill(args.config, args.team, args.dry_run)
     for job_id, outcome in results:
         print(f"{outcome:<10} {job_id}")
     filled = sum(1 for _, outcome in results if outcome == "filled")

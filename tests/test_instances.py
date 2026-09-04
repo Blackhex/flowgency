@@ -105,21 +105,21 @@ def _directory_files(path: Path) -> dict[str, bytes]:
 
 
 def _make_spec(
-    group_path: Path,
+    team_path: Path,
     *,
     agent_name: str,
     team_key: str,
 ) -> JobSpec:
-    config_path = group_path.parent / "config.yaml"
+    config_path = team_path.parent / "config.yaml"
     return JobSpec(
         schema_version=5,
         job_id=uuid4().hex,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key=team_key,
-        team_root=str(group_path.resolve()),
+        team_root=str(team_path.resolve()),
         agent_name=agent_name,
-        workspace_root=str(group_path.resolve()),
+        workspace_root=str(team_path.resolve()),
         trigger="manual_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},
@@ -394,12 +394,12 @@ def test_move_blocks_when_relevant_jobs_are_active(
     status,
     team_key,
 ):
-    group_path = (
+    team_path = (
         instance_env["newsletter_path"]
         if team_key == "newsletter"
         else instance_env["other_path"]
     )
-    spec = _make_spec(group_path, agent_name="builder", team_key=team_key)
+    spec = _make_spec(team_path, agent_name="builder", team_key=team_key)
     record_path = JobStore(instance_env["memory_root"]).path(team_key, spec.job_id)
     write_job(record_path, JobRecord.from_spec(spec))
     if status != "queued":
@@ -972,11 +972,11 @@ def test_move_reports_orphaned_prompt_namespace_when_source_cleanup_fails(
     )
     original_delete_namespace_locked = instance_env["prompt_store"]._delete_namespace_locked
 
-    def fail_source_cleanup(group, instance, *, registered):
-        if (group, instance) == ("newsletter", "builder"):
+    def fail_source_cleanup(team, instance, *, registered):
+        if (team, instance) == ("newsletter", "builder"):
             raise OSError("simulated source cleanup failure")
         return original_delete_namespace_locked(
-            group,
+            team,
             instance,
             registered=registered,
         )
@@ -1150,10 +1150,10 @@ def test_submit_cannot_slip_past_create_group_lock(
     original_create = instances_module.create_agent_instance
     original_resolve = submission_module._resolve_request
 
-    def gated_create(store, expected_revision, group_id, agent):
+    def gated_create(store, expected_revision, team_id, agent):
         create_entered.set()
         assert release_create.wait(timeout=5)
-        return original_create(store, expected_revision, group_id, agent)
+        return original_create(store, expected_revision, team_id, agent)
 
     def gated_resolve(job_request, locked_snapshot):
         submit_resolve_started.set()

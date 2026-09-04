@@ -64,7 +64,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = T
     memory_root = tmp_path / "memory-store"
     newsletter_paths = create_team_environment(tmp_path, "newsletter")
     research_paths = create_team_environment(tmp_path, "research")
-    group_root = newsletter_paths.state_root
+    team_root = newsletter_paths.state_root
     target_root = research_paths.state_root
     _write_blueprint(library_root, "advisor", "Advisor", include_prompt=with_agent_prompts)
     _write_blueprint(library_root, "builder-blueprint", "Builder")
@@ -109,7 +109,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = T
             _private_prompt_bytes(),
         )
         app_mod.refresh_services()
-    return TestClient(app_mod.app), config_path, group_root
+    return TestClient(app_mod.app), config_path, team_root
 
 
 def _revision(config_path: Path) -> str:
@@ -137,16 +137,16 @@ def _all_route_paths() -> list[str]:
     return paths
 
 
-def _roster_job_spec(tmp_path: Path, group_root: Path, *, job_id: str, created_at: str) -> JobSpec:
+def _roster_job_spec(tmp_path: Path, team_root: Path, *, job_id: str, created_at: str) -> JobSpec:
     return JobSpec(
         schema_version=5,
         job_id=job_id,
         config_path=str((tmp_path / "config.yaml").resolve()),
         config_revision="cfg-1",
         team_key="newsletter",
-        team_root=str(group_root.resolve()),
+        team_root=str(team_root.resolve()),
         agent_name="advisor",
-        workspace_root=str(group_root.resolve()),
+        workspace_root=str(team_root.resolve()),
         trigger="manual_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},
@@ -180,13 +180,13 @@ def _roster_job_spec(tmp_path: Path, group_root: Path, *, job_id: str, created_a
 
 def _write_roster_job(
     tmp_path: Path,
-    group_root: Path,
+    team_root: Path,
     *,
     job_id: str,
     status: str,
     created_at: str,
 ) -> JobRecord:
-    spec = _roster_job_spec(tmp_path, group_root, job_id=job_id, created_at=created_at)
+    spec = _roster_job_spec(tmp_path, team_root, job_id=job_id, created_at=created_at)
     record = JobRecord.from_spec(spec)
     record.status = status
     write_job(JobStore(tmp_path / "memory-store").path("newsletter", job_id), record)
@@ -313,8 +313,8 @@ def test_create_instance_from_roster(monkeypatch, tmp_path, raw_config):
 
 
 def test_remove_instance_updates_config_only(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
-    preexisting_dir = group_root / "advisor"
+    client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    preexisting_dir = team_root / "advisor"
     preexisting_dir.mkdir(parents=True)
     revision = _revision(config_path)
 
@@ -410,11 +410,11 @@ def test_move_apply_warns_when_prompt_namespace_cleanup_is_orphaned(
         app_mod.app.state.services.instances.prompt_store._delete_namespace_locked
     )
 
-    def fail_source_cleanup(group, instance, *, registered):
-        if (group, instance) == ("newsletter", "advisor"):
+    def fail_source_cleanup(team, instance, *, registered):
+        if (team, instance) == ("newsletter", "advisor"):
             raise OSError("simulated source cleanup failure")
         return original_delete_namespace_locked(
-            group,
+            team,
             instance,
             registered=registered,
         )
@@ -459,10 +459,10 @@ def test_move_apply_warns_when_prompt_namespace_cleanup_is_orphaned(
     ],
 )
 def test_roster_shows_exact_active_job_state(monkeypatch, tmp_path, raw_config, status, label):
-    client, _, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    client, _, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_roster_job(
         tmp_path,
-        group_root,
+        team_root,
         job_id="job-1",
         status=status,
         created_at="2026-07-15T00:00:00+00:00",
@@ -489,17 +489,17 @@ def test_roster_without_active_job_omits_job_badge(monkeypatch, tmp_path, raw_co
 
 
 def test_roster_uses_newest_active_job_deterministically(monkeypatch, tmp_path, raw_config):
-    client, _, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    client, _, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_roster_job(
         tmp_path,
-        group_root,
+        team_root,
         job_id="job-older",
         status="queued",
         created_at="2026-07-15T00:00:00+00:00",
     )
     _write_roster_job(
         tmp_path,
-        group_root,
+        team_root,
         job_id="job-newer",
         status="waiting_for_memory",
         created_at="2026-07-16T00:00:00+00:00",
@@ -519,17 +519,17 @@ def test_roster_shows_all_active_jobs_and_keeps_launch_controls_enabled(
     tmp_path,
     raw_config,
 ):
-    client, _, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
+    client, _, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_roster_job(
         tmp_path,
-        group_root,
+        team_root,
         job_id="job-older",
         status="queued",
         created_at="2026-07-15T00:00:00+00:00",
     )
     _write_roster_job(
         tmp_path,
-        group_root,
+        team_root,
         job_id="job-newer",
         status="running",
         created_at="2026-07-16T00:00:00+00:00",
@@ -650,19 +650,19 @@ def test_removed_mutation_routes_are_absent_from_route_table(monkeypatch, tmp_pa
     route_paths = set(_all_route_paths())
 
     for path in {
-        "/admin/teams/{group}/agents/create",
-        "/admin/teams/{group}/agents/{agent}/save",
-        "/admin/teams/{group}/agents/{agent}/rename",
-        "/admin/teams/{group}/agents/{agent}/delete",
+        "/admin/teams/{team}/agents/create",
+        "/admin/teams/{team}/agents/{agent}/save",
+        "/admin/teams/{team}/agents/{agent}/rename",
+        "/admin/teams/{team}/agents/{agent}/delete",
         "/admin/teams/{org}/agents/create",
         "/admin/teams/{org}/agents/{agent}/save",
         "/admin/teams/{org}/agents/{agent}/rename",
         "/admin/teams/{org}/agents/{agent}/delete",
-        "/{group}/agents/{agent}/identity",
-        "/{group}/agents/{agent}/definition",
-        "/{group}/agents/{agent}/upload-headshot",
-        "/{group}/agents/{agent}/headshot",
-        "/{group}/agents/{agent}/toggle-subagent",
+        "/{team}/agents/{agent}/identity",
+        "/{team}/agents/{agent}/definition",
+        "/{team}/agents/{agent}/upload-headshot",
+        "/{team}/agents/{agent}/headshot",
+        "/{team}/agents/{agent}/toggle-subagent",
     }:
         assert path not in route_paths
 

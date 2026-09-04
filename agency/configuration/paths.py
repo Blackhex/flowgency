@@ -321,7 +321,7 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
             if not _overlap(left.path, right.path):
                 continue
             hint = (
-                "Use disjoint local directories for global stores, group roots, and workspaces."
+                "Use disjoint local directories for global stores, team roots, and workspaces."
             )
             issues.append(_overlap_issue(left, right, hint=hint))
             issues.append(_overlap_issue(right, left, hint=hint))

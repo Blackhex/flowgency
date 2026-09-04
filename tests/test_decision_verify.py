@@ -21,18 +21,18 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
         "test",
         create_state=True,
     )
-    group = paths.state_root
-    (group / "engineer").mkdir(parents=True)
+    team_state = paths.state_root
+    (team_state / "engineer").mkdir(parents=True)
     for name in ("proposals", "decisions", "observations", "logs", "locks"):
-        (group / name).mkdir(parents=True, exist_ok=True)
+        (team_state / name).mkdir(parents=True, exist_ok=True)
 
     proposal_meta = {"origin_agent": "product", "status": "decided"}
-    (group / "proposals" / "change.md").write_text(
+    (team_state / "proposals" / "change.md").write_text(
         "---\n" + yaml.safe_dump(proposal_meta, sort_keys=False) + "---\n\nProposal body\n",
         encoding="utf-8",
     )
 
-    decision_path = group / "decisions" / "change.md"
+    decision_path = team_state / "decisions" / "change.md"
     decision_path.write_text(
         "---\n" + yaml.safe_dump(decision_meta, sort_keys=False) + "---\n\nDecision body\n",
         encoding="utf-8",
@@ -79,7 +79,7 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
-    return TestClient(app), decision_path, group
+    return TestClient(app), decision_path, team_state
 
 
 def _meta(path):
@@ -108,7 +108,7 @@ def test_verify_marks_decision_verified(tmp_path, monkeypatch):
 
 
 def test_verify_needs_follow_up_creates_linked_observation(tmp_path, monkeypatch):
-    client, decision_path, group_root = _setup_group(
+    client, decision_path, team_root = _setup_group(
         tmp_path, monkeypatch,
         decision_meta={"proposal": "change.md", "execution_status": "complete", "executed_by": "engineer"},
     )
@@ -124,7 +124,7 @@ def test_verify_needs_follow_up_creates_linked_observation(tmp_path, monkeypatch
     follow_up = meta["follow_up_observation"]
     assert follow_up.endswith(".md")
 
-    obs_path = group_root / "observations" / follow_up
+    obs_path = team_root / "observations" / follow_up
     assert obs_path.exists()
     obs_meta = _meta(obs_path)
     assert obs_meta["follow_up_of_decision"] == "change.md"

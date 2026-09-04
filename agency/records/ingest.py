@@ -1,4 +1,4 @@
-"""Ingest validated outbox records into the group's pipeline directories."""
+"""Ingest validated outbox records into the team's pipeline directories."""
 
 from __future__ import annotations
 

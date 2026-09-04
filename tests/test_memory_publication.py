@@ -17,8 +17,8 @@ from agency.memory.publication import (
 
 @pytest.fixture
 def publication_fixture(tmp_path):
-    group_path = tmp_path / "group"
-    group_path.mkdir(parents=True)
+    team_path = tmp_path / "team"
+    team_path.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
     memory_root = tmp_path / "memory-store"
@@ -28,9 +28,9 @@ def publication_fixture(tmp_path):
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key="news",
-        team_root=str(group_path.resolve()),
+        team_root=str(team_path.resolve()),
         agent_name="writer",
-        workspace_root=str(group_path.resolve()),
+        workspace_root=str(team_path.resolve()),
         trigger="manual_prompt",
         integration_name="script",
         integration_config={},
@@ -92,7 +92,7 @@ def publication_fixture(tmp_path):
     )
     stage = store.stage(resolved, job_id=spec.job_id)
     return {
-        "team_root": group_path,
+        "team_root": team_path,
         "job_path": job_path,
         "job_store": group_job_store,
         "job_id": spec.job_id,
@@ -223,7 +223,7 @@ def test_publication_rejects_symlinked_jobs_directory(
 ):
     stage = publication_fixture["stage"]
     job_store = publication_fixture["job_store"]
-    linked_jobs = publication_fixture["team_root"].parent / "linked-group" / ".jobs" / "linked-group"
+    linked_jobs = publication_fixture["team_root"].parent / "linked-team" / ".jobs" / "linked-team"
     linked_jobs.parent.mkdir(parents=True)
     with pytest.raises(MemoryPublicationError, match="unsafe|job store"):
         prepare_publication(stage, job_store=linked_jobs)

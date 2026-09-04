@@ -53,14 +53,14 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
     prompt_root = tmp_path / "prompts"
-    group_root = tmp_path / "groups" / "newsletter"
+    team_root = tmp_path / "groups" / "newsletter"
     (tmp_path / "Research" / "editorial").mkdir(parents=True, exist_ok=True)
     (tmp_path / "Research" / "additional").mkdir(parents=True, exist_ok=True)
-    (group_root / "logs").mkdir(parents=True, exist_ok=True)
-    (group_root / "observations").mkdir(parents=True, exist_ok=True)
-    (group_root / "proposals").mkdir(parents=True, exist_ok=True)
-    (group_root / "decisions").mkdir(parents=True, exist_ok=True)
-    (group_root / "locks").mkdir(parents=True, exist_ok=True)
+    (team_root / "logs").mkdir(parents=True, exist_ok=True)
+    (team_root / "observations").mkdir(parents=True, exist_ok=True)
+    (team_root / "proposals").mkdir(parents=True, exist_ok=True)
+    (team_root / "decisions").mkdir(parents=True, exist_ok=True)
+    (team_root / "locks").mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
     local_prompt_dir = prompt_root / "newsletter" / "advisor"
     local_prompt_dir.mkdir(parents=True, exist_ok=True)
@@ -74,7 +74,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["memory_store"] = str(memory_root)
     raw["agency"]["prompt_store"] = str(prompt_root)
     raw["teams"]["newsletter"]["name"] = "Newsletter"
-    raw["teams"]["newsletter"]["path"] = str(group_root)
+    raw["teams"]["newsletter"]["path"] = str(team_root)
     raw["teams"]["newsletter"]["default_integration"] = "copilot"
     raw["teams"]["newsletter"]["runtime"] = {
         "timeout": 2400,
@@ -128,12 +128,12 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
 def _seed_activity_app(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    group_root = tmp_path / "groups" / "newsletter-workspace"
+    team_root = tmp_path / "groups" / "newsletter-workspace"
     raw["agency"]["default_team"] = "newsletter-prod"
     raw["teams"] = {
         "newsletter-prod": {
             **raw["teams"]["newsletter"],
-            "path": str(group_root),
+            "path": str(team_root),
             "name": "Newsletter Prod",
             "agents": [
                 {
@@ -148,16 +148,16 @@ def _seed_activity_app(monkeypatch, tmp_path, raw_config):
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
-    group_root.joinpath("logs", "2026-07-16").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("observations").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("proposals").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("decisions").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("locks").mkdir(parents=True, exist_ok=True)
-    group_root.joinpath("observations", "status.md").write_text(
+    team_root.joinpath("logs", "2026-07-16").mkdir(parents=True, exist_ok=True)
+    team_root.joinpath("observations").mkdir(parents=True, exist_ok=True)
+    team_root.joinpath("proposals").mkdir(parents=True, exist_ok=True)
+    team_root.joinpath("decisions").mkdir(parents=True, exist_ok=True)
+    team_root.joinpath("locks").mkdir(parents=True, exist_ok=True)
+    team_root.joinpath("observations", "status.md").write_text(
         "---\nagent: advisor\nstatus: open\n---\n\nObservation.\n",
         encoding="utf-8",
     )
-    log_file = group_root.joinpath("logs", "2026-07-16", "advisor-run.out")
+    log_file = team_root.joinpath("logs", "2026-07-16", "advisor-run.out")
     log_file.write_text("# log\n", encoding="utf-8")
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
@@ -408,7 +408,7 @@ def test_activity_tab_is_read_only(monkeypatch, tmp_path, raw_config):
     assert '<form' not in response.text
 
 
-def test_activity_links_use_routed_group_key_and_round_trip(monkeypatch, tmp_path, raw_config):
+def test_activity_links_use_routed_team_key_and_round_trip(monkeypatch, tmp_path, raw_config):
     client, _, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter-prod/agents/advisor/activity")

@@ -229,11 +229,11 @@ def _run_memory_job(tmp_path, monkeypatch, edit):
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            workspace_root=fixture.group_root,
+            workspace_root=fixture.team_root,
             integration=_memory_editing_integration(seen, edit),
             timeout=30,
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
-            group_root=fixture.group_root,
+            team_root=fixture.team_root,
         ),
     )
     return fixture, seen, execute_job(fixture.authority)

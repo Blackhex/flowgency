@@ -1096,9 +1096,9 @@ def _dashboard_memory_label(selector: dict[str, object], channels) -> str:
     return scope.replace("_", " ").title()
 
 
-def _newest_active_job(group_jobs: tuple[Path, ...], agent_name: str):
+def _newest_active_job(team_jobs: tuple[Path, ...], agent_name: str):
     jobs = sorted(
-        active_jobs(group_jobs, agent_name),
+        active_jobs(team_jobs, agent_name),
         key=lambda record: (
             record.started_at or "",
             record.spec.created_at,

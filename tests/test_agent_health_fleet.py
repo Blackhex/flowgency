@@ -39,10 +39,10 @@ def _group(tmp_path, *, routines, dispatch_enabled=True):
 
 
 def _health(tmp_path, *, routines, dispatch_enabled=True, now=NOW):
-    group = _group(tmp_path, routines=routines, dispatch_enabled=dispatch_enabled)
-    group["observations"].mkdir(parents=True, exist_ok=True)
+    team_data = _group(tmp_path, routines=routines, dispatch_enabled=dispatch_enabled)
+    team_data["observations"].mkdir(parents=True, exist_ok=True)
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": now.isoformat()}):
-        agents, _ = app_module.collect_agents_with_identity(group)
+        agents, _ = app_module.collect_agents_with_identity(team_data)
     return agents[0]["health"]
 
 
@@ -105,7 +105,7 @@ def test_an_agent_whose_last_run_is_ancient_is_still_green_without_a_schedule(tm
 def _spec(tmp_path, job_id, created_at="2026-07-20T00:00:00+00:00"):
     config_path = tmp_path / "config.yaml"
     if not config_path.exists():
-        config_path.write_text("schema_version: 5\ngroups: {}\n", encoding="utf-8")
+        config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
     return JobSpec(
         schema_version=5,
         job_id=job_id,

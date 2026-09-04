@@ -12,8 +12,8 @@ import agency.app as app_mod
 from agency.configuration import ConfigStore
 from agency.configuration.patches import (
     AgentRuntimePatch,
-    GroupSettingsStatePatch,
-    patch_group_settings_state,
+    TeamSettingsStatePatch,
+    patch_team_settings_state,
 )
 
 
@@ -34,7 +34,7 @@ def _make_group_client(monkeypatch, tmp_path, raw_config):
     src.mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
     raw["agency"]["title"] = "Agency"
-    raw["agency"]["default_group"] = "grp"
+    raw["agency"]["default_team"] = "grp"
     raw["agency"]["agent_library"] = str(tmp_path / "library")
     raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
     raw["agency"]["memory_store"] = str(tmp_path / "memory")
@@ -87,12 +87,12 @@ def _make_agent_client(monkeypatch, tmp_path, raw_config):
     workspace.mkdir(parents=True, exist_ok=True)
     extra = tmp_path / "extra"
     extra.mkdir(parents=True, exist_ok=True)
-    group_root = tmp_path / "groups" / "newsletter"
-    (group_root / "logs").mkdir(parents=True, exist_ok=True)
-    (group_root / "observations").mkdir(parents=True, exist_ok=True)
-    (group_root / "proposals").mkdir(parents=True, exist_ok=True)
-    (group_root / "decisions").mkdir(parents=True, exist_ok=True)
-    (group_root / "locks").mkdir(parents=True, exist_ok=True)
+    team_root = tmp_path / "groups" / "newsletter"
+    (team_root / "logs").mkdir(parents=True, exist_ok=True)
+    (team_root / "observations").mkdir(parents=True, exist_ok=True)
+    (team_root / "proposals").mkdir(parents=True, exist_ok=True)
+    (team_root / "decisions").mkdir(parents=True, exist_ok=True)
+    (team_root / "locks").mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor")
 
     raw["agency"]["agent_library"] = str(library_root)
@@ -100,7 +100,7 @@ def _make_agent_client(monkeypatch, tmp_path, raw_config):
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
     raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["teams"]["newsletter"]["name"] = "Newsletter"
-    raw["teams"]["newsletter"]["path"] = str(group_root)
+    raw["teams"]["newsletter"]["path"] = str(team_root)
     raw["teams"]["newsletter"]["workspace_path"] = str(workspace)
     raw["teams"]["newsletter"]["default_integration"] = "copilot"
     raw["teams"]["newsletter"]["runtime"] = {
@@ -138,13 +138,13 @@ def _make_agent_client(monkeypatch, tmp_path, raw_config):
 
 
 def test_group_save_unrelated_field_preserves_rules(tmp_path, monkeypatch, raw_config):
-    """Editing only the group name must not touch permission mode or rules."""
+    """Editing only the team name must not touch permission mode or rules."""
     client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
     before = deepcopy(store.load().raw["teams"]["grp"]["runtime"]["permissions"])
     revision = store.load().revision
 
     response = client.post(
-        "/admin/orgs/grp/save",
+        "/admin/teams/grp/save",
         data={
             "revision": revision,
             "name": "Renamed Group",
@@ -175,7 +175,7 @@ def test_group_save_with_form_fields_preserves_rules(tmp_path, monkeypatch, raw_
     ).strip()
 
     response = client.post(
-        "/admin/orgs/grp/save",
+        "/admin/teams/grp/save",
         data={
             "revision": revision,
             "name": "Grp",
@@ -267,7 +267,7 @@ def test_group_create_persists_typed_permission_rules(tmp_path, monkeypatch, raw
     ).strip()
 
     response = client.post(
-        "/admin/orgs/create",
+        "/admin/teams/create",
         data={
             "revision": store.load().revision,
             "key": "fresh",
@@ -297,7 +297,7 @@ def test_group_create_rejects_malformed_permission_rules(tmp_path, monkeypatch, 
     new_workspace.mkdir(parents=True)
 
     response = client.post(
-        "/admin/orgs/create",
+        "/admin/teams/create",
         data={
             "revision": store.load().revision,
             "key": "fresh",
@@ -324,7 +324,7 @@ def test_group_create_without_permission_fields_is_unrestricted(tmp_path, monkey
     new_workspace.mkdir(parents=True)
 
     response = client.post(
-        "/admin/orgs/create",
+        "/admin/teams/create",
         data={
             "revision": store.load().revision,
             "key": "fresh",
@@ -347,13 +347,13 @@ def test_group_create_without_permission_fields_is_unrestricted(tmp_path, monkey
 
 
 def test_group_patch_none_leaves_rules_alone(tmp_path, raw_config):
-    """GroupSettingsStatePatch with permission_rules=None preserves existing rules."""
+    """TeamSettingsStatePatch with permission_rules=None preserves existing rules."""
     raw = deepcopy(raw_config)
     workspace = tmp_path / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "lib").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["default_group"] = "grp"
+    raw["agency"]["default_team"] = "grp"
     raw["agency"]["agent_library"] = str(tmp_path / "lib")
     raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
     raw["agency"]["memory_store"] = str(tmp_path / "mem")
@@ -377,9 +377,9 @@ def test_group_patch_none_leaves_rules_alone(tmp_path, raw_config):
     store = ConfigStore(config_path)
     revision = store.load().revision
 
-    patch_group_settings_state(
+    patch_team_settings_state(
         store, revision, "grp",
-        GroupSettingsStatePatch(
+        TeamSettingsStatePatch(
             name="Grp",
             workspace_path=str(workspace),
             path=str(tmp_path / "groups" / "grp-state"),
@@ -396,13 +396,13 @@ def test_group_patch_none_leaves_rules_alone(tmp_path, raw_config):
 
 
 def test_group_patch_empty_tuple_clears_rules(tmp_path, raw_config):
-    """GroupSettingsStatePatch with permission_rules=() explicitly clears rules."""
+    """TeamSettingsStatePatch with permission_rules=() explicitly clears rules."""
     raw = deepcopy(raw_config)
     workspace = tmp_path / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "lib").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["default_group"] = "grp"
+    raw["agency"]["default_team"] = "grp"
     raw["agency"]["agent_library"] = str(tmp_path / "lib")
     raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
     raw["agency"]["memory_store"] = str(tmp_path / "mem")
@@ -426,9 +426,9 @@ def test_group_patch_empty_tuple_clears_rules(tmp_path, raw_config):
     store = ConfigStore(config_path)
     revision = store.load().revision
 
-    patch_group_settings_state(
+    patch_team_settings_state(
         store, revision, "grp",
-        GroupSettingsStatePatch(
+        TeamSettingsStatePatch(
             name="Grp",
             workspace_path=str(workspace),
             path=str(tmp_path / "groups" / "grp-state"),
@@ -452,7 +452,7 @@ def test_agent_patch_none_leaves_rules_alone(tmp_path, raw_config):
     extra = tmp_path / "extra"
     extra.mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["default_group"] = "grp"
+    raw["agency"]["default_team"] = "grp"
     raw["agency"]["agent_library"] = str(tmp_path / "lib")
     raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
     raw["agency"]["memory_store"] = str(tmp_path / "mem")
@@ -500,7 +500,7 @@ def test_agent_patch_empty_tuple_clears_rules(tmp_path, raw_config):
     extra = tmp_path / "extra"
     extra.mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["default_group"] = "grp"
+    raw["agency"]["default_team"] = "grp"
     raw["agency"]["agent_library"] = str(tmp_path / "lib")
     raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
     raw["agency"]["memory_store"] = str(tmp_path / "mem")

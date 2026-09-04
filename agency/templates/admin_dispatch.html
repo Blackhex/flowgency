@@ -15,13 +15,13 @@
       <div>
         {% if dispatch.state == 'active' %}
         <p class="text-sm font-medium text-gray-900">Dispatcher active</p>
-        <p class="mt-2 text-sm text-gray-500">The user-level system scheduler checks all enabled groups every {{ dispatch.expected_interval }} minutes.</p>
+        <p class="mt-2 text-sm text-gray-500">The user-level system scheduler checks all enabled teams every {{ dispatch.expected_interval }} minutes.</p>
         {% elif dispatch.state == 'misconfigured' %}
         <p class="text-sm font-medium text-gray-900">Dispatcher misconfigured</p>
         <p class="mt-2 text-sm text-gray-500">Mismatched fields: {{ dispatch.mismatches | join(', ') }}</p>
         {% else %}
         <p class="text-sm font-medium text-gray-900">Dispatcher inactive</p>
-        <p class="mt-2 text-sm text-gray-500">Set up the user-level system scheduler to run enabled group schedules.</p>
+        <p class="mt-2 text-sm text-gray-500">Set up the user-level system scheduler to run enabled team schedules.</p>
         {% endif %}
       {% if dispatch.error %}
       <p class="mt-2 text-sm text-red-700">{{ dispatch.error }}</p>

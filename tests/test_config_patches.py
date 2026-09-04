@@ -56,8 +56,8 @@ def test_agent_patch_preserves_workspaces_and_other_agents(config_store):
     )
 
     snapshot = config_store.load()
-    group = snapshot.raw["teams"]["newsletter"]
-    group["agents"].append(
+    team = snapshot.raw["teams"]["newsletter"]
+    team["agents"].append(
         {
             "name": "advisor",
             "blueprint": "advisor-blueprint",
@@ -251,14 +251,14 @@ def test_patch_team_settings_state_preserves_extension_keys(config_store):
         ),
     )
 
-    group = updated.raw["teams"]["newsletter"]
-    assert group["workspace_path"] == str(
+    team = updated.raw["teams"]["newsletter"]
+    assert team["workspace_path"] == str(
         refreshed.path.parent / "workspace" / "editorial"
     )
-    assert group["path"] == str(refreshed.path.parent / "groups" / "editorial")
-    assert group["group_extension"] == {"theme": "sunset"}
-    assert group["runtime"]["runtime_extension"] == {"preserve": True}
-    assert group["workspaces"][0]["workspace_extension"] == {"preserve": True}
+    assert team["path"] == str(refreshed.path.parent / "groups" / "editorial")
+    assert team["group_extension"] == {"theme": "sunset"}
+    assert team["runtime"]["runtime_extension"] == {"preserve": True}
+    assert team["workspaces"][0]["workspace_extension"] == {"preserve": True}
 
 
 def test_create_team_rejects_unknown_root_key_on_load(

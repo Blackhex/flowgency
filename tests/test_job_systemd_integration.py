@@ -38,8 +38,8 @@ def _shell_command(arguments):
 
 def test_systemd_worker_survives_submitter_exit(tmp_path):
     """Transient systemd service continues after submitting process exits."""
-    group_path = tmp_path / "group"
-    agent_dir = group_path / "product"
+    team_path = tmp_path / "team"
+    agent_dir = team_path / "product"
     agent_dir.mkdir(parents=True)
     gate = tmp_path / "continue"
     sentinel = tmp_path / "completed"
@@ -65,7 +65,7 @@ def test_systemd_worker_survives_submitter_exit(tmp_path):
         "teams": {"test": {
             "name": "Test",
             "workspace_path": str((tmp_path / "workspace").resolve()),
-            "path": str(group_path.resolve()),
+            "path": str(team_path.resolve()),
             "default_integration": "script",
             "agents": [{
                 "name": "product",

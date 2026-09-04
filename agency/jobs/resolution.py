@@ -70,9 +70,9 @@ def _build_issue(code: str, scope: str, field: str, message: str, hint: str) -> 
     )
 
 
-def _find_agent(group, agent_name: str) -> AgentInstance:
+def _find_agent(team, agent_name: str) -> AgentInstance:
     try:
-        return group.agents[agent_name]
+        return team.agents[agent_name]
     except KeyError as exc:
         raise JobValidationError(f"Unknown agent: {agent_name}") from exc
 

@@ -148,7 +148,7 @@ def load_dispatch_config(config_path: str):
 
 
 def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
-    """Run one full dispatch cycle across all enabled groups."""
+    """Run one full dispatch cycle across all enabled teams."""
     snapshot = config if hasattr(config, "config") else load_dispatch_config(str(config_path))
     resolved = snapshot.config
     interval = resolved.agency.dispatch.interval
@@ -186,7 +186,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
 
                 if getattr(routine, "condition", None):
                     log.info(
-                        "  SKIP: %s/%s has condition '%s' (requires group dispatch script)",
+                        "  SKIP: %s/%s has condition '%s' (requires team dispatch script)",
                         agent_name,
                         routine.id,
                         routine.condition,

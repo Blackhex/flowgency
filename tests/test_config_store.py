@@ -253,7 +253,7 @@ def test_late_conflict_does_not_initialize_candidate_group_storage(
 ):
     from agency.configuration.store import ConfigConflictError, ConfigStore
 
-    candidate_group = tmp_path / "candidate-group"
+    candidate_group = tmp_path / "candidate-team"
     raw = deepcopy(raw_config)
     raw["teams"]["newsletter"]["path"] = str(candidate_group)
     path = _write_yaml(config_paths["config_path"], raw)

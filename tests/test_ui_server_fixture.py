@@ -8,7 +8,7 @@ _TESTS_DIR = Path(__file__).resolve().parent
 def test_prepare_runtime_creates_deterministic_fixture_without_type_error():
     """_prepare_runtime() must not raise TypeError from renamed selector keyword.
 
-    RED proof: before the fix, _seed_memory() passes group_key= to
+    RED proof: before the fix, _seed_memory() passes team_key= to
     resolve_memory_selector() which now expects team_key=.
     """
     if str(_TESTS_DIR) not in sys.path:

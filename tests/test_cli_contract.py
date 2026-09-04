@@ -495,3 +495,51 @@ def test_lock_cancellation_maps_to_resource_busy_exit():
     from agency.fs.locks import LockCancelledError
 
     assert exit_code_for(LockCancelledError("cancelled")) == ExitCode.RESOURCE_BUSY
+
+
+def test_v5_config_with_groups_is_rejected_without_migration_hint(tmp_path, cli_runner):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 5,
+                "agency": {
+                    "title": "Old",
+                    "default_team": "newsletter",
+                    "agent_library": str(tmp_path / "lib"),
+                    "compilation_cache": str(tmp_path / "cache"),
+                    "memory_store": str(tmp_path / "mem"),
+                    "prompt_store": str(tmp_path / "prompts"),
+                },
+                "groups": {
+                    "newsletter": {
+                        "name": "Newsletter",
+                        "workspace_path": str(tmp_path / "ws"),
+                        "path": str(tmp_path / "state"),
+                    }
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = cli_runner("status", config=config_path)
+
+    assert result.exit_code != 0
+    assert "schema_version must be 6" in result.stderr
+    assert "config migrate" not in result.stderr
+
+
+def test_old_admin_groups_route_returns_404(tmp_path, monkeypatch):
+    from tests.test_surface_contracts import _config_only_client
+
+    client, _ = _config_only_client(tmp_path, monkeypatch)
+    assert client.get("/admin/groups", follow_redirects=False).status_code == 404
+
+
+def test_old_group_scoped_route_returns_404(tmp_path, monkeypatch):
+    from tests.test_surface_contracts import _config_only_client
+
+    client, _ = _config_only_client(tmp_path, monkeypatch)
+    assert client.get("/admin/groups/newsletter", follow_redirects=False).status_code == 404

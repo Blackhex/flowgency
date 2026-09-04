@@ -23,7 +23,7 @@ def _seed_client(monkeypatch, tmp_path, raw_config):
     raw = deepcopy(raw_config)
     config_path = tmp_path / "config.yaml"
     paths = create_team_environment(tmp_path, "grp")
-    group_root = paths.state_root
+    team_root = paths.state_root
     library_root = tmp_path / "library"
     cache_root = tmp_path / "cache"
     memory_root = tmp_path / "memory"
@@ -43,7 +43,7 @@ def _seed_client(monkeypatch, tmp_path, raw_config):
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
-    return TestClient(app_mod.app), config_path, group_root
+    return TestClient(app_mod.app), config_path, team_root
 
 
 def _revision(config_path):
@@ -51,7 +51,7 @@ def _revision(config_path):
 
 
 def test_roster_create_adds_config_instance_without_scaffolding(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_client(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_client(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
     response = client.post(
@@ -73,11 +73,11 @@ def test_roster_create_adds_config_instance_without_scaffolding(monkeypatch, tmp
     assert created["blueprint"] == "advisor"
     assert created["integration"] == "copilot"
     assert created["identity"]["display_name"] == "Reviewer"
-    assert not (group_root / "reviewer").exists()
+    assert not (team_root / "reviewer").exists()
 
 
 def test_roster_create_rejects_invalid_blueprint_without_partial_files(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_client(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_client(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
     response = client.post(
@@ -94,4 +94,4 @@ def test_roster_create_rejects_invalid_blueprint_without_partial_files(monkeypat
     assert response.status_code == 409
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["teams"]["grp"]["agents"] == []
-    assert not (group_root / "reviewer").exists()
+    assert not (team_root / "reviewer").exists()

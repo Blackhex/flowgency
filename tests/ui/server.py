@@ -78,19 +78,19 @@ def _seed_blueprint(
         )
 
 
-def _seed_pipeline(group: Path) -> None:
+def _seed_pipeline(team: Path) -> None:
     for directory in ("logs/2026-07-16", "observations", "proposals", "decisions", "locks"):
-        (group / directory).mkdir(parents=True, exist_ok=True)
+        (team / directory).mkdir(parents=True, exist_ok=True)
     _write(
-        group / "observations" / "audience-signal.md",
+        team / "observations" / "audience-signal.md",
         "---\nagent: advisor\nstatus: open\ndate: 2026-07-16T09:00:00+00:00\nfloat: true\n---\n\n# Audience signal\n\nReaders want shorter releases.\n",
     )
     _write(
-        group / "proposals" / "weekly-brief.md",
+        team / "proposals" / "weekly-brief.md",
         "---\norigin_agent: advisor\nstatus: proposed\ndate: 2026-07-16T10:00:00+00:00\nquestions:\n  - Approve the weekly brief?\n---\n\n# Weekly brief\n\nPublish a concise weekly brief.\n",
     )
     _write(
-        group / "decisions" / "approve-brief.md",
+        team / "decisions" / "approve-brief.md",
         "---\ndecided_by: editor\ndate: 2026-07-16T11:00:00+00:00\nanswers:\n  approve: approved\n---\n\n# Approve brief\n",
     )
 

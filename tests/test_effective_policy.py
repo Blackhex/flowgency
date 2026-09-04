@@ -38,8 +38,8 @@ _INTEGRATION = _PermissiveIntegration()
 
 def test_group_rules_are_present_in_effective_policy(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [
@@ -47,7 +47,7 @@ def test_group_rules_are_present_in_effective_policy(raw_config, config_paths):
             ],
         },
     }
-    group["agents"][0]["integration"] = "copilot"
+    team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     policy = resolve_effective_policy(
@@ -61,8 +61,8 @@ def test_group_rules_are_present_in_effective_policy(raw_config, config_paths):
 
 def test_agent_rules_are_additive_to_group(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [
@@ -70,7 +70,7 @@ def test_agent_rules_are_additive_to_group(raw_config, config_paths):
             ],
         },
     }
-    agent = group["agents"][0]
+    agent = team["agents"][0]
     agent["integration"] = "copilot"
     agent["runtime"] = {
         "permissions": {
@@ -94,8 +94,8 @@ def test_distinct_paths_remain_separate_rules(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     other = str(config_paths["config_dir"] / "other")
     (config_paths["config_dir"] / "other").mkdir(exist_ok=True)
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [
@@ -103,7 +103,7 @@ def test_distinct_paths_remain_separate_rules(raw_config, config_paths):
             ],
         },
     }
-    agent = group["agents"][0]
+    agent = team["agents"][0]
     agent["integration"] = "copilot"
     agent["runtime"] = {
         "permissions": {
@@ -122,11 +122,11 @@ def test_distinct_paths_remain_separate_rules(raw_config, config_paths):
 
 
 def test_unrestricted_policy_has_empty_rules_by_default(raw_config, config_paths):
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {"mode": "unrestricted"},
     }
-    group["agents"][0]["integration"] = "copilot"
+    team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     policy = resolve_effective_policy(
@@ -138,9 +138,9 @@ def test_unrestricted_policy_has_empty_rules_by_default(raw_config, config_paths
 
 
 def test_timeout_override_precedence_is_job_then_agent_then_group(raw_config, config_paths):
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {"timeout": 900, "permissions": {"mode": "unrestricted"}}
-    agent = group["agents"][0]
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {"timeout": 900, "permissions": {"mode": "unrestricted"}}
+    agent = team["agents"][0]
     agent["integration"] = "copilot"
     agent["runtime"] = {"timeout": 1200}
 
@@ -159,9 +159,9 @@ def test_timeout_override_precedence_is_job_then_agent_then_group(raw_config, co
 
 
 def test_mode_inherits_from_group_when_agent_omits(raw_config, config_paths):
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {"permissions": {"mode": "restricted"}}
-    group["agents"][0]["integration"] = "copilot"
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {"permissions": {"mode": "restricted"}}
+    team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     policy = resolve_effective_policy(
@@ -172,9 +172,9 @@ def test_mode_inherits_from_group_when_agent_omits(raw_config, config_paths):
 
 
 def test_agent_mode_overrides_group(raw_config, config_paths):
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {"permissions": {"mode": "restricted"}}
-    agent = group["agents"][0]
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {"permissions": {"mode": "restricted"}}
+    agent = team["agents"][0]
     agent["integration"] = "copilot"
     agent["runtime"] = {"permissions": {"mode": "unrestricted"}}
 
@@ -187,14 +187,14 @@ def test_agent_mode_overrides_group(raw_config, config_paths):
 
 
 def test_pathless_rule_tools_union(raw_config, config_paths):
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [{"tools": ["read"]}],
         },
     }
-    agent = group["agents"][0]
+    agent = team["agents"][0]
     agent["integration"] = "copilot"
     agent["runtime"] = {
         "permissions": {"rules": [{"tools": ["write"]}]},
@@ -233,9 +233,9 @@ def test_unsupported_mode_raises_validation_failed(raw_config, config_paths):
         def run(self, request):
             raise NotImplementedError
 
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {"permissions": {"mode": "restricted"}}
-    group["agents"][0]["integration"] = "copilot"
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {"permissions": {"mode": "restricted"}}
+    team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
@@ -250,14 +250,14 @@ def test_unsupported_mode_raises_validation_failed(raw_config, config_paths):
 def test_relative_rule_path_resolves_against_group_workspace(raw_config, config_paths):
     """M4: relative rule paths must resolve against workspace_path, not CWD."""
     ws = raw_config["teams"]["newsletter"]["workspace_path"]
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [{"path": "subdir", "tools": ["read"]}],
         },
     }
-    group["agents"][0]["integration"] = "copilot"
+    team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     policy = resolve_effective_policy(
@@ -271,14 +271,14 @@ def test_relative_rule_path_resolves_against_group_workspace(raw_config, config_
 
 def test_relative_rule_path_is_stable_across_cwd_changes(raw_config, config_paths, monkeypatch, tmp_path):
     """M4: the resolved path must not change when the process CWD changes."""
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [{"path": "src", "tools": ["read"]}],
         },
     }
-    group["agents"][0]["integration"] = "copilot"
+    team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
@@ -299,14 +299,14 @@ def test_relative_rule_path_is_stable_across_cwd_changes(raw_config, config_path
 
 def test_absolute_rule_path_is_unchanged(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [{"path": ws, "tools": ["read"]}],
         },
     }
-    group["agents"][0]["integration"] = "copilot"
+    team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     policy = resolve_effective_policy(

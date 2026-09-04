@@ -1,4 +1,4 @@
-"""Tests for the admin group settings save/create with the permissions model."""
+"""Tests for the admin team settings save/create with the permissions model."""
 
 from copy import deepcopy
 from html.parser import HTMLParser
@@ -426,7 +426,7 @@ def test_admin_org_save_invalid_workspaces_is_all_or_nothing(tmp_path, monkeypat
     [
         (
             "missing-new-workspace",
-            "new-group-state",
+            "new-team-state",
             "Configured path must exist as a directory",
         ),
         (
@@ -453,7 +453,7 @@ def test_admin_org_create_invalid_paths_rerender_submitted_form_without_writing(
         "/admin/teams/create",
         data={
             "revision": before.revision,
-            "key": "submitted-group",
+            "key": "submitted-team",
             "name": "Submitted Group",
             "workspace_path": str(submitted_workspace),
             "path": str(submitted_group),
@@ -468,7 +468,7 @@ def test_admin_org_create_invalid_paths_rerender_submitted_form_without_writing(
     assert str(submitted_group) in response.text
     assert f'name="revision" value="{before.revision}"' in response.text
     assert diagnostic in response.text
-    assert "submitted-group" not in store.load().raw["teams"]
+    assert "submitted-team" not in store.load().raw["teams"]
     assert store.load().raw == before.raw
 
 
@@ -483,7 +483,7 @@ def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
         "/admin/teams/create",
         data={
             "revision": store.load().revision,
-            "key": "copilot-group",
+            "key": "copilot-team",
             "name": "Copilot Group",
             "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
@@ -494,12 +494,12 @@ def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
     )
 
     assert response.status_code == 303
-    assert store.load().raw["teams"]["copilot-group"]["default_integration"] == "copilot"
+    assert store.load().raw["teams"]["copilot-team"]["default_integration"] == "copilot"
 
     bad = client.post(
         "/admin/teams/create",
         data={
-            "key": "bad-group",
+            "key": "bad-team",
             "name": "Bad Group",
             "workspace_path": str(tmp_path / "new-workspace"),
             "path": str(tmp_path / "new-agents"),
@@ -513,7 +513,7 @@ def test_admin_org_create_uses_selected_default_integration_and_rejects_unknown(
     assert "not-registered" in bad.text
     assert 'name="default_integration"' in bad.text
     assert "selected" in bad.text
-    assert "bad-group" not in store.load().raw["teams"]
+    assert "bad-team" not in store.load().raw["teams"]
 
 
 def test_admin_org_create_form_parser_smoke_preserves_default_integration_select(

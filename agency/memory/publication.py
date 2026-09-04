@@ -433,12 +433,12 @@ def _validate_job_store(job_store: Path) -> Path:
         raise MemoryPublicationError("job store is unsafe")
     if candidate.parent.name != ".jobs":
         raise MemoryPublicationError(
-            "job store must be a canonical .jobs/<group> directory"
+            "job store must be a canonical .jobs/<team> directory"
         )
     resolved = candidate.resolve()
     if resolved.parent.name != ".jobs":
         raise MemoryPublicationError(
-            "job store must be a canonical .jobs/<group> directory"
+            "job store must be a canonical .jobs/<team> directory"
         )
     if not resolved.is_dir():
         raise MemoryPublicationError("job store must be an existing directory")

@@ -456,11 +456,11 @@ def _write_blueprint(root: Path, key: str = "builder-blueprint") -> None:
 
 def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo ok") -> Path:
     workspace = tmp_path / "workspaces" / "newsletter"
-    group = tmp_path / "agents" / "newsletter"
+    team_dir = tmp_path / "agents" / "newsletter"
     workspace.mkdir(parents=True, exist_ok=True)
     (workspace / "repo").mkdir(parents=True, exist_ok=True)
-    (group / "builder").mkdir(parents=True, exist_ok=True)
-    (group / "repo").mkdir(parents=True, exist_ok=True)
+    (team_dir / "builder").mkdir(parents=True, exist_ok=True)
+    (team_dir / "repo").mkdir(parents=True, exist_ok=True)
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
@@ -1196,10 +1196,10 @@ class _RecordingLauncher:
 
 def _pool_config(tmp_path, *, pool=1):
     workspace = tmp_path / "workspaces" / "newsletter"
-    group = tmp_path / "agents" / "newsletter"
+    team_dir = tmp_path / "agents" / "newsletter"
     workspace.mkdir(parents=True, exist_ok=True)
     (workspace / "repo").mkdir(parents=True, exist_ok=True)
-    group.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
     memory_store = tmp_path / "memory"
 
     raw = {
@@ -1218,7 +1218,7 @@ def _pool_config(tmp_path, *, pool=1):
             "newsletter": {
                 "name": "Newsletter",
                 "workspace_path": str(workspace),
-                "path": str(group),
+                "path": str(team_dir),
                 "default_integration": "copilot",
                 "runtime": {
                     "timeout": 1800,

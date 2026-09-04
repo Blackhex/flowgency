@@ -4,7 +4,7 @@ import yaml
 
 import agency.config as strict_config_module
 from agency.configuration import ConfigStore
-from agency.web.state import runtime_group
+from agency.web.state import runtime_team
 
 
 def test_runtime_config_module_exposes_no_retired_agent_helper_surface():
@@ -55,7 +55,7 @@ def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_inp
     snapshot = ConfigStore(config_path)._snapshot(
         yaml.safe_dump(raw_config, sort_keys=False).encode("utf-8")
     )
-    runtime = runtime_group(snapshot, "team")
+    runtime = runtime_team(snapshot, "team")
 
     assert raw_config["teams"]["team"]["agents"] == [
         {
@@ -86,7 +86,7 @@ def test_runtime_group_exposes_resolved_agent_instances_without_mutating_raw_inp
     assert runtime["dispatch_interval"] == 15
     root = Path("/groups/team").resolve(strict=False)
     assert runtime["workspace_root"] == root
-    assert runtime["group_root"] == root
+    assert runtime["team_root"] == root
     assert runtime["observations"] == root / "observations"
     assert runtime["proposals"] == root / "proposals"
     assert runtime["decisions"] == root / "decisions"

@@ -25,14 +25,14 @@ def _setup_jobs_group(
     job_id="cli-job",
     started_at="2026-07-11T10:00:00+00:00",
 ):
-    """Create a group with one complete job that has changed files, and wire it
-    into the app registry the CLI reads through get_group."""
+    """Create a team with one complete job that has changed files, and wire it
+    into the app registry the CLI reads through get_team."""
     paths = create_team_environment(
         tmp_path,
         "test",
         create_state=True,
     )
-    group = paths.state_root
+    team_dir = paths.state_root
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
@@ -73,9 +73,9 @@ def _setup_jobs_group(
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key="test",
-        team_root=str(group.resolve()),
+        team_root=str(team_dir.resolve()),
         agent_name="engineer",
-        workspace_root=str(group.resolve()),
+        workspace_root=str(team_dir.resolve()),
         trigger="decision",
         integration_name="script",
         integration_config={},
@@ -111,7 +111,7 @@ def _setup_jobs_group(
     record.started_at = started_at
     record.completed_at = "2026-07-11T10:00:05+00:00"
     record.changed_files = [{"path": "a.txt", "status": "modified", "lines_added": 2, "lines_removed": 1}]
-    stdout_path = group / "logs" / f"{spec.job_id}.out"
+    stdout_path = team_dir / "logs" / f"{spec.job_id}.out"
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stdout_path.write_text("line one\nline two\nline three\n", encoding="utf-8")
     record.stdout_path = str(stdout_path)
@@ -127,7 +127,7 @@ def _setup_jobs_group(
         lambda args: (
             snapshot,
             "test",
-            Namespace(name="Test", path=group),
+            Namespace(name="Test", path=team_dir),
         ),
     )
     return spec
@@ -436,9 +436,9 @@ def test_cmd_logs_unknown_job_exits(tmp_path, monkeypatch):
     assert cli.cmd_logs(Namespace(team="test", job_id="deadbeef", lines=40, stderr=False)) == 1
 
 
-def test_cmd_jobs_and_logs_ignore_forged_group_jobs_records(tmp_path, monkeypatch, capsys):
+def test_cmd_jobs_and_logs_ignore_forged_team_jobs_records(tmp_path, monkeypatch, capsys):
     spec = _setup_jobs_group(tmp_path, monkeypatch, job_id="canonical-job")
-    forged_path = tmp_path / "group" / "jobs" / "forged-job.yaml"
+    forged_path = tmp_path / "team" / "jobs" / "forged-job.yaml"
     forged_path.parent.mkdir(parents=True, exist_ok=True)
     forged_record = JobRecord.from_spec(
         JobSpec(
@@ -468,7 +468,7 @@ def test_cmd_jobs_and_logs_ignore_forged_group_jobs_records(tmp_path, monkeypatc
     )
     forged_record.status = "complete"
     forged_record.started_at = spec.created_at
-    forged_record.stdout_path = str(tmp_path / "group" / "logs" / "forged-job.out")
+    forged_record.stdout_path = str(tmp_path / "team" / "logs" / "forged-job.out")
     write_job(forged_path, forged_record)
 
     cli.cmd_jobs(Namespace(team="test", status=None, agent=None, json=True))
@@ -488,11 +488,11 @@ from agency.jobs import JobSubmissionError  # noqa: E402
 
 
 def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", questions=None):
-    group = tmp_path / "group"
+    team_dir = tmp_path / "team"
     for directory in ("proposals", "decisions", "jobs", "logs"):
-        (group / directory).mkdir(parents=True, exist_ok=True)
-    (group / "builder").mkdir()
-    proposal_path = group / "proposals" / "change.md"
+        (team_dir / directory).mkdir(parents=True, exist_ok=True)
+    (team_dir / "builder").mkdir()
+    proposal_path = team_dir / "proposals" / "change.md"
     proposal_meta = {
         "origin_agent": "observer",
         "execution_agent": execution_agent,
@@ -516,17 +516,17 @@ def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", ques
     resolved = {
         "key": "test",
         "name": "Test",
-        "workspace_root": group,
-        "group_root": group,
-        "observations": group / "observations",
-        "proposals": group / "proposals",
-        "decisions": group / "decisions",
-        "logs": group / "logs",
+        "workspace_root": team_dir,
+        "team_root": team_dir,
+        "observations": team_dir / "observations",
+        "proposals": team_dir / "proposals",
+        "decisions": team_dir / "decisions",
+        "logs": team_dir / "logs",
         "agents": ["builder"],
         "_agents_normalized": agents,
     }
     monkeypatch.setattr(cli, "_resolve_team", lambda args: resolved)
-    return Namespace(team="test", slug="change", config=str(tmp_path / "config.yaml")), group / "decisions" / "change.md", proposal_path
+    return Namespace(team="test", slug="change", config=str(tmp_path / "config.yaml")), team_dir / "decisions" / "change.md", proposal_path
 
 
 def test_cmd_decide_rejects_invalid_proposal_schema(tmp_path, monkeypatch, capsys):

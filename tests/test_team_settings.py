@@ -135,8 +135,8 @@ def test_admin_groups_lists_workspace_and_team_paths_without_initialize_action(
     raw_config,
 ):
     client, _ = _make_client(monkeypatch, tmp_path, raw_config)
-    group_root = tmp_path / "groups" / "newsletter-state"
-    shutil.rmtree(group_root)
+    team_root = tmp_path / "groups" / "newsletter-state"
+    shutil.rmtree(team_root)
 
     response = client.get("/admin/teams")
 
@@ -144,7 +144,7 @@ def test_admin_groups_lists_workspace_and_team_paths_without_initialize_action(
     assert "Workspace path" in response.text
     assert "Team path" in response.text
     assert str(tmp_path / "workspace" / "newsletter") in response.text
-    assert str(group_root) in response.text
+    assert str(team_root) in response.text
     assert "/initialize" not in response.text
     assert "Record directories missing" in response.text
     assert "Path does not exist" not in response.text
@@ -209,7 +209,7 @@ def test_stale_group_create_returns_conflict_without_writing_group(
             "key": "new-group",
             "name": "New Team",
             "workspace_path": str(tmp_path / "workspace" / "new-group"),
-            "path": str(tmp_path / "groups" / "new-group-state"),
+            "path": str(tmp_path / "groups" / "new-team-state"),
             "default_integration": "copilot",
             "workspaces_json": "[]",
         },

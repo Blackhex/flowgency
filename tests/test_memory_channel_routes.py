@@ -69,30 +69,30 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
         }
     }
     groups = {}
-    for key, group_name, agent_name, display_name in [
+    for key, team_name, agent_name, display_name in [
         ("newsletter", "Newsletter", "advisor", "Advisor"),
         ("product", "Product", "strategist", "Strategist"),
     ]:
         paths = create_team_environment(tmp_path, key)
-        group_root = paths.state_root
-        (group_root / "logs").mkdir(
+        team_root = paths.state_root
+        (team_root / "logs").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "observations").mkdir(
+        (team_root / "observations").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "proposals").mkdir(
+        (team_root / "proposals").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "decisions").mkdir(
+        (team_root / "decisions").mkdir(
             parents=True,
             exist_ok=True,
         )
         groups[key] = apply_team_paths({
-            "name": group_name,
+            "name": team_name,
             "default_integration": "copilot",
             "agents": [
                 {
@@ -150,7 +150,7 @@ def _write_channel_job(
     job_id: str | None = None,
 ) -> Path:
     snapshot = ConfigStore(config_path).load()
-    group = snapshot.config.teams["newsletter"]
+    team = snapshot.config.teams["newsletter"]
     authority = JobStore(snapshot.config.agency.memory_store)
     authority.team_root("newsletter").mkdir(parents=True, exist_ok=True)
     resolved = resolve_memory_selector(
@@ -168,9 +168,9 @@ def _write_channel_job(
         config_path=str(config_path.resolve()),
         config_revision=snapshot.revision,
         team_key="newsletter",
-        team_root=str(group.path.resolve()),
+        team_root=str(team.path.resolve()),
         agent_name="advisor",
-        workspace_root=str(group.path.resolve()),
+        workspace_root=str(team.path.resolve()),
         trigger="manual_prompt",
         integration_name="copilot",
         integration_config={},
@@ -595,8 +595,8 @@ def _channel_references_for_test(
 ) -> list[str]:
     snapshot = ConfigStore(config_path).load()
     refs: list[str] = []
-    for group in snapshot.config.teams.values():
-        for agent in group.agents.values():
+    for team_cfg in snapshot.config.teams.values():
+        for agent in team_cfg.agents.values():
             if (
                 agent.default_memory is not None
                 and agent.default_memory.scope == "channel"

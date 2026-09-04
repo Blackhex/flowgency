@@ -22,17 +22,17 @@ from .resolution import JobValidationError, resolve_job_request
 from .store import (
     active_jobs,
     cancel_job,
-    group_operation_lock_path,
+    team_operation_lock_path,
     latest_executed_job,
     latest_terminal_job,
 )
 from .submission import JobSubmissionError, submit_job_request
 
 
-def reconcile_jobs(groups: dict, *, memory_store_root):
+def reconcile_jobs(teams: dict, *, memory_store_root):
     from .reconciliation import reconcile_jobs as _reconcile_jobs
 
-    return _reconcile_jobs(groups, memory_store_root=memory_store_root)
+    return _reconcile_jobs(teams, memory_store_root=memory_store_root)
 
 
 def drain(config, *, memory_store, launcher=None, full_reconcile=False):
@@ -62,7 +62,7 @@ __all__ = [
     "BlueprintRef",
     "cancel_job",
     "drain",
-    "group_operation_lock_path",
+    "team_operation_lock_path",
     "create_launch_view",
     "default_launcher",
     "JobArtifact",

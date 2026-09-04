@@ -87,15 +87,15 @@ def _team(raw: dict[str, Any], team_id: str) -> dict[str, Any]:
     return team
 
 
-def _agents(group: dict[str, Any]) -> list[dict[str, Any]]:
-    agents = group.setdefault("agents", [])
+def _agents(team: dict[str, Any]) -> list[dict[str, Any]]:
+    agents = team.setdefault("agents", [])
     if not isinstance(agents, list):
         raise TypeError("agents must be a list")
     return agents
 
 
-def _agent(group: dict[str, Any], agent_id: str) -> dict[str, Any]:
-    for entry in _agents(group):
+def _agent(team: dict[str, Any], agent_id: str) -> dict[str, Any]:
+    for entry in _agents(team):
         if isinstance(entry, dict) and entry.get("name") == agent_id:
             return entry
     raise KeyError(agent_id)

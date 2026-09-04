@@ -79,13 +79,13 @@ def test_unknown_group_yields_an_empty_set(raw_config, config_paths):
 # ---------------------------------------------------------------------------
 
 
-def _fake_context(group_root: Path, integration):
+def _fake_context(team_root: Path, integration):
     return SimpleNamespace(
-        workspace_root=group_root,
+        workspace_root=team_root,
         integration=integration,
         timeout=30,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
-        group_root=group_root,
+        team_root=team_root,
     )
 
 
@@ -112,17 +112,17 @@ def _obs_integration(filename: str, content: str):
 
 def test_execute_job_files_valid_observation(tmp_path, monkeypatch):
     _, spec = queued_job(tmp_path)
-    group_root = tmp_path / "group"
+    team_root = tmp_path / "team"
     obs = "---\ntitle: Test Finding\n---\n\nSomething notable occurred.\n"
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
-        lambda ignored: _fake_context(group_root, _obs_integration("obs.md", obs)),
+        lambda ignored: _fake_context(team_root, _obs_integration("obs.md", obs)),
     )
 
     result = execute_job(_job_authority(spec))
 
     assert result.status == "complete"
-    filed = list((group_root / "observations").glob("*.md"))
+    filed = list((team_root / "observations").glob("*.md"))
     assert len(filed) == 1
     _, fm, _ = filed[0].read_text().split("---", 2)
     meta = yaml.safe_load(fm)
@@ -133,12 +133,12 @@ def test_execute_job_files_valid_observation(tmp_path, monkeypatch):
 
 def test_execute_job_rejects_invalid_observation_retains_artifacts(tmp_path, monkeypatch):
     _, spec = queued_job(tmp_path)
-    group_root = tmp_path / "group"
+    team_root = tmp_path / "team"
     # Empty body is rejected by validate_outbox.
     obs = "---\ntitle: Bad Record\n---\n\n"
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
-        lambda ignored: _fake_context(group_root, _obs_integration("bad.md", obs)),
+        lambda ignored: _fake_context(team_root, _obs_integration("bad.md", obs)),
     )
 
     result = execute_job(_job_authority(spec))
@@ -154,11 +154,11 @@ def test_observation_survives_publication_failure(tmp_path, monkeypatch):
     from agency.memory.publication import MemoryPublicationError
 
     _, spec = queued_job(tmp_path)
-    group_root = tmp_path / "group"
+    team_root = tmp_path / "team"
     obs = "---\ntitle: Durable\n---\n\nThis record must survive a publication failure.\n"
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
-        lambda ignored: _fake_context(group_root, _obs_integration("obs.md", obs)),
+        lambda ignored: _fake_context(team_root, _obs_integration("obs.md", obs)),
     )
 
     def _fail(*args, **kwargs):
@@ -170,7 +170,7 @@ def test_observation_survives_publication_failure(tmp_path, monkeypatch):
 
     assert result.status == "failed"
     # Record was written by ingest_records before prepare_publication was called.
-    filed = list((group_root / "observations").glob("*.md"))
+    filed = list((team_root / "observations").glob("*.md"))
     assert len(filed) == 1
 
 
@@ -208,7 +208,7 @@ def test_agents_on_an_unregistered_integration_are_not_writable(raw_config, conf
         ],
     )
     object.__setattr__(
-        config.groups["newsletter"].agents["leto"],
+        config.teams["newsletter"].agents["leto"],
         "integration",
         "no-such-integration",
     )
@@ -240,12 +240,12 @@ def _outbox_integration(populate):
 
 def _run_with_outbox(tmp_path, monkeypatch, populate):
     _, spec = queued_job(tmp_path)
-    group_root = tmp_path / "group"
+    team_root = tmp_path / "team"
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
-        lambda ignored: _fake_context(group_root, _outbox_integration(populate)),
+        lambda ignored: _fake_context(team_root, _outbox_integration(populate)),
     )
-    return execute_job(_job_authority(spec)), group_root
+    return execute_job(_job_authority(spec)), team_root
 
 
 def _artifact_names(result):
@@ -320,10 +320,10 @@ def test_valid_records_are_ingested_alongside_rejected_ones(tmp_path, monkeypatc
             EMPTY_BODY_OBSERVATION, encoding="utf-8"
         )
 
-    result, group_root = _run_with_outbox(tmp_path, monkeypatch, populate)
+    result, team_root = _run_with_outbox(tmp_path, monkeypatch, populate)
 
     assert result.status == "failed"
-    filed = list((group_root / "observations").glob("*.md"))
+    filed = list((team_root / "observations").glob("*.md"))
     assert [item.name.endswith("-real-finding.md") for item in filed] == [True]
     summary = result.execution_summary or ""
     assert "bad.md: record body is empty" in summary

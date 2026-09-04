@@ -493,7 +493,7 @@ def test_duplicate_job_id_across_allowed_stores_establishes_barrier(
             },
             "other": {
                 "job_store": duplicate_store,
-                "team_root": tmp_path / "other-group",
+                "team_root": tmp_path / "other-team",
             },
         },
     )

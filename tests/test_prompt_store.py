@@ -179,7 +179,7 @@ def test_prompt_store_rejects_hostile_group_directory_symlink_or_reparse(
     monkeypatch,
 ):
     root = tmp_path / "prompts"
-    external = tmp_path / "external-group"
+    external = tmp_path / "external-team"
     external.mkdir()
     sentinel = external / "sentinel.txt"
     sentinel.write_text("keep", encoding="utf-8")

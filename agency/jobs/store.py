@@ -42,24 +42,24 @@ def job_path(jobs_dir: Path, job_id: str) -> Path:
     return Path(jobs_dir) / f"{job_id}.yaml"
 
 
-def group_operation_lock_path(group_root: Path) -> Path:
-    return Path(group_root) / "locks" / ".operations.lock"
+def team_operation_lock_path(team_root: Path) -> Path:
+    return Path(team_root) / "locks" / ".operations.lock"
 
 
-def canonical_group_operation_lock_paths(
-    *group_roots: Path,
+def canonical_team_operation_lock_paths(
+    *team_roots: Path,
 ) -> tuple[Path, ...]:
     unique: dict[str, Path] = {}
-    for group_root in group_roots:
-        lock_path = group_operation_lock_path(group_root).resolve(strict=False)
+    for team_root in team_roots:
+        lock_path = team_operation_lock_path(team_root).resolve(strict=False)
         unique[os.path.normcase(str(lock_path))] = lock_path
     return tuple(unique[key] for key in sorted(unique))
 
 
-def acquire_group_operation_locks(*group_roots: Path) -> ExitStack:
+def acquire_team_operation_locks(*team_roots: Path) -> ExitStack:
     stack = ExitStack()
     try:
-        for lock_path in canonical_group_operation_lock_paths(*group_roots):
+        for lock_path in canonical_team_operation_lock_paths(*team_roots):
             stack.enter_context(exclusive_lock(lock_path, wait=True))
     except Exception:
         stack.close()
@@ -84,7 +84,7 @@ def revision_bound_team_operation(
     )
     initial_identity = _team_path_identity(initial, relevant_ids)
     lock_paths = tuple(initial_identity.values()) + tuple(proposed_paths)
-    with acquire_group_operation_locks(*lock_paths):
+    with acquire_team_operation_locks(*lock_paths):
         locked = config_store.load()
         locked_ids = (
             tuple(sorted(locked.config.teams))

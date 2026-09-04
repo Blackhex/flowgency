@@ -304,8 +304,8 @@ def _split_lines(text: str) -> tuple[str, ...]:
 
 
 def _apply_runtime_patch(raw: dict[str, Any], team_id: str, agent_id: str, patch: AgentRuntimePatch) -> None:
-    groups = raw.setdefault("teams", {})
-    team_cfg = groups[team_id]
+    teams = raw.setdefault("teams", {})
+    team_cfg = teams[team_id]
     agents = team_cfg.setdefault("agents", [])
     target = None
     for entry in agents:

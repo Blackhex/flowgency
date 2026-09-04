@@ -6,7 +6,7 @@ from agency.records.validation import MAX_OUTBOX_ENTRIES_PER_KIND, MAX_RECORD_BY
 
 
 def test_retain_rejected_records_labels_both_directories_without_collision(tmp_path):
-    job_store = JobStore(tmp_path / "memory").group_root("group")
+    job_store = JobStore(tmp_path / "memory").team_root("team")
     job_store.mkdir(parents=True)
     observations = tmp_path / "outbox" / "observations"
     proposals = tmp_path / "outbox" / "proposals"
@@ -32,7 +32,7 @@ def test_retain_rejected_records_labels_both_directories_without_collision(tmp_p
 
 def test_retain_rejected_records_skips_what_it_cannot_retain(tmp_path):
     """The unretainable entries are the reason for the rejection; keep the rest."""
-    job_store = JobStore(tmp_path / "memory").group_root("group")
+    job_store = JobStore(tmp_path / "memory").team_root("team")
     job_store.mkdir(parents=True)
     observations = tmp_path / "outbox" / "observations"
     observations.mkdir(parents=True)
@@ -52,7 +52,7 @@ def test_retain_rejected_records_skips_what_it_cannot_retain(tmp_path):
 
 
 def test_retain_failed_stage_persists_stage_files_and_diff(tmp_path):
-    job_store = JobStore(tmp_path / "memory").group_root("group")
+    job_store = JobStore(tmp_path / "memory").team_root("team")
     job_store.mkdir(parents=True)
     stage_dir = tmp_path / "stage"
     stage_dir.mkdir()
@@ -83,7 +83,7 @@ def test_retain_failed_stage_persists_stage_files_and_diff(tmp_path):
 def test_retain_failed_stage_rejects_symlinked_job_store(tmp_path):
     external_root = tmp_path / "external"
     external_root.mkdir()
-    job_store = tmp_path / "memory" / ".jobs" / "group"
+    job_store = tmp_path / "memory" / ".jobs" / "team"
     job_store.parent.mkdir(parents=True)
     stage_dir = tmp_path / "stage"
     stage_dir.mkdir()
@@ -109,7 +109,7 @@ def test_retain_failed_stage_rejects_symlinked_job_store(tmp_path):
 
 
 def test_retain_rejected_records_skips_oversized_file(tmp_path):
-    job_store = JobStore(tmp_path / "memory").group_root("group")
+    job_store = JobStore(tmp_path / "memory").team_root("team")
     job_store.mkdir(parents=True)
     observations = tmp_path / "outbox" / "observations"
     observations.mkdir(parents=True)
@@ -126,7 +126,7 @@ def test_retain_rejected_records_skips_oversized_file(tmp_path):
 
 
 def test_retain_rejected_records_caps_entry_count(tmp_path):
-    job_store = JobStore(tmp_path / "memory").group_root("group")
+    job_store = JobStore(tmp_path / "memory").team_root("team")
     job_store.mkdir(parents=True)
     observations = tmp_path / "outbox" / "observations"
     observations.mkdir(parents=True)

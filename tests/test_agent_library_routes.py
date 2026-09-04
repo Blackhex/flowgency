@@ -58,20 +58,20 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
     prompt_root = tmp_path / "prompts"
     newsletter_paths = create_team_environment(tmp_path, "newsletter")
     product_paths = create_team_environment(tmp_path, "product")
-    for group_root in (newsletter_paths.state_root, product_paths.state_root):
-        (group_root / "logs").mkdir(
+    for team_root in (newsletter_paths.state_root, product_paths.state_root):
+        (team_root / "logs").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "observations").mkdir(
+        (team_root / "observations").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "proposals").mkdir(
+        (team_root / "proposals").mkdir(
             parents=True,
             exist_ok=True,
         )
-        (group_root / "decisions").mkdir(
+        (team_root / "decisions").mkdir(
             parents=True,
             exist_ok=True,
         )

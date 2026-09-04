@@ -33,16 +33,16 @@ def grants_write_on(rules: Iterable[_Rule], workspace: Path | str) -> bool:
     return False
 
 
-def may_execute_decisions(config, group_key: str, agent_name: str) -> bool:
+def may_execute_decisions(config, team_key: str, agent_name: str) -> bool:
     """Return True iff the agent's effective policy grants write on the team workspace root."""
     from agency.configuration.effective import resolve_effective_policy
     from agency.configuration.issues import ValidationFailed
 
-    team = config.teams.get(group_key)
+    team = config.teams.get(team_key)
     if team is None or agent_name not in team.agents:
         return False
     try:
-        policy = resolve_effective_policy(config, group_key, agent_name)
+        policy = resolve_effective_policy(config, team_key, agent_name)
     except (ValidationFailed, KeyError):
         return False
 

@@ -24,10 +24,10 @@ from agency.jobs.models import (
 from agency.jobs.store import (
     InvalidJobTransition,
     active_jobs,
-    canonical_group_operation_lock_paths,
+    canonical_team_operation_lock_paths,
     cancel_job,
     claim_job,
-    group_operation_lock_path,
+    team_operation_lock_path,
     is_launchable,
     job_path,
     occupies_slot,
@@ -98,7 +98,7 @@ def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
 def test_job_record_round_trips_through_atomic_store(tmp_path):
     spec = make_spec(tmp_path)
     record = JobRecord.from_spec(spec)
-    path = job_path(tmp_path / "group", spec.job_id)
+    path = job_path(tmp_path / "team", spec.job_id)
 
     write_job(path, record)
 
@@ -128,8 +128,8 @@ def test_v4_payload_with_group_key_is_rejected(tmp_path):
     spec = make_spec(tmp_path)
     payload = spec.to_dict()
     payload["schema_version"] = 4
-    payload["group_key"] = payload.pop("team_key")
-    payload["group_root"] = payload.pop("team_root")
+    payload["team_key"] = payload.pop("team_key")
+    payload["team_root"] = payload.pop("team_root")
     with pytest.raises((ValueError, TypeError)):
         JobSpec.from_dict(payload)
 
@@ -139,7 +139,7 @@ def test_read_job_retries_transient_windows_permission_error(
     monkeypatch,
 ):
     spec = make_spec(tmp_path)
-    path = job_path(tmp_path / "group", spec.job_id)
+    path = job_path(tmp_path / "team", spec.job_id)
     record = JobRecord.from_spec(spec)
     payload = yaml.safe_dump(record.to_dict(), sort_keys=False)
     attempts = {"count": 0}
@@ -190,7 +190,7 @@ def test_read_job_raises_immediately_for_non_windows_permission_error(
     tmp_path,
     monkeypatch,
 ):
-    path = job_path(tmp_path / "group", "job-123")
+    path = job_path(tmp_path / "team", "job-123")
     attempts = {"count": 0}
 
     def fake_open(self, *args, **kwargs):
@@ -221,7 +221,7 @@ def test_read_job_raises_immediately_for_non_transient_windows_permission_error(
     tmp_path,
     monkeypatch,
 ):
-    path = job_path(tmp_path / "group", "job-123")
+    path = job_path(tmp_path / "team", "job-123")
     attempts = {"count": 0}
 
     def fake_open(self, *args, **kwargs):
@@ -254,7 +254,7 @@ def test_read_job_raises_last_error_after_transient_windows_retry_exhaustion(
     tmp_path,
     monkeypatch,
 ):
-    path = job_path(tmp_path / "group", "job-123")
+    path = job_path(tmp_path / "team", "job-123")
     attempts = {"count": 0}
     sleeps = []
     last_error = PermissionError(13, "Access is denied", str(path))
@@ -300,7 +300,7 @@ def test_read_job_raises_last_error_after_transient_windows_retry_exhaustion(
 
 def test_transition_job_requires_expected_status(tmp_path):
     spec = make_spec(tmp_path)
-    path = job_path(tmp_path / "group", spec.job_id)
+    path = job_path(tmp_path / "team", spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
 
     running = transition_job(path, "queued", "running", worker_pid=123)
@@ -369,7 +369,7 @@ def test_job_spec_serializes_distinct_workspace_and_team_roots(tmp_path):
 
 
 def test_operation_lock_is_under_group_locks(tmp_path):
-    assert group_operation_lock_path(tmp_path) == (
+    assert team_operation_lock_path(tmp_path) == (
         tmp_path / "locks" / ".operations.lock"
     )
 
@@ -385,9 +385,9 @@ def test_operation_lock_paths_use_platform_case_normalization(
         return value.lower() if os.name == "nt" else value
 
     monkeypatch.setattr(store_module.os.path, "normcase", record_normcase)
-    paths = canonical_group_operation_lock_paths(
-        tmp_path / "Group",
-        tmp_path / "group",
+    paths = canonical_team_operation_lock_paths(
+        tmp_path / "Team",
+        tmp_path / "team",
     )
 
     assert normalized
@@ -395,7 +395,7 @@ def test_operation_lock_paths_use_platform_case_normalization(
         assert len(paths) == 1
     else:
         assert len(paths) == 2
-        assert {path.parent.parent.name for path in paths} == {"Group", "group"}
+        assert {path.parent.parent.name for path in paths} == {"Team", "team"}
 
 
 def test_job_request_no_longer_accepts_extra_prompt_source(tmp_path):
@@ -475,20 +475,20 @@ def test_job_record_rejects_older_schema_version_one(tmp_path):
 
 
 def test_active_jobs_includes_waiting_for_memory(tmp_path):
-    group_path = _canonical_group_store(tmp_path)
+    team_path = _canonical_group_store(tmp_path)
     queued_spec = make_spec(tmp_path, agent="product")
     waiting_spec = make_spec(tmp_path, agent="product")
     running_spec = make_spec(tmp_path, agent="product")
 
-    write_job(job_path(group_path, queued_spec.job_id), JobRecord.from_spec(queued_spec))
-    waiting_path = job_path(group_path, waiting_spec.job_id)
+    write_job(job_path(team_path, queued_spec.job_id), JobRecord.from_spec(queued_spec))
+    waiting_path = job_path(team_path, waiting_spec.job_id)
     write_job(waiting_path, JobRecord.from_spec(waiting_spec))
     transition_job(waiting_path, "queued", "waiting_for_memory")
-    running_path = job_path(group_path, running_spec.job_id)
+    running_path = job_path(team_path, running_spec.job_id)
     write_job(running_path, JobRecord.from_spec(running_spec))
     transition_job(running_path, "queued", "running")
 
-    records = active_jobs(group_path, "product")
+    records = active_jobs(team_path, "product")
 
     assert {record.spec.job_id for record in records} == {
         queued_spec.job_id,
@@ -543,18 +543,18 @@ def test_cancel_job_rejects_running_and_terminal_states(tmp_path, status):
 
 
 def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):
-    group_path = _canonical_group_store(tmp_path)
+    team_path = _canonical_group_store(tmp_path)
     queued_spec = make_spec(tmp_path, agent="product")
     running_spec = make_spec(tmp_path, agent="product")
     other_spec = make_spec(tmp_path, agent="editorial")
 
-    write_job(job_path(group_path, queued_spec.job_id), JobRecord.from_spec(queued_spec))
-    running_path = job_path(group_path, running_spec.job_id)
+    write_job(job_path(team_path, queued_spec.job_id), JobRecord.from_spec(queued_spec))
+    running_path = job_path(team_path, running_spec.job_id)
     write_job(running_path, JobRecord.from_spec(running_spec))
     transition_job(running_path, "queued", "running")
-    write_job(job_path(group_path, other_spec.job_id), JobRecord.from_spec(other_spec))
+    write_job(job_path(team_path, other_spec.job_id), JobRecord.from_spec(other_spec))
 
-    records = active_jobs(group_path, "product")
+    records = active_jobs(team_path, "product")
 
     assert {record.spec.job_id for record in records} == {
         queued_spec.job_id,
@@ -564,21 +564,21 @@ def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):
 
 
 def test_active_jobs_ignores_malformed_field_types(tmp_path):
-    group_path = _canonical_group_store(tmp_path)
+    team_path = _canonical_group_store(tmp_path)
     valid_spec = make_spec(tmp_path)
     valid_record = JobRecord.from_spec(valid_spec)
-    write_job(job_path(group_path, valid_spec.job_id), valid_record)
+    write_job(job_path(team_path, valid_spec.job_id), valid_record)
 
     malformed = valid_record.to_dict()
     malformed["spec"]["job_id"] = "malformed"
     malformed["spec"]["prompt_content"] = {"unexpected": "mapping"}
-    malformed_path = job_path(group_path, "malformed")
+    malformed_path = job_path(team_path, "malformed")
     malformed_path.write_text(
         yaml.safe_dump(malformed, sort_keys=False),
         encoding="utf-8",
     )
 
-    records = active_jobs(group_path)
+    records = active_jobs(team_path)
 
     assert [record.spec.job_id for record in records] == [valid_spec.job_id]
 
@@ -813,12 +813,14 @@ def test_blueprint_cache_ref_includes_instance_digest():
     assert ref.cache_root == Path("C:/cache")
 
 
-def test_worker_accepts_team_id_and_rejects_group_id():
+def test_worker_accepts_team_id_and_rejects_group_id(tmp_path):
     import argparse
     from agency.jobs.worker import main
 
-    with pytest.raises(SystemExit):
-        main(["--store-root", ".", "--group-id", "x", "--job-id", "j", "--immutable-digest", "d"])
+    jobs_root = tmp_path / ".jobs"
+    jobs_root.mkdir()
+    with pytest.raises((SystemExit, FileNotFoundError)):
+        main(["--store-root", str(jobs_root), "--team-id", "x", "--job-id", "j", "--immutable-digest", "a" * 64])
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--store-root", required=True)

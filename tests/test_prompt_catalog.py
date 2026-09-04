@@ -23,14 +23,14 @@ def _write_blueprint(library_root: Path, key: str, prompt_source: str) -> None:
 
 def _write_config(tmp_path: Path, agents: list[dict]) -> Path:
     workspace = tmp_path / "workspace"
-    group_root = tmp_path / "groups" / "reviewers"
+    team_root = tmp_path / "groups" / "reviewers"
     workspace.mkdir(parents=True, exist_ok=True)
-    group_root.mkdir(parents=True, exist_ok=True)
+    team_root.mkdir(parents=True, exist_ok=True)
     raw = {
-        "schema_version": 5,
+        "schema_version": 6,
         "agency": {
             "title": "Agency",
-            "default_group": "reviewers",
+            "default_team": "reviewers",
             "ai_backend": "copilot",
             "agent_library": str(tmp_path / "agent-library"),
             "compilation_cache": str(tmp_path / "compiled-agents"),
@@ -41,7 +41,7 @@ def _write_config(tmp_path: Path, agents: list[dict]) -> Path:
             "reviewers": {
                 "name": "Reviewers",
                 "workspace_path": str(workspace),
-                "path": str(group_root),
+                "path": str(team_root),
                 "default_integration": "copilot",
                 "agents": agents,
             }
@@ -77,7 +77,7 @@ def test_malformed_blueprint_prompt_keeps_its_own_message_and_hint(tmp_path):
         "Prompt markdown frontmatter is incomplete: .agents/prompts/diff-review.prompt.md."
     )
     assert issue.corrective_hint == "Terminate the YAML frontmatter before the prompt body."
-    assert issue.scope == "groups.reviewers.agents.reviewer"
+    assert issue.scope == "teams.reviewers.agents.reviewer"
 
 
 def test_one_broken_blueprint_shared_by_two_agents_reports_once(tmp_path):
@@ -90,7 +90,7 @@ def test_one_broken_blueprint_shared_by_two_agents_reports_once(tmp_path):
     issues = _validate(tmp_path, config_path)
 
     assert len(issues) == 1
-    assert issues[0].scope == "groups.reviewers.agents.first"
+    assert issues[0].scope == "teams.reviewers.agents.first"
 
 
 def test_valid_blueprint_prompt_reports_no_issues(tmp_path):
@@ -114,7 +114,7 @@ def test_name_collision_across_scopes_keeps_its_own_code_and_hint(tmp_path):
     assert len(issues) == 1
     issue = issues[0]
     assert issue.code == "invalid-prompt-catalog"
-    assert issue.scope == "groups.reviewers.agents.reviewer"
+    assert issue.scope == "teams.reviewers.agents.reviewer"
     assert issue.field == "prompts"
     assert issue.corrective_hint == "Use unique prompt names across blueprint and instance scopes."
 

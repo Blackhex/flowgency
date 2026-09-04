@@ -152,7 +152,7 @@ def _validate_job_stores(
             candidate = Path(value).expanduser()
         if candidate.parent.name != ".jobs":
             raise ValueError(
-                "job store must be a direct .jobs/<group> directory"
+                "job store must be a direct .jobs/<team> directory"
             )
         components = (candidate.parent, candidate)
         for component in components:
@@ -160,7 +160,7 @@ def _validate_job_stores(
                 raise ValueError("job store is unsafe")
         canonical = candidate.resolve(strict=False)
         if canonical.parent.name != ".jobs":
-            raise ValueError("job store must resolve to .jobs/<group>")
+            raise ValueError("job store must resolve to .jobs/<team>")
         if canonical in seen:
             raise ValueError("job stores must be canonical and distinct")
         if canonical.exists():

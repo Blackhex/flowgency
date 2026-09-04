@@ -10,7 +10,7 @@ from agency.jobs.store import latest_terminal_job, write_job
 
 def _spec(tmp_path: Path, job_id: str, agent_name: str, created_at: str) -> JobSpec:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 5\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
     return JobSpec(
         schema_version=5,
         job_id=job_id,

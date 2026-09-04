@@ -44,7 +44,7 @@ class PromptService:
     def catalog(
         self,
         snapshot: ConfigSnapshot | None,
-        group_id: str,
+        team_id: str,
         agent_id: str,
     ) -> tuple[CatalogPrompt, ...]:
         current = snapshot or self.config_store.load()
@@ -52,32 +52,32 @@ class PromptService:
             current,
             self.library,
             self.store,
-            group_id,
+            team_id,
             agent_id,
         )
 
     def create_private(
         self,
-        group_id: str,
+        team_id: str,
         agent_id: str,
         prompt_name: str,
         payload: bytes,
         *,
         expected_revision: str,
     ) -> PromptMutationResult:
-        created = self.store.create(group_id, agent_id, prompt_name, payload)
+        created = self.store.create(team_id, agent_id, prompt_name, payload)
         try:
             snapshot = register_agent_prompt(
                 self.config_store,
                 expected_revision,
-                group_id,
+                team_id,
                 agent_id,
                 prompt_name,
             )
         except Exception:
             try:
                 self.store.delete(
-                    group_id,
+                    team_id,
                     agent_id,
                     prompt_name,
                     expected_digest=created.document.digest,
@@ -89,7 +89,7 @@ class PromptService:
 
     def update_private(
         self,
-        group_id: str,
+        team_id: str,
         agent_id: str,
         prompt_name: str,
         payload: bytes,
@@ -98,7 +98,7 @@ class PromptService:
     ) -> PromptMutationResult:
         snapshot = self.config_store.load()
         updated = self.store.update(
-            group_id,
+            team_id,
             agent_id,
             prompt_name,
             expected_digest=expected_digest,
@@ -108,7 +108,7 @@ class PromptService:
 
     def delete_private(
         self,
-        group_id: str,
+        team_id: str,
         agent_id: str,
         prompt_name: str,
         *,
@@ -116,10 +116,10 @@ class PromptService:
         expected_digest: str,
     ) -> PromptMutationResult:
         snapshot = self.config_store.load()
-        agent = snapshot.config.teams[group_id].agents[agent_id]
+        agent = snapshot.config.teams[team_id].agents[agent_id]
         if prompt_name not in agent.prompts:
             raise PromptNotFoundError(
-                f"prompt not registered: {group_id}/{agent_id}/{prompt_name}"
+                f"prompt not registered: {team_id}/{agent_id}/{prompt_name}"
             )
         for routine in agent.routines:
             if (
@@ -130,7 +130,7 @@ class PromptService:
                     (
                         ValidationIssue(
                             code="prompt-in-use",
-                            scope=f"groups.{group_id}.agents.{agent_id}.routines.{routine.id}",
+                            scope=f"teams.{team_id}.agents.{agent_id}.routines.{routine.id}",
                             field="prompt",
                             message=(
                                 f"Prompt '{prompt_name}' is still referenced by routine '{routine.id}'."
@@ -141,24 +141,24 @@ class PromptService:
                         ),
                     )
                 )
-        stored = self.store.read(group_id, agent_id, prompt_name)
+        stored = self.store.read(team_id, agent_id, prompt_name)
         updated = unregister_agent_prompt(
             self.config_store,
             expected_revision,
-            group_id,
+            team_id,
             agent_id,
             prompt_name,
         )
         try:
             self.store.delete(
-                group_id,
+                team_id,
                 agent_id,
                 prompt_name,
                 expected_digest=expected_digest,
             )
             orphaned_path = None
         except Exception:
-            orphaned_path = self.store.path(group_id, agent_id, prompt_name)
+            orphaned_path = self.store.path(team_id, agent_id, prompt_name)
         return PromptMutationResult(
             snapshot=updated,
             document=stored.document,

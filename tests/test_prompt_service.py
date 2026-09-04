@@ -195,7 +195,7 @@ def test_delete_private_reports_orphan_when_source_cleanup_fails(
         expected_revision=prompt_service_env.config_store.load().revision,
     )
 
-    def fail_delete(group, instance, name, *, expected_digest):
+    def fail_delete(team, instance, name, *, expected_digest):
         raise OSError("simulated cleanup failure")
 
     monkeypatch.setattr(prompt_service_env.store, "delete", fail_delete)

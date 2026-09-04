@@ -40,7 +40,7 @@ def _authority(spec: JobSpec):
 def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content: str | None = None):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 5\nagency:\n  title: Test\n  default_team: ''\n"
+        "schema_version: 6\nagency:\n  title: Test\n  default_team: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
         "  prompt_store: /nonexistent\nmemory: {}\nteams: {}\n",
@@ -62,7 +62,7 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
         channels={},
         store_root=tmp_path / ".compat-memory-root",
     )
-    group_root = tmp_path / "group"
+    team_root = tmp_path / "team"
     workspace_root = tmp_path / "workspace"
     private_prompts: tuple[PromptSnapshot, ...] = ()
     if private_prompt_content is not None:
@@ -81,7 +81,7 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key="test",
-        team_root=str(group_root.resolve()),
+        team_root=str(team_root.resolve()),
         agent_name="product",
         workspace_root=str(workspace_root.resolve()),
         trigger="decision" if decision_context else "manual_prompt",
@@ -120,10 +120,10 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
 
 
 def memory_bound_job(tmp_path: Path):
-    group_path = tmp_path / "group"
+    team_path = tmp_path / "team"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 5\nagency:\n  title: Test\n  default_team: ''\n"
+        "schema_version: 6\nagency:\n  title: Test\n  default_team: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
         "  prompt_store: /nonexistent\nmemory: {}\nteams: {}\n",
@@ -145,9 +145,9 @@ def memory_bound_job(tmp_path: Path):
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key="test",
-        team_root=str(group_path.resolve()),
+        team_root=str(team_path.resolve()),
         agent_name="product",
-        workspace_root=str(group_path.resolve()),
+        workspace_root=str(team_path.resolve()),
         trigger="manual_prompt",
         integration_name="script",
         integration_config={"command": "echo ok"},
@@ -393,7 +393,7 @@ def test_execute_job_persists_execution_evidence_when_publication_failure_pre_fa
     tmp_path,
     monkeypatch,
 ):
-    _init_repo(tmp_path / "group")
+    _init_repo(tmp_path / "team")
     fixture = MemoryJobFixture(tmp_path)
     artifact = fixture.spec.blueprint.to_artifact()
     artifact.runtime_path.mkdir(parents=True, exist_ok=True)
@@ -508,7 +508,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        team_root=tmp_path / "group",
+        team_root=tmp_path / "team",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -526,7 +526,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     assert result.status == "complete"
     assert Path(result.stdout_path).read_text() == "done"
     assert Path(result.stderr_path).read_text() == "warning"
-    group_logs = tmp_path / "group" / "logs"
+    group_logs = tmp_path / "team" / "logs"
     assert Path(result.stdout_path).is_relative_to(group_logs)
     assert Path(result.stderr_path).is_relative_to(group_logs)
     assert list(group_logs.rglob("*.prompt"))
@@ -557,11 +557,11 @@ def test_execute_job_preserves_historical_v3_selected_skill(tmp_path, monkeypatc
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
-        workspace_root=tmp_path / "group",
+        workspace_root=tmp_path / "team",
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        team_root=tmp_path / "group",
+        team_root=tmp_path / "team",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -599,11 +599,11 @@ def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
-        workspace_root=tmp_path / "group",
+        workspace_root=tmp_path / "team",
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        team_root=tmp_path / "group",
+        team_root=tmp_path / "team",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -787,7 +787,7 @@ def test_worker_rejects_private_overlay_collision_with_shared_runtime(
 
 def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
-    workspace_root = tmp_path / "group"
+    workspace_root = tmp_path / "team"
     workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
@@ -798,7 +798,7 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
             ),
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
         ),
     )
@@ -806,16 +806,16 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
     result = execute_job(_authority(spec))
 
     assert result.stderr_path is None
-    assert not list((tmp_path / "group" / "logs").rglob("*.err"))
+    assert not list((tmp_path / "team" / "logs").rglob("*.err"))
 
 
 def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
     context = SimpleNamespace(
-        workspace_root=tmp_path / "group",
+        workspace_root=tmp_path / "team",
         timeout=30,
         sandbox_root=None,
-        team_root=tmp_path / "group",
+        team_root=tmp_path / "team",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=SimpleNamespace(
             run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -834,7 +834,7 @@ def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
 
 
 def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
-    decisions = tmp_path / "group" / "decisions"
+    decisions = tmp_path / "team" / "decisions"
     decisions.mkdir(parents=True)
     decision = decisions / "proposal.md"
     decision.write_text(
@@ -850,10 +850,10 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            workspace_root=tmp_path / "group",
+            workspace_root=tmp_path / "team",
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(0, "done", "", 0.1)
@@ -874,10 +874,10 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            workspace_root=tmp_path / "group",
+            workspace_root=tmp_path / "team",
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(124, "partial", "timeout", 30.0)
@@ -903,10 +903,10 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            workspace_root=tmp_path / "group",
+            workspace_root=tmp_path / "team",
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(run=lambda request: minimal_result),
         ),
@@ -931,10 +931,10 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            workspace_root=tmp_path / "group",
+            workspace_root=tmp_path / "team",
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(0, "done", "", 0.1)
@@ -963,10 +963,10 @@ def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeyp
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            workspace_root=tmp_path / "group",
+            workspace_root=tmp_path / "team",
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -1003,11 +1003,11 @@ def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkey
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
-        workspace_root=tmp_path / "group" / "product",
+        workspace_root=tmp_path / "team" / "product",
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        team_root=tmp_path / "group",
+        team_root=tmp_path / "team",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True)
@@ -1055,7 +1055,7 @@ def test_execute_job_persists_session_id_from_successful_run(tmp_path, monkeypat
         def run(self, request: IntegrationRunRequest):
             return RunResult(0, "done", "", 0.1, session_id="sess-success-abc")
 
-    workspace_root = tmp_path / "group"
+    workspace_root = tmp_path / "team"
     workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
@@ -1064,7 +1064,7 @@ def test_execute_job_persists_session_id_from_successful_run(tmp_path, monkeypat
             integration=Integration(),
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
         ),
     )
@@ -1129,7 +1129,7 @@ def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkey
             captured["request"] = request
             return RunResult(0, "done", "", 0.1)
 
-    workspace_root = tmp_path / "group"
+    workspace_root = tmp_path / "team"
     workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
@@ -1138,7 +1138,7 @@ def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkey
             integration=Integration(),
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=authored_policy,
         ),
     )
@@ -1199,7 +1199,7 @@ def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, m
             integration=integration,
             timeout=30,
             sandbox_root=None,
-            team_root=tmp_path / "group",
+            team_root=tmp_path / "team",
             runtime_policy=authored_policy,
         ),
     )

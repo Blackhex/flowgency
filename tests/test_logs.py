@@ -58,10 +58,10 @@ def test_agent_log_views_omit_empty_error_files(tmp_path):
     logs_dir.mkdir(parents=True)
     (logs_dir / "agent-run.out").write_text("completed")
     (logs_dir / "agent-run.err").write_text("")
-    group = {"logs": tmp_path / "logs"}
+    team_dict = {"logs": tmp_path / "logs"}
 
-    recent = get_agent_logs(group, "agent")
-    timeline = build_agent_timeline(group, "agent", agent_observations=[])
+    recent = get_agent_logs(team_dict, "agent")
+    timeline = build_agent_timeline(team_dict, "agent", agent_observations=[])
 
     assert [entry["name"] for entry in recent] == ["agent-run.out"]
     assert [event["name"] for event in timeline] == ["agent-run.out"]
@@ -69,14 +69,14 @@ def test_agent_log_views_omit_empty_error_files(tmp_path):
 
 def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     workspace_path = tmp_path / "workspace" / "test"
-    group_root = tmp_path / "groups" / "test"
+    team_root = tmp_path / "groups" / "test"
     workspace_path.mkdir(parents=True)
-    logs_dir = group_root / "logs" / "2026-07-12"
+    logs_dir = team_root / "logs" / "2026-07-12"
     logs_dir.mkdir(parents=True)
-    (group_root / "observations").mkdir(parents=True)
-    (group_root / "proposals").mkdir(parents=True)
-    (group_root / "decisions").mkdir(parents=True)
-    (group_root / "locks").mkdir(parents=True)
+    (team_root / "observations").mkdir(parents=True)
+    (team_root / "proposals").mkdir(parents=True)
+    (team_root / "decisions").mkdir(parents=True)
+    (team_root / "locks").mkdir(parents=True)
 
     log_file = logs_dir / "agent-run.out"
     log_file.write_text("completed", encoding="utf-8")
@@ -91,11 +91,11 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 5,
+                "schema_version": 6,
 
                 "agency": {
                     "title": "Agency",
-                    "default_group": "test",
+                    "default_team": "test",
                     "ai_backend": "claude-code",
                     "agent_library": str((tmp_path / "agent-library").resolve()),
                     "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
@@ -106,7 +106,7 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
                     "test": {
                         "name": "Test Group",
                         "workspace_path": str(workspace_path.resolve()),
-                        "path": str(group_root.resolve()),
+                        "path": str(team_root.resolve()),
                         "default_integration": "script",
                         "agents": [
                             {
@@ -136,12 +136,12 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
 
 def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatch):
     workspace_path = tmp_path / "workspace" / "test"
-    group_root = tmp_path / "groups" / "test"
+    team_root = tmp_path / "groups" / "test"
     workspace_path.mkdir(parents=True)
-    (group_root / "logs" / "2026-07-12").mkdir(parents=True)
+    (team_root / "logs" / "2026-07-12").mkdir(parents=True)
     for name in ("observations", "proposals", "decisions", "locks"):
-        (group_root / name).mkdir(parents=True)
-    log_file = group_root / "logs" / "2026-07-12" / "agent-run.out"
+        (team_root / name).mkdir(parents=True)
+    log_file = team_root / "logs" / "2026-07-12" / "agent-run.out"
     log_file.write_text("completed", encoding="utf-8")
     workspace_file = workspace_path / "notes.out"
     workspace_file.write_text("workspace data", encoding="utf-8")
@@ -154,10 +154,10 @@ def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatc
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 5,
+                "schema_version": 6,
                 "agency": {
                     "title": "Agency",
-                    "default_group": "test",
+                    "default_team": "test",
                     "ai_backend": "claude-code",
                     "agent_library": str((tmp_path / "agent-library").resolve()),
                     "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
@@ -168,7 +168,7 @@ def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatc
                     "test": {
                         "name": "Test Group",
                         "workspace_path": str(workspace_path.resolve()),
-                        "path": str(group_root.resolve()),
+                        "path": str(team_root.resolve()),
                         "default_integration": "script",
                         "agents": [
                             {

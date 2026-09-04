@@ -79,7 +79,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "source.md").write_text("unchanged\n", encoding="utf-8")
-    group_state = tmp_path / "groups" / "newsletter"
+    team_state = tmp_path / "groups" / "newsletter"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump(
@@ -99,7 +99,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
                     "newsletter": {
                         "name": "Newsletter",
                         "workspace_path": str(workspace),
-                        "path": str(group_state),
+                        "path": str(team_state),
                         "default_integration": "claude-code",
                         "agents": [
                             {
@@ -229,23 +229,23 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert config["schema_version"] == 6
     assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store", "prompt_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
-    group = config["teams"]["example"]
-    assert group["workspace_path"] == "C:/Projects/example"
-    assert group["path"] == "C:/Agency/teams/example"
+    team = config["teams"]["example"]
+    assert team["workspace_path"] == "C:/Projects/example"
+    assert team["path"] == "C:/Agency/teams/example"
     skill_text = (
         REPO_ROOT / "skills" / "agency-setup" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "`workspace_path` points to the project workspace" in skill_text
     assert "`path` points to the Agency-owned team-state root" in skill_text
-    assert "agents" not in group["dispatch"]
-    assert group["runtime"]["permissions"]["rules"]
-    assert all({"name", "blueprint", "integration"} <= set(instance) for instance in group["agents"])
-    builder = next(instance for instance in group["agents"] if instance["name"] == "builder")
+    assert "agents" not in team["dispatch"]
+    assert team["runtime"]["permissions"]["rules"]
+    assert all({"name", "blueprint", "integration"} <= set(instance) for instance in team["agents"])
+    builder = next(instance for instance in team["agents"] if instance["name"] == "builder")
     assert "rules" in builder["runtime"]["permissions"]
     selectors = [routine["memory"] for routine in builder["routines"]]
     assert {selector["scope"] for selector in selectors} == {"routine", "channel"}
     assert next(selector for selector in selectors if selector["scope"] == "channel")["channel"] == "project-strategy"
-    assert group["workspaces"] == [
+    assert team["workspaces"] == [
         {
             "name": "Main workspace",
             "type": "ide",
@@ -260,12 +260,12 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     library.mkdir()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    group_state = tmp_path / "groups" / "example"
+    team_state = tmp_path / "groups" / "example"
     config["agency"]["agent_library"] = str(library)
     config["agency"]["compilation_cache"] = str(tmp_path / "cache")
     config["agency"]["memory_store"] = str(tmp_path / "memory")
     config["teams"]["example"]["workspace_path"] = str(workspace)
-    config["teams"]["example"]["path"] = str(group_state)
+    config["teams"]["example"]["path"] = str(team_state)
     config["teams"]["example"]["runtime"]["permissions"]["rules"] = [
         {"path": str(workspace), "tools": ["read", "search"]}
     ]

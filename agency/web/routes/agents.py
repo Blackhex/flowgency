@@ -483,13 +483,13 @@ async def agent_move_apply(request: Request, team: str, agent: str, services: Ag
         return _render_roster(
             request,
             request.app.state.services,
-            preview.target_group,
+            preview.target_team,
             warning=(
                 f"Orphaned prompt namespace remains at {result.orphaned_prompt_namespace}"
             ),
             status_code=409,
         )
-    return RedirectResponse(f"/{preview.target_group}/agents", status_code=303)
+    return RedirectResponse(f"/{preview.target_team}/agents", status_code=303)
 
 
 @router.get("/admin/teams/{team}/agents/{agent}", response_class=HTMLResponse)

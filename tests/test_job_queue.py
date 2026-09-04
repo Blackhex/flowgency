@@ -27,14 +27,14 @@ from agency.jobs.worker import main as worker_main
 def _make_spec(tmp_path: Path, job_id: str) -> JobSpec:
     config_path = tmp_path / "config.yaml"
     if not config_path.exists():
-        config_path.write_text("schema_version: 5\ngroups: {}\n", encoding="utf-8")
+        config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
     return JobSpec(
         schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key="newsletter",
-        team_root=str((tmp_path / "group").resolve()),
+        team_root=str((tmp_path / "team").resolve()),
         agent_name="product",
         workspace_root=str((tmp_path / "workspace").resolve()),
         trigger="manual_prompt",
@@ -122,7 +122,7 @@ def _make_queue_fixture(tmp_path, *, pool: int = 3) -> _QueueFixture:
     memory_store = tmp_path / "memory"
     config_path = tmp_path / "config.yaml"
     workspace_path = tmp_path / "workspace"
-    group_path = tmp_path / "teams" / "newsletter"
+    team_path = tmp_path / "teams" / "newsletter"
     workspace_path.mkdir(parents=True, exist_ok=True)
 
     raw = {
@@ -141,7 +141,7 @@ def _make_queue_fixture(tmp_path, *, pool: int = 3) -> _QueueFixture:
             "newsletter": {
                 "name": "Newsletter",
                 "workspace_path": str(workspace_path),
-                "path": str(group_path),
+                "path": str(team_path),
                 "default_integration": "copilot",
                 "agents": [],
             },

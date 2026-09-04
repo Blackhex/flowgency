@@ -245,8 +245,8 @@ def test_validates_blueprint_identifiers(raw_config, config_paths, blueprint_val
 @pytest.mark.parametrize(
     ("default_team", "expected_code"),
     [
-        ("bad group", "invalid-team-name"),
-        ("missing-group", "missing-default-team"),
+        ("bad team", "invalid-team-name"),
+        ("missing-team", "missing-default-team"),
         ("newsletter-team", None),
     ],
 )
@@ -309,9 +309,9 @@ def test_relative_group_paths_resolve_from_config_directory(raw_config, config_p
     raw_config["teams"]["newsletter"]["workspace_path"] = "workspace"
     raw_config["teams"]["newsletter"]["path"] = "groups/newsletter"
     parsed = parse_config(raw_config, config_paths["config_path"])
-    group = parsed.teams["newsletter"]
-    assert group.workspace_path == (config_paths["config_dir"] / "workspace").resolve()
-    assert group.path == (config_paths["config_dir"] / "groups/newsletter").resolve()
+    team = parsed.teams["newsletter"]
+    assert team.workspace_path == (config_paths["config_dir"] / "workspace").resolve()
+    assert team.path == (config_paths["config_dir"] / "groups/newsletter").resolve()
 
 
 def test_parse_config_raises_validation_failed_for_missing_group_path_with_additional_roots(
@@ -367,7 +367,7 @@ def test_rejects_duplicate_agent_names(raw_config, config_paths):
 @pytest.mark.parametrize(
     ("team_key", "expected_code"),
     [
-        ("bad group", "invalid-team-name"),
+        ("bad team", "invalid-team-name"),
         ("Newsletter", "invalid-team-name"),
         ("newsletter-team", None),
     ],
@@ -1055,7 +1055,7 @@ def test_v5_group_runtime_rejects_v4_key(raw_config, config_paths, key):
     issues = validate_config(raw_config, config_paths["config_path"])
 
     matches = [i for i in issues if i.code == "superseded-config-key" and key in i.field]
-    assert matches, f"Expected rejection of group runtime.{key}"
+    assert matches, f"Expected rejection of team runtime.{key}"
     assert "Remove the key" in matches[0].corrective_hint
     assert "migrate" not in matches[0].corrective_hint
 

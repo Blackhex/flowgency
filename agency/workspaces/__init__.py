@@ -1,6 +1,6 @@
 """Workspace plugin system for Agency.
 
-Workspaces represent how users visualize and interact with their agent groups
+Workspaces represent how users visualize and interact with their agent teams
 at runtime — tmux grids, IDE windows, chat channels, dedicated UIs, etc.
 Modeled after the integration plugin system.
 """
@@ -49,7 +49,7 @@ class BaseWorkspace:
         """Auto-detect this workspace type from a team directory.
 
         Returns a config dict if detected, None otherwise.
-        Used during group setup/autodetect.
+        Used during team setup/autodetect.
         """
         return None
 

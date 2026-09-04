@@ -466,14 +466,14 @@ def test_filechange_fields():
 def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
     from agency.configuration import ValidationFailed, parse_config
 
-    group = raw_config["teams"]["newsletter"]
-    group["runtime"] = {
+    team = raw_config["teams"]["newsletter"]
+    team["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [{"path": "C:/repo", "tools": ["read"]}],
         },
     }
-    agent = group["agents"][0]
+    agent = team["agents"][0]
     agent["name"] = "builder"
     agent["integration"] = "claude-code"
 

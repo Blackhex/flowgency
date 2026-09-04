@@ -40,15 +40,15 @@ class PromptNamespaceLease:
 
     def registered_entries(
         self,
-        group: str,
+        team: str,
         instance: str,
         names: tuple[str, ...],
     ) -> tuple[tuple[str, str], ...]:
-        self._require_namespace(group, instance)
+        self._require_namespace(team, instance)
         entries: list[tuple[str, str]] = []
         for name in names:
             stored, _payload = self._store._load_prompt_locked(
-                group,
+                team,
                 instance,
                 name,
             )
@@ -57,42 +57,42 @@ class PromptNamespaceLease:
 
     def copy_registered(
         self,
-        source_group: str,
+        source_team: str,
         source_instance: str,
-        target_group: str,
+        target_team: str,
         target_instance: str,
         *,
         registered: tuple[tuple[str, str], ...],
     ) -> tuple[Path, ...]:
-        self._require_namespace(source_group, source_instance)
-        self._require_namespace(target_group, target_instance)
+        self._require_namespace(source_team, source_instance)
+        self._require_namespace(target_team, target_instance)
         return self._store._copy_namespace_locked(
-            source_group,
+            source_team,
             source_instance,
-            target_group,
+            target_team,
             target_instance,
             registered=registered,
         )
 
     def delete_registered(
         self,
-        group: str,
+        team: str,
         instance: str,
         *,
         registered: tuple[tuple[str, str], ...],
     ) -> tuple[Path, ...]:
-        self._require_namespace(group, instance)
+        self._require_namespace(team, instance)
         return self._store._delete_namespace_locked(
-            group,
+            team,
             instance,
             registered=registered,
         )
 
-    def _require_namespace(self, group: str, instance: str) -> None:
-        key = self._store._namespace_key(group, instance)
+    def _require_namespace(self, team: str, instance: str) -> None:
+        key = self._store._namespace_key(team, instance)
         if key not in self._namespace_keys:
             raise ValueError(
-                f"namespace is not held by this lease: {group}/{instance}"
+                f"namespace is not held by this lease: {team}/{instance}"
             )
 
 
@@ -111,15 +111,15 @@ class PromptStore:
             configured = Path.cwd() / configured
         self.root = Path(os.path.abspath(str(configured)))
 
-    def path(self, group: str, instance: str, name: str) -> Path:
-        group_slug = _validate_slug("group", group)
+    def path(self, team: str, instance: str, name: str) -> Path:
+        team_slug = _validate_slug("team", team)
         instance_slug = _validate_slug("instance", instance)
         name_slug = _validate_slug("prompt", name)
         candidate = Path(
             os.path.abspath(
                 str(
                     self.root
-                    / group_slug
+                    / team_slug
                     / instance_slug
                     / f"{name_slug}.prompt.md"
                 )
@@ -128,31 +128,31 @@ class PromptStore:
         _require_contained(self.root, candidate, label="prompt")
         return candidate
 
-    def namespace_path(self, group: str, instance: str) -> Path:
-        group_slug = _validate_slug("group", group)
+    def namespace_path(self, team: str, instance: str) -> Path:
+        team_slug = _validate_slug("team", team)
         instance_slug = _validate_slug("instance", instance)
         candidate = Path(
-            os.path.abspath(str(self.root / group_slug / instance_slug))
+            os.path.abspath(str(self.root / team_slug / instance_slug))
         )
         _require_contained(self.root, candidate, label="prompts")
         return candidate
 
-    def read(self, group: str, instance: str, name: str) -> StoredPrompt:
-        with self._namespace_lock(group, instance):
-            stored, _payload = self._load_prompt_locked(group, instance, name)
+    def read(self, team: str, instance: str, name: str) -> StoredPrompt:
+        with self._namespace_lock(team, instance):
+            stored, _payload = self._load_prompt_locked(team, instance, name)
         return stored
 
     def create(
         self,
-        group: str,
+        team: str,
         instance: str,
         name: str,
         payload: bytes,
     ) -> StoredPrompt:
-        path = self.path(group, instance, name)
+        path = self.path(team, instance, name)
         document = parse_prompt_document(prompt_source_path(name), payload)
-        with self._namespace_lock(group, instance):
-            self._ensure_namespace_directory(group, instance)
+        with self._namespace_lock(team, instance):
+            self._ensure_namespace_directory(team, instance)
             if path.exists():
                 _validate_safe_leaf(path, label="prompt")
                 raise PromptConflictError(f"prompt already exists: {path}")
@@ -161,7 +161,7 @@ class PromptStore:
 
     def update(
         self,
-        group: str,
+        team: str,
         instance: str,
         name: str,
         *,
@@ -170,8 +170,8 @@ class PromptStore:
     ) -> StoredPrompt:
         expected = _validate_digest(expected_digest)
         document = parse_prompt_document(prompt_source_path(name), payload)
-        with self._namespace_lock(group, instance):
-            path = self.path(group, instance, name)
+        with self._namespace_lock(team, instance):
+            path = self.path(team, instance, name)
             current = _read_prompt_file(self.root, path)
             current_digest = hashlib.sha256(current).hexdigest()
             if current_digest != expected:
@@ -181,15 +181,15 @@ class PromptStore:
 
     def delete(
         self,
-        group: str,
+        team: str,
         instance: str,
         name: str,
         *,
         expected_digest: str,
     ) -> StoredPrompt:
         expected = _validate_digest(expected_digest)
-        with self._namespace_lock(group, instance):
-            stored, payload = self._load_prompt_locked(group, instance, name)
+        with self._namespace_lock(team, instance):
+            stored, payload = self._load_prompt_locked(team, instance, name)
             current_digest = hashlib.sha256(payload).hexdigest()
             if current_digest != expected:
                 raise PromptConflictError("prompt changed; reload and retry")
@@ -203,88 +203,88 @@ class PromptStore:
         *namespaces: tuple[str, str],
     ):
         validated = tuple(
-            (_validate_slug("group", group), _validate_slug("instance", instance))
-            for group, instance in namespaces
+            (_validate_slug("team", team), _validate_slug("instance", instance))
+            for team, instance in namespaces
         )
         lock_paths = self._sorted_namespace_lock_paths(*validated)
         keys = frozenset(
-            self._namespace_key(group, instance) for group, instance in validated
+            self._namespace_key(team, instance) for team, instance in validated
         )
         with self._acquire_locks(lock_paths):
             yield PromptNamespaceLease(self, keys)
 
     def copy_namespace(
         self,
-        source_group: str,
+        source_team: str,
         source_instance: str,
-        target_group: str,
+        target_team: str,
         target_instance: str,
         *,
         registered: tuple[tuple[str, str], ...],
     ) -> tuple[Path, ...]:
         with self.namespace_transaction(
-            (source_group, source_instance),
-            (target_group, target_instance),
+            (source_team, source_instance),
+            (target_team, target_instance),
         ) as lease:
             return lease.copy_registered(
-                source_group,
+                source_team,
                 source_instance,
-                target_group,
+                target_team,
                 target_instance,
                 registered=registered,
             )
 
     def delete_namespace(
         self,
-        group: str,
+        team: str,
         instance: str,
         *,
         registered: tuple[tuple[str, str], ...],
     ) -> tuple[Path, ...]:
-        with self.namespace_transaction((group, instance)) as lease:
+        with self.namespace_transaction((team, instance)) as lease:
             return lease.delete_registered(
-                group,
+                team,
                 instance,
                 registered=registered,
             )
 
     def _load_prompt_locked(
         self,
-        group: str,
+        team: str,
         instance: str,
         name: str,
     ) -> tuple[StoredPrompt, bytes]:
-        path = self.path(group, instance, name)
+        path = self.path(team, instance, name)
         payload = _read_prompt_file(self.root, path)
         document = parse_prompt_document(prompt_source_path(name), payload)
         return StoredPrompt(document=document, path=path), payload
 
     def _copy_namespace_locked(
         self,
-        source_group: str,
+        source_team: str,
         source_instance: str,
-        target_group: str,
+        target_team: str,
         target_instance: str,
         *,
         registered: tuple[tuple[str, str], ...],
     ) -> tuple[Path, ...]:
-        _validate_slug("group", source_group)
+        _validate_slug("team", source_team)
         _validate_slug("instance", source_instance)
-        _validate_slug("group", target_group)
+        _validate_slug("team", target_team)
         _validate_slug("instance", target_instance)
         items = _validate_registered(registered)
-        self._require_namespace_directory(source_group, source_instance)
-        self._ensure_namespace_directory(target_group, target_instance)
+        self._require_namespace_directory(source_team, source_instance)
+        self._ensure_namespace_directory(target_team, target_instance)
         staged: list[tuple[Path, bytes]] = []
         for name, expected_digest in items:
             stored, payload = self._load_prompt_locked(
-                source_group,
+                source_team,
                 source_instance,
                 name,
             )
             if stored.document.digest != expected_digest:
                 raise PromptConflictError("prompt changed; reload and retry")
-            target_path = self.path(target_group, target_instance, name)
+            target_path = self.path(target_team, target_instance, name)
             if target_path.exists():
                 _validate_safe_leaf(target_path, label="prompt")
                 raise PromptConflictError(f"prompt already exists: {target_path}")
@@ -309,18 +309,18 @@ class PromptStore:
 
     def _delete_namespace_locked(
         self,
-        group: str,
+        team: str,
         instance: str,
         *,
         registered: tuple[tuple[str, str], ...],
     ) -> tuple[Path, ...]:
-        _validate_slug("group", group)
+        _validate_slug("team", team)
         _validate_slug("instance", instance)
         items = _validate_registered(registered)
-        self._require_namespace_directory(group, instance)
+        self._require_namespace_directory(team, instance)
         staged: list[tuple[Path, bytes, PromptDocument]] = []
         for name, expected_digest in items:
-            stored, payload = self._load_prompt_locked(group, instance, name)
+            stored, payload = self._load_prompt_locked(team, instance, name)
             if stored.document.digest != expected_digest:
                 raise PromptConflictError("prompt changed; reload and retry")
             staged.append((stored.path, payload, stored.document))
@@ -343,8 +343,8 @@ class PromptStore:
         return tuple(deleted)
 
     @contextmanager
-    def _namespace_lock(self, group: str, instance: str):
-        key = self._namespace_key(group, instance)
+    def _namespace_lock(self, team: str, instance: str):
+        key = self._namespace_key(team, instance)
         lock_path = self._lock_path_for_key(key)
         with exclusive_lock(lock_path, wait=True):
             yield
@@ -356,10 +356,10 @@ class PromptStore:
                 stack.enter_context(exclusive_lock(lock_path, wait=True))
             yield
 
-    def _namespace_key(self, group: str, instance: str) -> str:
-        group_slug = _validate_slug("group", group)
+    def _namespace_key(self, team: str, instance: str) -> str:
+        team_slug = _validate_slug("team", team)
         instance_slug = _validate_slug("instance", instance)
-        return f"namespace:{group_slug}:{instance_slug}"
+        return f"namespace:{team_slug}:{instance_slug}"
 
     def _sorted_namespace_lock_paths(
         self,
@@ -367,8 +367,8 @@ class PromptStore:
     ) -> list[Path]:
         # One namespace lock domain covers all prompt operations on an instance.
         lock_paths = {
-            self._lock_path_for_key(self._namespace_key(group, instance))
-            for group, instance in namespaces
+            self._lock_path_for_key(self._namespace_key(team, instance))
+            for team, instance in namespaces
         }
         return sorted(lock_paths, key=lambda item: _path_key(item))
 
@@ -381,19 +381,19 @@ class PromptStore:
         _validate_safe_leaf(lock_path, label="locks")
         return lock_path
 
-    def _ensure_namespace_directory(self, group: str, instance: str) -> Path:
-        group_slug = _validate_slug("group", group)
+    def _ensure_namespace_directory(self, team: str, instance: str) -> Path:
+        team_slug = _validate_slug("team", team)
         instance_slug = _validate_slug("instance", instance)
         return _ensure_directory_chain(
             self.root,
-            [group_slug, instance_slug],
+            [team_slug, instance_slug],
             label="prompts",
         )
 
-    def _require_namespace_directory(self, group: str, instance: str) -> Path:
-        group_slug = _validate_slug("group", group)
+    def _require_namespace_directory(self, team: str, instance: str) -> Path:
+        team_slug = _validate_slug("team", team)
         instance_slug = _validate_slug("instance", instance)
-        namespace_path = self.root / group_slug / instance_slug
+        namespace_path = self.root / team_slug / instance_slug
         exists = _validate_existing_directory_chain(
             self.root,
             namespace_path,

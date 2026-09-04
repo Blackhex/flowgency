@@ -140,10 +140,10 @@ def test_copilot_reports_that_no_filesystem_policy_was_applied_without_credentia
 
 def _context(tmp_path, result):
     return SimpleNamespace(
-        workspace_root=tmp_path / "group",
+        workspace_root=tmp_path / "team",
         timeout=30,
         sandbox_root=None,
-        group_root=tmp_path / "group",
+        team_root=tmp_path / "team",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=SimpleNamespace(run=lambda request: result),
     )
@@ -206,7 +206,7 @@ def test_failed_run_still_records_what_was_not_enforced(tmp_path, monkeypatch):
 
 
 def test_note_reaches_the_decision_record(tmp_path, monkeypatch):
-    decisions = tmp_path / "group" / "decisions"
+    decisions = tmp_path / "team" / "decisions"
     decisions.mkdir(parents=True)
     decision = decisions / "proposal.md"
     decision.write_text(

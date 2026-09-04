@@ -106,7 +106,7 @@ def test_decision_detail_shows_agent_log_and_changes(tmp_path, monkeypatch):
     import agency.app as app_mod
     from agency.app import app
 
-    # Set up group with decision directory
+    # Set up team with decision directory
     paths = create_team_environment(
         tmp_path,
         "test",
@@ -231,7 +231,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     memory_root = tmp_path / "memory-store"
     prompt_root = tmp_path / "prompts"
     paths = create_team_environment(tmp_path, "newsletter")
-    group_root = paths.state_root
+    team_root = paths.state_root
     for rel in [
         ("logs", "2026-07-16"),
         ("observations",),
@@ -239,7 +239,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
         ("decisions",),
         ("locks",),
     ]:
-        (group_root.joinpath(*rel)).mkdir(parents=True, exist_ok=True)
+        (team_root.joinpath(*rel)).mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
 
     raw["agency"]["agent_library"] = str(library_root)
@@ -277,11 +277,11 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    return TestClient(app_mod.app), config_path, group_root
+    return TestClient(app_mod.app), config_path, team_root
 
 
 def _job_spec(
-    group_root: Path,
+    team_root: Path,
     config_path: Path,
     *,
     status: str,
@@ -295,9 +295,9 @@ def _job_spec(
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
         team_key="newsletter",
-        team_root=str(group_root.resolve()),
+        team_root=str(team_root.resolve()),
         agent_name=agent_name,
-        workspace_root=str(group_root.resolve()),
+        workspace_root=str(team_root.resolve()),
         trigger="scheduled_prompt",
         integration_name="copilot",
         integration_config={"model": "gpt-5.4"},
@@ -306,7 +306,7 @@ def _job_spec(
             source_digest="digest-1",
             integration="copilot",
             projector_version="v1",
-            cache_path=str((group_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
+            cache_path=str((team_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
         ),
         routine_id=routine_id,
         skill=None,
@@ -320,7 +320,7 @@ def _job_spec(
             selector={"scope": "channel", "channel": "support"},
             canonical_json='{"channel":"support","scope":"channel"}',
             memory_hash="abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-            path=str((group_root.parent.parent / "memory-store" / "channel-support").resolve()),
+            path=str((team_root.parent.parent / "memory-store" / "channel-support").resolve()),
         ),
         trigger_context={"source": "test"},
         prompt_source={"type": "routine", "routine_id": routine_id, "title": routine_id.replace("-", " ").title()},
@@ -330,8 +330,8 @@ def _job_spec(
 
 
 def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
-    spec = _job_spec(group_root, config_path, status="waiting_for_memory")
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    spec = _job_spec(team_root, config_path, status="waiting_for_memory")
     path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     transition_job(path, "queued", "waiting_for_memory")
@@ -348,8 +348,8 @@ def test_dashboard_shows_waiting_memory_with_canonical_links(monkeypatch, tmp_pa
 
 
 def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_path, raw_config):
-    _, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
-    spec = _job_spec(group_root, config_path, status="running", job_id="job-running")
+    _, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    spec = _job_spec(team_root, config_path, status="running", job_id="job-running")
     path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     transition_job(path, "queued", "running")
@@ -367,7 +367,7 @@ def test_dashboard_running_count_excludes_queued_but_not_waiting_jobs(monkeypatc
     run, so the card stays lit and the count includes it. Only `queued` — which
     nothing has started yet — is excluded.
     """
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["teams"]["newsletter"]["agents"][0]
     for agent_name in ("researcher", "writer"):
@@ -379,16 +379,16 @@ def test_dashboard_running_count_excludes_queued_but_not_waiting_jobs(monkeypatc
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
 
-    queued = _job_spec(group_root, config_path, status="queued", job_id="job-queued")
+    queued = _job_spec(team_root, config_path, status="queued", job_id="job-queued")
     waiting = _job_spec(
-        group_root,
+        team_root,
         config_path,
         status="waiting_for_memory",
         job_id="job-waiting",
         agent_name="researcher",
     )
     running = _job_spec(
-        group_root,
+        team_root,
         config_path,
         status="running",
         job_id="job-running",
@@ -430,7 +430,7 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
     raw_config,
     fallback_mode,
 ):
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     advisor = raw["teams"]["newsletter"]["agents"][0]
     for agent_name in ("researcher", "writer"):
@@ -438,27 +438,27 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
         agent["name"] = agent_name
         agent["identity"]["display_name"] = agent_name.title()
         raw["teams"]["newsletter"]["agents"].append(agent)
-        (group_root / agent_name).mkdir()
-        (group_root / agent_name / "AGENTS.md").write_text(
+        (team_root / agent_name).mkdir()
+        (team_root / agent_name / "AGENTS.md").write_text(
             f"# {agent_name.title()}\n",
             encoding="utf-8",
         )
-    (group_root / "advisor").mkdir()
-    (group_root / "advisor" / "AGENTS.md").write_text("# Advisor\n", encoding="utf-8")
+    (team_root / "advisor").mkdir()
+    (team_root / "advisor" / "AGENTS.md").write_text("# Advisor\n", encoding="utf-8")
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
 
     jobs = [
-        _job_spec(group_root, config_path, status="queued", job_id="job-queued"),
+        _job_spec(team_root, config_path, status="queued", job_id="job-queued"),
         _job_spec(
-            group_root,
+            team_root,
             config_path,
             status="waiting_for_memory",
             job_id="job-waiting",
             agent_name="researcher",
         ),
         _job_spec(
-            group_root,
+            team_root,
             config_path,
             status="running",
             job_id="job-running",
@@ -474,7 +474,7 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
         elif spec.job_id == "job-running":
             transition_job(path, "queued", "running")
 
-    writer_log = group_root / "logs" / "2026-07-16" / "writer-run.out"
+    writer_log = team_root / "logs" / "2026-07-16" / "writer-run.out"
     writer_log.write_text("recent activity\n", encoding="utf-8")
     if fallback_mode == "absent":
         monkeypatch.delattr(app_mod.app.state, "services", raising=False)
@@ -513,7 +513,7 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
 
 
 def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw_config):
-    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, _, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     other_paths = create_team_environment(tmp_path, "research")
     other_group = other_paths.state_root
     for rel in [("logs",), ("observations",), ("proposals",), ("decisions",), ("locks",)]:
@@ -544,7 +544,7 @@ def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw
 
 
 def test_dashboard_reports_never_run_agents_separately(monkeypatch, tmp_path, raw_config):
-    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, _, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/")
 
@@ -563,7 +563,7 @@ def test_initials_filter_builds_a_two_letter_avatar():
 
 
 def test_fleet_cards_render_both_timing_values(monkeypatch, tmp_path, raw_config):
-    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, _, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/")
 
@@ -574,8 +574,8 @@ def test_fleet_cards_render_both_timing_values(monkeypatch, tmp_path, raw_config
 
 
 def test_running_dot_uses_health_sentence_as_title(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
-    spec = _job_spec(group_root, config_path, status="running", job_id="job-running")
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    spec = _job_spec(team_root, config_path, status="running", job_id="job-running")
     path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     transition_job(path, "queued", "running")
@@ -589,13 +589,13 @@ def test_running_dot_uses_health_sentence_as_title(monkeypatch, tmp_path, raw_co
 
 
 def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+    (team_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
 
     with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
@@ -631,13 +631,13 @@ def test_a_running_agent_produces_no_health_item():
 
 def test_overdue_agent_appears_in_the_attention_queue(monkeypatch, tmp_path, raw_config):
     # dispatch must be enabled so schedule_lateness detects the overdue routine
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+    (team_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
 
     with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
@@ -648,7 +648,7 @@ def test_overdue_agent_appears_in_the_attention_queue(monkeypatch, tmp_path, raw
 
 
 def test_never_run_agent_produces_no_queue_item(monkeypatch, tmp_path, raw_config):
-    client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, _, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/")
 
@@ -656,7 +656,7 @@ def test_never_run_agent_produces_no_queue_item(monkeypatch, tmp_path, raw_confi
 
 
 def test_build_health_items_job_href(tmp_path):
-    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="succeeded", job_id="job-abc-123")
+    spec = _job_spec(tmp_path / "team", tmp_path / "config.yaml", status="succeeded", job_id="job-abc-123")
     record = JobRecord.from_spec(spec)
     record.status = "succeeded"
     record.completed_at = "2026-07-29T10:00:00+00:00"
@@ -671,7 +671,7 @@ def test_build_health_items_job_href(tmp_path):
 
 
 def test_last_run_line_succeeded(tmp_path):
-    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="succeeded", job_id="job-succeeded")
+    spec = _job_spec(tmp_path / "team", tmp_path / "config.yaml", status="succeeded", job_id="job-succeeded")
     record = JobRecord.from_spec(spec)
     record.status = "succeeded"
     record.duration_seconds = 235.0
@@ -691,7 +691,7 @@ def test_last_run_line_succeeded(tmp_path):
 
 
 def test_last_run_line_failed(tmp_path):
-    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-failed")
+    spec = _job_spec(tmp_path / "team", tmp_path / "config.yaml", status="failed", job_id="job-failed")
     record = JobRecord.from_spec(spec)
     record.status = "failed"
     record.duration_seconds = 10.0
@@ -714,7 +714,7 @@ def test_last_run_line_none():
 
 
 def test_last_run_line_no_duration(tmp_path):
-    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-nodur")
+    spec = _job_spec(tmp_path / "team", tmp_path / "config.yaml", status="failed", job_id="job-nodur")
     record = JobRecord.from_spec(spec)
     record.status = "failed"
     record.duration_seconds = None
@@ -733,7 +733,7 @@ def test_last_run_line_no_duration(tmp_path):
 
 
 def test_health_sentence_fully_populated(tmp_path):
-    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-full1234")
+    spec = _job_spec(tmp_path / "team", tmp_path / "config.yaml", status="failed", job_id="job-full1234")
     record = JobRecord.from_spec(spec)
     record.status = "failed"
     record.exit_code = 1
@@ -751,7 +751,7 @@ def test_health_sentence_fully_populated(tmp_path):
 
 
 def test_health_sentence_exit_code_none(tmp_path):
-    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-nocode1")
+    spec = _job_spec(tmp_path / "team", tmp_path / "config.yaml", status="failed", job_id="job-nocode1")
     record = JobRecord.from_spec(spec)
     record.status = "failed"
     record.exit_code = None
@@ -768,7 +768,7 @@ def test_health_sentence_exit_code_none(tmp_path):
 
 
 def test_health_sentence_duration_none(tmp_path):
-    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-nodur123")
+    spec = _job_spec(tmp_path / "team", tmp_path / "config.yaml", status="failed", job_id="job-nodur123")
     record = JobRecord.from_spec(spec)
     record.status = "failed"
     record.exit_code = 1
@@ -785,7 +785,7 @@ def test_health_sentence_duration_none(tmp_path):
 
 
 def test_health_sentence_completed_at_none(tmp_path):
-    spec = _job_spec(tmp_path / "group", tmp_path / "config.yaml", status="failed", job_id="job-notime12")
+    spec = _job_spec(tmp_path / "team", tmp_path / "config.yaml", status="failed", job_id="job-notime12")
     record = JobRecord.from_spec(spec)
     record.status = "failed"
     record.exit_code = 1
@@ -800,13 +800,13 @@ def test_health_sentence_completed_at_none(tmp_path):
 
 def test_attention_queue_header_singular(monkeypatch, tmp_path, raw_config):
     # dispatch must be enabled so schedule_lateness produces the overdue fault
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+    (team_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
 
     with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
@@ -841,7 +841,7 @@ def test_fleet_attention_counts_health_items_not_color():
 def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, tmp_path, raw_config):
     """An unhealthy agent that is running must not appear in fleet_attention or the queue."""
     from copy import deepcopy
-    client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
+    client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     # add a second agent so advisor can be overdue while writer is running
@@ -853,11 +853,11 @@ def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, 
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
-    (group_root / "logs" / "2026-07-16" / "writer-run.out").write_text("x", encoding="utf-8")
+    (team_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
+    (team_root / "logs" / "2026-07-16" / "writer-run.out").write_text("x", encoding="utf-8")
 
     # put writer in a running job so it is unhealthy but running
-    running_spec = _job_spec(group_root, config_path, status="running", job_id="job-writer-run", agent_name="writer")
+    running_spec = _job_spec(team_root, config_path, status="running", job_id="job-writer-run", agent_name="writer")
     running_path = JobStore(tmp_path / "memory-store").path("newsletter", running_spec.job_id)
     write_job(running_path, JobRecord.from_spec(running_spec))
     transition_job(running_path, "queued", "running")
@@ -922,11 +922,11 @@ class TestWorkQueueStrip:
 
     @pytest.fixture
     def waiting_jobs(self, _env, tmp_path):
-        _, config_path, group_root = _env
+        _, config_path, team_root = _env
         authority = JobStore(tmp_path / "memory-store")
 
         for job_id in ("job-running-1", "job-running-2"):
-            spec = _job_spec(group_root, config_path, status="running", job_id=job_id)
+            spec = _job_spec(team_root, config_path, status="running", job_id=job_id)
             path = authority.path("newsletter", job_id)
             write_job(path, JobRecord.from_spec(spec))
             transition_job(path, "queued", "running")
@@ -936,7 +936,7 @@ class TestWorkQueueStrip:
             ("job-queue-aa", "authority-audit", "2026-07-16T09:00:00+00:00"),
             ("job-queue-da", "docs-audit", "2026-07-16T11:42:00+00:00"),
         ):
-            spec = _job_spec(group_root, config_path, status="queued", job_id=job_id, routine_id=routine)
+            spec = _job_spec(team_root, config_path, status="queued", job_id=job_id, routine_id=routine)
             path = authority.path("newsletter", job_id)
             write_job(path, JobRecord.from_spec(spec, due_at=due))
 
@@ -993,7 +993,7 @@ class TestWorkQueueStrip:
         assert re.search(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{2}:\d{2}", body)
 
     def test_load_snapshot_exception_falls_back_to_idle(self, client, monkeypatch):
-        # Patch queue_snapshot to raise while _load_snapshot (used by get_group) still works;
+        # Patch queue_snapshot to raise while _load_snapshot (used by get_team) still works;
         # the work queue's try/except catches this and falls back to the idle line.
         import agency.app as app_mod
 
@@ -1107,15 +1107,15 @@ class TestFleetCardQueuedState:
 
     @pytest.fixture
     def waiting_jobs(self, _env, tmp_path):
-        _, config_path, group_root = _env
-        spec = _job_spec(group_root, config_path, status="queued", job_id="job-queued")
+        _, config_path, team_root = _env
+        spec = _job_spec(team_root, config_path, status="queued", job_id="job-queued")
         path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
         write_job(path, JobRecord.from_spec(spec))
 
     @pytest.fixture
     def running_job(self, _env, tmp_path):
-        _, config_path, group_root = _env
-        spec = _job_spec(group_root, config_path, status="running", job_id="job-running")
+        _, config_path, team_root = _env
+        spec = _job_spec(team_root, config_path, status="running", job_id="job-running")
         path = JobStore(tmp_path / "memory-store").path("newsletter", spec.job_id)
         write_job(path, JobRecord.from_spec(spec))
         transition_job(path, "queued", "running")
