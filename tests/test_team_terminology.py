@@ -38,3 +38,4 @@ def test_setup_assets_use_team_domain_terms():
     assert "teams.<team-id>" in text
     assert "<root>/teams/<team-id>" in text
     assert not re.search(r"\bgroup display name\b", text, re.IGNORECASE)
+    assert not re.search(r"\bgroup concept\b", text, re.IGNORECASE)

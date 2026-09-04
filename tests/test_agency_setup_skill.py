@@ -451,7 +451,7 @@ def test_setup_drafts_exact_count_complete_grounded_operating_profiles():
 
     assert "exactly the approved initial count" in normalized
     assert "inspected project facts" in normalized
-    assert "approved group concept" in normalized
+    assert "approved team concept" in normalized
     assert "selected integration" in normalized
     assert "Label unsupported assumptions" in normalized
     assert "None proposed" in team
@@ -509,7 +509,7 @@ def test_setup_adapts_identity_and_distinguishes_shared_roles():
     normalized = " ".join(skill.split())
 
     for phrase in (
-        "When the approved group concept clearly establishes a naming theme",
+        "When the approved team concept clearly establishes a naming theme",
         "use domain-specific functional identities",
         "do not force a theme",
         "Agents may share a broad role",

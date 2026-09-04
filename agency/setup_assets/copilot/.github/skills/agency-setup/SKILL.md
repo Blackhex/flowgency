@@ -95,7 +95,7 @@ role-selection form.
 
 Generate the first complete team draft with exactly that many profiles. The
 draft must contain exactly the approved initial count. Synthesize it from inspected project facts,
-the approved group concept, the requested count, any priority answer, the
+the approved team concept, the requested count, any priority answer, the
 selected integration, and the exact workspace. Do not offer a fixed candidate
 slate or ask which generic roles to instantiate. Label unsupported assumptions.
 When the launch prompt contains `Selected integration:`, use that registered
@@ -139,7 +139,7 @@ identifiable in each profile. Put the complete profiles in the message that
 precedes the team-decision form; do not replace them with compact prose or a
 summary.
 
-When the approved group concept clearly establishes a naming theme, adapt
+When the approved team concept clearly establishes a naming theme, adapt
 display names, titles, and optional emoji coherently without obscuring each
 agent's function; every `identity.display_name` and `identity.title` must
 visibly acknowledge it. Stable slugs and broad role labels alone do not satisfy
