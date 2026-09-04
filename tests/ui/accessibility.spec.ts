@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { assertNoConsoleErrors, installConsoleErrorGate } from './layout';
 
 const pages = [
-  { name: 'Group Settings', path: '/admin/orgs/newsletter/edit', identity: ['heading', 'Edit: Newsletter'] },
+  { name: 'Team Settings', path: '/admin/teams/newsletter/edit', identity: ['heading', 'Edit: Newsletter'] },
   { name: 'Agent roster', path: '/newsletter/agents', identity: ['heading', 'Instances assigned to Newsletter'] },
   { name: 'Agent Profile', path: '/newsletter/agents/advisor/profile', identity: ['tab', 'Profile'] },
   { name: 'Agent Blueprint', path: '/newsletter/agents/advisor/blueprint', identity: ['tab', 'Blueprint'] },

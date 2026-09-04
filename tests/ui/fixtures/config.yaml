@@ -1,7 +1,7 @@
-schema_version: 4
+schema_version: 6
 agency:
   title: Agency UI Gate
-  default_group: newsletter
+  default_team: newsletter
   ai_backend: copilot
   agent_library: __RUNTIME__/agent-library
   compilation_cache: __RUNTIME__/compiled-agents
@@ -11,21 +11,18 @@ memory:
   channels:
     brand-strategy:
       display_name: Brand Strategy
-groups:
+teams:
   newsletter:
     name: Newsletter
     workspace_path: __RUNTIME__/workspaces/newsletter
-    path: __RUNTIME__/groups/newsletter
+    path: __RUNTIME__/teams/newsletter
     default_integration: copilot
     runtime:
       timeout: 2400
-      sandbox:
+      permissions:
         mode: restricted
-        roots:
-          - __RUNTIME__/workspaces/newsletter
-      tools:
-        mode: allowlist
-        names: [shell, write]
+        rules:
+          - path: __RUNTIME__/workspaces/newsletter
     agents:
       - name: advisor
         blueprint: advisor
@@ -38,12 +35,9 @@ groups:
           - local-triage
         runtime:
           timeout: 1200
-          sandbox:
-            additional_roots:
-              - __RUNTIME__/groups/newsletter/editorial
-          tools:
-            mode: allowlist
-            names: [shell]
+          permissions:
+            rules:
+              - path: __RUNTIME__/teams/newsletter/editorial
         default_memory:
           scope: channel
           channel: brand-strategy

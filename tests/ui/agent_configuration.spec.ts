@@ -25,22 +25,22 @@ test.beforeEach(async ({ page }, testInfo) => {
   await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; }' });
 });
 
-test('group settings leads to the sole roster and inherited runtime', async ({ page }) => {
-  await page.goto('/admin/orgs/newsletter/edit');
+test('team settings leads to the sole roster and inherited runtime', async ({ page }) => {
+  await page.goto('/admin/teams/newsletter/edit');
   await expect(page.getByRole('heading', { name: 'Edit: Newsletter' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Create Instance' })).toHaveCount(0);
   await expect(page.getByText('Advisor')).toHaveCount(0);
   const workspacePath = page.locator('#workspace_path');
-  const groupPath = page.locator('#path');
-  const sandboxRoots = page.locator('#sandbox_roots');
+  const teamPath = page.locator('#path');
+  const permissionRulesField = page.locator('#permission_rules_yaml');
   await expect(workspacePath).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]workspaces[\\/]newsletter$/);
-  await expect(groupPath).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]groups[\\/]newsletter$/);
-  await expect(sandboxRoots).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]workspaces[\\/]newsletter$/);
+  await expect(teamPath).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]teams[\\/]newsletter$/);
+  await expect(permissionRulesField).toHaveValue(/workspaces[\\/]newsletter/);
   await assertNoLayoutIssues(page);
   // These fields hold absolute paths that vary per checkout, so compare them as text only.
   await expect(page).toHaveScreenshot('group-settings.png', {
     fullPage: true,
-    mask: [workspacePath, groupPath, sandboxRoots],
+    mask: [workspacePath, teamPath, permissionRulesField],
   });
 
   await expectBodyFocus(page);
@@ -63,34 +63,27 @@ test('group settings leads to the sole roster and inherited runtime', async ({ p
   await page.keyboard.press('Tab');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/newsletter\/agents\/advisor\/runtime$/);
-  await expect(page.getByRole('heading', { name: 'Group default' })).toBeVisible();
-  const inheritedRoot = page.getByText(/Group default: .*tests\/ui\/\.runtime\/current\/workspaces\/newsletter$/);
-  await expect(inheritedRoot).toHaveCount(2);
-  await expect(inheritedRoot.first()).toBeVisible();
-  const groupRoot = page.getByText(/Agent addition: .*tests\/ui\/\.runtime\/current\/groups\/newsletter$/);
-  await expect(groupRoot).toHaveCount(1);
-  await expect(groupRoot).toBeVisible();
-  const additionalRoot = page.getByText(/Agent addition: .*tests\/ui\/\.runtime\/current\/groups\/newsletter\/editorial$/);
-  await expect(additionalRoot).toHaveCount(1);
-  await expect(additionalRoot).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Team default' })).toBeVisible();
+  const workspaceRule = page.getByText(/Rule:.*tests\/ui\/.runtime\/current\/workspaces\/newsletter/);
+  await expect(workspaceRule.first()).toBeVisible();
+  const editorialRule = page.getByText(/Rule:.*tests\/ui\/.runtime\/current\/teams\/newsletter\/editorial/);
+  await expect(editorialRule.first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/\.runtime\/run-\d+/);
   await expect(page.getByText('Timeout: 2400s', { exact: true })).toBeVisible();
   await expect(page.getByText('Timeout: 1200s', { exact: true })).toBeVisible();
-  await expect(page.getByText('Tools: allowlist (shell, write)', { exact: true })).toBeVisible();
-  await expect(page.getByText('Tools: allowlist (shell)', { exact: true })).toBeVisible();
+  await expect(page.getByText('Mode: restricted', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('Copilot');
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('copilot');
   await expect(page.getByRole('heading', { name: 'Effective preview' })).toBeVisible();
-  const additionalRootsField = page.locator('textarea[name="additional_roots"]');
-  await expect(additionalRootsField).toHaveValue(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]groups[\\/]newsletter[\\/]editorial$/);
-  await pinToSingleLine(inheritedRoot);
-  await pinToSingleLine(groupRoot);
-  await pinToSingleLine(additionalRoot);
+  const agentRulesField = page.locator('textarea[name="permission_rules_yaml"]');
+  await expect(agentRulesField).toHaveValue(/teams[\\/]newsletter[\\/]editorial/);
+  await pinToSingleLine(workspaceRule);
+  await pinToSingleLine(editorialRule);
   await assertNoLayoutIssues(page);
-  // Sandbox roots are absolute and vary per checkout, so compare them as text only.
+  // Permission rule paths are absolute and vary per checkout, so compare them as text only.
   await expect(page).toHaveScreenshot('agent-runtime.png', {
     fullPage: true,
-    mask: [inheritedRoot, groupRoot, additionalRoot, additionalRootsField],
+    mask: [workspaceRule, editorialRule, agentRulesField],
   });
   await assertNoConsoleErrors(page);
 });
@@ -203,7 +196,7 @@ test('memory channel uses a friendly label without normal hash disclosure', asyn
 test('destructive controls require confirmation or a review page and are keyboard reachable', async ({ page }) => {
   await page.goto('/newsletter/agents');
   await expectBodyFocus(page);
-  await tabTo(page, { role: 'textbox', name: 'Target group' });
+  await tabTo(page, { role: 'textbox', name: 'Target team' });
   await page.keyboard.type('research');
   await page.keyboard.press('Tab');
   await expect(page.getByRole('combobox', { name: 'Memory move mode' }).first()).toBeFocused();

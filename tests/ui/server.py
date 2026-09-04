@@ -95,21 +95,21 @@ def _seed_pipeline(group: Path) -> None:
     )
 
 
-def _seed_group_scaffold(group: Path) -> None:
+def _seed_team_scaffold(team: Path) -> None:
     for directory in ("logs/2026-07-16", "observations", "proposals", "decisions", "locks"):
-        (group / directory).mkdir(parents=True, exist_ok=True)
+        (team / directory).mkdir(parents=True, exist_ok=True)
 
 
 def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
-    group = runtime / "groups" / "newsletter"
+    team = runtime / "teams" / "newsletter"
     workspace = runtime / "workspaces" / "newsletter"
     return JobSpec(
-        schema_version=4,
+        schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="ui-gate-revision",
-        group_key="newsletter",
-        group_root=str(group.resolve()),
+        team_key="newsletter",
+        team_root=str(team.resolve()),
         agent_name="advisor",
         workspace_root=str(workspace.resolve()),
         trigger="scheduled_prompt",
@@ -153,7 +153,7 @@ def _job_spec(runtime: Path, config_path: Path, job_id: str) -> JobSpec:
 
 def _seed_jobs(runtime: Path, config_path: Path) -> None:
     authority = JobStore(runtime / "memory-store")
-    authority.group_root("newsletter").mkdir(parents=True, exist_ok=True)
+    authority.team_root("newsletter").mkdir(parents=True, exist_ok=True)
     waiting_path = authority.path("newsletter", "job-waiting")
     write_job(waiting_path, JobRecord.from_spec(_job_spec(runtime, config_path, "job-waiting")))
     transition_job(waiting_path, "queued", "waiting_for_memory")
@@ -168,8 +168,8 @@ def _seed_jobs(runtime: Path, config_path: Path) -> None:
     failed.memory_publication = {
         "failed_artifacts": [{"name": "memory.md", "path": str(artifact.resolve()), "size": artifact.stat().st_size}]
     }
-    failed.stdout_path = str((runtime / "groups" / "newsletter" / "logs" / "2026-07-16" / "advisor-job-failed.out").resolve())
-    failed.stderr_path = str((runtime / "groups" / "newsletter" / "logs" / "2026-07-16" / "advisor-job-failed.err").resolve())
+    failed.stdout_path = str((runtime / "teams" / "newsletter" / "logs" / "2026-07-16" / "advisor-job-failed.out").resolve())
+    failed.stderr_path = str((runtime / "teams" / "newsletter" / "logs" / "2026-07-16" / "advisor-job-failed.err").resolve())
     _write(Path(failed.stdout_path), "deterministic stdout\n")
     _write(Path(failed.stderr_path), "deterministic stderr\n")
     _set_mtime(Path(failed.stdout_path), "2026-07-16T11:30:00+00:00")
@@ -197,7 +197,7 @@ def _seed_memory(runtime: Path, config: dict) -> None:
     channel = resolve_memory_selector(
         MemorySelector(scope="channel", channel="brand-strategy"),
         job_id="ui-preview",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=config["memory"]["channels"],
@@ -224,12 +224,12 @@ def _prepare_runtime() -> tuple[Path, Path]:
     config = _replace_runtime(raw, runtime)
     config_path = runtime / "config.yaml"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    group = runtime / "groups" / "newsletter"
-    (runtime / "groups" / "newsletter" / "editorial").mkdir(parents=True, exist_ok=True)
+    team = runtime / "teams" / "newsletter"
+    (runtime / "teams" / "newsletter" / "editorial").mkdir(parents=True, exist_ok=True)
     (runtime / "workspaces" / "newsletter").mkdir(parents=True, exist_ok=True)
     (runtime / "workspaces" / "research").mkdir(parents=True, exist_ok=True)
-    _seed_pipeline(group)
-    _seed_group_scaffold(runtime / "groups" / "research")
+    _seed_pipeline(team)
+    _seed_team_scaffold(runtime / "teams" / "research")
     _seed_blueprint(
         runtime / "agent-library",
         "advisor",
