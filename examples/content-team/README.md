@@ -32,18 +32,30 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
        - name: writer
          blueprint: writer
          integration: claude-code
-         capabilities:
-           write: true
+         runtime:
+           permissions:
+             mode: restricted
+             rules:
+               - path: /path/to/your/project
+                 tools: [read, search]
        - name: editor
          blueprint: editor
          integration: claude-code
-         capabilities:
-           write: false
+         runtime:
+           permissions:
+             mode: restricted
+             rules:
+               - path: /path/to/your/project
+                 tools: [read, search]
        - name: researcher
          blueprint: researcher
          integration: claude-code
-         capabilities:
-           write: false
+         runtime:
+           permissions:
+             mode: restricted
+             rules:
+               - path: /path/to/your/project
+                 tools: [read, search]
    ```
 
 3. Edit each agent's `CLAUDE.md` (or your tool's identity file) to match your project's context — what you publish, where, and your voice/tone guidelines.
