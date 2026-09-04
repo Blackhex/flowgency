@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="mb-4">
-  <a href="/{{ group }}/decisions" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to decisions</a>
+  <a href="/{{ team }}/decisions" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to decisions</a>
 </div>
 
 <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
@@ -26,7 +26,7 @@
       {% if pipeline_observations %}
       <div class="flex flex-wrap items-center gap-1">
         {% for lc in pipeline_observations %}
-        <a href="/{{ group }}/observations/{{ lc.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 font-medium hover:bg-amber-200 transition-colors text-xs">
+        <a href="/{{ team }}/observations/{{ lc.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 font-medium hover:bg-amber-200 transition-colors text-xs">
           {{ lc.slug | replace("-", " ") }}
         </a>
         {% endfor %}
@@ -34,7 +34,7 @@
       <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       {% endif %}
       {% if proposal_slug %}
-      <a href="/{{ group }}/proposals/{{ proposal_slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-purple-100 text-purple-800 font-medium hover:bg-purple-200 transition-colors">
+      <a href="/{{ team }}/proposals/{{ proposal_slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-purple-100 text-purple-800 font-medium hover:bg-purple-200 transition-colors">
         {{ proposal_slug | replace("-", " ") | title }}
       </a>
       <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -137,7 +137,7 @@
       </div>
 
       {% if execution_status in ('failed', 'cancelled') %}
-      <form method="POST" action="/{{ group }}/decisions/{{ slug }}/retry" class="inline flex items-center gap-2">
+      <form method="POST" action="/{{ team }}/decisions/{{ slug }}/retry" class="inline flex items-center gap-2">
         <select name="execution_agent" required
                 class="text-xs border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-md px-2 py-1.5">
           {% for agent_name in execution_agents %}
@@ -163,7 +163,7 @@
       {{ executed_by | agent_badge }}
       {% endif %}
       {% if execution_log %}
-      <a href="/{{ group }}/logs/view?path={{ execution_log | urlencode }}"
+      <a href="/{{ team }}/logs/view?path={{ execution_log | urlencode }}"
          class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">View log</a>
       {% endif %}
     </div>
@@ -236,7 +236,7 @@
       {% if verified_at %}<span class="ml-1">· {{ verified_at }}</span>{% endif %}
       {% if verification_status == 'needs_follow_up' and follow_up_observation %}
       <span class="ml-1">·
-        <a href="/{{ group }}/observations/{{ follow_up_observation }}"
+        <a href="/{{ team }}/observations/{{ follow_up_observation }}"
            class="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400">View follow-up observation</a>
       </span>
       {% endif %}
@@ -244,14 +244,14 @@
     {% endif %}
 
     <div class="flex flex-wrap items-center gap-2">
-      <form method="POST" action="/{{ group }}/decisions/{{ slug }}/verify" class="inline">
+      <form method="POST" action="/{{ team }}/decisions/{{ slug }}/verify" class="inline">
         <input type="hidden" name="verification_status" value="verified">
         <button type="submit"
                 class="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors">
           Mark verified
         </button>
       </form>
-      <form method="POST" action="/{{ group }}/decisions/{{ slug }}/verify" class="inline">
+      <form method="POST" action="/{{ team }}/decisions/{{ slug }}/verify" class="inline">
         <input type="hidden" name="verification_status" value="needs_follow_up">
         <button type="submit"
                 class="px-3 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"

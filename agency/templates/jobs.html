@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% set active = "jobs" %}
 
-{% block title %}Jobs - {{ group_name }}{% endblock %}
+{% block title %}Jobs - {{ team_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-6 gap-4 flex-wrap">
   <div>
-    <h1 class="text-2xl font-bold text-gray-900">Jobs in {{ group_name }}</h1>
-    <p class="text-sm text-gray-500 mt-1">Active and recent durable job records for this group.</p>
+    <h1 class="text-2xl font-bold text-gray-900">Jobs in {{ team_name }}</h1>
+    <p class="text-sm text-gray-500 mt-1">Active and recent durable job records for this team.</p>
   </div>
   <span class="text-sm text-gray-500">{{ jobs|length }} job{{ 's' if jobs|length != 1 else '' }}</span>
 </div>
@@ -29,7 +29,7 @@
         </div>
         <div class="mt-2 text-sm text-gray-600">Routine: {{ job.routine_title }}</div>
         <div class="mt-1 text-xs text-gray-500">Memory: {{ job.memory_label }}</div>
-        {% if job.instance_missing %}<div class="mt-1 text-xs text-amber-700">Instance no longer belongs to this group</div>{% endif %}
+        {% if job.instance_missing %}<div class="mt-1 text-xs text-amber-700">Instance no longer belongs to this team</div>{% endif %}
       </div>
       <div class="flex gap-2 flex-wrap">
         {% if job.activity_href %}

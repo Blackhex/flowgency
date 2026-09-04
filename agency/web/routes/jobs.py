@@ -35,20 +35,20 @@ def _theme_css(request: Request) -> str:
     return request.app.state.theme_css_getter()
 
 
-def _group_context(request: Request, snapshot, group_id: str) -> dict[str, Any]:
-    group = snapshot.config.groups[group_id]
+def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
+    team_cfg = snapshot.config.teams[team_id]
     return {
-        "group": group_id,
-        "group_name": group.name,
-        "groups": {key: value.name for key, value in snapshot.config.groups.items()},
+        "team": team_id,
+        "team_name": team_cfg.name,
+        "teams": {key: value.name for key, value in snapshot.config.teams.items()},
         "agency_title": snapshot.config.agency.title,
         "admin_active": False,
-        "workspaces": [workspace.model_dump(mode="json") for workspace in group.workspaces],
-        "workspaces_available": bool(group.workspaces),
+        "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
+        "workspaces_available": bool(team_cfg.workspaces),
         "nav_open_observations": 0,
         "nav_actionable": 0,
         "nav_actionable_proposals": 0,
-        "nav_agent_count": len(group.agents),
+        "nav_agent_count": len(team_cfg.agents),
         "nav_running_decisions": 0,
         "show_tips": False,
         "tips_dismissed": [],
@@ -62,14 +62,14 @@ def _safe_job_id(job_id: str) -> str:
     return job_id
 
 
-def _job_path(job_store: JobStore, group_id: str, job_id: str) -> Path:
-    return job_store.path(group_id, _safe_job_id(job_id))
+def _job_path(job_store: JobStore, team_id: str, job_id: str) -> Path:
+    return job_store.path(team_id, _safe_job_id(job_id))
 
 
-def _log_href(group_id: str, log_path: str | None) -> str:
+def _log_href(team_id: str, log_path: str | None) -> str:
     if not log_path:
         return ""
-    return f"/{quote(group_id, safe='')}/logs/view?path={quote(log_path)}"
+    return f"/{quote(team_id, safe='')}/logs/view?path={quote(log_path)}"
 
 
 _SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -170,23 +170,23 @@ def _memory_label(selector_data: dict[str, object], snapshot) -> str:
         return "Routine memory"
     if selector.scope == "agent":
         return "Agent memory"
-    if selector.scope == "group":
-        return "Group memory"
+    if selector.scope == "team":
+        return "Team memory"
     channel = snapshot.config.memory.channels.get(selector.channel or "")
     display = channel.display_name if channel is not None else (selector.channel or "Channel")
     return f"Channel: {display}"
 
 
-def _artifact_root(job_store: JobStore, group_id: str, job_id: str) -> Path:
-    return job_store.artifact_root(group_id, _safe_job_id(job_id))
+def _artifact_root(job_store: JobStore, team_id: str, job_id: str) -> Path:
+    return job_store.artifact_root(team_id, _safe_job_id(job_id))
 
 
-def _validate_artifact_query(job_store: JobStore, group_id: str, job_id: str, artifact: str) -> Path:
+def _validate_artifact_query(job_store: JobStore, team_id: str, job_id: str, artifact: str) -> Path:
     candidate = Path(artifact)
     if candidate.name != artifact or artifact in {"", ".", ".."}:
         raise HTTPException(status_code=400, detail="Invalid artifact path")
-    target = (_artifact_root(job_store, group_id, job_id) / artifact).resolve(strict=False)
-    root = _artifact_root(job_store, group_id, job_id)
+    target = (_artifact_root(job_store, team_id, job_id) / artifact).resolve(strict=False)
+    root = _artifact_root(job_store, team_id, job_id)
     try:
         target.relative_to(root)
     except ValueError as exc:
@@ -196,17 +196,17 @@ def _validate_artifact_query(job_store: JobStore, group_id: str, job_id: str, ar
     return target
 
 
-def _job_rows(snapshot, job_store: JobStore, group_id: str) -> list[dict[str, Any]]:
-    group = snapshot.config.groups[group_id]
+def _job_rows(snapshot, job_store: JobStore, team_id: str) -> list[dict[str, Any]]:
+    team_cfg = snapshot.config.teams[team_id]
     view = queue_snapshot(snapshot.config, memory_store=job_store.memory_store)
     positions = {
         entry.record.spec.job_id: index + 1
         for index, entry in enumerate(view.waiting)
     }
     rows: list[dict[str, Any]] = []
-    for path in sorted(job_store.paths(group_id), key=lambda item: item.stat().st_mtime, reverse=True):
+    for path in sorted(job_store.paths(team_id), key=lambda item: item.stat().st_mtime, reverse=True):
         record = read_job(path)
-        instance = group.agents.get(record.spec.agent_name)
+        instance = team_cfg.agents.get(record.spec.agent_name)
         agent_name = record.spec.agent_name
         rows.append(
             {
@@ -221,8 +221,8 @@ def _job_rows(snapshot, job_store: JobStore, group_id: str) -> list[dict[str, An
                 "integration": record.spec.integration_name,
                 "routine_title": _routine_title(record.spec.routine_id, record.spec.prompt_source),
                 "memory_label": _memory_label(record.spec.memory.selector, snapshot),
-                "detail_href": f"/{group_id}/jobs/{record.spec.job_id}",
-                "activity_href": f"/{group_id}/agents/{agent_name}/activity" if instance is not None else "",
+                "detail_href": f"/{team_id}/jobs/{record.spec.job_id}",
+                "activity_href": f"/{team_id}/agents/{agent_name}/activity" if instance is not None else "",
                 "instance_missing": instance is None,
                 "queue_position": positions.get(record.spec.job_id),
                 "queue_length": len(view.waiting),
@@ -233,11 +233,11 @@ def _job_rows(snapshot, job_store: JobStore, group_id: str) -> list[dict[str, An
     return rows
 
 
-def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
-    group = snapshot.config.groups[group_id]
-    instance = group.agents.get(record.spec.agent_name)
+def _job_detail_context(snapshot, team_id: str, record) -> dict[str, Any]:
+    team_cfg = snapshot.config.teams[team_id]
+    instance = team_cfg.agents.get(record.spec.agent_name)
     agent_name = record.spec.agent_name
-    artifact_dir = JobStore(snapshot.config.agency.memory_store).artifact_root(group_id, record.spec.job_id)
+    artifact_dir = JobStore(snapshot.config.agency.memory_store).artifact_root(team_id, record.spec.job_id)
     failed_artifacts = []
     if artifact_dir.exists():
         for artifact in sorted(artifact_dir.glob("*.md")):
@@ -246,7 +246,7 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
                 {
                     "name": artifact.name,
                     "label": label,
-                    "href": f"/{group_id}/jobs/{record.spec.job_id}?artifact={artifact.name}",
+                    "href": f"/{team_id}/jobs/{record.spec.job_id}?artifact={artifact.name}",
                 }
             )
     publication = record.memory_publication or {}
@@ -265,14 +265,14 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
         "memory_label": _memory_label(record.spec.memory.selector, snapshot),
         "failed_artifacts": failed_artifacts,
         "publication_receipt": publication,
-        "activity_href": f"/{group_id}/agents/{agent_name}/activity" if instance is not None else "",
-        "routine_href": f"/{group_id}/agents/{agent_name}/routines" if instance is not None else "",
-        "profile_href": f"/{group_id}/agents/{agent_name}/profile" if instance is not None else "",
+        "activity_href": f"/{team_id}/agents/{agent_name}/activity" if instance is not None else "",
+        "routine_href": f"/{team_id}/agents/{agent_name}/routines" if instance is not None else "",
+        "profile_href": f"/{team_id}/agents/{agent_name}/profile" if instance is not None else "",
         "instance_missing": instance is None,
         "can_cancel": record.status in {"queued", "waiting_for_memory"},
-        "stdout_href": _log_href(group_id, record.stdout_path),
+        "stdout_href": _log_href(team_id, record.stdout_path),
         "stdout_name": Path(record.stdout_path).name if record.stdout_path else "",
-        "stderr_href": _log_href(group_id, record.stderr_path),
+        "stderr_href": _log_href(team_id, record.stderr_path),
         "stderr_name": Path(record.stderr_path).name if record.stderr_path else "",
         "diagnostic_memory_hash": record.spec.memory.memory_hash,
         "resume_command": _format_resume(resume_argv, getattr(record, "copilot_home", None)),
@@ -281,11 +281,11 @@ def _job_detail_context(snapshot, group_id: str, record) -> dict[str, Any]:
     }
 
 
-@router.get("/{group}/jobs", response_class=HTMLResponse)
-async def jobs_list(request: Request, group: str, services: AgencyServices = Depends(get_services)):
+@router.get("/{team}/jobs", response_class=HTMLResponse)
+async def jobs_list(request: Request, team: str, services: AgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
-    if group not in snapshot.config.groups:
-        raise HTTPException(status_code=404, detail="Unknown group")
+    if team not in snapshot.config.teams:
+        raise HTTPException(status_code=404, detail="Unknown team")
     if services.job_store is None:
         raise HTTPException(status_code=409, detail="Job store unavailable")
     return _templates(request).TemplateResponse(
@@ -293,34 +293,34 @@ async def jobs_list(request: Request, group: str, services: AgencyServices = Dep
         "jobs.html",
         {
             "request": request,
-            **_group_context(request, snapshot, group),
+            **_team_context(request, snapshot, team),
             "active": "jobs",
-            "jobs": _job_rows(snapshot, services.job_store, group),
+            "jobs": _job_rows(snapshot, services.job_store, team),
         },
     )
 
 
-@router.get("/{group}/jobs/{job_id}", response_class=HTMLResponse)
-async def job_detail(request: Request, group: str, job_id: str, artifact: str = "", resume: str = "", services: AgencyServices = Depends(get_services)):
+@router.get("/{team}/jobs/{job_id}", response_class=HTMLResponse)
+async def job_detail(request: Request, team: str, job_id: str, artifact: str = "", resume: str = "", services: AgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
-    if group not in snapshot.config.groups:
-        raise HTTPException(status_code=404, detail="Unknown group")
+    if team not in snapshot.config.teams:
+        raise HTTPException(status_code=404, detail="Unknown team")
     if services.job_store is None:
         raise HTTPException(status_code=409, detail="Job store unavailable")
     if artifact:
-        target = _validate_artifact_query(services.job_store, group, job_id, artifact)
+        target = _validate_artifact_query(services.job_store, team, job_id, artifact)
         return FileResponse(target)
-    path = _job_path(services.job_store, group, job_id)
+    path = _job_path(services.job_store, team, job_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     record = read_job(path)
-    context = _job_detail_context(snapshot, group, record)
+    context = _job_detail_context(snapshot, team, record)
     return _templates(request).TemplateResponse(
         request,
         "job_detail.html",
         {
             "request": request,
-            **_group_context(request, snapshot, group),
+            **_team_context(request, snapshot, team),
             "active": "jobs",
             **context,
             "resume_notice": {
@@ -331,14 +331,14 @@ async def job_detail(request: Request, group: str, job_id: str, artifact: str = 
     )
 
 
-@router.post("/{group}/jobs/{job_id}/resume")
-async def job_resume(request: Request, group: str, job_id: str, services: AgencyServices = Depends(get_services)):
+@router.post("/{team}/jobs/{job_id}/resume")
+async def job_resume(request: Request, team: str, job_id: str, services: AgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
-    if group not in snapshot.config.groups:
-        raise HTTPException(status_code=404, detail="Unknown group")
+    if team not in snapshot.config.teams:
+        raise HTTPException(status_code=404, detail="Unknown team")
     if services.job_store is None:
         raise HTTPException(status_code=409, detail="Job store unavailable")
-    path = _job_path(services.job_store, group, job_id)
+    path = _job_path(services.job_store, team, job_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     record = read_job(path)
@@ -359,21 +359,21 @@ async def job_resume(request: Request, group: str, job_id: str, services: Agency
         )
     except (IntegrationError, OSError):
         outcome = "failed"
-    return RedirectResponse(f"/{group}/jobs/{job_id}?resume={outcome}", status_code=303)
+    return RedirectResponse(f"/{team}/jobs/{job_id}?resume={outcome}", status_code=303)
 
 
-@router.post("/{group}/jobs/{job_id}/cancel", response_class=HTMLResponse)
-async def job_cancel(request: Request, group: str, job_id: str, services: AgencyServices = Depends(get_services)):
+@router.post("/{team}/jobs/{job_id}/cancel", response_class=HTMLResponse)
+async def job_cancel(request: Request, team: str, job_id: str, services: AgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
-    if group not in snapshot.config.groups:
-        raise HTTPException(status_code=404, detail="Unknown group")
+    if team not in snapshot.config.teams:
+        raise HTTPException(status_code=404, detail="Unknown team")
     if services.job_store is None:
         raise HTTPException(status_code=409, detail="Job store unavailable")
-    path = _job_path(services.job_store, group, job_id)
+    path = _job_path(services.job_store, team, job_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     try:
         cancel_job(path)
     except InvalidJobTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RedirectResponse(f"/{group}/jobs/{job_id}", status_code=303)
+    return RedirectResponse(f"/{team}/jobs/{job_id}", status_code=303)

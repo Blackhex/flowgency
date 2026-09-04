@@ -5,7 +5,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 import agency.app as app_mod
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 def _write_blueprint(root: Path, key: str, title: str) -> None:
@@ -37,11 +37,11 @@ def _status(state="inactive", installed=False, conflict=False, mismatches=None):
 
 
 def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
-    paths = create_group_environment(
+    paths = create_team_environment(
         tmp_path,
         "test",
     )
-    group_path = paths.state_root
+    team_path = paths.state_root
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
@@ -49,11 +49,11 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     _write_blueprint(library_root, "advisor", "Advisor")
     config_path = tmp_path / "config.yaml"
     config = {
-        "schema_version": 5,
+        "schema_version": 6,
 
         "agency": {
             "title": "Agency",
-            "default_group": "test",
+            "default_team": "test",
             "ai_backend": "copilot",
             "agent_library": str(library_root),
             "compilation_cache": str(cache_root),
@@ -62,8 +62,8 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
             "dispatch": {"interval": 15},
         },
         "memory": {"channels": {}},
-        "groups": {
-            "test": apply_group_paths({
+        "teams": {
+            "test": apply_team_paths({
                 "name": "Test Agents",
                 "default_integration": "copilot",
                 "runtime": {
@@ -111,7 +111,7 @@ def test_dispatch_status_ignores_persisted_installed_flag(tmp_path, monkeypatch)
 
 def test_group_page_labels_config_as_schedule_enabled(tmp_path, monkeypatch):
     client = _configure_admin(tmp_path, monkeypatch, _status())
-    response = client.get("/admin/groups")
+    response = client.get("/admin/teams")
     assert response.status_code == 200
     assert "Schedule enabled" in response.text
     assert "Dispatch on" not in response.text
@@ -119,7 +119,7 @@ def test_group_page_labels_config_as_schedule_enabled(tmp_path, monkeypatch):
 
 def test_group_schedule_controls_remain_visible_when_dispatcher_inactive(tmp_path, monkeypatch):
     client = _configure_admin(tmp_path, monkeypatch, _status())
-    response = client.get("/admin/orgs/test/edit")
+    response = client.get("/admin/teams/test/edit")
     assert response.status_code == 200
     assert "Runtime defaults" in response.text
     assert "Dispatch enabled" in response.text
@@ -197,7 +197,7 @@ def test_interval_update_repairs_dispatcher_through_shared_api(tmp_path, monkeyp
         "/admin/settings",
         data={
             "title": "Agency",
-            "default_group": "test",
+            "default_team": "test",
             "ai_backend": "copilot",
             "theme": "",
             "dispatch_interval": "30",
@@ -220,7 +220,7 @@ def test_interval_update_returns_409_when_inspection_error(tmp_path, monkeypatch
         "/admin/settings",
         data={
             "title": "Agency",
-            "default_group": "test",
+            "default_team": "test",
             "ai_backend": "copilot",
             "theme": "",
             "dispatch_interval": "30",
@@ -234,7 +234,7 @@ def test_interval_update_returns_409_when_inspection_error(tmp_path, monkeypatch
 def test_admin_groups_card_layout_stacks_on_mobile(tmp_path, monkeypatch):
     """Group card outer layout must stack content above actions on mobile, return to row at sm."""
     client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
-    response = client.get("/admin/groups")
+    response = client.get("/admin/teams")
     assert response.status_code == 200
     # Outer card layout must stack on mobile: flex flex-col on base, flex-row at sm
     assert 'flex flex-col' in response.text and 'sm:flex-row' in response.text
@@ -254,11 +254,11 @@ def test_admin_group_conflict_lists_workspace_without_group_state_as_not_initial
     monkeypatch,
 ):
     client = _configure_admin(tmp_path, monkeypatch, _status())
-    assert client.get("/admin/groups").status_code == 200
-    shutil.rmtree(tmp_path / "groups" / "test")
+    assert client.get("/admin/teams").status_code == 200
+    shutil.rmtree(tmp_path / "teams" / "test")
 
     response = client.post(
-        "/admin/orgs/test/delete",
+        "/admin/teams/test/delete",
         data={"revision": "stale-revision"},
     )
 
@@ -270,11 +270,11 @@ def test_admin_group_conflict_lists_workspace_without_group_state_as_not_initial
 def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monkeypatch):
     """Group settings no longer render the old per-agent schedule rule editor."""
     client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
-    response = client.get("/admin/orgs/test/edit")
+    response = client.get("/admin/teams/test/edit")
     assert response.status_code == 200
     assert "Dispatch Schedule" not in response.text
     assert "Save Dispatch Config" not in response.text
-    assert "Agent roster management moved to the group roster page" in response.text
+    assert "Agent roster management moved to the team roster page" in response.text
     assert 'href="/test/agents"' in response.text
 
 
@@ -288,7 +288,7 @@ def test_admin_org_edit_preserves_selected_theme(tmp_path, monkeypatch):
     )
     app_mod.refresh_services()
 
-    response = client.get("/admin/orgs/test/edit")
+    response = client.get("/admin/teams/test/edit")
 
     assert response.status_code == 200
     assert "/* Theme: Workshop */" in response.text

@@ -73,7 +73,7 @@ def test_schema_version_four_is_rejected(config_paths):
             "memory_store": str(config_paths["memory_store"]),
             "prompt_store": str(config_paths["prompt_store"]),
         },
-        "groups": {},
+        "teams": {},
     }
 
     with pytest.raises(ValidationFailed) as excinfo:

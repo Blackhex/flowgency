@@ -335,7 +335,7 @@ def test_execution_integrations_enforce_validate_run_before_subprocess_or_prompt
         runtime_policy=EffectiveRuntimePolicy(
             timeout=60
         ),
-        skill="daily-review",
+        skill=None,
         skill_arguments=()
     )
 
@@ -466,7 +466,7 @@ def test_filechange_fields():
 def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
     from agency.configuration import ValidationFailed, parse_config
 
-    group = raw_config["groups"]["newsletter"]
+    group = raw_config["teams"]["newsletter"]
     group["runtime"] = {
         "permissions": {
             "mode": "restricted",

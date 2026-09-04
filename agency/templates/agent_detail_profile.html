@@ -4,7 +4,7 @@
     <p class="text-sm text-gray-500">Edit config-backed identity fields and write capability. This page does not edit native integration files.</p>
     <p class="mt-2 text-sm text-gray-600">Integration key: <span class="font-mono">{{ integration }}</span></p>
   </div>
-  <form method="post" action="/{{ group }}/agents/{{ agent }}/profile" class="grid gap-4 md:grid-cols-2">
+  <form method="post" action="/{{ team }}/agents/{{ agent }}/profile" class="grid gap-4 md:grid-cols-2">
     <input type="hidden" name="revision" value="{{ config_revision }}">
     <label class="block text-sm text-gray-700">
       <span class="mb-1 block font-medium">Display name</span>

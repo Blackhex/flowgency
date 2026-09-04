@@ -249,7 +249,7 @@ def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, raw_con
         assert "Blueprint:" in response.text
         assert "copilot" in response.text.lower()
         assert "Routine: Daily review" in response.text
-        assert "Instance no longer belongs to this group" in response.text
+        assert "Instance no longer belongs to this team" in response.text
         assert "/newsletter/agents/advisor/" not in response.text
 
 
@@ -277,7 +277,7 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
     assert "Blueprint:" in response.text
     assert "copilot" in response.text.lower()
     assert "Routine: Daily review" in response.text
-    assert "Instance no longer belongs to this group" in response.text
+    assert "Instance no longer belongs to this team" in response.text
     assert "/newsletter/agents/advisor/" not in response.text
 
 

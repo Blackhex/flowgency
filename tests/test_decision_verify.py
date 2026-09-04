@@ -12,11 +12,11 @@ from fastapi.testclient import TestClient
 
 import agency.app as app_mod
 from agency.app import app
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 def _setup_group(tmp_path, monkeypatch, *, decision_meta):
-    paths = create_group_environment(
+    paths = create_team_environment(
         tmp_path,
         "test",
         create_state=True,
@@ -46,11 +46,11 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 5,
+                "schema_version": 6,
 
                 "agency": {
                     "title": "Agency",
-                    "default_group": "test",
+                    "default_team": "test",
                     "ai_backend": "claude-code",
                     "decided_by": "captain",
                     "agent_library": str((tmp_path / "agent-library").resolve()),
@@ -58,8 +58,8 @@ def _setup_group(tmp_path, monkeypatch, *, decision_meta):
                     "memory_store": str((tmp_path / "memory").resolve()),
                     "prompt_store": str((tmp_path / "prompts").resolve()),
                 },
-                "groups": {
-                    "test": apply_group_paths({
+                "teams": {
+                    "test": apply_team_paths({
                         "name": "Test",
                         "default_integration": "script",
                         "agents": [

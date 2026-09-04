@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active = "proposals" %}
 
-{% block title %}Proposals - {{ group_name }}{% endblock %}
+{% block title %}Proposals - {{ team_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-6">
@@ -11,7 +11,7 @@
 
 <div class="space-y-3">
   {% for c in proposals %}
-  <a href="/{{ group }}/proposals/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-purple-300 transition-colors">
+  <a href="/{{ team }}/proposals/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-purple-300 transition-colors">
     <div class="flex flex-wrap items-center gap-2 mb-1.5">
       {{ c.get("origin_agent", "") | agent_badge }}
       {{ c.get("status", "") | status_badge }}

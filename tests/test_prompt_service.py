@@ -38,7 +38,7 @@ def prompt_service_env(tmp_path, raw_config):
         "---\nname: shared-triage\ndescription: Shared triage.\n---\n\nReview shared work.\n",
         encoding="utf-8",
     )
-    agent = raw["groups"]["newsletter"]["agents"][0]
+    agent = raw["teams"]["newsletter"]["agents"][0]
     agent["name"] = "reviewer"
     agent["blueprint"] = "reviewer"
     agent["prompts"] = []
@@ -68,7 +68,7 @@ def test_create_private_publishes_then_registers(prompt_service_env):
 
     assert result.document.name == "local-triage"
     assert (
-        result.snapshot.config.groups["newsletter"].agents["reviewer"].prompts
+        result.snapshot.config.teams["newsletter"].agents["reviewer"].prompts
         == ("local-triage",)
     )
 
@@ -158,7 +158,7 @@ def test_delete_private_rejects_referenced_routine(prompt_service_env):
     )
     prompt_service_env.config_store.patch(
         created.snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
             routines=[
                 {
                     "id": "morning-triage",
@@ -209,7 +209,7 @@ def test_delete_private_reports_orphan_when_source_cleanup_fails(
     )
 
     assert (
-        result.snapshot.config.groups["newsletter"].agents["reviewer"].prompts
+        result.snapshot.config.teams["newsletter"].agents["reviewer"].prompts
         == ()
     )
     assert result.orphaned_path == prompt_service_env.store.path(

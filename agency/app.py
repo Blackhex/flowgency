@@ -1,4 +1,4 @@
-"""Agency Dashboard — multi-group agent management interface."""
+"""Agency Dashboard — multi-team agent management interface."""
 
 import logging
 import os
@@ -62,9 +62,9 @@ from agency.records.frontmatter import extract_display_title, parse_frontmatter
 import json as json_module
 from agency.workspaces import REGISTRY as WORKSPACE_REGISTRY
 from agency.web import AgencyServices, build_services, get_services
-from agency.web.state import agency_settings, runtime_group
+from agency.web.state import agency_settings, runtime_team
 from agency.web.routes import (
-    admin_groups_router,
+    admin_teams_router,
     admin_library_router,
     admin_memory_router,
     agent_detail_router,
@@ -129,7 +129,7 @@ def get_agency_config() -> dict:
         if not _has_config_file():
             return {
                 "title": "Agency",
-                "default_group": "",
+                "default_team": "",
                 "decided_by": "admin",
                 "ai_backend": "claude-code",
                 "theme": "",
@@ -393,11 +393,11 @@ async def manifest():
     return data
 
 
-# ── Group Resolution ──────────────────────────────────────────────────────────
+# ── Team Resolution ───────────────────────────────────────────────────────────
 
 
-def get_group(group: str) -> dict:
-    """Resolve a group key to its full config dict."""
+def get_team(team: str) -> dict:
+    """Resolve a team key to its full config dict."""
     try:
         snapshot = _load_snapshot()
     except Exception as error:
@@ -405,9 +405,9 @@ def get_group(group: str) -> dict:
             status_code=409,
             detail=_config_error_message(error),
         )
-    if group not in snapshot.config.groups:
-        raise HTTPException(404, f"Unknown group: {group}")
-    return runtime_group(snapshot, group)
+    if team not in snapshot.config.teams:
+        raise HTTPException(404, f"Unknown team: {team}")
+    return runtime_team(snapshot, team)
 
 
 def get_agent_integration(g: dict, agent_name: str):
@@ -425,11 +425,11 @@ def safe_redirect(url: str, fallback: str = "/") -> str:
     return fallback
 
 
-def group_context(g: dict, observations: list[dict] | None = None, proposals: list[dict] | None = None) -> dict:
-    """Return standard template context for a group. Accepts precomputed lists to avoid double-reads."""
+def team_context(g: dict, observations: list[dict] | None = None, proposals: list[dict] | None = None) -> dict:
+    """Return standard template context for a team."""
     snapshot = _load_snapshot()
     agency = agency_settings(snapshot)
-    group_cfg = snapshot.config.groups[g["key"]]
+    team_cfg = snapshot.config.teams[g["key"]]
     if observations is None:
         observations = list_observations(g)
     if proposals is None:
@@ -441,18 +441,18 @@ def group_context(g: dict, observations: list[dict] | None = None, proposals: li
     decisions = list_decisions(g)
     running_decisions = sum(1 for d in decisions if d.get("execution_status") == "running")
     return {
-        "group": g["key"],
-        "group_name": g["name"],
-        "groups": {
-            key: value.name for key, value in snapshot.config.groups.items()
+        "team": g["key"],
+        "team_name": g["name"],
+        "teams": {
+            key: value.name for key, value in snapshot.config.teams.items()
         },
         "agency_title": agency.get("title", "Agency"),
         "admin_active": False,
         "workspaces": [
             workspace.model_dump(mode="json")
-            for workspace in group_cfg.workspaces
+            for workspace in team_cfg.workspaces
         ],
-        "workspaces_available": bool(group_cfg.workspaces),
+        "workspaces_available": bool(team_cfg.workspaces),
         "nav_open_observations": open_observation_count,
         "nav_actionable": needs_action_count,
         "nav_actionable_proposals": actionable_proposal_count,
@@ -550,7 +550,7 @@ def enforce_ttl(filepath: Path, meta: dict) -> bool:
 
 
 def list_markdown_items(item_dir: Path, apply_ttl: bool = False) -> list[dict]:
-    """List markdown files from an explicit group directory with parsed frontmatter."""
+    """List markdown files from an explicit team directory with parsed frontmatter."""
     item_dir = Path(item_dir)
     if not item_dir.exists():
         return []
@@ -945,7 +945,7 @@ def integration_badge_filter(name: str) -> Markup:
 
 templates.env.filters["integration_badge"] = integration_badge_filter
 
-app.include_router(admin_groups_router)
+app.include_router(admin_teams_router)
 app.include_router(admin_library_router)
 app.include_router(admin_memory_router)
 app.include_router(agents_router)
@@ -1109,7 +1109,7 @@ def _newest_active_job(group_jobs: tuple[Path, ...], agent_name: str):
     return jobs[0] if jobs else None
 
 
-def _overlay_dashboard_job_state(agent: dict, current, group_key: str) -> None:
+def _overlay_dashboard_job_state(agent: dict, current, team_key: str) -> None:
     agent_name = agent["name"]
     agent.update(
         {
@@ -1117,9 +1117,9 @@ def _overlay_dashboard_job_state(agent: dict, current, group_key: str) -> None:
             "queued": current is not None and current.status == "queued",
             "job_status_key": current.status if current is not None else None,
             "job_status": _job_state_label(current.status) if current is not None else None,
-            "job_href": f"/{group_key}/jobs/{current.spec.job_id}" if current is not None else "",
-            "activity_href": f"/{group_key}/agents/{agent_name}/activity",
-            "profile_href": f"/{group_key}/agents/{agent_name}/profile",
+            "job_href": f"/{team_key}/jobs/{current.spec.job_id}" if current is not None else "",
+            "activity_href": f"/{team_key}/agents/{agent_name}/activity",
+            "profile_href": f"/{team_key}/agents/{agent_name}/profile",
         }
     )
 
@@ -1138,13 +1138,13 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
             _overlay_dashboard_job_state(agent, current, g["key"])
         return agents
 
-    if g["key"] not in snapshot.config.groups:
+    if g["key"] not in snapshot.config.teams:
         return []
-    group = snapshot.config.groups[g["key"]]
+    team_cfg = snapshot.config.teams[g["key"]]
     observations = list_observations(g)
     fleet: list[dict] = []
     dispatch_cfg = g.get("dispatch", {})
-    for instance in group.agents.values():
+    for instance in team_cfg.agents.values():
         current = _newest_active_job(tuple(g.get("job_paths", ())), instance.name)
         selector = (
             current.spec.memory.selector
@@ -1290,37 +1290,37 @@ def build_agent_timeline(g: dict, agent_name: str, agent_observations: list[dict
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    """Redirect to the default group."""
+    """Redirect to the default team."""
     services = _services()
     if services.startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
     snapshot = services.config_store.load()
     agency = get_agency_config()
-    default = agency.get("default_group", "")
-    if default and default in snapshot.config.groups:
+    default = agency.get("default_team", "")
+    if default and default in snapshot.config.teams:
         return RedirectResponse(f"/{default}/", status_code=303)
-    first = next(iter(snapshot.config.groups), "")
+    first = next(iter(snapshot.config.teams), "")
     if first:
         return RedirectResponse(f"/{first}/", status_code=303)
     return RedirectResponse("/setup", status_code=303)
 
 
-@app.get("/setup/complete/{group}", response_class=HTMLResponse)
-async def setup_complete(request: Request, group: str):
+@app.get("/setup/complete/{team}", response_class=HTMLResponse)
+async def setup_complete(request: Request, team: str):
     """Post-setup page — tells user to come back later."""
-    group_name = group
+    team_display = team
     agency_title = "Agency"
     services = _services()
     if services.startup_error is None:
         snapshot = services.config_store.load()
         agency_title = agency_settings(snapshot).get("title", "Agency")
-        if group in snapshot.config.groups:
-            group_name = snapshot.config.groups[group].name
+        if team in snapshot.config.teams:
+            team_display = snapshot.config.teams[team].name
     return templates.TemplateResponse(request, "setup_complete.html", {
         "request": request,
         "agency_title": agency_title,
-        "group": group,
-        "group_name": group_name,
+        "team": team,
+        "team_name": team_display,
     })
 
 
@@ -1361,26 +1361,26 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
     snapshot = _load_snapshot()
     agency = agency_settings(snapshot)
     orgs = []
-    for key, group in snapshot.config.groups.items():
-        paths = resolve_team_paths(group)
-        dispatch_cfg = group.dispatch
+    for key, tcfg in snapshot.config.teams.items():
+        paths = resolve_team_paths(tcfg)
+        dispatch_cfg = tcfg.dispatch
         orgs.append({
             "key": key,
-            "name": group.name,
-            "workspace_path": str(group.workspace_path),
-            "group_path": str(group.path),
-            "agents": list(group.agents.keys()),
-            "agent_count": len(group.agents),
+            "name": tcfg.name,
+            "workspace_path": str(tcfg.workspace_path),
+            "team_path": str(tcfg.path),
+            "agents": list(tcfg.agents.keys()),
+            "agent_count": len(tcfg.agents),
             "initialized": all(path.is_dir() for path in paths.record_directories),
             "workspace_exists": paths.workspace_root.exists(),
             "dispatch_enabled": dispatch_cfg.enabled,
         })
     return {
         "agency_title": agency.get("title", "Agency"),
-        "default_group": agency.get("default_group", ""),
+        "default_team": agency.get("default_team", ""),
         "orgs": orgs,
-        "groups": {
-            key: group.name for key, group in snapshot.config.groups.items()
+        "teams": {
+            key: tcfg.name for key, tcfg in snapshot.config.teams.items()
         },
         "revision": snapshot.revision,
         "admin_active": True,
@@ -1519,14 +1519,14 @@ async def admin_dispatch_page(request: Request):
     })
 
 
-@app.get("/admin/groups", response_class=HTMLResponse)
-async def admin_groups_page(request: Request):
-    """Admin agent groups page."""
+@app.get("/admin/teams", response_class=HTMLResponse)
+async def admin_teams_page(request: Request):
+    """Admin agent teams page."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
-    return templates.TemplateResponse(request, "admin_groups.html", {
+    return templates.TemplateResponse(request, "admin_teams.html", {
         "request": request,
-        **admin_context("groups"),
+        **admin_context("teams"),
     })
 
 
@@ -1538,7 +1538,7 @@ async def admin_save_settings(request: Request):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     title = form.get("title", "Agency").strip()
-    default_group = form.get("default_group", "").strip()
+    default_team = form.get("default_team", "").strip()
     snapshot = _load_snapshot()
     settings = agency_settings(snapshot)
     ai_backend = form.get("ai_backend", "claude-code")
@@ -1560,7 +1560,7 @@ async def admin_save_settings(request: Request):
             revision or snapshot.revision,
             AgencySettingsPatch(
                 title=title or "Agency",
-                default_group=default_group,
+                default_team=default_team,
                 ai_backend=ai_backend,
                 theme=theme,
                 dispatch_interval=int(dispatch_interval),
@@ -1630,22 +1630,22 @@ async def admin_dispatch_install(request: Request):
     return RedirectResponse("/admin/dispatch", status_code=303)
 
 
-@app.get("/admin/orgs/new", response_class=HTMLResponse)
+@app.get("/admin/teams/new", response_class=HTMLResponse)
 async def admin_org_new(request: Request):
     """Create new org form."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
     agency = get_agency_config()
     snapshot = _load_snapshot()
-    return templates.TemplateResponse(request, "admin_org_edit.html", {
+    return templates.TemplateResponse(request, "admin_team_edit.html", {
         "request": request,
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
         "active": "admin",
-        "admin_page": "groups",
+        "admin_page": "teams",
         "theme_css": get_theme_css(),
-        "groups": {
-            key: group.name for key, group in snapshot.config.groups.items()
+        "teams": {
+            key: tcfg.name for key, tcfg in snapshot.config.teams.items()
         },
         "mode": "create",
         "org_key": "",
@@ -1662,20 +1662,20 @@ async def admin_org_new(request: Request):
     })
 
 
-@app.post("/{group}/agents/{agent}/run")
+@app.post("/{team}/agents/{agent}/run")
 async def agent_run(
     request: Request,
-    group: str,
+    team: str,
     agent: str,
     services: AgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     try:
-        group_config = snapshot.config.groups[group]
+        team_config = snapshot.config.teams[team]
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"Unknown group: {group}") from exc
+        raise HTTPException(status_code=404, detail=f"Unknown team: {team}") from exc
     try:
-        instance = group_config.agents[agent]
+        instance = team_config.agents[agent]
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Unknown agent: {agent}") from exc
 
@@ -1717,7 +1717,7 @@ async def agent_run(
                 snapshot,
                 services.blueprint_library,
                 services.prompt_store,
-                group,
+                team,
                 agent,
                 scope=prompt.scope,
                 name=prompt.name,
@@ -1748,7 +1748,7 @@ async def agent_run(
                 scope="channel",
                 channel=memory_channel,
             )
-        elif memory_scope not in {"run", "routine", "agent", "group"}:
+        elif memory_scope not in {"run", "routine", "agent", "team"}:
             raise HTTPException(status_code=400, detail="Invalid memory override")
         else:
             if memory_channel:
@@ -1762,7 +1762,7 @@ async def agent_run(
     try:
         request_obj = JobRequest(
             config_path=services.config_path,
-            group_key=group,
+            team_key=team,
             agent_name=agent,
             trigger="manual_prompt",
             task_input=task_input,
@@ -1777,10 +1777,10 @@ async def agent_run(
     return JSONResponse({"status": "started", "job_id": handle.job_id}, status_code=202)
 
 
-@app.get("/{group}/", response_class=HTMLResponse)
-async def home(request: Request, group: str):
+@app.get("/{team}/", response_class=HTMLResponse)
+async def home(request: Request, team: str):
     """Dashboard home — mission control."""
-    g = get_group(group)
+    g = get_team(team)
     observations = list_observations(g)
     proposals = list_proposals(g)
     decisions = list_decisions(g)
@@ -1829,7 +1829,7 @@ async def home(request: Request, group: str):
 
     return templates.TemplateResponse(request, "home.html", {
         "request": request,
-        **group_context(g, observations=observations, proposals=proposals),
+        **team_context(g, observations=observations, proposals=proposals),
         # Zone 1: Fleet
         "fleet_agents": agents,
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
@@ -1853,10 +1853,10 @@ async def home(request: Request, group: str):
     })
 
 
-@app.get("/{group}/observations", response_class=HTMLResponse)
-async def observations_list(request: Request, group: str, agent: str = "", status: str = ""):
+@app.get("/{team}/observations", response_class=HTMLResponse)
+async def observations_list(request: Request, team: str, agent: str = "", status: str = ""):
     """List all observations with optional filtering."""
-    g = get_group(group)
+    g = get_team(team)
     observations = list_observations(g)
     filtered = observations
     if agent:
@@ -1865,7 +1865,7 @@ async def observations_list(request: Request, group: str, agent: str = "", statu
         filtered = [c for c in filtered if c.get("status") == status]
     return templates.TemplateResponse(request, "observations.html", {
         "request": request,
-        **group_context(g, observations=observations),
+        **team_context(g, observations=observations),
         "observations": filtered,
         "filter_agent": agent,
         "filter_status": status,
@@ -1873,10 +1873,10 @@ async def observations_list(request: Request, group: str, agent: str = "", statu
     })
 
 
-@app.get("/{group}/observations/{slug}", response_class=HTMLResponse)
-async def observation_detail(request: Request, group: str, slug: str):
+@app.get("/{team}/observations/{slug}", response_class=HTMLResponse)
+async def observation_detail(request: Request, team: str, slug: str):
     """View a single observation."""
-    g = get_group(group)
+    g = get_team(team)
     path = Path(g["observations"]) / f"{slug}.md"
     if not path.exists():
         raise HTTPException(404, "Observation not found")
@@ -1901,7 +1901,7 @@ async def observation_detail(request: Request, group: str, slug: str):
 
     return templates.TemplateResponse(request, "observation_detail.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "meta": meta,
         "body_html": render_md(body),
         "body_raw": body,
@@ -1912,10 +1912,10 @@ async def observation_detail(request: Request, group: str, slug: str):
     })
 
 
-@app.post("/{group}/observations/{slug}/status", response_class=HTMLResponse)
-async def observation_update_status(request: Request, group: str, slug: str):
+@app.post("/{team}/observations/{slug}/status", response_class=HTMLResponse)
+async def observation_update_status(request: Request, team: str, slug: str):
     """Update an observation's status via form submission."""
-    g = get_group(group)
+    g = get_team(team)
     path = Path(g["observations"]) / f"{slug}.md"
     if not path.exists():
         raise HTTPException(404, "Observation not found")
@@ -1927,29 +1927,29 @@ async def observation_update_status(request: Request, group: str, slug: str):
 
     update_frontmatter_field(path, "status", new_status)
 
-    return RedirectResponse(f"/{group}/observations/{slug}", status_code=303)
+    return RedirectResponse(f"/{team}/observations/{slug}", status_code=303)
 
 
-@app.get("/{group}/proposals", response_class=HTMLResponse)
-async def proposals_list(request: Request, group: str):
+@app.get("/{team}/proposals", response_class=HTMLResponse)
+async def proposals_list(request: Request, team: str):
     """List all proposals."""
-    g = get_group(group)
+    g = get_team(team)
     items = list_proposals(g)
     return templates.TemplateResponse(request, "proposals.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "proposals": items,
     })
 
 
-@app.get("/{group}/proposals/{slug}", response_class=HTMLResponse)
-async def proposal_detail(request: Request, group: str, slug: str):
+@app.get("/{team}/proposals/{slug}", response_class=HTMLResponse)
+async def proposal_detail(request: Request, team: str, slug: str):
     """View a single proposal."""
-    g = get_group(group)
-    return render_proposal_detail(request, g, group, slug)
+    g = get_team(team)
+    return render_proposal_detail(request, g, team, slug)
 
 
-def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
+def render_proposal_detail(request: Request, g: dict, team: str, slug: str,
                             *, selected_execution_agent: str | None = None,
                             submitted_answers: dict | None = None,
                             decision_note: str = "",
@@ -2005,7 +2005,7 @@ def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
 
     return templates.TemplateResponse(request, "proposal_detail.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "meta": meta,
         "body_html": render_md(body),
         "body_raw": body,
@@ -2024,11 +2024,11 @@ def render_proposal_detail(request: Request, g: dict, group: str, slug: str,
     }, status_code=status_code)
 
 
-@app.post("/{group}/proposals/{slug}/decide", response_class=HTMLResponse)
-async def proposal_decide(request: Request, group: str, slug: str):
+@app.post("/{team}/proposals/{slug}/decide", response_class=HTMLResponse)
+async def proposal_decide(request: Request, team: str, slug: str):
     """Create a decision by answering a proposal's questions and submitting a
     durable job for the selected execution agent."""
-    g = get_group(group)
+    g = get_team(team)
     decisions_dir = Path(g["decisions"])
     proposals_dir = Path(g["proposals"])
 
@@ -2056,7 +2056,7 @@ async def proposal_decide(request: Request, group: str, slug: str):
     schema_errors = validate_proposal_schema(cmeta)
     if schema_errors:
         return render_proposal_detail(
-            request, g, group, slug,
+            request, g, team, slug,
             selected_execution_agent=execution_agent,
             submitted_answers=answers,
             decision_note=decision_note,
@@ -2067,7 +2067,7 @@ async def proposal_decide(request: Request, group: str, slug: str):
     declared_executor = cmeta.get("execution_agent", "")
     if declared_executor and declared_executor not in execution_agent_options(g):
         return render_proposal_detail(
-            request, g, group, slug,
+            request, g, team, slug,
             selected_execution_agent=execution_agent,
             submitted_answers=answers,
             decision_note=decision_note,
@@ -2087,7 +2087,7 @@ async def proposal_decide(request: Request, group: str, slug: str):
 
     if all_errors:
         return render_proposal_detail(
-            request, g, group, slug,
+            request, g, team, slug,
             selected_execution_agent=execution_agent,
             submitted_answers=answers,
             decision_note=decision_note,
@@ -2117,7 +2117,7 @@ async def proposal_decide(request: Request, group: str, slug: str):
     if should_execute_decision(questions, answers, decision_note):
         request_obj = JobRequest(
             config_path=CONFIG_PATH,
-            group_key=group,
+            team_key=team,
             agent_name=execution_agent,
             trigger="decision",
             task_input=build_decision_prompt(proposal_body, answers, decision_note),
@@ -2137,7 +2137,7 @@ async def proposal_decide(request: Request, group: str, slug: str):
         except JobSubmissionError as error:
             decision_path.unlink(missing_ok=True)
             return render_proposal_detail(
-                request, g, group, slug,
+                request, g, team, slug,
                 selected_execution_agent=execution_agent,
                 submitted_answers=answers,
                 decision_note=decision_note,
@@ -2153,29 +2153,29 @@ async def proposal_decide(request: Request, group: str, slug: str):
     # Update proposal status to decided
     update_frontmatter_field(cpath, "status", "decided")
 
-    return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
+    return RedirectResponse(f"/{team}/decisions/{slug}", status_code=303)
 
 
-@app.get("/{group}/decisions", response_class=HTMLResponse)
-async def decisions_list(request: Request, group: str):
+@app.get("/{team}/decisions", response_class=HTMLResponse)
+async def decisions_list(request: Request, team: str):
     """List all decisions."""
-    g = get_group(group)
+    g = get_team(team)
     items = list_decisions(g)
     return templates.TemplateResponse(request, "decisions.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "decisions": items,
     })
 
 
-@app.get("/{group}/decisions/{slug}", response_class=HTMLResponse)
-async def decision_detail(request: Request, group: str, slug: str):
+@app.get("/{team}/decisions/{slug}", response_class=HTMLResponse)
+async def decision_detail(request: Request, team: str, slug: str):
     """View a single decision."""
-    g = get_group(group)
-    return render_decision_detail(request, g, group, slug)
+    g = get_team(team)
+    return render_decision_detail(request, g, team, slug)
 
 
-def render_decision_detail(request: Request, g: dict, group: str, slug: str,
+def render_decision_detail(request: Request, g: dict, team: str, slug: str,
                             *, decision_error: str = "", status_code: int = 200):
     """Build the decision_detail template response. Shared by the GET route and
     the POST /retry route so validation/submission errors can re-render the
@@ -2220,7 +2220,7 @@ def render_decision_detail(request: Request, g: dict, group: str, slug: str,
 
     return templates.TemplateResponse(request, "decision_detail.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "meta": meta,
         "body_html": render_md(body),
         "slug": slug,
@@ -2246,10 +2246,10 @@ def render_decision_detail(request: Request, g: dict, group: str, slug: str,
     }, status_code=status_code)
 
 
-@app.post("/{group}/decisions/{slug}/retry", response_class=HTMLResponse)
-async def decision_retry(request: Request, group: str, slug: str):
+@app.post("/{team}/decisions/{slug}/retry", response_class=HTMLResponse)
+async def decision_retry(request: Request, team: str, slug: str):
     """Retry execution of a failed decision by submitting a new durable job."""
-    g = get_group(group)
+    g = get_team(team)
     decision_path = Path(g["decisions"]) / f"{slug}.md"
     if not decision_path.exists():
         raise HTTPException(404, "Decision not found")
@@ -2261,7 +2261,7 @@ async def decision_retry(request: Request, group: str, slug: str):
     current_status = meta.get("execution_status", "")
     if current_status not in {"failed", "cancelled"}:
         return render_decision_detail(
-            request, g, group, slug,
+            request, g, team, slug,
             decision_error=f"Cannot retry a decision with status \u2018{current_status}\u2019. Only failed or cancelled decisions can be retried.",
             status_code=400,
         )
@@ -2282,14 +2282,14 @@ async def decision_retry(request: Request, group: str, slug: str):
 
     if execution_agent not in execution_agent_options(g):
         return render_decision_detail(
-            request, g, group, slug,
+            request, g, team, slug,
             decision_error=f"Agent '{execution_agent}' does not support execution or is not writable.",
             status_code=400,
         )
 
     request_obj = JobRequest(
         config_path=CONFIG_PATH,
-        group_key=group,
+        team_key=team,
         agent_name=execution_agent,
         trigger="decision_retry",
         task_input=build_decision_prompt(proposal_body, meta.get("answers", {}), meta.get("decision_note", "")),
@@ -2322,16 +2322,16 @@ async def decision_retry(request: Request, group: str, slug: str):
     except JobSubmissionError as error:
         atomic_write_text(decision_path, original_text)
         return render_decision_detail(
-            request, g, group, slug,
+            request, g, team, slug,
             decision_error=str(error),
             status_code=400,
         )
 
-    return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
+    return RedirectResponse(f"/{team}/decisions/{slug}", status_code=303)
 
 
-@app.post("/{group}/decisions/{slug}/verify", response_class=HTMLResponse)
-async def decision_verify(request: Request, group: str, slug: str):
+@app.post("/{team}/decisions/{slug}/verify", response_class=HTMLResponse)
+async def decision_verify(request: Request, team: str, slug: str):
     """Record whether an executed decision satisfied its originating proposal.
 
     This is a thin, governance-only outcome state on the existing decision
@@ -2339,7 +2339,7 @@ async def decision_verify(request: Request, group: str, slug: str):
     the outcome did not satisfy the intent, this opens a follow-up observation
     (floated, linked back to the decision) so the loop stays connected.
     """
-    g = get_group(group)
+    g = get_team(team)
     decision_path = Path(g["decisions"]) / f"{slug}.md"
     if not decision_path.exists():
         raise HTTPException(404, "Decision not found")
@@ -2350,7 +2350,7 @@ async def decision_verify(request: Request, group: str, slug: str):
     outcome = form.get("verification_status", "")
     if outcome not in ("verified", "needs_follow_up"):
         return render_decision_detail(
-            request, g, group, slug,
+            request, g, team, slug,
             decision_error="Choose 'Verified' or 'Needs follow-up'.",
             status_code=400,
         )
@@ -2374,10 +2374,10 @@ async def decision_verify(request: Request, group: str, slug: str):
 
     if outcome == "needs_follow_up":
         return RedirectResponse(
-            f"/{group}/observations/{meta['follow_up_observation'].replace('.md', '')}",
+            f"/{team}/observations/{meta['follow_up_observation'].replace('.md', '')}",
             status_code=303,
         )
-    return RedirectResponse(f"/{group}/decisions/{slug}", status_code=303)
+    return RedirectResponse(f"/{team}/decisions/{slug}", status_code=303)
 
 
 def _create_follow_up_observation(g: dict, decision_slug: str, meta: dict, body: str) -> str:
@@ -2420,22 +2420,22 @@ def _create_follow_up_observation(g: dict, decision_slug: str, meta: dict, body:
     return follow_up_slug
 
 
-@app.get("/{group}/logs", response_class=HTMLResponse)
-async def logs_list(request: Request, group: str):
+@app.get("/{team}/logs", response_class=HTMLResponse)
+async def logs_list(request: Request, team: str):
     """Browse execution logs by date."""
-    g = get_group(group)
+    g = get_team(team)
     logs = collect_logs(g)
     return templates.TemplateResponse(request, "logs.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "logs": logs,
     })
 
 
-@app.get("/{group}/logs/view", response_class=HTMLResponse)
-async def log_view(request: Request, group: str, path: str):
+@app.get("/{team}/logs/view", response_class=HTMLResponse)
+async def log_view(request: Request, team: str, path: str):
     """View a log file."""
-    g = get_group(group)
+    g = get_team(team)
     fpath = Path(path)
     logs_dir = Path(g["logs"]).resolve()
     validate_file_access(fpath, logs_dir)
@@ -2447,17 +2447,17 @@ async def log_view(request: Request, group: str, path: str):
 
     return templates.TemplateResponse(request, "log_view.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "filename": fpath.name,
         "content_html": content_html,
         "raw": raw,
     })
 
 
-@app.get("/{group}/workspaces", response_class=HTMLResponse)
-async def workspaces_list(request: Request, group: str):
-    """List all workspaces for a group."""
-    g = get_group(group)
+@app.get("/{team}/workspaces", response_class=HTMLResponse)
+async def workspaces_list(request: Request, team: str):
+    """List all workspaces for a team."""
+    g = get_team(team)
     workspace_list = g.get("workspaces", [])
     from agency.workspaces import REGISTRY
     enriched = []
@@ -2472,16 +2472,16 @@ async def workspaces_list(request: Request, group: str):
         })
     return templates.TemplateResponse(request, "workspaces.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "enriched_workspaces": enriched,
         "active": "workspaces",
     })
 
 
-@app.get("/{group}/workspaces/{idx}/file", response_class=HTMLResponse)
-async def workspace_file_view(request: Request, group: str, idx: int):
+@app.get("/{team}/workspaces/{idx}/file", response_class=HTMLResponse)
+async def workspace_file_view(request: Request, team: str, idx: int):
     """View/edit a config file within a workspace."""
-    g = get_group(group)
+    g = get_team(team)
     workspace_list = g.get("workspaces", [])
     if idx < 0 or idx >= len(workspace_list):
         raise HTTPException(404, "Workspace not found")
@@ -2508,7 +2508,7 @@ async def workspace_file_view(request: Request, group: str, idx: int):
                 break
     return templates.TemplateResponse(request, "workspace_detail.html", {
         "request": request,
-        **group_context(g),
+        **team_context(g),
         "ws": ws,
         "ws_idx": idx,
         "plugin": plugin,
@@ -2520,10 +2520,10 @@ async def workspace_file_view(request: Request, group: str, idx: int):
     })
 
 
-@app.post("/{group}/workspaces/{idx}/file/save", response_class=HTMLResponse)
-async def workspace_file_save(request: Request, group: str, idx: int):
+@app.post("/{team}/workspaces/{idx}/file/save", response_class=HTMLResponse)
+async def workspace_file_save(request: Request, team: str, idx: int):
     """Save edits to a workspace config file."""
-    g = get_group(group)
+    g = get_team(team)
     workspace_list = g.get("workspaces", [])
     if idx < 0 or idx >= len(workspace_list):
         raise HTTPException(404, "Workspace not found")
@@ -2538,7 +2538,7 @@ async def workspace_file_save(request: Request, group: str, idx: int):
         if file_path not in allowed:
             raise HTTPException(403, "File not in workspace config files")
         Path(file_path).write_text(content)
-    return RedirectResponse(f"/{group}/workspaces/{idx}/file?path={urllib.parse.quote(file_path, safe='')}", status_code=303)
+    return RedirectResponse(f"/{team}/workspaces/{idx}/file?path={urllib.parse.quote(file_path, safe='')}", status_code=303)
 
 
 RELOAD_INCLUDES = (

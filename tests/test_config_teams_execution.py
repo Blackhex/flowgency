@@ -38,7 +38,7 @@ def test_resolve_job_request_accesses_config_teams(raw_config, config_paths, mon
 
     request = JobRequest(
         config_path=config_paths["config_path"],
-        group_key="nonexistent",
+        team_key="nonexistent",
         agent_name="builder",
         trigger="manual",
         task_input="test",

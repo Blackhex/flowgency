@@ -37,7 +37,7 @@ def _write_config(tmp_path: Path, agents: list[dict]) -> Path:
             "memory_store": str(tmp_path / "memory-store"),
             "prompt_store": str(tmp_path / "prompts"),
         },
-        "groups": {
+        "teams": {
             "reviewers": {
                 "name": "Reviewers",
                 "workspace_path": str(workspace),

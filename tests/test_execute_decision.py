@@ -26,7 +26,7 @@ from test_proposal_questions import _setup_decision_group
 def _authority(spec: JobSpec):
     store = JobStore(Path(spec.memory.path).parent)
     return store.reference(
-        spec.group_key,
+        spec.team_key,
         spec.job_id,
         JobRecord.from_spec(spec).authority_digest,
     )
@@ -38,7 +38,7 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
     decision_path.parent.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 5\nagency:\n  title: Test\n  default_group: ''\n"
+        "schema_version: 5\nagency:\n  title: Test\n  default_team: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
         "  prompt_store: /nonexistent\nmemory: {}\ngroups: {}\n",
@@ -51,19 +51,19 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
     resolved = resolve_memory_selector(
         MemorySelector(scope="run"),
         job_id="placeholder",
-        group_key="grp",
+        team_key="grp",
         agent_name="worker",
         routine_id=None,
         channels={},
         store_root=tmp_path / ".compat-memory-root",
     )
     spec = JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=f"decision-{decision_name.replace('.', '-')}",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="grp",
-        group_root=str(group_path.resolve()),
+        team_key="grp",
+        team_root=str(group_path.resolve()),
         agent_name="worker",
         workspace_root=str(group_path.resolve()),
         trigger="decision",
@@ -102,7 +102,7 @@ def queued_decision_job(tmp_path: Path, *, decision_name: str = "prop.md") -> tu
         f"---\nexecution_job_id: {spec.job_id}\nexecution_status: pending\n---\n",
         encoding="utf-8",
     )
-    job_path = JobStore(tmp_path / ".compat-memory-root").path(spec.group_key, spec.job_id)
+    job_path = JobStore(tmp_path / ".compat-memory-root").path(spec.team_key, spec.job_id)
     write_job(job_path, JobRecord.from_spec(spec))
     return group_path, decision_path, spec
 
@@ -138,7 +138,7 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
 
     authored_rule = ResolvedPermissionRule(path=repo, tools=("read", "write"))
     context = SimpleNamespace(
-        group_root=group_path,
+        team_root=group_path,
         runtime_policy=EffectiveRuntimePolicy(
             timeout=30,
             mode="restricted",
@@ -179,7 +179,7 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
     group_path, decision, spec = queued_decision_job(tmp_path, decision_name="retry.md")
 
     context = SimpleNamespace(
-        group_root=group_path,
+        team_root=group_path,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         workspace_root=group_path / "worker",
         timeout=30,
@@ -208,7 +208,7 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
     group_path, decision, spec = queued_decision_job(tmp_path, decision_name="failed.md")
 
     context = SimpleNamespace(
-        group_root=group_path,
+        team_root=group_path,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         workspace_root=group_path / "worker",
         timeout=30,
@@ -259,7 +259,7 @@ def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monk
         )
 
     context = SimpleNamespace(
-        group_root=group_path,
+        team_root=group_path,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         workspace_root=group_path / "worker",
         timeout=30,

@@ -34,12 +34,12 @@ def _write_job(tmp_path, status):
     config_path = tmp_path / "config.yaml"
     config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
     spec = JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=f"job-{status}",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="grp",
-        group_root=str(tmp_path.resolve()),
+        team_key="grp",
+        team_root=str(tmp_path.resolve()),
         agent_name="product",
         workspace_root=str(tmp_path.resolve()),
         trigger="manual_prompt",
@@ -53,7 +53,7 @@ def _write_job(tmp_path, status):
             cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
         ),
         routine_id="daily-review",
-        skill="daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
@@ -72,7 +72,7 @@ def _write_job(tmp_path, status):
         created_at="2026-07-15T00:00:00+00:00",
     )
     store = JobStore(memory_root)
-    group_store = store.group_root("grp")
+    group_store = store.team_root("grp")
     group_store.mkdir(parents=True, exist_ok=True)
     write_job(store.path("grp", spec.job_id), replace(JobRecord.from_spec(spec), status=status))
 

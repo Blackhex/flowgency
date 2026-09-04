@@ -102,7 +102,7 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
                     "memory_store": str((tmp_path / "memory").resolve()),
                     "prompt_store": str((tmp_path / "prompts").resolve()),
                 },
-                "groups": {
+                "teams": {
                     "test": {
                         "name": "Test Group",
                         "workspace_path": str(workspace_path.resolve()),
@@ -164,7 +164,7 @@ def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatc
                     "memory_store": str((tmp_path / "memory").resolve()),
                     "prompt_store": str((tmp_path / "prompts").resolve()),
                 },
-                "groups": {
+                "teams": {
                     "test": {
                         "name": "Test Group",
                         "workspace_path": str(workspace_path.resolve()),

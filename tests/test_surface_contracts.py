@@ -14,23 +14,23 @@ from agency.configuration.paths import validate_resolved_paths
 
 REPO_ROOT = Path(__file__).parents[1]
 RETIRED_ROUTES = {
-    ("GET", "/{group}/documents"),
-    ("GET", "/{group}/documents/view"),
-    ("POST", "/{group}/documents/save"),
-    ("GET", "/{group}/prompts"),
-    ("GET", "/{group}/prompts/{slug:promptslug}"),
-    ("POST", "/{group}/prompts/{slug:promptslug}/save"),
-    ("POST", "/{group}/prompts/dispatch"),
-    ("GET", "/{group}/memory"),
-    ("GET", "/{group}/memory/view"),
-    ("POST", "/{group}/memory/save"),
-    ("POST", "/{group}/agents/{agent}/identity"),
-    ("POST", "/{group}/agents/{agent}/definition"),
-    ("POST", "/{group}/agents/{agent}/upload-headshot"),
-    ("GET", "/{group}/agents/{agent}/headshot"),
-    ("POST", "/{group}/agents/{agent}/toggle-subagent"),
-    ("POST", "/admin/orgs/{org}/initialize"),
-    ("POST", "/admin/orgs/{org}/autodetect"),
+    ("GET", "/{team}/documents"),
+    ("GET", "/{team}/documents/view"),
+    ("POST", "/{team}/documents/save"),
+    ("GET", "/{team}/prompts"),
+    ("GET", "/{team}/prompts/{slug:promptslug}"),
+    ("POST", "/{team}/prompts/{slug:promptslug}/save"),
+    ("POST", "/{team}/prompts/dispatch"),
+    ("GET", "/{team}/memory"),
+    ("GET", "/{team}/memory/view"),
+    ("POST", "/{team}/memory/save"),
+    ("POST", "/{team}/agents/{agent}/identity"),
+    ("POST", "/{team}/agents/{agent}/definition"),
+    ("POST", "/{team}/agents/{agent}/upload-headshot"),
+    ("GET", "/{team}/agents/{agent}/headshot"),
+    ("POST", "/{team}/agents/{agent}/toggle-subagent"),
+    ("POST", "/admin/teams/{org}/initialize"),
+    ("POST", "/admin/teams/{org}/autodetect"),
 }
 RETIRED_TEMPLATES = {
     "admin_agent_detail.html",
@@ -84,10 +84,10 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 5,
+                "schema_version": 6,
                 "agency": {
                     "title": "Agency",
-                    "default_group": "newsletter",
+                    "default_team": "newsletter",
                     "ai_backend": "claude-code",
                     "agent_library": str(library),
                     "compilation_cache": str(tmp_path / "cache"),
@@ -95,7 +95,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
                     "prompt_store": str(tmp_path / "prompt-store"),
                 },
                 "memory": {"channels": {}},
-                "groups": {
+                "teams": {
                     "newsletter": {
                         "name": "Newsletter",
                         "workspace_path": str(workspace),
@@ -118,6 +118,18 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     return TestClient(app_mod.app), tmp_path
+
+
+def test_active_routes_use_team_placeholders_not_group_placeholders():
+    paths = {
+        route.path
+        for route in app_mod.app.routes
+        if hasattr(route, "path")
+    }
+    assert "/admin/teams" in paths
+    assert "/admin/groups" not in paths
+    assert not any("{group}" in path or "/admin/orgs" in path for path in paths)
+    assert any("{team}" in path for path in paths)
 
 
 def test_removed_conversion_surfaces_do_not_exist(repo_root: Path):
@@ -175,8 +187,8 @@ def test_retired_routes_return_ordinary_404_without_mutating_source(tmp_path, mo
         ("post", "/newsletter/agents/advisor/upload-headshot", {"files": {"file": ("headshot.png", b"changed", "image/png")}}),
         ("get", "/newsletter/agents/advisor/headshot", {}),
         ("post", "/newsletter/agents/advisor/toggle-subagent", {"data": {}}),
-        ("post", "/admin/orgs/newsletter/initialize", {"data": {}}),
-        ("post", "/admin/orgs/newsletter/autodetect", {"data": {}}),
+        ("post", "/admin/teams/newsletter/initialize", {"data": {}}),
+        ("post", "/admin/teams/newsletter/autodetect", {"data": {}}),
     ]
 
     for method, path, kwargs in requests:
@@ -217,7 +229,7 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert config["schema_version"] == 5
     assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store", "prompt_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
-    group = config["groups"]["example"]
+    group = config["teams"]["example"]
     assert group["workspace_path"] == "C:/Projects/example"
     assert group["path"] == "C:/Agency/groups/example"
     skill_text = (
@@ -252,12 +264,12 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     config["agency"]["agent_library"] = str(library)
     config["agency"]["compilation_cache"] = str(tmp_path / "cache")
     config["agency"]["memory_store"] = str(tmp_path / "memory")
-    config["groups"]["example"]["workspace_path"] = str(workspace)
-    config["groups"]["example"]["path"] = str(group_state)
-    config["groups"]["example"]["runtime"]["permissions"]["rules"] = [
+    config["teams"]["example"]["workspace_path"] = str(workspace)
+    config["teams"]["example"]["path"] = str(group_state)
+    config["teams"]["example"]["runtime"]["permissions"]["rules"] = [
         {"path": str(workspace), "tools": ["read", "search"]}
     ]
-    builder = next(a for a in config["groups"]["example"]["agents"] if a["name"] == "builder")
+    builder = next(a for a in config["teams"]["example"]["agents"] if a["name"] == "builder")
     builder["runtime"]["permissions"]["rules"] = [
         {"path": str(workspace), "tools": ["read", "search", "write"]}
     ]

@@ -12,12 +12,12 @@ def _spec(tmp_path: Path, job_id: str, agent_name: str, created_at: str) -> JobS
     config_path = tmp_path / "config.yaml"
     config_path.write_text("schema_version: 5\ngroups: {}\n", encoding="utf-8")
     return JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="grp",
-        group_root=str(tmp_path.resolve()),
+        team_key="grp",
+        team_root=str(tmp_path.resolve()),
         agent_name=agent_name,
         workspace_root=str(tmp_path.resolve()),
         trigger="manual_prompt",
@@ -31,7 +31,7 @@ def _spec(tmp_path: Path, job_id: str, agent_name: str, created_at: str) -> JobS
             cache_path=str((tmp_path / "cache" / "entry.py").resolve()),
         ),
         routine_id="daily-review",
-        skill="daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
@@ -55,7 +55,7 @@ def _spec(tmp_path: Path, job_id: str, agent_name: str, created_at: str) -> JobS
 def store(tmp_path):
     memory_root = tmp_path / "memory"
     job_store = JobStore(memory_root)
-    job_store.group_root("grp").mkdir(parents=True, exist_ok=True)
+    job_store.team_root("grp").mkdir(parents=True, exist_ok=True)
     return job_store
 
 

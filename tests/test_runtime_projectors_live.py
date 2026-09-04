@@ -167,7 +167,7 @@ else:
             workspace_root,
             launch_dir,
             task_file,
-            skill="runtime-probe",
+            skill=None,
         )
         before = capture_protected_state(
             launch_dir,

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active = "logs" %}
 
-{% block title %}Logs - {{ group_name }}{% endblock %}
+{% block title %}Logs - {{ team_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-6">
@@ -14,7 +14,7 @@
   <div class="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
     {% for e in entries %}
     {% if e.suffix in [".out", ".err"] %}
-    <a href="/{{ group }}/logs/view?path={{ e.path }}" class="block px-4 py-2.5 hover:bg-gray-50 transition-colors">
+    <a href="/{{ team }}/logs/view?path={{ e.path }}" class="block px-4 py-2.5 hover:bg-gray-50 transition-colors">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3 min-w-0">
           <span class="w-12 shrink-0 text-xs font-mono text-gray-400">{{ e.timestamp.strftime('%H:%M') }}</span>

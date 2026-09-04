@@ -49,7 +49,7 @@ def test_validate_run_requires_runtime_placeholders(tmp_path):
         runtime_policy=EffectiveRuntimePolicy(
             timeout=60
         ),
-        skill="daily-review",
+        skill=None,
         skill_arguments=()
     )
 
@@ -97,7 +97,7 @@ def test_run_rejects_invalid_typed_request_before_script_launch(tmp_path):
         runtime_policy=EffectiveRuntimePolicy(
             timeout=60
         ),
-        skill="daily-review",
+        skill=None,
         skill_arguments=()
     )
 

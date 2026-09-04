@@ -20,7 +20,7 @@
     </div>
   </div>
   {% endif %}
-  <form method="post" action="/{{ group }}/agents/{{ agent }}/memory" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
+  <form method="post" action="/{{ team }}/agents/{{ agent }}/memory" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
     <input type="hidden" name="action" value="selector">
     <input type="hidden" name="revision" value="{{ config_revision }}">
     <label class="block text-sm text-gray-700">
@@ -28,7 +28,7 @@
       <select name="default_memory_scope" class="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white">
         <option value="run" {% if default_memory_scope == 'run' %}selected{% endif %}>Run memory</option>
         <option value="agent" {% if default_memory_scope == 'agent' %}selected{% endif %}>Agent memory</option>
-        <option value="group" {% if default_memory_scope == 'group' %}selected{% endif %}>Group memory</option>
+        <option value="team" {% if default_memory_scope == 'team' %}selected{% endif %}>Team memory</option>
         <option value="channel" {% if default_memory_scope == 'channel' %}selected{% endif %}>Channel memory</option>
       </select>
     </label>
@@ -45,7 +45,7 @@
       <button type="submit" class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Save selector</button>
     </div>
   </form>
-  <form method="post" action="/{{ group }}/agents/{{ agent }}/memory" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
+  <form method="post" action="/{{ team }}/agents/{{ agent }}/memory" class="grid gap-4 md:grid-cols-2 border-t border-gray-200 pt-4">
     <input type="hidden" name="action" value="content">
     <input type="hidden" name="content_revision" value="{{ memory_snapshot.revision }}">
     <input type="hidden" name="selector_token" value="{{ selector_token }}">

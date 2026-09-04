@@ -62,7 +62,7 @@ def test_systemd_worker_survives_submitter_exit(tmp_path):
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),
         },
-        "groups": {"test": {
+        "teams": {"test": {
             "name": "Test",
             "workspace_path": str((tmp_path / "workspace").resolve()),
             "path": str(group_path.resolve()),
@@ -83,7 +83,7 @@ def test_systemd_worker_survives_submitter_exit(tmp_path):
         "import pathlib, sys\n"
         "from agency.jobs import JobRequest, submit_job_request\n"
         "config, job_id_file = map(pathlib.Path, sys.argv[1:])\n"
-        "request = JobRequest(config_path=config, group_key='test', "
+        "request = JobRequest(config_path=config, team_key='test', "
         "agent_name='product', trigger='manual_prompt', task_input='run', routine_id='run-product')\n"
         "handle = submit_job_request(request)\n"  # uses default_launcher → SystemdRunLauncher
         "job_id_file.write_text(handle.job_id)\n"

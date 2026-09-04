@@ -85,7 +85,7 @@ def test_validate_run_rejects_skill_activation_until_cli_contract_is_verified(in
         runtime_policy=EffectiveRuntimePolicy(
             timeout=60
         ),
-        skill="daily-review",
+        skill=None,
         skill_arguments=("newsletter",)
     )
 
@@ -103,7 +103,7 @@ def test_run_rejects_invalid_typed_request_before_reading_task_file(integration,
         runtime_policy=EffectiveRuntimePolicy(
             timeout=60
         ),
-        skill="daily-review",
+        skill=None,
         skill_arguments=()
     )
 

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% set active = "agents" %}
 
-{% block title %}Agents - {{ group_name }}{% endblock %}
+{% block title %}Agents - {{ team_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-6 gap-4 flex-wrap">
   <div>
-    <h1 class="text-2xl font-bold text-gray-900">Instances assigned to {{ group_name }}</h1>
+    <h1 class="text-2xl font-bold text-gray-900">Instances assigned to {{ team_name }}</h1>
     <p class="text-sm text-gray-600 mt-1">This roster is sourced from config records only.</p>
   </div>
   <div class="flex items-center gap-3 flex-wrap">
@@ -24,7 +24,7 @@
     <div class="flex items-start justify-between gap-4 mb-5">
       <div>
         <h2 class="text-lg font-semibold text-gray-900">Add agent</h2>
-        <p class="text-sm text-gray-600 mt-1">Create a new configured instance for {{ group_name }}.</p>
+        <p class="text-sm text-gray-600 mt-1">Create a new configured instance for {{ team_name }}.</p>
       </div>
       <button type="button" data-action="close-add-agent" class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors" aria-label="Close add agent dialog">&times;</button>
     </div>
@@ -40,7 +40,7 @@
     </div>
     {% endif %}
 
-    <form method="post" action="/{{ group }}/agents/create" class="grid gap-4 md:grid-cols-4">
+    <form method="post" action="/{{ team }}/agents/create" class="grid gap-4 md:grid-cols-4">
       <input type="hidden" name="revision" value="{{ config_revision }}">
       <label class="block md:col-span-2">
         <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Instance name</span>
@@ -103,8 +103,8 @@
         <form method="post" action="{{ instance.move_href }}" class="flex gap-2 items-center flex-wrap">
           <input type="hidden" name="revision" value="{{ config_revision }}">
           <label class="block">
-            <span class="sr-only">Target group</span>
-            <input type="text" name="target_group" placeholder="target group" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono w-32">
+            <span class="sr-only">Target team</span>
+            <input type="text" name="target_team" placeholder="target team" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono w-32">
           </label>
           <label class="block">
             <span class="sr-only">Memory move mode</span>
@@ -115,7 +115,7 @@
           </label>
           <button type="submit" class="px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">Move</button>
         </form>
-        <form method="post" action="{{ instance.remove_href }}" onsubmit="return window.confirm('Remove {{ instance.display_name }} from {{ group_name }}?')">
+        <form method="post" action="{{ instance.remove_href }}" onsubmit="return window.confirm('Remove {{ instance.display_name }} from {{ team_name }}?')">
           <input type="hidden" name="revision" value="{{ config_revision }}">
           <input type="hidden" name="confirm" value="true">
           <button type="submit" class="px-3 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors dark:bg-red-900/40 dark:text-red-100 dark:hover:bg-red-900/60">Remove</button>
@@ -361,7 +361,7 @@
       updatePlural(summary);
 
       const badge = document.createElement('a');
-      badge.href = `/${encodeURIComponent('{{ group }}')}/jobs/${encodeURIComponent(jobId)}`;
+      badge.href = `/${encodeURIComponent('{{ team }}')}/jobs/${encodeURIComponent(jobId)}`;
       badge.title = 'Queued job awaiting execution';
       badge.className = 'inline-flex min-w-[8.75rem] justify-center items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700';
       badge.textContent = 'Queued';

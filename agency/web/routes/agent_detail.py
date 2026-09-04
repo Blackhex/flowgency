@@ -73,20 +73,20 @@ def _theme_css(request: Request) -> str:
     return request.app.state.theme_css_getter()
 
 
-def _group_context(request: Request, snapshot, group_id: str) -> dict[str, Any]:
-    group = snapshot.config.groups[group_id]
+def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
+    team_cfg = snapshot.config.teams[team_id]
     return {
-        "group": group_id,
-        "group_name": group.name,
-        "groups": {key: value.name for key, value in snapshot.config.groups.items()},
+        "team": team_id,
+        "team_name": team_cfg.name,
+        "teams": {key: value.name for key, value in snapshot.config.teams.items()},
         "agency_title": snapshot.config.agency.title,
         "admin_active": False,
-        "workspaces": [workspace.model_dump(mode="json") for workspace in group.workspaces],
-        "workspaces_available": bool(group.workspaces),
+        "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
+        "workspaces_available": bool(team_cfg.workspaces),
         "nav_open_observations": 0,
         "nav_actionable": 0,
         "nav_actionable_proposals": 0,
-        "nav_agent_count": len(group.agents),
+        "nav_agent_count": len(team_cfg.agents),
         "nav_running_decisions": 0,
         "show_tips": False,
         "tips_dismissed": [],
@@ -94,23 +94,23 @@ def _group_context(request: Request, snapshot, group_id: str) -> dict[str, Any]:
     }
 
 
-def _get_snapshot_instance(snapshot, group_id: str, agent_id: str):
+def _get_snapshot_instance(snapshot, team_id: str, agent_id: str):
     try:
-        group = snapshot.config.groups[group_id]
-        instance = group.agents[agent_id]
+        team_cfg = snapshot.config.teams[team_id]
+        instance = team_cfg.agents[agent_id]
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unknown agent") from exc
-    return group, instance
+    return team_cfg, instance
 
 
-def _tab_links(group_id: str, agent_id: str, active_tab: str) -> list[dict[str, str | bool]]:
+def _tab_links(team_id: str, agent_id: str, active_tab: str) -> list[dict[str, str | bool]]:
     links: list[dict[str, str | bool]] = []
     for key, label in _TAB_LABELS.items():
         links.append(
             {
                 "key": key,
                 "label": label,
-                "href": f"/{group_id}/agents/{agent_id}/{key}",
+                "href": f"/{team_id}/agents/{agent_id}/{key}",
                 "current": key == active_tab,
             }
         )
@@ -140,8 +140,8 @@ def _memory_scope_label(selector: MemorySelector | None, channels) -> str:
         return "Run memory"
     if selected.scope == "agent":
         return "Agent memory"
-    if selected.scope == "group":
-        return "Group memory"
+    if selected.scope == "team":
+        return "Team memory"
     if selected.scope == "channel":
         channel = channels.get(selected.channel or "")
         display = channel.display_name if channel is not None else (selected.channel or "Channel")
@@ -149,17 +149,17 @@ def _memory_scope_label(selector: MemorySelector | None, channels) -> str:
     return selected.scope.title()
 
 
-def _preview_job_id(group_id: str, agent_id: str) -> str:
-    return f"detail-{group_id}-{agent_id}"
+def _preview_job_id(team_id: str, agent_id: str) -> str:
+    return f"detail-{team_id}-{agent_id}"
 
 
-def _resolve_tab_memory(snapshot, services: AgencyServices, group_id: str, agent_id: str, selector: MemorySelector | None):
+def _resolve_tab_memory(snapshot, services: AgencyServices, team_id: str, agent_id: str, selector: MemorySelector | None):
     if services.memory_store is None:
         raise HTTPException(status_code=409, detail="Memory store unavailable")
     resolved = resolve_memory_selector(
         selector or MemorySelector(scope="agent"),
-        job_id=_preview_job_id(group_id, agent_id),
-        group_key=group_id,
+        job_id=_preview_job_id(team_id, agent_id),
+        team_key=team_id,
         agent_name=agent_id,
         routine_id=None,
         channels=snapshot.config.memory.channels,
@@ -213,7 +213,7 @@ def _list_markdown_items(directory: Path) -> list[dict[str, Any]]:
 
 
 def _recent_log_rows(
-    group_id: str,
+    team_id: str,
     paths: ResolvedTeamPaths,
     agent_id: str,
 ) -> list[dict[str, str]]:
@@ -230,7 +230,7 @@ def _recent_log_rows(
             rows.append(
                 {
                     "name": candidate.name,
-                    "href": f"/{quote(group_id, safe='')}/logs/view?path={quote(str(candidate.resolve()))}",
+                    "href": f"/{quote(team_id, safe='')}/logs/view?path={quote(str(candidate.resolve()))}",
                     "when": candidate.stat().st_mtime_ns,
                 }
             )
@@ -240,7 +240,7 @@ def _recent_log_rows(
 
 
 def _activity_items(
-    group_id: str,
+    team_id: str,
     paths: ResolvedTeamPaths,
     agent_id: str,
     job_store: JobStore | None,
@@ -249,7 +249,7 @@ def _activity_items(
         _ActivityItem(
             kind="Observation",
             title=item.get("_title", item["_slug"]),
-            href=f"/{group_id}/observations/{item['_slug']}",
+            href=f"/{team_id}/observations/{item['_slug']}",
             meta=str(item.get("status", "open")),
         )
         for item in _list_markdown_items(paths.observations)
@@ -259,7 +259,7 @@ def _activity_items(
         _ActivityItem(
             kind="Proposal",
             title=item.get("_title", item["_slug"]),
-            href=f"/{group_id}/proposals/{item['_slug']}",
+            href=f"/{team_id}/proposals/{item['_slug']}",
             meta=str(item.get("status", "proposed")),
         )
         for item in _list_markdown_items(paths.proposals)
@@ -271,13 +271,13 @@ def _activity_items(
             "status": record.status,
             "trigger": record.spec.trigger,
         }
-        for record in (job_store.active(group_id, agent_id) if job_store is not None else ())
+        for record in (job_store.active(team_id, agent_id) if job_store is not None else ())
     ]
     return {
         "observations": observations[:8],
         "proposals": proposals[:8],
         "jobs": jobs[:8],
-        "logs": _recent_log_rows(group_id, paths, agent_id),
+        "logs": _recent_log_rows(team_id, paths, agent_id),
     }
 
 
@@ -303,10 +303,10 @@ def _split_lines(text: str) -> tuple[str, ...]:
     return tuple(line.strip() for line in str(text or "").splitlines() if line.strip())
 
 
-def _apply_runtime_patch(raw: dict[str, Any], group_id: str, agent_id: str, patch: AgentRuntimePatch) -> None:
-    groups = raw.setdefault("groups", {})
-    group = groups[group_id]
-    agents = group.setdefault("agents", [])
+def _apply_runtime_patch(raw: dict[str, Any], team_id: str, agent_id: str, patch: AgentRuntimePatch) -> None:
+    groups = raw.setdefault("teams", {})
+    team_cfg = groups[team_id]
+    agents = team_cfg.setdefault("agents", [])
     target = None
     for entry in agents:
         if isinstance(entry, dict) and entry.get("name") == agent_id:
@@ -324,9 +324,9 @@ def _apply_runtime_patch(raw: dict[str, Any], group_id: str, agent_id: str, patc
         permissions["rules"] = list(patch.rules)
 
 
-def _patch_default_memory(raw: dict[str, Any], group_id: str, agent_id: str, selector: MemorySelector | None) -> None:
+def _patch_default_memory(raw: dict[str, Any], team_id: str, agent_id: str, selector: MemorySelector | None) -> None:
     target = None
-    for entry in raw["groups"][group_id].setdefault("agents", []):
+    for entry in raw["teams"][team_id].setdefault("agents", []):
         if isinstance(entry, dict) and entry.get("name") == agent_id:
             target = entry
             break
@@ -456,7 +456,7 @@ def _parse_routines_payload(form, available_prompts: frozenset[tuple[str, str]])
         memory_payload = None
         if memory is not None:
             if not isinstance(memory, dict) or not str(memory.get("scope", "")).strip():
-                issues.append({"field": f"{field_prefix}.memory", "message": "Memory selector must be a mapping with a scope.", "hint": "Use run, routine, agent, group, or channel."})
+                issues.append({"field": f"{field_prefix}.memory", "message": "Memory selector must be a mapping with a scope.", "hint": "Use run, routine, agent, team, or channel."})
             else:
                 memory_payload = {"scope": str(memory.get("scope", "")).strip()}
                 if memory_payload["scope"] == "channel" and str(memory.get("channel", "")).strip():
@@ -475,7 +475,7 @@ def _parse_routines_payload(form, available_prompts: frozenset[tuple[str, str]])
 
 
 def _available_prompts(
-    services: AgencyServices, snapshot, group_id: str, agent_id: str
+    services: AgencyServices, snapshot, team_id: str, agent_id: str
 ) -> tuple[tuple[tuple[str, str], ...], list[dict[str, str]]]:
     if services.blueprint_library is None or services.prompt_store is None:
         return (), []
@@ -487,7 +487,7 @@ def _available_prompts(
                     snapshot,
                     services.blueprint_library,
                     services.prompt_store,
-                    group_id,
+                    team_id,
                     agent_id,
                 )
             ),
@@ -500,19 +500,19 @@ def _available_prompts(
 def _prompts_context(
     services: AgencyServices,
     snapshot,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     *,
     create_name: str = "",
     create_source: str = "",
     source_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    _group, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
+    _team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     if services.prompt_service is None:
         raise HTTPException(status_code=409, detail="Prompt service unavailable")
     overrides = source_overrides or {}
     try:
-        catalog = services.prompt_service.catalog(snapshot, group_id, agent_id)
+        catalog = services.prompt_service.catalog(snapshot, team_id, agent_id)
     except ValidationFailed as exc:
         return {
             "shared_prompts": (),
@@ -551,14 +551,14 @@ def _prompts_context(
     }
 
 
-def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
-    group, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
+def _runtime_context(snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
+    team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     integration = get_integration(instance.integration)
     issues: list[dict[str, str]] = []
     effective = None
     effective_root_rows: list[dict[str, str]] = []
     try:
-        effective = resolve_effective_policy(snapshot.config, group_id, agent_id)
+        effective = resolve_effective_policy(snapshot.config, team_id, agent_id)
         for index, rule in enumerate(effective.rules):
             if rule.path is None:
                 continue
@@ -572,10 +572,10 @@ def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
     except ValidationFailed as exc:
         issues = _issue_dicts(exc)
 
-    group_rules = group.runtime.permissions.rules
+    team_rules = team_cfg.runtime.permissions.rules
     agent_rules = instance.runtime.permissions.rules
     group_rule_lines = []
-    for rule in group_rules:
+    for rule in team_rules:
         path_str = str(rule.path).replace("\\", "/") if rule.path else "(pathless)"
         tools_str = ", ".join(rule.tools) if rule.tools is not None else "(all)"
         group_rule_lines.append(f"{path_str}: {tools_str}")
@@ -598,9 +598,9 @@ def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
     return {
         "integration_name": instance.integration,
         "integration_display_name": integration.display_name,
-        "group_timeout": group.runtime.timeout,
-        "group_permission_mode": group.runtime.permissions.mode,
-        "group_rules": "\n".join(group_rule_lines),
+        "team_timeout": team_cfg.runtime.timeout,
+        "team_permission_mode": team_cfg.runtime.permissions.mode,
+        "team_rules": "\n".join(group_rule_lines),
         "agent_timeout": instance.runtime.timeout if "timeout" in instance.runtime.model_fields_set else "",
         "agent_rules_yaml": agent_rules_yaml,
         "effective": effective,
@@ -611,8 +611,8 @@ def _runtime_context(snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
     }
 
 
-def _blueprint_context(services: AgencyServices, snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
-    _, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
+def _blueprint_context(services: AgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
+    _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     if services.blueprint_library is None:
         raise HTTPException(status_code=409, detail="Blueprint library unavailable")
     try:
@@ -653,13 +653,13 @@ def _blueprint_context(services: AgencyServices, snapshot, group_id: str, agent_
     }
 
 
-def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
+def _routine_status(snapshot, team_id: str, instance) -> list[dict[str, Any]]:
     """Pair each configured routine with what actually fired."""
-    group = snapshot.config.groups[group_id]
-    logs_root = resolve_team_paths(group).logs
+    team_cfg = snapshot.config.teams[team_id]
+    logs_root = resolve_team_paths(team_cfg).logs
     now = clock_now()
     grace = grace_window(int(snapshot.config.agency.dispatch.interval))
-    dispatch_enabled = group.dispatch.enabled
+    dispatch_enabled = team_cfg.dispatch.enabled
     rows = []
     for schedule in routine_schedules(instance.routines):
         if schedule.conditional:
@@ -717,14 +717,14 @@ def _next_due_text(schedule, logs_root, agent_name, now, grace, dispatch_enabled
     return "due now"
 
 
-def _routines_context(services: AgencyServices, snapshot, group_id: str, agent_id: str) -> dict[str, Any]:
-    _, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
+def _routines_context(services: AgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
+    _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     routines_yaml = yaml.safe_dump(
         [routine.model_dump(mode="json", exclude_none=True) for routine in instance.routines],
         sort_keys=False,
         allow_unicode=True,
     ).strip()
-    prompt_options, issues = _available_prompts(services, snapshot, group_id, agent_id)
+    prompt_options, issues = _available_prompts(services, snapshot, team_id, agent_id)
     shared = sorted(name for scope, name in prompt_options if scope == "blueprint")
     private = sorted(name for scope, name in prompt_options if scope == "instance")
     result: dict[str, Any] = {
@@ -732,16 +732,16 @@ def _routines_context(services: AgencyServices, snapshot, group_id: str, agent_i
         "available_private_prompts": tuple(private),
         "routines_yaml": routines_yaml,
         "supports_enabled": True,
-        "routine_status": _routine_status(snapshot, group_id, instance),
+        "routine_status": _routine_status(snapshot, team_id, instance),
     }
     if issues:
         result["issues"] = issues
     return result
 
 
-def _memory_context(snapshot, services: AgencyServices, group_id: str, agent_id: str) -> dict[str, Any]:
-    _, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
-    memory_snapshot = _resolve_tab_memory(snapshot, services, group_id, agent_id, instance.default_memory)
+def _memory_context(snapshot, services: AgencyServices, team_id: str, agent_id: str) -> dict[str, Any]:
+    _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
+    memory_snapshot = _resolve_tab_memory(snapshot, services, team_id, agent_id, instance.default_memory)
     selected_file = _selected_file(memory_snapshot)
     channel_options = [
         {"key": key, "label": channel.display_name}
@@ -763,7 +763,7 @@ def _memory_context(snapshot, services: AgencyServices, group_id: str, agent_id:
 def _detail_context(
     request: Request,
     services: AgencyServices,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     tab: str,
     *,
@@ -774,16 +774,16 @@ def _detail_context(
     overrides: dict[str, Any] | None = None,
 ):
     snapshot = services.config_store.load()
-    group, instance = _get_snapshot_instance(snapshot, group_id, agent_id)
+    team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     handler_issues = issues or []
     context: dict[str, Any] = {
         "request": request,
-        **_group_context(request, snapshot, group_id),
+        **_team_context(request, snapshot, team_id),
         "active": "agents",
         "agent": agent_id,
         "tab": tab,
         "tab_label": _TAB_LABELS[tab],
-        "tab_links": _tab_links(group_id, agent_id, tab),
+        "tab_links": _tab_links(team_id, agent_id, tab),
         "config_revision": snapshot.revision,
         "agent_name": instance.name,
         "display_name": instance.identity.display_name or instance.name,
@@ -791,7 +791,7 @@ def _detail_context(
         "emoji": instance.identity.emoji,
         "integration": instance.integration,
         "blueprint": instance.blueprint,
-        "can_write": may_execute_decisions(snapshot.config, group_id, agent_id),
+        "can_write": may_execute_decisions(snapshot.config, team_id, agent_id),
         "issues": handler_issues,
         "banner": banner,
         "memory_conflict": memory_conflict,
@@ -804,25 +804,25 @@ def _detail_context(
                     "display_name": instance.identity.display_name,
                     "title": instance.identity.title,
                     "emoji": instance.identity.emoji,
-                    "can_write": may_execute_decisions(snapshot.config, group_id, agent_id),
+                    "can_write": may_execute_decisions(snapshot.config, team_id, agent_id),
                 }
             }
         )
     elif tab == "blueprint":
-        context.update(_blueprint_context(services, snapshot, group_id, agent_id))
+        context.update(_blueprint_context(services, snapshot, team_id, agent_id))
     elif tab == "runtime":
-        context.update(_runtime_context(snapshot, group_id, agent_id))
+        context.update(_runtime_context(snapshot, team_id, agent_id))
     elif tab == "prompts":
-        context.update(_prompts_context(services, snapshot, group_id, agent_id))
+        context.update(_prompts_context(services, snapshot, team_id, agent_id))
     elif tab == "routines":
-        context.update(_routines_context(services, snapshot, group_id, agent_id))
+        context.update(_routines_context(services, snapshot, team_id, agent_id))
     elif tab == "memory":
-        context.update(_memory_context(snapshot, services, group_id, agent_id))
+        context.update(_memory_context(snapshot, services, team_id, agent_id))
     elif tab == "activity":
         context.update(
             _activity_items(
-                group_id,
-                resolve_team_paths(group),
+                team_id,
+                resolve_team_paths(team_cfg),
                 agent_id,
                 services.job_store,
             )
@@ -842,18 +842,18 @@ def _detail_context(
     return _templates(request).TemplateResponse(request, "agent_detail.html", context, status_code=status_code)
 
 
-@router.get("/{group}/agents/{agent}", response_class=HTMLResponse)
-async def agent_detail_base(group: str, agent: str):
-    return RedirectResponse(f"/{group}/agents/{agent}/profile", status_code=303)
+@router.get("/{team}/agents/{agent}", response_class=HTMLResponse)
+async def agent_detail_base(team: str, agent: str):
+    return RedirectResponse(f"/{team}/agents/{agent}/profile", status_code=303)
 
 
-@router.get("/{group}/agents/{agent}/profile", response_class=HTMLResponse)
-async def agent_detail_profile(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
-    return _detail_context(request, services, group, agent, "profile")
+@router.get("/{team}/agents/{agent}/profile", response_class=HTMLResponse)
+async def agent_detail_profile(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+    return _detail_context(request, services, team, agent, "profile")
 
 
-@router.post("/{group}/agents/{agent}/profile", response_class=HTMLResponse)
-async def agent_detail_profile_save(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
+@router.post("/{team}/agents/{agent}/profile", response_class=HTMLResponse)
+async def agent_detail_profile_save(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     try:
@@ -862,7 +862,7 @@ async def agent_detail_profile_save(request: Request, group: str, agent: str, se
         patch_agent_profile(
             services.config_store,
             revision,
-            group,
+            team,
             agent,
             AgentProfilePatch(
                 display_name=str(form.get("display_name", "")).strip(),
@@ -871,25 +871,25 @@ async def agent_detail_profile_save(request: Request, group: str, agent: str, se
             ),
         )
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "profile", status_code=409, issues=_issue_dicts(exc))
+        return _detail_context(request, services, team, agent, "profile", status_code=409, issues=_issue_dicts(exc))
     except ConfigConflictError as exc:
-        return _detail_context(request, services, group, agent, "profile", status_code=409, banner=str(exc))
+        return _detail_context(request, services, team, agent, "profile", status_code=409, banner=str(exc))
     request.app.state.refresh_services()
-    return RedirectResponse(f"/{group}/agents/{agent}/profile", status_code=303)
+    return RedirectResponse(f"/{team}/agents/{agent}/profile", status_code=303)
 
 
-@router.get("/{group}/agents/{agent}/blueprint", response_class=HTMLResponse)
-async def agent_detail_blueprint(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
-    return _detail_context(request, services, group, agent, "blueprint")
+@router.get("/{team}/agents/{agent}/blueprint", response_class=HTMLResponse)
+async def agent_detail_blueprint(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+    return _detail_context(request, services, team, agent, "blueprint")
 
 
-@router.get("/{group}/agents/{agent}/runtime", response_class=HTMLResponse)
-async def agent_detail_runtime(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
-    return _detail_context(request, services, group, agent, "runtime")
+@router.get("/{team}/agents/{agent}/runtime", response_class=HTMLResponse)
+async def agent_detail_runtime(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+    return _detail_context(request, services, team, agent, "runtime")
 
 
-@router.post("/{group}/agents/{agent}/runtime", response_class=HTMLResponse)
-async def agent_detail_runtime_save(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
+@router.post("/{team}/agents/{agent}/runtime", response_class=HTMLResponse)
+async def agent_detail_runtime_save(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     timeout_text = str(form.get("timeout", "")).strip()
@@ -905,7 +905,7 @@ async def agent_detail_runtime_save(request: Request, group: str, agent: str, se
                 rules = tuple(parsed_rules)
             except (yaml.YAMLError, TypeError):
                 return _detail_context(
-                    request, services, group, agent, "runtime",
+                    request, services, team, agent, "runtime",
                     status_code=409,
                     banner="Permission rules must be valid YAML (a list of mappings).",
                 )
@@ -920,9 +920,9 @@ async def agent_detail_runtime_save(request: Request, group: str, agent: str, se
             raise ConfigConflictError("config.yaml changed; reload before saving")
         current = services.config_store.load()
         raw = deepcopy(current.raw)
-        _apply_runtime_patch(raw, group, agent, patch)
+        _apply_runtime_patch(raw, team, agent, patch)
         parsed = parse_config(raw, current.path).resolved
-        resolve_effective_policy(parsed, group, agent)
+        resolve_effective_policy(parsed, team, agent)
         services.config_store.replace(revision, raw)
     except ValueError as exc:
         issues = (
@@ -942,22 +942,22 @@ async def agent_detail_runtime_save(request: Request, group: str, agent: str, se
                 }
             ]
         )
-        return _detail_context(request, services, group, agent, "runtime", status_code=409, issues=issues)
+        return _detail_context(request, services, team, agent, "runtime", status_code=409, issues=issues)
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "runtime", status_code=409, issues=_issue_dicts(exc))
+        return _detail_context(request, services, team, agent, "runtime", status_code=409, issues=_issue_dicts(exc))
     except ConfigConflictError as exc:
-        return _detail_context(request, services, group, agent, "runtime", status_code=409, banner=str(exc))
+        return _detail_context(request, services, team, agent, "runtime", status_code=409, banner=str(exc))
     request.app.state.refresh_services()
-    return RedirectResponse(f"/{group}/agents/{agent}/runtime", status_code=303)
+    return RedirectResponse(f"/{team}/agents/{agent}/runtime", status_code=303)
 
 
-@router.get("/{group}/agents/{agent}/prompts", response_class=HTMLResponse)
-async def agent_detail_prompts(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
-    return _detail_context(request, services, group, agent, "prompts")
+@router.get("/{team}/agents/{agent}/prompts", response_class=HTMLResponse)
+async def agent_detail_prompts(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+    return _detail_context(request, services, team, agent, "prompts")
 
 
-@router.post("/{group}/agents/{agent}/prompts/create", response_class=HTMLResponse)
-async def agent_detail_prompts_create(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
+@router.post("/{team}/agents/{agent}/prompts/create", response_class=HTMLResponse)
+async def agent_detail_prompts_create(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     name = str(form.get("name", "")).strip()
@@ -965,11 +965,11 @@ async def agent_detail_prompts_create(request: Request, group: str, agent: str, 
     try:
         if services.prompt_service is None:
             raise HTTPException(status_code=409, detail="Prompt service unavailable")
-        _get_snapshot_instance(services.config_store.load(), group, agent)
+        _get_snapshot_instance(services.config_store.load(), team, agent)
         if not revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
         services.prompt_service.create_private(
-            group,
+            team,
             agent,
             name,
             source.encode("utf-8"),
@@ -979,7 +979,7 @@ async def agent_detail_prompts_create(request: Request, group: str, agent: str, 
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "prompts",
             status_code=409,
@@ -987,7 +987,7 @@ async def agent_detail_prompts_create(request: Request, group: str, agent: str, 
             overrides=_prompts_context(
                 services,
                 services.config_store.load(),
-                group,
+                team,
                 agent,
                 create_name=name,
                 create_source=source,
@@ -997,7 +997,7 @@ async def agent_detail_prompts_create(request: Request, group: str, agent: str, 
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "prompts",
             status_code=409,
@@ -1005,7 +1005,7 @@ async def agent_detail_prompts_create(request: Request, group: str, agent: str, 
             overrides=_prompts_context(
                 services,
                 services.config_store.load(),
-                group,
+                team,
                 agent,
                 create_name=name,
                 create_source=source,
@@ -1015,7 +1015,7 @@ async def agent_detail_prompts_create(request: Request, group: str, agent: str, 
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "prompts",
             status_code=409,
@@ -1023,20 +1023,20 @@ async def agent_detail_prompts_create(request: Request, group: str, agent: str, 
             overrides=_prompts_context(
                 services,
                 services.config_store.load(),
-                group,
+                team,
                 agent,
                 create_name=name,
                 create_source=source,
             ),
         )
     request.app.state.refresh_services()
-    return RedirectResponse(f"/{group}/agents/{agent}/prompts", status_code=303)
+    return RedirectResponse(f"/{team}/agents/{agent}/prompts", status_code=303)
 
 
-@router.post("/{group}/agents/{agent}/prompts/{name}/save", response_class=HTMLResponse)
+@router.post("/{team}/agents/{agent}/prompts/{name}/save", response_class=HTMLResponse)
 async def agent_detail_prompts_save(
     request: Request,
-    group: str,
+    team: str,
     agent: str,
     name: str,
     services: AgencyServices = Depends(get_services),
@@ -1047,9 +1047,9 @@ async def agent_detail_prompts_save(
     try:
         if services.prompt_service is None:
             raise HTTPException(status_code=409, detail="Prompt service unavailable")
-        _get_snapshot_instance(services.config_store.load(), group, agent)
+        _get_snapshot_instance(services.config_store.load(), team, agent)
         services.prompt_service.update_private(
-            group,
+            team,
             agent,
             name,
             source.encode("utf-8"),
@@ -1061,7 +1061,7 @@ async def agent_detail_prompts_save(
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "prompts",
             status_code=409,
@@ -1069,7 +1069,7 @@ async def agent_detail_prompts_save(
             overrides=_prompts_context(
                 services,
                 services.config_store.load(),
-                group,
+                team,
                 agent,
                 source_overrides={name: source},
             ),
@@ -1078,7 +1078,7 @@ async def agent_detail_prompts_save(
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "prompts",
             status_code=409,
@@ -1086,19 +1086,19 @@ async def agent_detail_prompts_save(
             overrides=_prompts_context(
                 services,
                 services.config_store.load(),
-                group,
+                team,
                 agent,
                 source_overrides={name: source},
             ),
         )
     request.app.state.refresh_services()
-    return RedirectResponse(f"/{group}/agents/{agent}/prompts", status_code=303)
+    return RedirectResponse(f"/{team}/agents/{agent}/prompts", status_code=303)
 
 
-@router.post("/{group}/agents/{agent}/prompts/{name}/delete", response_class=HTMLResponse)
+@router.post("/{team}/agents/{agent}/prompts/{name}/delete", response_class=HTMLResponse)
 async def agent_detail_prompts_delete(
     request: Request,
-    group: str,
+    team: str,
     agent: str,
     name: str,
     services: AgencyServices = Depends(get_services),
@@ -1109,11 +1109,11 @@ async def agent_detail_prompts_delete(
     try:
         if services.prompt_service is None:
             raise HTTPException(status_code=409, detail="Prompt service unavailable")
-        _get_snapshot_instance(services.config_store.load(), group, agent)
+        _get_snapshot_instance(services.config_store.load(), team, agent)
         if not revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
         services.prompt_service.delete_private(
-            group,
+            team,
             agent,
             name,
             expected_revision=revision,
@@ -1122,12 +1122,12 @@ async def agent_detail_prompts_delete(
     except PromptNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Unknown prompt") from exc
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "prompts", status_code=409, issues=_issue_dicts(exc))
+        return _detail_context(request, services, team, agent, "prompts", status_code=409, issues=_issue_dicts(exc))
     except ConfigConflictError as exc:
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "prompts",
             status_code=409,
@@ -1137,53 +1137,53 @@ async def agent_detail_prompts_delete(
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "prompts",
             status_code=409,
             issues=_single_issue("digest", str(exc), "Reload and confirm the prompt digest before deleting."),
         )
     request.app.state.refresh_services()
-    return RedirectResponse(f"/{group}/agents/{agent}/prompts", status_code=303)
+    return RedirectResponse(f"/{team}/agents/{agent}/prompts", status_code=303)
 
 
-@router.get("/{group}/agents/{agent}/routines", response_class=HTMLResponse)
-async def agent_detail_routines(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
-    return _detail_context(request, services, group, agent, "routines")
+@router.get("/{team}/agents/{agent}/routines", response_class=HTMLResponse)
+async def agent_detail_routines(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+    return _detail_context(request, services, team, agent, "routines")
 
 
-@router.post("/{group}/agents/{agent}/routines", response_class=HTMLResponse)
-async def agent_detail_routines_save(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
+@router.post("/{team}/agents/{agent}/routines", response_class=HTMLResponse)
+async def agent_detail_routines_save(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     snapshot = services.config_store.load()
-    _, instance = _get_snapshot_instance(snapshot, group, agent)
-    prompt_options, catalog_issues = _available_prompts(services, snapshot, group, agent)
+    _, instance = _get_snapshot_instance(snapshot, team, agent)
+    prompt_options, catalog_issues = _available_prompts(services, snapshot, team, agent)
     routines, parse_issues = _parse_routines_payload(form, frozenset(prompt_options))
     parse_issues = catalog_issues + parse_issues
     shared = tuple(sorted(name for scope, name in prompt_options if scope == "blueprint"))
     private = tuple(sorted(name for scope, name in prompt_options if scope == "instance"))
     if parse_issues:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
+        return _detail_context(request, services, team, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
     try:
         if not revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
-        replace_agent_routines(services.config_store, revision, group, agent, routines)
+        replace_agent_routines(services.config_store, revision, team, agent, routines)
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
+        return _detail_context(request, services, team, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
     except ConfigConflictError as exc:
-        return _detail_context(request, services, group, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
+        return _detail_context(request, services, team, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
     request.app.state.refresh_services()
-    return RedirectResponse(f"/{group}/agents/{agent}/routines", status_code=303)
+    return RedirectResponse(f"/{team}/agents/{agent}/routines", status_code=303)
 
 
-@router.get("/{group}/agents/{agent}/memory", response_class=HTMLResponse)
-async def agent_detail_memory(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
-    return _detail_context(request, services, group, agent, "memory")
+@router.get("/{team}/agents/{agent}/memory", response_class=HTMLResponse)
+async def agent_detail_memory(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+    return _detail_context(request, services, team, agent, "memory")
 
 
-@router.post("/{group}/agents/{agent}/memory", response_class=HTMLResponse)
-async def agent_detail_memory_save(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
+@router.post("/{team}/agents/{agent}/memory", response_class=HTMLResponse)
+async def agent_detail_memory_save(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
     form = await request.form()
     action = str(form.get("action", "")).strip() or "content"
     revision = str(form.get("revision", "")).strip()
@@ -1197,11 +1197,11 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
             if not revision:
                 raise ConfigConflictError("config.yaml changed; reload before saving")
             raw = deepcopy(snapshot.raw)
-            _patch_default_memory(raw, group, agent, selector)
+            _patch_default_memory(raw, team, agent, selector)
             parse_config(raw, snapshot.path)
             services.config_store.replace(revision, raw)
         elif action == "content":
-            _, instance = _get_snapshot_instance(snapshot, group, agent)
+            _, instance = _get_snapshot_instance(snapshot, team, agent)
             selector_token = str(form.get("selector_token", "")).strip()
             selector = _parse_memory_selector_token(selector_token, snapshot.config.memory.channels)
             effective_selector = instance.default_memory
@@ -1212,8 +1212,8 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
                 effective_selector = selector
             resolved = resolve_memory_selector(
                 effective_selector or MemorySelector(scope="agent"),
-                job_id=_preview_job_id(group, agent),
-                group_key=group,
+                job_id=_preview_job_id(team, agent),
+                team_key=team,
                 agent_name=agent,
                 routine_id=None,
                 channels=snapshot.config.memory.channels,
@@ -1242,7 +1242,7 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "memory",
             status_code=423,
@@ -1257,7 +1257,7 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
         return _detail_context(
             request,
             services,
-            group,
+            team,
             agent,
             "memory",
             status_code=409,
@@ -1275,13 +1275,13 @@ async def agent_detail_memory_save(request: Request, group: str, agent: str, ser
             },
         )
     except ValidationFailed as exc:
-        return _detail_context(request, services, group, agent, "memory", status_code=409, issues=_issue_dicts(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
+        return _detail_context(request, services, team, agent, "memory", status_code=409, issues=_issue_dicts(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
     except ConfigConflictError as exc:
-        return _detail_context(request, services, group, agent, "memory", status_code=409, banner=str(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
+        return _detail_context(request, services, team, agent, "memory", status_code=409, banner=str(exc), overrides={"selector_token": str(form.get("selector_token", "")).strip(), "selected_memory_file": filename, "selected_memory_content": content})
     request.app.state.refresh_services()
-    return RedirectResponse(f"/{group}/agents/{agent}/memory", status_code=303)
+    return RedirectResponse(f"/{team}/agents/{agent}/memory", status_code=303)
 
 
-@router.get("/{group}/agents/{agent}/activity", response_class=HTMLResponse)
-async def agent_detail_activity(request: Request, group: str, agent: str, services: AgencyServices = Depends(get_services)):
-    return _detail_context(request, services, group, agent, "activity")
+@router.get("/{team}/agents/{agent}/activity", response_class=HTMLResponse)
+async def agent_detail_activity(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+    return _detail_context(request, services, team, agent, "activity")

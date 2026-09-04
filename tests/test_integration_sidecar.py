@@ -74,7 +74,7 @@ class TestGemini:
             runtime_policy=EffectiveRuntimePolicy(
                 timeout=60
             ),
-            skill="daily-review",
+            skill=None,
             skill_arguments=()
         )
 
@@ -696,7 +696,7 @@ class TestCopilot:
             runtime_policy=EffectiveRuntimePolicy(
                 timeout=60
             ),
-            skill="runtime-probe",
+            skill=None,
             skill_arguments=("alpha", "two words")
         )
 

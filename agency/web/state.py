@@ -27,7 +27,7 @@ def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
     )
     return {
         "title": str(agency_raw.get("title", resolved.title)),
-        "default_group": default_team,
+        "default_team": default_team,
         "decided_by": str(agency_raw.get("decided_by", "admin")),
         "ai_backend": str(agency_raw.get("ai_backend", resolved.ai_backend)),
         "theme": str(agency_raw.get("theme", "")),
@@ -43,38 +43,38 @@ def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
     }
 
 
-def runtime_group(snapshot: ConfigSnapshot, group_id: str) -> dict[str, Any]:
-    group = snapshot.config.teams[group_id]
-    paths = resolve_team_paths(group)
+def runtime_team(snapshot: ConfigSnapshot, team_id: str) -> dict[str, Any]:
+    team = snapshot.config.teams[team_id]
+    paths = resolve_team_paths(team)
     job_store = JobStore(snapshot.config.agency.memory_store)
     agents_full = [
-        instance.model_dump(mode="json") for instance in group.agents.values()
+        instance.model_dump(mode="json") for instance in team.agents.values()
     ]
     return {
-        "key": group_id,
-        "name": group.name,
+        "key": team_id,
+        "name": team.name,
         "workspace_root": paths.workspace_root,
-        "group_root": paths.team_root,
+        "team_root": paths.team_root,
         "observations": paths.observations,
         "proposals": paths.proposals,
         "decisions": paths.decisions,
         "locks": paths.locks,
         "logs": paths.logs,
-        "job_paths": job_store.paths(group_id),
+        "job_paths": job_store.paths(team_id),
         "dispatch_interval": snapshot.config.agency.dispatch.interval,
-        "agents": list(group.agents.keys()),
+        "agents": list(team.agents.keys()),
         "agents_full": agents_full,
-        "dispatch": group.dispatch.model_dump(mode="json"),
-        "runtime": group.runtime.model_dump(mode="json"),
+        "dispatch": team.dispatch.model_dump(mode="json"),
+        "runtime": team.runtime.model_dump(mode="json"),
         "workspaces": [
             workspace.model_dump(mode="json")
-            for workspace in group.workspaces
+            for workspace in team.workspaces
         ],
     }
 
 
-def all_runtime_groups(snapshot: ConfigSnapshot) -> dict[str, dict[str, Any]]:
+def all_runtime_teams(snapshot: ConfigSnapshot) -> dict[str, dict[str, Any]]:
     return {
-        group_id: runtime_group(snapshot, group_id)
-        for group_id in snapshot.config.teams
+        team_id: runtime_team(snapshot, team_id)
+        for team_id in snapshot.config.teams
     }

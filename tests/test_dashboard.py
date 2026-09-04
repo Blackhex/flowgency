@@ -20,7 +20,7 @@ from agency.app import (
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import transition_job, write_job
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 class TestBuildPipelineStats:
@@ -107,14 +107,14 @@ def test_decision_detail_shows_agent_log_and_changes(tmp_path, monkeypatch):
     from agency.app import app
 
     # Set up group with decision directory
-    paths = create_group_environment(
+    paths = create_team_environment(
         tmp_path,
         "test",
         create_state=True,
     )
-    group_path = paths.state_root
-    decisions_path = group_path / "decisions"
-    logs_path = group_path / "logs" / "2026-07-10"
+    team_path = paths.state_root
+    decisions_path = team_path / "decisions"
+    logs_path = team_path / "logs" / "2026-07-10"
     decisions_path.mkdir(parents=True, exist_ok=True)
     logs_path.mkdir(parents=True, exist_ok=True)
 
@@ -150,10 +150,10 @@ Decision body
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 5,
+                "schema_version": 6,
                 "agency": {
                     "title": "Agency",
-                    "default_group": "test",
+                    "default_team": "test",
                     "ai_backend": "script",
                     "agent_library": str(library_root),
                     "compilation_cache": str(cache_root),
@@ -161,8 +161,8 @@ Decision body
                     "prompt_store": str(prompt_root),
                 },
                 "memory": {"channels": {}},
-                "groups": {
-                    "test": apply_group_paths({
+                "teams": {
+                    "test": apply_team_paths({
                         "name": "Test Group",
                         "default_integration": "script",
                         "agents": [
@@ -230,7 +230,7 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
     prompt_root = tmp_path / "prompts"
-    paths = create_group_environment(tmp_path, "newsletter")
+    paths = create_team_environment(tmp_path, "newsletter")
     group_root = paths.state_root
     for rel in [
         ("logs", "2026-07-16"),
@@ -246,8 +246,8 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["agency"]["prompt_store"] = str(prompt_root)
-    raw["groups"] = {
-        "newsletter": apply_group_paths({
+    raw["teams"] = {
+        "newsletter": apply_team_paths({
             "name": "Newsletter",
             "default_integration": "copilot",
             "agents": [
@@ -290,12 +290,12 @@ def _job_spec(
     routine_id: str = "daily-review",
 ) -> JobSpec:
     return JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="newsletter",
-        group_root=str(group_root.resolve()),
+        team_key="newsletter",
+        team_root=str(group_root.resolve()),
         agent_name=agent_name,
         workspace_root=str(group_root.resolve()),
         trigger="scheduled_prompt",
@@ -309,7 +309,7 @@ def _job_spec(
             cache_path=str((group_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
         ),
         routine_id=routine_id,
-        skill=routine_id,
+        skill=None,
         skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
@@ -354,7 +354,7 @@ def test_dashboard_active_job_does_not_override_agent_health(monkeypatch, tmp_pa
     write_job(path, JobRecord.from_spec(spec))
     transition_job(path, "queued", "running")
 
-    fleet = build_dashboard_fleet(app_mod.get_group("newsletter"))
+    fleet = build_dashboard_fleet(app_mod.get_team("newsletter"))
 
     assert fleet[0]["health"] == "gray"
     assert fleet[0]["running"] is True
@@ -369,12 +369,12 @@ def test_dashboard_running_count_excludes_queued_but_not_waiting_jobs(monkeypatc
     """
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    advisor = raw["groups"]["newsletter"]["agents"][0]
+    advisor = raw["teams"]["newsletter"]["agents"][0]
     for agent_name in ("researcher", "writer"):
         agent = deepcopy(advisor)
         agent["name"] = agent_name
         agent["identity"]["display_name"] = agent_name.title()
-        raw["groups"]["newsletter"]["agents"].append(agent)
+        raw["teams"]["newsletter"]["agents"].append(agent)
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
@@ -413,7 +413,7 @@ def test_dashboard_running_count_excludes_queued_but_not_waiting_jobs(monkeypatc
     assert "2 running" in response.text
     assert response.text.count("data-agent-running") == 2
 
-    fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_group("newsletter"))}
+    fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_team("newsletter"))}
     assert fleet["advisor"]["job_status_key"] == "queued"
     assert fleet["advisor"]["running"] is False
     assert fleet["advisor"].get("queued") is True
@@ -432,12 +432,12 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
 ):
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    advisor = raw["groups"]["newsletter"]["agents"][0]
+    advisor = raw["teams"]["newsletter"]["agents"][0]
     for agent_name in ("researcher", "writer"):
         agent = deepcopy(advisor)
         agent["name"] = agent_name
         agent["identity"]["display_name"] = agent_name.title()
-        raw["groups"]["newsletter"]["agents"].append(agent)
+        raw["teams"]["newsletter"]["agents"].append(agent)
         (group_root / agent_name).mkdir()
         (group_root / agent_name / "AGENTS.md").write_text(
             f"# {agent_name.title()}\n",
@@ -482,7 +482,7 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
         app_mod.app.state.services = SimpleNamespace(startup_error=RuntimeError("unavailable"))
 
     response = client.get("/newsletter/")
-    fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_group("newsletter"))}
+    fleet = {agent["name"]: agent for agent in build_dashboard_fleet(app_mod.get_team("newsletter"))}
 
     assert response.status_code == 200
     assert "Queued" in response.text
@@ -514,13 +514,13 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
 
 def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw_config):
     client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
-    other_paths = create_group_environment(tmp_path, "research")
+    other_paths = create_team_environment(tmp_path, "research")
     other_group = other_paths.state_root
     for rel in [("logs",), ("observations",), ("proposals",), ("decisions",), ("locks",)]:
         other_group.joinpath(*rel).mkdir(parents=True, exist_ok=True)
 
     raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
-    raw["groups"]["research"] = apply_group_paths({
+    raw["teams"]["research"] = apply_team_paths({
         "name": "Research",
         "default_integration": "copilot",
         "agents": [
@@ -591,7 +591,7 @@ def test_running_dot_uses_health_sentence_as_title(monkeypatch, tmp_path, raw_co
 def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
@@ -633,7 +633,7 @@ def test_overdue_agent_appears_in_the_attention_queue(monkeypatch, tmp_path, raw
     # dispatch must be enabled so schedule_lateness detects the overdue routine
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
@@ -802,7 +802,7 @@ def test_attention_queue_header_singular(monkeypatch, tmp_path, raw_config):
     # dispatch must be enabled so schedule_lateness produces the overdue fault
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
@@ -843,13 +843,13 @@ def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, 
     from copy import deepcopy
     client, config_path, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     # add a second agent so advisor can be overdue while writer is running
-    advisor = raw["groups"]["newsletter"]["agents"][0]
+    advisor = raw["teams"]["newsletter"]["agents"][0]
     writer = deepcopy(advisor)
     writer["name"] = "writer"
     writer["identity"] = {"display_name": "Writer"}
-    raw["groups"]["newsletter"]["agents"].append(writer)
+    raw["teams"]["newsletter"]["agents"].append(writer)
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
@@ -868,8 +868,8 @@ def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, 
         # otherwise this compares a page built at 2026-07-16 12:00 against
         # health recomputed at real wall-clock time.
         expected_attention = len(app_mod.build_health_items(
-            app_mod.get_group("newsletter"),
-            [a for a in app_mod.build_dashboard_fleet(app_mod.get_group("newsletter"))],
+            app_mod.get_team("newsletter"),
+            [a for a in app_mod.build_dashboard_fleet(app_mod.get_team("newsletter"))],
         ))
 
     # advisor is overdue and NOT running → counts as 1 attention
@@ -1006,15 +1006,15 @@ class TestWorkQueueStrip:
 
     def test_memory_store_none_falls_back_to_idle(self, client, monkeypatch):
         # Patch the snapshot so the work queue section sees memory_store=None with pool=8.
-        # Patching runtime_group prevents the earlier get_group call from failing on None.
+        # Patching runtime_team prevents the earlier get_team call from failing on None.
         # The guard sends pool=8 (configured); without the guard queue_snapshot(…, None)
         # raises TypeError → except fires → pool=4, causing the assertion to fail.
         import agency.app as app_mod
-        from agency.web.state import runtime_group as real_runtime_group
+        from agency.web.state import runtime_team as real_runtime_team
         from dataclasses import replace as dc_replace
 
         real_snapshot = app_mod._load_snapshot()
-        real_group = real_runtime_group(real_snapshot, "newsletter")
+        real_group = real_runtime_team(real_snapshot, "newsletter")
 
         modified_agency = real_snapshot.config.agency.model_copy(
             update={
@@ -1028,7 +1028,7 @@ class TestWorkQueueStrip:
         )
 
         monkeypatch.setattr(app_mod, "_load_snapshot", lambda: mock_snapshot)
-        monkeypatch.setattr(app_mod, "runtime_group", lambda snap, gid: real_group)
+        monkeypatch.setattr(app_mod, "runtime_team", lambda snap, gid: real_group)
 
         body = client.get("/newsletter/").text
         assert "idle" in body and "pool 8" in body
@@ -1121,7 +1121,7 @@ class TestFleetCardQueuedState:
         transition_job(path, "queued", "running")
 
     def test_an_agent_with_a_waiting_job_is_not_shown_as_running(self, client, waiting_jobs):
-        fleet = build_dashboard_fleet(app_mod.get_group("newsletter"))
+        fleet = build_dashboard_fleet(app_mod.get_team("newsletter"))
         assert fleet[0].get("queued") is True
         assert fleet[0].get("running") is False
         body = client.get("/newsletter/").text
@@ -1130,6 +1130,6 @@ class TestFleetCardQueuedState:
     def test_an_agent_with_a_started_job_is_still_shown_as_running(self, client, running_job):
         body = client.get("/newsletter/").text
         assert "data-agent-running" in body
-        fleet = build_dashboard_fleet(app_mod.get_group("newsletter"))
+        fleet = build_dashboard_fleet(app_mod.get_team("newsletter"))
         assert fleet[0].get("running") is True
         assert not fleet[0].get("queued")

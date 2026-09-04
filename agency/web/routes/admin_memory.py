@@ -44,8 +44,8 @@ def _base_admin_context(request: Request, snapshot) -> dict[str, Any]:
         "active": "admin",
         "admin_page": "memory-channels",
         "theme_css": _theme_css(request),
-        "groups": {
-            key: group.name for key, group in snapshot.config.groups.items()
+        "teams": {
+            key: tcfg.name for key, tcfg in snapshot.config.teams.items()
         },
     }
 
@@ -64,8 +64,8 @@ def _issue_dicts(exc: ValidationFailed) -> list[dict[str, str]]:
 
 def _channel_references(snapshot, channel_key: str) -> list[dict[str, str]]:
     refs: list[dict[str, str]] = []
-    for group_key, group in snapshot.config.groups.items():
-        for agent_key, agent in group.agents.items():
+    for team_key, tcfg in snapshot.config.teams.items():
+        for agent_key, agent in tcfg.agents.items():
             display_name = agent.identity.display_name or agent_key
             if (
                 agent.default_memory is not None
@@ -74,8 +74,8 @@ def _channel_references(snapshot, channel_key: str) -> list[dict[str, str]]:
             ):
                 refs.append(
                     {
-                        "label": f"{group.name} / {display_name}",
-                        "href": f"/{group_key}/agents/{agent_key}/memory",
+                        "label": f"{tcfg.name} / {display_name}",
+                        "href": f"/{team_key}/agents/{agent_key}/memory",
                     }
                 )
             for routine in agent.routines:
@@ -87,11 +87,11 @@ def _channel_references(snapshot, channel_key: str) -> list[dict[str, str]]:
                     refs.append(
                         {
                             "label": (
-                                f"{group.name} / {display_name} / "
+                                f"{tcfg.name} / {display_name} / "
                                 f"{routine.id}"
                             ),
                             "href": (
-                                f"/{group_key}/agents/"
+                                f"/{team_key}/agents/"
                                 f"{agent_key}/routines"
                             ),
                         }
@@ -112,7 +112,7 @@ def _resolve_channel_memory(
     return resolve_memory_selector(
         MemorySelector(scope="channel", channel=channel_key),
         job_id="admin-memory-channel",
-        group_key="admin",
+        team_key="admin",
         agent_name="channel",
         routine_id=None,
         channels=snapshot.config.memory.channels,
@@ -250,15 +250,15 @@ def _remove_channel_directory(services: AgencyServices, resolved) -> None:
 def _active_channel_jobs(snapshot, channel_key: str) -> list[str]:
     references: list[str] = []
     job_store = JobStore(snapshot.config.agency.memory_store)
-    for group_key, group in snapshot.config.groups.items():
-        for record in job_store.active(group_key):
+    for team_key, tcfg in snapshot.config.teams.items():
+        for record in job_store.active(team_key):
             selector = dict(record.spec.memory.selector)
             if (
                 selector.get("scope") == "channel"
                 and selector.get("channel") == channel_key
             ):
                 references.append(
-                    f"{group.name} / {record.spec.agent_name} / "
+                    f"{tcfg.name} / {record.spec.agent_name} / "
                     f"{record.spec.job_id}"
                 )
     references.sort()

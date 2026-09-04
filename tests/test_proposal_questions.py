@@ -168,7 +168,7 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
         "schema_version: 5\n"
         "agency:\n"
         "  title: Agency\n"
-        "  default_group: test\n"
+        "  default_team: test\n"
         "  ai_backend: claude-code\n"
         f"  agent_library: {(tmp_path / 'agent-library').as_posix()}\n"
         f"  compilation_cache: {(tmp_path / 'compiled-agents').as_posix()}\n"

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active = "decisions" %}
 
-{% block title %}Decisions - {{ group_name }}{% endblock %}
+{% block title %}Decisions - {{ team_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-6">
@@ -11,7 +11,7 @@
 
 <div class="space-y-2">
   {% for d in decisions %}
-  <a href="/{{ group }}/decisions/{{ d._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-emerald-300 transition-colors">
+  <a href="/{{ team }}/decisions/{{ d._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-emerald-300 transition-colors">
     <div class="flex items-start justify-between">
       <div>
         <div class="font-medium text-gray-900">{{ d._title }}</div>

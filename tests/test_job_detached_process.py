@@ -10,7 +10,7 @@ import yaml
 
 from agency.jobs.authority import JobStore
 from agency.jobs.store import read_job
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 def _read_job_eventually(path: Path, *, deadline: float):
@@ -44,7 +44,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     )
     if probe.returncode != 0 or probe.stdout.strip() != "5":
         pytest.skip("installed agency package has different schema_version")
-    paths = create_group_environment(tmp_path, "test")
+    paths = create_team_environment(tmp_path, "test")
     group_path = paths.state_root
     agent_dir = group_path / "product"
     agent_dir.mkdir(parents=True)
@@ -72,17 +72,17 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         encoding="utf-8",
     )
     config_path.write_text(yaml.safe_dump({
-        "schema_version": 5,
+        "schema_version": 6,
         "agency": {
             "title": "Agency",
-            "default_group": "test",
+            "default_team": "test",
             "ai_backend": "claude-code",
             "agent_library": str(agent_library),
             "compilation_cache": str(tmp_path / "compiled-agents"),
             "memory_store": str(tmp_path / "memory"),
             "prompt_store": str(tmp_path / "prompts"),
         },
-        "groups": {"test": apply_group_paths({
+        "teams": {"test": apply_team_paths({
             "name": "Test",
             "default_integration": "script",
             "runtime": {
@@ -109,7 +109,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         "import os, pathlib\n"
         "from agency.jobs import JobRequest, submit_job_request\n"
         "config, job_id_file, pid_file = map(pathlib.Path, sys.argv[1:])\n"
-        "request = JobRequest(config_path=config, group_key='test', "
+        "request = JobRequest(config_path=config, team_key='test', "
         "agent_name='product', trigger='decision', task_input='run')\n"
         "handle = submit_job_request(request)\n"
         "job_id_file.write_text(handle.job_id)\n"

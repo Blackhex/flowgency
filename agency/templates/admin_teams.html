@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Agent Groups — {{ agency_title }}{% endblock %}
+{% block title %}Agent Teams — {{ agency_title }}{% endblock %}
 {% block content %}
 <div>
   <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-gray-900">Agent Groups</h1>
-    <a href="/admin/orgs/new" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
-      + Add New Group
+    <h1 class="text-2xl font-bold text-gray-900">Agent Teams</h1>
+    <a href="/admin/teams/new" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+      + Add New Team
     </a>
   </div>
 
@@ -17,7 +17,7 @@
           <h3 class="text-lg font-semibold text-gray-900">{{ org.name }}</h3>
           <div class="space-y-1 text-sm text-gray-500 font-mono break-all">
             <p><span class="font-semibold text-gray-700">Workspace path:</span> {{ org.workspace_path }}</p>
-            <p><span class="font-semibold text-gray-700">Group path:</span> {{ org.group_path }}</p>
+            <p><span class="font-semibold text-gray-700">Team path:</span> {{ org.team_path }}</p>
           </div>
           <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600">
             <span>{{ org.agent_count }} agent{{ 's' if org.agent_count != 1 else '' }}</span>
@@ -42,12 +42,12 @@
           </div>
         </div>
         <div class="flex flex-wrap gap-2 sm:ml-4">
-          <a href="/admin/orgs/{{ org.key }}/edit"
+          <a href="/admin/teams/{{ org.key }}/edit"
              class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
             Edit
           </a>
-          <form method="post" action="/admin/orgs/{{ org.key }}/delete" class="inline"
-                onsubmit="return confirm('Delete group \'{{ org.name }}\'? This only removes it from config — files on disk are not deleted.')">
+          <form method="post" action="/admin/teams/{{ org.key }}/delete" class="inline"
+                onsubmit="return confirm('Delete team \'{{ org.name }}\'? This only removes it from config — files on disk are not deleted.')">
             <input type="hidden" name="revision" value="{{ revision }}">
             <button type="submit"
                     class="px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors">
@@ -62,9 +62,9 @@
 
   {% if not orgs %}
   <div class="bg-white rounded-xl border border-gray-200 border-dashed p-8 text-center">
-    <p class="text-sm text-gray-500 mb-3">No agent groups configured yet.</p>
-    <a href="/admin/orgs/new" class="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
-      Add Your First Group
+    <p class="text-sm text-gray-500 mb-3">No agent teams configured yet.</p>
+    <a href="/admin/teams/new" class="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">
+      Add Your First Team
     </a>
   </div>
   {% endif %}

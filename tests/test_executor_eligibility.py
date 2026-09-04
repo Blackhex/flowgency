@@ -12,15 +12,15 @@ from agency.permissions.eligibility import may_execute_decisions
 def _config(tmp_path: Path, raw_config, rules):
     raw = deepcopy(raw_config)
     raw["schema_version"] = 5
-    workspace = raw["groups"]["newsletter"]["workspace_path"]
-    raw["groups"]["newsletter"]["runtime"] = {
+    workspace = raw["teams"]["newsletter"]["workspace_path"]
+    raw["teams"]["newsletter"]["runtime"] = {
         "permissions": {
             "mode": "restricted",
             "rules": [dict(r, path=r["path"].replace("<ws>", workspace)) for r in rules],
         }
     }
     # Use copilot so that restricted mode is accepted by the integration validator.
-    raw["groups"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    raw["teams"]["newsletter"]["agents"][0]["integration"] = "copilot"
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return ConfigStore(path).load().config

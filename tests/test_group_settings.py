@@ -70,18 +70,18 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     (tmp_path / "groups" / "newsletter-state").mkdir(parents=True, exist_ok=True)
     (tmp_path / "repo-root").mkdir(parents=True, exist_ok=True)
     raw["agency"]["title"] = "Agency"
-    raw["agency"]["default_group"] = "newsletter"
+    raw["agency"]["default_team"] = "newsletter"
     raw["agency"]["agent_library"] = str(library_root)
     raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
     raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
-    raw["groups"]["newsletter"]["workspace_path"] = str(
+    raw["teams"]["newsletter"]["workspace_path"] = str(
         tmp_path / "workspace" / "newsletter"
     )
-    raw["groups"]["newsletter"]["path"] = str(
+    raw["teams"]["newsletter"]["path"] = str(
         tmp_path / "groups" / "newsletter-state"
     )
-    raw["groups"]["newsletter"]["runtime"] = {
+    raw["teams"]["newsletter"]["runtime"] = {
         "timeout": 2400,
         "permissions": {
             "mode": "restricted",
@@ -90,8 +90,8 @@ def _make_client(monkeypatch, tmp_path, raw_config):
             ],
         },
     }
-    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
-    for agent in raw["groups"]["newsletter"].get("agents", []):
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
+    for agent in raw["teams"]["newsletter"].get("agents", []):
         blueprint_root = library_root / agent["blueprint"]
         blueprint_root.mkdir(parents=True, exist_ok=True)
         (blueprint_root / "AGENTS.md").write_text(f"# {agent['blueprint']}\n", encoding="utf-8")
@@ -113,7 +113,7 @@ def _make_client(monkeypatch, tmp_path, raw_config):
 def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_path, raw_config):
     client, _ = _make_client(monkeypatch, tmp_path, raw_config)
 
-    response = client.get("/admin/orgs/newsletter/edit")
+    response = client.get("/admin/teams/newsletter/edit")
 
     assert response.status_code == 200
     assert "Runtime defaults" in response.text
@@ -121,7 +121,7 @@ def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_pat
     assert 'name="workspace_path"' in response.text
     assert 'name="path"' in response.text
     assert "Workspace path" in response.text
-    assert "Group path" in response.text
+    assert "Team path" in response.text
     assert "shared/" not in response.text
     assert "/initialize" not in response.text
     assert "Agent Roster" not in response.text
@@ -129,7 +129,7 @@ def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_pat
     assert "Auto-detect" not in response.text
 
 
-def test_admin_groups_lists_workspace_and_group_paths_without_initialize_action(
+def test_admin_groups_lists_workspace_and_team_paths_without_initialize_action(
     monkeypatch,
     tmp_path,
     raw_config,
@@ -138,11 +138,11 @@ def test_admin_groups_lists_workspace_and_group_paths_without_initialize_action(
     group_root = tmp_path / "groups" / "newsletter-state"
     shutil.rmtree(group_root)
 
-    response = client.get("/admin/groups")
+    response = client.get("/admin/teams")
 
     assert response.status_code == 200
     assert "Workspace path" in response.text
-    assert "Group path" in response.text
+    assert "Team path" in response.text
     assert str(tmp_path / "workspace" / "newsletter") in response.text
     assert str(group_root) in response.text
     assert "/initialize" not in response.text
@@ -156,11 +156,11 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):
 
     store.patch(
         stale,
-        lambda raw: raw["groups"]["newsletter"].__setitem__("name", "Elsewhere"),
+        lambda raw: raw["teams"]["newsletter"].__setitem__("name", "Elsewhere"),
     )
 
     response = client.post(
-        "/admin/orgs/newsletter/save",
+        "/admin/teams/newsletter/save",
         data={
             "revision": stale,
             "name": "Newsletter",
@@ -185,11 +185,11 @@ def test_stale_group_create_returns_conflict_without_writing_group(
     raw_config,
 ):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
-    response = client.get("/admin/orgs/new")
+    response = client.get("/admin/teams/new")
     forms = [
         form
         for form in _parse_forms(response.text)
-        if form["attrs"].get("action") == "/admin/orgs/create"
+        if form["attrs"].get("action") == "/admin/teams/create"
     ]
     inputs = {
         item["name"]: item
@@ -203,11 +203,11 @@ def test_stale_group_create_returns_conflict_without_writing_group(
     )
 
     response = client.post(
-        "/admin/orgs/create",
+        "/admin/teams/create",
         data={
             "revision": stale,
             "key": "new-group",
-            "name": "New Group",
+            "name": "New Team",
             "workspace_path": str(tmp_path / "workspace" / "new-group"),
             "path": str(tmp_path / "groups" / "new-group-state"),
             "default_integration": "copilot",
@@ -218,7 +218,7 @@ def test_stale_group_create_returns_conflict_without_writing_group(
 
     assert inputs["revision"]["value"] == stale
     assert response.status_code == 409
-    assert "new-group" not in store.load().config.groups
+    assert "new-group" not in store.load().config.teams
 
 
 def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path):
@@ -232,7 +232,7 @@ def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path)
     data_root.mkdir()
     integration = _LauncherIntegration()
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.launchable_integrations",
+        "agency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
     client = TestClient(app_mod.app)
@@ -309,5 +309,5 @@ def test_setup_form_posts_only_launcher_inputs(
 
     assert "data_root" in inputs
     assert "project_dir" not in inputs
-    assert "group_key" not in inputs
+    assert "team_key" not in inputs
     assert "expected_revision" not in inputs

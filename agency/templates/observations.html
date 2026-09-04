@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active = "observations" %}
 
-{% block title %}Observations - {{ group_name }}{% endblock %}
+{% block title %}Observations - {{ team_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-4">
@@ -11,13 +11,13 @@
 
 <!-- Filters -->
 <div class="flex gap-3 mb-6">
-  <select onchange="location.href='/{{ group }}/observations?agent='+this.value+'&status={{ filter_status }}'" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
+  <select onchange="location.href='/{{ team }}/observations?agent='+this.value+'&status={{ filter_status }}'" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
     <option value="">All agents</option>
     {% for a in agents %}
     <option value="{{ a }}" {% if filter_agent == a %}selected{% endif %}>{{ a }}</option>
     {% endfor %}
   </select>
-  <select onchange="location.href='/{{ group }}/observations?agent={{ filter_agent }}&status='+this.value" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
+  <select onchange="location.href='/{{ team }}/observations?agent={{ filter_agent }}&status='+this.value" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
     <option value="">All statuses</option>
     {% for s in ["open", "connected", "dismissed", "archived"] %}
     <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ s }}</option>
@@ -27,7 +27,7 @@
 
 <div class="space-y-2">
   {% for c in observations %}
-  <a href="/{{ group }}/observations/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
+  <a href="/{{ team }}/observations/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:border-indigo-300 transition-colors">
     <div class="flex flex-wrap items-center gap-2 mb-1.5">
       {{ c.get("agent", "") | agent_badge }}
       {{ c.get("status", "") | status_badge }}

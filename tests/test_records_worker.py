@@ -16,7 +16,7 @@ from test_job_execution import _authority as _job_authority, queued_job
 
 
 def build_config(raw_config, config_paths, agents):
-    raw_config["groups"]["newsletter"]["agents"] = agents
+    raw_config["teams"]["newsletter"]["agents"] = agents
     return parse_config(raw_config, config_paths["config_path"]).resolved
 
 

@@ -14,7 +14,7 @@ from agency import app as app_mod
 from agency.web.routes import admin_library as admin_library_routes
 from agency.configuration import ConfigStore
 from agency.fs.snapshot import compute_source_digest
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -56,8 +56,8 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
     prompt_root = tmp_path / "prompts"
-    newsletter_paths = create_group_environment(tmp_path, "newsletter")
-    product_paths = create_group_environment(tmp_path, "product")
+    newsletter_paths = create_team_environment(tmp_path, "newsletter")
+    product_paths = create_team_environment(tmp_path, "product")
     for group_root in (newsletter_paths.state_root, product_paths.state_root):
         (group_root / "logs").mkdir(
             parents=True,
@@ -81,8 +81,8 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["agency"]["prompt_store"] = str(prompt_root)
-    raw["groups"] = {
-        "newsletter": apply_group_paths({
+    raw["teams"] = {
+        "newsletter": apply_team_paths({
             "name": "Newsletter",
             "default_integration": "copilot",
             "agents": [
@@ -103,7 +103,7 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
             ],
             "workspaces": [],
         }, newsletter_paths),
-        "product": apply_group_paths({
+        "product": apply_team_paths({
             "name": "Product",
             "default_integration": "copilot",
             "agents": [

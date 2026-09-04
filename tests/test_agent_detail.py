@@ -73,10 +73,10 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["agency"]["prompt_store"] = str(prompt_root)
-    raw["groups"]["newsletter"]["name"] = "Newsletter"
-    raw["groups"]["newsletter"]["path"] = str(group_root)
-    raw["groups"]["newsletter"]["default_integration"] = "copilot"
-    raw["groups"]["newsletter"]["runtime"] = {
+    raw["teams"]["newsletter"]["name"] = "Newsletter"
+    raw["teams"]["newsletter"]["path"] = str(group_root)
+    raw["teams"]["newsletter"]["default_integration"] = "copilot"
+    raw["teams"]["newsletter"]["runtime"] = {
         "timeout": 2400,
         "permissions": {
             "mode": "restricted",
@@ -85,7 +85,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
             ],
         },
     }
-    raw["groups"]["newsletter"]["agents"] = [
+    raw["teams"]["newsletter"]["agents"] = [
         {
             "name": "advisor",
             "blueprint": "advisor",
@@ -100,7 +100,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
                 "permissions": {
                     "rules": [
                         {"path": str((tmp_path / "Research" / "additional").resolve()), "tools": ["read", "shell", "write"]},
-                        {"path": str(raw_config["groups"]["newsletter"]["workspace_path"]), "tools": ["read", "shell", "write"]},
+                        {"path": str(raw_config["teams"]["newsletter"]["workspace_path"]), "tools": ["read", "shell", "write"]},
                     ],
                 },
             },
@@ -129,21 +129,21 @@ def _seed_activity_app(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     group_root = tmp_path / "groups" / "newsletter-workspace"
-    raw["agency"]["default_group"] = "newsletter-prod"
-    raw["groups"] = {
+    raw["agency"]["default_team"] = "newsletter-prod"
+    raw["teams"] = {
         "newsletter-prod": {
-            **raw["groups"]["newsletter"],
+            **raw["teams"]["newsletter"],
             "path": str(group_root),
             "name": "Newsletter Prod",
             "agents": [
                 {
-                    **raw["groups"]["newsletter"]["agents"][0],
+                    **raw["teams"]["newsletter"]["agents"][0],
                     "name": "advisor",
                 }
             ],
         }
     }
-    raw["groups"]["newsletter-prod"]["agents"][0]["name"] = "advisor"
+    raw["teams"]["newsletter-prod"]["agents"][0]["name"] = "advisor"
     config_path.write_text(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
@@ -215,7 +215,7 @@ def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_pat
     response = client.get("/newsletter/agents/advisor/runtime")
 
     assert response.status_code == 200
-    assert "Group default" in response.text
+    assert "Team default" in response.text
     # Effective preview shows rules as "Rule" source labels
     assert "Rule" in response.text
     assert "Research/editorial" in response.text.replace("\\", "/")
@@ -228,7 +228,7 @@ def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch
     default_root = str((tmp_path / "Research" / "editorial").resolve())
     additional_root = str((tmp_path / "Research" / "additional").resolve())
     # Add a duplicate rule path that appears in both group and agent (uniform tools)
-    raw["groups"]["newsletter"]["agents"][0]["runtime"]["permissions"]["rules"] = [
+    raw["teams"]["newsletter"]["agents"][0]["runtime"]["permissions"]["rules"] = [
         {"path": default_root, "tools": ["read", "shell", "write"]},
         {"path": additional_root, "tools": ["read", "shell", "write"]},
     ]
@@ -291,7 +291,7 @@ def test_agent_prompts_create_registers_private_prompt(monkeypatch, tmp_path, ra
 
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    agent = saved["groups"]["newsletter"]["agents"][0]
+    agent = saved["teams"]["newsletter"]["agents"][0]
     assert "daily-triage" in agent["prompts"]
 
 
@@ -332,7 +332,7 @@ def test_agent_prompts_delete_rejects_prompt_in_use(monkeypatch, tmp_path, raw_c
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["agents"][0]["routines"].append(
+    raw["teams"]["newsletter"]["agents"][0]["routines"].append(
         {
             "id": "local-review",
             "prompt": {"scope": "instance", "name": "local-triage"},
@@ -437,7 +437,7 @@ def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path
 
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    agent = saved["groups"]["newsletter"]["agents"][0]
+    agent = saved["teams"]["newsletter"]["agents"][0]
     assert agent["identity"]["display_name"] == "Senior Advisor"
     assert agent["identity"]["title"] == "Runtime Curator"
 
@@ -457,7 +457,7 @@ def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_pa
 
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    runtime = saved["groups"]["newsletter"]["agents"][0]["runtime"]
+    runtime = saved["teams"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1801
 
 
@@ -466,7 +466,7 @@ def test_runtime_post_surfaces_unsupported_capability_issue(monkeypatch, tmp_pat
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     # script integration only supports unrestricted; group mode is restricted
-    raw["groups"]["newsletter"]["agents"][0]["integration"] = "script"
+    raw["teams"]["newsletter"]["agents"][0]["integration"] = "script"
     config_path.write_text(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
@@ -517,7 +517,7 @@ def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):
 
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    routines = saved["groups"]["newsletter"]["agents"][0]["routines"]
+    routines = saved["teams"]["newsletter"]["agents"][0]["routines"]
     assert [routine["id"] for routine in routines] == ["triage", "digest"]
     assert routines[0]["enabled"] is False
     assert routines[1]["enabled"] is True
@@ -549,7 +549,7 @@ def test_routines_post_keeps_the_recovery_bound(monkeypatch, tmp_path, raw_confi
 
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    routines = saved["groups"]["newsletter"]["agents"][0]["routines"]
+    routines = saved["teams"]["newsletter"]["agents"][0]["routines"]
     assert routines[0]["schedule"] == {"at": "09:00", "catch_up": "48h"}
 
     reloaded = client.get("/newsletter/agents/advisor/routines")
@@ -585,7 +585,7 @@ def test_routines_post_rejects_an_unusable_recovery_bound(
 def test_routines_get_preserves_disabled_state(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["agents"][0]["routines"][0]["enabled"] = False
+    raw["teams"]["newsletter"]["agents"][0]["routines"][0]["enabled"] = False
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     app_mod.refresh_services()
 
@@ -655,7 +655,7 @@ def test_routine_editor_rejects_unknown_scope_name_and_shorthand(monkeypatch, tm
         [
             {
                 "id": "bad-scope",
-                "prompt": {"scope": "group", "name": "pr-review"},
+                "prompt": {"scope": "team", "name": "pr-review"},
                 "schedule": {"at": "09:00"},
             },
             {
@@ -691,7 +691,7 @@ def test_memory_post_selector_updates_only_config(monkeypatch, tmp_path, raw_con
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="detail-newsletter-advisor",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=snapshot.config.memory.channels,
@@ -706,7 +706,7 @@ def test_memory_post_selector_updates_only_config(monkeypatch, tmp_path, raw_con
         data={
             "action": "selector",
             "revision": revision,
-            "default_memory_scope": "group",
+            "default_memory_scope": "team",
             "default_memory_channel": "",
         },
         follow_redirects=False,
@@ -714,7 +714,7 @@ def test_memory_post_selector_updates_only_config(monkeypatch, tmp_path, raw_con
 
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["groups"]["newsletter"]["agents"][0]["default_memory"] == {"scope": "group"}
+    assert saved["teams"]["newsletter"]["agents"][0]["default_memory"] == {"scope": "team"}
     after = memory_store.read(resolved)
     assert after.revision == before.revision
     assert after.files == before.files
@@ -727,7 +727,7 @@ def test_memory_post_content_updates_only_selected_memory(monkeypatch, tmp_path,
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="detail-newsletter-advisor",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=snapshot.config.memory.channels,
@@ -762,7 +762,7 @@ def test_memory_post_returns_409_for_stale_content_revision(monkeypatch, tmp_pat
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="detail-newsletter-advisor",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=snapshot.config.memory.channels,
@@ -799,7 +799,7 @@ def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memo
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="detail-newsletter-advisor",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=snapshot.config.memory.channels,
@@ -822,7 +822,7 @@ def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memo
         data={
             "action": "selector",
             "revision": stale_revision,
-            "default_memory_scope": "group",
+            "default_memory_scope": "team",
             "default_memory_channel": "",
         },
     )
@@ -850,7 +850,7 @@ def test_routines_get_disabled_routine_shows_dash_for_next_due(monkeypatch, tmp_
     """Disabled routines must show '—' for next_due, not a computed schedule."""
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["agents"][0]["routines"].append(
+    raw["teams"]["newsletter"]["agents"][0]["routines"].append(
         {
             "id": "weekly-digest",
             "prompt": {"scope": "blueprint", "name": "pr-review"},
@@ -876,8 +876,8 @@ def test_routines_get_fired_routine_shows_timestamp_and_next_occurrence(monkeypa
 
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["dispatch"] = {"enabled": True}
-    raw["groups"]["newsletter"]["agents"][0]["routines"].append(
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
+    raw["teams"]["newsletter"]["agents"][0]["routines"].append(
         {
             "id": "hourly-check",
             "prompt": {"scope": "blueprint", "name": "pr-review"},
@@ -910,7 +910,7 @@ def test_routines_dispatch_disabled_shows_dispatch_disabled(monkeypatch, tmp_pat
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     # ensure dispatch is explicitly disabled
-    raw["groups"]["newsletter"]["dispatch"] = {"enabled": False}
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": False}
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     app_mod.refresh_services()
 
@@ -928,7 +928,7 @@ def test_memory_post_returns_423_when_memory_is_busy(monkeypatch, tmp_path, raw_
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="detail-newsletter-advisor",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=snapshot.config.memory.channels,

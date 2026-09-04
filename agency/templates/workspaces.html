@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active = "workspaces" %}
 
-{% block title %}Workspaces - {{ group_name }}{% endblock %}
+{% block title %}Workspaces - {{ team_name }}{% endblock %}
 
 {% block content %}
 <div class="flex items-baseline justify-between mb-4">
@@ -23,7 +23,7 @@
       </div>
       <div class="flex items-center gap-2">
         {% if ws.config_files %}
-          <a href="/{{ group }}/workspaces/{{ loop.index0 }}/file"
+          <a href="/{{ team }}/workspaces/{{ loop.index0 }}/file"
              class="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
             View Files
           </a>
@@ -41,8 +41,8 @@
 </div>
 {% else %}
 <div class="bg-white rounded-lg border border-gray-200 p-8 text-center">
-  <p class="text-gray-500 mb-2">No workspaces configured for this group.</p>
-  <p class="text-sm text-gray-400">Add workspaces in <a href="/admin/orgs/{{ group }}/edit" class="text-indigo-600 hover:underline">group settings</a> to define how you visualize and interact with these agents.</p>
+  <p class="text-gray-500 mb-2">No workspaces configured for this team.</p>
+  <p class="text-sm text-gray-400">Add workspaces in <a href="/admin/teams/{{ team }}/edit" class="text-indigo-600 hover:underline">group settings</a> to define how you visualize and interact with these agents.</p>
 </div>
 {% endif %}
 {% endblock %}

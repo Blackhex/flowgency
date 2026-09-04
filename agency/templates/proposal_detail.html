@@ -5,12 +5,12 @@
 
 {% block content %}
 <div class="mb-4">
-  <a href="/{{ group }}/proposals" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to proposals</a>
+  <a href="/{{ team }}/proposals" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to proposals</a>
 </div>
 
 <div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
   <div class="flex flex-wrap items-center gap-2 mb-3">
-    <a href="/{{ group }}/agents/{{ meta.get('origin_agent', '') }}">{{ meta.get("origin_agent", "") | agent_badge }}</a>
+    <a href="/{{ team }}/agents/{{ meta.get('origin_agent', '') }}">{{ meta.get("origin_agent", "") | agent_badge }}</a>
     {{ meta.get("status", "") | status_badge }}
   </div>
   <h1 class="text-lg md:text-xl font-bold text-gray-900 mb-4">{{ title }}</h1>
@@ -34,7 +34,7 @@
       {% if linked_observations %}
       <div class="flex flex-wrap items-center gap-1">
         {% for lc in linked_observations %}
-        <a href="/{{ group }}/observations/{{ lc.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 font-medium hover:bg-amber-200 transition-colors text-xs">
+        <a href="/{{ team }}/observations/{{ lc.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 font-medium hover:bg-amber-200 transition-colors text-xs">
           {{ lc.slug | replace("-", " ") }}
         </a>
         {% endfor %}
@@ -46,7 +46,7 @@
       </span>
       {% if decision %}
       <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-      <a href="/{{ group }}/decisions/{{ decision.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-100 text-emerald-800 font-medium hover:bg-emerald-200 transition-colors">
+      <a href="/{{ team }}/decisions/{{ decision.slug }}" class="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-100 text-emerald-800 font-medium hover:bg-emerald-200 transition-colors">
         Decided
       </a>
       {% endif %}
@@ -73,7 +73,7 @@
       {% for err in proposal_errors %}<div>{{ err }}</div>{% endfor %}
     </div>
     {% else %}
-    <form method="POST" action="/{{ group }}/proposals/{{ slug }}/decide">
+    <form method="POST" action="/{{ team }}/proposals/{{ slug }}/decide">
       {% if decision_error %}
       <div class="mb-4 p-3 border border-red-300 bg-red-50 text-red-700 rounded-md" role="alert">{{ decision_error }}</div>
       {% endif %}
@@ -187,7 +187,7 @@
       <div class="text-sm text-gray-700">{{ decision.meta.get("decision_note") }}</div>
     </div>
     {% endif %}
-    <a href="/{{ group }}/decisions/{{ decision.slug }}" class="text-sm text-emerald-700 underline mt-2 inline-block">View decision</a>
+    <a href="/{{ team }}/decisions/{{ decision.slug }}" class="text-sm text-emerald-700 underline mt-2 inline-block">View decision</a>
     {% endif %}
   </div>
   {% endif %}

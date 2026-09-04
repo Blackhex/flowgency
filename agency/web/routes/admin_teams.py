@@ -50,28 +50,28 @@ def _workspace_types_json(request: Request) -> str:
     return request.app.state.workspace_types_json_getter()
 
 
-def _group_summary(key: str, group) -> dict:
-    paths = resolve_team_paths(group)
+def _team_summary(key: str, tcfg) -> dict:
+    paths = resolve_team_paths(tcfg)
     return {
         "key": key,
-        "name": group.name,
-        "workspace_path": str(group.workspace_path),
-        "group_path": str(group.path),
-        "agents": list(group.agents.keys()),
-        "agent_count": len(group.agents),
+        "name": tcfg.name,
+        "workspace_path": str(tcfg.workspace_path),
+        "team_path": str(tcfg.path),
+        "agents": list(tcfg.agents.keys()),
+        "agent_count": len(tcfg.agents),
         "initialized": all(path.is_dir() for path in paths.record_directories),
         "workspace_exists": paths.workspace_root.exists(),
-        "dispatch_enabled": group.dispatch.enabled,
+        "dispatch_enabled": tcfg.dispatch.enabled,
     }
 
 
 def _base_admin_context(request: Request, snapshot=None) -> dict:
-    groups = {}
+    teams = {}
     title = "Agency"
     if snapshot is not None:
-        groups = {
-            key: group.name
-            for key, group in snapshot.config.groups.items()
+        teams = {
+            key: tcfg.name
+            for key, tcfg in snapshot.config.teams.items()
         }
         title = snapshot.config.agency.title
     return {
@@ -79,9 +79,9 @@ def _base_admin_context(request: Request, snapshot=None) -> dict:
         "agency_title": title,
         "admin_active": True,
         "active": "admin",
-        "admin_page": "groups",
+        "admin_page": "teams",
         "theme_css": _theme_css(request),
-        "groups": groups,
+        "teams": teams,
     }
 
 
@@ -154,20 +154,20 @@ def _setup_response(
     )
 
 
-def _group_settings_response(
+def _team_settings_response(
     request: Request,
     snapshot,
-    group_id: str,
+    team_id: str,
     *,
     warning: str = "",
     form_values: dict[str, Any] | None = None,
     revision: str | None = None,
     status_code: int = 200,
 ):
-    group = snapshot.config.groups[group_id]
-    runtime = group.runtime
+    team_cfg = snapshot.config.teams[team_id]
+    runtime = team_cfg.runtime
     permissions = runtime.permissions
-    dispatch = group.dispatch
+    dispatch = team_cfg.dispatch
     values = form_values or {}
 
     def value(key: str, default):
@@ -175,26 +175,26 @@ def _group_settings_response(
 
     return _templates(request).TemplateResponse(
         request,
-        "admin_org_edit.html",
+        "admin_team_edit.html",
         {
             **_base_admin_context(request, snapshot),
             "mode": "edit",
-            "org_key": group_id,
-            "org_name": value("name", group.name),
-            "org_workspace_path": value("workspace_path", str(group.workspace_path)),
-            "org_path": value("path", str(group.path)),
+            "org_key": team_id,
+            "org_name": value("name", team_cfg.name),
+            "org_workspace_path": value("workspace_path", str(team_cfg.workspace_path)),
+            "org_path": value("path", str(team_cfg.path)),
             "org_workspaces_json": value(
                 "workspaces_json",
                 json.dumps(
                     [
                         workspace.model_dump(mode="json")
-                        for workspace in group.workspaces
+                        for workspace in team_cfg.workspaces
                     ]
                 ),
             ),
             "workspace_types_json": _workspace_types_json(request),
             "default_integration": value(
-                "default_integration", group.default_integration
+                "default_integration", team_cfg.default_integration
             ),
             "runtime_timeout": value("runtime_timeout", runtime.timeout),
             "permission_mode": value("permission_mode", permissions.mode),
@@ -217,8 +217,8 @@ def _group_settings_response(
                 ).strip() if permissions.rules else "",
             ),
             "dispatch_enabled": value("dispatch_enabled", dispatch.enabled),
-            "agent_count": len(group.agents),
-            "manage_agents_href": f"/{group_id}/agents",
+            "agent_count": len(team_cfg.agents),
+            "manage_agents_href": f"/{team_id}/agents",
             "warning": warning,
             "revision": (
                 revision
@@ -230,7 +230,7 @@ def _group_settings_response(
     )
 
 
-def _group_create_response(
+def _team_create_response(
     request: Request,
     snapshot,
     *,
@@ -246,7 +246,7 @@ def _group_create_response(
 ):
     return _templates(request).TemplateResponse(
         request,
-        "admin_org_edit.html",
+        "admin_team_edit.html",
         {
             **_base_admin_context(request, snapshot),
             "mode": "create",
@@ -303,7 +303,7 @@ def _integration_names() -> list[str]:
     return sorted(REGISTRY)
 
 
-def _canonical_group_path(config_path: Path, value: str) -> Path:
+def _canonical_team_path(config_path: Path, value: str) -> Path:
     candidate = Path(value).expanduser()
     if not candidate.is_absolute():
         candidate = config_path.parent / candidate
@@ -557,7 +557,7 @@ async def setup_status(
     return JSONResponse(payload)
 
 
-@router.get("/admin/orgs/{org}/edit", response_class=HTMLResponse)
+@router.get("/admin/teams/{org}/edit", response_class=HTMLResponse)
 async def admin_org_edit(
     request: Request,
     org: str,
@@ -570,12 +570,12 @@ async def admin_org_edit(
             status=inspect_setup_status(services.config_store),
         )
     snapshot = services.config_store.load()
-    if org not in snapshot.config.groups:
-        raise HTTPException(status_code=404, detail=f"Unknown org: {org}")
-    return _group_settings_response(request, snapshot, org)
+    if org not in snapshot.config.teams:
+        raise HTTPException(status_code=404, detail=f"Unknown team: {org}")
+    return _team_settings_response(request, snapshot, org)
 
 
-@router.post("/admin/orgs/{org}/save", response_class=HTMLResponse)
+@router.post("/admin/teams/{org}/save", response_class=HTMLResponse)
 async def admin_org_save(
     request: Request,
     org: str,
@@ -599,7 +599,7 @@ async def admin_org_save(
         permission_rules = _parse_permission_rules(form)
     except PermissionRulesInvalid as exc:
         snapshot = services.config_store.load()
-        return _group_settings_response(
+        return _team_settings_response(
             request,
             snapshot,
             org,
@@ -614,7 +614,7 @@ async def admin_org_save(
             raise TypeError
     except (json.JSONDecodeError, TypeError):
         snapshot = services.config_store.load()
-        return _group_settings_response(
+        return _team_settings_response(
             request,
             snapshot,
             org,
@@ -627,7 +627,7 @@ async def admin_org_save(
             services.config_store,
             team_ids=(org,),
             proposed_paths=(
-                _canonical_group_path(services.config_path, path),
+                _canonical_team_path(services.config_path, path),
             ),
             expected_revision=revision,
         ) as locked:
@@ -649,7 +649,7 @@ async def admin_org_save(
             )
     except ConfigConflictError:
         snapshot = services.config_store.load()
-        return _group_settings_response(
+        return _team_settings_response(
             request,
             snapshot,
             org,
@@ -658,7 +658,7 @@ async def admin_org_save(
         )
     except ValidationFailed as exc:
         snapshot = services.config_store.load()
-        return _group_settings_response(
+        return _team_settings_response(
             request,
             snapshot,
             org,
@@ -679,10 +679,10 @@ async def admin_org_save(
         )
 
     request.app.state.refresh_services()
-    return RedirectResponse(f"/admin/orgs/{org}/edit", status_code=303)
+    return RedirectResponse(f"/admin/teams/{org}/edit", status_code=303)
 
 
-@router.post("/admin/orgs/create", response_class=HTMLResponse)
+@router.post("/admin/teams/create", response_class=HTMLResponse)
 async def admin_org_create(
     request: Request,
     services: AgencyServices = Depends(get_services),
@@ -703,7 +703,7 @@ async def admin_org_create(
         snapshot = services.config_store.load()
         return _templates(request).TemplateResponse(
             request,
-            "admin_org_edit.html",
+            "admin_team_edit.html",
             {
                 **_base_admin_context(request, snapshot),
                 "mode": "create",
@@ -726,7 +726,7 @@ async def admin_org_create(
     if default_integration and default_integration not in REGISTRY:
         return _templates(request).TemplateResponse(
             request,
-            "admin_org_edit.html",
+            "admin_team_edit.html",
             {
                 **_base_admin_context(request, snapshot),
                 "mode": "create",
@@ -749,7 +749,7 @@ async def admin_org_create(
     try:
         permission_rules = _parse_permission_rules(form)
     except PermissionRulesInvalid as exc:
-        return _group_create_response(
+        return _team_create_response(
             request,
             snapshot,
             key=key,
@@ -762,7 +762,7 @@ async def admin_org_create(
             revision=snapshot.revision,
             status_code=409,
         )
-    # A new group has no stored state to leave unchanged, so an absent field
+    # A new team has no stored state to leave unchanged, so an absent field
     # falls back to the documented default rather than the patch sentinel.
     permission_mode = _parse_permission_mode(form) or "unrestricted"
     try:
@@ -772,7 +772,7 @@ async def admin_org_create(
     except (json.JSONDecodeError, TypeError):
         return _templates(request).TemplateResponse(
             request,
-            "admin_org_edit.html",
+            "admin_team_edit.html",
             {
                 **_base_admin_context(request, snapshot),
                 "mode": "create",
@@ -793,7 +793,7 @@ async def admin_org_create(
         with revision_bound_team_operation(
             services.config_store,
             proposed_paths=(
-                _canonical_group_path(services.config_path, path),
+                _canonical_team_path(services.config_path, path),
             ),
             expected_revision=revision,
         ) as locked:
@@ -817,7 +817,7 @@ async def admin_org_create(
         current = services.config_store.load()
         return _templates(request).TemplateResponse(
             request,
-            "admin_org_edit.html",
+            "admin_team_edit.html",
             {
                 **_base_admin_context(request, current),
                 "mode": "create",
@@ -836,7 +836,7 @@ async def admin_org_create(
         )
     except ValidationFailed as exc:
         current = services.config_store.load()
-        return _group_create_response(
+        return _team_create_response(
             request,
             current,
             key=key,
@@ -850,10 +850,10 @@ async def admin_org_create(
             status_code=422,
         )
     request.app.state.refresh_services()
-    return RedirectResponse("/admin/groups", status_code=303)
+    return RedirectResponse("/admin/teams", status_code=303)
 
 
-@router.post("/admin/orgs/{org}/delete", response_class=HTMLResponse)
+@router.post("/admin/teams/{org}/delete", response_class=HTMLResponse)
 async def admin_org_delete(
     request: Request,
     org: str,
@@ -884,12 +884,12 @@ async def admin_org_delete(
         current = services.config_store.load()
         return _templates(request).TemplateResponse(
             request,
-            "admin_groups.html",
+            "admin_teams.html",
             {
                 **_base_admin_context(request, current),
                 "orgs": [
-                    _group_summary(key, group)
-                    for key, group in current.config.groups.items()
+                    _team_summary(key, tcfg)
+                    for key, tcfg in current.config.teams.items()
                 ],
                 "revision": current.revision,
                 "dispatch_error": (
@@ -899,4 +899,4 @@ async def admin_org_delete(
             status_code=409,
         )
     request.app.state.refresh_services()
-    return RedirectResponse("/admin/groups", status_code=303)
+    return RedirectResponse("/admin/teams", status_code=303)

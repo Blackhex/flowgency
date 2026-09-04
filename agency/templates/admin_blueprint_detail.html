@@ -77,7 +77,7 @@
         <h2 class="text-lg font-semibold text-gray-900">Instance users</h2>
         <ul class="mt-4 space-y-2 text-sm text-gray-600">
           {% for user in users %}
-          <li><a href="{{ user.href }}" class="text-indigo-600 hover:text-indigo-800">{{ user.group }} / {{ user.agent }}</a></li>
+          <li><a href="{{ user.href }}" class="text-indigo-600 hover:text-indigo-800">{{ user.team }} / {{ user.agent }}</a></li>
           {% endfor %}
         </ul>
       </section>

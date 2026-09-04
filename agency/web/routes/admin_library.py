@@ -129,7 +129,7 @@ def _base_admin_context(request: Request, snapshot) -> dict[str, Any]:
         "admin_page": "agent-library",
         "theme_css": _theme_css(request),
         "groups": {
-            key: group.name for key, group in snapshot.config.groups.items()
+            key: tcfg.name for key, group in snapshot.config.teams.items()
         },
     }
 
@@ -168,16 +168,16 @@ def _load_blueprint(services: AgencyServices, key: str):
 
 def _instance_users(snapshot, blueprint_key: str) -> list[dict[str, str]]:
     users: list[dict[str, str]] = []
-    for group_key, group in snapshot.config.groups.items():
-        for agent_key, agent in group.agents.items():
+    for team_key, tcfg in snapshot.config.teams.items():
+        for agent_key, agent in tcfg.agents.items():
             if agent.blueprint != blueprint_key:
                 continue
             display_name = agent.identity.display_name or agent_key
             users.append(
                 {
-                    "group": group.name,
+                    "group": tcfg.name,
                     "agent": display_name,
-                    "href": f"/{group_key}/agents/{agent_key}/blueprint",
+                    "href": f"/{team_key}/agents/{agent_key}/blueprint",
                 }
             )
     users.sort(key=lambda item: (item["group"], item["agent"]))
@@ -321,8 +321,8 @@ def _configured_prompt_users(
     prompt_name: str,
 ) -> list[dict[str, str]]:
     users: list[dict[str, str]] = []
-    for group_key, group in snapshot.config.groups.items():
-        for agent_key, agent in group.agents.items():
+    for team_key, tcfg in snapshot.config.teams.items():
+        for agent_key, agent in tcfg.agents.items():
             if agent.blueprint != blueprint_key:
                 continue
             for routine in agent.routines:
@@ -332,8 +332,8 @@ def _configured_prompt_users(
                 ):
                     users.append(
                         {
-                            "group_key": group_key,
-                            "group": group.name,
+                            "team_key": team_key,
+                            "group": tcfg.name,
                             "agent": (
                                 agent.identity.display_name
                                 or agent_key

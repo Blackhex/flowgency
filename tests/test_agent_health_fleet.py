@@ -107,12 +107,12 @@ def _spec(tmp_path, job_id, created_at="2026-07-20T00:00:00+00:00"):
     if not config_path.exists():
         config_path.write_text("schema_version: 5\ngroups: {}\n", encoding="utf-8")
     return JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="grp",
-        group_root=str(tmp_path.resolve()),
+        team_key="grp",
+        team_root=str(tmp_path.resolve()),
         agent_name="product",
         workspace_root=str(tmp_path.resolve()),
         trigger="manual_prompt",
@@ -126,7 +126,7 @@ def _spec(tmp_path, job_id, created_at="2026-07-20T00:00:00+00:00"):
             cache_path=str((tmp_path / "cache" / "entry.py").resolve()),
         ),
         routine_id="daily-review",
-        skill="daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="# Task\n",
         runtime_policy=RuntimePolicySnapshot(
@@ -150,7 +150,7 @@ def _write_job(tmp_path, job_id, *, status, completed_at=None, created_at="2026-
     spec = _spec(tmp_path, job_id, created_at=created_at)
     record = replace(JobRecord.from_spec(spec), status=status, completed_at=completed_at)
     store = JobStore(tmp_path / "memory")
-    store.group_root("grp").mkdir(parents=True, exist_ok=True)
+    store.team_root("grp").mkdir(parents=True, exist_ok=True)
     write_job(store.path("grp", job_id), record)
 
 

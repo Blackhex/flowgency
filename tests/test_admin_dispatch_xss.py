@@ -3,38 +3,38 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 import agency.app as app_mod
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypatch):
     """Prove conflict config path is not interpolated into onsubmit JS string."""
     # Create test environment
-    paths = create_group_environment(
+    paths = create_team_environment(
         tmp_path,
         "test",
-        group_dirs=("prompts",),
+        team_dirs=("prompts",),
     )
-    group_path = paths.state_root
-    (group_path / "product").mkdir(parents=True, exist_ok=True)
+    team_path = paths.state_root
+    (team_path / "product").mkdir(parents=True, exist_ok=True)
     blueprint_root = tmp_path / "agent-library" / "product-blueprint"
     blueprint_root.mkdir(parents=True)
     (blueprint_root / "AGENTS.md").write_text("# Product\n", encoding="utf-8")
     (tmp_path / "prompts").mkdir()
     config_path = tmp_path / "config.yaml"
     config = {
-        "schema_version": 5,
+        "schema_version": 6,
 
         "agency": {
             "title": "Agency",
-            "default_group": "test",
+            "default_team": "test",
             "ai_backend": "claude-code",
             "agent_library": str((tmp_path / "agent-library").resolve()),
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),
             "prompt_store": str((tmp_path / "prompts").resolve()),
         },
-        "groups": {
-            "test": apply_group_paths({
+        "teams": {
+            "test": apply_team_paths({
                 "name": "Test",
                 "default_integration": "claude-code",
                 "agents": [

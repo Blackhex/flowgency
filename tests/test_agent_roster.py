@@ -17,7 +17,7 @@ from agency.jobs.models import (
     RuntimePolicySnapshot,
 )
 from agency.jobs.store import write_job
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 from agency.configuration import ConfigStore
 from agency import app as app_mod
 
@@ -62,8 +62,8 @@ def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = T
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    newsletter_paths = create_group_environment(tmp_path, "newsletter")
-    research_paths = create_group_environment(tmp_path, "research")
+    newsletter_paths = create_team_environment(tmp_path, "newsletter")
+    research_paths = create_team_environment(tmp_path, "research")
     group_root = newsletter_paths.state_root
     target_root = research_paths.state_root
     _write_blueprint(library_root, "advisor", "Advisor", include_prompt=with_agent_prompts)
@@ -73,10 +73,10 @@ def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = T
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
-    raw["groups"]["newsletter"]["name"] = "Newsletter"
-    apply_group_paths(raw["groups"]["newsletter"], newsletter_paths)
-    raw["groups"]["newsletter"]["default_integration"] = "copilot"
-    raw["groups"]["newsletter"]["agents"] = [
+    raw["teams"]["newsletter"]["name"] = "Newsletter"
+    apply_team_paths(raw["teams"]["newsletter"], newsletter_paths)
+    raw["teams"]["newsletter"]["default_integration"] = "copilot"
+    raw["teams"]["newsletter"]["agents"] = [
         {
             "name": "advisor",
             "blueprint": "advisor",
@@ -85,16 +85,16 @@ def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = T
             "identity": {"display_name": "Advisor", "title": "Blueprint Librarian"},
         }
     ]
-    raw["groups"]["research"] = {
-        **apply_group_paths({}, research_paths),
+    raw["teams"]["research"] = {
+        **apply_team_paths({}, research_paths),
         "name": "Research",
         "default_integration": "copilot",
         "agents": [],
     }
 
     authority = JobStore(memory_root)
-    authority.group_root("newsletter").mkdir(parents=True, exist_ok=True)
-    authority.group_root("research").mkdir(parents=True, exist_ok=True)
+    authority.team_root("newsletter").mkdir(parents=True, exist_ok=True)
+    authority.team_root("research").mkdir(parents=True, exist_ok=True)
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
@@ -139,12 +139,12 @@ def _all_route_paths() -> list[str]:
 
 def _roster_job_spec(tmp_path: Path, group_root: Path, *, job_id: str, created_at: str) -> JobSpec:
     return JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=job_id,
         config_path=str((tmp_path / "config.yaml").resolve()),
         config_revision="cfg-1",
-        group_key="newsletter",
-        group_root=str(group_root.resolve()),
+        team_key="newsletter",
+        team_root=str(group_root.resolve()),
         agent_name="advisor",
         workspace_root=str(group_root.resolve()),
         trigger="manual_prompt",
@@ -158,7 +158,7 @@ def _roster_job_spec(tmp_path: Path, group_root: Path, *, job_id: str, created_a
             cache_path="C:/cache/copilot/v1/digest-1",
         ),
         routine_id="daily-review",
-        skill="daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
@@ -263,7 +263,7 @@ def test_roster_renders_expanded_saved_and_one_off_launcher(
     assert 'name="memory_scope"' in response.text
     assert 'value="run"' in response.text
     assert 'value="agent"' in response.text
-    assert 'value="group"' in response.text
+    assert 'value="team"' in response.text
     assert 'value="channel"' in response.text
     assert "Support" in response.text
     assert "Run prompt" in response.text
@@ -305,7 +305,7 @@ def test_create_instance_from_roster(monkeypatch, tmp_path, raw_config):
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     created = next(
-        agent for agent in saved["groups"]["newsletter"]["agents"] if agent["name"] == "reviewer"
+        agent for agent in saved["teams"]["newsletter"]["agents"] if agent["name"] == "reviewer"
     )
     assert created["blueprint"] == "advisor"
     assert created["integration"] == "copilot"
@@ -326,7 +326,7 @@ def test_remove_instance_updates_config_only(monkeypatch, tmp_path, raw_config):
 
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["groups"]["newsletter"]["agents"] == []
+    assert saved["teams"]["newsletter"]["agents"] == []
     assert preexisting_dir.is_dir()
 
 
@@ -357,7 +357,7 @@ def test_remove_instance_warns_when_prompt_namespace_is_orphaned(
 
     assert response.status_code == 409
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["groups"]["newsletter"]["agents"] == []
+    assert saved["teams"]["newsletter"]["agents"] == []
     assert "local-triage" not in response.text
     assert "orphaned prompt namespace" in response.text.lower()
     assert "newsletter" in response.text
@@ -370,7 +370,7 @@ def test_move_preview_and_apply(monkeypatch, tmp_path, raw_config):
 
     preview = client.post(
         "/newsletter/agents/advisor/move",
-        data={"target_group": "research", "memory_mode": "empty", "revision": revision},
+        data={"target_team": "research", "memory_mode": "empty", "revision": revision},
     )
 
     assert preview.status_code == 200
@@ -380,15 +380,15 @@ def test_move_preview_and_apply(monkeypatch, tmp_path, raw_config):
 
     apply = client.post(
         "/newsletter/agents/advisor/move/apply",
-        data={"target_group": "research", "memory_mode": "empty", "preview_revision": revision},
+        data={"target_team": "research", "memory_mode": "empty", "preview_revision": revision},
         follow_redirects=False,
     )
 
     assert apply.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["groups"]["newsletter"]["agents"] == []
+    assert saved["teams"]["newsletter"]["agents"] == []
     moved = next(
-        agent for agent in saved["groups"]["research"]["agents"] if agent["name"] == "advisor"
+        agent for agent in saved["teams"]["research"]["agents"] if agent["name"] == "advisor"
     )
     assert moved["blueprint"] == "advisor"
 
@@ -429,7 +429,7 @@ def test_move_apply_warns_when_prompt_namespace_cleanup_is_orphaned(
     response = client.post(
         "/newsletter/agents/advisor/move/apply",
         data={
-            "target_group": "research",
+            "target_team": "research",
             "memory_mode": "empty",
             "preview_revision": preview_revision,
         },
@@ -442,9 +442,9 @@ def test_move_apply_warns_when_prompt_namespace_cleanup_is_orphaned(
     assert str(prompt_store.path("newsletter", "advisor", "local-triage").parent) in response.text
 
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["groups"]["newsletter"]["agents"] == []
+    assert saved["teams"]["newsletter"]["agents"] == []
     moved = next(
-        agent for agent in saved["groups"]["research"]["agents"] if agent["name"] == "advisor"
+        agent for agent in saved["teams"]["research"]["agents"] if agent["name"] == "advisor"
     )
     assert moved["prompts"] == ["local-triage"]
     assert prompt_store.read("research", "advisor", "local-triage").document.digest == created.document.digest
@@ -549,7 +549,7 @@ def test_roster_shows_all_active_jobs_and_keeps_launch_controls_enabled(
 def test_old_admin_agent_get_redirects_to_profile(monkeypatch, tmp_path, raw_config):
     client, _, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
-    response = client.get("/admin/orgs/newsletter/agents/advisor", follow_redirects=False)
+    response = client.get("/admin/teams/newsletter/agents/advisor", follow_redirects=False)
 
     assert response.status_code == 303
     assert response.headers["location"] == "/newsletter/agents/advisor/profile"
@@ -572,7 +572,7 @@ def test_stale_create_revision_returns_conflict(monkeypatch, tmp_path, raw_confi
     client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     stale = store.load().revision
-    store.patch(stale, lambda raw: raw["groups"]["newsletter"].__setitem__("name", "Changed"))
+    store.patch(stale, lambda raw: raw["teams"]["newsletter"].__setitem__("name", "Changed"))
 
     response = client.post(
         "/newsletter/agents/create",
@@ -614,11 +614,11 @@ def test_stale_move_preview_returns_conflict(monkeypatch, tmp_path, raw_config):
     client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     stale = store.load().revision
-    store.patch(stale, lambda raw: raw["groups"]["newsletter"].__setitem__("name", "Changed"))
+    store.patch(stale, lambda raw: raw["teams"]["newsletter"].__setitem__("name", "Changed"))
 
     response = client.post(
         "/newsletter/agents/advisor/move",
-        data={"target_group": "research", "memory_mode": "empty", "revision": stale},
+        data={"target_team": "research", "memory_mode": "empty", "revision": stale},
     )
 
     assert response.status_code == 409
@@ -631,14 +631,14 @@ def test_stale_move_apply_returns_conflict(monkeypatch, tmp_path, raw_config):
     revision = store.load().revision
     preview = client.post(
         "/newsletter/agents/advisor/move",
-        data={"target_group": "research", "memory_mode": "empty", "revision": revision},
+        data={"target_team": "research", "memory_mode": "empty", "revision": revision},
     )
     assert preview.status_code == 200
-    store.patch(revision, lambda raw: raw["groups"]["newsletter"].__setitem__("name", "Changed"))
+    store.patch(revision, lambda raw: raw["teams"]["newsletter"].__setitem__("name", "Changed"))
 
     response = client.post(
         "/newsletter/agents/advisor/move/apply",
-        data={"target_group": "research", "memory_mode": "empty", "preview_revision": revision},
+        data={"target_team": "research", "memory_mode": "empty", "preview_revision": revision},
     )
 
     assert response.status_code == 409
@@ -650,14 +650,14 @@ def test_removed_mutation_routes_are_absent_from_route_table(monkeypatch, tmp_pa
     route_paths = set(_all_route_paths())
 
     for path in {
-        "/admin/orgs/{group}/agents/create",
-        "/admin/orgs/{group}/agents/{agent}/save",
-        "/admin/orgs/{group}/agents/{agent}/rename",
-        "/admin/orgs/{group}/agents/{agent}/delete",
-        "/admin/orgs/{org}/agents/create",
-        "/admin/orgs/{org}/agents/{agent}/save",
-        "/admin/orgs/{org}/agents/{agent}/rename",
-        "/admin/orgs/{org}/agents/{agent}/delete",
+        "/admin/teams/{group}/agents/create",
+        "/admin/teams/{group}/agents/{agent}/save",
+        "/admin/teams/{group}/agents/{agent}/rename",
+        "/admin/teams/{group}/agents/{agent}/delete",
+        "/admin/teams/{org}/agents/create",
+        "/admin/teams/{org}/agents/{agent}/save",
+        "/admin/teams/{org}/agents/{agent}/rename",
+        "/admin/teams/{org}/agents/{agent}/delete",
         "/{group}/agents/{agent}/identity",
         "/{group}/agents/{agent}/definition",
         "/{group}/agents/{agent}/upload-headshot",
@@ -673,16 +673,16 @@ def test_task14_removed_mutation_routes_are_unregistered_and_nonmutating(monkeyp
     route_paths = set(_all_route_paths())
 
     for path in {
-        "/admin/orgs/{org}/initialize",
-        "/admin/orgs/{org}/autodetect",
-        "/admin/orgs/{org}/dispatch",
+        "/admin/teams/{org}/initialize",
+        "/admin/teams/{org}/autodetect",
+        "/admin/teams/{org}/dispatch",
     }:
         assert path not in route_paths
 
     for url in {
-        "/admin/orgs/newsletter/initialize",
-        "/admin/orgs/newsletter/autodetect",
-        "/admin/orgs/newsletter/dispatch",
+        "/admin/teams/newsletter/initialize",
+        "/admin/teams/newsletter/autodetect",
+        "/admin/teams/newsletter/dispatch",
     }:
         response = client.post(url, follow_redirects=False)
         assert response.status_code == 404
@@ -695,16 +695,16 @@ def test_task14_route_ownership_is_unique_and_canonical(monkeypatch, tmp_path, r
 
     canonical_paths = {
         "/admin/",
-        "/admin/groups",
+        "/admin/teams",
         "/admin/dispatch",
         "/admin/settings",
         "/admin/integrations",
         "/admin/integrations/register",
         "/admin/integrations/unregister",
         "/admin/integrations/restart",
-        "/admin/orgs/new",
-        "/admin/orgs/{org}/delete",
-        "/{group}/agents/{agent}/run",
+        "/admin/teams/new",
+        "/admin/teams/{org}/delete",
+        "/{team}/agents/{agent}/run",
     }
 
     for path in canonical_paths:

@@ -23,7 +23,7 @@ from agency.jobs.models import (
 from agency.jobs.store import read_job, write_job
 from dataclasses import replace
 from agency.memory import resolve_memory_selector
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 from tests._lock_helpers import hold_exclusive_lock
 
 
@@ -73,7 +73,7 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
         ("newsletter", "Newsletter", "advisor", "Advisor"),
         ("product", "Product", "strategist", "Strategist"),
     ]:
-        paths = create_group_environment(tmp_path, key)
+        paths = create_team_environment(tmp_path, key)
         group_root = paths.state_root
         (group_root / "logs").mkdir(
             parents=True,
@@ -91,7 +91,7 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
             parents=True,
             exist_ok=True,
         )
-        groups[key] = apply_group_paths({
+        groups[key] = apply_team_paths({
             "name": group_name,
             "default_integration": "copilot",
             "agents": [
@@ -108,11 +108,11 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
             ],
             "workspaces": [],
         }, paths)
-    raw["groups"] = groups
+    raw["teams"] = groups
 
     authority = JobStore(memory_root)
-    authority.group_root("newsletter").mkdir(parents=True, exist_ok=True)
-    authority.group_root("product").mkdir(parents=True, exist_ok=True)
+    authority.team_root("newsletter").mkdir(parents=True, exist_ok=True)
+    authority.team_root("product").mkdir(parents=True, exist_ok=True)
 
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
@@ -123,7 +123,7 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
     resolved = resolve_memory_selector(
         MemorySelector(scope="channel", channel="brand-strategy"),
         job_id="preview",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=snapshot.config.memory.channels,
@@ -150,25 +150,25 @@ def _write_channel_job(
     job_id: str | None = None,
 ) -> Path:
     snapshot = ConfigStore(config_path).load()
-    group = snapshot.config.groups["newsletter"]
+    group = snapshot.config.teams["newsletter"]
     authority = JobStore(snapshot.config.agency.memory_store)
-    authority.group_root("newsletter").mkdir(parents=True, exist_ok=True)
+    authority.team_root("newsletter").mkdir(parents=True, exist_ok=True)
     resolved = resolve_memory_selector(
         MemorySelector(scope="channel", channel=channel_key),
         job_id=job_id or uuid4().hex,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=snapshot.config.memory.channels,
         store_root=snapshot.config.agency.memory_store,
     )
     spec = JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=job_id or uuid4().hex,
         config_path=str(config_path.resolve()),
         config_revision=snapshot.revision,
-        group_key="newsletter",
-        group_root=str(group.path.resolve()),
+        team_key="newsletter",
+        team_root=str(group.path.resolve()),
         agent_name="advisor",
         workspace_root=str(group.path.resolve()),
         trigger="manual_prompt",
@@ -190,7 +190,7 @@ def _write_channel_job(
             ),
         ),
         routine_id="daily-review",
-        skill="daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="Run it",
         runtime_policy=RuntimePolicySnapshot(
@@ -360,7 +360,7 @@ def test_channel_delete_blocks_when_active_job_targets_channel(
     support = resolve_memory_selector(
         MemorySelector(scope="channel", channel="support"),
         job_id="preview",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=ConfigStore(config_path).load().config.memory.channels,
@@ -399,7 +399,7 @@ def test_channel_delete_ignores_terminal_jobs(
     support = resolve_memory_selector(
         MemorySelector(scope="channel", channel="support"),
         job_id="preview",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=ConfigStore(config_path).load().config.memory.channels,
@@ -434,7 +434,7 @@ def test_channel_delete_returns_423_when_memory_is_busy(
     support = resolve_memory_selector(
         MemorySelector(scope="channel", channel="support"),
         job_id="preview",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=ConfigStore(config_path).load().config.memory.channels,
@@ -487,7 +487,7 @@ def test_channel_delete_restores_archive_when_config_replace_conflicts(
     support = resolve_memory_selector(
         MemorySelector(scope="channel", channel="support"),
         job_id="preview",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=ConfigStore(config_path).load().config.memory.channels,
@@ -531,7 +531,7 @@ def test_channel_delete_archives_canonical_and_recreation_starts_fresh(
     support = resolve_memory_selector(
         MemorySelector(scope="channel", channel="support"),
         job_id="preview",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=ConfigStore(config_path).load().config.memory.channels,
@@ -579,7 +579,7 @@ def test_channel_delete_archives_canonical_and_recreation_starts_fresh(
     recreated = resolve_memory_selector(
         MemorySelector(scope="channel", channel="support"),
         job_id="preview",
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="advisor",
         routine_id=None,
         channels=refreshed.config.memory.channels,
@@ -595,7 +595,7 @@ def _channel_references_for_test(
 ) -> list[str]:
     snapshot = ConfigStore(config_path).load()
     refs: list[str] = []
-    for group in snapshot.config.groups.values():
+    for group in snapshot.config.teams.values():
         for agent in group.agents.values():
             if (
                 agent.default_memory is not None

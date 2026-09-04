@@ -315,7 +315,7 @@ def test_run_server_reports_first_run_before_starting_uvicorn(
 def test_setup_get_renders_only_data_root_and_integration_fields(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.launchable_integrations",
+        "agency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, data_root: (
             _LaunchIntegration("copilot", "GitHub Copilot"),
         ),
@@ -375,7 +375,7 @@ def test_setup_get_rebuilds_services_before_redirect_when_config_appears_out_of_
 def test_setup_launch_rejects_relative_data_root(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.launchable_integrations",
+        "agency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (_LaunchIntegration(),),
     )
     response = TestClient(app_mod.app).post(
@@ -392,7 +392,7 @@ def test_setup_launch_rejects_unavailable_integration(tmp_path, monkeypatch):
     data_root = tmp_path / "Agency"
     data_root.mkdir()
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.launchable_integrations",
+        "agency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (_LaunchIntegration("claude-code", "Claude Code"),),
     )
     client = TestClient(app_mod.app)
@@ -412,7 +412,7 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     data_root.mkdir()
     integration = _LaunchIntegration()
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.launchable_integrations",
+        "agency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
 
@@ -423,7 +423,7 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.run_in_threadpool",
+        "agency.web.routes.admin_teams.run_in_threadpool",
         fake_run_in_threadpool,
     )
     client = TestClient(app_mod.app)
@@ -494,7 +494,7 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
         error=IntegrationError("Launch failed."),
     )
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.launchable_integrations",
+        "agency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
 
@@ -504,7 +504,7 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.run_in_threadpool",
+        "agency.web.routes.admin_teams.run_in_threadpool",
         fake_run_in_threadpool,
     )
     client = TestClient(app_mod.app)
@@ -529,7 +529,7 @@ def test_setup_launch_creates_and_uses_missing_data_root(tmp_path, monkeypatch):
     data_root = tmp_path / "new" / "Agency"
     integration = _LaunchIntegration()
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.launchable_integrations",
+        "agency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
     client = TestClient(app_mod.app)
@@ -558,7 +558,7 @@ def test_setup_launch_returns_to_form_when_launch_and_fallback_fail(
         fallback_error=IntegrationError("No valid fallback command."),
     )
     monkeypatch.setattr(
-        "agency.web.routes.admin_groups.launchable_integrations",
+        "agency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
 

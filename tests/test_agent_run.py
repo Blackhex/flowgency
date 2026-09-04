@@ -15,16 +15,16 @@ from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.prompts import PromptStore
 from agency.jobs.store import write_job
-from tests._group_helpers import create_group_environment
+from tests._team_helpers import create_team_environment
 
 
 def _setup_group(tmp_path: Path) -> Path:
-    paths = create_group_environment(
+    paths = create_team_environment(
         tmp_path,
         "test",
-        group_dirs=("prompts", "logs"),
+        team_dirs=("prompts", "logs"),
     )
-    group_path = paths.state_root
+    team_path = paths.state_root
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory"
@@ -47,20 +47,20 @@ def _setup_group(tmp_path: Path) -> Path:
     )
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 5\n"
+        "schema_version: 6\n"
         "agency:\n"
         "  title: Agency\n"
-        "  default_group: test\n"
+        "  default_team: test\n"
         "  ai_backend: claude-code\n"
         f"  agent_library: {library_root.as_posix()}\n"
         f"  compilation_cache: {cache_root.as_posix()}\n"
         f"  memory_store: {memory_root.as_posix()}\n"
         f"  prompt_store: {prompt_store.as_posix()}\n"
-        "groups:\n"
+        "teams:\n"
         "  test:\n"
         "    name: Test\n"
         f"    workspace_path: {paths.workspace_root.as_posix()}\n"
-        f"    path: {group_path.as_posix()}\n"
+        f"    path: {team_path.as_posix()}\n"
         "    default_integration: script\n"
         "    agents:\n"
         "      - name: product\n"
@@ -88,12 +88,12 @@ def _setup_group(tmp_path: Path) -> Path:
     )
     app_mod.CONFIG_PATH = config_path
     app_mod.refresh_services()
-    return group_path
+    return team_path
 
 
 def _configure_schedule(routine_id: str) -> None:
     config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
-    for agent in config["groups"]["test"]["agents"]:
+    for agent in config["teams"]["test"]["agents"]:
         if agent["name"] != "product":
             continue
         for routine in agent.get("routines", []):
@@ -108,7 +108,7 @@ def _configure_schedule(routine_id: str) -> None:
 
 
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
-    group_path = _setup_group(tmp_path)
+    team_path = _setup_group(tmp_path)
     calls = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
@@ -129,13 +129,13 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     request = calls[0]
     assert isinstance(request, JobRequest)
     assert request.trigger == "manual_prompt"
-    assert request.group_key == "test"
+    assert request.team_key == "test"
     assert request.agent_name == "product"
     assert request.routine_id == "daily-review"
     assert request.task_input == ""
     assert request.prompt == PromptSelector(scope="blueprint", name="daily-review")
     assert request.timeout_override is None
-    assert not (group_path / "product").exists()
+    assert not (team_path / "product").exists()
 
 
 def test_run_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
@@ -218,7 +218,7 @@ def test_run_returns_400_when_blueprint_prompt_disappears_after_validation(tmp_p
 def test_run_returns_400_when_private_prompt_disappears_after_validation(tmp_path, monkeypatch):
     _setup_group(tmp_path)
     config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
-    config["groups"]["test"]["agents"][0]["prompts"] = ["local-triage"]
+    config["teams"]["test"]["agents"][0]["prompts"] = ["local-triage"]
     app_mod.CONFIG_PATH.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
     prompt_store = PromptStore(tmp_path / "prompt-store")
@@ -276,20 +276,20 @@ def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
 
 
 def test_agent_running_state_comes_from_active_job_records(tmp_path):
-    group_path = _setup_group(tmp_path)
+    team_path = _setup_group(tmp_path)
     job_store = JobStore(tmp_path / "memory")
-    group_store = job_store.group_root("test")
+    group_store = job_store.team_root("test")
     group_store.mkdir(parents=True, exist_ok=True)
     for status in ("queued", "running"):
         spec = JobSpec(
-            schema_version=4,
+            schema_version=5,
             job_id=f"job-{status}",
             config_path=str((tmp_path / "config.yaml").resolve()),
             config_revision="cfg-1",
-            group_key="test",
-            group_root=str(group_path.resolve()),
+            team_key="test",
+            team_root=str(team_path.resolve()),
             agent_name="product",
-            workspace_root=str(group_path.resolve()),
+            workspace_root=str(team_path.resolve()),
             trigger="manual_prompt",
             integration_name="script",
             integration_config={},
@@ -309,8 +309,8 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
                 mode="unrestricted",
             ),
             memory=MemoryBinding(
-                selector={"scope": "agent", "version": 1, "group": "test", "agent": "product"},
-                canonical_json='{"agent":"product","group":"test","scope":"agent","version":1}',
+                selector={"scope": "agent", "version": 1, "team": "test", "agent": "product"},
+                canonical_json='{"agent":"product","team":"test","scope":"agent","version":1}',
                 memory_hash="memory-hash-1",
                 path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
             ),
@@ -323,8 +323,8 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
         record = replace(JobRecord.from_spec(spec), status=status)
         write_job(job_store.path("test", spec.job_id), record)
 
-    assert not (group_path / "logs" / ".running-product").exists()
-    assert is_agent_running(app_mod.get_group("test"), "product") is True
+    assert not (team_path / "logs" / ".running-product").exists()
+    assert is_agent_running(app_mod.get_team("test"), "product") is True
 
 
 def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):
@@ -500,13 +500,13 @@ def test_agents_page_does_not_render_retired_schedule_links(
     resp = client.get("/test/agents")
 
     assert resp.status_code == 200
-    assert 'href="/admin/orgs/test/edit#rules-product"' not in resp.text
+    assert 'href="/admin/teams/test/edit#rules-product"' not in resp.text
     assert 'href="/test/prompts#schedule-product-0"' not in resp.text
 
 
 def test_agents_page_keeps_roster_layout_when_logs_exist(tmp_path):
-    group_path = _setup_group(tmp_path)
-    day = group_path / "logs" / "2026-07-11"
+    team_path = _setup_group(tmp_path)
+    day = team_path / "logs" / "2026-07-11"
     day.mkdir()
     (day / "product-error.err").write_text("run failure")
     client = TestClient(app)
@@ -524,15 +524,15 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
     _setup_group(tmp_path)
     monkeypatch.setattr(app_mod, "is_agent_running", lambda *args, **kwargs: True)
     job_store = JobStore(tmp_path / "memory")
-    group_store = job_store.group_root("test")
+    group_store = job_store.team_root("test")
     group_store.mkdir(parents=True, exist_ok=True)
     spec = JobSpec(
-        schema_version=4,
+        schema_version=5,
         job_id="job-running",
         config_path=str((tmp_path / "config.yaml").resolve()),
         config_revision=ConfigStore(tmp_path / "config.yaml").load().revision,
-        group_key="test",
-        group_root=str((tmp_path / "grp").resolve()),
+        team_key="test",
+        team_root=str((tmp_path / "grp").resolve()),
         agent_name="product",
         workspace_root=str((tmp_path / "grp").resolve()),
         trigger="manual_prompt",
@@ -554,8 +554,8 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
             mode="unrestricted",
         ),
         memory=MemoryBinding(
-            selector={"scope": "agent", "version": 1, "group": "test", "agent": "product"},
-            canonical_json='{"agent":"product","group":"test","scope":"agent","version":1}',
+            selector={"scope": "agent", "version": 1, "team": "test", "agent": "product"},
+            canonical_json='{"agent":"product","team":"test","scope":"agent","version":1}',
             memory_hash="memory-hash-1",
             path=str((tmp_path / "memory" / "memory-hash-1").resolve()),
         ),

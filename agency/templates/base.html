@@ -247,7 +247,7 @@
 
       <!-- Logo + title -->
       <div class="flex items-center justify-start px-4 pt-5 pb-1 relative">
-        <a href="{% if group %}/{{ group }}/{% else %}/{% endif %}" class="flex items-end gap-2.5 group">
+        <a href="{% if team %}/{{ team }}/{% else %}/{% endif %}" class="flex items-end gap-2.5 group">
           <div class="logo-square w-8 h-8 rounded-lg bg-agency-600 flex items-center justify-center">
             <svg class="w-5 h-5" viewBox="0 0 80 80" fill="none">
               <line x1="20" y1="60" x2="29" y2="42" stroke="white" stroke-width="3" opacity="0.4"/>
@@ -269,12 +269,12 @@
         </button>
       </div>
 
-      <!-- Group switcher (hidden on admin pages) -->
+      <!-- Team switcher (hidden on admin pages) -->
       <div class="px-3 pt-3 pb-2 {% if admin_active %}hidden{% endif %}">
-        <label for="group-switcher" class="sr-only">Current group</label>
-        <select id="group-switcher" aria-label="Current group" onchange="var parts=window.location.pathname.split('/').filter(Boolean);var section=parts[1]||'';window.location='/'+this.value+(section?'/'+section:'/')" class="w-full px-2.5 py-2 text-sm font-medium border border-white/10 rounded-lg bg-white/5 text-gray-300 focus:outline-none focus:ring-1 focus:ring-agency-500 cursor-pointer" style="background-color: rgba(255,255,255,0.05);">
-          {% for gkey, gname in groups.items() %}
-          <option value="{{ gkey }}" {% if gkey == group %}selected{% endif %}>{{ gname }}</option>
+        <label for="team-switcher" class="sr-only">Current team</label>
+        <select id="team-switcher" aria-label="Current team" onchange="var parts=window.location.pathname.split('/').filter(Boolean);var section=parts[1]||'';window.location='/'+this.value+(section?'/'+section:'/')" class="w-full px-2.5 py-2 text-sm font-medium border border-white/10 rounded-lg bg-white/5 text-gray-300 focus:outline-none focus:ring-1 focus:ring-agency-500 cursor-pointer" style="background-color: rgba(255,255,255,0.05);">
+          {% for gkey, gname in teams.items() %}
+          <option value="{{ gkey }}" {% if gkey == team %}selected{% endif %}>{{ gname }}</option>
           {% endfor %}
         </select>
       </div>
@@ -306,10 +306,10 @@
           </span>
         </a>
 
-        <a href="/admin/groups" class="nav-item {% if admin_page == 'groups' %}active{% endif %}">
+        <a href="/admin/teams" class="nav-item {% if admin_page == 'teams' %}active{% endif %}">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v 6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v 2M7 7h10"/></svg>
-            Agent Groups
+            Agent Teams
           </span>
         </a>
 
@@ -336,7 +336,7 @@
 
         {% else %}
         <!-- Primary: What needs attention -->
-        <a href="/{{ group }}/" class="nav-item mt-1 {% if active == 'home' %}active{% endif %}">
+        <a href="/{{ team }}/" class="nav-item mt-1 {% if active == 'home' %}active{% endif %}">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-2.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
             Inbox
@@ -346,7 +346,7 @@
           {% endif %}
         </a>
 
-        <a href="/{{ group }}/agents" class="nav-item {% if active == 'agents' %}active{% endif %}">
+        <a href="/{{ team }}/agents" class="nav-item {% if active == 'agents' %}active{% endif %}">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
             Agents
@@ -357,7 +357,7 @@
         <!-- Pipeline: Observe > Propose > Decide -->
         <div class="nav-section">Pipeline</div>
 
-        <a href="/{{ group }}/observations" class="nav-item {% if active == 'observations' %}active{% endif %}" title="Observations from your agents">
+        <a href="/{{ team }}/observations" class="nav-item {% if active == 'observations' %}active{% endif %}" title="Observations from your agents">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
             Observations
@@ -367,7 +367,7 @@
           {% endif %}
         </a>
 
-        <a href="/{{ group }}/proposals" class="nav-item {% if active == 'proposals' %}active{% endif %}" title="Proposals waiting for your review">
+        <a href="/{{ team }}/proposals" class="nav-item {% if active == 'proposals' %}active{% endif %}" title="Proposals waiting for your review">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
             Proposals
@@ -377,7 +377,7 @@
           {% endif %}
         </a>
 
-        <a href="/{{ group }}/decisions" class="nav-item {% if active == 'decisions' %}active{% endif %}" title="Your approved, deferred, or rejected proposals">
+        <a href="/{{ team }}/decisions" class="nav-item {% if active == 'decisions' %}active{% endif %}" title="Your approved, deferred, or rejected proposals">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             Decisions
@@ -390,14 +390,14 @@
         <!-- Workspace: Reference + config -->
         <div class="nav-section">Workspace</div>
 
-        <a href="/{{ group }}/logs" class="nav-item {% if active == 'logs' %}active{% endif %}">
+        <a href="/{{ team }}/logs" class="nav-item {% if active == 'logs' %}active{% endif %}">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             Logs
           </span>
         </a>
 
-        <a href="/{{ group }}/jobs" class="nav-item {% if active == 'jobs' %}active{% endif %}">
+        <a href="/{{ team }}/jobs" class="nav-item {% if active == 'jobs' %}active{% endif %}">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6m3 6V7m3 10v-4M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
             Jobs
@@ -419,7 +419,7 @@
         </a>
 
         {% if workspaces_available %}
-        <a href="/{{ group }}/workspaces" class="nav-item {% if active == 'workspaces' %}active{% endif %}">
+        <a href="/{{ team }}/workspaces" class="nav-item {% if active == 'workspaces' %}active{% endif %}">
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v 2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v 6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v 6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/></svg>
             Workspaces
