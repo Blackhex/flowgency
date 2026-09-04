@@ -198,12 +198,12 @@ def test_publication_rejects_hostile_external_job_path_and_preserves_sentinel(
 ):
     stage = publication_fixture["stage"]
     job_store = publication_fixture["job_store"]
-    hostile_group = publication_fixture["team_root"].parent / "hostile"
-    hostile_job_store = hostile_group / ".jobs" / "hostile"
+    hostile_team = publication_fixture["team_root"].parent / "hostile"
+    hostile_job_store = hostile_team / ".jobs" / "hostile"
     hostile_job_store.mkdir(parents=True)
     hostile_job_path = hostile_job_store / f"{publication_fixture['job_id']}.yaml"
     hostile_job_path.write_text("sentinel", encoding="utf-8")
-    sentinel = hostile_group / "sentinel.txt"
+    sentinel = hostile_team / "sentinel.txt"
     sentinel.write_text("keep-me", encoding="utf-8")
 
     with pytest.raises(MemoryPublicationError, match="job store|unsafe"):

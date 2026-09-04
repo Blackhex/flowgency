@@ -69,7 +69,7 @@ def _config_with_rules(
     tmp_path: Path,
     raw_config,
     *,
-    group_rules=None,
+    team_rules=None,
     agent_rules=None,
     mode="unrestricted",
 ):
@@ -78,7 +78,7 @@ def _config_with_rules(
     team["runtime"] = {
         "permissions": {
             "mode": mode,
-            "rules": group_rules or [],
+            "rules": team_rules or [],
         },
     }
     agent = team["agents"][0]

@@ -23,7 +23,7 @@ from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, 
 from agency.jobs.store import job_path, write_job
 
 
-def _group(tmp_path):
+def _team(tmp_path):
     logs = tmp_path / "logs"
     logs.mkdir(parents=True)
     return {"key": "grp", "logs": logs}
@@ -32,7 +32,7 @@ def _group(tmp_path):
 def _write_job(tmp_path, status):
     memory_root = tmp_path.parent / "memory" if tmp_path.name == "grp" else tmp_path / "memory"
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
     spec = JobSpec(
         schema_version=5,
         job_id=f"job-{status}",
@@ -61,8 +61,8 @@ def _write_job(tmp_path, status):
             mode="unrestricted",
         ),
         memory=MemoryBinding(
-            selector={"scope": "agent", "version": 1, "group": "grp", "agent": "product"},
-            canonical_json='{"agent":"product","group":"grp","scope":"agent","version":1}',
+            selector={"scope": "agent", "version": 1, "team": "grp", "agent": "product"},
+            canonical_json='{"agent":"product","scope":"agent","team":"grp","version":1}',
             memory_hash="memory-hash-1",
             path=str((memory_root / "memory-hash-1").resolve()),
         ),
@@ -72,14 +72,14 @@ def _write_job(tmp_path, status):
         created_at="2026-07-15T00:00:00+00:00",
     )
     store = JobStore(memory_root)
-    group_store = store.team_root("grp")
-    group_store.mkdir(parents=True, exist_ok=True)
+    team_store = store.team_root("grp")
+    team_store.mkdir(parents=True, exist_ok=True)
     write_job(store.path("grp", spec.job_id), replace(JobRecord.from_spec(spec), status=status))
 
 
 @pytest.mark.parametrize("status", ["queued", "running"])
 def test_active_job_reports_agent_running(tmp_path, status):
-    g = _group(tmp_path)
+    g = _team(tmp_path)
     _write_job(tmp_path, status)
     g["job_paths"] = tuple(JobStore(tmp_path / "memory").paths("grp"))
     assert is_agent_running(g, "product", timeout=1800) is True
@@ -87,25 +87,25 @@ def test_active_job_reports_agent_running(tmp_path, status):
 
 @pytest.mark.parametrize("status", ["complete", "failed"])
 def test_terminal_job_does_not_report_agent_running(tmp_path, status):
-    g = _group(tmp_path)
+    g = _team(tmp_path)
     _write_job(tmp_path, status)
     g["job_paths"] = tuple(JobStore(tmp_path / "memory").paths("grp"))
     assert is_agent_running(g, "product", timeout=1800) is False
 
 
 def test_no_active_job_reports_agent_not_running(tmp_path):
-    g = _group(tmp_path)
+    g = _team(tmp_path)
     assert is_agent_running(g, "product", timeout=1800) is False
 
 
-def _group_with_logs(tmp_path):
+def _team_with_logs(tmp_path):
     logs = tmp_path / "logs"
     logs.mkdir(parents=True)
     return {"key": "grp", "logs": logs}
 
 
 def test_agent_last_run_uses_newest_stdout_mtime(tmp_path):
-    g = _group_with_logs(tmp_path)
+    g = _team_with_logs(tmp_path)
     day = g["logs"] / "2026-07-11"
     day.mkdir()
     older = day / "product-z-manual_prompt.out"
@@ -129,7 +129,7 @@ def test_agent_last_run_uses_newest_stdout_mtime(tmp_path):
 
 
 def test_agent_last_run_ignores_stderr_and_other_agents(tmp_path):
-    g = _group_with_logs(tmp_path)
+    g = _team_with_logs(tmp_path)
     day = g["logs"] / "2026-07-11"
     day.mkdir()
     (day / "product-failed.err").write_text("failed")
@@ -139,7 +139,7 @@ def test_agent_last_run_ignores_stderr_and_other_agents(tmp_path):
 
 
 def test_agent_last_run_stats_each_candidate_once(tmp_path, monkeypatch):
-    g = _group_with_logs(tmp_path)
+    g = _team_with_logs(tmp_path)
     day = g["logs"] / "2026-07-11"
     day.mkdir()
     candidates = {
@@ -164,7 +164,7 @@ def test_agent_last_run_stats_each_candidate_once(tmp_path, monkeypatch):
     assert stat_calls == {candidate: 1 for candidate in candidates}
 
 
-def _group_with_routines(tmp_path, routines):
+def _team_with_routines(tmp_path, routines):
     logs = tmp_path / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     return {
@@ -197,24 +197,24 @@ ENABLED = {"enabled": True}
 
 
 def test_next_run_disabled(tmp_path):
-    g = _group_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
+    g = _team_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
     assert compute_next_run(g, "product", {"enabled": False}) is None
 
 
 def test_next_run_no_rules(tmp_path):
-    g = _group_with_routines(tmp_path, [])
+    g = _team_with_routines(tmp_path, [])
     assert compute_next_run(g, "product", ENABLED) is None
 
 
 def test_next_run_unknown_agent(tmp_path):
-    g = _group_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
+    g = _team_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
     assert compute_next_run(g, "missing", ENABLED) is None
 
 
 def test_next_run_at_future(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     future = (fixed_now + timedelta(hours=2)).strftime("%H:%M")
-    g = _group_with_routines(tmp_path, [{"id": "r", "at": future}])
+    g = _team_with_routines(tmp_path, [{"id": "r", "at": future}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result is not None
@@ -226,7 +226,7 @@ def test_next_run_at_past_without_marker_stays_today(tmp_path):
     """A missed occurrence is still the next one — the dispatcher fires it on its next tick."""
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
-    g = _group_with_routines(tmp_path, [{"id": "r", "at": past}])
+    g = _team_with_routines(tmp_path, [{"id": "r", "at": past}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result == datetime(2026, 1, 15, 10, 0, 0)
@@ -235,7 +235,7 @@ def test_next_run_at_past_without_marker_stays_today(tmp_path):
 def test_next_run_at_past_with_marker_rolls_to_tomorrow(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
-    g = _group_with_routines(tmp_path, [{"id": "r", "at": past}])
+    g = _team_with_routines(tmp_path, [{"id": "r", "at": past}])
     day = fixed_now.strftime("%Y-%m-%d")
     marker = at_marker_path(g["logs"], "product", "r", day)
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -246,7 +246,7 @@ def test_next_run_at_past_with_marker_rolls_to_tomorrow(tmp_path):
 
 
 def test_next_run_every_no_marker_due_now(tmp_path):
-    g = _group_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
+    g = _team_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
     before = datetime.now()
     result = compute_next_run(g, "product", ENABLED)
     assert result is not None
@@ -254,7 +254,7 @@ def test_next_run_every_no_marker_due_now(tmp_path):
 
 
 def test_next_run_every_with_marker(tmp_path):
-    g = _group_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
+    g = _team_with_routines(tmp_path, [{"id": "r", "every": "6h"}])
     marker = g["logs"] / ".last-product-r"
     marker.touch()
     two_hours_ago = time.time() - 2 * 3600
@@ -266,7 +266,7 @@ def test_next_run_every_with_marker(tmp_path):
 
 
 def test_next_run_skips_condition_rule(tmp_path):
-    g = _group_with_routines(tmp_path, [{"id": "gate", "at": "06:00", "condition": "pre-send"}])
+    g = _team_with_routines(tmp_path, [{"id": "gate", "at": "06:00", "condition": "pre-send"}])
     assert compute_next_run(g, "product", ENABLED) is None
 
 
@@ -274,7 +274,7 @@ def test_next_run_returns_soonest(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     soon = (fixed_now + timedelta(minutes=30)).strftime("%H:%M")
     later = (fixed_now + timedelta(hours=5)).strftime("%H:%M")
-    g = _group_with_routines(tmp_path, [{"id": "a", "at": later}, {"id": "b", "at": soon}])
+    g = _team_with_routines(tmp_path, [{"id": "a", "at": later}, {"id": "b", "at": soon}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result.strftime("%H:%M") == soon
@@ -282,7 +282,7 @@ def test_next_run_returns_soonest(tmp_path):
 
 def test_next_run_detail_identifies_winning_rule(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
-    g = _group_with_routines(tmp_path, [{"id": "later", "at": "17:00"}, {"id": "soon", "at": "12:30"}])
+    g = _team_with_routines(tmp_path, [{"id": "later", "at": "17:00"}, {"id": "soon", "at": "12:30"}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         detail = compute_next_run_detail(g, "product", ENABLED)
         compatible_value = compute_next_run(g, "product", ENABLED)
@@ -296,7 +296,7 @@ def test_next_run_detail_identifies_winning_rule(tmp_path):
 
 def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
-    g = _group_with_routines(tmp_path, [{"id": "first", "at": "13:00"}, {"id": "second", "at": "13:00"}])
+    g = _team_with_routines(tmp_path, [{"id": "first", "at": "13:00"}, {"id": "second", "at": "13:00"}])
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
         detail = compute_next_run_detail(g, "product", ENABLED)
     assert detail["routine_id"] == "first"
@@ -304,7 +304,7 @@ def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
 
 
 def test_next_run_skips_disabled_routine(tmp_path):
-    g = _group_with_routines(tmp_path, [{"id": "r", "at": "13:00"}])
+    g = _team_with_routines(tmp_path, [{"id": "r", "at": "13:00"}])
     g["agents_full"][0]["routines"][0]["enabled"] = False
     assert compute_next_run(g, "product", ENABLED) is None
 
@@ -394,7 +394,7 @@ NOW = datetime(2026, 7, 29, 11, 46, 0)
 ENABLED_DISPATCH = {"enabled": True}
 
 
-def _fleet_group(tmp_path, routines):
+def _fleet_team(tmp_path, routines):
     logs = tmp_path / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     return {
@@ -408,7 +408,7 @@ def _fleet_group(tmp_path, routines):
 
 
 def _enrich(tmp_path, routines):
-    g = _fleet_group(tmp_path, routines)
+    g = _fleet_team(tmp_path, routines)
     agent = {"name": "product"}
     with patch("agency.app.clock_now", return_value=NOW):
         _apply_agent_status(g, agent, routines, ENABLED_DISPATCH)
@@ -443,7 +443,7 @@ def test_enricher_supplies_the_timing_pair(tmp_path):
 
 
 def test_enricher_ignores_schedules_when_dispatch_is_off(tmp_path):
-    g = _fleet_group(tmp_path, [{"id": "suite-health", "schedule": {"at": "08:00"}}])
+    g = _fleet_team(tmp_path, [{"id": "suite-health", "schedule": {"at": "08:00"}}])
     g["dispatch"] = {"enabled": False}
     agent = {"name": "product"}
     with patch("agency.app.clock_now", return_value=NOW):

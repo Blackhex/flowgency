@@ -39,7 +39,7 @@ from agency.jobs.store import (
 import agency.config as strict_config_module
 
 
-def _canonical_group_store(tmp_path: Path) -> Path:
+def _canonical_team_store(tmp_path: Path) -> Path:
     return JobStore(tmp_path / "memory-store").team_root("newsletter")
 
 
@@ -475,7 +475,7 @@ def test_job_record_rejects_older_schema_version_one(tmp_path):
 
 
 def test_active_jobs_includes_waiting_for_memory(tmp_path):
-    team_path = _canonical_group_store(tmp_path)
+    team_path = _canonical_team_store(tmp_path)
     queued_spec = make_spec(tmp_path, agent="product")
     waiting_spec = make_spec(tmp_path, agent="product")
     running_spec = make_spec(tmp_path, agent="product")
@@ -504,7 +504,7 @@ def test_active_jobs_includes_waiting_for_memory(tmp_path):
 
 def test_cancel_job_transitions_waiting_for_memory_without_expected_argument(tmp_path):
     spec = make_spec(tmp_path)
-    path = job_path(_canonical_group_store(tmp_path), spec.job_id)
+    path = job_path(_canonical_team_store(tmp_path), spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     transition_job(path, "queued", "waiting_for_memory")
 
@@ -529,7 +529,7 @@ def test_cancel_job_signature_no_longer_accepts_expected_parameter():
 @pytest.mark.parametrize("status", ["running", "complete", "failed", "cancelled"])
 def test_cancel_job_rejects_running_and_terminal_states(tmp_path, status):
     spec = make_spec(tmp_path)
-    path = job_path(_canonical_group_store(tmp_path), spec.job_id)
+    path = job_path(_canonical_team_store(tmp_path), spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
 
     if status == "complete":
@@ -543,7 +543,7 @@ def test_cancel_job_rejects_running_and_terminal_states(tmp_path, status):
 
 
 def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):
-    team_path = _canonical_group_store(tmp_path)
+    team_path = _canonical_team_store(tmp_path)
     queued_spec = make_spec(tmp_path, agent="product")
     running_spec = make_spec(tmp_path, agent="product")
     other_spec = make_spec(tmp_path, agent="editorial")
@@ -564,7 +564,7 @@ def test_active_jobs_returns_queued_and_running_for_agent(tmp_path):
 
 
 def test_active_jobs_ignores_malformed_field_types(tmp_path):
-    team_path = _canonical_group_store(tmp_path)
+    team_path = _canonical_team_store(tmp_path)
     valid_spec = make_spec(tmp_path)
     valid_record = JobRecord.from_spec(valid_spec)
     write_job(job_path(team_path, valid_spec.job_id), valid_record)

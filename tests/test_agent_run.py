@@ -278,8 +278,8 @@ def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
 def test_agent_running_state_comes_from_active_job_records(tmp_path):
     team_path = _setup_team(tmp_path)
     job_store = JobStore(tmp_path / "memory")
-    group_store = job_store.team_root("test")
-    group_store.mkdir(parents=True, exist_ok=True)
+    team_store = job_store.team_root("test")
+    team_store.mkdir(parents=True, exist_ok=True)
     for status in ("queued", "running"):
         spec = JobSpec(
             schema_version=5,
@@ -524,8 +524,8 @@ def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
     _setup_team(tmp_path)
     monkeypatch.setattr(app_mod, "is_agent_running", lambda *args, **kwargs: True)
     job_store = JobStore(tmp_path / "memory")
-    group_store = job_store.team_root("test")
-    group_store.mkdir(parents=True, exist_ok=True)
+    team_store = job_store.team_root("test")
+    team_store.mkdir(parents=True, exist_ok=True)
     spec = JobSpec(
         schema_version=5,
         job_id="job-running",

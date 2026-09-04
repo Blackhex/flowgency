@@ -142,7 +142,7 @@ def test_patch_agent_profile_preserves_extension_keys(config_store):
     }
 
 
-def test_patch_team_settings_preserves_unowned_group_fields(config_store):
+def test_patch_team_settings_preserves_unowned_team_fields(config_store):
     from agency.configuration.patches import (
         TeamSettingsPatch,
         patch_team_settings,

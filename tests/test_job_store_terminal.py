@@ -39,7 +39,7 @@ def _spec(tmp_path: Path, job_id: str, agent_name: str, created_at: str) -> JobS
             mode="unrestricted",
         ),
         memory=MemoryBinding(
-            selector={"scope": "agent", "version": 1, "group": "grp", "agent": agent_name},
+            selector={"scope": "agent", "version": 1, "team": "grp", "agent": agent_name},
             canonical_json='{"scope":"agent"}',
             memory_hash="memory-hash-1",
             path=str((tmp_path / "memory" / "memory-hash-1").resolve()),

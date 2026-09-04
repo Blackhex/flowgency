@@ -94,7 +94,7 @@ def test_prompt_store_rejects_stale_digest(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "group,instance,name",
+    "team,instance,name",
     [
         ("", "reviewer", "local-triage"),
         ("newsletter", "", "local-triage"),
@@ -106,11 +106,11 @@ def test_prompt_store_rejects_stale_digest(tmp_path):
         ("newsletter", "..", "local-triage"),
     ],
 )
-def test_prompt_store_rejects_invalid_slugs(tmp_path, group, instance, name):
+def test_prompt_store_rejects_invalid_slugs(tmp_path, team, instance, name):
     store = PromptStore(tmp_path / "prompts")
 
     with pytest.raises(ValueError, match="stable slug"):
-        store.path(group, instance, name)
+        store.path(team, instance, name)
 
 
 def test_prompt_store_rejects_noncanonical_case_before_filesystem_access(

@@ -20,7 +20,7 @@ from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, 
 from agency.jobs.store import write_job
 from agency.memory.selectors import resolve_memory_selector
 from agency.configuration.models import MemorySelector
-from test_proposal_questions import _setup_decision_group
+from test_proposal_questions import _setup_decision_team
 
 
 def _authority(spec: JobSpec):
@@ -276,7 +276,7 @@ def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monk
 
 
 def test_decide_submits_embedded_snapshot_and_persists_job_id(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     captured = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
     response = client.post(
@@ -297,7 +297,7 @@ def test_decide_submits_embedded_snapshot_and_persists_job_id(tmp_path, monkeypa
 
 
 def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     decision_path.write_text(
         "---\nproposal: change.md\nexecution_status: failed\n"
         "execution_agent: engineer\nexecution_job_id: old-job\n"
@@ -318,7 +318,7 @@ def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monk
 
 
 def test_launch_failure_rolls_back_new_decision(tmp_path, monkeypatch):
-    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)))
     response = client.post(
         "/test/proposals/change/decide",
@@ -331,7 +331,7 @@ def test_launch_failure_rolls_back_new_decision(tmp_path, monkeypatch):
 
 
 def test_retry_launch_failure_restores_original_decision_text(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     original_text = (
         "---\nproposal: change.md\nexecution_status: failed\n"
         "execution_agent: engineer\nexecution_job_id: old-job\n"
@@ -369,7 +369,7 @@ def _spy_os_replace(monkeypatch):
 def test_decide_creates_decision_via_atomic_replace(tmp_path, monkeypatch):
     """Decision creation must write via a same-directory temp file + os.replace,
     not a plain write_text, so a crash mid-write never leaves a truncated file."""
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id=request.job_id))
     calls = _spy_os_replace(monkeypatch)
 
@@ -388,7 +388,7 @@ def test_decide_creates_decision_via_atomic_replace(tmp_path, monkeypatch):
 def test_retry_updates_decision_via_atomic_replace(tmp_path, monkeypatch):
     """Retry's decision update (new job id, history append) must go through
     the atomic temp-file + os.replace helper, not plain write_text."""
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     decision_path.write_text(
         "---\nproposal: change.md\nexecution_status: failed\n"
         "execution_agent: engineer\nexecution_job_id: old-job\n"
@@ -411,7 +411,7 @@ def test_retry_updates_decision_via_atomic_replace(tmp_path, monkeypatch):
 def test_retry_launch_failure_restores_decision_via_atomic_replace(tmp_path, monkeypatch):
     """Retry rollback (restoring the pre-retry decision text after a failed
     submission) must also use the atomic temp-file + os.replace helper."""
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     original_text = (
         "---\nproposal: change.md\nexecution_status: failed\n"
         "execution_agent: engineer\nexecution_job_id: old-job\n"
@@ -442,7 +442,7 @@ def test_retry_invalid_executor_rerenders_decision_detail_with_error(tmp_path, m
     """An invalid executor on retry must re-render decision_detail.html with a
     visible inline error and HTTP 400, not a bare HTTPException JSON body, and
     must leave the decision file untouched."""
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     original_text = (
         "---\nproposal: change.md\nexecution_status: failed\n"
         "execution_agent: engineer\nexecution_job_id: old-job\n"
@@ -464,7 +464,7 @@ def test_retry_invalid_executor_rerenders_decision_detail_with_error(tmp_path, m
 def test_retry_launch_failure_rerenders_decision_detail_with_error(tmp_path, monkeypatch):
     """A submission failure on retry must re-render decision_detail.html with a
     visible inline error and HTTP 400, not a bare HTTPException JSON body."""
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     original_text = (
         "---\nproposal: change.md\nexecution_status: failed\n"
         "execution_agent: engineer\nexecution_job_id: old-job\n"
@@ -488,7 +488,7 @@ def test_retry_launch_failure_rerenders_decision_detail_with_error(tmp_path, mon
 
 
 def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     submitted = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: submitted.append(request))
     response = client.post(
@@ -505,7 +505,7 @@ def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_
 
 
 def test_declined_with_note_submits_job_and_persists_note(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     captured = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request))
     response = client.post(
@@ -522,7 +522,7 @@ def test_declined_with_note_submits_job_and_persists_note(tmp_path, monkeypatch)
 def test_launch_failure_preserves_submitted_answers_and_note_in_rerender(tmp_path, monkeypatch):
     """On JobSubmissionError, the re-render must include the submitted answers
     (radio pre-selected) and the decision note so all user input survives."""
-    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "agency.app.submit_job_request",
         lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)),
@@ -540,7 +540,7 @@ def test_launch_failure_preserves_submitted_answers_and_note_in_rerender(tmp_pat
 
 
 def test_retry_rejects_read_only_executor(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     decision_path.write_text("---\nproposal: change.md\nexecution_status: failed\nexecution_agent: engineer\n---\n")
     response = client.post("/test/decisions/change/retry", data={"execution_agent": "product"})
     assert response.status_code == 400
@@ -548,7 +548,7 @@ def test_retry_rejects_read_only_executor(tmp_path, monkeypatch):
 
 
 def test_retry_prompt_keeps_decision_note(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: approved\ndecision_note: Keep rollback\nexecution_status: failed\nexecution_agent: engineer\n---\n")
     captured = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request))
@@ -558,7 +558,7 @@ def test_retry_prompt_keeps_decision_note(tmp_path, monkeypatch):
 
 
 def test_retry_allows_cancelled_status(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     decision_path.write_text(
         "---\nproposal: change.md\nexecution_status: cancelled\n"
         "execution_agent: engineer\nexecution_job_id: old-job\n"
@@ -585,7 +585,7 @@ def test_retry_allows_cancelled_status(tmp_path, monkeypatch):
 def test_retry_blocked_for_non_failed_status(tmp_path, monkeypatch, bad_status):
     """Only execution_status == 'failed' may POST to /retry.
     Any other status must return 400, leave the decision unchanged, and call no submit_job."""
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     original = f"---\nproposal: change.md\nexecution_status: {bad_status}\nexecution_agent: engineer\n---\n"
     decision_path.write_text(original)
     submitted = []
@@ -601,7 +601,7 @@ def test_retry_blocked_for_non_failed_status(tmp_path, monkeypatch, bad_status):
 def test_retry_form_does_not_fall_back_to_origin_agent(tmp_path, monkeypatch):
     """render_decision_detail must use decision.execution_agent → proposal.execution_agent → ''
     and must NOT fall back to proposal.origin_agent."""
-    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     # Decision has no execution_agent; proposal has origin_agent but no execution_agent
     decision_path.write_text(
         "---\nproposal: change.md\nexecution_status: failed\n---\n"

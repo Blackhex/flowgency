@@ -160,11 +160,11 @@ def test_launch_zones_cannot_be_widened_by_configuration(tmp_path: Path):
     assert zoned.tools_for(tmp_path / ZONE_INSTRUCTIONS / "AGENTS.md") == ("read",)
 
 
-def _config(tmp_path: Path, raw_config, *, group_rules, agent_rules):
+def _config(tmp_path: Path, raw_config, *, team_rules, agent_rules):
     raw = deepcopy(raw_config)
     raw["schema_version"] = 6
     raw["teams"]["newsletter"]["runtime"] = {
-        "permissions": {"mode": "restricted", "rules": group_rules}
+        "permissions": {"mode": "restricted", "rules": team_rules}
     }
     # agents is a list in raw_config; strip any stale capability/sandbox keys
     agent = raw["teams"]["newsletter"]["agents"][0]
@@ -182,7 +182,7 @@ def test_instance_rules_are_additive(tmp_path, raw_config):
     config = _config(
         tmp_path,
         raw_config,
-        group_rules=[{"path": "C:/ws", "tools": ["read"]}],
+        team_rules=[{"path": "C:/ws", "tools": ["read"]}],
         agent_rules=[{"path": "C:/ws/tests", "tools": ["read"]}],
     )
 
@@ -197,7 +197,7 @@ def test_same_path_in_team_and_instance_unions_tools(tmp_path, raw_config):
     config = _config(
         tmp_path,
         raw_config,
-        group_rules=[{"path": "C:/ws", "tools": ["read"]}],
+        team_rules=[{"path": "C:/ws", "tools": ["read"]}],
         agent_rules=[{"path": "C:/ws", "tools": ["search"]}],
     )
 

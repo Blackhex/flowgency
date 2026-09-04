@@ -129,11 +129,11 @@ def test_only_copilot_scopes_write_and_only_when_detection_succeeds(monkeypatch)
 # ── Rejection through resolve_effective_policy ──────────────────────────────
 
 
-def _resolved_config(tmp_path, raw_config, *, integration, group_mode, group_rules, agent_rules):
+def _resolved_config(tmp_path, raw_config, *, integration, team_mode, team_rules, agent_rules):
     raw = deepcopy(raw_config)
     raw["schema_version"] = 6
     raw["teams"]["newsletter"]["runtime"] = {
-        "permissions": {"mode": group_mode, "rules": group_rules}
+        "permissions": {"mode": team_mode, "rules": team_rules}
     }
     agent = raw["teams"]["newsletter"]["agents"][0]
     agent.pop("capabilities", None)
@@ -151,8 +151,8 @@ def test_restricted_mode_rejected_through_resolution(tmp_path, raw_config):
         tmp_path,
         raw_config,
         integration="claude-code",
-        group_mode="restricted",
-        group_rules=[{"path": "C:/ws", "tools": ["read"]}],
+        team_mode="restricted",
+        team_rules=[{"path": "C:/ws", "tools": ["read"]}],
         agent_rules=[],
     )
 
@@ -170,8 +170,8 @@ def test_scoped_tools_rejected_through_resolution(tmp_path, raw_config):
         tmp_path,
         raw_config,
         integration="claude-code",
-        group_mode="unrestricted",
-        group_rules=[{"path": "C:/ws", "tools": ["read"]}],
+        team_mode="unrestricted",
+        team_rules=[{"path": "C:/ws", "tools": ["read"]}],
         agent_rules=[{"path": "C:/ws/tests", "tools": ["read", "write"]}],
     )
 

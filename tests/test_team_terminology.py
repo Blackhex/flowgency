@@ -46,6 +46,44 @@ def test_setup_assets_use_team_domain_terms():
     assert not re.search(r"\bgroup concept\b", text, re.IGNORECASE)
 
 
+def test_normal_test_fixtures_use_team_domain_terms():
+    paths = (
+        REPO_ROOT / "tests" / "test_agent_health_fleet.py",
+        REPO_ROOT / "tests" / "test_agent_run.py",
+        REPO_ROOT / "tests" / "test_agent_status.py",
+        REPO_ROOT / "tests" / "test_cli_contract.py",
+        REPO_ROOT / "tests" / "test_config_patches.py",
+        REPO_ROOT / "tests" / "test_job_models.py",
+        REPO_ROOT / "tests" / "test_job_routes.py",
+        REPO_ROOT / "tests" / "test_job_store_terminal.py",
+        REPO_ROOT / "tests" / "test_memory_publication.py",
+        REPO_ROOT / "tests" / "test_permission_capabilities.py",
+        REPO_ROOT / "tests" / "test_permission_resolution.py",
+        REPO_ROOT / "tests" / "test_prompt_store.py",
+        REPO_ROOT / "tests" / "test_proposal_questions.py",
+        REPO_ROOT / "tests" / "test_write_boundary_contract.py",
+    )
+    text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+
+    forbidden_terms = (
+        "def _group",
+        "_fleet_group",
+        "_group =",
+        "_group_store",
+        "group_store",
+        "group_mode",
+        "group_rules",
+        "test_cli_reads_group_records",
+        "test_patch_team_settings_preserves_unowned_group_fields",
+        "test_prompt_store_rejects_invalid_slugs(tmp_path, group,",
+        "_setup_decision_group",
+        '"group": "grp"',
+        '"group":"grp"',
+        "schema_version: 3\\ngroups: {}",
+    )
+    assert not [term for term in forbidden_terms if term in text]
+
+
 def test_example_config_blocks_are_valid_v6(tmp_path: Path) -> None:
     from agency.configuration.models import validate_config
 

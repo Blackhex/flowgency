@@ -11,7 +11,7 @@ from agency.jobs.store import write_job
 NOW = datetime(2026, 7, 28, 12, 0, 0)
 
 
-def _group(tmp_path, *, routines, dispatch_enabled=True):
+def _team(tmp_path, *, routines, dispatch_enabled=True):
     logs = tmp_path / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     memory_root = tmp_path / "memory"
@@ -39,7 +39,7 @@ def _group(tmp_path, *, routines, dispatch_enabled=True):
 
 
 def _health(tmp_path, *, routines, dispatch_enabled=True, now=NOW):
-    team_data = _group(tmp_path, routines=routines, dispatch_enabled=dispatch_enabled)
+    team_data = _team(tmp_path, routines=routines, dispatch_enabled=dispatch_enabled)
     team_data["observations"].mkdir(parents=True, exist_ok=True)
     with patch.dict(os.environ, {"AGENCY_FIXED_NOW": now.isoformat()}):
         agents, _ = app_module.collect_agents_with_identity(team_data)
@@ -134,7 +134,7 @@ def _spec(tmp_path, job_id, created_at="2026-07-20T00:00:00+00:00"):
             mode="unrestricted",
         ),
         memory=MemoryBinding(
-            selector={"scope": "agent", "version": 1, "group": "grp", "agent": "product"},
+            selector={"scope": "agent", "version": 1, "team": "grp", "agent": "product"},
             canonical_json='{"scope":"agent"}',
             memory_hash="mem-1",
             path=str((tmp_path / "memory" / "mem-1").resolve()),

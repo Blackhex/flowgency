@@ -157,8 +157,8 @@ def test_job_list_is_team_scoped(monkeypatch, tmp_path, raw_config):
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     research_paths = create_team_environment(tmp_path, "research")
-    other_group = research_paths.state_root
-    (other_group / "logs" / "2026-07-16").mkdir(parents=True, exist_ok=True)
+    other_team = research_paths.state_root
+    (other_team / "logs" / "2026-07-16").mkdir(parents=True, exist_ok=True)
     raw["teams"]["research"] = {
         **apply_team_paths({}, research_paths),
         "name": "Research",
@@ -168,7 +168,7 @@ def test_job_list_is_team_scoped(monkeypatch, tmp_path, raw_config):
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
-    _write_job_record(other_group, config_path, team_id="research", job_id="job-2", status="queued")
+    _write_job_record(other_team, config_path, team_id="research", job_id="job-2", status="queued")
 
     response = client.get("/newsletter/jobs")
 
@@ -587,8 +587,8 @@ def test_a_position_counts_the_whole_queue_not_just_this_team(
     client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     research_paths = create_team_environment(tmp_path, "research")
-    other_group = research_paths.state_root
-    (other_group / "logs" / "2026-07-16").mkdir(parents=True, exist_ok=True)
+    other_team = research_paths.state_root
+    (other_team / "logs" / "2026-07-16").mkdir(parents=True, exist_ok=True)
     raw["teams"]["research"] = {
         **apply_team_paths({}, research_paths),
         "name": "Research",
@@ -599,7 +599,7 @@ def test_a_position_counts_the_whole_queue_not_just_this_team(
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
     _write_job_record(
-        other_group,
+        other_team,
         config_path,
         team_id="research",
         job_id="job-earlier",

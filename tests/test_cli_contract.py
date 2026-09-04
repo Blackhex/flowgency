@@ -92,7 +92,7 @@ def cli_config(tmp_path):
     return config_path
 
 
-def test_cli_reads_group_records_without_workspace_shared(cli_config, cli_runner):
+def test_cli_reads_team_records_without_workspace_shared(cli_config, cli_runner):
     team_root = cli_config.parent / "teams" / "newsletter"
     observation = team_root / "observations" / "signal.md"
     observation.parent.mkdir(parents=True, exist_ok=True)

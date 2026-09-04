@@ -128,7 +128,7 @@ class TestProposalFrontmatter:
         assert parsed_meta["answers"]["color"] == "Red"
 
 
-def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
+def _setup_decision_team(tmp_path, monkeypatch, *, explicit_executor=True):
     team_dir = tmp_path / "team"
     for agent in ("product", "engineer", "sdk-agent"):
         (team_dir / agent).mkdir(parents=True)
@@ -203,19 +203,19 @@ def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
 
 
 def test_executor_options_exclude_agents_without_explicit_write_capability(tmp_path, monkeypatch):
-    _setup_decision_group(tmp_path, monkeypatch)
+    _setup_decision_team(tmp_path, monkeypatch)
     assert app_mod.execution_agent_options(app_mod.get_team("test")) == ["engineer"]
 
 
 def test_proposal_form_defaults_executor_to_explicit_execution_agent(tmp_path, monkeypatch):
-    client, _, _ = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, _ = _setup_decision_team(tmp_path, monkeypatch)
     response = client.get("/test/proposals/change")
     assert response.status_code == 200
     assert '<option value="engineer" selected>' in response.text
 
 
 def test_unanswered_boolean_form_only_offers_approve_and_decline(tmp_path, monkeypatch):
-    client, _, _ = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, _ = _setup_decision_team(tmp_path, monkeypatch)
     response = client.get("/test/proposals/change")
     assert response.status_code == 200
     assert 'value="approved"' in response.text
@@ -226,7 +226,7 @@ def test_unanswered_boolean_form_only_offers_approve_and_decline(tmp_path, monke
 
 
 def test_historical_proposal_excludes_origin_agent_without_write_capability(tmp_path, monkeypatch):
-    client, _, _ = _setup_decision_group(tmp_path, monkeypatch, explicit_executor=False)
+    client, _, _ = _setup_decision_team(tmp_path, monkeypatch, explicit_executor=False)
     response = client.get("/test/proposals/change")
     assert "execution_agent is required" in response.text
     assert "Submit All Answers" not in response.text
@@ -234,7 +234,7 @@ def test_historical_proposal_excludes_origin_agent_without_write_capability(tmp_
 
 
 def test_invalid_executor_rerenders_without_creating_decision(tmp_path, monkeypatch):
-    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "approved", "execution_agent": "sdk-agent"},
@@ -246,7 +246,7 @@ def test_invalid_executor_rerenders_without_creating_decision(tmp_path, monkeypa
 
 
 def test_missing_execution_agent_blocks_get_and_post(tmp_path, monkeypatch):
-    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch, explicit_executor=False)
+    client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch, explicit_executor=False)
     get_response = client.get("/test/proposals/change")
     post_response = client.post("/test/proposals/change/decide", data={"answer_approve": "approved", "execution_agent": "engineer"})
     assert get_response.status_code == 200
@@ -259,7 +259,7 @@ def test_missing_execution_agent_blocks_get_and_post(tmp_path, monkeypatch):
 
 
 def test_invalid_answers_preserve_submitted_values_without_side_effects(tmp_path, monkeypatch):
-    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "deferred", "decision_note": "Keep this note", "execution_agent": "engineer"},
@@ -274,7 +274,7 @@ def test_invalid_answers_preserve_submitted_values_without_side_effects(tmp_path
 def test_ineligible_declared_executor_blocks_post_with_eligible_submitted_executor(tmp_path, monkeypatch):
     """POST must return 400 when the proposal's declared execution_agent is not eligible,
     even when the submitted form selects a different eligible executor."""
-    client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     # Overwrite proposal to declare an ineligible executor
     proposal_path.write_text(
         "---\n" + yaml.safe_dump({
@@ -300,7 +300,7 @@ def test_ineligible_declared_executor_blocks_post_with_eligible_submitted_execut
 # ---------------------------------------------------------------------------
 
 def test_questionnaire_renders_decline_open_text_note_and_executor_override(tmp_path, monkeypatch):
-    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, _ = _setup_decision_team(tmp_path, monkeypatch)
     meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
     meta["questions"].append({"id": "detail", "type": "free-response", "prompt": "Details?", "required": False})
     proposal_path.write_text("---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body)
@@ -313,7 +313,7 @@ def test_questionnaire_renders_decline_open_text_note_and_executor_override(tmp_
 
 
 def test_invalid_schema_disables_questionnaire_submission(tmp_path, monkeypatch):
-    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, _ = _setup_decision_team(tmp_path, monkeypatch)
     meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
     meta["questions"] = [{"id": "mode", "type": "choice", "prompt": "Mode?"}]
     proposal_path.write_text("---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body)
@@ -323,7 +323,7 @@ def test_invalid_schema_disables_questionnaire_submission(tmp_path, monkeypatch)
 
 
 def test_historical_blank_answer_displays_no_answer_recorded(tmp_path, monkeypatch):
-    client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
+    client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: ''\nexecution_status: skipped\n---\n")
     response = client.get("/test/decisions/change")
     assert "No answer recorded" in response.text
@@ -336,7 +336,7 @@ def test_historical_blank_answer_displays_no_answer_recorded(tmp_path, monkeypat
 
 def test_single_choice_answer_preserved_on_post_validation_failure(tmp_path, monkeypatch):
     """Single-choice selection is re-rendered as checked when POST fails."""
-    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, _ = _setup_decision_team(tmp_path, monkeypatch)
     meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
     meta["questions"].append({
         "id": "color", "type": "choice", "prompt": "Pick?",
@@ -353,7 +353,7 @@ def test_single_choice_answer_preserved_on_post_validation_failure(tmp_path, mon
 
 def test_multi_choice_answers_preserved_on_post_validation_failure(tmp_path, monkeypatch):
     """Multi-checkbox selections are re-rendered as checked when POST fails."""
-    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, _ = _setup_decision_team(tmp_path, monkeypatch)
     meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
     meta["questions"].append({
         "id": "features", "type": "choice", "prompt": "Pick features",
@@ -374,7 +374,7 @@ def test_multi_choice_answers_preserved_on_post_validation_failure(tmp_path, mon
 
 def test_open_text_answer_preserved_on_post_validation_failure(tmp_path, monkeypatch):
     """Free-response text is re-populated in textarea when POST fails."""
-    client, proposal_path, _ = _setup_decision_group(tmp_path, monkeypatch)
+    client, proposal_path, _ = _setup_decision_team(tmp_path, monkeypatch)
     meta, body = app_mod.parse_frontmatter(proposal_path.read_text())
     meta["questions"].append({
         "id": "detail", "type": "free-response", "prompt": "Details?",
