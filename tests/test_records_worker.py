@@ -68,7 +68,7 @@ def test_agents_without_a_capabilities_block_are_not_writable(raw_config, config
     assert writable_agent_names(config, "newsletter") == frozenset()
 
 
-def test_unknown_group_yields_an_empty_set(raw_config, config_paths):
+def test_unknown_team_yields_an_empty_set(raw_config, config_paths):
     config = build_config(raw_config, config_paths, [])
 
     assert writable_agent_names(config, "no-such-group") == frozenset()

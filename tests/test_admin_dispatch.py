@@ -109,7 +109,7 @@ def test_dispatch_status_ignores_persisted_installed_flag(tmp_path, monkeypatch)
     assert status["state"] == "inactive"
 
 
-def test_group_page_labels_config_as_schedule_enabled(tmp_path, monkeypatch):
+def test_team_page_labels_config_as_schedule_enabled(tmp_path, monkeypatch):
     client = _configure_admin(tmp_path, monkeypatch, _status())
     response = client.get("/admin/teams")
     assert response.status_code == 200
@@ -117,7 +117,7 @@ def test_group_page_labels_config_as_schedule_enabled(tmp_path, monkeypatch):
     assert "Dispatch on" not in response.text
 
 
-def test_group_schedule_controls_remain_visible_when_dispatcher_inactive(tmp_path, monkeypatch):
+def test_team_schedule_controls_remain_visible_when_dispatcher_inactive(tmp_path, monkeypatch):
     client = _configure_admin(tmp_path, monkeypatch, _status())
     response = client.get("/admin/teams/test/edit")
     assert response.status_code == 200
@@ -231,7 +231,7 @@ def test_interval_update_returns_409_when_inspection_error(tmp_path, monkeypatch
     assert "Task Scheduler service is unavailable" in response.text
 
 
-def test_admin_groups_card_layout_stacks_on_mobile(tmp_path, monkeypatch):
+def test_admin_teams_card_layout_stacks_on_mobile(tmp_path, monkeypatch):
     """Group card outer layout must stack content above actions on mobile, return to row at sm."""
     client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
     response = client.get("/admin/teams")
@@ -249,7 +249,7 @@ def test_admin_groups_card_layout_stacks_on_mobile(tmp_path, monkeypatch):
     assert 'class="flex items-start justify-between"' not in response.text  # Old layout
 
 
-def test_admin_group_conflict_lists_workspace_without_group_state_as_not_initialized(
+def test_admin_team_conflict_lists_workspace_without_team_state_as_not_initialized(
     tmp_path,
     monkeypatch,
 ):

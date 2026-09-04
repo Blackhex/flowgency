@@ -213,7 +213,7 @@ def test_setup_keeps_path_overrides_behind_one_grouped_review():
     assert "Do not ask about individual storage paths in the default flow." in skill
     assert "one consolidated path summary" in skill
     assert "No derived directory or blueprint may be created before" in skill
-def test_setup_skill_owns_group_naming_storage_workspaces_and_atomic_write():
+def test_setup_skill_owns_team_naming_storage_workspaces_and_atomic_write():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split()).lower()
 
@@ -386,7 +386,7 @@ def test_windows_launcher_still_resolves_real_copilot_executable():
     assert "Invoke-Expression" not in launcher
 
 
-def test_setup_summarizes_project_before_group_count_and_first_draft():
+def test_setup_summarizes_project_before_team_count_and_first_draft():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
 
@@ -396,7 +396,7 @@ def test_setup_summarizes_project_before_group_count_and_first_draft():
     summary = normalized.index(
         "Before team design, summarize this working context in user-facing prose."
     )
-    group_idx = normalized.index(
+    team_idx = normalized.index(
         "ask the user to approve the team display name and stable team ID"
     )
     count = normalized.index("ask for an initial positive integer agent count")
@@ -404,7 +404,7 @@ def test_setup_summarizes_project_before_group_count_and_first_draft():
         "Generate the first complete team draft with exactly that many profiles."
     )
 
-    assert inspection < summary < group_idx < count < draft
+    assert inspection < summary < team_idx < count < draft
     assert "propose three to five distinct roles" not in normalized.lower()
     assert "which proposed roles to create now" not in normalized.lower()
 

@@ -214,7 +214,7 @@ def _write_channel_job(
     return path
 
 
-def test_channel_is_global_across_groups(monkeypatch, tmp_path, raw_config):
+def test_channel_is_global_across_teams(monkeypatch, tmp_path, raw_config):
     client, _, _ = _seed_memory_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/memory-channels/brand-strategy")

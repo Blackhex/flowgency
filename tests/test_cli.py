@@ -18,7 +18,7 @@ from agency.jobs.store import write_job
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
-def _setup_jobs_group(
+def _setup_jobs_team(
     tmp_path,
     monkeypatch,
     *,
@@ -365,7 +365,7 @@ def test_cli_help_shows_jobs_and_logs():
 
 
 def test_cmd_jobs_lists_records(tmp_path, monkeypatch, capsys):
-    _setup_jobs_group(tmp_path, monkeypatch)
+    _setup_jobs_team(tmp_path, monkeypatch)
     cli.cmd_jobs(Namespace(team="test", status=None, agent=None, json=False))
     out = capsys.readouterr().out
     assert "engineer" in out
@@ -374,7 +374,7 @@ def test_cmd_jobs_lists_records(tmp_path, monkeypatch, capsys):
 
 
 def test_cmd_jobs_json_reports_changed_file_count(tmp_path, monkeypatch, capsys):
-    spec = _setup_jobs_group(tmp_path, monkeypatch)
+    spec = _setup_jobs_team(tmp_path, monkeypatch)
     cli.cmd_jobs(Namespace(team="test", status=None, agent=None, json=True))
     out = capsys.readouterr().out
     assert spec.job_id in out
@@ -382,14 +382,14 @@ def test_cmd_jobs_json_reports_changed_file_count(tmp_path, monkeypatch, capsys)
 
 
 def test_cmd_jobs_status_filter_excludes_non_matching(tmp_path, monkeypatch, capsys):
-    _setup_jobs_group(tmp_path, monkeypatch)
+    _setup_jobs_team(tmp_path, monkeypatch)
     cli.cmd_jobs(Namespace(team="test", status="failed", agent=None, json=False))
     out = capsys.readouterr().out
     assert "engineer" not in out
 
 
 def test_cmd_logs_tails_execution_log(tmp_path, monkeypatch, capsys):
-    spec = _setup_jobs_group(tmp_path, monkeypatch)
+    spec = _setup_jobs_team(tmp_path, monkeypatch)
     cli.cmd_logs(Namespace(team="test", job_id=spec.job_id, lines=40, stderr=False))
     out = capsys.readouterr().out
     assert "line one" in out
@@ -397,7 +397,7 @@ def test_cmd_logs_tails_execution_log(tmp_path, monkeypatch, capsys):
 
 
 def test_cmd_logs_no_job_id_lists_recent(tmp_path, monkeypatch, capsys):
-    spec = _setup_jobs_group(tmp_path, monkeypatch)
+    spec = _setup_jobs_team(tmp_path, monkeypatch)
     cli.cmd_logs(Namespace(team="test", job_id=None, lines=40, stderr=False))
     out = capsys.readouterr().out
     assert spec.job_id in out
@@ -409,13 +409,13 @@ def test_equal_timestamp_jobs_use_deterministic_id_order_in_json_and_logs(
     capsys,
 ):
     timestamp = "2026-07-11T10:00:00+00:00"
-    _setup_jobs_group(
+    _setup_jobs_team(
         tmp_path,
         monkeypatch,
         job_id="beta-job",
         started_at=timestamp,
     )
-    _setup_jobs_group(
+    _setup_jobs_team(
         tmp_path,
         monkeypatch,
         job_id="alpha-job",
@@ -432,12 +432,12 @@ def test_equal_timestamp_jobs_use_deterministic_id_order_in_json_and_logs(
 
 
 def test_cmd_logs_unknown_job_exits(tmp_path, monkeypatch):
-    _setup_jobs_group(tmp_path, monkeypatch)
+    _setup_jobs_team(tmp_path, monkeypatch)
     assert cli.cmd_logs(Namespace(team="test", job_id="deadbeef", lines=40, stderr=False)) == 1
 
 
 def test_cmd_jobs_and_logs_ignore_forged_team_jobs_records(tmp_path, monkeypatch, capsys):
-    spec = _setup_jobs_group(tmp_path, monkeypatch, job_id="canonical-job")
+    spec = _setup_jobs_team(tmp_path, monkeypatch, job_id="canonical-job")
     forged_path = tmp_path / "team" / "jobs" / "forged-job.yaml"
     forged_path.parent.mkdir(parents=True, exist_ok=True)
     forged_record = JobRecord.from_spec(

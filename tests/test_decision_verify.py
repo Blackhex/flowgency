@@ -15,7 +15,7 @@ from agency.app import app
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
-def _setup_group(tmp_path, monkeypatch, *, decision_meta):
+def _setup_team(tmp_path, monkeypatch, *, decision_meta):
     paths = create_team_environment(
         tmp_path,
         "test",
@@ -88,7 +88,7 @@ def _meta(path):
 
 
 def test_verify_marks_decision_verified(tmp_path, monkeypatch):
-    client, decision_path, _ = _setup_group(
+    client, decision_path, _ = _setup_team(
         tmp_path, monkeypatch,
         decision_meta={"proposal": "change.md", "execution_status": "complete", "executed_by": "engineer"},
     )
@@ -108,7 +108,7 @@ def test_verify_marks_decision_verified(tmp_path, monkeypatch):
 
 
 def test_verify_needs_follow_up_creates_linked_observation(tmp_path, monkeypatch):
-    client, decision_path, team_root = _setup_group(
+    client, decision_path, team_root = _setup_team(
         tmp_path, monkeypatch,
         decision_meta={"proposal": "change.md", "execution_status": "complete", "executed_by": "engineer"},
     )
@@ -134,7 +134,7 @@ def test_verify_needs_follow_up_creates_linked_observation(tmp_path, monkeypatch
 
 
 def test_verify_rejects_invalid_status(tmp_path, monkeypatch):
-    client, decision_path, _ = _setup_group(
+    client, decision_path, _ = _setup_team(
         tmp_path, monkeypatch,
         decision_meta={"proposal": "change.md", "execution_status": "complete"},
     )
@@ -147,7 +147,7 @@ def test_verify_rejects_invalid_status(tmp_path, monkeypatch):
 
 
 def test_verify_missing_decision_returns_404(tmp_path, monkeypatch):
-    client, _, _ = _setup_group(
+    client, _, _ = _setup_team(
         tmp_path, monkeypatch,
         decision_meta={"proposal": "change.md", "execution_status": "complete"},
     )

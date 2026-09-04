@@ -227,7 +227,7 @@ def instance_service(instance_env):
     )
 
 
-def test_create_instance_pins_group_and_validates_blueprint_and_integration(
+def test_create_instance_pins_team_and_validates_blueprint_and_integration(
     instance_service,
 ):
     from agency.configuration.issues import ValidationFailed
@@ -1074,7 +1074,7 @@ def test_remove_instance_reports_orphaned_prompt_namespace_when_files_remain(
     )
 
 
-def test_create_blocks_on_group_operation_lock_until_release(instance_env):
+def test_create_blocks_on_team_operation_lock_until_release(instance_env):
     from agency.instances import AgentInstanceCreate, InstanceService
 
     service = InstanceService(
@@ -1111,7 +1111,7 @@ def test_create_blocks_on_group_operation_lock_until_release(instance_env):
     assert snapshot.config.teams["newsletter"].agents["advisor"].name == "advisor"
 
 
-def test_submit_cannot_slip_past_create_group_lock(
+def test_submit_cannot_slip_past_create_team_lock(
     instance_env,
     monkeypatch,
 ):
@@ -1199,7 +1199,7 @@ def test_submit_cannot_slip_past_create_group_lock(
     assert "handle" in submit_outcome or "error" in submit_outcome
 
 
-def test_move_holds_group_lock_and_concurrent_submit_re_resolves_after_move(
+def test_move_holds_team_lock_and_concurrent_submit_re_resolves_after_move(
     instance_service,
     instance_env,
     monkeypatch,
@@ -1320,7 +1320,7 @@ def test_opposite_direction_move_lock_order_avoids_deadlock(instance_env):
     assert any(not isinstance(item, Exception) for item in outcomes)
 
 
-def test_remove_uses_group_lock_to_block_new_submissions(
+def test_remove_uses_team_lock_to_block_new_submissions(
     instance_service,
     instance_env,
     monkeypatch,

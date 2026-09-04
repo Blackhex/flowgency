@@ -656,7 +656,7 @@ def test_setup_status_returns_invalid_with_message(tmp_path, monkeypatch, raw_co
     }
 
 
-def test_setup_status_returns_incomplete_when_config_has_no_groups(
+def test_setup_status_returns_incomplete_when_config_has_no_teams(
     tmp_path, monkeypatch, raw_config
 ):
     config_path = tmp_path / "config.yaml"

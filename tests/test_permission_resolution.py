@@ -193,7 +193,7 @@ def test_instance_rules_are_additive(tmp_path, raw_config):
     assert Path("C:/ws/tests") in paths
 
 
-def test_same_path_in_group_and_instance_unions_tools(tmp_path, raw_config):
+def test_same_path_in_team_and_instance_unions_tools(tmp_path, raw_config):
     config = _config(
         tmp_path,
         raw_config,

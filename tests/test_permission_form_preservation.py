@@ -25,7 +25,7 @@ def _write_yaml(path: Path, raw: dict) -> Path:
     return path
 
 
-def _make_group_client(monkeypatch, tmp_path, raw_config):
+def _make_team_client(monkeypatch, tmp_path, raw_config):
     raw = deepcopy(raw_config)
     (tmp_path / "library").mkdir(parents=True, exist_ok=True)
     workspace = tmp_path / "workspace"
@@ -137,9 +137,9 @@ def _make_agent_client(monkeypatch, tmp_path, raw_config):
 # ---------- C1: Group settings form preserves rules ----------
 
 
-def test_group_save_unrelated_field_preserves_rules(tmp_path, monkeypatch, raw_config):
+def test_team_save_unrelated_field_preserves_rules(tmp_path, monkeypatch, raw_config):
     """Editing only the team name must not touch permission mode or rules."""
-    client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
+    client, store = _make_team_client(monkeypatch, tmp_path, raw_config)
     before = deepcopy(store.load().raw["teams"]["grp"]["runtime"]["permissions"])
     revision = store.load().revision
 
@@ -163,9 +163,9 @@ def test_group_save_unrelated_field_preserves_rules(tmp_path, monkeypatch, raw_c
     assert after == before
 
 
-def test_group_save_with_form_fields_preserves_rules(tmp_path, monkeypatch, raw_config):
+def test_team_save_with_form_fields_preserves_rules(tmp_path, monkeypatch, raw_config):
     """Posting the form including permission fields round-trips rules."""
-    client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
+    client, store = _make_team_client(monkeypatch, tmp_path, raw_config)
     before = deepcopy(store.load().raw["teams"]["grp"]["runtime"]["permissions"])
     revision = store.load().revision
     src = tmp_path / "workspace" / "src"
@@ -255,10 +255,10 @@ def test_agent_runtime_form_round_trips_rules(tmp_path, monkeypatch, raw_config)
 # ---------- N3: Group create form persists what the operator typed ----------
 
 
-def test_group_create_persists_typed_permission_rules(tmp_path, monkeypatch, raw_config):
+def test_team_create_persists_typed_permission_rules(tmp_path, monkeypatch, raw_config):
     """The New Group form posts the same permission fields as the edit form.
     What the operator types must reach the configuration, not be discarded."""
-    client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
+    client, store = _make_team_client(monkeypatch, tmp_path, raw_config)
     new_workspace = tmp_path / "new-workspace"
     (new_workspace / "src").mkdir(parents=True)
     rules_yaml = yaml.safe_dump(
@@ -290,9 +290,9 @@ def test_group_create_persists_typed_permission_rules(tmp_path, monkeypatch, raw
     ]
 
 
-def test_group_create_rejects_malformed_permission_rules(tmp_path, monkeypatch, raw_config):
+def test_team_create_rejects_malformed_permission_rules(tmp_path, monkeypatch, raw_config):
     """Create and save share the parsing, so both refuse the same input."""
-    client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
+    client, store = _make_team_client(monkeypatch, tmp_path, raw_config)
     new_workspace = tmp_path / "new-workspace"
     new_workspace.mkdir(parents=True)
 
@@ -316,10 +316,10 @@ def test_group_create_rejects_malformed_permission_rules(tmp_path, monkeypatch, 
     assert "fresh" not in store.load().raw["teams"]
 
 
-def test_group_create_without_permission_fields_is_unrestricted(tmp_path, monkeypatch, raw_config):
+def test_team_create_without_permission_fields_is_unrestricted(tmp_path, monkeypatch, raw_config):
     """An operator who types nothing gets the documented default, not a
     silently discarded entry."""
-    client, store = _make_group_client(monkeypatch, tmp_path, raw_config)
+    client, store = _make_team_client(monkeypatch, tmp_path, raw_config)
     new_workspace = tmp_path / "new-workspace"
     new_workspace.mkdir(parents=True)
 
@@ -346,7 +346,7 @@ def test_group_create_without_permission_fields_is_unrestricted(tmp_path, monkey
 # ---------- Sentinel semantics: None vs () ----------
 
 
-def test_group_patch_none_leaves_rules_alone(tmp_path, raw_config):
+def test_team_patch_none_leaves_rules_alone(tmp_path, raw_config):
     """TeamSettingsStatePatch with permission_rules=None preserves existing rules."""
     raw = deepcopy(raw_config)
     workspace = tmp_path / "workspace"
@@ -395,7 +395,7 @@ def test_group_patch_none_leaves_rules_alone(tmp_path, raw_config):
     assert saved["rules"] == [{"path": str(workspace), "tools": ["read"]}]
 
 
-def test_group_patch_empty_tuple_clears_rules(tmp_path, raw_config):
+def test_team_patch_empty_tuple_clears_rules(tmp_path, raw_config):
     """TeamSettingsStatePatch with permission_rules=() explicitly clears rules."""
     raw = deepcopy(raw_config)
     workspace = tmp_path / "workspace"

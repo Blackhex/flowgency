@@ -110,7 +110,7 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     return TestClient(app_mod.app), ConfigStore(config_path)
 
 
-def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_path, raw_config):
+def test_team_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_path, raw_config):
     client, _ = _make_client(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/admin/teams/newsletter/edit")
@@ -129,7 +129,7 @@ def test_group_settings_has_defaults_and_manage_agents_link(monkeypatch, tmp_pat
     assert "Auto-detect" not in response.text
 
 
-def test_admin_groups_lists_workspace_and_team_paths_without_initialize_action(
+def test_admin_teams_lists_workspace_and_team_paths_without_initialize_action(
     monkeypatch,
     tmp_path,
     raw_config,
@@ -150,7 +150,7 @@ def test_admin_groups_lists_workspace_and_team_paths_without_initialize_action(
     assert "Path does not exist" not in response.text
 
 
-def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):
+def test_stale_team_save_returns_conflict(monkeypatch, tmp_path, raw_config):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
     stale = store.load().revision
 
@@ -179,7 +179,7 @@ def test_stale_group_save_returns_conflict(monkeypatch, tmp_path, raw_config):
     assert "reload" in response.text.lower()
 
 
-def test_stale_group_create_returns_conflict_without_writing_group(
+def test_stale_team_create_returns_conflict_without_writing_team(
     monkeypatch,
     tmp_path,
     raw_config,

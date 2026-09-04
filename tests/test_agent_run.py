@@ -18,7 +18,7 @@ from agency.jobs.store import write_job
 from tests._team_helpers import create_team_environment
 
 
-def _setup_group(tmp_path: Path) -> Path:
+def _setup_team(tmp_path: Path) -> Path:
     paths = create_team_environment(
         tmp_path,
         "test",
@@ -108,7 +108,7 @@ def _configure_schedule(routine_id: str) -> None:
 
 
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
-    team_path = _setup_group(tmp_path)
+    team_path = _setup_team(tmp_path)
     calls = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
@@ -139,7 +139,7 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
 
 
 def test_run_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     calls = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
@@ -159,7 +159,7 @@ def test_run_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
 
 
 def test_run_unknown_routine_404(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
@@ -172,7 +172,7 @@ def test_run_unknown_routine_404(tmp_path, monkeypatch):
 
 
 def test_run_invalid_routine_id_400(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
@@ -185,7 +185,7 @@ def test_run_invalid_routine_id_400(tmp_path, monkeypatch):
 
 
 def test_run_returns_400_when_blueprint_prompt_disappears_after_validation(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     prompt_path = (
         tmp_path / "agent-library" / "builder-blueprint" / ".agents" / "prompts" / "daily-review.prompt.md"
     )
@@ -216,7 +216,7 @@ def test_run_returns_400_when_blueprint_prompt_disappears_after_validation(tmp_p
 
 
 def test_run_returns_400_when_private_prompt_disappears_after_validation(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
     config["teams"]["test"]["agents"][0]["prompts"] = ["local-triage"]
     app_mod.CONFIG_PATH.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
@@ -264,7 +264,7 @@ def test_run_returns_400_when_private_prompt_disappears_after_validation(tmp_pat
 
 
 def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     calls = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id=f"job-{len(calls)}"))
     client = TestClient(app)
@@ -276,7 +276,7 @@ def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
 
 
 def test_agent_running_state_comes_from_active_job_records(tmp_path):
-    team_path = _setup_group(tmp_path)
+    team_path = _setup_team(tmp_path)
     job_store = JobStore(tmp_path / "memory")
     group_store = job_store.team_root("test")
     group_store.mkdir(parents=True, exist_ok=True)
@@ -328,7 +328,7 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
 
 
 def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     calls = []
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
@@ -343,7 +343,7 @@ def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):
 
 
 def test_run_rejects_invalid_selector_override_for_routine(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
@@ -356,7 +356,7 @@ def test_run_rejects_invalid_selector_override_for_routine(tmp_path, monkeypatch
 
 
 def test_run_accepts_valid_channel_memory_override(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
     config["memory"] = {"channels": {"support": {"display_name": "Support"}}}
     app_mod.CONFIG_PATH.write_text(
@@ -416,7 +416,7 @@ def test_run_submits_typed_memory_override_for_manual_modes(
     monkeypatch,
     payload,
 ):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     calls = []
     monkeypatch.setattr(
         "agency.app.submit_job_request",
@@ -432,7 +432,7 @@ def test_run_submits_typed_memory_override_for_manual_modes(
 
 
 def test_agents_page_lists_prompts_with_run(tmp_path):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     client = TestClient(app)
 
     resp = client.get("/test/agents")
@@ -446,7 +446,7 @@ def test_agents_page_lists_prompts_with_run(tmp_path):
 
 
 def test_agents_page_excludes_unrelated_and_system_prompts(tmp_path):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     client = TestClient(app)
 
     resp = client.get("/test/agents")
@@ -460,7 +460,7 @@ def test_agents_page_excludes_unrelated_and_system_prompts(tmp_path):
 
 
 def test_agents_page_shows_config_only_roster_without_activity_links(tmp_path):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     client = TestClient(app)
 
     resp = client.get("/test/agents")
@@ -472,7 +472,7 @@ def test_agents_page_shows_config_only_roster_without_activity_links(tmp_path):
 
 
 def test_exact_dispatch_slug_does_not_resolve_to_generic_prompt_routes(tmp_path):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     client = TestClient(app)
 
     detail_response = client.get("/test/prompts/dispatch")
@@ -494,7 +494,7 @@ def test_agents_page_does_not_render_retired_schedule_links(
     tmp_path,
     prompt,
 ):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     client = TestClient(app)
 
     resp = client.get("/test/agents")
@@ -505,7 +505,7 @@ def test_agents_page_does_not_render_retired_schedule_links(
 
 
 def test_agents_page_keeps_roster_layout_when_logs_exist(tmp_path):
-    team_path = _setup_group(tmp_path)
+    team_path = _setup_team(tmp_path)
     day = team_path / "logs" / "2026-07-11"
     day.mkdir()
     (day / "product-error.err").write_text("run failure")
@@ -521,7 +521,7 @@ def test_agents_page_keeps_roster_layout_when_logs_exist(tmp_path):
 
 
 def test_agents_page_running_status_has_no_time_links(tmp_path, monkeypatch):
-    _setup_group(tmp_path)
+    _setup_team(tmp_path)
     monkeypatch.setattr(app_mod, "is_agent_running", lambda *args, **kwargs: True)
     job_store = JobStore(tmp_path / "memory")
     group_store = job_store.team_root("test")

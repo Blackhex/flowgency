@@ -253,7 +253,7 @@ def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, raw_con
         assert "/newsletter/agents/advisor/" not in response.text
 
 
-def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp_path, raw_config):
+def test_historical_job_survives_instance_move_to_another_team(monkeypatch, tmp_path, raw_config):
     client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(team_root, config_path, job_id="job-moved", status="failed")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -580,7 +580,7 @@ def test_waiting_jobs_show_their_position(monkeypatch, tmp_path, raw_config):
     assert "1 of 3" in response.text
 
 
-def test_a_position_counts_the_whole_queue_not_just_this_group(
+def test_a_position_counts_the_whole_queue_not_just_this_team(
     monkeypatch, tmp_path, raw_config
 ):
     """The pool is machine-wide, so a position must be too."""

@@ -57,7 +57,7 @@ def test_omitted_tools_confers_eligibility(tmp_path, raw_config):
     assert may_execute_decisions(config, "newsletter", "builder") is True
 
 
-def test_unknown_group_is_not_eligible(tmp_path, raw_config):
+def test_unknown_team_is_not_eligible(tmp_path, raw_config):
     config = _config(tmp_path, raw_config, [{"path": "<ws>", "tools": ["write"]}])
 
     assert may_execute_decisions(config, "nope", "builder") is False

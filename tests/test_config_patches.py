@@ -198,7 +198,7 @@ def test_patch_team_settings_state_preserves_extension_keys(config_store):
     )
 
     snapshot = config_store.load()
-    snapshot.raw["teams"]["newsletter"]["group_extension"] = {"theme": "sunset"}
+    snapshot.raw["teams"]["newsletter"]["team_extension"] = {"theme": "sunset"}
     snapshot.raw["teams"]["newsletter"]["runtime"] = {
         "timeout": 1200,
         "runtime_extension": {"preserve": True},
@@ -256,7 +256,7 @@ def test_patch_team_settings_state_preserves_extension_keys(config_store):
         refreshed.path.parent / "workspace" / "editorial"
     )
     assert team["path"] == str(refreshed.path.parent / "groups" / "editorial")
-    assert team["group_extension"] == {"theme": "sunset"}
+    assert team["team_extension"] == {"theme": "sunset"}
     assert team["runtime"]["runtime_extension"] == {"preserve": True}
     assert team["workspaces"][0]["workspace_extension"] == {"preserve": True}
 

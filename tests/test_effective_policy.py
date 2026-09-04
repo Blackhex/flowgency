@@ -36,7 +36,7 @@ class _PermissiveIntegration(BaseIntegration):
 _INTEGRATION = _PermissiveIntegration()
 
 
-def test_group_rules_are_present_in_effective_policy(raw_config, config_paths):
+def test_team_rules_are_present_in_effective_policy(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     team = raw_config["teams"]["newsletter"]
     team["runtime"] = {
@@ -59,7 +59,7 @@ def test_group_rules_are_present_in_effective_policy(raw_config, config_paths):
     assert policy.rules[0].tools == ("read", "search")
 
 
-def test_agent_rules_are_additive_to_group(raw_config, config_paths):
+def test_agent_rules_are_additive_to_team(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     team = raw_config["teams"]["newsletter"]
     team["runtime"] = {
@@ -137,7 +137,7 @@ def test_unrestricted_policy_has_empty_rules_by_default(raw_config, config_paths
     assert policy.rules == ()
 
 
-def test_timeout_override_precedence_is_job_then_agent_then_group(raw_config, config_paths):
+def test_timeout_override_precedence_is_job_then_agent_then_team(raw_config, config_paths):
     team = raw_config["teams"]["newsletter"]
     team["runtime"] = {"timeout": 900, "permissions": {"mode": "unrestricted"}}
     agent = team["agents"][0]
@@ -158,7 +158,7 @@ def test_timeout_override_precedence_is_job_then_agent_then_group(raw_config, co
     assert overridden.timeout == 1800
 
 
-def test_mode_inherits_from_group_when_agent_omits(raw_config, config_paths):
+def test_mode_inherits_from_team_when_agent_omits(raw_config, config_paths):
     team = raw_config["teams"]["newsletter"]
     team["runtime"] = {"permissions": {"mode": "restricted"}}
     team["agents"][0]["integration"] = "copilot"
@@ -171,7 +171,7 @@ def test_mode_inherits_from_group_when_agent_omits(raw_config, config_paths):
     assert policy.mode == "restricted"
 
 
-def test_agent_mode_overrides_group(raw_config, config_paths):
+def test_agent_mode_overrides_team(raw_config, config_paths):
     team = raw_config["teams"]["newsletter"]
     team["runtime"] = {"permissions": {"mode": "restricted"}}
     agent = team["agents"][0]
@@ -247,7 +247,7 @@ def test_unsupported_mode_raises_validation_failed(raw_config, config_paths):
     assert any(i.code == "unsupported-permission-mode" for i in excinfo.value.issues)
 
 
-def test_relative_rule_path_resolves_against_group_workspace(raw_config, config_paths):
+def test_relative_rule_path_resolves_against_team_workspace(raw_config, config_paths):
     """M4: relative rule paths must resolve against workspace_path, not CWD."""
     ws = raw_config["teams"]["newsletter"]["workspace_path"]
     team = raw_config["teams"]["newsletter"]

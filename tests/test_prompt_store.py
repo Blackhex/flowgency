@@ -174,7 +174,7 @@ def test_prompt_store_rejects_hostile_root_symlink_or_reparse(
     assert mode in {"real-link", "simulated-reparse"}
 
 
-def test_prompt_store_rejects_hostile_group_directory_symlink_or_reparse(
+def test_prompt_store_rejects_hostile_team_directory_symlink_or_reparse(
     tmp_path,
     monkeypatch,
 ):
@@ -183,9 +183,9 @@ def test_prompt_store_rejects_hostile_group_directory_symlink_or_reparse(
     external.mkdir()
     sentinel = external / "sentinel.txt"
     sentinel.write_text("keep", encoding="utf-8")
-    hostile_group = root / "newsletter"
+    hostile_team = root / "newsletter"
     root.mkdir(parents=True)
-    mode = _make_hostile_infra_entry(hostile_group, external, monkeypatch)
+    mode = _make_hostile_infra_entry(hostile_team, external, monkeypatch)
     store = PromptStore(root)
 
     with pytest.raises(ValueError, match="prompts"):

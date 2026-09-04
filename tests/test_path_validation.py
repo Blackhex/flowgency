@@ -78,7 +78,7 @@ def test_job_store_is_under_memory_control_plane(tmp_path, raw_config):
 
 
 @pytest.mark.parametrize("kind", ["missing", "file"])
-def test_missing_or_non_directory_group_workspace_path_fails_closed(tmp_path, raw_config, kind):
+def test_missing_or_non_directory_team_workspace_path_fails_closed(tmp_path, raw_config, kind):
     raw, _ = _resolved_config(tmp_path, raw_config)
     workspace_path = tmp_path / "bad-workspace"
     if kind == "file":
@@ -141,7 +141,7 @@ def test_unwritable_nearest_parent_is_rejected_where_portable(tmp_path, raw_conf
     assert any(issue.code == "unwritable-control-parent" for issue in issues)
 
 
-def test_resolved_group_paths_have_no_shared_segment(tmp_path, raw_config):
+def test_resolved_team_paths_have_no_shared_segment(tmp_path, raw_config):
     from agency.configuration.team_paths import resolve_team_paths
     from agency.configuration.models import parse_config
 
@@ -169,7 +169,7 @@ def test_resolved_group_paths_have_no_shared_segment(tmp_path, raw_config):
     }
 
 
-def test_initialization_creates_group_state_but_not_workspace_shared(
+def test_initialization_creates_team_state_but_not_workspace_shared(
     tmp_path, raw_config
 ):
     from agency.configuration.models import parse_config
@@ -202,7 +202,7 @@ def test_initialization_creates_group_state_but_not_workspace_shared(
         ("workspace_path", "path"),
     ],
 )
-def test_group_authorities_must_not_overlap(
+def test_team_authorities_must_not_overlap(
     tmp_path, raw_config, field, other_authority
 ):
     raw = deepcopy(raw_config)

@@ -244,7 +244,7 @@ def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
 
 
 @pytest.mark.parametrize("operation", ["replace", "patch"])
-def test_late_conflict_does_not_initialize_candidate_group_storage(
+def test_late_conflict_does_not_initialize_candidate_team_storage(
     tmp_path,
     raw_config,
     config_paths,
@@ -253,9 +253,9 @@ def test_late_conflict_does_not_initialize_candidate_group_storage(
 ):
     from agency.configuration.store import ConfigConflictError, ConfigStore
 
-    candidate_group = tmp_path / "candidate-team"
+    candidate_team = tmp_path / "candidate-team"
     raw = deepcopy(raw_config)
-    raw["teams"]["newsletter"]["path"] = str(candidate_group)
+    raw["teams"]["newsletter"]["path"] = str(candidate_team)
     path = _write_yaml(config_paths["config_path"], raw)
     store = ConfigStore(path)
     snapshot = store.load()
@@ -278,11 +278,11 @@ def test_late_conflict_does_not_initialize_candidate_group_storage(
             store.patch(
                 snapshot.revision,
                 lambda current: current["teams"]["newsletter"].__setitem__(
-                    "path", str(candidate_group)
+                    "path", str(candidate_team)
                 ),
             )
 
-    assert not candidate_group.exists()
+    assert not candidate_team.exists()
 
 
 def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(

@@ -238,7 +238,7 @@ def test_recovery_rejects_journal_filename_mismatch(recovery_fixture):
     assert read_job(recovery_fixture.job_path).status == "running"
 
 
-def test_recovery_rejects_job_owned_by_wrong_configured_group(tmp_path):
+def test_recovery_rejects_job_owned_by_wrong_configured_team(tmp_path):
     forged = RecoveryFixture(tmp_path, team_key="forged")
     forged.crash_at("published")
     journal_path = next(

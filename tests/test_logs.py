@@ -134,7 +134,7 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     assert time_pos < badge_pos
 
 
-def test_log_view_rejects_workspace_file_outside_group_logs(tmp_path, monkeypatch):
+def test_log_view_rejects_workspace_file_outside_team_logs(tmp_path, monkeypatch):
     workspace_path = tmp_path / "workspace" / "test"
     team_root = tmp_path / "groups" / "test"
     workspace_path.mkdir(parents=True)

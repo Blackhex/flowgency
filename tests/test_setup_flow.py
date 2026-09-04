@@ -217,7 +217,7 @@ def test_status_is_invalid_for_yaml_parse_errors(tmp_path: Path) -> None:
     assert "\n" not in status.message
 
 
-def test_status_is_incomplete_when_no_groups(tmp_path: Path, raw_config) -> None:
+def test_status_is_incomplete_when_no_teams(tmp_path: Path, raw_config) -> None:
     store = ConfigStore(tmp_path / "config.yaml")
     incomplete = copy.deepcopy(raw_config)
     incomplete["agency"]["default_team"] = ""
@@ -229,7 +229,7 @@ def test_status_is_incomplete_when_no_groups(tmp_path: Path, raw_config) -> None
     assert status.state == "incomplete"
 
 
-def test_status_is_ready_only_with_a_group(tmp_path: Path, raw_config) -> None:
+def test_status_is_ready_only_with_a_team(tmp_path: Path, raw_config) -> None:
     store = ConfigStore(tmp_path / "config.yaml")
     store.create(raw_config)
 

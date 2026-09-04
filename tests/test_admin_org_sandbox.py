@@ -219,7 +219,7 @@ def test_admin_org_create_multiline_roots(tmp_path, monkeypatch, raw_config):
 def test_admin_org_save_preserves_extension_keys(tmp_path, monkeypatch, raw_config):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
     snapshot = store.load()
-    snapshot.raw["teams"]["grp"]["group_extension"] = {"theme": "sunset"}
+    snapshot.raw["teams"]["grp"]["team_extension"] = {"theme": "sunset"}
     snapshot.raw["teams"]["grp"]["runtime"] = {
         "timeout": 1200,
         "runtime_extension": {"preserve": True},
@@ -255,7 +255,7 @@ def test_admin_org_save_preserves_extension_keys(tmp_path, monkeypatch, raw_conf
 
     assert response.status_code == 303
     saved = store.load().raw
-    assert saved["teams"]["grp"]["group_extension"] == {"theme": "sunset"}
+    assert saved["teams"]["grp"]["team_extension"] == {"theme": "sunset"}
     assert saved["teams"]["grp"]["runtime"]["runtime_extension"] == {"preserve": True}
     assert saved["teams"]["grp"]["workspaces"][0]["workspace_extension"] == {"preserve": True}
 
@@ -335,7 +335,7 @@ def test_admin_org_save_preserves_workspaces(tmp_path, monkeypatch, raw_config):
     ]
 
 
-def test_admin_org_create_calls_one_patch_and_persists_full_group_state(
+def test_admin_org_create_calls_one_patch_and_persists_full_team_state(
     tmp_path, monkeypatch, raw_config
 ):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)

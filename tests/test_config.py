@@ -114,7 +114,7 @@ def test_rejects_routine_default_without_routine_context(raw_config, config_path
     assert any(issue.code == "invalid-memory-scope" for issue in issues)
 
 
-def test_validate_config_reports_group_dispatch_agents_not_supported(raw_config, config_paths):
+def test_validate_config_reports_team_dispatch_agents_not_supported(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["dispatch"] = {
@@ -135,7 +135,7 @@ def test_validate_config_reports_group_dispatch_agents_not_supported(raw_config,
     )
 
 
-def test_parse_config_rejects_group_dispatch_agents_not_supported(raw_config, config_paths):
+def test_parse_config_rejects_team_dispatch_agents_not_supported(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"]["dispatch"] = {
@@ -151,7 +151,7 @@ def test_parse_config_rejects_group_dispatch_agents_not_supported(raw_config, co
     assert any(issue.code == "team-dispatch-agents-not-supported" for issue in excinfo.value.issues)
 
 
-def test_accepts_supported_group_dispatch_and_routines(raw_config, config_paths):
+def test_accepts_supported_team_dispatch_and_routines(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
     raw_config["teams"]["newsletter"]["dispatch"] = {
@@ -178,7 +178,7 @@ def test_routine_enabled_is_typed_and_defaults_true(raw_config, config_paths):
     assert parsed.teams["newsletter"].agents["builder"].routines[0].enabled is False
 
 
-def test_rejects_other_unknown_group_dispatch_keys(raw_config, config_paths):
+def test_rejects_other_unknown_team_dispatch_keys(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["dispatch"] = {
@@ -303,7 +303,7 @@ def test_team_requires_workspace_and_state_paths(raw_config, config_paths):
         )
 
 
-def test_relative_group_paths_resolve_from_config_directory(raw_config, config_paths):
+def test_relative_team_paths_resolve_from_config_directory(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"]["workspace_path"] = "workspace"
@@ -314,7 +314,7 @@ def test_relative_group_paths_resolve_from_config_directory(raw_config, config_p
     assert team.path == (config_paths["config_dir"] / "groups/newsletter").resolve()
 
 
-def test_parse_config_raises_validation_failed_for_missing_group_path_with_additional_roots(
+def test_parse_config_raises_validation_failed_for_missing_team_path_with_additional_roots(
     raw_config, config_paths
 ):
     from agency.configuration.models import parse_config
@@ -450,7 +450,7 @@ def test_rejects_missing_explicit_integration(raw_config, config_paths):
 
 
 @pytest.mark.parametrize("default_integration_value", [None, "", "   "])
-def test_rejects_missing_or_blank_group_default_integration(
+def test_rejects_missing_or_blank_team_default_integration(
     raw_config, config_paths, default_integration_value
 ):
     from agency.configuration.models import parse_config, validate_config
@@ -471,7 +471,7 @@ def test_rejects_missing_or_blank_group_default_integration(
     assert any(issue.code == "missing-default-integration" for issue in excinfo.value.issues)
 
 
-def test_rejects_invalid_group_allowlist(raw_config, config_paths):
+def test_rejects_invalid_team_allowlist(raw_config, config_paths):
     """v4 tools key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
@@ -484,7 +484,7 @@ def test_rejects_invalid_group_allowlist(raw_config, config_paths):
     assert any(issue.code == "superseded-config-key" and "tools" in issue.field for issue in issues)
 
 
-def test_rejects_group_additional_roots(raw_config, config_paths):
+def test_rejects_team_additional_roots(raw_config, config_paths):
     """v4 sandbox key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
@@ -510,7 +510,7 @@ def test_rejects_agent_roots(raw_config, config_paths):
     assert any(issue.code == "superseded-config-key" and "sandbox" in issue.field for issue in issues)
 
 
-def test_validates_group_sandbox_semantics(raw_config, config_paths):
+def test_validates_team_sandbox_semantics(raw_config, config_paths):
     """v4 sandbox key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
@@ -521,7 +521,7 @@ def test_validates_group_sandbox_semantics(raw_config, config_paths):
     assert any(issue.code == "superseded-config-key" and "sandbox" in issue.field for issue in issues)
 
 
-def test_accepts_restricted_group_permissions(raw_config, config_paths):
+def test_accepts_restricted_team_permissions(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
     raw_config["teams"]["newsletter"]["runtime"] = {
@@ -1022,7 +1022,7 @@ def test_malformed_catch_up_is_rejected(tmp_path):
     assert any(issue.code == "invalid-dispatch-rule" for issue in error.value.issues)
 
 
-def test_group_dispatch_rejects_daily_limit(tmp_path):
+def test_team_dispatch_rejects_daily_limit(tmp_path):
     config = _write_minimal_config(tmp_path, dispatch_daily_limit=20)
     with pytest.raises(ValidationFailed):
         load_config(config)

@@ -61,7 +61,7 @@ class TestBuildPipelineStats:
         assert result["flow_status"] == "healthy"
 
 
-def test_list_markdown_items_reads_the_explicit_group_directory(tmp_path):
+def test_list_markdown_items_reads_the_explicit_team_directory(tmp_path):
     observations = tmp_path / "observations"
     observations.mkdir()
     (observations / "signal.md").write_text(
@@ -512,12 +512,12 @@ def test_dashboard_fallback_preserves_exact_active_job_states(
         assert fleet[agent_name]["profile_href"] == f"/newsletter/agents/{agent_name}/profile"
 
 
-def test_dashboard_uses_selected_group_instances_only(monkeypatch, tmp_path, raw_config):
+def test_dashboard_uses_selected_team_instances_only(monkeypatch, tmp_path, raw_config):
     client, _, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     other_paths = create_team_environment(tmp_path, "research")
-    other_group = other_paths.state_root
+    other_team = other_paths.state_root
     for rel in [("logs",), ("observations",), ("proposals",), ("decisions",), ("locks",)]:
-        other_group.joinpath(*rel).mkdir(parents=True, exist_ok=True)
+        other_team.joinpath(*rel).mkdir(parents=True, exist_ok=True)
 
     raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
     raw["teams"]["research"] = apply_team_paths({

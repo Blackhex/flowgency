@@ -368,7 +368,7 @@ def test_job_spec_serializes_distinct_workspace_and_team_roots(tmp_path):
     assert spec.resolved_team_root == Path(spec.team_root).resolve()
 
 
-def test_operation_lock_is_under_group_locks(tmp_path):
+def test_operation_lock_is_under_team_locks(tmp_path):
     assert team_operation_lock_path(tmp_path) == (
         tmp_path / "locks" / ".operations.lock"
     )
@@ -718,7 +718,7 @@ def sample_spec(tmp_path):
     return make_spec(tmp_path)
 
 
-def test_queue_lock_sits_beside_the_group_directories(tmp_path):
+def test_queue_lock_sits_beside_the_team_directories(tmp_path):
     assert queue_lock_path(tmp_path).name == ".queue.lock"
     assert queue_lock_path(tmp_path).parent == tmp_path
 
