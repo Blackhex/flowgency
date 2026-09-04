@@ -163,7 +163,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
     except Exception:
         log.exception("queue drain failed")
 
-    for group_key, group in resolved.groups.items():
+    for group_key, group in resolved.teams.items():
         if not group.dispatch.enabled:
             continue
 

@@ -611,6 +611,16 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
             )
         )
     agency = raw.get("agency") if _is_mapping(raw.get("agency")) else {}
+    if "default_group" in agency:
+        issues.append(
+            _build_issue(
+                code="superseded-default-group",
+                scope="agency",
+                field="default_group",
+                message="agency.default_group is no longer recognised.",
+                hint="Rename agency.default_group to agency.default_team.",
+            )
+        )
     memory = raw.get("memory") if _is_mapping(raw.get("memory")) else {}
     channels = memory.get("channels") if _is_mapping(memory.get("channels")) else {}
     declared_channels = set(channels)

@@ -180,9 +180,9 @@ def resolve_job_request(
     if issues:
         raise ValidationFailed(issues)
     try:
-        group = snapshot.config.groups[request.group_key]
+        group = snapshot.config.teams[request.group_key]
     except KeyError as exc:
-        raise JobValidationError(f"Unknown group: {request.group_key}") from exc
+        raise JobValidationError(f"Unknown team: {request.group_key}") from exc
     paths = resolve_team_paths(group)
 
     agent = _find_agent(group, request.agent_name)

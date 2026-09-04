@@ -77,6 +77,12 @@ def test_current_defaults_are_explicit(raw_config, config_paths):
     [
         (lambda raw: raw.__setitem__("schema_version", 5), "unsupported-schema-version"),
         (lambda raw: raw.__setitem__("groups", raw.pop("teams")), "invalid-config"),
+        (
+            lambda raw: raw["agency"].__setitem__(
+                "default_group", raw["agency"].pop("default_team")
+            ),
+            "superseded-default-group",
+        ),
     ],
 )
 def test_v6_rejects_prior_group_control_plane(raw_config, config_paths, raw_change, required_code):
