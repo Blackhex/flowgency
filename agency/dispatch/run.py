@@ -85,14 +85,14 @@ def lost_occurrences(records) -> dict[tuple[str, str], datetime]:
     }
 
 
-def _group_job_records(memory_store: Path, group_key: str):
+def _team_job_records(memory_store: Path, team_key: str):
     try:
-        group_dir = JobStore(memory_store).team_root(group_key)
+        team_dir = JobStore(memory_store).team_root(team_key)
     except (OSError, ValueError):
         return
-    if not group_dir.is_dir():
+    if not team_dir.is_dir():
         return
-    for path in sorted(group_dir.glob("*.yaml")):
+    for path in sorted(team_dir.glob("*.yaml")):
         try:
             yield read_job(path)
         except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
@@ -163,22 +163,22 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
     except Exception:
         log.exception("queue drain failed")
 
-    for group_key, group in resolved.teams.items():
-        if not group.dispatch.enabled:
+    for team_key, team in resolved.teams.items():
+        if not team.dispatch.enabled:
             continue
 
-        log.info("Processing group: %s", group_key)
-        paths = resolve_team_paths(group)
+        log.info("Processing team: %s", team_key)
+        paths = resolve_team_paths(team)
 
         logs_root = paths.logs
         today = clock_now().strftime("%Y-%m-%d")
         log_dir = logs_root / today
         log_dir.mkdir(parents=True, exist_ok=True)
         lost = lost_occurrences(
-            _group_job_records(resolved.agency.memory_store, group_key)
+            _team_job_records(resolved.agency.memory_store, team_key)
         )
 
-        for agent_name, agent in group.agents.items():
+        for agent_name, agent in team.agents.items():
             for routine in agent.routines:
                 if not routine.enabled:
                     log.info("  SKIP: %s/%s is disabled", agent_name, routine.id)
@@ -227,7 +227,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
                 try:
                     request = JobRequest(
                         config_path=snapshot.path,
-                        team_key=group_key,
+                        team_key=team_key,
                         agent_name=agent_name,
                         trigger="scheduled_prompt",
                         task_input="",

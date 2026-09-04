@@ -1056,7 +1056,8 @@ def test_v5_group_runtime_rejects_v4_key(raw_config, config_paths, key):
 
     matches = [i for i in issues if i.code == "superseded-config-key" and key in i.field]
     assert matches, f"Expected rejection of group runtime.{key}"
-    assert "migrate" in matches[0].corrective_hint
+    assert "Remove the key" in matches[0].corrective_hint
+    assert "migrate" not in matches[0].corrective_hint
 
 
 @pytest.mark.parametrize("key", ["sandbox", "tools"])
@@ -1080,4 +1081,5 @@ def test_v5_agent_rejects_capabilities_key(raw_config, config_paths):
 
     matches = [i for i in issues if i.code == "superseded-config-key" and "capabilities" in i.field]
     assert matches, "Expected rejection of capabilities key"
-    assert "migrate" in matches[0].corrective_hint
+    assert "Remove the key" in matches[0].corrective_hint
+    assert "migrate" not in matches[0].corrective_hint
