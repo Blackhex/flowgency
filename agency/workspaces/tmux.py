@@ -32,14 +32,14 @@ class TmuxWorkspace(BaseWorkspace):
     def supports_launch(self) -> bool:
         return True
 
-    def launch_command(self, config: dict, group_path: str) -> str | None:
+    def launch_command(self, config: dict, team_path: str) -> str | None:
         path = config.get("script_path")
         if not path:
             return None
         return f"bash {path}"
 
-    def detect(self, group_path: str) -> dict | None:
-        gp = Path(group_path)
+    def detect(self, team_path: str) -> dict | None:
+        gp = Path(team_path)
         for script in sorted(gp.glob("tmux-*.sh")):
             return {"script_path": str(script)}
         tmux_sh = gp / "tmux.sh"

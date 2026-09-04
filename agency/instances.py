@@ -113,7 +113,7 @@ def list_instances(
     snapshot: ConfigSnapshot,
     group_id: str,
 ) -> tuple[AgentInstance, ...]:
-    return tuple(snapshot.config.groups[group_id].agents.values())
+    return tuple(snapshot.config.teams[group_id].agents.values())
 
 
 def get_instance(
@@ -121,7 +121,7 @@ def get_instance(
     group_id: str,
     agent_id: str,
 ) -> AgentInstance:
-    return snapshot.config.groups[group_id].agents[agent_id]
+    return snapshot.config.teams[group_id].agents[agent_id]
 
 
 def create_instance(
@@ -131,7 +131,7 @@ def create_instance(
     agent: AgentInstance,
 ) -> ConfigSnapshot:
     snapshot = store.load()
-    group_path = snapshot.config.groups[group_id].path
+    group_path = snapshot.config.teams[group_id].path
     with acquire_group_operation_locks(group_path):
         refreshed = store.load()
         if refreshed.revision != expected_revision:
@@ -153,7 +153,7 @@ def remove_instance(
     agent_id: str,
 ) -> ConfigSnapshot:
     snapshot = store.load()
-    group_path = snapshot.config.groups[group_id].path
+    group_path = snapshot.config.teams[group_id].path
     with acquire_group_operation_locks(group_path):
         refreshed = store.load()
         if refreshed.revision != expected_revision:
@@ -238,8 +238,8 @@ def move_instance(
 
     created_targets: list[ResolvedMemory] = []
     snapshot = store.load()
-    source_group_path = snapshot.config.groups[preview.source_group].path
-    target_group_path = snapshot.config.groups[preview.target_group].path
+    source_group_path = snapshot.config.teams[preview.source_group].path
+    target_group_path = snapshot.config.teams[preview.target_group].path
     orphaned_prompt_namespace: Path | None = None
     with ExitStack() as stack:
         stack.enter_context(
@@ -444,7 +444,7 @@ class InstanceService:
         )
         return InstanceMutationResult(
             snapshot=updated,
-            instance=updated.config.groups[group_id].agents[request.name],
+            instance=updated.config.teams[group_id].agents[request.name],
         )
 
     def remove(
@@ -596,7 +596,7 @@ def _resolve_owned_memories(
         item = resolve_memory_selector(
             selector,
             job_id="instance-preview",
-            group_key=group_id,
+            team_key=group_id,
             agent_name=agent.name,
             routine_id=routine_id,
             channels=snapshot.config.memory.channels,
@@ -621,7 +621,7 @@ def _resolve_owned_memory_pairs(
                 resolve_memory_selector(
                     selector,
                     job_id="instance-preview",
-                    group_key=source_group,
+                    team_key=source_group,
                     agent_name=agent.name,
                     routine_id=routine_id,
                     channels=snapshot.config.memory.channels,
@@ -630,7 +630,7 @@ def _resolve_owned_memory_pairs(
                 resolve_memory_selector(
                     selector,
                     job_id="instance-preview",
-                    group_key=target_group,
+                    team_key=target_group,
                     agent_name=agent.name,
                     routine_id=routine_id,
                     channels=snapshot.config.memory.channels,
@@ -705,7 +705,7 @@ def _preview_blocks(
     prompt_store: PromptStore,
     source_prompts: tuple[tuple[str, str], ...],
 ):
-    if agent_id in snapshot.config.groups[target_group].agents:
+    if agent_id in snapshot.config.teams[target_group].agents:
         yield "target-instance-exists"
         return
     if _has_active_jobs(snapshot, source_group, target_group, agent_id):
@@ -743,9 +743,9 @@ def _apply_move_patch(
     target_group: str,
     agent_name: str,
 ) -> None:
-    groups = raw["groups"]
-    source_agents = groups[source_group].setdefault("agents", [])
-    target_agents = groups[target_group].setdefault("agents", [])
+    teams = raw["teams"]
+    source_agents = teams[source_group].setdefault("agents", [])
+    target_agents = teams[target_group].setdefault("agents", [])
     if any(
         isinstance(entry, dict) and entry.get("name") == agent_name
         for entry in target_agents
@@ -798,3 +798,4 @@ __all__ = [
     "preview_move",
     "remove_instance",
 ]
+

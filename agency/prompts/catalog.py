@@ -56,7 +56,7 @@ def effective_prompt_catalog(
     group_id: str,
     agent_id: str,
 ) -> tuple[CatalogPrompt, ...]:
-    group = snapshot.config.groups[group_id]
+    group = snapshot.config.teams[group_id]
     instance = group.agents[agent_id]
     inspection = library.inspect(instance.blueprint)
     shared = tuple(
@@ -106,7 +106,7 @@ def validate_prompt_catalogs(
 ) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
     seen: set[tuple[str, str, str]] = set()
-    for group_id, group in snapshot.config.groups.items():
+    for group_id, group in snapshot.config.teams.items():
         for agent_id in group.agents:
             try:
                 effective_prompt_catalog(snapshot, library, store, group_id, agent_id)

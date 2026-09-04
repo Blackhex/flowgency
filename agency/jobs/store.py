@@ -78,7 +78,7 @@ def revision_bound_group_operation(
 ):
     initial = config_store.load()
     relevant_ids = (
-        tuple(sorted(initial.config.groups))
+        tuple(sorted(initial.config.teams))
         if all_groups
         else tuple(sorted(set(group_ids)))
     )
@@ -87,7 +87,7 @@ def revision_bound_group_operation(
     with acquire_group_operation_locks(*lock_paths):
         locked = config_store.load()
         locked_ids = (
-            tuple(sorted(locked.config.groups))
+            tuple(sorted(locked.config.teams))
             if all_groups
             else relevant_ids
         )
@@ -117,10 +117,10 @@ def _group_path_identity(
     for group_id in group_ids:
         try:
             identity[group_id] = (
-                snapshot.config.groups[group_id].path.resolve()
+                snapshot.config.teams[group_id].path.resolve()
             )
         except KeyError as exc:
-            raise ValueError(f"Unknown group: {group_id}") from exc
+            raise ValueError(f"Unknown team: {group_id}") from exc
     return identity
 
 

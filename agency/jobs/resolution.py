@@ -99,29 +99,29 @@ def _bind_integration(
 
 def _missing_prompt_error(
     *,
-    group_key: str,
+    team_key: str,
     agent_name: str,
     scope: str,
     name: str,
     action: str,
 ) -> JobValidationError:
     return JobValidationError(
-        f"Configured {scope} prompt '{name}' for {group_key}/{agent_name} is no longer available; {action}."
+        f"Configured {scope} prompt '{name}' for {team_key}/{agent_name} is no longer available; {action}."
     )
 
 
 def _snapshot_private_prompt(
     prompt_store: PromptStore,
     *,
-    group_key: str,
+    team_key: str,
     agent_name: str,
     name: str,
 ) -> PromptSnapshot:
     try:
-        stored = prompt_store.read(group_key, agent_name, name)
+        stored = prompt_store.read(team_key, agent_name, name)
     except PromptNotFoundError as exc:
         raise _missing_prompt_error(
-            group_key=group_key,
+            team_key=team_key,
             agent_name=agent_name,
             scope="instance",
             name=name,
@@ -139,7 +139,7 @@ def _resolve_saved_prompt(
     library: BlueprintLibrary,
     prompt_store: PromptStore,
     *,
-    group_key: str,
+    team_key: str,
     agent_name: str,
     scope: str,
     name: str,
@@ -149,7 +149,7 @@ def _resolve_saved_prompt(
             snapshot,
             library,
             prompt_store,
-            group_key,
+            team_key,
             agent_name,
             scope=scope,
             name=name,
@@ -157,7 +157,7 @@ def _resolve_saved_prompt(
     except (KeyError, PromptNotFoundError) as exc:
         action = "restore the prompt source or update the saved prompt selector"
         raise _missing_prompt_error(
-            group_key=group_key,
+            team_key=team_key,
             agent_name=agent_name,
             scope=scope,
             name=name,
@@ -180,12 +180,12 @@ def resolve_job_request(
     if issues:
         raise ValidationFailed(issues)
     try:
-        group = snapshot.config.teams[request.group_key]
+        team = snapshot.config.teams[request.team_key]
     except KeyError as exc:
-        raise JobValidationError(f"Unknown team: {request.group_key}") from exc
-    paths = resolve_team_paths(group)
+        raise JobValidationError(f"Unknown team: {request.team_key}") from exc
+    paths = resolve_team_paths(team)
 
-    agent = _find_agent(group, request.agent_name)
+    agent = _find_agent(team, request.agent_name)
     routine = _find_routine(agent, request.routine_id)
 
     if request.routine_id is not None and routine is None:
@@ -211,7 +211,7 @@ def resolve_job_request(
     )
     runtime_policy = resolve_effective_policy(
         snapshot.config,
-        request.group_key,
+        request.team_key,
         request.agent_name,
         timeout_override=request.timeout_override,
         integration=integration,
@@ -228,7 +228,7 @@ def resolve_job_request(
     resolved_memory = resolve_memory_selector(
         selector,
         job_id=request.job_id,
-        group_key=request.group_key,
+        team_key=request.team_key,
         agent_name=request.agent_name,
         routine_id=routine.id if routine is not None else None,
         channels=snapshot.config.memory.channels,
@@ -253,7 +253,7 @@ def resolve_job_request(
     private_prompts = tuple(
         _snapshot_private_prompt(
             prompt_store,
-            group_key=request.group_key,
+            team_key=request.team_key,
             agent_name=request.agent_name,
             name=name,
         )
@@ -267,7 +267,7 @@ def resolve_job_request(
                 snapshot,
                 library,
                 prompt_store,
-                group_key=request.group_key,
+                team_key=request.team_key,
                 agent_name=request.agent_name,
                 scope=selector.scope,
                 name=selector.name,
@@ -297,13 +297,13 @@ def resolve_job_request(
         prompt_source = {"type": "decision_retry"}
 
     return JobSpec(
-        schema_version=4,
+        schema_version=5,
         job_id=request.job_id,
         config_path=str(snapshot.path),
         config_revision=snapshot.revision,
-        group_key=request.group_key,
+        team_key=request.team_key,
         workspace_root=str(paths.workspace_root),
-        group_root=str(paths.group_root),
+        team_root=str(paths.team_root),
         agent_name=request.agent_name,
         trigger=request.trigger,
         integration_name=agent.integration,
@@ -337,6 +337,6 @@ def resolve_job_request(
         created_at=datetime.now(timezone.utc).isoformat(),
         private_prompts=private_prompts,
         writable_agents=tuple(
-            sorted(writable_agent_names(snapshot.config, request.group_key))
+            sorted(writable_agent_names(snapshot.config, request.team_key))
         ),
     )

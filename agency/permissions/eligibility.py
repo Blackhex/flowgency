@@ -34,18 +34,16 @@ def grants_write_on(rules: Iterable[_Rule], workspace: Path | str) -> bool:
 
 
 def may_execute_decisions(config, group_key: str, agent_name: str) -> bool:
-    """Return True iff the agent's effective policy grants write on the group workspace root."""
-    # Deferred: resolving a policy imports the integrations package, which
-    # imports this module to decide the Copilot sandbox's credential grants.
+    """Return True iff the agent's effective policy grants write on the team workspace root."""
     from agency.configuration.effective import resolve_effective_policy
     from agency.configuration.issues import ValidationFailed
 
-    group = config.groups.get(group_key)
-    if group is None or agent_name not in group.agents:
+    team = config.teams.get(group_key)
+    if team is None or agent_name not in team.agents:
         return False
     try:
         policy = resolve_effective_policy(config, group_key, agent_name)
     except (ValidationFailed, KeyError):
         return False
 
-    return grants_write_on(policy.rules, group.workspace_path)
+    return grants_write_on(policy.rules, team.workspace_path)

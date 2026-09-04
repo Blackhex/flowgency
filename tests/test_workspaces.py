@@ -240,18 +240,18 @@ class TestWorkspaceRoutes:
         config_path.write_text(
             yaml.safe_dump(
                 {
-                    "schema_version": 5,
+                    "schema_version": 6,
 
                     "agency": {
                         "title": "Test",
-                        "default_group": "test",
+                        "default_team": "test",
                         "ai_backend": "claude-code",
                         "agent_library": str((tmp_path / "agent-library").resolve()),
                         "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
                         "memory_store": str((tmp_path / "memory").resolve()),
                         "prompt_store": str((tmp_path / "prompts").resolve()),
                     },
-                    "groups": {
+                    "teams": {
                         "test": {
                             "name": "Test Group",
                             "workspace_path": str(tmp_path.resolve()),
@@ -300,3 +300,5 @@ class TestWorkspaceRoutes:
             data={"file_path": "/etc/passwd", "content": "hacked"},
         )
         assert resp.status_code == 403
+
+

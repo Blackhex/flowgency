@@ -20,15 +20,15 @@ def publication_fixture(tmp_path):
     group_path = tmp_path / "group"
     group_path.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
     memory_root = tmp_path / "memory-store"
     spec = JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id="publication-job",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="news",
-        group_root=str(group_path.resolve()),
+        team_key="news",
+        team_root=str(group_path.resolve()),
         agent_name="writer",
         workspace_root=str(group_path.resolve()),
         trigger="manual_prompt",
@@ -42,7 +42,7 @@ def publication_fixture(tmp_path):
             cache_path=str((tmp_path / "compiled-agents" / "script" / "v1" / "digest-1" / "entry.py").resolve()),
         ),
         routine_id="publish-memory",
-        skill="publish-memory",
+        skill=None,
         skill_arguments=(),
         task_input="Publish memory",
         runtime_policy=RuntimePolicySnapshot(
@@ -57,14 +57,17 @@ def publication_fixture(tmp_path):
         ),
         trigger_context=None,
         prompt_source={
-            "type": "routine",
-            "routine_id": "daily-review",
+            "type": "blueprint_prompt",
+            "scope": "blueprint",
+            "name": "daily-review",
+            "source_path": ".agents/prompts/daily-review.prompt.md",
+            "source_digest": "digest-1",
         },
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
     authority_store = JobStore(memory_root)
-    group_job_store = authority_store.group_root("news")
+    group_job_store = authority_store.team_root("news")
     group_job_store.mkdir(parents=True, exist_ok=True)
     job_path = authority_store.path("news", spec.job_id)
     queued = JobRecord.from_spec(spec)
@@ -75,7 +78,7 @@ def publication_fixture(tmp_path):
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id=spec.job_id,
-        group_key="news",
+        team_key="news",
         agent_name="writer",
         routine_id=None,
         channels={},
@@ -89,7 +92,7 @@ def publication_fixture(tmp_path):
     )
     stage = store.stage(resolved, job_id=spec.job_id)
     return {
-        "group_root": group_path,
+        "team_root": group_path,
         "job_path": job_path,
         "job_store": group_job_store,
         "job_id": spec.job_id,
@@ -195,7 +198,7 @@ def test_publication_rejects_hostile_external_job_path_and_preserves_sentinel(
 ):
     stage = publication_fixture["stage"]
     job_store = publication_fixture["job_store"]
-    hostile_group = publication_fixture["group_root"].parent / "hostile"
+    hostile_group = publication_fixture["team_root"].parent / "hostile"
     hostile_job_store = hostile_group / ".jobs" / "hostile"
     hostile_job_store.mkdir(parents=True)
     hostile_job_path = hostile_job_store / f"{publication_fixture['job_id']}.yaml"
@@ -220,7 +223,10 @@ def test_publication_rejects_symlinked_jobs_directory(
 ):
     stage = publication_fixture["stage"]
     job_store = publication_fixture["job_store"]
-    linked_jobs = publication_fixture["group_root"].parent / "linked-group" / ".jobs" / "linked-group"
+    linked_jobs = publication_fixture["team_root"].parent / "linked-group" / ".jobs" / "linked-group"
     linked_jobs.parent.mkdir(parents=True)
     with pytest.raises(MemoryPublicationError, match="unsafe|job store"):
         prepare_publication(stage, job_store=linked_jobs)
+
+
+

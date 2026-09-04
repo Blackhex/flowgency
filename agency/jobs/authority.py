@@ -22,20 +22,20 @@ class JobAuthorityError(ValueError):
 @dataclass(frozen=True)
 class JobAuthorityRef:
     store_root: Path
-    group_id: str
+    team_id: str
     job_id: str
     immutable_digest: str
 
     @property
     def path(self) -> Path:
-        return (self.store_root / self.group_id / f"{self.job_id}.yaml").resolve(strict=False)
+        return (self.store_root / self.team_id / f"{self.job_id}.yaml").resolve(strict=False)
 
     def worker_args(self) -> list[str]:
         return [
             "--store-root",
             str(self.store_root),
-            "--group-id",
-            self.group_id,
+            "--team-id",
+            self.team_id,
             "--job-id",
             self.job_id,
             "--immutable-digest",
@@ -63,10 +63,10 @@ class JobStore:
         return store
 
     @staticmethod
-    def _group_id(group_id: str) -> str:
-        if not isinstance(group_id, str) or not _IDENTIFIER.fullmatch(group_id):
-            raise ValueError("group_id must be a canonical stable identifier")
-        return group_id
+    def _team_id(team_id: str) -> str:
+        if not isinstance(team_id, str) or not _IDENTIFIER.fullmatch(team_id):
+            raise ValueError("team_id must be a canonical stable identifier")
+        return team_id
 
     @staticmethod
     def _job_id(job_id: str) -> str:
@@ -74,40 +74,40 @@ class JobStore:
             raise ValueError("job_id must be a canonical safe filename segment")
         return job_id
 
-    def path(self, group_id: str, job_id: str) -> Path:
-        group_id = self._group_id(group_id)
+    def path(self, team_id: str, job_id: str) -> Path:
+        team_id = self._team_id(team_id)
         job_id = self._job_id(job_id)
-        path = (self.root / group_id / f"{job_id}.yaml").resolve()
-        if path.parent != (self.root / group_id).resolve():
+        path = (self.root / team_id / f"{job_id}.yaml").resolve()
+        if path.parent != (self.root / team_id).resolve():
             raise ValueError("job path escaped the authoritative store")
         return path
 
-    def group_root(self, group_id: str) -> Path:
-        group_id = self._group_id(group_id)
-        return (self.root / group_id).resolve(strict=False)
+    def team_root(self, team_id: str) -> Path:
+        team_id = self._team_id(team_id)
+        return (self.root / team_id).resolve(strict=False)
 
-    def artifact_root(self, group_id: str, job_id: str) -> Path:
-        group_root = self.group_root(group_id)
+    def artifact_root(self, team_id: str, job_id: str) -> Path:
+        root = self.team_root(team_id)
         job_id = self._job_id(job_id)
-        target = (group_root / "artifacts" / job_id).resolve(strict=False)
-        if target.parent != (group_root / "artifacts").resolve(strict=False):
+        target = (root / "artifacts" / job_id).resolve(strict=False)
+        if target.parent != (root / "artifacts").resolve(strict=False):
             raise ValueError("artifact path escaped the authoritative store")
         return target
 
     def reference(
         self,
-        group_id: str,
+        team_id: str,
         job_id: str,
         immutable_digest: str,
     ) -> JobAuthorityRef:
-        self.path(group_id, job_id)
+        self.path(team_id, job_id)
         if not isinstance(immutable_digest, str) or not _DIGEST.fullmatch(immutable_digest):
             raise ValueError("immutable_digest must be a SHA-256 digest")
-        return JobAuthorityRef(self.root, group_id, job_id, immutable_digest)
+        return JobAuthorityRef(self.root, team_id, job_id, immutable_digest)
 
     def create(self, record: JobRecord) -> JobAuthorityRef:
         reference = self.reference(
-            record.spec.group_key,
+            record.spec.team_key,
             record.spec.job_id,
             record.authority_digest,
         )
@@ -118,7 +118,7 @@ class JobStore:
 
     def read(self, reference: JobAuthorityRef) -> JobRecord:
         expected = self.reference(
-            reference.group_id,
+            reference.team_id,
             reference.job_id,
             reference.immutable_digest,
         )
@@ -130,18 +130,18 @@ class JobStore:
             raise JobAuthorityError("immutable job authority failed integrity validation") from exc
 
     def write(self, reference: JobAuthorityRef, record: JobRecord) -> None:
-        if record.spec.group_key != reference.group_id or record.spec.job_id != reference.job_id:
+        if record.spec.team_key != reference.team_id or record.spec.job_id != reference.job_id:
             raise JobAuthorityError("job identity does not match its authority reference")
         if record.authority_digest != reference.immutable_digest:
             raise JobAuthorityError("immutable job authority digest changed")
         write_job(reference.path, record)
 
-    def paths(self, group_id: str) -> tuple[Path, ...]:
-        directory = self.group_root(group_id)
+    def paths(self, team_id: str) -> tuple[Path, ...]:
+        directory = self.team_root(team_id)
         return tuple(sorted(directory.glob("*.yaml"))) if directory.is_dir() else ()
 
-    def active(self, group_id: str, agent_name: str | None = None) -> list[JobRecord]:
-        return active_jobs(self.paths(group_id), agent_name)
+    def active(self, team_id: str, agent_name: str | None = None) -> list[JobRecord]:
+        return active_jobs(self.paths(team_id), agent_name)
 
 
 __all__ = ["JobAuthorityError", "JobAuthorityRef", "JobStore"]

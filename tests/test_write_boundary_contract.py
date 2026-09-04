@@ -74,7 +74,7 @@ def _config_with_rules(
     mode="unrestricted",
 ):
     raw = deepcopy(raw_config)
-    group = raw["groups"]["newsletter"]
+    group = raw["teams"]["newsletter"]
     group["runtime"] = {
         "permissions": {
             "mode": mode,
@@ -94,7 +94,7 @@ def _config_with_rules(
 
 def test_agent_with_write_on_workspace_is_eligible(tmp_path, raw_config):
     """An agent whose rules grant write on the workspace_path may execute."""
-    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     config = _config_with_rules(
         tmp_path,
         raw_config,
@@ -105,7 +105,7 @@ def test_agent_with_write_on_workspace_is_eligible(tmp_path, raw_config):
 
 def test_agent_without_write_on_workspace_is_ineligible(tmp_path, raw_config):
     """An agent whose rules omit write on the workspace_path is ineligible."""
-    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     config = _config_with_rules(
         tmp_path,
         raw_config,
@@ -126,7 +126,7 @@ def test_agent_with_no_workspace_rule_is_ineligible(tmp_path, raw_config):
 
 def test_agent_with_null_tools_on_workspace_is_eligible(tmp_path, raw_config):
     """tools=None means all tools including write - eligible."""
-    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     config = _config_with_rules(
         tmp_path,
         raw_config,
@@ -153,7 +153,7 @@ def test_integration_rejects_unsupported_mode(tmp_path, raw_config):
 
 def test_permissive_integration_accepts_restricted_mode(tmp_path, raw_config):
     """An integration that supports both modes validates successfully."""
-    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
+    ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     config = _config_with_rules(
         tmp_path,
         raw_config,
@@ -221,3 +221,5 @@ def test_a_job_spec_persisted_before_the_write_boundary_still_loads(tmp_path):
 
     assert restored.spec.runtime_policy.to_effective_policy().mode == "unrestricted"
     assert restored.spec.writable_agents is None
+
+

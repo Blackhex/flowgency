@@ -131,11 +131,11 @@ def test_only_copilot_scopes_write_and_only_when_detection_succeeds(monkeypatch)
 
 def _resolved_config(tmp_path, raw_config, *, integration, group_mode, group_rules, agent_rules):
     raw = deepcopy(raw_config)
-    raw["schema_version"] = 5
-    raw["groups"]["newsletter"]["runtime"] = {
+    raw["schema_version"] = 6
+    raw["teams"]["newsletter"]["runtime"] = {
         "permissions": {"mode": group_mode, "rules": group_rules}
     }
-    agent = raw["groups"]["newsletter"]["agents"][0]
+    agent = raw["teams"]["newsletter"]["agents"][0]
     agent.pop("capabilities", None)
     agent["integration"] = integration
     agent["runtime"] = {"permissions": {"rules": agent_rules}}
@@ -252,3 +252,5 @@ def test_zoned_restricted_policy_passes_validation_for_copilot(tmp_path):
     zoned = authored.with_launch_zones(tmp_path / "launch")
 
     assert integration.validate_runtime_policy(zoned) == ()
+
+

@@ -131,7 +131,7 @@ def _operation_id_from_path(journal_path: Path) -> str | None:
 class _JobStoreOwner:
     group_id: str
     path: Path
-    group_root: Path | None
+    team_root: Path | None
 
 
 def _validate_job_stores(
@@ -147,7 +147,7 @@ def _validate_job_stores(
         configured_group_root: Path | None = None
         if isinstance(value, Mapping):
             candidate = Path(value["job_store"]).expanduser()
-            configured_group_root = Path(value["group_root"]).expanduser().resolve(strict=False)
+            configured_group_root = Path(value["team_root"]).expanduser().resolve(strict=False)
         else:
             candidate = Path(value).expanduser()
         if candidate.parent.name != ".jobs":
@@ -170,7 +170,7 @@ def _validate_job_stores(
             _JobStoreOwner(
                 group_id=group_id,
                 path=canonical,
-                group_root=configured_group_root,
+                team_root=configured_group_root,
             )
         )
     return tuple(
@@ -233,7 +233,7 @@ class _RecoveryOperation:
     journal_path: Path
     job_path: Path | None
     owner_group_id: str | None
-    owner_group_root: Path | None
+    owner_team_root: Path | None
 
 
 def _operation_from_payload(
@@ -316,7 +316,7 @@ def _operation_from_payload(
             )
         owner, job_path = matches[0]
         owner_group_id = owner.group_id
-        owner_group_root = owner.group_root
+        owner_group_root = owner.team_root
     stage_path = _stage_path(store_root, memory_hash, stage_name)
     backup_path = _backup_path(
         store_root,
@@ -348,7 +348,7 @@ def _operation_from_payload(
         journal_path=journal_path,
         job_path=job_path,
         owner_group_id=owner_group_id,
-        owner_group_root=owner_group_root,
+        owner_team_root=owner_group_root,
     )
     if kind == "job":
         _validate_job_ownership(operation)
@@ -364,12 +364,12 @@ def _validate_job_ownership(
     spec = record.spec
     if spec.job_id != operation.operation_id:
         raise ValueError("job spec id does not own journal operation")
-    if spec.group_key != operation.owner_group_id:
+    if spec.team_key != operation.owner_group_id:
         raise ValueError("job does not belong to its configured group owner")
-    if operation.owner_group_root is None:
+    if operation.owner_team_root is None:
         raise ValueError("configured group root is required for job recovery")
-    trusted_group_root = operation.owner_group_root.resolve()
-    if Path(spec.group_root).resolve() != trusted_group_root:
+    trusted_group_root = operation.owner_team_root.resolve()
+    if Path(spec.team_root).resolve() != trusted_group_root:
         raise ValueError("job spec group root does not match configured group")
     if (
         Path(spec.memory.path).resolve().parent
@@ -385,7 +385,7 @@ def _validate_job_ownership(
     recomputed = resolve_memory_selector(
         selector,
         job_id=spec.job_id,
-        group_key=spec.group_key,
+        team_key=spec.team_key,
         agent_name=spec.agent_name,
         routine_id=spec.routine_id,
         channels=channels,

@@ -13,13 +13,13 @@ from .store import read_job
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Execute one Agency job")
     parser.add_argument("--store-root", required=True)
-    parser.add_argument("--group-id", required=True)
+    parser.add_argument("--team-id", required=True)
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--immutable-digest", required=True)
     args = parser.parse_args(argv)
     store = JobStore.from_store_root(args.store_root)
     reference = store.reference(
-        args.group_id,
+        args.team_id,
         args.job_id,
         args.immutable_digest,
     )

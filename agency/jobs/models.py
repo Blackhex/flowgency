@@ -12,8 +12,8 @@ from agency.configuration.models import MemorySelector, PromptSelector
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
-SCHEMA_VERSION = 4
-SUPPORTED_SCHEMA_VERSIONS = frozenset({3, 4})
+SCHEMA_VERSION = 5
+SUPPORTED_SCHEMA_VERSIONS = frozenset({5})
 VALID_TRIGGERS = {
     "scheduled_prompt",
     "manual_prompt",
@@ -124,7 +124,7 @@ class PromptSnapshot:
 @dataclass(frozen=True)
 class JobRequest:
     config_path: Path
-    group_key: str
+    team_key: str
     agent_name: str
     trigger: str
     task_input: str = ""
@@ -152,9 +152,9 @@ class JobSpec:
     job_id: str
     config_path: str
     config_revision: str
-    group_key: str
+    team_key: str
     workspace_root: str
-    group_root: str
+    team_root: str
     agent_name: str
     trigger: str
     integration_name: str
@@ -181,9 +181,9 @@ class JobSpec:
         string_fields = {
             "job_id": self.job_id,
             "config_revision": self.config_revision,
-            "group_key": self.group_key,
+            "team_key": self.team_key,
             "workspace_root": self.workspace_root,
-            "group_root": self.group_root,
+            "team_root": self.team_root,
             "agent_name": self.agent_name,
             "trigger": self.trigger,
             "integration_name": self.integration_name,
@@ -196,34 +196,19 @@ class JobSpec:
             raise ValueError(f"Invalid job trigger: {self.trigger}")
         if not self.job_id.strip():
             raise ValueError("Job ID is required")
-        if not self.group_key.strip():
-            raise ValueError("Group key is required")
+        if not self.team_key.strip():
+            raise ValueError("Team key is required")
         if not self.agent_name.strip():
             raise ValueError("Agent name is required")
         if not self.task_input.strip():
             raise ValueError("Prompt content must not be blank")
-        if self.schema_version == 3:
-            self._validate_v3_prompt_contract()
-        else:
-            self._validate_v4_prompt_contract()
+        self._validate_prompt_contract()
 
-    def _validate_v3_prompt_contract(self) -> None:
-        if self.trigger in {"scheduled_prompt", "manual_prompt"}:
-            if not self.routine_id or not self.skill:
-                raise ValueError(
-                    "scheduled and manual jobs require routine_id and skill"
-                )
-        if self.trigger in {"decision", "decision_retry"}:
-            if self.routine_id is not None or self.skill is not None:
-                raise ValueError(
-                    "decision jobs require routine_id and skill to be null"
-                )
-
-    def _validate_v4_prompt_contract(self) -> None:
+    def _validate_prompt_contract(self) -> None:
         if self.skill is not None:
-            raise ValueError("schema v4 jobs must not set skill")
+            raise ValueError("schema v5 jobs must not set skill")
         if self.skill_arguments != ():
-            raise ValueError("schema v4 jobs must keep skill_arguments empty")
+            raise ValueError("schema v5 jobs must keep skill_arguments empty")
         if self.trigger in {"scheduled_prompt", "manual_prompt"}:
             if self.prompt_source is None:
                 raise ValueError("prompt-backed jobs require a prompt_source")
@@ -238,9 +223,9 @@ class JobSpec:
             "job_id": self.job_id,
             "config_path": self.config_path,
             "config_revision": self.config_revision,
-            "group_key": self.group_key,
+            "team_key": self.team_key,
             "workspace_root": self.workspace_root,
-            "group_root": self.group_root,
+            "team_root": self.team_root,
             "agent_name": self.agent_name,
             "trigger": self.trigger,
             "integration_name": self.integration_name,
@@ -256,9 +241,8 @@ class JobSpec:
             "prompt_source": self.prompt_source,
             "timeout_override": self.timeout_override,
             "created_at": self.created_at,
+            "private_prompts": [asdict(item) for item in self.private_prompts],
         }
-        if self.schema_version >= 4:
-            payload["private_prompts"] = [asdict(item) for item in self.private_prompts]
         if self.writable_agents is not None:
             payload["writable_agents"] = list(self.writable_agents)
         return payload
@@ -278,18 +262,11 @@ class JobSpec:
         values["integration_config"] = dict(values.get("integration_config") or {})
         values["blueprint"] = BlueprintRef(**values["blueprint"])
         runtime_policy_data = dict(values["runtime_policy"])
-        if "sandbox_mode" in runtime_policy_data:
-            # Old format: convert to new permission-rule shape.
-            values["runtime_policy"] = RuntimePolicySnapshot(
-                timeout=runtime_policy_data["timeout"],
-                mode=runtime_policy_data["sandbox_mode"],
-            )
-        else:
-            values["runtime_policy"] = RuntimePolicySnapshot(
-                timeout=runtime_policy_data["timeout"],
-                mode=runtime_policy_data.get("mode", "unrestricted"),
-                rules=tuple(runtime_policy_data.get("rules") or ()),
-            )
+        values["runtime_policy"] = RuntimePolicySnapshot(
+            timeout=runtime_policy_data["timeout"],
+            mode=runtime_policy_data.get("mode", "unrestricted"),
+            rules=tuple(runtime_policy_data.get("rules") or ()),
+        )
         values["memory"] = MemoryBinding(**values["memory"])
         values["skill_arguments"] = tuple(values.get("skill_arguments") or ())
         values["private_prompts"] = tuple(
@@ -316,8 +293,8 @@ class JobSpec:
         return Path(self.workspace_root).resolve(strict=False)
 
     @property
-    def resolved_group_root(self) -> Path:
-        return Path(self.group_root).resolve(strict=False)
+    def resolved_team_root(self) -> Path:
+        return Path(self.team_root).resolve(strict=False)
 
 
 @dataclass

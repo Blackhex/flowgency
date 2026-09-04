@@ -41,12 +41,12 @@ class BaseWorkspace:
         """Whether this workspace type can be launched programmatically."""
         return False
 
-    def launch_command(self, config: dict, group_path: str) -> str | None:
+    def launch_command(self, config: dict, team_path: str) -> str | None:
         """Return a shell command to launch this workspace, or None."""
         return None
 
-    def detect(self, group_path: str) -> dict | None:
-        """Auto-detect this workspace type from a group directory.
+    def detect(self, team_path: str) -> dict | None:
+        """Auto-detect this workspace type from a team directory.
 
         Returns a config dict if detected, None otherwise.
         Used during group setup/autodetect.

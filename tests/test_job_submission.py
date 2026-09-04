@@ -49,7 +49,7 @@ def prompt_env(tmp_path, raw_config):
         "---\nname: pr-review\ndescription: Review PRs.\n---\n\nReview pull requests.\n",
         encoding="utf-8",
     )
-    agent = raw["groups"]["newsletter"]["agents"][0]
+    agent = raw["teams"]["newsletter"]["agents"][0]
     agent["name"] = "reviewer"
     agent["blueprint"] = "reviewer"
     agent["prompts"] = ["local-triage"]
@@ -123,7 +123,7 @@ def test_effective_catalog_rejects_shared_private_name_collisions(prompt_env):
     )
     prompt_env.snapshot = ConfigStore(prompt_env.snapshot.path).patch(
         prompt_env.snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update({"prompts": ["local-triage", "pr-review"]}),
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update({"prompts": ["local-triage", "pr-review"]}),
     )
 
     with pytest.raises(ValueError, match="exists in both blueprint and instance scopes"):
@@ -166,7 +166,7 @@ def test_resolve_job_request_reads_each_private_prompt_once_for_snapshot(tmp_pat
     config = _write_config(tmp_path, command="echo ok")
     _write_blueprint(tmp_path / "agent-library")
     raw = yaml.safe_load(config.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["agents"][0]["prompts"] = ["local-triage"]
+    raw["teams"]["newsletter"]["agents"][0]["prompts"] = ["local-triage"]
     config.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
     first_payload = (
@@ -197,7 +197,7 @@ def test_resolve_job_request_reads_each_private_prompt_once_for_snapshot(tmp_pat
     spec = resolve_job_request(
         JobRequest(
             config_path=config,
-            group_key="newsletter",
+            team_key="newsletter",
             agent_name="builder",
             trigger="decision",
             task_input="Decide what changed.",
@@ -243,7 +243,7 @@ def test_resolve_job_request_translates_missing_blueprint_prompt_to_validation_e
         resolve_job_request(
             JobRequest(
                 config_path=config,
-                group_key="newsletter",
+                team_key="newsletter",
                 agent_name="builder",
                 trigger="manual_prompt",
                 task_input="",
@@ -262,7 +262,7 @@ def test_resolve_job_request_translates_missing_private_prompt_to_validation_err
     config = _write_config(tmp_path, command="echo ok")
     _write_blueprint(tmp_path / "agent-library")
     raw = yaml.safe_load(config.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["agents"][0]["prompts"] = ["local-triage"]
+    raw["teams"]["newsletter"]["agents"][0]["prompts"] = ["local-triage"]
     config.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
     config_store = ConfigStore(config)
@@ -292,7 +292,7 @@ def test_resolve_job_request_translates_missing_private_prompt_to_validation_err
         resolve_job_request(
             JobRequest(
                 config_path=config,
-                group_key="newsletter",
+                team_key="newsletter",
                 agent_name="builder",
                 trigger="decision",
                 task_input="Decide what changed.",
@@ -319,16 +319,16 @@ def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_pat
     (tmp_path / "workspaces" / "newsletter" / "repo").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 5\n"
+        "schema_version: 6\n"
         "agency:\n"
         "  title: Agency\n"
-        "  default_group: newsletter\n"
+        "  default_team: newsletter\n"
         "  ai_backend: claude-code\n"
         "  agent_library: agent-library\n"
         "  compilation_cache: compiled-agents\n"
         "  memory_store: memory\n"
         "  prompt_store: prompts\n"
-        "groups:\n"
+        "teams:\n"
         "  newsletter:\n"
         "    name: Newsletter\n"
         "    workspace_path: workspaces/newsletter\n"
@@ -370,7 +370,7 @@ def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_pat
     spec = resolve_job_request(
         JobRequest(
             config_path=config,
-            group_key="newsletter",
+            team_key="newsletter",
             agent_name="builder",
             trigger="manual_prompt",
             routine_id="daily-review",
@@ -464,16 +464,16 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 5\n"
+        "schema_version: 6\n"
         "agency:\n"
         "  title: Agency\n"
-        "  default_group: newsletter\n"
+        "  default_team: newsletter\n"
         "  ai_backend: claude-code\n"
         "  agent_library: agent-library\n"
         "  compilation_cache: compiled-agents\n"
         "  memory_store: memory\n"
         "  prompt_store: prompts\n"
-        "groups:\n"
+        "teams:\n"
         "  newsletter:\n"
         "    name: Newsletter\n"
         "    workspace_path: workspaces/newsletter\n"
@@ -513,7 +513,7 @@ def configured_request(tmp_path: Path) -> JobRequest:
     _write_blueprint(tmp_path / "agent-library")
     return JobRequest(
         config_path=config,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         routine_id="daily-review",
@@ -533,7 +533,7 @@ def test_submit_persists_then_launches(tmp_path):
     assert record.status == "queued"
     authority = launcher.launch.call_args.args[0]
     assert authority.path == handle.path
-    assert authority.group_id == "newsletter"
+    assert authority.team_id == "newsletter"
     assert authority.job_id == handle.job_id
     assert handle.worker_pid == 4321
 
@@ -548,7 +548,7 @@ def test_submit_request_persists_validated_current_snapshot(tmp_path):
     record = read_job(handle.path)
     assert record.spec.config_revision not in {"compat-unresolved", "compat-submission-resolved"}
     assert record.spec.workspace_root == str((tmp_path / "workspaces" / "newsletter").resolve())
-    assert record.spec.group_root == str((tmp_path / "agents" / "newsletter").resolve())
+    assert record.spec.team_root == str((tmp_path / "agents" / "newsletter").resolve())
     assert not hasattr(record.spec, "agent_dir")
     assert not hasattr(record.spec, "workspace_path")
     assert record.spec.runtime_policy.rules == (
@@ -588,7 +588,7 @@ def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
     _write_blueprint(tmp_path / "agent-library")
     request = JobRequest(
         config_path=config,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         task_input="",
@@ -599,7 +599,7 @@ def test_submit_request_with_missing_routine_fails_before_job_write(tmp_path):
     with pytest.raises(ValueError, match="existing routine"):
         submit_job_request(request, launcher)
 
-    jobs_dir = JobStore(tmp_path / "memory").group_root("newsletter")
+    jobs_dir = JobStore(tmp_path / "memory").team_root("newsletter")
     if jobs_dir.exists():
         assert not any(jobs_dir.glob("*.yaml"))
     pins_root = tmp_path / "compiled-agents" / "_pins"
@@ -614,7 +614,7 @@ def test_full_run_validation_does_not_require_skill_activation_for_prompt_jobs(
     _write_blueprint(tmp_path / "agent-library")
     request = JobRequest(
         config_path=config,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         routine_id="daily-review",
@@ -657,7 +657,7 @@ def test_submit_blocks_move_and_move_then_observes_active_job(
     (tmp_path / "agents" / "other").mkdir(parents=True, exist_ok=True)
     config_store.patch(
         snapshot.revision,
-        lambda raw: raw["groups"].update(
+        lambda raw: raw["teams"].update(
             {
                 "other": {
                     "name": "Other",
@@ -737,7 +737,7 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
     _write_blueprint(tmp_path / "agent-library")
     request = JobRequest(
         config_path=config,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         task_input="",
@@ -760,7 +760,7 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
     assert spec.blueprint.source_digest
     assert spec.memory.selector["scope"] == "agent"
     assert spec.workspace_root == str((tmp_path / "workspaces" / "newsletter").resolve())
-    assert spec.group_root == str((tmp_path / "agents" / "newsletter").resolve())
+    assert spec.team_root == str((tmp_path / "agents" / "newsletter").resolve())
     assert not hasattr(spec, "agent_dir")
     assert not hasattr(spec, "workspace_path")
     assert spec.runtime_policy.rules == (
@@ -782,7 +782,7 @@ def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
     _write_blueprint(tmp_path / "agent-library")
     request = JobRequest(
         config_path=config,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         task_input="",
@@ -824,12 +824,12 @@ def queued_decision_like_spec(tmp_path: Path) -> JobSpec:
     config = _write_config(tmp_path)
     _write_blueprint(tmp_path / "agent-library")
     return JobSpec(
-        schema_version=4,
+        schema_version=5,
         job_id="decision-job",
         config_path=str(config.resolve()),
         config_revision="cfg-1",
-        group_key="newsletter",
-        group_root=str((tmp_path / "agents" / "newsletter").resolve()),
+        team_key="newsletter",
+        team_root=str((tmp_path / "agents" / "newsletter").resolve()),
         agent_name="builder",
         workspace_root=str((tmp_path / "agents" / "newsletter").resolve()),
         trigger="decision",
@@ -871,7 +871,7 @@ def test_resolve_job_request_snapshots_distinct_configured_roots(tmp_path):
     spec = resolve_job_request(
         JobRequest(
             config_path=config,
-            group_key="newsletter",
+            team_key="newsletter",
             agent_name="builder",
             trigger="manual_prompt",
             task_input="",
@@ -885,7 +885,7 @@ def test_resolve_job_request_snapshots_distinct_configured_roots(tmp_path):
     )
 
     assert spec.workspace_root == str((tmp_path / "workspaces" / "newsletter").resolve())
-    assert spec.group_root == str((tmp_path / "agents" / "newsletter").resolve())
+    assert spec.team_root == str((tmp_path / "agents" / "newsletter").resolve())
     assert not hasattr(spec, "agent_dir")
     assert not hasattr(spec, "workspace_path")
 
@@ -895,7 +895,7 @@ def test_submit_releases_cache_pin_when_launch_fails(tmp_path):
     _write_blueprint(tmp_path / "agent-library")
     request = JobRequest(
         config_path=config,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         task_input="",
@@ -1080,7 +1080,7 @@ def test_resolution_does_not_infer_routine_or_skill_from_prompt_source_path(tmp_
     _write_blueprint(tmp_path / "agent-library")
     request = JobRequest(
         config_path=config,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         task_input="",
@@ -1109,7 +1109,7 @@ def _resolve(tmp_path, **request_kwargs):
     return resolve_job_request(
         JobRequest(
             config_path=config,
-            group_key="newsletter",
+            team_key="newsletter",
             agent_name="builder",
             **request_kwargs,
         ),
@@ -1203,10 +1203,10 @@ def _pool_config(tmp_path, *, pool=1):
     memory_store = tmp_path / "memory"
 
     raw = {
-        "schema_version": 5,
+        "schema_version": 6,
         "agency": {
             "title": "Agency",
-            "default_group": "newsletter",
+            "default_team": "newsletter",
             "ai_backend": "claude-code",
             "agent_library": str(tmp_path / "agent-library"),
             "compilation_cache": str(tmp_path / "compiled-agents"),
@@ -1214,7 +1214,7 @@ def _pool_config(tmp_path, *, pool=1):
             "prompt_store": str(tmp_path / "prompts"),
             "jobs": {"pool": pool},
         },
-        "groups": {
+        "teams": {
             "newsletter": {
                 "name": "Newsletter",
                 "workspace_path": str(workspace),
@@ -1268,12 +1268,12 @@ def _pool_config(tmp_path, *, pool=1):
 def _queue_spec(tmp_path, job_id):
     config_path = tmp_path / "config.yaml"
     return JobSpec(
-        schema_version=4,
+        schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="newsletter",
-        group_root=str((tmp_path / "agents" / "newsletter").resolve()),
+        team_key="newsletter",
+        team_root=str((tmp_path / "agents" / "newsletter").resolve()),
         agent_name="builder",
         workspace_root=str((tmp_path / "workspaces" / "newsletter").resolve()),
         trigger="manual_prompt",
@@ -1328,7 +1328,7 @@ class _SubmissionEnv:
     def request(self, **overrides):
         defaults = dict(
             config_path=self.config_path,
-            group_key="newsletter",
+            team_key="newsletter",
             agent_name="builder",
             trigger="manual_prompt",
             task_input="",
@@ -1430,3 +1430,7 @@ def test_a_queued_job_is_not_reported_as_a_failed_submission(submission_env):
     handle = submit_job_request(submission_env.request(), submission_env.launcher)
     assert handle.status == "queued"
     assert submission_env.status(handle.job_id) == "queued"
+
+
+
+

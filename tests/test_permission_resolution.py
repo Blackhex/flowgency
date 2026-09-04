@@ -162,12 +162,12 @@ def test_launch_zones_cannot_be_widened_by_configuration(tmp_path: Path):
 
 def _config(tmp_path: Path, raw_config, *, group_rules, agent_rules):
     raw = deepcopy(raw_config)
-    raw["schema_version"] = 5
-    raw["groups"]["newsletter"]["runtime"] = {
+    raw["schema_version"] = 6
+    raw["teams"]["newsletter"]["runtime"] = {
         "permissions": {"mode": "restricted", "rules": group_rules}
     }
     # agents is a list in raw_config; strip any stale capability/sandbox keys
-    agent = raw["groups"]["newsletter"]["agents"][0]
+    agent = raw["teams"]["newsletter"]["agents"][0]
     agent.pop("capabilities", None)
     # Use copilot so that restricted mode is accepted by the integration validator.
     agent["integration"] = "copilot"
@@ -204,3 +204,5 @@ def test_same_path_in_group_and_instance_unions_tools(tmp_path, raw_config):
     resolved = resolve_effective_policy(config, "newsletter", "builder")
 
     assert set(resolved.tools_for(Path("C:/ws/a"))) == {"read", "search"}
+
+

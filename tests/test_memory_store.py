@@ -69,7 +69,7 @@ def resolved_memory(memory_root):
     return resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="job-a",
-        group_key="news",
+        team_key="news",
         agent_name="advisor",
         routine_id=None,
         channels={},
@@ -643,3 +643,5 @@ def test_try_save_preserves_backup_if_rollback_recovery_fails(
     assert "restore failed" in str(excinfo.value)
     preserved = [item.name for item in backups[0].iterdir()]
     assert sorted(preserved) == ["memory.md", "notes.md"]
+
+

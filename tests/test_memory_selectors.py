@@ -12,7 +12,7 @@ def test_routine_selector_is_stable_across_runs(tmp_path):
     first = resolve_memory_selector(
         MemorySelector(scope="routine"),
         job_id="job-a",
-        group_key="news",
+        team_key="news",
         agent_name="advisor",
         routine_id="daily-review",
         channels={},
@@ -21,7 +21,7 @@ def test_routine_selector_is_stable_across_runs(tmp_path):
     second = resolve_memory_selector(
         MemorySelector(scope="routine"),
         job_id="job-b",
-        group_key="news",
+        team_key="news",
         agent_name="advisor",
         routine_id="daily-review",
         channels={},
@@ -37,7 +37,7 @@ def test_run_selector_is_unique_per_job(tmp_path):
     first = resolve_memory_selector(
         selector,
         job_id="job-a",
-        group_key="news",
+        team_key="news",
         agent_name="advisor",
         routine_id=None,
         channels={},
@@ -46,7 +46,7 @@ def test_run_selector_is_unique_per_job(tmp_path):
     second = resolve_memory_selector(
         selector,
         job_id="job-b",
-        group_key="news",
+        team_key="news",
         agent_name="advisor",
         routine_id=None,
         channels={},
@@ -60,7 +60,7 @@ def test_selector_uses_exact_canonical_json_and_domain_prefix(tmp_path):
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="job-a",
-        group_key="news",
+        team_key="news",
         agent_name="advisor",
         routine_id=None,
         channels={},
@@ -68,7 +68,7 @@ def test_selector_uses_exact_canonical_json_and_domain_prefix(tmp_path):
     )
 
     expected_json = json.dumps(
-        {"agent": "advisor", "group": "news", "scope": "agent", "version": 1},
+        {"agent": "advisor", "team": "news", "scope": "agent", "version": 1},
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -89,7 +89,7 @@ def test_channel_selector_uses_only_declared_global_channel(tmp_path):
     first = resolve_memory_selector(
         MemorySelector(scope="channel", channel="support"),
         job_id="job-a",
-        group_key="news",
+        team_key="news",
         agent_name="advisor",
         routine_id=None,
         channels=channels,
@@ -98,7 +98,7 @@ def test_channel_selector_uses_only_declared_global_channel(tmp_path):
     second = resolve_memory_selector(
         MemorySelector(scope="channel", channel="support"),
         job_id="job-b",
-        group_key="ops",
+        team_key="ops",
         agent_name="builder",
         routine_id="other-routine",
         channels=channels,
@@ -118,7 +118,7 @@ def test_channel_selector_rejects_unknown_channel(tmp_path):
         resolve_memory_selector(
             MemorySelector(scope="channel", channel="missing"),
             job_id="job-a",
-            group_key="news",
+            team_key="news",
             agent_name="advisor",
             routine_id=None,
             channels={},
@@ -126,14 +126,14 @@ def test_channel_selector_rejects_unknown_channel(tmp_path):
         )
 
 
-@pytest.mark.parametrize("scope", ["run", "routine", "agent", "group"])
+@pytest.mark.parametrize("scope", ["run", "routine", "agent", "team"])
 @pytest.mark.parametrize("channel", ["support", "   "])
 def test_non_channel_selectors_reject_channel_field(tmp_path, scope, channel):
     with pytest.raises(ValueError, match="channel field is only valid for channel scope"):
         resolve_memory_selector(
             MemorySelector(scope=scope, channel=channel),
             job_id="job-a",
-            group_key="news",
+            team_key="news",
             agent_name="advisor",
             routine_id="daily-review",
             channels={"support": MemoryChannel(display_name="Support")},
@@ -145,7 +145,7 @@ def test_case_collision_key_is_unicode_normalized_and_casefolded(tmp_path):
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="job-a",
-        group_key="news",
+        team_key="news",
         agent_name="advisor",
         routine_id=None,
         channels={},
@@ -174,7 +174,7 @@ def test_routine_selector_requires_routine_id(tmp_path):
         resolve_memory_selector(
             MemorySelector(scope="routine"),
             job_id="job-a",
-            group_key="news",
+            team_key="news",
             agent_name="advisor",
             routine_id=None,
             channels={},
@@ -203,3 +203,41 @@ def test_effective_selector_falls_back_to_implicit_run():
         None,
         None,
     ) == MemorySelector(scope="run")
+
+
+def test_team_memory_selector_uses_team_scope_and_criteria(tmp_path):
+    selector = MemorySelector(scope="team")
+
+    resolved = resolve_memory_selector(
+        selector,
+        job_id="job-1",
+        team_key="newsletter",
+        agent_name="advisor",
+        routine_id=None,
+        channels={},
+        store_root=tmp_path,
+    )
+
+    assert json.loads(resolved.canonical_json) == {
+        "scope": "team",
+        "team": "newsletter",
+        "version": 1,
+    }
+
+
+def test_group_memory_scope_is_rejected():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        MemorySelector(scope="group")
+
+
+def test_canonical_json_with_group_key_is_rejected(tmp_path):
+    from agency.memory.selectors import resolved_memory_from_canonical
+    canonical = '{"group":"newsletter","scope":"team","version":1}'
+    with pytest.raises(ValueError, match="canonical criteria keys are invalid"):
+        resolved_memory_from_canonical(
+            MemorySelector(scope="team"),
+            canonical,
+            store_root=tmp_path,
+        )
+

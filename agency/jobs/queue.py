@@ -38,7 +38,7 @@ LOCK_TIMEOUT_SECONDS = 5.0
 
 
 class QueueEntry(NamedTuple):
-    group_id: str
+    team_id: str
     record: JobRecord
     path: Path
 
@@ -52,13 +52,13 @@ class QueueView(NamedTuple):
 def _entries(config, memory_store: Path) -> list[QueueEntry]:
     store = JobStore(memory_store)
     entries: list[QueueEntry] = []
-    for group_id in sorted(config.groups):
-        group_dir = store.group_root(group_id)
-        if not group_dir.is_dir():
+    for team_id in sorted(config.teams):
+        team_dir = store.team_root(team_id)
+        if not team_dir.is_dir():
             continue
-        for path in sorted(group_dir.glob("*.yaml")):
+        for path in sorted(team_dir.glob("*.yaml")):
             try:
-                entries.append(QueueEntry(group_id, read_job(path), path))
+                entries.append(QueueEntry(team_id, read_job(path), path))
             except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
                 log.warning("ignoring malformed job record %s: %s", path, error)
                 continue
@@ -83,8 +83,8 @@ def queue_snapshot(config, *, memory_store: Path) -> QueueView:
 
 def _group_roots(config) -> dict:
     return {
-        group_id: {"group_root": str(group.path)}
-        for group_id, group in config.groups.items()
+        team_id: {"team_root": str(team.path)}
+        for team_id, team in config.teams.items()
     }
 
 
@@ -98,7 +98,7 @@ def _start(entry: QueueEntry, store: JobStore, launcher: JobLauncher) -> bool:
     if not is_launchable(record):
         return False
     reference = store.reference(
-        entry.group_id,
+        entry.team_id,
         record.spec.job_id,
         record.authority_digest,
     )

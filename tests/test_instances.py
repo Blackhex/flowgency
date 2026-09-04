@@ -27,7 +27,7 @@ from agency.jobs.store import transition_job, write_job
 from agency.jobs.submission import submit_job_request
 from agency.memory import MemoryStore, resolve_memory_selector
 from agency.prompts import PromptNotFoundError, PromptService, PromptStore
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -81,14 +81,14 @@ def _resolved_memory(
     memory_root: Path,
     selector: MemorySelector,
     *,
-    group_key: str,
+    team_key: str,
     agent_name: str,
     routine_id: str | None = None,
 ) -> object:
     return resolve_memory_selector(
         selector,
         job_id="preview-job",
-        group_key=group_key,
+        team_key=team_key,
         agent_name=agent_name,
         routine_id=routine_id,
         channels={"support": {"display_name": "Support"}},
@@ -108,16 +108,16 @@ def _make_spec(
     group_path: Path,
     *,
     agent_name: str,
-    group_key: str,
+    team_key: str,
 ) -> JobSpec:
     config_path = group_path.parent / "config.yaml"
     return JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=uuid4().hex,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key=group_key,
-        group_root=str(group_path.resolve()),
+        team_key=team_key,
+        team_root=str(group_path.resolve()),
         agent_name=agent_name,
         workspace_root=str(group_path.resolve()),
         trigger="manual_prompt",
@@ -131,8 +131,8 @@ def _make_spec(
             cache_path="C:/cache/copilot/v1/digest-1",
         ),
         routine_id="daily-review",
-        skill="daily-review",
-        skill_arguments=("--fast",),
+        skill=None,
+        skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
             timeout=1800,
@@ -145,7 +145,13 @@ def _make_spec(
             path="C:/memory/placeholder",
         ),
         trigger_context={"source": "test"},
-        prompt_source={"type": "routine", "routine_id": "daily-review"},
+        prompt_source={
+            "type": "blueprint_prompt",
+            "scope": "blueprint",
+            "name": "daily-review",
+            "source_path": ".agents/prompts/daily-review.prompt.md",
+            "source_digest": "digest-1",
+        },
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
@@ -157,8 +163,8 @@ def instance_env(tmp_path, raw_config):
     _write_blueprint(library_root, "builder-blueprint")
     _write_blueprint(library_root, "advisor")
 
-    newsletter_paths = create_group_environment(tmp_path, "newsletter")
-    other_paths = create_group_environment(tmp_path, "other")
+    newsletter_paths = create_team_environment(tmp_path, "newsletter")
+    other_paths = create_team_environment(tmp_path, "other")
     newsletter_path = newsletter_paths.state_root
     other_path = other_paths.state_root
     raw = deepcopy(raw_config)
@@ -166,8 +172,8 @@ def instance_env(tmp_path, raw_config):
     raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
     raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
     raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
-    apply_group_paths(raw["groups"]["newsletter"], newsletter_paths)
-    agent = raw["groups"]["newsletter"]["agents"][0]
+    apply_team_paths(raw["teams"]["newsletter"], newsletter_paths)
+    agent = raw["teams"]["newsletter"]["agents"][0]
     agent["default_memory"] = {"scope": "agent"}
     agent["routines"] = [
         {
@@ -180,7 +186,7 @@ def instance_env(tmp_path, raw_config):
             "id": "group-sync",
             "prompt": {"scope": "blueprint", "name": "daily-review"},
             "schedule": {"every": "6h"},
-            "memory": {"scope": "group"},
+            "memory": {"scope": "team"},
         },
         {
             "id": "announcements",
@@ -189,8 +195,8 @@ def instance_env(tmp_path, raw_config):
             "memory": {"scope": "channel", "channel": "support"},
         },
     ]
-    raw["groups"]["other"] = {
-        **apply_group_paths({}, other_paths),
+    raw["teams"]["other"] = {
+        **apply_team_paths({}, other_paths),
         "name": "Other",
         "default_integration": "copilot",
         "agents": [],
@@ -242,10 +248,10 @@ def test_create_instance_pins_group_and_validates_blueprint_and_integration(
     assert result.instance.blueprint == "advisor"
     assert result.instance.integration == "copilot"
     assert (
-        result.snapshot.config.groups["newsletter"].agents["advisor"].name
+        result.snapshot.config.teams["newsletter"].agents["advisor"].name
         == "advisor"
     )
-    assert "advisor" not in result.snapshot.config.groups["other"].agents
+    assert "advisor" not in result.snapshot.config.teams["other"].agents
 
     with pytest.raises(AssetValidationError):
         instance_service.create(
@@ -277,26 +283,26 @@ def test_remove_instance_patches_config_only_and_reports_orphaned_memories(
     agent_memory = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
     )
     routine_memory = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="routine"),
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         routine_id="daily-review",
     )
     group_memory = _resolved_memory(
         instance_env["memory_root"],
-        MemorySelector(scope="group"),
-        group_key="newsletter",
+        MemorySelector(scope="team"),
+        team_key="newsletter",
         agent_name="builder",
     )
     channel_memory = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="channel", channel="support"),
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
     )
     instance_env["memory_store"].ensure(agent_memory)
@@ -306,7 +312,7 @@ def test_remove_instance_patches_config_only_and_reports_orphaned_memories(
 
     result = instance_service.remove("newsletter", "builder")
 
-    assert "builder" not in result.snapshot.config.groups["newsletter"].agents
+    assert "builder" not in result.snapshot.config.teams["newsletter"].agents
     assert agent_memory.directory.exists()
     assert routine_memory.directory.exists()
     assert group_memory.directory.exists()
@@ -338,17 +344,17 @@ def test_preview_move_reports_only_agent_and_routine_memories(
         "routine",
     }
     assert {item.canonical_json for item in preview.source_memories} == {
-        '{"agent":"builder","group":"newsletter","scope":"agent","version":1}',
+        '{"agent":"builder","scope":"agent","team":"newsletter","version":1}',
         (
-            '{"agent":"builder","group":"newsletter","routine":'
-            '"daily-review","scope":"routine","version":1}'
+            '{"agent":"builder","routine":'
+            '"daily-review","scope":"routine","team":"newsletter","version":1}'
         ),
     }
     assert {item.canonical_json for item in preview.destination_memories} == {
-        '{"agent":"builder","group":"other","scope":"agent","version":1}',
+        '{"agent":"builder","scope":"agent","team":"other","version":1}',
         (
-            '{"agent":"builder","group":"other","routine":'
-            '"daily-review","scope":"routine","version":1}'
+            '{"agent":"builder","routine":'
+            '"daily-review","scope":"routine","team":"other","version":1}'
         ),
     }
 
@@ -360,7 +366,7 @@ def test_move_refuses_existing_destination_memory(
     target = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
     )
     instance_env["memory_store"].ensure(target)
@@ -381,20 +387,20 @@ def test_move_refuses_existing_destination_memory(
 
 
 @pytest.mark.parametrize("status", ["queued", "waiting_for_memory", "running"])
-@pytest.mark.parametrize("group_key", ["newsletter", "other"])
+@pytest.mark.parametrize("team_key", ["newsletter", "other"])
 def test_move_blocks_when_relevant_jobs_are_active(
     instance_service,
     instance_env,
     status,
-    group_key,
+    team_key,
 ):
     group_path = (
         instance_env["newsletter_path"]
-        if group_key == "newsletter"
+        if team_key == "newsletter"
         else instance_env["other_path"]
     )
-    spec = _make_spec(group_path, agent_name="builder", group_key=group_key)
-    record_path = JobStore(instance_env["memory_root"]).path(group_key, spec.job_id)
+    spec = _make_spec(group_path, agent_name="builder", team_key=team_key)
+    record_path = JobStore(instance_env["memory_root"]).path(team_key, spec.job_id)
     write_job(record_path, JobRecord.from_spec(spec))
     if status != "queued":
         transition_job(record_path, "queued", status)
@@ -416,13 +422,13 @@ def test_move_copy_mode_copies_exact_snapshot_and_leaves_source_memory(
     agent_memory = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
     )
     routine_memory = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="routine"),
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         routine_id="daily-review",
     )
@@ -447,21 +453,21 @@ def test_move_copy_mode_copies_exact_snapshot_and_leaves_source_memory(
     )
     snapshot = instance_service.move(preview)
 
-    moved = snapshot.config.groups["other"].agents["builder"]
+    moved = snapshot.config.teams["other"].agents["builder"]
     assert moved.default_memory == MemorySelector(scope="agent")
     assert moved.routines[0].memory == MemorySelector(scope="routine")
-    assert "builder" not in snapshot.config.groups["newsletter"].agents
+    assert "builder" not in snapshot.config.teams["newsletter"].agents
 
     target_agent = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
     )
     target_routine = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="routine"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
         routine_id="daily-review",
     )
@@ -492,17 +498,17 @@ def test_move_empty_mode_seeds_memory_md_only(instance_service, instance_env):
     )
     snapshot = instance_service.move(preview)
 
-    assert "builder" in snapshot.config.groups["other"].agents
+    assert "builder" in snapshot.config.teams["other"].agents
     target_agent = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
     )
     target_routine = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="routine"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
         routine_id="daily-review",
     )
@@ -551,13 +557,13 @@ def test_move_rolls_back_created_targets_when_config_patch_fails(
     agent_memory = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
     )
     routine_memory = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="routine"),
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         routine_id="daily-review",
     )
@@ -583,20 +589,20 @@ def test_move_rolls_back_created_targets_when_config_patch_fails(
     target_agent = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
     )
     target_routine = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="routine"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
         routine_id="daily-review",
     )
     unrelated_target = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="other",
+        team_key="other",
         agent_name="sentinel",
     )
     unrelated_created = instance_env["memory_store"].ensure(unrelated_target)
@@ -617,8 +623,8 @@ def test_move_rolls_back_created_targets_when_config_patch_fails(
         assert snapshot.revision == expected_revision
         raw = deepcopy(snapshot.raw)
         patcher(raw)
-        assert raw["groups"]["newsletter"]["agents"] == []
-        assert raw["groups"]["other"]["agents"][0]["name"] == "builder"
+        assert raw["teams"]["newsletter"]["agents"] == []
+        assert raw["teams"]["other"]["agents"][0]["name"] == "builder"
         assert _directory_files(target_agent.directory) == expected_created_files["agent"]
         assert _directory_files(target_routine.directory) == expected_created_files["routine"]
         raise InjectedPatchFailure("fail after target creation")
@@ -634,7 +640,7 @@ def test_move_rolls_back_created_targets_when_config_patch_fails(
 
     snapshot = instance_env["config_store"].load()
     assert get_instance(snapshot, "newsletter", "builder").name == "builder"
-    assert "builder" not in snapshot.config.groups["other"].agents
+    assert "builder" not in snapshot.config.teams["other"].agents
     assert not target_agent.directory.exists()
     assert not target_routine.directory.exists()
     assert instance_env["memory_store"].read(agent_memory).files == {
@@ -678,13 +684,13 @@ def test_move_revalidates_revision_and_rolls_back_new_target_memory(
     target_agent = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="agent"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
     )
     target_routine = _resolved_memory(
         instance_env["memory_root"],
         MemorySelector(scope="routine"),
-        group_key="other",
+        team_key="other",
         agent_name="builder",
         routine_id="daily-review",
     )
@@ -705,7 +711,7 @@ def test_preview_move_includes_registered_private_prompt_digests(
     snapshot = instance_env["config_store"].load()
     instance_env["config_store"].patch(
         snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
             prompts=["local-triage"]
         ),
     )
@@ -739,7 +745,7 @@ def test_move_copies_registered_prompts_only_and_removes_registered_source(
     snapshot = instance_env["config_store"].load()
     instance_env["config_store"].patch(
         snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
             prompts=["local-triage"]
         ),
     )
@@ -752,7 +758,7 @@ def test_move_copies_registered_prompts_only_and_removes_registered_source(
     )
     updated = instance_service.move(preview)
 
-    assert updated.config.groups["other"].agents["builder"].prompts == (
+    assert updated.config.teams["other"].agents["builder"].prompts == (
         "local-triage",
     )
     assert (
@@ -810,7 +816,7 @@ def test_move_rolls_back_copied_prompts_when_config_patch_fails(
     snapshot = instance_env["config_store"].load()
     instance_env["config_store"].patch(
         snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
             prompts=["local-triage"]
         ),
     )
@@ -861,7 +867,7 @@ def test_move_blocks_private_prompt_update_in_copy_to_delete_window(
     snapshot = instance_env["config_store"].load()
     instance_env["config_store"].patch(
         snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
             prompts=["local-triage"]
         ),
     )
@@ -954,7 +960,7 @@ def test_move_reports_orphaned_prompt_namespace_when_source_cleanup_fails(
     snapshot = instance_env["config_store"].load()
     instance_env["config_store"].patch(
         snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
             prompts=["local-triage"]
         ),
     )
@@ -983,8 +989,8 @@ def test_move_reports_orphaned_prompt_namespace_when_source_cleanup_fails(
 
     result = instance_service.move(preview)
 
-    assert result.snapshot.config.groups["newsletter"].agents == {}
-    assert result.snapshot.config.groups["other"].agents["builder"].prompts == (
+    assert result.snapshot.config.teams["newsletter"].agents == {}
+    assert result.snapshot.config.teams["other"].agents["builder"].prompts == (
         "local-triage",
     )
     assert result.orphaned_prompt_namespace == (
@@ -1015,7 +1021,7 @@ def test_remove_instance_deletes_registered_private_prompts_and_reports_none(
     snapshot = instance_env["config_store"].load()
     instance_env["config_store"].patch(
         snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
             prompts=["local-triage"]
         ),
     )
@@ -1048,7 +1054,7 @@ def test_remove_instance_reports_orphaned_prompt_namespace_when_files_remain(
     snapshot = instance_env["config_store"].load()
     instance_env["config_store"].patch(
         snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
             prompts=["local-triage"]
         ),
     )
@@ -1096,13 +1102,13 @@ def test_create_blocks_on_group_operation_lock_until_release(instance_env):
         thread.join(timeout=0.2)
         assert thread.is_alive()
         snapshot = instance_env["config_store"].load()
-        assert "advisor" not in snapshot.config.groups["newsletter"].agents
+        assert "advisor" not in snapshot.config.teams["newsletter"].agents
 
     thread.join(timeout=5)
 
     assert result["mutation"].instance.name == "advisor"
     snapshot = instance_env["config_store"].load()
-    assert snapshot.config.groups["newsletter"].agents["advisor"].name == "advisor"
+    assert snapshot.config.teams["newsletter"].agents["advisor"].name == "advisor"
 
 
 def test_submit_cannot_slip_past_create_group_lock(
@@ -1127,7 +1133,7 @@ def test_submit_cannot_slip_past_create_group_lock(
     )
     submit_request = JobRequest(
         config_path=instance_env["config_store"].path,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         routine_id="daily-review",
@@ -1221,7 +1227,7 @@ def test_move_holds_group_lock_and_concurrent_submit_re_resolves_after_move(
 
     request = JobRequest(
         config_path=instance_env["config_store"].path,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         routine_id="daily-review",
@@ -1326,7 +1332,7 @@ def test_remove_uses_group_lock_to_block_new_submissions(
     original_patch = instance_env["config_store"].patch
     request = JobRequest(
         config_path=instance_env["config_store"].path,
-        group_key="newsletter",
+        team_key="newsletter",
         agent_name="builder",
         trigger="manual_prompt",
         routine_id="daily-review",
@@ -1381,3 +1387,7 @@ def test_remove_uses_group_lock_to_block_new_submissions(
     assert "result" in remove_outcome
     assert isinstance(submit_outcome.get("error"), JobValidationError)
     assert "Unknown agent: builder" in str(submit_outcome["error"])
+
+
+
+

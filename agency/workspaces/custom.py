@@ -37,7 +37,7 @@ class CustomWorkspace(BaseWorkspace):
     def supports_launch(self) -> bool:
         return True
 
-    def launch_command(self, config: dict, group_path: str) -> str | None:
+    def launch_command(self, config: dict, team_path: str) -> str | None:
         return config.get("launch_cmd")
 
 

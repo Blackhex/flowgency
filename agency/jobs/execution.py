@@ -68,7 +68,7 @@ def _writable_agents(spec) -> frozenset[str]:
     if spec.writable_agents is not None:
         return frozenset(spec.writable_agents)
     snapshot = load_config_snapshot(Path(spec.config_path))
-    return writable_agent_names(snapshot.config, spec.group_key)
+    return writable_agent_names(snapshot.config, spec.team_key)
 
 
 def _rejection_summary(rejected, ingested_count: int) -> str:
@@ -313,7 +313,7 @@ def resolve_job_context(spec):
     if hasattr(integration, "with_config") and spec.integration_config:
         integration = integration.with_config(spec.integration_config)
     return SimpleNamespace(
-        group_root=spec.resolved_group_root,
+        team_root=spec.resolved_team_root,
         workspace_root=spec.resolved_workspace_root,
         integration=integration,
         timeout=spec.runtime_policy.timeout,
@@ -452,7 +452,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                 elif getattr(context, "workspace_root", None):
                     git_root = Path(context.workspace_root)
                 base_sha = capture_base_sha(git_root)
-                log_dir = Path(context.group_root) / "logs" / started.strftime("%Y-%m-%d")
+                log_dir = Path(context.team_root) / "logs" / started.strftime("%Y-%m-%d")
                 log_dir.mkdir(parents=True, exist_ok=True)
                 stem = (
                     f"{record.spec.agent_name}-{record.spec.trigger}-"
@@ -569,8 +569,8 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                         # invalid ones, and always before memory publishes.
                         ingested = ingest_records(
                             validation,
-                            observations_dir=Path(context.group_root) / "observations",
-                            proposals_dir=Path(context.group_root) / "proposals",
+                            observations_dir=Path(context.team_root) / "observations",
+                            proposals_dir=Path(context.team_root) / "proposals",
                             agent_name=spec.agent_name,
                             now=started,
                             job_id=spec.job_id,

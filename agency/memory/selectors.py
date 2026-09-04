@@ -38,9 +38,9 @@ def resolved_memory_from_canonical(
         raise ValueError("memory canonical criteria do not match selector")
     expected_keys = {
         "run": {"version", "scope", "job"},
-        "routine": {"version", "scope", "group", "agent", "routine"},
-        "agent": {"version", "scope", "group", "agent"},
-        "group": {"version", "scope", "group"},
+        "routine": {"version", "scope", "team", "agent", "routine"},
+        "agent": {"version", "scope", "team", "agent"},
+        "team": {"version", "scope", "team"},
         "channel": {"version", "scope", "channel"},
     }[selector.scope]
     if set(criteria) != expected_keys:
@@ -81,7 +81,7 @@ def resolve_memory_selector(
     selector: MemorySelector,
     *,
     job_id: str,
-    group_key: str,
+    team_key: str,
     agent_name: str,
     routine_id: str | None,
     channels: Mapping[str, MemoryChannel],
@@ -94,11 +94,11 @@ def resolve_memory_selector(
     elif selector.scope == "routine":
         if routine_id is None:
             raise ValueError("routine memory requires a routine ID")
-        criteria.update(group=group_key, agent=agent_name, routine=routine_id)
+        criteria.update(team=team_key, agent=agent_name, routine=routine_id)
     elif selector.scope == "agent":
-        criteria.update(group=group_key, agent=agent_name)
-    elif selector.scope == "group":
-        criteria["group"] = group_key
+        criteria.update(team=team_key, agent=agent_name)
+    elif selector.scope == "team":
+        criteria["team"] = team_key
     elif selector.scope == "channel":
         if selector.channel not in channels:
             raise ValueError(

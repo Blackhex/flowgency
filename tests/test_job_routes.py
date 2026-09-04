@@ -12,7 +12,7 @@ from agency import app as app_mod
 from agency.jobs.authority import JobStore
 from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from agency.jobs.store import read_job, transition_job, write_job
-from tests._group_helpers import apply_group_paths, create_group_environment
+from tests._team_helpers import apply_team_paths, create_team_environment
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -45,7 +45,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
-    paths = create_group_environment(tmp_path, "newsletter")
+    paths = create_team_environment(tmp_path, "newsletter")
     group_root = paths.state_root
     for rel in [
         ("logs", "2026-07-16"),
@@ -61,8 +61,8 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["agency"]["compilation_cache"] = str(cache_root)
     raw["agency"]["memory_store"] = str(memory_root)
     raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
-    raw["groups"] = {
-        "newsletter": apply_group_paths({
+    raw["teams"] = {
+        "newsletter": apply_team_paths({
             "name": "Newsletter",
             "default_integration": "copilot",
             "agents": [
@@ -106,12 +106,12 @@ def _write_job_record(
     job_store = JobStore(group_root.parent.parent / "memory-store")
     workspace_root = group_root.parent.parent / "workspaces" / group_id
     spec = JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id=job_id,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key=group_id,
-        group_root=str(group_root.resolve()),
+        team_key=group_id,
+        team_root=str(group_root.resolve()),
         agent_name="advisor",
         workspace_root=str(workspace_root.resolve()),
         trigger="scheduled_prompt",
@@ -125,7 +125,7 @@ def _write_job_record(
             cache_path=str((group_root.parent.parent / "compiled-agents" / "copilot" / "v1" / "digest-1").resolve()),
         ),
         routine_id="daily-review",
-        skill="daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="# Routine\n",
         runtime_policy=RuntimePolicySnapshot(
@@ -156,14 +156,14 @@ def test_job_list_is_group_scoped(monkeypatch, tmp_path, raw_config):
     _write_job_record(group_root, config_path, job_id="job-1", status="queued")
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    research_paths = create_group_environment(tmp_path, "research")
+    research_paths = create_team_environment(tmp_path, "research")
     other_group = research_paths.state_root
     (other_group / "logs" / "2026-07-16").mkdir(parents=True, exist_ok=True)
-    raw["groups"]["research"] = {
-        **apply_group_paths({}, research_paths),
+    raw["teams"]["research"] = {
+        **apply_team_paths({}, research_paths),
         "name": "Research",
         "default_integration": "copilot",
-        "agents": deepcopy(raw["groups"]["newsletter"]["agents"]),
+        "agents": deepcopy(raw["teams"]["newsletter"]["agents"]),
     }
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
@@ -234,7 +234,7 @@ def test_historical_job_survives_instance_removal(monkeypatch, tmp_path, raw_con
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(group_root, config_path, job_id="job-historical", status="failed")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["groups"]["newsletter"]["agents"] = []
+    raw["teams"]["newsletter"]["agents"] = []
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
     app_mod.app.state.services = app_mod.build_services(config_path)
@@ -257,11 +257,11 @@ def test_historical_job_survives_instance_move_to_another_group(monkeypatch, tmp
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_job_record(group_root, config_path, job_id="job-moved", status="failed")
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    advisor = raw["groups"]["newsletter"]["agents"].pop()
-    moved_paths = create_group_environment(tmp_path, "research")
+    advisor = raw["teams"]["newsletter"]["agents"].pop()
+    moved_paths = create_team_environment(tmp_path, "research")
     moved_root = moved_paths.state_root
     moved_root.joinpath("logs", "2026-07-16").mkdir(parents=True)
-    raw["groups"]["research"] = apply_group_paths({
+    raw["teams"]["research"] = apply_team_paths({
         "name": "Research",
         "default_integration": "copilot",
         "agents": [advisor],
@@ -586,14 +586,14 @@ def test_a_position_counts_the_whole_queue_not_just_this_group(
     """The pool is machine-wide, so a position must be too."""
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    research_paths = create_group_environment(tmp_path, "research")
+    research_paths = create_team_environment(tmp_path, "research")
     other_group = research_paths.state_root
     (other_group / "logs" / "2026-07-16").mkdir(parents=True, exist_ok=True)
-    raw["groups"]["research"] = {
-        **apply_group_paths({}, research_paths),
+    raw["teams"]["research"] = {
+        **apply_team_paths({}, research_paths),
         "name": "Research",
         "default_integration": "copilot",
-        "agents": deepcopy(raw["groups"]["newsletter"]["agents"]),
+        "agents": deepcopy(raw["teams"]["newsletter"]["agents"]),
     }
     _write_yaml(config_path, raw)
     app_mod.refresh_services()
@@ -639,3 +639,7 @@ def test_a_queued_job_offers_cancel(monkeypatch, tmp_path, raw_config):
     assert response.status_code == 200
     assert "/jobs/" in response.text
     assert "cancel" in response.text.lower()
+
+
+
+

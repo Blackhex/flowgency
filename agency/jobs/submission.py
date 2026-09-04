@@ -81,7 +81,7 @@ def _submit_resolved(
         pass
     pin_artifact(spec.blueprint.cache_root, artifact.ref, spec.job_id)
     authority = job_store.reference(
-        spec.group_key,
+        spec.team_key,
         spec.job_id,
         record.authority_digest,
     )
@@ -135,7 +135,7 @@ def submit_job_request(
         try:
             with revision_bound_group_operation(
                 config_store,
-                group_ids=(request.group_key,),
+                group_ids=(request.team_key,),
             ) as locked_snapshot:
                 issues = validate_resolved_paths(locked_snapshot.config)
                 if issues:

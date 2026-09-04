@@ -79,12 +79,12 @@ def reconcile_jobs(
     left_running = 0
     job_store = JobStore(memory_store_root)
     job_stores = {
-        group_id: {
-            "job_store": (job_store.root / group_id),
-            "group_root": group["group_root"],
+        team_id: {
+            "job_store": (job_store.root / team_id),
+            "team_root": team["team_root"],
         }
-        for group_id, group in sorted(groups.items())
-        if group.get("group_root")
+        for team_id, team in sorted(groups.items())
+        if team.get("team_root")
     }
     blocked_job_ids: set[str] = set()
     recovery_unavailable = False
@@ -102,11 +102,11 @@ def reconcile_jobs(
             "Global memory recovery failed and requires manual intervention: %s",
             error,
         )
-    for group_id, group in groups.items():
-        if not group.get("group_root"):
+    for team_id, team in groups.items():
+        if not team.get("team_root"):
             continue
         records: list[tuple[Path, object]] = []
-        for path in job_store.paths(group_id):
+        for path in job_store.paths(team_id):
             try:
                 record = read_job(path)
             except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:

@@ -185,12 +185,12 @@ def writable_agent_names(config, group_key: str) -> frozenset[str]:
     from agency.integrations import get_integration
     from agency.permissions.eligibility import may_execute_decisions
 
-    group = config.groups.get(group_key)
-    if group is None:
+    team = config.teams.get(group_key)
+    if team is None:
         return frozenset()
 
     names: set[str] = set()
-    for name, agent in group.agents.items():
+    for name, agent in team.agents.items():
         if not may_execute_decisions(config, group_key, name):
             continue
         try:

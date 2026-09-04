@@ -31,7 +31,7 @@ from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 def _authority(spec: JobSpec):
     store = JobStore(Path(spec.memory.path).parent)
     return store.reference(
-        spec.group_key,
+        spec.team_key,
         spec.job_id,
         JobRecord.from_spec(spec).authority_digest,
     )
@@ -43,7 +43,7 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
         "schema_version: 5\nagency:\n  title: Test\n  default_group: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
-        "  prompt_store: /nonexistent\nmemory: {}\ngroups: {}\n",
+        "  prompt_store: /nonexistent\nmemory: {}\nteams: {}\n",
         encoding="utf-8",
     )
     cache_path = tmp_path / ".compat-cache" / "script" / "v1" / "unresolved"
@@ -56,7 +56,7 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
     resolved = resolve_memory_selector(
         MemorySelector(scope="run"),
         job_id="placeholder",
-        group_key="test",
+        team_key="test",
         agent_name="product",
         routine_id=None,
         channels={},
@@ -76,12 +76,12 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
             ),
         )
     spec = JobSpec(
-        schema_version=4 if private_prompt_content is not None else 3,
+        schema_version=5,
         job_id="queued-job",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="test",
-        group_root=str(group_root.resolve()),
+        team_key="test",
+        team_root=str(group_root.resolve()),
         agent_name="product",
         workspace_root=str(workspace_root.resolve()),
         trigger="decision" if decision_context else "manual_prompt",
@@ -95,7 +95,7 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
             cache_path=str(cache_path.resolve()),
         ),
         routine_id=None if decision_context else "daily-review",
-        skill=None if (decision_context or private_prompt_content is not None) else "daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="Immutable instructions",
         runtime_policy=RuntimePolicySnapshot(
@@ -114,7 +114,7 @@ def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content:
         created_at="2026-07-15T00:00:00+00:00",
         private_prompts=private_prompts,
     )
-    path = JobStore(tmp_path / ".compat-memory-root").path(spec.group_key, spec.job_id)
+    path = JobStore(tmp_path / ".compat-memory-root").path(spec.team_key, spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     return path, spec
 
@@ -126,26 +126,26 @@ def memory_bound_job(tmp_path: Path):
         "schema_version: 5\nagency:\n  title: Test\n  default_group: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
-        "  prompt_store: /nonexistent\nmemory: {}\ngroups: {}\n",
+        "  prompt_store: /nonexistent\nmemory: {}\nteams: {}\n",
         encoding="utf-8",
     )
     cache_path = tmp_path / "compiled-agents" / "script" / "v1" / "digest"
     resolved = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="placeholder",
-        group_key="test",
+        team_key="test",
         agent_name="product",
         routine_id="daily-review",
         channels={},
         store_root=tmp_path / "memory-store",
     )
     spec = JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id="memory-bound-job",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="test",
-        group_root=str(group_path.resolve()),
+        team_key="test",
+        team_root=str(group_path.resolve()),
         agent_name="product",
         workspace_root=str(group_path.resolve()),
         trigger="manual_prompt",
@@ -159,7 +159,7 @@ def memory_bound_job(tmp_path: Path):
             cache_path=str(cache_path.resolve()),
         ),
         routine_id="daily-review",
-        skill="daily-review",
+        skill=None,
         skill_arguments=(),
         task_input="Immutable instructions",
         runtime_policy=RuntimePolicySnapshot(
@@ -177,7 +177,7 @@ def memory_bound_job(tmp_path: Path):
         timeout_override=None,
         created_at="2026-07-15T00:00:00+00:00",
     )
-    path = JobStore(tmp_path / "memory-store").path(spec.group_key, spec.job_id)
+    path = JobStore(tmp_path / "memory-store").path(spec.team_key, spec.job_id)
     write_job(path, JobRecord.from_spec(spec))
     return path, spec
 
@@ -206,13 +206,13 @@ class MemoryJobFixture:
         self.tmp_path = tmp_path
         self.job_path, self.spec = memory_bound_job(tmp_path)
         self.authority = _authority(self.spec)
-        self.group_root = Path(self.spec.group_root)
+        self.team_root = Path(self.spec.team_root)
         self.memory_root = tmp_path / "memory-store"
         self.store = MemoryStore(self.memory_root)
         self.resolved = resolve_memory_selector(
             MemorySelector(scope="agent"),
             job_id=self.spec.job_id,
-            group_key=self.spec.group_key,
+            team_key=self.spec.team_key,
             agent_name=self.spec.agent_name,
             routine_id=self.spec.routine_id,
             channels={},
@@ -242,11 +242,11 @@ def test_execute_job_waits_for_memory_before_starting_run(tmp_path, monkeypatch)
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
-        workspace_root=fixture.group_root,
+        workspace_root=fixture.team_root,
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=fixture.group_root,
+        team_root=fixture.team_root,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
@@ -289,11 +289,11 @@ def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_pat
             return RunResult(0, "done", "", 0.1)
 
     context = SimpleNamespace(
-        workspace_root=fixture.group_root,
+        workspace_root=fixture.team_root,
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=fixture.group_root,
+        team_root=fixture.team_root,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
@@ -342,11 +342,11 @@ def test_execute_job_failed_run_keeps_canonical_memory_and_retains_stage(tmp_pat
             return RunResult(1, "done", "", 0.1)
 
     context = SimpleNamespace(
-        workspace_root=fixture.group_root,
+        workspace_root=fixture.team_root,
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=fixture.group_root,
+        team_root=fixture.team_root,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
@@ -374,11 +374,11 @@ def test_execute_job_releases_cache_pin_after_terminal_state(tmp_path, monkeypat
     monkeypatch.setattr(
         "agency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
-            workspace_root=fixture.group_root,
+            workspace_root=fixture.team_root,
             integration=SimpleNamespace(run=lambda request: RunResult(0, "done", "", 0.1)),
             timeout=30,
             sandbox_root=None,
-            group_root=fixture.group_root,
+            team_root=fixture.team_root,
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
         ),
     )
@@ -422,11 +422,11 @@ def test_execute_job_persists_execution_evidence_when_publication_failure_pre_fa
             )
 
     context = SimpleNamespace(
-        workspace_root=fixture.group_root,
+        workspace_root=fixture.team_root,
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=fixture.group_root,
+        team_root=fixture.team_root,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
@@ -508,7 +508,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=tmp_path / "group",
+        team_root=tmp_path / "group",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -561,7 +561,7 @@ def test_execute_job_preserves_historical_v3_selected_skill(tmp_path, monkeypatc
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=tmp_path / "group",
+        team_root=tmp_path / "group",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -603,7 +603,7 @@ def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=tmp_path / "group",
+        team_root=tmp_path / "group",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -660,7 +660,7 @@ def test_worker_projects_private_prompt_snapshot_without_rereading_source(
 
     context = SimpleNamespace(
         workspace_root=Path(spec.workspace_root),
-        group_root=Path(spec.group_root),
+        team_root=Path(spec.team_root),
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=Integration(),
         timeout=30,
@@ -718,7 +718,7 @@ def test_worker_private_prompt_overlay_does_not_mutate_shared_cache_bytes(
 
     context = SimpleNamespace(
         workspace_root=Path(spec.workspace_root),
-        group_root=Path(spec.group_root),
+        team_root=Path(spec.team_root),
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=Integration(),
         timeout=30,
@@ -767,7 +767,7 @@ def test_worker_rejects_private_overlay_collision_with_shared_runtime(
 
     context = SimpleNamespace(
         workspace_root=Path(spec.workspace_root),
-        group_root=Path(spec.group_root),
+        team_root=Path(spec.team_root),
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=Integration(),
         timeout=30,
@@ -798,7 +798,7 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
             ),
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
         ),
     )
@@ -815,7 +815,7 @@ def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
         workspace_root=tmp_path / "group",
         timeout=30,
         sandbox_root=None,
-        group_root=tmp_path / "group",
+        team_root=tmp_path / "group",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
         integration=SimpleNamespace(
             run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -853,7 +853,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
             workspace_root=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(0, "done", "", 0.1)
@@ -877,7 +877,7 @@ def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
             workspace_root=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(124, "partial", "timeout", 30.0)
@@ -906,7 +906,7 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
             workspace_root=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(run=lambda request: minimal_result),
         ),
@@ -934,7 +934,7 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
             workspace_root=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: RunResult(0, "done", "", 0.1)
@@ -966,7 +966,7 @@ def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeyp
             workspace_root=tmp_path / "group",
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
             integration=SimpleNamespace(
                 run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -1007,7 +1007,7 @@ def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkey
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=tmp_path / "group",
+        team_root=tmp_path / "group",
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     context.workspace_root.mkdir(parents=True)
@@ -1064,7 +1064,7 @@ def test_execute_job_persists_session_id_from_successful_run(tmp_path, monkeypat
             integration=Integration(),
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=EffectiveRuntimePolicy(timeout=30),
         ),
     )
@@ -1085,11 +1085,11 @@ def test_execute_job_persists_session_id_from_failed_run(tmp_path, monkeypatch):
             return RunResult(1, "done", "", 0.1, session_id="sess-fail-xyz")
 
     context = SimpleNamespace(
-        workspace_root=fixture.group_root,
+        workspace_root=fixture.team_root,
         integration=Integration(),
         timeout=30,
         sandbox_root=None,
-        group_root=fixture.group_root,
+        team_root=fixture.team_root,
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
@@ -1138,7 +1138,7 @@ def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkey
             integration=Integration(),
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=authored_policy,
         ),
     )
@@ -1199,7 +1199,7 @@ def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, m
             integration=integration,
             timeout=30,
             sandbox_root=None,
-            group_root=tmp_path / "group",
+            team_root=tmp_path / "group",
             runtime_policy=authored_policy,
         ),
     )
@@ -1209,3 +1209,5 @@ def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, m
 
     assert result.status == "complete"
     assert captured.get("called"), "subprocess.run was reached — require_valid_run passed"
+
+

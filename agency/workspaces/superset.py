@@ -37,12 +37,12 @@ class SupersetWorkspace(BaseWorkspace):
     def supports_launch(self) -> bool:
         return True
 
-    def launch_command(self, config: dict, group_path: str) -> str | None:
+    def launch_command(self, config: dict, team_path: str) -> str | None:
         path = config.get("project_path")
         return f"superset {path}" if path else None
 
-    def detect(self, group_path: str) -> dict | None:
-        gp = Path(group_path)
+    def detect(self, team_path: str) -> dict | None:
+        gp = Path(team_path)
         if (gp / ".superset" / "config.json").is_file():
             return {"project_path": str(gp)}
         return None

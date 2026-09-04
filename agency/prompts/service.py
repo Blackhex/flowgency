@@ -116,7 +116,7 @@ class PromptService:
         expected_digest: str,
     ) -> PromptMutationResult:
         snapshot = self.config_store.load()
-        agent = snapshot.config.groups[group_id].agents[agent_id]
+        agent = snapshot.config.teams[group_id].agents[agent_id]
         if prompt_name not in agent.prompts:
             raise PromptNotFoundError(
                 f"prompt not registered: {group_id}/{agent_id}/{prompt_name}"

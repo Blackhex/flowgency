@@ -40,21 +40,21 @@ import agency.config as strict_config_module
 
 
 def _canonical_group_store(tmp_path: Path) -> Path:
-    return JobStore(tmp_path / "memory-store").group_root("newsletter")
+    return JobStore(tmp_path / "memory-store").team_root("newsletter")
 
 
 def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 5\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
     workspace_root = tmp_path / "workspace"
-    group_root = tmp_path / "group"
+    team_root = tmp_path / "team"
     return JobSpec(
-        schema_version=4,
+        schema_version=5,
         job_id=uuid4().hex,
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="newsletter",
-        group_root=str(group_root.resolve()),
+        team_key="newsletter",
+        team_root=str(team_root.resolve()),
         agent_name=agent,
         workspace_root=str(workspace_root.resolve()),
         trigger="manual_prompt",
@@ -106,27 +106,32 @@ def test_job_record_round_trips_through_atomic_store(tmp_path):
     assert spec.config_path == str((tmp_path / "config.yaml").resolve())
 
 
-def test_job_spec_reads_v3_routine_record_and_writes_v4_prompt_record(tmp_path):
-    current = make_spec(tmp_path)
-    current_data = current.to_dict()
-    historical_data = dict(current_data)
-    historical_data.update(
-        schema_version=3,
-        routine_id="daily-review",
-        skill="daily-review",
-        skill_arguments=["--brief"],
-        prompt_source={"type": "routine", "routine_id": "daily-review"},
-    )
-    historical_data.pop("private_prompts", None)
+def test_current_job_schema_serializes_team_fields(tmp_path):
+    spec = make_spec(tmp_path)
+    payload = spec.to_dict()
 
-    historical = JobSpec.from_dict(historical_data)
-    reloaded_current = JobSpec.from_dict(current_data)
+    assert payload["schema_version"] == 5
+    assert payload["team_key"] == "newsletter"
+    assert "team_root" in payload
+    assert "group_key" not in payload
+    assert "group_root" not in payload
 
-    assert historical.schema_version == 3
-    assert historical.skill == "daily-review"
-    assert reloaded_current.schema_version == 4
-    assert reloaded_current.skill is None
-    assert reloaded_current.prompt_source["type"] == "blueprint_prompt"
+
+@pytest.mark.parametrize("schema_version", [3, 4])
+def test_job_rejects_prior_schema_versions(tmp_path, schema_version):
+    from dataclasses import replace
+    with pytest.raises(ValueError, match="Unsupported job schema version"):
+        replace(make_spec(tmp_path), schema_version=schema_version).validate()
+
+
+def test_v4_payload_with_group_key_is_rejected(tmp_path):
+    spec = make_spec(tmp_path)
+    payload = spec.to_dict()
+    payload["schema_version"] = 4
+    payload["group_key"] = payload.pop("team_key")
+    payload["group_root"] = payload.pop("team_root")
+    with pytest.raises((ValueError, TypeError)):
+        JobSpec.from_dict(payload)
 
 
 def test_read_job_retries_transient_windows_permission_error(
@@ -306,19 +311,19 @@ def test_transition_job_requires_expected_status(tmp_path):
         transition_job(path, "queued", "failed")
 
 
-def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_path):
+def test_job_spec_requires_prompt_source_for_prompt_jobs(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
 
     for trigger in ("manual_prompt", "scheduled_prompt"):
-        with pytest.raises(ValueError, match="routine_id and skill"):
+        with pytest.raises(ValueError, match="prompt-backed jobs require a prompt_source"):
             JobSpec(
-                schema_version=3,
+                schema_version=5,
                 job_id=uuid4().hex,
                 config_path=str(config_path.resolve()),
                 config_revision="cfg-1",
-                group_key="newsletter",
-                group_root=str(tmp_path.resolve()),
+                team_key="newsletter",
+                team_root=str(tmp_path.resolve()),
                 agent_name="product",
                 workspace_root=str(tmp_path.resolve()),
                 trigger=trigger,
@@ -346,21 +351,21 @@ def test_job_spec_requires_routine_and_skill_for_manual_and_scheduled_jobs(tmp_p
                 skill_arguments=(),
                 task_input="run",
                 trigger_context={"source": "test"},
-                prompt_source={"type": "routine", "routine_id": None},
+                prompt_source=None,
                 timeout_override=None,
                 created_at="2026-07-15T00:00:00+00:00",
             ).validate()
 
 
-def test_job_spec_serializes_distinct_workspace_and_group_roots(tmp_path):
+def test_job_spec_serializes_distinct_workspace_and_team_roots(tmp_path):
     spec = make_spec(tmp_path)
 
     payload = spec.to_dict()
 
     assert payload["workspace_root"] == str(spec.resolved_workspace_root)
-    assert payload["group_root"] == str(spec.resolved_group_root)
+    assert payload["team_root"] == str(spec.resolved_team_root)
     assert spec.resolved_workspace_root == Path(spec.workspace_root).resolve()
-    assert spec.resolved_group_root == Path(spec.group_root).resolve()
+    assert spec.resolved_team_root == Path(spec.team_root).resolve()
 
 
 def test_operation_lock_is_under_group_locks(tmp_path):
@@ -395,12 +400,12 @@ def test_operation_lock_paths_use_platform_case_normalization(
 
 def test_job_request_no_longer_accepts_extra_prompt_source(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
 
     with pytest.raises(TypeError):
         JobRequest(
             config_path=config_path,
-            group_key="newsletter",
+            team_key="newsletter",
             agent_name="product",
             trigger="manual_prompt",
             task_input="run",
@@ -415,15 +420,15 @@ def test_job_spec_no_longer_exposes_create_constructor():
 
 def test_decision_jobs_require_null_routine_and_skill(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
 
     spec = JobSpec(
-        schema_version=3,
+        schema_version=5,
         job_id="job-456",
         config_path=str(config_path.resolve()),
         config_revision="cfg-1",
-        group_key="newsletter",
-        group_root=str(tmp_path.resolve()),
+        team_key="newsletter",
+        team_root=str(tmp_path.resolve()),
         agent_name="product",
         workspace_root=str(tmp_path.resolve()),
         trigger="decision",
@@ -441,8 +446,8 @@ def test_decision_jobs_require_null_routine_and_skill(tmp_path):
             mode="restricted",
         ),
         memory=MemoryBinding(
-            selector={"scope": "agent", "version": 1, "group": "newsletter", "agent": "product"},
-            canonical_json='{"agent":"product","group":"newsletter","scope":"agent","version":1}',
+            selector={"scope": "agent", "version": 1, "team": "newsletter", "agent": "product"},
+            canonical_json='{"agent":"product","scope":"agent","team":"newsletter","version":1}',
             memory_hash="memory-hash-2",
             path="C:/memory/memory-hash-2",
         ),
@@ -735,3 +740,19 @@ def test_blueprint_cache_ref_includes_instance_digest():
     assert ref.cache_ref == artifact.ref
     assert ref.cache_ref.instance_digest == "inst456"
     assert ref.cache_root == Path("C:/cache")
+
+
+def test_worker_accepts_team_id_and_rejects_group_id():
+    import argparse
+    from agency.jobs.worker import main
+
+    with pytest.raises(SystemExit):
+        main(["--store-root", ".", "--group-id", "x", "--job-id", "j", "--immutable-digest", "d"])
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--store-root", required=True)
+    parser.add_argument("--team-id", required=True)
+    parser.add_argument("--job-id", required=True)
+    parser.add_argument("--immutable-digest", required=True)
+    args = parser.parse_args(["--store-root", ".", "--team-id", "news", "--job-id", "j1", "--immutable-digest", "d1"])
+    assert args.team_id == "news"
