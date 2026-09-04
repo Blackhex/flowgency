@@ -129,6 +129,32 @@ def _config_revision(config_path: Path) -> str:
     return ConfigStore(config_path).load().revision
 
 
+def test_library_list_renders_without_error(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, _, _, _ = _seed_library_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/admin/agent-library")
+
+    assert response.status_code == 200
+
+
+def test_blueprint_detail_displays_team_name_for_instance_users(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, _, _, _ = _seed_library_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/admin/agent-library/blueprints/advisor")
+
+    assert response.status_code == 200
+    assert "Newsletter / Advisor" in response.text
+    assert "Product / Strategist" in response.text
+
+
 def test_library_detail_shows_standard_files_and_users(
     monkeypatch,
     tmp_path,

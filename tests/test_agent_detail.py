@@ -209,6 +209,16 @@ def test_profile_tab_uses_config_identity_and_capability(monkeypatch, tmp_path, 
     assert "Subagent" not in response.text
 
 
+def test_runtime_tab_renders_team_default_timeout_and_mode(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/agents/advisor/runtime")
+
+    assert response.status_code == 200
+    assert "Timeout: 2400s" in response.text
+    assert "Mode: restricted" in response.text
+
+
 def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_path, raw_config):
     client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 

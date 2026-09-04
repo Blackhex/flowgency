@@ -11,11 +11,11 @@
     </div>
     <div class="space-y-2">
       <h3 class="font-semibold text-gray-900">Team default</h3>
-      <p>Timeout: {{ group_timeout }}s</p>
-      <p>Mode: {{ group_permission_mode }}</p>
-      {% if group_rules %}
+      <p>Timeout: {{ team_timeout }}s</p>
+      <p>Mode: {{ team_permission_mode }}</p>
+      {% if team_rules %}
       <p>Rules:</p>
-      <pre class="font-mono text-xs bg-gray-100 rounded p-2 whitespace-pre-wrap">{{ group_rules }}</pre>
+      <pre class="font-mono text-xs bg-gray-100 rounded p-2 whitespace-pre-wrap">{{ team_rules }}</pre>
       {% else %}
       <p>Rules: (none)</p>
       {% endif %}

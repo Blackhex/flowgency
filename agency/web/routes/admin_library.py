@@ -128,8 +128,8 @@ def _base_admin_context(request: Request, snapshot) -> dict[str, Any]:
         "active": "admin",
         "admin_page": "agent-library",
         "theme_css": _theme_css(request),
-        "groups": {
-            key: tcfg.name for key, group in snapshot.config.teams.items()
+        "teams": {
+            key: tcfg.name for key, tcfg in snapshot.config.teams.items()
         },
     }
 
@@ -175,12 +175,12 @@ def _instance_users(snapshot, blueprint_key: str) -> list[dict[str, str]]:
             display_name = agent.identity.display_name or agent_key
             users.append(
                 {
-                    "group": tcfg.name,
+                    "team": tcfg.name,
                     "agent": display_name,
                     "href": f"/{team_key}/agents/{agent_key}/blueprint",
                 }
             )
-    users.sort(key=lambda item: (item["group"], item["agent"]))
+    users.sort(key=lambda item: (item["team"], item["agent"]))
     return users
 
 
@@ -333,7 +333,7 @@ def _configured_prompt_users(
                     users.append(
                         {
                             "team_key": team_key,
-                            "group": tcfg.name,
+                            "team": tcfg.name,
                             "agent": (
                                 agent.identity.display_name
                                 or agent_key
@@ -343,7 +343,7 @@ def _configured_prompt_users(
                     )
     users.sort(
         key=lambda item: (
-            item["group"],
+            item["team"],
             item["agent"],
             item["routine"],
         )
@@ -353,7 +353,7 @@ def _configured_prompt_users(
 
 def _format_prompt_user_summary(users: list[dict[str, str]]) -> str:
     summary = ", ".join(
-        f"{item['group']}/{item['agent']}:{item['routine']}"
+        f"{item['team']}/{item['agent']}:{item['routine']}"
         for item in users
     )
     return f"Prompt is used by {summary}."

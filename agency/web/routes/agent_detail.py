@@ -574,11 +574,11 @@ def _runtime_context(snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
 
     team_rules = team_cfg.runtime.permissions.rules
     agent_rules = instance.runtime.permissions.rules
-    group_rule_lines = []
+    team_rule_lines = []
     for rule in team_rules:
         path_str = str(rule.path).replace("\\", "/") if rule.path else "(pathless)"
         tools_str = ", ".join(rule.tools) if rule.tools is not None else "(all)"
-        group_rule_lines.append(f"{path_str}: {tools_str}")
+        team_rule_lines.append(f"{path_str}: {tools_str}")
     agent_rules_dicts = [
         {
             k: v
@@ -600,7 +600,7 @@ def _runtime_context(snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
         "integration_display_name": integration.display_name,
         "team_timeout": team_cfg.runtime.timeout,
         "team_permission_mode": team_cfg.runtime.permissions.mode,
-        "team_rules": "\n".join(group_rule_lines),
+        "team_rules": "\n".join(team_rule_lines),
         "agent_timeout": instance.runtime.timeout if "timeout" in instance.runtime.model_fields_set else "",
         "agent_rules_yaml": agent_rules_yaml,
         "effective": effective,
