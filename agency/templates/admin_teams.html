@@ -10,29 +10,29 @@
   </div>
 
   <div class="space-y-3">
-    {% for org in orgs %}
+    {% for team in team_summaries %}
     <div class="bg-white rounded-xl border border-gray-200 p-5">
       <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div class="min-w-0 space-y-1.5">
-          <h3 class="text-lg font-semibold text-gray-900">{{ org.name }}</h3>
+          <h3 class="text-lg font-semibold text-gray-900">{{ team.name }}</h3>
           <div class="space-y-1 text-sm text-gray-500 font-mono break-all">
-            <p><span class="font-semibold text-gray-700">Workspace path:</span> {{ org.workspace_path }}</p>
-            <p><span class="font-semibold text-gray-700">Team path:</span> {{ org.team_path }}</p>
+            <p><span class="font-semibold text-gray-700">Workspace path:</span> {{ team.workspace_path }}</p>
+            <p><span class="font-semibold text-gray-700">Team path:</span> {{ team.team_path }}</p>
           </div>
           <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600">
-            <span>{{ org.agent_count }} agent{{ 's' if org.agent_count != 1 else '' }}</span>
+            <span>{{ team.agent_count }} agent{{ 's' if team.agent_count != 1 else '' }}</span>
             <span class="text-gray-300">|</span>
-            {% if org.initialized %}
+            {% if team.initialized %}
             <span class="inline-flex items-center gap-1 text-green-700">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
               Initialized
             </span>
-            {% elif org.workspace_exists %}
+            {% elif team.workspace_exists %}
             <span class="text-amber-600">Record directories missing</span>
             {% else %}
             <span class="text-red-600">Workspace path does not exist</span>
             {% endif %}
-            {% if org.dispatch_enabled %}
+            {% if team.dispatch_enabled %}
             <span class="text-gray-300">|</span>
             <span class="inline-flex items-center gap-1 text-indigo-600">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -42,12 +42,12 @@
           </div>
         </div>
         <div class="flex flex-wrap gap-2 sm:ml-4">
-          <a href="/admin/teams/{{ org.key }}/edit"
+          <a href="/admin/teams/{{ team.key }}/edit"
              class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
             Edit
           </a>
-          <form method="post" action="/admin/teams/{{ org.key }}/delete" class="inline"
-                onsubmit="return confirm('Delete team \'{{ org.name }}\'? This only removes it from config — files on disk are not deleted.')">
+              <form method="post" action="/admin/teams/{{ team.key }}/delete" class="inline"
+                onsubmit="return confirm('Delete team \'{{ team.name }}\'? This only removes it from config — files on disk are not deleted.')">
             <input type="hidden" name="revision" value="{{ revision }}">
             <button type="submit"
                     class="px-3 py-1.5 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors">
@@ -60,7 +60,7 @@
     {% endfor %}
   </div>
 
-  {% if not orgs %}
+  {% if not team_summaries %}
   <div class="bg-white rounded-xl border border-gray-200 border-dashed p-8 text-center">
     <p class="text-sm text-gray-500 mb-3">No agent teams configured yet.</p>
     <a href="/admin/teams/new" class="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors">

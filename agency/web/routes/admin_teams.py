@@ -179,11 +179,11 @@ def _team_settings_response(
         {
             **_base_admin_context(request, snapshot),
             "mode": "edit",
-            "org_key": team_id,
-            "org_name": value("name", team_cfg.name),
-            "org_workspace_path": value("workspace_path", str(team_cfg.workspace_path)),
-            "org_path": value("path", str(team_cfg.path)),
-            "org_workspaces_json": value(
+            "team_key": team_id,
+            "team_name": value("name", team_cfg.name),
+            "team_workspace_path": value("workspace_path", str(team_cfg.workspace_path)),
+            "team_path": value("path", str(team_cfg.path)),
+            "team_workspaces_json": value(
                 "workspaces_json",
                 json.dumps(
                     [
@@ -250,12 +250,12 @@ def _team_create_response(
         {
             **_base_admin_context(request, snapshot),
             "mode": "create",
-            "org_key": key,
-            "org_name": name,
-            "org_workspace_path": workspace_path,
-            "org_path": path,
+            "team_key": key,
+            "team_name": name,
+            "team_workspace_path": workspace_path,
+            "team_path": path,
             "default_integration": default_integration,
-            "org_workspaces_json": workspaces_json,
+            "team_workspaces_json": workspaces_json,
             "workspace_types_json": _workspace_types_json(request),
             "warning": warning,
             "integration_names": _integration_names(),
@@ -557,10 +557,10 @@ async def setup_status(
     return JSONResponse(payload)
 
 
-@router.get("/admin/teams/{org}/edit", response_class=HTMLResponse)
-async def admin_org_edit(
+@router.get("/admin/teams/{team}/edit", response_class=HTMLResponse)
+async def admin_team_edit(
     request: Request,
-    org: str,
+    team: str,
     services: AgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
@@ -570,15 +570,15 @@ async def admin_org_edit(
             status=inspect_setup_status(services.config_store),
         )
     snapshot = services.config_store.load()
-    if org not in snapshot.config.teams:
-        raise HTTPException(status_code=404, detail=f"Unknown team: {org}")
-    return _team_settings_response(request, snapshot, org)
+    if team not in snapshot.config.teams:
+        raise HTTPException(status_code=404, detail=f"Unknown team: {team}")
+    return _team_settings_response(request, snapshot, team)
 
 
-@router.post("/admin/teams/{org}/save", response_class=HTMLResponse)
-async def admin_org_save(
+@router.post("/admin/teams/{team}/save", response_class=HTMLResponse)
+async def admin_team_save(
     request: Request,
-    org: str,
+    team: str,
     services: AgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
@@ -602,7 +602,7 @@ async def admin_org_save(
         return _team_settings_response(
             request,
             snapshot,
-            org,
+            team,
             warning=str(exc),
             status_code=409,
         )
@@ -617,7 +617,7 @@ async def admin_org_save(
         return _team_settings_response(
             request,
             snapshot,
-            org,
+            team,
             warning="Workspaces payload is invalid.",
             status_code=409,
         )
@@ -625,7 +625,7 @@ async def admin_org_save(
     try:
         with revision_bound_team_operation(
             services.config_store,
-            team_ids=(org,),
+            team_ids=(team,),
             proposed_paths=(
                 _canonical_team_path(services.config_path, path),
             ),
@@ -634,7 +634,7 @@ async def admin_org_save(
             patch_team_settings_state(
                 services.config_store,
                 locked.revision,
-                org,
+                team,
                 TeamSettingsStatePatch(
                     name=name,
                     workspace_path=workspace_path,
@@ -652,7 +652,7 @@ async def admin_org_save(
         return _team_settings_response(
             request,
             snapshot,
-            org,
+            team,
             warning="Configuration changed. Reload before saving.",
             status_code=409,
         )
@@ -661,7 +661,7 @@ async def admin_org_save(
         return _team_settings_response(
             request,
             snapshot,
-            org,
+            team,
             warning=_validation_warning(exc),
             form_values={
                 "revision": revision,
@@ -679,11 +679,11 @@ async def admin_org_save(
         )
 
     request.app.state.refresh_services()
-    return RedirectResponse(f"/admin/teams/{org}/edit", status_code=303)
+    return RedirectResponse(f"/admin/teams/{team}/edit", status_code=303)
 
 
 @router.post("/admin/teams/create", response_class=HTMLResponse)
-async def admin_org_create(
+async def admin_team_create(
     request: Request,
     services: AgencyServices = Depends(get_services),
 ):
@@ -707,14 +707,14 @@ async def admin_org_create(
             {
                 **_base_admin_context(request, snapshot),
                 "mode": "create",
-                "org_key": key,
-                "org_name": name,
-                "org_workspace_path": workspace_path,
-                "org_path": path,
+                "team_key": key,
+                "team_name": name,
+                "team_workspace_path": workspace_path,
+                "team_path": path,
                 "default_integration": str(
                     form.get("default_integration", "")
                 ).strip(),
-                "org_workspaces_json": str(form.get("workspaces_json", "[]")),
+                "team_workspaces_json": str(form.get("workspaces_json", "[]")),
                 "workspace_types_json": _workspace_types_json(request),
                 "warning": "Key, name, workspace path, and path are required.",
                 "integration_names": _integration_names(),
@@ -730,12 +730,12 @@ async def admin_org_create(
             {
                 **_base_admin_context(request, snapshot),
                 "mode": "create",
-                "org_key": key,
-                "org_name": name,
-                "org_workspace_path": workspace_path,
-                "org_path": path,
+                "team_key": key,
+                "team_name": name,
+                "team_workspace_path": workspace_path,
+                "team_path": path,
                 "default_integration": default_integration,
-                "org_workspaces_json": str(form.get("workspaces_json", "[]")),
+                "team_workspaces_json": str(form.get("workspaces_json", "[]")),
                 "workspace_types_json": _workspace_types_json(request),
                 "warning": (
                     f"Integration '{default_integration}' is not registered."
@@ -776,12 +776,12 @@ async def admin_org_create(
             {
                 **_base_admin_context(request, snapshot),
                 "mode": "create",
-                "org_key": key,
-                "org_name": name,
-                "org_workspace_path": workspace_path,
-                "org_path": path,
+                "team_key": key,
+                "team_name": name,
+                "team_workspace_path": workspace_path,
+                "team_path": path,
                 "default_integration": default_integration,
-                "org_workspaces_json": workspaces_json,
+                "team_workspaces_json": workspaces_json,
                 "workspace_types_json": _workspace_types_json(request),
                 "warning": "Workspaces payload is invalid.",
                 "integration_names": _integration_names(),
@@ -821,12 +821,12 @@ async def admin_org_create(
             {
                 **_base_admin_context(request, current),
                 "mode": "create",
-                "org_key": key,
-                "org_name": name,
-                "org_workspace_path": workspace_path,
-                "org_path": path,
+                "team_key": key,
+                "team_name": name,
+                "team_workspace_path": workspace_path,
+                "team_path": path,
                 "default_integration": default_integration,
-                "org_workspaces_json": workspaces_json,
+                "team_workspaces_json": workspaces_json,
                 "workspace_types_json": _workspace_types_json(request),
                 "warning": "Configuration changed. Reload before saving.",
                 "integration_names": _integration_names(),
@@ -853,10 +853,10 @@ async def admin_org_create(
     return RedirectResponse("/admin/teams", status_code=303)
 
 
-@router.post("/admin/teams/{org}/delete", response_class=HTMLResponse)
-async def admin_org_delete(
+@router.post("/admin/teams/{team}/delete", response_class=HTMLResponse)
+async def admin_team_delete(
     request: Request,
-    org: str,
+    team: str,
     services: AgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
@@ -870,13 +870,13 @@ async def admin_org_delete(
     try:
         with revision_bound_team_operation(
             services.config_store,
-            team_ids=(org,),
+            team_ids=(team,),
             expected_revision=revision or snapshot.revision,
         ) as locked:
             delete_team(
                 services.config_store,
                 locked.revision,
-                org,
+                team,
             )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -887,7 +887,7 @@ async def admin_org_delete(
             "admin_teams.html",
             {
                 **_base_admin_context(request, current),
-                "orgs": [
+                "team_summaries": [
                     _team_summary(key, tcfg)
                     for key, tcfg in current.config.teams.items()
                 ],

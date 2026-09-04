@@ -132,6 +132,26 @@ def test_active_routes_use_team_placeholders_not_group_placeholders():
     assert any("{team}" in path for path in paths)
 
 
+def test_admin_team_surface_uses_team_vocabulary(repo_root: Path):
+    paths = (
+        repo_root / "agency" / "app.py",
+        repo_root / "agency" / "web" / "routes" / "admin_teams.py",
+        repo_root / "agency" / "templates" / "admin_dispatch.html",
+        repo_root / "agency" / "templates" / "admin_teams.html",
+        repo_root / "agency" / "templates" / "admin_team_edit.html",
+    )
+    text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+
+    assert "admin_org_" not in text
+    assert "{org}" not in text
+    assert "org_key" not in text
+    assert "org_name" not in text
+    assert "org_workspace_path" not in text
+    assert "org_workspaces_json" not in text
+    assert '"orgs"' not in text
+    assert "for org in" not in text
+
+
 def test_removed_conversion_surfaces_do_not_exist(repo_root: Path):
     removed = [
         repo_root / "agency" / "configuration" / "compat.py",

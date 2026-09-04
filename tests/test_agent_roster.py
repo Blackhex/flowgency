@@ -703,7 +703,7 @@ def test_task14_route_ownership_is_unique_and_canonical(monkeypatch, tmp_path, r
         "/admin/integrations/unregister",
         "/admin/integrations/restart",
         "/admin/teams/new",
-        "/admin/teams/{org}/delete",
+        "/admin/teams/{team}/delete",
         "/{team}/agents/{agent}/run",
     }
 

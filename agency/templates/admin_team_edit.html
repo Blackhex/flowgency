@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ 'New Team' if mode == 'create' else 'Edit ' + org_name }} — {{ agency_title }}{% endblock %}
+{% block title %}{{ 'New Team' if mode == 'create' else 'Edit ' + team_name }} — {{ agency_title }}{% endblock %}
 {% block content %}
 <div class="max-w-4xl">
   <div class="mb-6">
@@ -7,7 +7,7 @@
   </div>
 
   <h1 class="text-2xl font-bold text-gray-900 mb-6">
-    {% if mode == 'create' %}New Agent Team{% else %}Edit: {{ org_name }}{% endif %}
+    {% if mode == 'create' %}New Agent Team{% else %}Edit: {{ team_name }}{% endif %}
   </h1>
 
   {% if warning %}
@@ -16,7 +16,7 @@
   </div>
   {% endif %}
 
-  <form method="post" action="{% if mode == 'create' %}/admin/teams/create{% else %}/admin/teams/{{ org_key }}/save{% endif %}"
+  <form method="post" action="{% if mode == 'create' %}/admin/teams/create{% else %}/admin/teams/{{ team_key }}/save{% endif %}"
         class="bg-white rounded-xl border border-gray-200 p-6 space-y-6 mb-8">
     <input type="hidden" name="revision" value="{{ revision }}">
 
@@ -27,7 +27,7 @@
     {% if mode == 'create' %}
     <div>
       <label for="key" class="block text-sm font-medium text-gray-700 mb-1">Key</label>
-      <input type="text" name="key" id="key" value="{{ org_key }}" required
+      <input type="text" name="key" id="key" value="{{ team_key }}" required
              placeholder="e.g. my-project, research-team"
              class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
     </div>
@@ -36,18 +36,18 @@
     <div class="grid gap-4 md:grid-cols-2">
       <div>
         <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-        <input type="text" name="name" id="name" value="{{ org_name }}" required
+        <input type="text" name="name" id="name" value="{{ team_name }}" required
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
       </div>
       <div>
         <label for="workspace_path" class="block text-sm font-medium text-gray-700 mb-1">Workspace path</label>
-        <input type="text" name="workspace_path" id="workspace_path" value="{{ org_workspace_path }}" required
+        <input type="text" name="workspace_path" id="workspace_path" value="{{ team_workspace_path }}" required
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
         <p class="mt-1 text-xs text-gray-500">Project source and agent execution location.</p>
       </div>
       <div class="md:col-span-2">
         <label for="path" class="block text-sm font-medium text-gray-700 mb-1">Team path</label>
-        <input type="text" name="path" id="path" value="{{ org_path }}" required
+        <input type="text" name="path" id="path" value="{{ team_path }}" required
                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
         <p class="mt-1 text-xs text-gray-500">Agency-owned observations, proposals, decisions, locks, and logs.</p>
       </div>
@@ -67,7 +67,7 @@
 
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">Workspaces</label>
-      <input type="hidden" name="workspaces_json" id="workspaces-hidden" value="{{ org_workspaces_json|default('[]') }}">
+      <input type="hidden" name="workspaces_json" id="workspaces-hidden" value="{{ team_workspaces_json|default('[]') }}">
       <div class="text-xs text-gray-600">Existing workspace payload is preserved unless you replace it externally.</div>
     </div>
 

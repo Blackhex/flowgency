@@ -1360,11 +1360,11 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
     """Build common context for admin pages."""
     snapshot = _load_snapshot()
     agency = agency_settings(snapshot)
-    orgs = []
+    team_summaries = []
     for key, tcfg in snapshot.config.teams.items():
         paths = resolve_team_paths(tcfg)
         dispatch_cfg = tcfg.dispatch
-        orgs.append({
+        team_summaries.append({
             "key": key,
             "name": tcfg.name,
             "workspace_path": str(tcfg.workspace_path),
@@ -1378,7 +1378,7 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
     return {
         "agency_title": agency.get("title", "Agency"),
         "default_team": agency.get("default_team", ""),
-        "orgs": orgs,
+        "team_summaries": team_summaries,
         "teams": {
             key: tcfg.name for key, tcfg in snapshot.config.teams.items()
         },
@@ -1631,8 +1631,8 @@ async def admin_dispatch_install(request: Request):
 
 
 @app.get("/admin/teams/new", response_class=HTMLResponse)
-async def admin_org_new(request: Request):
-    """Create new org form."""
+async def admin_team_new(request: Request):
+    """Create new team form."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
     agency = get_agency_config()
@@ -1648,13 +1648,13 @@ async def admin_org_new(request: Request):
             key: tcfg.name for key, tcfg in snapshot.config.teams.items()
         },
         "mode": "create",
-        "org_key": "",
-        "org_name": "",
-        "org_workspace_path": "",
-        "org_path": "",
+        "team_key": "",
+        "team_name": "",
+        "team_workspace_path": "",
+        "team_path": "",
         "default_integration": "claude-code",
-        "org_agents": "",
-        "org_workspaces_json": json_module.dumps([]),
+        "team_agents": "",
+        "team_workspaces_json": json_module.dumps([]),
         "workspace_types_json": _workspace_types_json(),
         "agent_infos": [],
         "warning": "",

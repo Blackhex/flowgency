@@ -58,21 +58,21 @@
     </div>
 
     <!-- Per-team status -->
-    {% if orgs %}
+    {% if team_summaries %}
     <div class="pt-4 border-t border-gray-100">
       <h3 class="text-sm font-semibold text-gray-700 mb-3">Team Dispatch Status</h3>
       <div class="space-y-2">
-        {% for org in orgs %}
+        {% for team in team_summaries %}
         <div class="flex items-center justify-between py-2">
           <div class="flex items-center gap-2">
-            {% if org.dispatch_enabled %}
+            {% if team.dispatch_enabled %}
             <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
             {% else %}
             <span class="inline-block w-2 h-2 rounded-full bg-gray-300"></span>
             {% endif %}
-            <span class="text-sm text-gray-700">{{ org.name }}</span>
+            <span class="text-sm text-gray-700">{{ team.name }}</span>
           </div>
-          <a href="/admin/teams/{{ org.key }}/edit" class="text-xs text-indigo-600 hover:text-indigo-800">Configure</a>
+          <a href="/admin/teams/{{ team.key }}/edit" class="text-xs text-indigo-600 hover:text-indigo-800">Configure</a>
         </div>
         {% endfor %}
       </div>
