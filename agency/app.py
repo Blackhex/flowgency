@@ -30,7 +30,7 @@ from agency.configuration import (
     dismiss_tip,
     hide_all_tips,
     patch_agency_settings,
-    resolve_group_paths,
+    resolve_team_paths,
 )
 from agency.configuration.models import MemorySelector
 from agency.integrations import get_integration, REGISTRY
@@ -1362,7 +1362,7 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
     agency = agency_settings(snapshot)
     orgs = []
     for key, group in snapshot.config.groups.items():
-        paths = resolve_group_paths(group)
+        paths = resolve_team_paths(group)
         dispatch_cfg = group.dispatch
         orgs.append({
             "key": key,

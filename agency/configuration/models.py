@@ -9,14 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .issues import ValidationFailed, ValidationIssue
 
-MemoryScope = Literal["run", "routine", "agent", "group", "channel"]
+MemoryScope = Literal["run", "routine", "agent", "team", "channel"]
 PermissionMode = Literal["restricted", "unrestricted"]
 ScheduleKind = Literal["at", "every"]
 PromptScope = Literal["blueprint", "instance"]
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
-CONFIG_SCHEMA_VERSION = 5
-_ROOT_KEYS = {"schema_version", "agency", "memory", "groups"}
+CONFIG_SCHEMA_VERSION = 6
+_ROOT_KEYS = {"schema_version", "agency", "memory", "teams"}
 
 
 class AgencyDispatch(BaseModel):
@@ -32,7 +32,7 @@ class AgencyJobs(BaseModel):
 class AgencySettings(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     title: str = "Agency"
-    default_group: str = ""
+    default_team: str = ""
     ai_backend: str = "claude-code"
     dispatch: AgencyDispatch = Field(default_factory=AgencyDispatch)
     jobs: AgencyJobs = Field(default_factory=AgencyJobs)
@@ -120,7 +120,7 @@ class AgentInstance(BaseModel):
     routines: tuple[Routine, ...] = ()
 
 
-class GroupDispatch(BaseModel):
+class TeamDispatch(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = False
 
@@ -132,30 +132,30 @@ class WorkspaceConfig(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
-class GroupRuntime(BaseModel):
+class TeamRuntime(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     timeout: int = 1800
     permissions: RuntimePermissions = Field(default_factory=RuntimePermissions)
 
 
-class GroupConfig(BaseModel):
+class TeamConfig(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     name: str
     workspace_path: Path
     path: Path
     default_integration: str
-    runtime: GroupRuntime = Field(default_factory=GroupRuntime)
-    dispatch: GroupDispatch = Field(default_factory=GroupDispatch)
+    runtime: TeamRuntime = Field(default_factory=TeamRuntime)
+    dispatch: TeamDispatch = Field(default_factory=TeamDispatch)
     agents: dict[str, AgentInstance] = Field(default_factory=dict)
     workspaces: tuple[WorkspaceConfig, ...] = ()
 
 
 class AgencyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    schema_version: Literal[5]
+    schema_version: Literal[6]
     agency: AgencySettings
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
-    groups: dict[str, GroupConfig]
+    teams: dict[str, TeamConfig]
 
 
 class ParsedConfig(BaseModel):
@@ -172,8 +172,8 @@ class ParsedConfig(BaseModel):
         return self.resolved.memory
 
     @property
-    def groups(self) -> dict[str, GroupConfig]:
-        return self.resolved.groups
+    def teams(self) -> dict[str, TeamConfig]:
+        return self.resolved.teams
 
 
 @dataclass(frozen=True)
@@ -278,54 +278,54 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
                 if not _is_mapping(channel):
                     issues.append(_shape_issue(f"memory.channels.{channel_name}", "mapping"))
 
-    groups = raw.get("groups")
-    groups_map = _mapping_or_none(groups)
-    if groups_map is None:
-        issues.append(_shape_issue("groups", "mapping"))
+    teams = raw.get("teams")
+    teams_map = _mapping_or_none(teams)
+    if teams_map is None:
+        issues.append(_shape_issue("teams", "mapping"))
         return issues
 
-    for group_name, group in groups_map.items():
-        group_field = f"groups.{group_name}"
-        group_map = _mapping_or_none(group)
-        if group_map is None:
-            issues.append(_shape_issue(group_field, "mapping"))
+    for team_name, team in teams_map.items():
+        team_field = f"teams.{team_name}"
+        team_map = _mapping_or_none(team)
+        if team_map is None:
+            issues.append(_shape_issue(team_field, "mapping"))
             continue
 
-        runtime = group_map.get("runtime")
+        runtime = team_map.get("runtime")
         runtime_map = _mapping_or_none(runtime)
         if runtime is not None and runtime_map is None:
-            issues.append(_shape_issue(f"{group_field}.runtime", "mapping"))
+            issues.append(_shape_issue(f"{team_field}.runtime", "mapping"))
 
-        dispatch = group_map.get("dispatch")
+        dispatch = team_map.get("dispatch")
         if dispatch is not None and not _is_mapping(dispatch):
-            issues.append(_shape_issue(f"{group_field}.dispatch", "mapping"))
+            issues.append(_shape_issue(f"{team_field}.dispatch", "mapping"))
         elif _is_mapping(dispatch) and "agents" in dispatch:
             issues.append(
                 _build_issue(
-                    code="group-dispatch-agents-not-supported",
-                    scope=f"groups.{group_name}.dispatch",
-                    field=f"{group_field}.dispatch.agents",
-                    message="Group dispatch schedules belong on agent routines and are not supported in the current config.",
+                    code="team-dispatch-agents-not-supported",
+                    scope=f"teams.{team_name}.dispatch",
+                    field=f"{team_field}.dispatch.agents",
+                    message="Team dispatch schedules belong on agent routines and are not supported in the current config.",
                     hint="Move schedules into each agent's routines on the configured instances.",
                 )
             )
 
-        workspaces = group_map.get("workspaces")
+        workspaces = team_map.get("workspaces")
         if workspaces is not None and not _is_list(workspaces):
-            issues.append(_shape_issue(f"{group_field}.workspaces", "list"))
+            issues.append(_shape_issue(f"{team_field}.workspaces", "list"))
 
-        agents = group_map.get("agents")
+        agents = team_map.get("agents")
         agents_list = None
         if agents is not None:
             if not _is_list(agents):
-                issues.append(_shape_issue(f"{group_field}.agents", "list"))
+                issues.append(_shape_issue(f"{team_field}.agents", "list"))
             else:
                 agents_list = agents
         if agents_list is None:
             continue
 
         for index, agent in enumerate(agents_list):
-            agent_field = f"{group_field}.agents[{index}]"
+            agent_field = f"{team_field}.agents[{index}]"
             agent_map = _mapping_or_none(agent)
             if agent_map is None:
                 continue
@@ -461,7 +461,7 @@ def _validate_memory_selector(
             scope=scope,
             field=f"{field_prefix}.scope",
             message="Agent default memory cannot use routine scope.",
-            hint="Choose run, agent, group, or channel for an agent default memory selector.",
+            hint="Choose run, agent, team, or channel for an agent default memory selector.",
         )
     if selected_scope == "channel" and not selector.get("channel"):
         return _build_issue(
@@ -526,7 +526,7 @@ def _reject_superseded_keys(
                     field=f"{prefix}.{key}",
                     message=(
                         f"'{key}' is a schema_version 4 key that is not "
-                        f"recognised in version 5."
+                        f"recognised in version 6."
                     ),
                     hint=(
                         "Remove the key and use runtime.permissions instead. "
@@ -538,7 +538,7 @@ def _reject_superseded_keys(
     return issues
 
 
-def _validate_group_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
+def _validate_team_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if not _is_mapping(runtime):
         return issues
@@ -554,41 +554,41 @@ def _validate_agent_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     return issues
 
 
-def _validate_default_group(default_group: Any, groups: Mapping[str, Any]) -> list[ValidationIssue]:
+def _validate_default_team(default_team: Any, teams: Mapping[str, Any]) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    if default_group is None or default_group == "":
+    if default_team is None or default_team == "":
         return issues
-    if not isinstance(default_group, str):
+    if not isinstance(default_team, str):
         issues.append(
             _build_issue(
-                code="invalid-group-name",
+                code="invalid-team-name",
                 scope="agency",
-                field="agency.default_group",
-                message=f"Invalid group identifier: {default_group}",
+                field="agency.default_team",
+                message=f"Invalid team identifier: {default_team}",
                 hint="Use a lowercase stable slug containing only letters, digits, and single hyphen separators.",
             )
         )
         return issues
-    identifier_issue = _validate_identifier("group", default_group, "agency")
+    identifier_issue = _validate_identifier("team", default_team, "agency")
     if identifier_issue is not None:
         issues.append(
             ValidationIssue(
                 code=identifier_issue.code,
                 scope=identifier_issue.scope,
-                field="agency.default_group",
+                field="agency.default_team",
                 message=identifier_issue.message,
                 corrective_hint=identifier_issue.corrective_hint,
             )
         )
         return issues
-    if default_group not in groups:
+    if default_team not in teams:
         issues.append(
             _build_issue(
-                code="missing-default-group",
+                code="missing-default-team",
                 scope="agency",
-                field="agency.default_group",
-                message=f"Default group is not declared: {default_group}",
-                hint="Set agency.default_group to a declared group key or leave it blank when omission is intended.",
+                field="agency.default_team",
+                message=f"Default team is not declared: {default_team}",
+                hint="Set agency.default_team to a declared team key or leave it blank when omission is intended.",
             )
         )
     return issues
@@ -603,10 +603,10 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 code="unsupported-schema-version",
                 scope="config",
                 field="schema_version",
-                message="schema_version must be 5.",
+                message="schema_version must be 6.",
                 hint=(
-                    "Run `christag-agency config migrate` to convert a "
-                    "schema_version 4 configuration."
+                    "Rewrite the configuration to schema_version 6 with "
+                    "teams instead of groups."
                 ),
             )
         )
@@ -629,45 +629,45 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     hint=f"Set agency.{field_name} relative to config.yaml.",
                 )
             )
-    groups = raw.get("groups") if _is_mapping(raw.get("groups")) else {}
-    issues.extend(_validate_default_group(agency.get("default_group", ""), groups))
-    for group_name, group in groups.items():
-        identifier_issue = _validate_identifier("group", group_name, f"groups.{group_name}")
+    teams = raw.get("teams") if _is_mapping(raw.get("teams")) else {}
+    issues.extend(_validate_default_team(agency.get("default_team", ""), teams))
+    for team_name, team in teams.items():
+        identifier_issue = _validate_identifier("team", team_name, f"teams.{team_name}")
         if identifier_issue:
             issues.append(identifier_issue)
-        if not _is_mapping(group):
+        if not _is_mapping(team):
             continue
-        if not str(group.get("default_integration", "")).strip():
+        if not str(team.get("default_integration", "")).strip():
             issues.append(
                 _build_issue(
                     code="missing-default-integration",
-                    scope=f"groups.{group_name}",
+                    scope=f"teams.{team_name}",
                     field="default_integration",
-                    message="Group default integration is required.",
-                    hint="Set group.default_integration to a non-empty integration name.",
+                    message="Team default integration is required.",
+                    hint="Set team.default_integration to a non-empty integration name.",
                 )
             )
         for field_name in ("workspace_path", "path"):
-            if not str(group.get(field_name, "")).strip():
+            if not str(team.get(field_name, "")).strip():
                 issues.append(
                     _build_issue(
-                        code=f"missing-group-{field_name.replace('_', '-')}",
-                        scope=f"groups.{group_name}",
-                        field=f"groups.{group_name}.{field_name}",
-                        message=f"Group {field_name} is required.",
-                        hint=f"Set groups.{group_name}.{field_name} relative to config.yaml.",
+                        code=f"missing-team-{field_name.replace('_', '-')}",
+                        scope=f"teams.{team_name}",
+                        field=f"teams.{team_name}.{field_name}",
+                        message=f"Team {field_name} is required.",
+                        hint=f"Set teams.{team_name}.{field_name} relative to config.yaml.",
                     )
                 )
-        runtime = group.get("runtime") or {}
-        issues.extend(_validate_group_runtime(runtime, f"groups.{group_name}"))
-        agents = group.get("agents") if _is_list(group.get("agents")) else []
+        runtime = team.get("runtime") or {}
+        issues.extend(_validate_team_runtime(runtime, f"teams.{team_name}"))
+        agents = team.get("agents") if _is_list(team.get("agents")) else []
         seen_agents: set[str] = set()
         for index, agent in enumerate(agents):
             if not isinstance(agent, dict):
                 issues.append(
                     _build_issue(
                         code="invalid-agent-entry",
-                        scope=f"groups.{group_name}.agents[{index}]",
+                        scope=f"teams.{team_name}.agents[{index}]",
                         field=f"agents[{index}]",
                         message="Agent entry must be a mapping.",
                         hint="Define each agent as a mapping with name, blueprint, and integration.",
@@ -679,7 +679,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 issues.append(
                     _build_issue(
                         code="missing-agent-name",
-                        scope=f"groups.{group_name}.agents[{index}]",
+                        scope=f"teams.{team_name}.agents[{index}]",
                         field=f"agents[{index}].name",
                         message="Agent name is required.",
                         hint="Set agent.name to a non-empty identifier.",
@@ -687,7 +687,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 )
                 continue
             identifier_issue = _validate_identifier(
-                "agent", name, f"groups.{group_name}.agents.{name or '<unknown>'}"
+                "agent", name, f"teams.{team_name}.agents.{name or '<unknown>'}"
             )
             if identifier_issue:
                 issues.append(identifier_issue)
@@ -695,21 +695,21 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 issues.append(
                     _build_issue(
                         code="duplicate-agent-name",
-                        scope=f"groups.{group_name}",
+                        scope=f"teams.{team_name}",
                         field="agents",
                         message=f"Duplicate agent name: {name}",
-                        hint="Give each agent a unique name within the group.",
+                        hint="Give each agent a unique name within the team.",
                     )
                 )
             seen_agents.add(name)
-            blueprint_issue = _validate_blueprint(agent, f"groups.{group_name}.agents.{name or '<unknown>'}")
+            blueprint_issue = _validate_blueprint(agent, f"teams.{team_name}.agents.{name or '<unknown>'}")
             if blueprint_issue:
                 issues.append(blueprint_issue)
             if not str(agent.get("integration", "")).strip():
                 issues.append(
                     _build_issue(
                         code="missing-explicit-integration",
-                        scope=f"groups.{group_name}.agents.{name or '<unknown>'}",
+                        scope=f"teams.{team_name}.agents.{name or '<unknown>'}",
                         field="integration",
                         message="Each agent must declare an explicit integration.",
                         hint="Set integration on every agent instance.",
@@ -719,7 +719,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
             if default_memory:
                 issue = _validate_memory_selector(
                     default_memory,
-                    f"groups.{group_name}.agents.{name or '<unknown>'}",
+                    f"teams.{team_name}.agents.{name or '<unknown>'}",
                     allow_routine=False,
                     field_prefix="default_memory",
                     declared_channels=declared_channels,
@@ -731,7 +731,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
             for routine_index, routine in enumerate(routines):
                 if not isinstance(routine, dict):
                     issues.append(
-                        _routine_entry_issue(f"groups.{group_name}.agents[{index}].routines[{routine_index}]")
+                        _routine_entry_issue(f"teams.{team_name}.agents[{index}].routines[{routine_index}]")
                     )
                     continue
                 routine_id = routine.get("id")
@@ -739,7 +739,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     issues.append(
                         _build_issue(
                             code="duplicate-routine-name",
-                            scope=f"groups.{group_name}.agents.{name or '<unknown>'}",
+                            scope=f"teams.{team_name}.agents.{name or '<unknown>'}",
                             field="routines",
                             message=f"Duplicate routine id: {routine_id}",
                             hint="Give each routine a unique id within the agent.",
@@ -747,20 +747,20 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     )
                 if isinstance(routine_id, str):
                     identifier_issue = _validate_identifier(
-                        "routine", routine_id, f"groups.{group_name}.agents.{name or '<unknown>'}"
+                        "routine", routine_id, f"teams.{team_name}.agents.{name or '<unknown>'}"
                     )
                     if identifier_issue:
                         issues.append(identifier_issue)
                     seen_routines.add(routine_id)
                 schedule = routine.get("schedule") or {}
-                issue = _validate_rule(schedule, f"groups.{group_name}.agents.{name or '<unknown>'}")
+                issue = _validate_rule(schedule, f"teams.{team_name}.agents.{name or '<unknown>'}")
                 if issue:
                     issues.append(issue)
                 memory = routine.get("memory")
                 if memory is not None:
                     issue = _validate_memory_selector(
                         memory,
-                        f"groups.{group_name}.agents.{name or '<unknown>'}",
+                        f"teams.{team_name}.agents.{name or '<unknown>'}",
                         allow_routine=True,
                         field_prefix="memory",
                         declared_channels=declared_channels,
@@ -772,30 +772,30 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                     issues.extend(
                         _validate_routine_arguments(
                             arguments,
-                            f"groups.{group_name}.agents.{name or '<unknown>'}",
-                            f"groups.{group_name}.agents[{index}].routines[{routine_index}].arguments",
+                            f"teams.{team_name}.agents.{name or '<unknown>'}",
+                            f"teams.{team_name}.agents[{index}].routines[{routine_index}].arguments",
                         )
                     )
             runtime = agent.get("runtime") or {}
-            issues.extend(_validate_agent_runtime(runtime, f"groups.{group_name}.agents.{name or '<unknown>'}"))
+            issues.extend(_validate_agent_runtime(runtime, f"teams.{team_name}.agents.{name or '<unknown>'}"))
             if "capabilities" in agent:
                 issues.extend(
                     _reject_superseded_keys(
-                        agent, f"groups.{group_name}.agents.{name or '<unknown>'}",
-                        f"groups.{group_name}.agents.{name or '<unknown>'}",
+                        agent, f"teams.{team_name}.agents.{name or '<unknown>'}",
+                        f"teams.{team_name}.agents.{name or '<unknown>'}",
                         keys=("capabilities",),
                     )
                 )
-        dispatch = group.get("dispatch") if _is_mapping(group.get("dispatch")) else {}
+        dispatch = team.get("dispatch") if _is_mapping(team.get("dispatch")) else {}
         if _is_mapping(dispatch):
             for key in dispatch:
                 if key not in {"enabled"} and key != "agents":
                     issues.append(
                         _build_issue(
                             code="invalid-config",
-                            scope=f"groups.{group_name}.dispatch",
-                            field=f"groups.{group_name}.dispatch.{key}",
-                            message=f"Unknown group dispatch field: {key}",
+                            scope=f"teams.{team_name}.dispatch",
+                            field=f"teams.{team_name}.dispatch.{key}",
+                            message=f"Unknown team dispatch field: {key}",
                             hint="Remove the unsupported field or migrate it to a supported location.",
                         )
                     )
@@ -878,28 +878,28 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
         agency["prompt_store"] = _path_from_config(agency["prompt_store"], config_dir)
     prepared["agency"] = agency
 
-    groups = dict(prepared.get("groups") or {})
-    resolved_groups: dict[str, Any] = {}
-    for group_name, group in groups.items():
-        if not _is_mapping(group):
+    teams = dict(prepared.get("teams") or {})
+    resolved_teams: dict[str, Any] = {}
+    for team_name, team in teams.items():
+        if not _is_mapping(team):
             continue
-        resolved_group = dict(group)
-        if resolved_group.get("workspace_path") is not None:
-            resolved_group["workspace_path"] = _path_from_config(
-                resolved_group["workspace_path"], config_dir
+        resolved_team = dict(team)
+        if resolved_team.get("workspace_path") is not None:
+            resolved_team["workspace_path"] = _path_from_config(
+                resolved_team["workspace_path"], config_dir
             )
-        if resolved_group.get("path") is not None:
-            resolved_group["path"] = _path_from_config(resolved_group["path"], config_dir)
-        workspace_path = resolved_group.get("workspace_path")
+        if resolved_team.get("path") is not None:
+            resolved_team["path"] = _path_from_config(resolved_team["path"], config_dir)
+        workspace_path = resolved_team.get("workspace_path")
         workspace_root = (
             Path(workspace_path) if workspace_path is not None else None
         )
-        resolved_group["runtime"] = _prepare_runtime(
-            resolved_group.get("runtime") or {}, workspace_root
+        resolved_team["runtime"] = _prepare_runtime(
+            resolved_team.get("runtime") or {}, workspace_root
         )
-        _resolve_permission_paths(resolved_group["runtime"], Path(workspace_path) if workspace_path else config_dir)
+        _resolve_permission_paths(resolved_team["runtime"], Path(workspace_path) if workspace_path else config_dir)
         agents = {}
-        for agent in resolved_group.get("agents") or []:
+        for agent in resolved_team.get("agents") or []:
             if not isinstance(agent, dict):
                 continue
             name = agent.get("name")
@@ -925,11 +925,11 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
                     routines.append(routine_entry)
                 agent_entry["routines"] = tuple(routines)
             agents[name] = agent_entry
-        resolved_group["agents"] = agents
-        if resolved_group.get("workspaces") is not None:
-            resolved_group["workspaces"] = tuple(resolved_group.get("workspaces") or ())
-        resolved_groups[group_name] = resolved_group
-    prepared["groups"] = resolved_groups
+        resolved_team["agents"] = agents
+        if resolved_team.get("workspaces") is not None:
+            resolved_team["workspaces"] = tuple(resolved_team.get("workspaces") or ())
+        resolved_teams[team_name] = resolved_team
+    prepared["teams"] = resolved_teams
     return prepared
 
 
@@ -957,16 +957,16 @@ def _collect_post_parse_issues(parsed: ParsedConfig) -> list[ValidationIssue]:
                     hint="Use a path relative to the config directory or an absolute path.",
                 )
             )
-    for group_name, group in parsed.groups.items():
+    for team_name, team in parsed.teams.items():
         for field_name in ("workspace_path", "path"):
-            if not getattr(group, field_name).is_absolute():
+            if not getattr(team, field_name).is_absolute():
                 issues.append(
                     _build_issue(
-                        code=f"missing-group-{field_name.replace('_', '-')}",
-                        scope=f"groups.{group_name}",
-                        field=f"groups.{group_name}.{field_name}",
-                        message=f"Group {field_name} is required.",
-                        hint=f"Set groups.{group_name}.{field_name} relative to config.yaml.",
+                        code=f"missing-team-{field_name.replace('_', '-')}",
+                        scope=f"teams.{team_name}",
+                        field=f"teams.{team_name}.{field_name}",
+                        message=f"Team {field_name} is required.",
+                        hint=f"Set teams.{team_name}.{field_name} relative to config.yaml.",
                     )
                 )
     return issues

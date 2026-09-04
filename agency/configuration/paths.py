@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import stat
 
-from .group_paths import resolve_group_paths
+from .team_paths import resolve_team_paths
 from .issues import ValidationIssue
 from .models import AgencyConfig
 
@@ -245,9 +245,9 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
         _Authority("agency", "memory_store", "agency.memory_store", memory),
         _Authority("agency", "prompt_store", "agency.prompt_store", prompt_store),
     )
-    group_paths = {
-        group_id: resolve_group_paths(group)
-        for group_id, group in config.groups.items()
+    team_paths = {
+        team_id: resolve_team_paths(team)
+        for team_id, team in config.teams.items()
     }
 
     issues.extend(
@@ -285,12 +285,12 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
     )
 
     authorities = list(control_authorities)
-    for group_id, paths in group_paths.items():
-        scope = f"groups.{group_id}"
+    for team_id, paths in team_paths.items():
+        scope = f"teams.{team_id}"
         issues.extend(
             _validate_existing_directory(
                 paths.workspace_root,
-                code="invalid-group-workspace",
+                code="invalid-team-workspace",
                 scope=scope,
                 field="workspace_path",
                 writable=True,
@@ -298,8 +298,8 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
         )
         issues.extend(
             _validate_creatable_directory(
-                paths.group_root,
-                code="invalid-group-root",
+                paths.team_root,
+                code="invalid-team-root",
                 scope=scope,
                 field="path",
             )
@@ -312,7 +312,7 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
                     f"{scope}.workspace_path",
                     paths.workspace_root,
                 ),
-                _Authority(scope, "path", f"{scope}.path", paths.group_root),
+                _Authority(scope, "path", f"{scope}.path", paths.team_root),
             )
         )
 
@@ -326,9 +326,9 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
             issues.append(_overlap_issue(left, right, hint=hint))
             issues.append(_overlap_issue(right, left, hint=hint))
 
-    for group_id, group in config.groups.items():
-        scope = f"groups.{group_id}"
-        for index, rule in enumerate(group.runtime.permissions.rules):
+    for team_id, team in config.teams.items():
+        scope = f"teams.{team_id}"
+        for index, rule in enumerate(team.runtime.permissions.rules):
             if rule.path is None:
                 continue
             field = f"runtime.permissions.rules[{index}].path"
@@ -356,7 +356,7 @@ def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]
                             hint="Move control-plane storage and configured runtime-writable roots into disjoint directories.",
                         )
                     )
-        for agent_id, agent in group.agents.items():
+        for agent_id, agent in team.agents.items():
             agent_scope = f"{scope}.agents.{agent_id}"
             for index, rule in enumerate(agent.runtime.permissions.rules):
                 if rule.path is None:
@@ -438,9 +438,9 @@ def initialize_storage_directories(config: AgencyConfig) -> None:
         Path(config.agency.prompt_store),
         job_store_root(Path(config.agency.memory_store)),
     ]
-    for group in config.groups.values():
-        paths = resolve_group_paths(group)
-        directories.extend((paths.group_root, *paths.record_directories))
+    for team in config.teams.values():
+        paths = resolve_team_paths(team)
+        directories.extend((paths.team_root, *paths.record_directories))
     for path in directories:
         _ensure_real_directory(path, create=True)
 

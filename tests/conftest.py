@@ -15,7 +15,7 @@ def config_paths(tmp_path):
     config_path = tmp_path / "config.yaml"
     agent_library = tmp_path / "agent-library"
     workspace_path = tmp_path / "workspace"
-    group_path = tmp_path / "groups" / "newsletter"
+    team_path = tmp_path / "teams" / "newsletter"
     agent_library.mkdir(parents=True)
     workspace_path.mkdir()
     return {
@@ -23,7 +23,7 @@ def config_paths(tmp_path):
         "config_dir": config_path.parent,
         "agent_library": agent_library,
         "workspace_path": workspace_path,
-        "group_path": group_path,
+        "team_path": team_path,
         "compilation_cache": tmp_path / "compiled-agents",
         "memory_store": tmp_path / "memory",
         "prompt_store": tmp_path / "prompts",
@@ -33,10 +33,10 @@ def config_paths(tmp_path):
 @pytest.fixture
 def raw_config(config_paths):
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "agency": {
             "title": "Agency",
-            "default_group": "newsletter",
+            "default_team": "newsletter",
             "ai_backend": "claude-code",
             "agent_library": str(config_paths["agent_library"]),
             "compilation_cache": str(config_paths["compilation_cache"]),
@@ -48,11 +48,11 @@ def raw_config(config_paths):
                 "support": {"display_name": "Support"},
             },
         },
-        "groups": {
+        "teams": {
             "newsletter": {
                 "name": "Newsletter",
                 "workspace_path": str(config_paths["workspace_path"]),
-                "path": str(config_paths["group_path"]),
+                "path": str(config_paths["team_path"]),
                 "default_integration": "claude-code",
                 "runtime": {
                     "permissions": {

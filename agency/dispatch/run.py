@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 from agency.clock import now as clock_now
-from agency.configuration import resolve_group_paths
+from agency.configuration import resolve_team_paths
 from agency.dispatch.schedule import (
     at_marker_path,
     catch_up_allows,
@@ -168,7 +168,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
             continue
 
         log.info("Processing group: %s", group_key)
-        paths = resolve_group_paths(group)
+        paths = resolve_team_paths(group)
 
         logs_root = paths.logs
         today = clock_now().strftime("%Y-%m-%d")

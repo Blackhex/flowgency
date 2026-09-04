@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from agency.configuration import ConfigSnapshot, resolve_group_paths
+from agency.configuration import ConfigSnapshot, resolve_team_paths
 from agency.jobs.authority import JobStore
 
 
@@ -20,14 +20,14 @@ def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
         dismissed = []
 
     resolved = snapshot.config.agency
-    default_group = str(
-        agency_raw.get("default_group")
-        or resolved.default_group
-        or next(iter(snapshot.config.groups), "")
+    default_team = str(
+        agency_raw.get("default_team")
+        or resolved.default_team
+        or next(iter(snapshot.config.teams), "")
     )
     return {
         "title": str(agency_raw.get("title", resolved.title)),
-        "default_group": default_group,
+        "default_group": default_team,
         "decided_by": str(agency_raw.get("decided_by", "admin")),
         "ai_backend": str(agency_raw.get("ai_backend", resolved.ai_backend)),
         "theme": str(agency_raw.get("theme", "")),
@@ -44,8 +44,8 @@ def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
 
 
 def runtime_group(snapshot: ConfigSnapshot, group_id: str) -> dict[str, Any]:
-    group = snapshot.config.groups[group_id]
-    paths = resolve_group_paths(group)
+    group = snapshot.config.teams[group_id]
+    paths = resolve_team_paths(group)
     job_store = JobStore(snapshot.config.agency.memory_store)
     agents_full = [
         instance.model_dump(mode="json") for instance in group.agents.values()
@@ -54,7 +54,7 @@ def runtime_group(snapshot: ConfigSnapshot, group_id: str) -> dict[str, Any]:
         "key": group_id,
         "name": group.name,
         "workspace_root": paths.workspace_root,
-        "group_root": paths.group_root,
+        "group_root": paths.team_root,
         "observations": paths.observations,
         "proposals": paths.proposals,
         "decisions": paths.decisions,
@@ -76,5 +76,5 @@ def runtime_group(snapshot: ConfigSnapshot, group_id: str) -> dict[str, Any]:
 def all_runtime_groups(snapshot: ConfigSnapshot) -> dict[str, dict[str, Any]]:
     return {
         group_id: runtime_group(snapshot, group_id)
-        for group_id in snapshot.config.groups
+        for group_id in snapshot.config.teams
     }

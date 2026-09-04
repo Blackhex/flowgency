@@ -12,15 +12,15 @@ from starlette.concurrency import run_in_threadpool
 
 from agency.configuration import (
     ConfigConflictError,
-    delete_group,
+    delete_team,
     DirectoryPreparationError,
-    GroupCreateStatePatch,
-    GroupSettingsStatePatch,
+    TeamCreateStatePatch,
+    TeamSettingsStatePatch,
     ValidationFailed,
-    create_group_state,
-    patch_group_settings_state,
+    create_team_state,
+    patch_team_settings_state,
     prepare_writable_directory,
-    resolve_group_paths,
+    resolve_team_paths,
 )
 from agency.integrations import BaseIntegration, REGISTRY
 from agency.integrations.models import InteractiveSetupRequest
@@ -51,7 +51,7 @@ def _workspace_types_json(request: Request) -> str:
 
 
 def _group_summary(key: str, group) -> dict:
-    paths = resolve_group_paths(group)
+    paths = resolve_team_paths(group)
     return {
         "key": key,
         "name": group.name,
@@ -631,11 +631,11 @@ async def admin_org_save(
             ),
             expected_revision=revision,
         ) as locked:
-            patch_group_settings_state(
+            patch_team_settings_state(
                 services.config_store,
                 locked.revision,
                 org,
-                GroupSettingsStatePatch(
+                TeamSettingsStatePatch(
                     name=name,
                     workspace_path=workspace_path,
                     path=path,
@@ -797,11 +797,11 @@ async def admin_org_create(
             ),
             expected_revision=revision,
         ) as locked:
-            create_group_state(
+            create_team_state(
                 services.config_store,
                 locked.revision,
                 key,
-                GroupCreateStatePatch(
+                TeamCreateStatePatch(
                     name=name,
                     workspace_path=workspace_path,
                     path=path,
@@ -873,7 +873,7 @@ async def admin_org_delete(
             group_ids=(org,),
             expected_revision=revision or snapshot.revision,
         ) as locked:
-            delete_group(
+            delete_team(
                 services.config_store,
                 locked.revision,
                 org,

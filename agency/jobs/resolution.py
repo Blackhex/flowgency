@@ -10,7 +10,7 @@ from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import AgentInstance, Routine
 from agency.configuration.issues import ValidationFailed, ValidationIssue
 from agency.configuration.paths import validate_resolved_paths
-from agency.configuration.group_paths import resolve_group_paths
+from agency.configuration.team_paths import resolve_team_paths
 from agency.configuration.store import ConfigSnapshot, ConfigStore
 from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import IntegrationRunRequest
@@ -183,7 +183,7 @@ def resolve_job_request(
         group = snapshot.config.groups[request.group_key]
     except KeyError as exc:
         raise JobValidationError(f"Unknown group: {request.group_key}") from exc
-    paths = resolve_group_paths(group)
+    paths = resolve_team_paths(group)
 
     agent = _find_agent(group, request.agent_name)
     routine = _find_routine(agent, request.routine_id)

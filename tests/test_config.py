@@ -18,7 +18,7 @@ def test_parse_config_accepts_canonical_root(raw_config, config_paths):
 
     assert parsed.raw == raw_config
     assert parsed.resolved.agency.title == "Agency"
-    assert parsed.resolved.schema_version == 5
+    assert parsed.resolved.schema_version == 6
 
 
 def test_schema_five_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
@@ -26,12 +26,12 @@ def test_schema_five_requires_prompt_store_and_scoped_routine(raw_config, config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
-    routine = parsed.resolved.groups["newsletter"].agents["builder"].routines[0]
+    routine = parsed.resolved.teams["newsletter"].agents["builder"].routines[0]
     assert routine.prompt == PromptSelector(scope="blueprint", name="daily-review")
     assert not hasattr(routine, "skill")
 
 
-def test_schema_four_is_rejected_with_migrate_hint(raw_config, config_paths):
+def test_schema_four_is_rejected_with_rewrite_hint(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
     raw_config["schema_version"] = 4
@@ -40,16 +40,16 @@ def test_schema_four_is_rejected_with_migrate_hint(raw_config, config_paths):
         parse_config(raw_config, config_paths["config_path"])
 
     assert excinfo.value.issues[0].code == "unsupported-schema-version"
-    assert "migrate" in excinfo.value.issues[0].corrective_hint
+    assert "schema_version 6" in excinfo.value.issues[0].corrective_hint
 
 
-def test_parse_config_requires_schema_version_five(raw_config, config_paths):
+def test_parse_config_requires_schema_version_six(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.resolved.schema_version == 5
+    assert parsed.resolved.schema_version == 6
 
-    for value in (None, 1, 2, 3, 4):
+    for value in (None, 1, 2, 3, 4, 5):
         candidate = _clone_config(raw_config)
         if value is None:
             candidate.pop("schema_version")
@@ -63,18 +63,47 @@ def test_current_defaults_are_explicit(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    group = parsed.groups["newsletter"]
 
-    assert parsed.agency.dispatch.interval == 15
-    assert group.runtime.timeout == 1800
-    assert group.runtime.permissions.mode == "unrestricted"
-    assert group.dispatch.enabled is False
+    assert parsed.resolved.schema_version == 6
+    assert parsed.resolved.agency.default_team == "newsletter"
+    team = parsed.teams["newsletter"]
+    assert team.runtime.timeout == 1800
+    assert team.runtime.permissions.mode == "unrestricted"
+    assert team.dispatch.enabled is False
+
+
+@pytest.mark.parametrize(
+    ("raw_change", "required_code"),
+    [
+        (lambda raw: raw.__setitem__("schema_version", 5), "unsupported-schema-version"),
+        (lambda raw: raw.__setitem__("groups", raw.pop("teams")), "invalid-config"),
+    ],
+)
+def test_v6_rejects_prior_group_control_plane(raw_config, config_paths, raw_change, required_code):
+    from agency.configuration.models import validate_config
+
+    raw_change(raw_config)
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    assert any(issue.code == required_code for issue in issues)
+
+
+def test_configuration_exports_team_not_group_apis():
+    import agency.configuration as configuration
+
+    assert hasattr(configuration, "TeamSettingsPatch")
+    assert hasattr(configuration, "ResolvedTeamPaths")
+    assert hasattr(configuration, "resolve_team_paths")
+    assert not hasattr(configuration, "GroupSettingsPatch")
+    assert not hasattr(configuration, "ResolvedGroupPaths")
+    assert not hasattr(configuration, "resolve_group_paths")
 
 
 def test_rejects_routine_default_without_routine_context(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["default_memory"] = {"scope": "routine"}
+    raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {"scope": "routine"}
     issues = validate_config(raw_config, config_paths["config_path"])
     assert any(issue.code == "invalid-memory-scope" for issue in issues)
 
@@ -82,17 +111,17 @@ def test_rejects_routine_default_without_routine_context(raw_config, config_path
 def test_validate_config_reports_group_dispatch_agents_not_supported(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["dispatch"] = {
+    raw_config["teams"]["newsletter"]["dispatch"] = {
         "enabled": False,
     }
-    raw_config["groups"]["newsletter"]["dispatch"]["agents"] = {
+    raw_config["teams"]["newsletter"]["dispatch"]["agents"] = {
         "builder": [{"at": "09:00"}]
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == "group-dispatch-agents-not-supported" for issue in issues)
-    assert any(issue.field == "groups.newsletter.dispatch.agents" for issue in issues)
+    assert any(issue.code == "team-dispatch-agents-not-supported" for issue in issues)
+    assert any(issue.field == "teams.newsletter.dispatch.agents" for issue in issues)
     assert any(
         issue.corrective_hint
         == "Move schedules into each agent's routines on the configured instances."
@@ -103,50 +132,50 @@ def test_validate_config_reports_group_dispatch_agents_not_supported(raw_config,
 def test_parse_config_rejects_group_dispatch_agents_not_supported(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
-    raw_config["groups"]["newsletter"]["dispatch"] = {
+    raw_config["teams"]["newsletter"]["dispatch"] = {
         "enabled": False,
     }
-    raw_config["groups"]["newsletter"]["dispatch"]["agents"] = {
+    raw_config["teams"]["newsletter"]["dispatch"]["agents"] = {
         "builder": [{"at": "09:00"}]
     }
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == "group-dispatch-agents-not-supported" for issue in excinfo.value.issues)
+    assert any(issue.code == "team-dispatch-agents-not-supported" for issue in excinfo.value.issues)
 
 
 def test_accepts_supported_group_dispatch_and_routines(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
-    raw_config["groups"]["newsletter"]["dispatch"] = {
+    raw_config["teams"]["newsletter"]["dispatch"] = {
         "enabled": True,
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
     parsed = parse_config(raw_config, config_paths["config_path"])
 
-    assert not any(issue.field == "groups.newsletter.dispatch.agents" for issue in issues)
-    assert parsed.groups["newsletter"].dispatch.enabled is True
-    assert parsed.groups["newsletter"].agents["builder"].routines[0].schedule.at == "09:00"
+    assert not any(issue.field == "teams.newsletter.dispatch.agents" for issue in issues)
+    assert parsed.teams["newsletter"].dispatch.enabled is True
+    assert parsed.teams["newsletter"].agents["builder"].routines[0].schedule.at == "09:00"
 
 
 def test_routine_enabled_is_typed_and_defaults_true(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
-    routine = raw_config["groups"]["newsletter"]["agents"][0]["routines"][0]
+    routine = raw_config["teams"]["newsletter"]["agents"][0]["routines"][0]
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.groups["newsletter"].agents["builder"].routines[0].enabled is True
+    assert parsed.teams["newsletter"].agents["builder"].routines[0].enabled is True
 
     routine["enabled"] = False
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.groups["newsletter"].agents["builder"].routines[0].enabled is False
+    assert parsed.teams["newsletter"].agents["builder"].routines[0].enabled is False
 
 
 def test_rejects_other_unknown_group_dispatch_keys(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["dispatch"] = {
+    raw_config["teams"]["newsletter"]["dispatch"] = {
         "enabled": True,
         "owner": "ops",
     }
@@ -154,14 +183,14 @@ def test_rejects_other_unknown_group_dispatch_keys(raw_config, config_paths):
     issues = validate_config(raw_config, config_paths["config_path"])
 
     assert any(issue.code == "invalid-config" for issue in issues)
-    assert any(issue.field == "groups.newsletter.dispatch.owner" for issue in issues)
+    assert any(issue.field == "teams.newsletter.dispatch.owner" for issue in issues)
 
 
 @pytest.mark.parametrize("blueprint_value", [None, "", "   "])
 def test_rejects_missing_or_blank_blueprint(raw_config, config_paths, blueprint_value):
     from agency.configuration.models import parse_config, validate_config
 
-    agent = raw_config["groups"]["newsletter"]["agents"][0]
+    agent = raw_config["teams"]["newsletter"]["agents"][0]
     if blueprint_value is None:
         del agent["blueprint"]
     else:
@@ -189,14 +218,14 @@ def test_rejects_missing_or_blank_blueprint(raw_config, config_paths, blueprint_
 def test_validates_blueprint_identifiers(raw_config, config_paths, blueprint_value, expected_code):
     from agency.configuration.models import parse_config, validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["blueprint"] = blueprint_value
+    raw_config["teams"]["newsletter"]["agents"][0]["blueprint"] = blueprint_value
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
     if expected_code is None:
         assert not any(issue.code == "invalid-blueprint-name" for issue in issues)
         parsed = parse_config(raw_config, config_paths["config_path"])
-        assert parsed.groups["newsletter"].agents["builder"].blueprint == blueprint_value
+        assert parsed.teams["newsletter"].agents["builder"].blueprint == blueprint_value
         return
 
     assert any(issue.code == expected_code and issue.field == "blueprint" for issue in issues)
@@ -208,62 +237,62 @@ def test_validates_blueprint_identifiers(raw_config, config_paths, blueprint_val
 
 
 @pytest.mark.parametrize(
-    ("default_group", "expected_code"),
+    ("default_team", "expected_code"),
     [
-        ("bad group", "invalid-group-name"),
-        ("missing-group", "missing-default-group"),
+        ("bad group", "invalid-team-name"),
+        ("missing-group", "missing-default-team"),
         ("newsletter-team", None),
     ],
 )
-def test_validates_default_group_identifier_and_reference(
-    raw_config, config_paths, default_group, expected_code
+def test_validates_default_team_identifier_and_reference(
+    raw_config, config_paths, default_team, expected_code
 ):
     from agency.configuration.models import parse_config, validate_config
 
-    if default_group == "newsletter-team":
-        group_config = raw_config["groups"].pop("newsletter")
-        raw_config["groups"][default_group] = group_config
-    raw_config["agency"]["default_group"] = default_group
+    if default_team == "newsletter-team":
+        team_config = raw_config["teams"].pop("newsletter")
+        raw_config["teams"][default_team] = team_config
+    raw_config["agency"]["default_team"] = default_team
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
     if expected_code is None:
-        assert not any(issue.code in {"invalid-group-name", "missing-default-group"} for issue in issues)
+        assert not any(issue.code in {"invalid-team-name", "missing-default-team"} for issue in issues)
         parsed = parse_config(raw_config, config_paths["config_path"])
-        assert parsed.agency.default_group == default_group
+        assert parsed.agency.default_team == default_team
         return
 
-    assert any(issue.code == expected_code and issue.field == "agency.default_group" for issue in issues)
+    assert any(issue.code == expected_code and issue.field == "agency.default_team" for issue in issues)
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
 
     assert any(
-        issue.code == expected_code and issue.field == "agency.default_group" for issue in excinfo.value.issues
+        issue.code == expected_code and issue.field == "agency.default_team" for issue in excinfo.value.issues
     )
 
 
-def test_allows_omitted_default_group(raw_config, config_paths):
+def test_allows_omitted_default_team(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
-    raw_config["agency"]["default_group"] = ""
+    raw_config["agency"]["default_team"] = ""
 
     issues = validate_config(raw_config, config_paths["config_path"])
     parsed = parse_config(raw_config, config_paths["config_path"])
 
-    assert not any(issue.field == "agency.default_group" for issue in issues)
-    assert parsed.agency.default_group == ""
+    assert not any(issue.field == "agency.default_team" for issue in issues)
+    assert parsed.agency.default_team == ""
 
 
-def test_group_requires_workspace_and_state_paths(raw_config, config_paths):
+def test_team_requires_workspace_and_state_paths(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
     for field in ("workspace_path", "path"):
         candidate = _clone_config(raw_config)
-        del candidate["groups"]["newsletter"][field]
+        del candidate["teams"]["newsletter"][field]
         issues = validate_config(candidate, config_paths["config_path"])
         assert any(
-            issue.field == f"groups.newsletter.{field}"
+            issue.field == f"teams.newsletter.{field}"
             for issue in issues
         )
 
@@ -271,10 +300,10 @@ def test_group_requires_workspace_and_state_paths(raw_config, config_paths):
 def test_relative_group_paths_resolve_from_config_directory(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
-    raw_config["groups"]["newsletter"]["workspace_path"] = "workspace"
-    raw_config["groups"]["newsletter"]["path"] = "groups/newsletter"
+    raw_config["teams"]["newsletter"]["workspace_path"] = "workspace"
+    raw_config["teams"]["newsletter"]["path"] = "groups/newsletter"
     parsed = parse_config(raw_config, config_paths["config_path"])
-    group = parsed.groups["newsletter"]
+    group = parsed.teams["newsletter"]
     assert group.workspace_path == (config_paths["config_dir"] / "workspace").resolve()
     assert group.path == (config_paths["config_dir"] / "groups/newsletter").resolve()
 
@@ -284,8 +313,8 @@ def test_parse_config_raises_validation_failed_for_missing_group_path_with_addit
 ):
     from agency.configuration.models import parse_config
 
-    del raw_config["groups"]["newsletter"]["workspace_path"]
-    raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+    del raw_config["teams"]["newsletter"]["workspace_path"]
+    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"additional_roots": ["editorial"]}
     }
 
@@ -307,7 +336,7 @@ def test_parse_config_rejects_malformed_agent_entries(
 ):
     from agency.configuration.models import parse_config
 
-    raw_config["groups"]["newsletter"]["agents"] = [agent_entry]
+    raw_config["teams"]["newsletter"]["agents"] = [agent_entry]
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
@@ -318,7 +347,7 @@ def test_parse_config_rejects_malformed_agent_entries(
 def test_rejects_duplicate_agent_names(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"].append(
+    raw_config["teams"]["newsletter"]["agents"].append(
         {
             "name": "builder",
             "blueprint": "builder-blueprint",
@@ -330,35 +359,35 @@ def test_rejects_duplicate_agent_names(raw_config, config_paths):
 
 
 @pytest.mark.parametrize(
-    ("group_key", "expected_code"),
+    ("team_key", "expected_code"),
     [
-        ("bad group", "invalid-group-name"),
-        ("Newsletter", "invalid-group-name"),
+        ("bad group", "invalid-team-name"),
+        ("Newsletter", "invalid-team-name"),
         ("newsletter-team", None),
     ],
 )
-def test_validates_group_keys_as_stable_identifiers(raw_config, config_paths, group_key, expected_code):
+def test_validates_team_keys_as_stable_identifiers(raw_config, config_paths, team_key, expected_code):
     from agency.configuration.models import parse_config, validate_config
 
-    group_config = raw_config["groups"].pop("newsletter")
-    raw_config["groups"][group_key] = group_config
-    if raw_config["agency"].get("default_group") == "newsletter":
-        raw_config["agency"]["default_group"] = group_key
+    team_config = raw_config["teams"].pop("newsletter")
+    raw_config["teams"][team_key] = team_config
+    if raw_config["agency"].get("default_team") == "newsletter":
+        raw_config["agency"]["default_team"] = team_key
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
     if expected_code is None:
-        assert not any(issue.code == "invalid-group-name" for issue in issues)
+        assert not any(issue.code == "invalid-team-name" for issue in issues)
         parsed = parse_config(raw_config, config_paths["config_path"])
-        assert group_key in parsed.groups
+        assert team_key in parsed.teams
         return
 
-    assert any(issue.code == expected_code and issue.field == "group" for issue in issues)
+    assert any(issue.code == expected_code and issue.field == "team" for issue in issues)
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
 
-    assert any(issue.code == expected_code and issue.field == "group" for issue in excinfo.value.issues)
+    assert any(issue.code == expected_code and issue.field == "team" for issue in excinfo.value.issues)
 
 
 @pytest.mark.parametrize(
@@ -373,7 +402,7 @@ def test_validates_memory_channel_keys_as_stable_identifiers(raw_config, config_
     from agency.configuration.models import parse_config, validate_config
 
     raw_config["memory"]["channels"] = {channel_key: {"display_name": "Ops"}}
-    raw_config["groups"]["newsletter"]["agents"][0]["default_memory"] = {
+    raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {
         "scope": "channel",
         "channel": channel_key,
     }
@@ -397,7 +426,7 @@ def test_validates_memory_channel_keys_as_stable_identifiers(raw_config, config_
 def test_rejects_duplicate_routine_names(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    agent = raw_config["groups"]["newsletter"]["agents"][0]
+    agent = raw_config["teams"]["newsletter"]["agents"][0]
     agent["routines"] = [
         {"id": "daily"},
         {"id": "daily"},
@@ -409,7 +438,7 @@ def test_rejects_duplicate_routine_names(raw_config, config_paths):
 def test_rejects_missing_explicit_integration(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    del raw_config["groups"]["newsletter"]["agents"][0]["integration"]
+    del raw_config["teams"]["newsletter"]["agents"][0]["integration"]
     issues = validate_config(raw_config, config_paths["config_path"])
     assert any(issue.code == "missing-explicit-integration" for issue in issues)
 
@@ -421,9 +450,9 @@ def test_rejects_missing_or_blank_group_default_integration(
     from agency.configuration.models import parse_config, validate_config
 
     if default_integration_value is None:
-        del raw_config["groups"]["newsletter"]["default_integration"]
+        del raw_config["teams"]["newsletter"]["default_integration"]
     else:
-        raw_config["groups"]["newsletter"]["default_integration"] = default_integration_value
+        raw_config["teams"]["newsletter"]["default_integration"] = default_integration_value
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
@@ -437,10 +466,10 @@ def test_rejects_missing_or_blank_group_default_integration(
 
 
 def test_rejects_invalid_group_allowlist(raw_config, config_paths):
-    """v4 tools key is now rejected outright in v5."""
+    """v4 tools key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["runtime"] = {
+    raw_config["teams"]["newsletter"]["runtime"] = {
         "tools": {"mode": "allowlist", "names": ["", "  ", "ops"]}
     }
 
@@ -450,10 +479,10 @@ def test_rejects_invalid_group_allowlist(raw_config, config_paths):
 
 
 def test_rejects_group_additional_roots(raw_config, config_paths):
-    """v4 sandbox key is now rejected outright in v5."""
+    """v4 sandbox key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["runtime"] = {
+    raw_config["teams"]["newsletter"]["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": ["editorial"], "additional_roots": ["tmp"]}
     }
 
@@ -463,10 +492,10 @@ def test_rejects_group_additional_roots(raw_config, config_paths):
 
 
 def test_rejects_agent_roots(raw_config, config_paths):
-    """v4 sandbox key is now rejected outright in v5."""
+    """v4 sandbox key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": ["tmp"]}
     }
 
@@ -476,10 +505,10 @@ def test_rejects_agent_roots(raw_config, config_paths):
 
 
 def test_validates_group_sandbox_semantics(raw_config, config_paths):
-    """v4 sandbox key is now rejected outright in v5."""
+    """v4 sandbox key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["runtime"] = {"sandbox": {"mode": "unrestricted", "roots": ["tmp"]}}
+    raw_config["teams"]["newsletter"]["runtime"] = {"sandbox": {"mode": "unrestricted", "roots": ["tmp"]}}
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
@@ -489,7 +518,7 @@ def test_validates_group_sandbox_semantics(raw_config, config_paths):
 def test_accepts_restricted_group_permissions(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
-    raw_config["groups"]["newsletter"]["runtime"] = {
+    raw_config["teams"]["newsletter"]["runtime"] = {
         "permissions": {"mode": "restricted", "rules": [{"tools": ["read"]}]}
     }
 
@@ -497,15 +526,15 @@ def test_accepts_restricted_group_permissions(raw_config, config_paths):
     assert not any(issue.code == "invalid-field-shape" for issue in issues)
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.groups["newsletter"].runtime.permissions.mode == "restricted"
-    assert parsed.groups["newsletter"].runtime.permissions.rules[0].tools == ("read",)
+    assert parsed.teams["newsletter"].runtime.permissions.mode == "restricted"
+    assert parsed.teams["newsletter"].runtime.permissions.rules[0].tools == ("read",)
 
 
 def test_accepts_agent_permission_rules(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
-    ws = str(raw_config["groups"]["newsletter"]["workspace_path"])
-    raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+    ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
+    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "permissions": {"rules": [{"path": ws, "tools": ["read", "write"]}]}
     }
 
@@ -513,14 +542,14 @@ def test_accepts_agent_permission_rules(raw_config, config_paths):
     assert not any(issue.code == "invalid-field-shape" for issue in issues)
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    rule = parsed.groups["newsletter"].agents["builder"].runtime.permissions.rules[0]
+    rule = parsed.teams["newsletter"].agents["builder"].runtime.permissions.rules[0]
     assert rule.tools == ("read", "write")
 
 
 def test_rejects_channel_memory_reference_without_channel(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["default_memory"] = {"scope": "channel"}
+    raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {"scope": "channel"}
     issues = validate_config(raw_config, config_paths["config_path"])
     assert any(issue.code == "missing-memory-channel" for issue in issues)
 
@@ -528,7 +557,7 @@ def test_rejects_channel_memory_reference_without_channel(raw_config, config_pat
 def test_rejects_undeclared_channel_memory_reference(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["default_memory"] = {
+    raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {
         "scope": "channel",
         "channel": "missing",
     }
@@ -540,7 +569,7 @@ def test_accepts_declared_channel_memory_reference(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
     raw_config["memory"]["channels"] = {"ops": {"display_name": "Ops"}}
-    raw_config["groups"]["newsletter"]["agents"][0]["default_memory"] = {
+    raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {
         "scope": "channel",
         "channel": "ops",
     }
@@ -549,8 +578,8 @@ def test_accepts_declared_channel_memory_reference(raw_config, config_paths):
 
 
 @pytest.mark.parametrize("scope_path", [
-    ["groups", "newsletter", "agents", 0, "default_memory"],
-    ["groups", "newsletter", "agents", 0, "routines", 0, "memory"],
+    ["teams", "newsletter", "agents", 0, "default_memory"],
+    ["teams", "newsletter", "agents", 0, "routines", 0, "memory"],
 ])
 @pytest.mark.parametrize("channel_value", ["support", "   "])
 def test_rejects_non_channel_memory_selectors_with_channel(raw_config, config_paths, scope_path, channel_value):
@@ -577,7 +606,7 @@ def test_rejects_non_channel_memory_selectors_with_channel(raw_config, config_pa
 def test_rejects_schedule_without_one_of(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [
+    raw_config["teams"]["newsletter"]["agents"][0]["routines"] = [
         {"id": "daily", "prompt": {"scope": "blueprint", "name": "daily"}, "schedule": {}},
     ]
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -588,7 +617,7 @@ def test_rejects_schedule_without_one_of(raw_config, config_paths):
 def test_rejects_non_mapping_schedule_values(raw_config, config_paths, schedule_value):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [
+    raw_config["teams"]["newsletter"]["agents"][0]["routines"] = [
         {"id": "daily", "prompt": {"scope": "blueprint", "name": "daily"}, "schedule": schedule_value},
     ]
 
@@ -600,11 +629,11 @@ def test_rejects_non_mapping_schedule_values(raw_config, config_paths, schedule_
 def test_rejects_non_mapping_routine_entries(raw_config, config_paths, routine_value):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [routine_value]
+    raw_config["teams"]["newsletter"]["agents"][0]["routines"] = [routine_value]
 
     issues = validate_config(raw_config, config_paths["config_path"])
     assert any(
-        issue.code == "invalid-routine-entry" and issue.field == "groups.newsletter.agents[0].routines[0]"
+        issue.code == "invalid-routine-entry" and issue.field == "teams.newsletter.agents[0].routines[0]"
         for issue in issues
     )
 
@@ -613,22 +642,22 @@ def test_rejects_non_mapping_routine_entries(raw_config, config_paths, routine_v
 def test_parse_config_rejects_non_mapping_routine_entries(raw_config, config_paths, routine_value):
     from agency.configuration.models import parse_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["routines"] = [routine_value]
+    raw_config["teams"]["newsletter"]["agents"][0]["routines"] = [routine_value]
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
 
     assert any(
-        issue.code == "invalid-routine-entry" and issue.field == "groups.newsletter.agents[0].routines[0]"
+        issue.code == "invalid-routine-entry" and issue.field == "teams.newsletter.agents[0].routines[0]"
         for issue in excinfo.value.issues
     )
 
 
 def test_rejects_empty_allowlist(raw_config, config_paths):
-    """v4 tools key is now rejected outright in v5."""
+    """v4 tools key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "tools": {"mode": "allowlist", "names": []}
     }
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -637,10 +666,10 @@ def test_rejects_empty_allowlist(raw_config, config_paths):
 
 @pytest.mark.parametrize("names, expected_field", [([""], "runtime.tools.names[0]"), (["   "], "runtime.tools.names[0]")])
 def test_rejects_blank_allowlist_names(raw_config, config_paths, names, expected_field):
-    """v4 tools key is now rejected outright in v5."""
+    """v4 tools key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "tools": {"mode": "allowlist", "names": names}
     }
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -648,10 +677,10 @@ def test_rejects_blank_allowlist_names(raw_config, config_paths, names, expected
 
 
 def test_rejects_unrestricted_with_additions(raw_config, config_paths):
-    """v4 sandbox key is now rejected outright in v5."""
+    """v4 sandbox key is now rejected outright in v6."""
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {
+    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"mode": "unrestricted", "additional_roots": ["/tmp"]}
     }
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -663,10 +692,10 @@ def test_parse_validate_parity_for_superseded_keys(raw_config, config_paths):
     from agency.configuration.models import parse_config, validate_config
 
     candidate = _clone_config(raw_config)
-    candidate["groups"]["newsletter"]["runtime"] = {
+    candidate["teams"]["newsletter"]["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": ["editorial"]}
     }
-    candidate["groups"]["newsletter"]["agents"][0]["runtime"] = {
+    candidate["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"mode": "restricted"}
     }
 
@@ -682,16 +711,16 @@ def test_parse_validate_parity_for_superseded_keys(raw_config, config_paths):
 def test_preserves_supported_workspace_fields(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
-    raw_config["groups"]["newsletter"]["workspaces"][0]["extra"] = "kept"
+    raw_config["teams"]["newsletter"]["workspaces"][0]["extra"] = "kept"
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.groups["newsletter"].workspaces[0].extra == "kept"
+    assert parsed.teams["newsletter"].workspaces[0].extra == "kept"
 
 
 @pytest.mark.parametrize(
     "mutator",
     [
         pytest.param(
-            lambda raw: raw["groups"]["newsletter"]["agents"].append(
+            lambda raw: raw["teams"]["newsletter"]["agents"].append(
                 {
                     "name": "builder",
                     "blueprint": "other-blueprint",
@@ -701,45 +730,45 @@ def test_preserves_supported_workspace_fields(raw_config, config_paths):
             id="duplicate-agent-name",
         ),
         pytest.param(
-            lambda raw: raw["groups"]["newsletter"]["agents"][0].update({"name": "bad name"}),
+            lambda raw: raw["teams"]["newsletter"]["agents"][0].update({"name": "bad name"}),
             id="invalid-agent-identifier",
         ),
         pytest.param(
-            lambda raw: raw["groups"].update({"bad group": raw["groups"].pop("newsletter")}),
-            id="invalid-group-identifier",
+            lambda raw: raw["teams"].update({"bad team": raw["teams"].pop("newsletter")}),
+            id="invalid-team-identifier",
         ),
         pytest.param(
             lambda raw: raw["memory"].update({"channels": {"bad channel": {"display_name": "Ops"}}}),
             id="invalid-channel-identifier",
         ),
         pytest.param(
-            lambda raw: raw["groups"]["newsletter"]["agents"][0].update({"blueprint": "bad blueprint"}),
+            lambda raw: raw["teams"]["newsletter"]["agents"][0].update({"blueprint": "bad blueprint"}),
             id="invalid-blueprint-identifier",
         ),
         pytest.param(
-            lambda raw: raw["agency"].update({"default_group": "missing-group"}),
-            id="missing-default-group-reference",
+            lambda raw: raw["agency"].update({"default_team": "missing-team"}),
+            id="missing-default-team-reference",
         ),
         pytest.param(
-            lambda raw: raw["groups"]["newsletter"]["agents"][0]["default_memory"].update(
+            lambda raw: raw["teams"]["newsletter"]["agents"][0]["default_memory"].update(
                 {"scope": "channel", "channel": "missing"}
             ),
             id="missing-channel-reference",
         ),
         pytest.param(
-            lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
                 {"runtime": {"tools": {"mode": "allowlist", "names": [""]}}}
             ),
             id="blank-allowlist-name",
         ),
         pytest.param(
-            lambda raw: raw["groups"]["newsletter"]["agents"][0].update(
+            lambda raw: raw["teams"]["newsletter"]["agents"][0].update(
                 {"runtime": {"sandbox": {"mode": "unrestricted", "additional_roots": ["tmp"]}}}
             ),
             id="sandbox-contradiction",
         ),
         pytest.param(
-            lambda raw: raw["groups"]["newsletter"]["agents"][0]["routines"].append(
+            lambda raw: raw["teams"]["newsletter"]["agents"][0]["routines"].append(
                 {
                     "id": "daily-review",
                     "prompt": {"scope": "blueprint", "name": "daily-review-2"},
@@ -754,7 +783,7 @@ def test_parse_and_validate_reject_same_semantic_invalid_configs(raw_config, con
     from agency.configuration.models import parse_config, validate_config
 
     candidate = _clone_config(raw_config)
-    agent = candidate["groups"]["newsletter"]["agents"][0]
+    agent = candidate["teams"]["newsletter"]["agents"][0]
     agent.setdefault("default_memory", {"scope": "agent"})
     mutator(candidate)
 
@@ -776,13 +805,13 @@ def test_parse_and_validate_share_same_valid_result(raw_config, config_paths):
     parsed = parse_config(candidate, config_paths["config_path"])
 
     assert issues == ()
-    assert parsed.groups["newsletter"].agents["builder"].routines[0].id == "daily-review"
+    assert parsed.teams["newsletter"].agents["builder"].routines[0].id == "daily-review"
 
 
 def test_parse_config_preserves_routine_arguments_order_and_text(raw_config, config_paths):
     from agency.configuration.models import parse_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["routines"][0]["arguments"] = [
+    raw_config["teams"]["newsletter"]["agents"][0]["routines"][0]["arguments"] = [
         "--mode=review",
         "literal  value  with  spaces",
         "--flag=",
@@ -790,7 +819,7 @@ def test_parse_config_preserves_routine_arguments_order_and_text(raw_config, con
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
-    assert parsed.groups["newsletter"].agents["builder"].routines[0].arguments == (
+    assert parsed.teams["newsletter"].agents["builder"].routines[0].arguments == (
         "--mode=review",
         "literal  value  with  spaces",
         "--flag=",
@@ -800,9 +829,9 @@ def test_parse_config_preserves_routine_arguments_order_and_text(raw_config, con
 @pytest.mark.parametrize(
     ("bad_arguments", "expected_field"),
     [
-        ("--mode=review", "groups.newsletter.agents[0].routines[0].arguments"),
-        (["--ok", 3], "groups.newsletter.agents[0].routines[0].arguments[1]"),
-        (["--ok", ""], "groups.newsletter.agents[0].routines[0].arguments[1]"),
+        ("--mode=review", "teams.newsletter.agents[0].routines[0].arguments"),
+        (["--ok", 3], "teams.newsletter.agents[0].routines[0].arguments[1]"),
+        (["--ok", ""], "teams.newsletter.agents[0].routines[0].arguments[1]"),
     ],
 )
 def test_parse_config_rejects_malformed_routine_arguments(
@@ -810,7 +839,7 @@ def test_parse_config_rejects_malformed_routine_arguments(
 ):
     from agency.configuration.models import parse_config, validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["routines"][0]["arguments"] = bad_arguments
+    raw_config["teams"]["newsletter"]["agents"][0]["routines"][0]["arguments"] = bad_arguments
 
     issues = validate_config(raw_config, config_paths["config_path"])
     assert any(issue.field == expected_field for issue in issues)
@@ -826,7 +855,7 @@ def test_parse_config_rejects_malformed_routine_arguments(
     [
         ("agency", [], "agency"),
         ("memory", [], "memory"),
-        ("groups", [], "groups"),
+        ("teams", [], "teams"),
     ],
 )
 def test_parse_config_rejects_malformed_top_level_mappings(
@@ -843,16 +872,16 @@ def test_parse_config_rejects_malformed_top_level_mappings(
 
 
 @pytest.mark.parametrize(
-    ("group_value", "expected_field"),
+    ("team_value", "expected_field"),
     [
-        ([], "groups.newsletter"),
-        ("newsletter", "groups.newsletter"),
+        ([], "teams.newsletter"),
+        ("newsletter", "teams.newsletter"),
     ],
 )
-def test_parse_config_rejects_malformed_group_records(raw_config, config_paths, group_value, expected_field):
+def test_parse_config_rejects_malformed_team_records(raw_config, config_paths, team_value, expected_field):
     from agency.configuration.models import parse_config
 
-    raw_config["groups"]["newsletter"] = group_value
+    raw_config["teams"]["newsletter"] = team_value
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
@@ -865,16 +894,16 @@ def test_parse_config_rejects_malformed_group_records(raw_config, config_paths, 
     [
         (["memory", "channels"], [], "memory.channels"),
         (["memory", "channels", "support"], [], "memory.channels.support"),
-        (["groups", "newsletter", "runtime"], [], "groups.newsletter.runtime"),
-        (["groups", "newsletter", "dispatch"], [], "groups.newsletter.dispatch"),
-        (["groups", "newsletter", "workspaces"], {}, "groups.newsletter.workspaces"),
-        (["groups", "newsletter", "agents"], {}, "groups.newsletter.agents"),
-        (["groups", "newsletter", "agents", 0, "identity"], [], "groups.newsletter.agents[0].identity"),
-        (["groups", "newsletter", "agents", 0, "runtime"], [], "groups.newsletter.agents[0].runtime"),
-        (["groups", "newsletter", "agents", 0, "default_memory"], [], "groups.newsletter.agents[0].default_memory"),
-        (["groups", "newsletter", "agents", 0, "routines"], {}, "groups.newsletter.agents[0].routines"),
-        (["groups", "newsletter", "agents", 0, "routines", 0, "schedule"], [], "groups.newsletter.agents[0].routines[0].schedule"),
-        (["groups", "newsletter", "agents", 0, "routines", 0, "memory"], [], "groups.newsletter.agents[0].routines[0].memory"),
+        (["teams", "newsletter", "runtime"], [], "teams.newsletter.runtime"),
+        (["teams", "newsletter", "dispatch"], [], "teams.newsletter.dispatch"),
+        (["teams", "newsletter", "workspaces"], {}, "teams.newsletter.workspaces"),
+        (["teams", "newsletter", "agents"], {}, "teams.newsletter.agents"),
+        (["teams", "newsletter", "agents", 0, "identity"], [], "teams.newsletter.agents[0].identity"),
+        (["teams", "newsletter", "agents", 0, "runtime"], [], "teams.newsletter.agents[0].runtime"),
+        (["teams", "newsletter", "agents", 0, "default_memory"], [], "teams.newsletter.agents[0].default_memory"),
+        (["teams", "newsletter", "agents", 0, "routines"], {}, "teams.newsletter.agents[0].routines"),
+        (["teams", "newsletter", "agents", 0, "routines", 0, "schedule"], [], "teams.newsletter.agents[0].routines[0].schedule"),
+        (["teams", "newsletter", "agents", 0, "routines", 0, "memory"], [], "teams.newsletter.agents[0].routines[0].memory"),
     ],
 )
 def test_parse_config_rejects_malformed_nested_shapes(raw_config, config_paths, path, bad_value, expected_field):
@@ -914,7 +943,7 @@ def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None,
 
     agency = {
         "title": "Test",
-        "default_group": "grp",
+        "default_team": "grp",
         "ai_backend": "copilot",
         "agent_library": str(lib),
         "compilation_cache": str(tmp_path / "cache"),
@@ -925,9 +954,9 @@ def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None,
         agency["jobs"] = {"pool": jobs_pool}
 
     raw = {
-        "schema_version": 5,
+        "schema_version": 6,
         "agency": agency,
-        "groups": {
+        "teams": {
             "grp": {
                 "name": "Grp",
                 "workspace_path": str(ws),
@@ -969,14 +998,14 @@ def load_config(config_path):
 def test_schedule_accepts_a_catch_up_value(tmp_path):
     config = _write_minimal_config(tmp_path, catch_up="always")
     parsed = load_config(config)
-    routine = parsed.groups["grp"].agents["product"].routines[0]
+    routine = parsed.teams["grp"].agents["product"].routines[0]
     assert routine.schedule.catch_up == "always"
 
 
 def test_schedule_catch_up_defaults_to_none_in_the_model(tmp_path):
     config = _write_minimal_config(tmp_path)
     parsed = load_config(config)
-    routine = parsed.groups["grp"].agents["product"].routines[0]
+    routine = parsed.teams["grp"].agents["product"].routines[0]
     assert routine.schedule.catch_up is None
 
 
@@ -1015,7 +1044,7 @@ def test_jobs_pool_below_one_is_rejected(tmp_path):
 def test_v5_group_runtime_rejects_v4_key(raw_config, config_paths, key):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["runtime"][key] = {"mode": "all"}
+    raw_config["teams"]["newsletter"]["runtime"][key] = {"mode": "all"}
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
@@ -1028,7 +1057,7 @@ def test_v5_group_runtime_rejects_v4_key(raw_config, config_paths, key):
 def test_v5_agent_runtime_rejects_v4_key(raw_config, config_paths, key):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["runtime"] = {key: {"mode": "all"}}
+    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {key: {"mode": "all"}}
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
@@ -1039,7 +1068,7 @@ def test_v5_agent_runtime_rejects_v4_key(raw_config, config_paths, key):
 def test_v5_agent_rejects_capabilities_key(raw_config, config_paths):
     from agency.configuration.models import validate_config
 
-    raw_config["groups"]["newsletter"]["agents"][0]["capabilities"] = {"write": True}
+    raw_config["teams"]["newsletter"]["agents"][0]["capabilities"] = {"write": True}
 
     issues = validate_config(raw_config, config_paths["config_path"])
 

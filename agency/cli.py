@@ -24,7 +24,7 @@ from agency.configuration import (
     ValidationIssue,
     config_revision,
     parse_config,
-    resolve_group_paths,
+    resolve_team_paths,
 )
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
@@ -183,7 +183,7 @@ def _group(args: Namespace):
 
 def _resolve_group(args: Namespace) -> dict[str, Any]:
     snapshot, group_id, group = _group(args)
-    paths = resolve_group_paths(group)
+    paths = resolve_team_paths(group)
     from agency.permissions.eligibility import may_execute_decisions
     return {
         "key": group_id,
@@ -438,7 +438,7 @@ def cmd_status(args: Namespace) -> int:
     job_store = JobStore(snapshot.config.agency.memory_store)
     result = {}
     for group_id, group in snapshot.config.groups.items():
-        paths = resolve_group_paths(group)
+        paths = resolve_team_paths(group)
         observations = _markdown_items(paths.observations)
         proposals = _markdown_items(paths.proposals)
         decisions = _markdown_items(paths.decisions)

@@ -10,7 +10,7 @@ from .store import ConfigSnapshot, ConfigStore
 @dataclass(frozen=True)
 class AgencySettingsPatch:
     title: str
-    default_group: str
+    default_team: str
     ai_backend: str
     theme: str
     dispatch_interval: int
@@ -21,7 +21,7 @@ class AgencySettingsPatch:
 
 
 @dataclass(frozen=True)
-class GroupSettingsPatch:
+class TeamSettingsPatch:
     name: str
     workspace_path: str
     path: str
@@ -29,12 +29,12 @@ class GroupSettingsPatch:
 
 
 @dataclass(frozen=True)
-class GroupDispatchPatch:
+class TeamDispatchPatch:
     enabled: bool
 
 
 @dataclass(frozen=True)
-class GroupSettingsStatePatch:
+class TeamSettingsStatePatch:
     name: str
     workspace_path: str
     path: str
@@ -47,7 +47,7 @@ class GroupSettingsStatePatch:
 
 
 @dataclass(frozen=True)
-class GroupCreateStatePatch:
+class TeamCreateStatePatch:
     name: str
     workspace_path: str
     path: str
@@ -72,19 +72,19 @@ class AgentRuntimePatch:
     rules: tuple[dict[str, Any], ...] | None = None
 
 
-def _groups(raw: dict[str, Any]) -> dict[str, Any]:
-    groups = raw.setdefault("groups", {})
-    if not isinstance(groups, dict):
-        raise TypeError("groups must be a mapping")
-    return groups
+def _teams(raw: dict[str, Any]) -> dict[str, Any]:
+    teams = raw.setdefault("teams", {})
+    if not isinstance(teams, dict):
+        raise TypeError("teams must be a mapping")
+    return teams
 
 
-def _group(raw: dict[str, Any], group_id: str) -> dict[str, Any]:
-    groups = _groups(raw)
-    group = groups[group_id]
-    if not isinstance(group, dict):
-        raise TypeError(f"groups.{group_id} must be a mapping")
-    return group
+def _team(raw: dict[str, Any], team_id: str) -> dict[str, Any]:
+    teams = _teams(raw)
+    team = teams[team_id]
+    if not isinstance(team, dict):
+        raise TypeError(f"teams.{team_id} must be a mapping")
+    return team
 
 
 def _agents(group: dict[str, Any]) -> list[dict[str, Any]]:
@@ -118,7 +118,7 @@ def patch_agency_settings(
     def apply(raw: dict[str, Any]) -> None:
         agency = raw.setdefault("agency", {})
         agency["title"] = patch.title
-        agency["default_group"] = patch.default_group
+        agency["default_team"] = patch.default_team
         agency["ai_backend"] = patch.ai_backend
         agency["theme"] = patch.theme
         agency["agent_library"] = patch.agent_library
@@ -131,17 +131,17 @@ def patch_agency_settings(
     return store.patch(expected_revision, apply)
 
 
-def create_group(
+def create_team(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
-    patch: GroupSettingsPatch,
+    team_id: str,
+    patch: TeamSettingsPatch,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        groups = _groups(raw)
-        if group_id in groups:
-            raise ValueError(f"Group already exists: {group_id}")
-        groups[group_id] = {
+        teams = _teams(raw)
+        if team_id in teams:
+            raise ValueError(f"Team already exists: {team_id}")
+        teams[team_id] = {
             "name": patch.name,
             "workspace_path": patch.workspace_path,
             "path": patch.path,
@@ -152,17 +152,17 @@ def create_group(
     return store.patch(expected_revision, apply)
 
 
-def create_group_state(
+def create_team_state(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
-    patch: GroupCreateStatePatch,
+    team_id: str,
+    patch: TeamCreateStatePatch,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        groups = _groups(raw)
-        if group_id in groups:
-            raise ValueError(f"Group already exists: {group_id}")
-        groups[group_id] = {
+        teams = _teams(raw)
+        if team_id in teams:
+            raise ValueError(f"Team already exists: {team_id}")
+        teams[team_id] = {
             "name": patch.name,
             "workspace_path": patch.workspace_path,
             "path": patch.path,
@@ -184,71 +184,71 @@ def create_group_state(
     return store.patch(expected_revision, apply)
 
 
-def patch_group_settings(
+def patch_team_settings(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
-    patch: GroupSettingsPatch,
+    team_id: str,
+    patch: TeamSettingsPatch,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        group = _group(raw, group_id)
-        group["name"] = patch.name
-        group["workspace_path"] = patch.workspace_path
-        group["path"] = patch.path
-        group["default_integration"] = patch.default_integration
+        team = _team(raw, team_id)
+        team["name"] = patch.name
+        team["workspace_path"] = patch.workspace_path
+        team["path"] = patch.path
+        team["default_integration"] = patch.default_integration
 
     return store.patch(expected_revision, apply)
 
 
-def patch_group_dispatch(
+def patch_team_dispatch(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
-    patch: GroupDispatchPatch,
+    team_id: str,
+    patch: TeamDispatchPatch,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        group = _group(raw, group_id)
-        group["dispatch"] = {
+        team = _team(raw, team_id)
+        team["dispatch"] = {
             "enabled": patch.enabled,
         }
 
     return store.patch(expected_revision, apply)
 
 
-def patch_group_settings_state(
+def patch_team_settings_state(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
-    patch: GroupSettingsStatePatch,
+    team_id: str,
+    patch: TeamSettingsStatePatch,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        group = _group(raw, group_id)
-        group["name"] = patch.name
-        group["workspace_path"] = patch.workspace_path
-        group["path"] = patch.path
-        group["default_integration"] = patch.default_integration
+        team = _team(raw, team_id)
+        team["name"] = patch.name
+        team["workspace_path"] = patch.workspace_path
+        team["path"] = patch.path
+        team["default_integration"] = patch.default_integration
 
-        runtime = group.setdefault("runtime", {})
+        runtime = team.setdefault("runtime", {})
         if not isinstance(runtime, dict):
-            raise TypeError(f"groups.{group_id}.runtime must be a mapping")
+            raise TypeError(f"teams.{team_id}.runtime must be a mapping")
         runtime["timeout"] = patch.runtime_timeout
 
         permissions = runtime.setdefault("permissions", {})
         if not isinstance(permissions, dict):
             raise TypeError(
-                f"groups.{group_id}.runtime.permissions must be a mapping"
+                f"teams.{team_id}.runtime.permissions must be a mapping"
             )
         if patch.permission_mode is not None:
             permissions["mode"] = patch.permission_mode
         if patch.permission_rules is not None:
             permissions["rules"] = list(deepcopy(patch.permission_rules))
 
-        dispatch = group.setdefault("dispatch", {})
+        dispatch = team.setdefault("dispatch", {})
         if not isinstance(dispatch, dict):
-            raise TypeError(f"groups.{group_id}.dispatch must be a mapping")
+            raise TypeError(f"teams.{team_id}.dispatch must be a mapping")
         dispatch["enabled"] = patch.dispatch_enabled
 
-        group["workspaces"] = deepcopy(list(patch.workspaces))
+        team["workspaces"] = deepcopy(list(patch.workspaces))
 
     return store.patch(expected_revision, apply)
 
@@ -256,12 +256,12 @@ def patch_group_settings_state(
 def create_agent_instance(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent: dict[str, Any],
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        group = _group(raw, group_id)
-        agents = _agents(group)
+        team = _team(raw, team_id)
+        agents = _agents(team)
         agent_name = agent.get("name")
         for entry in agents:
             if isinstance(entry, dict) and entry.get("name") == agent_name:
@@ -274,15 +274,15 @@ def create_agent_instance(
 def patch_agent_profile(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     patch: AgentProfilePatch,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agent = _agent(_group(raw, group_id), agent_id)
+        agent = _agent(_team(raw, team_id), agent_id)
         identity = agent.setdefault("identity", {})
         if not isinstance(identity, dict):
-            raise TypeError(f"groups.{group_id}.agents.{agent_id}.identity must be a mapping")
+            raise TypeError(f"teams.{team_id}.agents.{agent_id}.identity must be a mapping")
         _merge_mapping(
             identity,
             {
@@ -298,15 +298,15 @@ def patch_agent_profile(
 def patch_agent_runtime(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     patch: AgentRuntimePatch,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agent = _agent(_group(raw, group_id), agent_id)
+        agent = _agent(_team(raw, team_id), agent_id)
         runtime = agent.setdefault("runtime", {})
         if not isinstance(runtime, dict):
-            raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime must be a mapping")
+            raise TypeError(f"teams.{team_id}.agents.{agent_id}.runtime must be a mapping")
         if patch.timeout is None:
             _clear_known_keys(runtime, ("timeout",))
         else:
@@ -315,7 +315,7 @@ def patch_agent_runtime(
         if patch.rules is not None:
             permissions = runtime.setdefault("permissions", {})
             if not isinstance(permissions, dict):
-                raise TypeError(f"groups.{group_id}.agents.{agent_id}.runtime.permissions must be a mapping")
+                raise TypeError(f"teams.{team_id}.agents.{agent_id}.runtime.permissions must be a mapping")
             permissions["rules"] = list(deepcopy(patch.rules))
 
     return store.patch(expected_revision, apply)
@@ -324,12 +324,12 @@ def patch_agent_runtime(
 def replace_agent_routines(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     routines: list[dict[str, Any]],
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agent = _agent(_group(raw, group_id), agent_id)
+        agent = _agent(_team(raw, team_id), agent_id)
         agent["routines"] = deepcopy(routines)
 
     return store.patch(expected_revision, apply)
@@ -338,16 +338,16 @@ def replace_agent_routines(
 def register_agent_prompt(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     prompt_name: str,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agent = _agent(_group(raw, group_id), agent_id)
+        agent = _agent(_team(raw, team_id), agent_id)
         prompts = agent.setdefault("prompts", [])
         if not isinstance(prompts, list):
             raise TypeError(
-                f"groups.{group_id}.agents.{agent_id}.prompts must be a list"
+                f"teams.{team_id}.agents.{agent_id}.prompts must be a list"
             )
         if prompt_name in prompts:
             raise ValueError(f"Prompt already registered: {prompt_name}")
@@ -359,16 +359,16 @@ def register_agent_prompt(
 def unregister_agent_prompt(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     prompt_name: str,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agent = _agent(_group(raw, group_id), agent_id)
+        agent = _agent(_team(raw, team_id), agent_id)
         prompts = agent.setdefault("prompts", [])
         if not isinstance(prompts, list):
             raise TypeError(
-                f"groups.{group_id}.agents.{agent_id}.prompts must be a list"
+                f"teams.{team_id}.agents.{agent_id}.prompts must be a list"
             )
         try:
             prompts.remove(prompt_name)
@@ -381,12 +381,12 @@ def unregister_agent_prompt(
 def remove_agent_instance(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
     agent_id: str,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        group = _group(raw, group_id)
-        agents = _agents(group)
+        team = _team(raw, team_id)
+        agents = _agents(team)
         for index, entry in enumerate(agents):
             if isinstance(entry, dict) and entry.get("name") == agent_id:
                 del agents[index]
@@ -436,19 +436,19 @@ def hide_all_tips(
     return store.patch(expected_revision, apply)
 
 
-def delete_group(
+def delete_team(
     store: ConfigStore,
     expected_revision: str,
-    group_id: str,
+    team_id: str,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        groups = _groups(raw)
-        if group_id not in groups:
-            raise KeyError(group_id)
-        del groups[group_id]
+        teams = _teams(raw)
+        if team_id not in teams:
+            raise KeyError(team_id)
+        del teams[team_id]
 
         agency = raw.setdefault("agency", {})
-        if agency.get("default_group") == group_id:
-            agency["default_group"] = next(iter(groups), "")
+        if agency.get("default_team") == team_id:
+            agency["default_team"] = next(iter(teams), "")
 
     return store.patch(expected_revision, apply)

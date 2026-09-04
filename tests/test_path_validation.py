@@ -30,7 +30,7 @@ def _resolved_config(tmp_path: Path, raw_config: dict):
         memory_store=str(memory),
         prompt_store=str(prompt_store),
     )
-    group = raw["groups"]["newsletter"]
+    group = raw["teams"]["newsletter"]
     group["workspace_path"] = str(workspace)
     group["path"] = str(tmp_path / "groups" / "newsletter")
     group["runtime"] = {
@@ -83,17 +83,17 @@ def test_missing_or_non_directory_group_workspace_path_fails_closed(tmp_path, ra
     workspace_path = tmp_path / "bad-workspace"
     if kind == "file":
         workspace_path.write_text("not a directory", encoding="utf-8")
-    raw["groups"]["newsletter"]["workspace_path"] = str(workspace_path)
+    raw["teams"]["newsletter"]["workspace_path"] = str(workspace_path)
     config = parse_config(raw, tmp_path / "config.yaml").resolved
 
     issues = validate_resolved_paths(config)
 
-    assert any(issue.code == "invalid-group-workspace" for issue in issues)
+    assert any(issue.code == "invalid-team-workspace" for issue in issues)
 
 
 def test_missing_restricted_root_fails_closed(tmp_path, raw_config):
     raw, _ = _resolved_config(tmp_path, raw_config)
-    raw["groups"]["newsletter"]["runtime"]["permissions"]["rules"] = [
+    raw["teams"]["newsletter"]["runtime"]["permissions"]["rules"] = [
         {"path": str(tmp_path / "missing-root"), "tools": ["read"]}
     ]
     config = parse_config(raw, tmp_path / "config.yaml").resolved
@@ -116,7 +116,7 @@ def test_control_and_runtime_overlap_is_rejected_in_both_directions(
         raw["agency"]["memory_store"] = str(runtime / "memory")
     runtime.mkdir(parents=True)
     Path(raw["agency"]["memory_store"]).mkdir(parents=True, exist_ok=True)
-    raw["groups"]["newsletter"]["path"] = str(runtime)
+    raw["teams"]["newsletter"]["path"] = str(runtime)
     config = parse_config(raw, tmp_path / "config.yaml").resolved
 
     issues = validate_resolved_paths(config)
@@ -142,28 +142,28 @@ def test_unwritable_nearest_parent_is_rejected_where_portable(tmp_path, raw_conf
 
 
 def test_resolved_group_paths_have_no_shared_segment(tmp_path, raw_config):
-    from agency.configuration.group_paths import resolve_group_paths
+    from agency.configuration.team_paths import resolve_team_paths
     from agency.configuration.models import parse_config
 
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
-    raw_config["groups"]["newsletter"]["workspace_path"] = str(workspace)
-    raw_config["groups"]["newsletter"]["path"] = str(
+    raw_config["teams"]["newsletter"]["workspace_path"] = str(workspace)
+    raw_config["teams"]["newsletter"]["path"] = str(
         tmp_path / "groups" / "newsletter"
     )
-    group = parse_config(raw_config, tmp_path / "config.yaml").resolved.groups[
+    group = parse_config(raw_config, tmp_path / "config.yaml").resolved.teams[
         "newsletter"
     ]
 
-    paths = resolve_group_paths(group)
+    paths = resolve_team_paths(group)
 
     assert paths.workspace_root == workspace.resolve()
-    assert paths.group_root == (tmp_path / "groups" / "newsletter").resolve()
-    assert paths.observations == paths.group_root / "observations"
-    assert paths.proposals == paths.group_root / "proposals"
-    assert paths.decisions == paths.group_root / "decisions"
-    assert paths.locks == paths.group_root / "locks"
-    assert paths.logs == paths.group_root / "logs"
+    assert paths.team_root == (tmp_path / "groups" / "newsletter").resolve()
+    assert paths.observations == paths.team_root / "observations"
+    assert paths.proposals == paths.team_root / "proposals"
+    assert paths.decisions == paths.team_root / "decisions"
+    assert paths.locks == paths.team_root / "locks"
+    assert paths.logs == paths.team_root / "logs"
     assert "shared" not in {
         part for path in paths.record_directories for part in path.parts
     }
@@ -177,8 +177,8 @@ def test_initialization_creates_group_state_but_not_workspace_shared(
 
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
-    raw_config["groups"]["newsletter"]["workspace_path"] = str(workspace)
-    raw_config["groups"]["newsletter"]["path"] = str(
+    raw_config["teams"]["newsletter"]["workspace_path"] = str(workspace)
+    raw_config["teams"]["newsletter"]["path"] = str(
         tmp_path / "groups" / "newsletter"
     )
     config = parse_config(raw_config, tmp_path / "config.yaml").resolved
@@ -197,8 +197,8 @@ def test_initialization_creates_group_state_but_not_workspace_shared(
     [
         ("workspace_path", "agency.memory_store"),
         ("path", "agency.agent_library"),
-        ("path", "groups.other.path"),
-        ("path", "groups.other.workspace_path"),
+        ("path", "teams.other.path"),
+        ("path", "teams.other.workspace_path"),
         ("workspace_path", "path"),
     ],
 )
@@ -206,7 +206,7 @@ def test_group_authorities_must_not_overlap(
     tmp_path, raw_config, field, other_authority
 ):
     raw = deepcopy(raw_config)
-    group = raw["groups"]["newsletter"]
+    group = raw["teams"]["newsletter"]
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     group["workspace_path"] = str(workspace)
@@ -220,14 +220,14 @@ def test_group_authorities_must_not_overlap(
     else:
         other_workspace = tmp_path / "other-workspace"
         other_workspace.mkdir()
-        raw["groups"]["other"] = {
+        raw["teams"]["other"] = {
             **deepcopy(group),
             "name": "Other",
             "workspace_path": str(other_workspace),
             "path": str(tmp_path / "groups" / "other"),
         }
         other_field = other_authority.rsplit(".", 1)[-1]
-        group[field] = raw["groups"]["other"][other_field]
+        group[field] = raw["teams"]["other"][other_field]
 
     config = parse_config(raw, tmp_path / "config.yaml").resolved
 
@@ -235,7 +235,7 @@ def test_group_authorities_must_not_overlap(
 
     assert any(
         issue.code == "unsafe-path-overlap"
-        and issue.scope == "groups.newsletter"
+        and issue.scope == "teams.newsletter"
         and issue.field == field
         for issue in issues
     )
@@ -249,7 +249,7 @@ def test_initialize_storage_directories_rejects_symlink_or_reparse_cache_root(
 
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
-    raw_config["groups"]["newsletter"]["workspace_path"] = str(workspace)
+    raw_config["teams"]["newsletter"]["workspace_path"] = str(workspace)
     cache_root = tmp_path / "cache-root"
     raw_config["agency"]["compilation_cache"] = str(cache_root)
     config = parse_config(raw_config, tmp_path / "config.yaml").resolved

@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from agency.configuration.issues import ValidationFailed, ValidationIssue
-from agency.configuration.models import AgencyConfig, AgentInstance, GroupConfig, PermissionMode
+from agency.configuration.models import AgencyConfig, AgentInstance, TeamConfig, PermissionMode
 from agency.integrations import BaseIntegration, get_integration
 from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
@@ -21,53 +21,53 @@ def _platform_path_key(path: Path) -> str:
     return resolved
 
 
-def _get_group(config: AgencyConfig, group_id: str) -> GroupConfig:
+def _get_team(config: AgencyConfig, team_id: str) -> TeamConfig:
     try:
-        return config.groups[group_id]
+        return config.teams[team_id]
     except KeyError as exc:
-        raise KeyError(f"Unknown group: {group_id}") from exc
+        raise KeyError(f"Unknown team: {team_id}") from exc
 
 
-def _get_agent(group: GroupConfig, agent_id: str) -> AgentInstance:
+def _get_agent(team: TeamConfig, agent_id: str) -> AgentInstance:
     try:
-        return group.agents[agent_id]
+        return team.agents[agent_id]
     except KeyError as exc:
         raise KeyError(f"Unknown agent: {agent_id}") from exc
 
 
-def _resolve_timeout(group: GroupConfig, agent: AgentInstance, timeout_override: int | None) -> int:
+def _resolve_timeout(team: TeamConfig, agent: AgentInstance, timeout_override: int | None) -> int:
     if timeout_override is not None:
         return timeout_override
     if "timeout" in agent.runtime.model_fields_set:
         return agent.runtime.timeout
-    return group.runtime.timeout
+    return team.runtime.timeout
 
 
-def _resolve_mode(group: GroupConfig, agent: AgentInstance) -> PermissionMode:
+def _resolve_mode(team: TeamConfig, agent: AgentInstance) -> PermissionMode:
     if "permissions" in agent.runtime.model_fields_set and (
         "mode" in agent.runtime.permissions.model_fields_set
     ):
         return agent.runtime.permissions.mode
-    return group.runtime.permissions.mode
+    return team.runtime.permissions.mode
 
 
 def _resolve_rule_path(rule_path: Path, workspace: Path) -> Path:
-    """Resolve a rule path against the group workspace when relative."""
+    """Resolve a rule path against the team workspace when relative."""
     if rule_path.is_absolute():
         return rule_path.resolve(strict=False)
     return (workspace / rule_path).resolve(strict=False)
 
 
 def _merge_rules(
-    group: GroupConfig,
+    team: TeamConfig,
     agent: AgentInstance,
 ) -> tuple[ResolvedPermissionRule, ...]:
     """Instance rules are additive; identical paths union their tools."""
     merged: list[ResolvedPermissionRule] = []
     index: dict[str | None, int] = {}
-    workspace = group.workspace_path
+    workspace = team.workspace_path
 
-    for source in (group.runtime.permissions.rules, agent.runtime.permissions.rules):
+    for source in (team.runtime.permissions.rules, agent.runtime.permissions.rules):
         for rule in source:
             resolved_path = None if rule.path is None else _resolve_rule_path(Path(rule.path), workspace)
             key = None if resolved_path is None else _platform_path_key(resolved_path)
@@ -91,18 +91,18 @@ def _merge_rules(
 
 def resolve_effective_policy(
     config: AgencyConfig,
-    group_id: str,
+    team_id: str,
     agent_id: str,
     *,
     timeout_override: int | None = None,
     integration: BaseIntegration | None = None,
 ) -> EffectiveRuntimePolicy:
-    group = _get_group(config, group_id)
-    agent = _get_agent(group, agent_id)
+    team = _get_team(config, team_id)
+    agent = _get_agent(team, agent_id)
     policy = EffectiveRuntimePolicy(
-        timeout=_resolve_timeout(group, agent, timeout_override),
-        mode=_resolve_mode(group, agent),
-        rules=_merge_rules(group, agent),
+        timeout=_resolve_timeout(team, agent, timeout_override),
+        mode=_resolve_mode(team, agent),
+        rules=_merge_rules(team, agent),
     )
 
     if integration is None:
@@ -111,7 +111,7 @@ def resolve_effective_policy(
         except KeyError as exc:
             issue = _build_issue(
                 code="unknown-integration",
-                scope=f"groups.{group_id}.agents.{agent_id}",
+                scope=f"teams.{team_id}.agents.{agent_id}",
                 field="integration",
                 message=f"Integration '{agent.integration}' is not registered.",
                 corrective_hint="Choose an installed integration or register it before running this agent.",

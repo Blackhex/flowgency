@@ -15,12 +15,12 @@ from agency.configuration import (
     AgentProfilePatch,
     AgentRuntimePatch,
     ConfigConflictError,
-    ResolvedGroupPaths,
+    ResolvedTeamPaths,
     ValidationFailed,
     parse_config,
     patch_agent_profile,
     replace_agent_routines,
-    resolve_group_paths,
+    resolve_team_paths,
 )
 from agency.configuration.effective import resolve_effective_policy
 from agency.configuration.models import MemorySelector
@@ -214,7 +214,7 @@ def _list_markdown_items(directory: Path) -> list[dict[str, Any]]:
 
 def _recent_log_rows(
     group_id: str,
-    paths: ResolvedGroupPaths,
+    paths: ResolvedTeamPaths,
     agent_id: str,
 ) -> list[dict[str, str]]:
     logs_root = paths.logs
@@ -241,7 +241,7 @@ def _recent_log_rows(
 
 def _activity_items(
     group_id: str,
-    paths: ResolvedGroupPaths,
+    paths: ResolvedTeamPaths,
     agent_id: str,
     job_store: JobStore | None,
 ) -> dict[str, Any]:
@@ -656,7 +656,7 @@ def _blueprint_context(services: AgencyServices, snapshot, group_id: str, agent_
 def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
     """Pair each configured routine with what actually fired."""
     group = snapshot.config.groups[group_id]
-    logs_root = resolve_group_paths(group).logs
+    logs_root = resolve_team_paths(group).logs
     now = clock_now()
     grace = grace_window(int(snapshot.config.agency.dispatch.interval))
     dispatch_enabled = group.dispatch.enabled
@@ -822,7 +822,7 @@ def _detail_context(
         context.update(
             _activity_items(
                 group_id,
-                resolve_group_paths(group),
+                resolve_team_paths(group),
                 agent_id,
                 services.job_store,
             )

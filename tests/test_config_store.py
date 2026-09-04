@@ -71,7 +71,7 @@ def test_config_store_round_trips_canonical_config(tmp_path, raw_config):
     snapshot = ConfigStore(path).create(raw_config)
 
     assert snapshot.raw == raw_config
-    assert snapshot.raw["schema_version"] == 5
+    assert snapshot.raw["schema_version"] == 6
 
 
 def test_create_requires_absent_file(raw_config, config_paths):
@@ -120,7 +120,7 @@ def test_patch_writes_utf8_yaml(raw_config, config_paths):
 
     updated = store.patch(
         snapshot.revision,
-        lambda raw: raw["groups"]["newsletter"]["agents"][0].__setitem__(
+        lambda raw: raw["teams"]["newsletter"]["agents"][0].__setitem__(
             "identity", {"display_name": "Zażółć", "title": "", "emoji": ""}
         ),
     )
@@ -128,7 +128,7 @@ def test_patch_writes_utf8_yaml(raw_config, config_paths):
     payload = path.read_bytes()
     assert "Zażółć" in payload.decode("utf-8")
     assert (
-        updated.raw["groups"]["newsletter"]["agents"][0]["identity"][
+        updated.raw["teams"]["newsletter"]["agents"][0]["identity"][
             "display_name"
         ]
         == "Zażółć"
@@ -215,7 +215,7 @@ def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
             {
                 "schema_version": 3,
                 "agency": {"title": "Agency"},
-                "groups": {},
+                "teams": {},
             },
         )
 
@@ -255,7 +255,7 @@ def test_late_conflict_does_not_initialize_candidate_group_storage(
 
     candidate_group = tmp_path / "candidate-group"
     raw = deepcopy(raw_config)
-    raw["groups"]["newsletter"]["path"] = str(candidate_group)
+    raw["teams"]["newsletter"]["path"] = str(candidate_group)
     path = _write_yaml(config_paths["config_path"], raw)
     store = ConfigStore(path)
     snapshot = store.load()
@@ -277,7 +277,7 @@ def test_late_conflict_does_not_initialize_candidate_group_storage(
         else:
             store.patch(
                 snapshot.revision,
-                lambda current: current["groups"]["newsletter"].__setitem__(
+                lambda current: current["teams"]["newsletter"].__setitem__(
                     "path", str(candidate_group)
                 ),
             )
@@ -319,7 +319,7 @@ def test_create_validates_before_initializing_storage(raw_config, config_paths):
     from agency.configuration.store import ConfigStore
 
     raw = deepcopy(raw_config)
-    raw["groups"]["newsletter"]["workspace_path"] = str(
+    raw["teams"]["newsletter"]["workspace_path"] = str(
         config_paths["config_dir"] / "missing-workspace"
     )
 
@@ -329,5 +329,5 @@ def test_create_validates_before_initializing_storage(raw_config, config_paths):
     assert not config_paths["compilation_cache"].exists()
     assert not config_paths["memory_store"].exists()
     assert not job_store_root(config_paths["memory_store"]).exists()
-    assert not config_paths["group_path"].exists()
+    assert not config_paths["team_path"].exists()
     assert not config_paths["config_path"].exists()

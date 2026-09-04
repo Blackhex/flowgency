@@ -43,9 +43,9 @@ def test_routine_patch_round_trips_the_recovery_bound(config_store):
     )
 
     saved = yaml.safe_load(updated.path.read_text(encoding="utf-8"))
-    routine = saved["groups"]["newsletter"]["agents"][0]["routines"][0]
+    routine = saved["teams"]["newsletter"]["agents"][0]["routines"][0]
     assert routine["schedule"] == {"at": "09:00", "catch_up": "48h"}
-    reloaded = config_store.load().config.groups["newsletter"].agents["builder"]
+    reloaded = config_store.load().config.teams["newsletter"].agents["builder"]
     assert reloaded.routines[0].schedule.catch_up == "48h"
 
 
@@ -56,7 +56,7 @@ def test_agent_patch_preserves_workspaces_and_other_agents(config_store):
     )
 
     snapshot = config_store.load()
-    group = snapshot.raw["groups"]["newsletter"]
+    group = snapshot.raw["teams"]["newsletter"]
     group["agents"].append(
         {
             "name": "advisor",
@@ -84,20 +84,20 @@ def test_agent_patch_preserves_workspaces_and_other_agents(config_store):
     )
 
     assert (
-        updated.raw["groups"]["newsletter"]["workspaces"]
-        == snapshot.raw["groups"]["newsletter"]["workspaces"]
+        updated.raw["teams"]["newsletter"]["workspaces"]
+        == snapshot.raw["teams"]["newsletter"]["workspaces"]
     )
     assert (
-        updated.raw["groups"]["newsletter"]["agents"][0]
-        == snapshot.raw["groups"]["newsletter"]["agents"][0]
+        updated.raw["teams"]["newsletter"]["agents"][0]
+        == snapshot.raw["teams"]["newsletter"]["agents"][0]
     )
     assert (
-        updated.raw["groups"]["newsletter"]["agents"][1][
+        updated.raw["teams"]["newsletter"]["agents"][1][
             "worktree_extension"
         ]
         == {"enabled": True}
     )
-    assert len(updated.config.groups["newsletter"].agents) == 2
+    assert len(updated.config.teams["newsletter"].agents) == 2
 
 
 def test_patch_agent_profile_preserves_extension_keys(config_store):
@@ -107,7 +107,7 @@ def test_patch_agent_profile_preserves_extension_keys(config_store):
     )
 
     snapshot = config_store.load()
-    agent = snapshot.raw["groups"]["newsletter"]["agents"][0]
+    agent = snapshot.raw["teams"]["newsletter"]["agents"][0]
     agent["identity"] = {
         "display_name": "Builder",
         "title": "Engineer",
@@ -133,7 +133,7 @@ def test_patch_agent_profile_preserves_extension_keys(config_store):
         ),
     )
 
-    identity = updated.raw["groups"]["newsletter"]["agents"][0]["identity"]
+    identity = updated.raw["teams"]["newsletter"]["agents"][0]["identity"]
     assert identity == {
         "display_name": "Editor",
         "title": "Lead",
@@ -142,15 +142,15 @@ def test_patch_agent_profile_preserves_extension_keys(config_store):
     }
 
 
-def test_patch_group_settings_preserves_unowned_group_fields(config_store):
+def test_patch_team_settings_preserves_unowned_group_fields(config_store):
     from agency.configuration.patches import (
-        GroupSettingsPatch,
-        patch_group_settings,
+        TeamSettingsPatch,
+        patch_team_settings,
     )
 
     snapshot = config_store.load()
-    snapshot.raw["groups"]["newsletter"]["ui_extension"] = {"theme": "sunset"}
-    snapshot.raw["groups"]["newsletter"]["runtime"] = {
+    snapshot.raw["teams"]["newsletter"]["ui_extension"] = {"theme": "sunset"}
+    snapshot.raw["teams"]["newsletter"]["runtime"] = {
         "timeout": 2400,
         "permissions": {"mode": "unrestricted"},
     }
@@ -164,11 +164,11 @@ def test_patch_group_settings_preserves_unowned_group_fields(config_store):
     (snapshot.path.parent / "agents" / "editorial").mkdir(parents=True, exist_ok=True)
 
     refreshed = config_store.load()
-    updated = patch_group_settings(
+    updated = patch_team_settings(
         config_store,
         refreshed.revision,
         "newsletter",
-        GroupSettingsPatch(
+        TeamSettingsPatch(
             name="Editorial",
             workspace_path=str(refreshed.path.parent / "workspace" / "editorial"),
             path=str(refreshed.path.parent / "groups" / "editorial"),
@@ -176,30 +176,30 @@ def test_patch_group_settings_preserves_unowned_group_fields(config_store):
         ),
     )
 
-    assert updated.raw["groups"]["newsletter"]["ui_extension"] == {
+    assert updated.raw["teams"]["newsletter"]["ui_extension"] == {
         "theme": "sunset"
     }
-    assert updated.raw["groups"]["newsletter"]["workspace_path"] == str(
+    assert updated.raw["teams"]["newsletter"]["workspace_path"] == str(
         refreshed.path.parent / "workspace" / "editorial"
     )
-    assert updated.raw["groups"]["newsletter"]["path"] == str(
+    assert updated.raw["teams"]["newsletter"]["path"] == str(
         refreshed.path.parent / "groups" / "editorial"
     )
     assert (
-        updated.raw["groups"]["newsletter"]["runtime"]
-        == refreshed.raw["groups"]["newsletter"]["runtime"]
+        updated.raw["teams"]["newsletter"]["runtime"]
+        == refreshed.raw["teams"]["newsletter"]["runtime"]
     )
 
 
-def test_patch_group_settings_state_preserves_extension_keys(config_store):
+def test_patch_team_settings_state_preserves_extension_keys(config_store):
     from agency.configuration.patches import (
-        GroupSettingsStatePatch,
-        patch_group_settings_state,
+        TeamSettingsStatePatch,
+        patch_team_settings_state,
     )
 
     snapshot = config_store.load()
-    snapshot.raw["groups"]["newsletter"]["group_extension"] = {"theme": "sunset"}
-    snapshot.raw["groups"]["newsletter"]["runtime"] = {
+    snapshot.raw["teams"]["newsletter"]["group_extension"] = {"theme": "sunset"}
+    snapshot.raw["teams"]["newsletter"]["runtime"] = {
         "timeout": 1200,
         "runtime_extension": {"preserve": True},
         "permissions": {
@@ -207,10 +207,10 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
             "rules": [{"path": "shared-root", "tools": ["shell"]}],
         },
     }
-    snapshot.raw["groups"]["newsletter"]["dispatch"] = {
+    snapshot.raw["teams"]["newsletter"]["dispatch"] = {
         "enabled": False,
     }
-    snapshot.raw["groups"]["newsletter"]["workspaces"] = [
+    snapshot.raw["teams"]["newsletter"]["workspaces"] = [
         {
             "name": "Terminal Grid",
             "type": "tmux",
@@ -227,11 +227,11 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
     )
 
     refreshed = config_store.load()
-    updated = patch_group_settings_state(
+    updated = patch_team_settings_state(
         config_store,
         refreshed.revision,
         "newsletter",
-        GroupSettingsStatePatch(
+        TeamSettingsStatePatch(
             name="Editorial",
             workspace_path=str(refreshed.path.parent / "workspace" / "editorial"),
             path=str(refreshed.path.parent / "groups" / "editorial"),
@@ -251,7 +251,7 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
         ),
     )
 
-    group = updated.raw["groups"]["newsletter"]
+    group = updated.raw["teams"]["newsletter"]
     assert group["workspace_path"] == str(
         refreshed.path.parent / "workspace" / "editorial"
     )
@@ -261,7 +261,7 @@ def test_patch_group_settings_state_preserves_extension_keys(config_store):
     assert group["workspaces"][0]["workspace_extension"] == {"preserve": True}
 
 
-def test_create_group_rejects_unknown_root_key_on_load(
+def test_create_team_rejects_unknown_root_key_on_load(
     config_store,
 ):
     from agency.configuration import ValidationFailed
@@ -278,8 +278,8 @@ def test_create_group_rejects_unknown_root_key_on_load(
     assert any(issue.field == "extensions" for issue in excinfo.value.issues)
 
 
-def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_store, monkeypatch):
-    from agency.configuration.patches import GroupCreateStatePatch, create_group_state
+def test_create_team_state_uses_one_patch_and_rolls_back_on_failure(config_store, monkeypatch):
+    from agency.configuration.patches import TeamCreateStatePatch, create_team_state
 
     snapshot = config_store.load()
     calls = 0
@@ -298,11 +298,11 @@ def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_stor
     monkeypatch.setattr(config_store, "patch", patched_patch)
 
     with pytest.raises(RuntimeError, match="boom"):
-        create_group_state(
+        create_team_state(
             config_store,
             snapshot.revision,
             "research",
-            GroupCreateStatePatch(
+            TeamCreateStatePatch(
                 name="Research",
                 workspace_path=str(snapshot.path.parent / "workspace" / "research"),
                 path=str(snapshot.path.parent / "groups" / "research"),
@@ -322,7 +322,7 @@ def test_create_group_state_uses_one_patch_and_rolls_back_on_failure(config_stor
         )
 
     assert calls == 1
-    assert "research" not in config_store.load().raw["groups"]
+    assert "research" not in config_store.load().raw["teams"]
 
 
 def test_patch_memory_channels_rejects_unknown_root_key_on_load(config_store):
@@ -358,7 +358,7 @@ def test_register_and_unregister_agent_prompt(config_store):
         "local-triage",
     )
 
-    assert registered.raw["groups"]["newsletter"]["agents"][0]["prompts"] == [
+    assert registered.raw["teams"]["newsletter"]["agents"][0]["prompts"] == [
         "local-triage"
     ]
 
@@ -370,7 +370,7 @@ def test_register_and_unregister_agent_prompt(config_store):
         "local-triage",
     )
 
-    assert unregistered.raw["groups"]["newsletter"]["agents"][0]["prompts"] == []
+    assert unregistered.raw["teams"]["newsletter"]["agents"][0]["prompts"] == []
 
 
 def test_patch_agent_runtime_preserves_extension_keys(config_store):
@@ -380,7 +380,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
     )
 
     snapshot = config_store.load()
-    agent = snapshot.raw["groups"]["newsletter"]["agents"][0]
+    agent = snapshot.raw["teams"]["newsletter"]["agents"][0]
     agent["runtime"] = {
         "timeout": 900,
         "permissions": {
@@ -392,7 +392,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
     )
-    workspace_root = Path(snapshot.raw["groups"]["newsletter"]["workspace_path"])
+    workspace_root = Path(snapshot.raw["teams"]["newsletter"]["workspace_path"])
     (workspace_root / "editorial").mkdir(parents=True, exist_ok=True)
     (workspace_root / "assets").mkdir(parents=True, exist_ok=True)
 
@@ -411,7 +411,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
         ),
     )
 
-    runtime = updated.raw["groups"]["newsletter"]["agents"][0]["runtime"]
+    runtime = updated.raw["teams"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1200
     assert runtime["permissions"]["rules"] == [
         {"path": str(workspace_root / "editorial"), "tools": ["read", "write"]},
@@ -427,7 +427,7 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
     )
 
     snapshot = config_store.load()
-    agent = snapshot.raw["groups"]["newsletter"]["agents"][0]
+    agent = snapshot.raw["teams"]["newsletter"]["agents"][0]
     agent["runtime"] = {
         "timeout": 2400,
         "permissions": {
@@ -452,7 +452,7 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
         ),
     )
 
-    runtime = updated.raw["groups"]["newsletter"]["agents"][0]["runtime"]
+    runtime = updated.raw["teams"]["newsletter"]["agents"][0]["runtime"]
     assert "timeout" not in runtime
     assert runtime.get("permissions", {}).get("rules") == []
     assert runtime["runtime_extension"] == {"preserve": True}
