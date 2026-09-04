@@ -4,6 +4,8 @@ import threading
 import time
 from types import SimpleNamespace
 
+import pytest
+
 import os
 import subprocess
 
@@ -543,7 +545,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     assert read_job(path) == result
 
 
-def test_execute_job_preserves_historical_v3_selected_skill(tmp_path, monkeypatch):
+def test_execute_job_v5_spec_carries_no_skill_to_integration(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
     seen = {}
 
@@ -572,7 +574,15 @@ def test_execute_job_preserves_historical_v3_selected_skill(tmp_path, monkeypatc
     result = execute_job(_authority(spec))
 
     assert result.status == "complete"
-    assert seen == {"skill": "daily-review", "mode": "unrestricted"}
+    assert seen == {"skill": None, "mode": "unrestricted"}
+
+
+def test_v3_job_payload_with_skill_is_rejected_by_from_dict(tmp_path):
+    _, spec = queued_job(tmp_path)
+    payload = spec.to_dict()
+    payload["skill"] = "daily-review"
+    with pytest.raises(ValueError, match="schema v5 jobs must not set skill"):
+        JobSpec.from_dict(payload)
 
 
 def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch):

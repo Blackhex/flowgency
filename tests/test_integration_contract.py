@@ -335,7 +335,7 @@ def test_execution_integrations_enforce_validate_run_before_subprocess_or_prompt
         runtime_policy=EffectiveRuntimePolicy(
             timeout=60
         ),
-        skill=None,
+        skill="runtime-probe",
         skill_arguments=()
     )
 
