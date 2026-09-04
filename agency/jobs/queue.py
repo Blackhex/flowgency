@@ -81,7 +81,7 @@ def queue_snapshot(config, *, memory_store: Path) -> QueueView:
     return QueueView(running, tuple(waiting), config.agency.jobs.pool)
 
 
-def _group_roots(config) -> dict:
+def _team_roots(config) -> dict:
     return {
         team_id: {"team_root": str(team.path)}
         for team_id, team in config.teams.items()
@@ -155,7 +155,7 @@ def drain(
             log.info("another drainer holds the queue; leaving the work to it")
             return 0
         reconcile_jobs(
-            _group_roots(config),
+            _team_roots(config),
             memory_store_root=memory_store,
             statuses=None if full_reconcile else SLOT_STATUSES,
         )

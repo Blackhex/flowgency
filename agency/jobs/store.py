@@ -68,36 +68,36 @@ def acquire_group_operation_locks(*group_roots: Path) -> ExitStack:
 
 
 @contextmanager
-def revision_bound_group_operation(
+def revision_bound_team_operation(
     config_store: ConfigStore,
     *,
-    group_ids: tuple[str, ...] = (),
+    team_ids: tuple[str, ...] = (),
     proposed_paths: tuple[Path, ...] = (),
-    all_groups: bool = False,
+    all_teams: bool = False,
     expected_revision: str | None = None,
 ):
     initial = config_store.load()
     relevant_ids = (
         tuple(sorted(initial.config.teams))
-        if all_groups
-        else tuple(sorted(set(group_ids)))
+        if all_teams
+        else tuple(sorted(set(team_ids)))
     )
-    initial_identity = _group_path_identity(initial, relevant_ids)
+    initial_identity = _team_path_identity(initial, relevant_ids)
     lock_paths = tuple(initial_identity.values()) + tuple(proposed_paths)
     with acquire_group_operation_locks(*lock_paths):
         locked = config_store.load()
         locked_ids = (
             tuple(sorted(locked.config.teams))
-            if all_groups
+            if all_teams
             else relevant_ids
         )
         if (
             locked.revision != initial.revision
             or locked_ids != relevant_ids
-            or _group_path_identity(locked, locked_ids) != initial_identity
+            or _team_path_identity(locked, locked_ids) != initial_identity
         ):
             raise ConfigConflictError(
-                "config group paths changed while acquiring operation locks"
+                "config team paths changed while acquiring operation locks"
             )
         if (
             expected_revision is not None
@@ -109,18 +109,18 @@ def revision_bound_group_operation(
         yield locked
 
 
-def _group_path_identity(
+def _team_path_identity(
     snapshot: ConfigSnapshot,
-    group_ids: tuple[str, ...],
+    team_ids: tuple[str, ...],
 ) -> dict[str, Path]:
     identity: dict[str, Path] = {}
-    for group_id in group_ids:
+    for team_id in team_ids:
         try:
-            identity[group_id] = (
-                snapshot.config.teams[group_id].path.resolve()
+            identity[team_id] = (
+                snapshot.config.teams[team_id].path.resolve()
             )
         except KeyError as exc:
-            raise ValueError(f"Unknown team: {group_id}") from exc
+            raise ValueError(f"Unknown team: {team_id}") from exc
     return identity
 
 

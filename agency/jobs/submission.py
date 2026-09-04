@@ -18,7 +18,7 @@ from .authority import JobStore
 from .launcher import JobLauncher
 from .models import JobHandle, JobRecord, JobRequest, JobSpec
 from .resolution import resolve_job_request
-from .store import read_job, revision_bound_group_operation
+from .store import read_job, revision_bound_team_operation
 
 log = logging.getLogger("agency.jobs.submission")
 
@@ -133,9 +133,9 @@ def submit_job_request(
     last_conflict = None
     for _attempt in range(3):
         try:
-            with revision_bound_group_operation(
+            with revision_bound_team_operation(
                 config_store,
-                group_ids=(request.team_key,),
+                team_ids=(request.team_key,),
             ) as locked_snapshot:
                 issues = validate_resolved_paths(locked_snapshot.config)
                 if issues:

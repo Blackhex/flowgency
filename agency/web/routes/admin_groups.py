@@ -24,7 +24,7 @@ from agency.configuration import (
 )
 from agency.integrations import BaseIntegration, REGISTRY
 from agency.integrations.models import InteractiveSetupRequest
-from agency.jobs.store import revision_bound_group_operation
+from agency.jobs.store import revision_bound_team_operation
 from agency.web.dependencies import AgencyServices, build_services, get_services
 from agency.web.directory_browser import DirectoryBrowseError, list_directories
 from agency.web.setup_flow import (
@@ -623,9 +623,9 @@ async def admin_org_save(
         )
 
     try:
-        with revision_bound_group_operation(
+        with revision_bound_team_operation(
             services.config_store,
-            group_ids=(org,),
+            team_ids=(org,),
             proposed_paths=(
                 _canonical_group_path(services.config_path, path),
             ),
@@ -790,7 +790,7 @@ async def admin_org_create(
             status_code=409,
         )
     try:
-        with revision_bound_group_operation(
+        with revision_bound_team_operation(
             services.config_store,
             proposed_paths=(
                 _canonical_group_path(services.config_path, path),
@@ -868,9 +868,9 @@ async def admin_org_delete(
     snapshot = services.config_store.load()
     revision = str((await request.form()).get("revision", "")).strip()
     try:
-        with revision_bound_group_operation(
+        with revision_bound_team_operation(
             services.config_store,
-            group_ids=(org,),
+            team_ids=(org,),
             expected_revision=revision or snapshot.revision,
         ) as locked:
             delete_team(

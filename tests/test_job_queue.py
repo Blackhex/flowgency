@@ -298,6 +298,18 @@ def test_a_busy_queue_lock_leaves_the_drain_to_its_holder(queue_fixture):
     assert queue_fixture.launcher.launched == []
 
 
+def test_team_roots_builds_team_root_mapping():
+    from agency.jobs.queue import _team_roots
+    from types import SimpleNamespace
+
+    team = SimpleNamespace(path="C:/teams/news")
+    config = SimpleNamespace(teams={"news": team})
+
+    result = _team_roots(config)
+
+    assert result == {"news": {"team_root": "C:/teams/news"}}
+
+
 def test_a_drain_does_not_reproject_terminal_records(queue_fixture, monkeypatch):
     """Terminal projection is a startup sweep, not a per-drain cost."""
     projected: list[str] = []

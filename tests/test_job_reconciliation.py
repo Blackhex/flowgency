@@ -86,6 +86,15 @@ def reconcile_for_test(groups, tmp_path, *, memory_store_root=None):
     )
 
 
+def test_reconcile_accepts_teams_keyword_argument(tmp_path, monkeypatch):
+    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: True)
+
+    result = reconcile_jobs(teams={}, memory_store_root=tmp_path / "memory")
+
+    assert result.failed == 0
+    assert result.left_running == 0
+
+
 def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
     group, decision, path = running_decision_job(tmp_path)
     monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: True)

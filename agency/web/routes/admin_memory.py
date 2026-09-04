@@ -16,7 +16,7 @@ from agency.configuration import (
 from agency.configuration.models import MemorySelector
 from agency.fs import ResourceBusyError
 from agency.jobs.authority import JobStore
-from agency.jobs.store import revision_bound_group_operation
+from agency.jobs.store import revision_bound_team_operation
 from agency.memory import MemoryConflictError, resolve_memory_selector
 from agency.memory.store import (
     _ensure_infrastructure_directory,
@@ -494,9 +494,9 @@ async def admin_memory_channel_delete(
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     try:
-        with revision_bound_group_operation(
+        with revision_bound_team_operation(
             services.config_store,
-            all_groups=True,
+            all_teams=True,
             expected_revision=revision,
         ) as refreshed:
             references = _channel_references(refreshed, channel_key)

@@ -63,7 +63,7 @@ def worker_alive(pid: int | None) -> bool | None:
 
 
 def reconcile_jobs(
-    groups: dict,
+    teams: dict,
     *,
     memory_store_root: Path,
     statuses: frozenset[str] | None = None,
@@ -83,7 +83,7 @@ def reconcile_jobs(
             "job_store": (job_store.root / team_id),
             "team_root": team["team_root"],
         }
-        for team_id, team in sorted(groups.items())
+        for team_id, team in sorted(teams.items())
         if team.get("team_root")
     }
     blocked_job_ids: set[str] = set()
@@ -102,7 +102,7 @@ def reconcile_jobs(
             "Global memory recovery failed and requires manual intervention: %s",
             error,
         )
-    for team_id, team in groups.items():
+    for team_id, team in teams.items():
         if not team.get("team_root"):
             continue
         records: list[tuple[Path, object]] = []

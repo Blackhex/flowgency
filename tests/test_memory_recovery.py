@@ -252,7 +252,7 @@ def test_recovery_rejects_job_owned_by_wrong_configured_group(tmp_path):
 
     assert result.recovered == 0
     assert result.blocked_job_ids == ("recovery-job",)
-    assert "configured group" in result.errors[0]
+    assert "configured team" in result.errors[0]
     assert journal_path.exists()
     assert forged.read_job().status == "running"
 
@@ -539,6 +539,22 @@ def test_invalid_journal_schema_is_a_persistent_barrier(
     assert journal_path.exists()
     assert recovery_fixture.stage.directory.exists()
     assert read_job(recovery_fixture.job_path).status == "running"
+
+
+def test_job_store_owner_uses_team_id_field():
+    from agency.memory.recovery import _JobStoreOwner
+
+    owner = _JobStoreOwner(team_id="news", path=Path("/tmp"), team_root=None)
+
+    assert owner.team_id == "news"
+    assert not hasattr(owner, "group_id")
+
+
+def test_recovery_operation_uses_owner_team_id():
+    from agency.memory.recovery import _RecoveryOperation
+
+    assert "owner_team_id" in {f.name for f in __import__("dataclasses").fields(_RecoveryOperation)}
+    assert "owner_group_id" not in {f.name for f in __import__("dataclasses").fields(_RecoveryOperation)}
 
 
 def _run_python(code: str, *args: str, timeout: int = 20):

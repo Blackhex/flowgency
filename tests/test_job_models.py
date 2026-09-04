@@ -610,6 +610,77 @@ def test_job_record_loads_payload_without_session_id(tmp_path):
     assert JobRecord.from_dict(payload).session_id is None
 
 
+def test_team_path_identity_resolves_configured_team_path(tmp_path):
+    from agency.jobs.store import _team_path_identity
+    from agency.configuration.models import parse_config
+    from agency.configuration.store import ConfigSnapshot
+
+    team_path = tmp_path / "teams" / "news"
+    team_path.mkdir(parents=True)
+    config_path = tmp_path / "config.yaml"
+    raw = {
+        "schema_version": 6,
+        "agency": {
+            "agent_library": str(tmp_path / "lib"),
+            "compilation_cache": str(tmp_path / "cache"),
+            "memory_store": str(tmp_path / "memory"),
+            "prompt_store": str(tmp_path / "prompts"),
+        },
+        "teams": {
+            "news": {
+                "name": "News",
+                "path": str(team_path),
+                "workspace_path": str(tmp_path / "ws"),
+                "default_integration": "copilot",
+            },
+        },
+    }
+    config = parse_config(raw, config_path)
+    snapshot = ConfigSnapshot(
+        path=config_path, revision="r1", raw=raw, config=config,
+    )
+
+    identity = _team_path_identity(snapshot, ("news",))
+
+    assert "news" in identity
+    assert identity["news"] == team_path.resolve()
+
+
+def test_revision_bound_team_operation_locks_and_yields_snapshot(tmp_path):
+    from agency.jobs.store import revision_bound_team_operation
+    from agency.configuration.store import ConfigStore
+
+    team_path = tmp_path / "teams" / "news"
+    team_path.mkdir(parents=True)
+    (team_path / "locks").mkdir(parents=True)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({
+            "schema_version": 6,
+            "agency": {
+                "agent_library": str(tmp_path / "lib"),
+                "compilation_cache": str(tmp_path / "cache"),
+                "memory_store": str(tmp_path / "memory"),
+                "prompt_store": str(tmp_path / "prompts"),
+            },
+            "teams": {
+                "news": {
+                    "name": "News",
+                    "path": str(team_path),
+                    "workspace_path": str(tmp_path / "ws"),
+                    "default_integration": "copilot",
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    store = ConfigStore(config_path)
+
+    with revision_bound_team_operation(store, team_ids=("news",)) as snap:
+        assert snap.revision
+        assert "news" in snap.config.teams
+
+
 def test_job_record_defaults_due_at_to_none(tmp_path):
     spec = make_spec(tmp_path)
     record = JobRecord.from_spec(spec)
