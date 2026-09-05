@@ -22,7 +22,7 @@ jobs, and human-governed execution.
 - Replace the existing visual identity with the approved Flowgency tree.
 - Add a synthesized workflow-board screenshot to the README.
 - Preserve runtime behavior apart from intentional identifier and path breaks.
-- Detect regressions to legacy naming mechanically.
+- Detect regressions to previous naming mechanically.
 
 ## Non-goals
 
@@ -73,17 +73,17 @@ flowgency:
   title: Flowgency
 ```
 
-A document with the correct version but a legacy root is invalid because the
-required `flowgency` mapping is absent and the legacy key is unknown. There is
+A document with the correct version but the previous root is invalid because
+the required `flowgency` mapping is absent and the previous key is unknown. There is
 no conversion command or compatibility parser. Errors use the existing
-configuration-validation mechanism; the rebrand does not add a special legacy
+configuration-validation mechanism; the rebrand does not add a special previous-format
 error path.
 
 Everything nested beneath the renamed root retains its existing shape and
 meaning. Current examples, fixtures, tests, and operator documentation use
 Flowgency schema 1. Dated specifications and plans may retain earlier numeric
-schema versions where technically necessary, but describe them only as legacy
-schemas and contain no legacy brand vocabulary.
+schema versions where technically necessary, but describe them only as
+superseded schemas and contain no previous brand vocabulary.
 
 The ignored local `config.yaml` is not edited by this branch. An operator must
 rewrite it to the Flowgency schema 1 shape before launching the renamed app.
@@ -198,7 +198,7 @@ without combining unrelated behavior changes.
 - Rename the root configuration field to `flowgency`.
 - Reset accepted configuration to Flowgency schema 1.
 - Rename branded models, services, helpers, constants, and template context.
-- Rename runtime projection and outbox paths from the legacy hidden directory
+- Rename runtime projection and outbox paths from the previous hidden directory
   to `.flowgency`.
 - Rename all environment variables to the `FLOWGENCY_` prefix.
 
@@ -213,7 +213,7 @@ same after identifier replacement.
   and discovery paths to `flowgency-setup`.
 - Rename PWA manifest fields, service-worker cache identifiers, CSS tokens,
   template variables, and application-title defaults.
-- Rename repository-owned files whose paths contain legacy branding.
+- Rename repository-owned files whose paths contain previous branding.
 
 ### 4. Brand Assets And Screenshots
 
@@ -230,20 +230,20 @@ same after identifier replacement.
 - Update active guides, examples, root instructions, contribution docs, setup
   skill docs, and canonical repository links.
 - Update dated tracked specifications and plans so the current tree contains no
-  legacy brand vocabulary or paths.
+  previous brand vocabulary or paths.
 - Preserve technical meaning in historical documents while using neutral
-  phrases such as "legacy schema" where chronology matters.
+  phrases such as "superseded schema" where chronology matters.
 
 ### 6. Tests And Naming Gate
 
 - Update imports and expected strings semantically rather than using an
   unconstrained global replacement.
 - Add a development test that enumerates tracked paths and text files and
-  rejects legacy brand variants case-insensitively.
+  rejects previous brand variants case-insensitively.
 - Keep generated and ignored output, Git metadata, and the physical checkout
   path outside the invariant.
 - Validate binary screenshots through regeneration and visual checks because a
-  text scan cannot detect rendered legacy titles or icons.
+  text scan cannot detect rendered previous titles or icons.
 
 ## Runtime Data Flow
 
@@ -263,12 +263,12 @@ do not.
 
 ## Failure Behavior
 
-Legacy entry points fail rather than redirecting:
+Previous entry points fail rather than redirecting:
 
 - the previous import package is absent;
 - the previous executable is not installed;
 - previous environment variables are ignored;
-- a configuration with the legacy root fails ordinary validation;
+- a configuration with the previous root fails ordinary validation;
 - previous runtime-owned hidden paths are not read as authority.
 
 No alias, warning bridge, migration loader, or startup rewrite is introduced.
@@ -306,7 +306,7 @@ A blind case-aware replacement is faster initially but cannot distinguish
 brand vocabulary from generic agent terminology or standards-owned names. It
 also obscures ownership boundaries and makes regressions harder to isolate.
 
-### Public Wrapper With Legacy Internals
+### Public Wrapper With Previous Internals
 
 Keeping old imports, configuration keys, or aliases would reduce immediate
 migration cost, but it would leave two vocabularies in the system and add
@@ -335,7 +335,7 @@ workflow as the stem, and a ticket as fruit in one identity.
 
 - The tracked tree uses Flowgency naming exclusively, except for generic agent
   terminology and standards-owned filenames.
-- Packaging installs `flowgency` and no legacy executable or import alias.
+- Packaging installs `flowgency` and no previous executable or import alias.
 - Flowgency accepts only schema 1 documents with a `flowgency` root.
 - Existing runtime behavior passes under renamed identifiers.
 - The README leads with ticket-driven orchestration and embeds the synthesized
