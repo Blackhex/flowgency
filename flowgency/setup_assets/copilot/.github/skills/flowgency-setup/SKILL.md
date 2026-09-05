@@ -4,10 +4,10 @@ description: Use when creating or registering a new Flowgency agent team for a c
 user_invocable: true
 ---
 
-# Agency Setup
+# Flowgency Setup
 
-The `agency-setup` skill owns the one authoritative canonical Agency config.
-Guided first-run setup supplies an approved Agency data root, authoritative
+The `flowgency-setup` skill owns the one authoritative canonical Flowgency config.
+Guided first-run setup supplies an approved Flowgency data root, authoritative
 config path, and supported AI integration; manual invocation collects missing
 context explicitly. The skill selects and inspects the first team project
 workspace, derives canonical storage paths, and then owns team naming,
@@ -17,17 +17,17 @@ memory, validation, and the one atomic config write.
 ## 1. Resolve Launch Context And Project Workspace
 
 Consume the launch context before asking questions. Guided mode requires both
-the exact `Setup mode: guided-first-run.` marker and an `Agency data root:`
+the exact `Setup mode: guided-first-run.` marker and a `Flowgency data root:`
 line. In guided mode, use that root as already selected and do not ask for the
 data root again; ask for the first team project workspace as the first
 user-facing question.
 
-In manual mode, without that complete guided context, ask for the Agency data
-root first. Explain that it is a separate home for Agency-owned data: reusable
+In manual mode, without that complete guided context, ask for the Flowgency data
+root first. Explain that it is a separate home for Flowgency-owned data: reusable
 agent blueprints, disposable compiled projections, semantic memory and durable
 jobs, and per-team records. Accept an existing directory or a new absolute path,
 expand user-home syntax, and require a writable real nearest parent for a
-missing root. Give `C:\Agency` and `~/Agency` as examples, then ask for the first
+missing root. Give `C:\Flowgency` and `~/Flowgency` as examples, then ask for the first
 team project workspace. No environment variable or hidden process state selects a mode.
 
 After the project workspace is selected, inspect that workspace read-only.
@@ -201,9 +201,9 @@ survivor choices, and the working context in this conversation only.
 
 Ask exactly once: `Customize the derived storage paths?` If declined, keep every derived path. Do not ask about individual storage paths in the default flow. If accepted, present all five storage paths in one grouped review and allow any of them to be replaced.
 
-Resolve every effective path before creation. Require that each missing effective path's nearest existing parent is a writable real directory that can safely create it, reject files, symlinks, and unsafe Windows reparse points, keep the global stores mutually disjoint, and keep every Agency-owned path disjoint from the project workspace. If validation fails, name the conflicting fields and resolved paths and return to the root choice or grouped review. Never choose a fallback location or project-local storage.
+Resolve every effective path before creation. Require that each missing effective path's nearest existing parent is a writable real directory that can safely create it, reject files, symlinks, and unsafe Windows reparse points, keep the global stores mutually disjoint, and keep every Flowgency-owned path disjoint from the project workspace. If validation fails, name the conflicting fields and resolved paths and return to the root choice or grouped review. Never choose a fallback location or project-local storage.
 
-Show one consolidated path summary containing the project workspace, authoritative config path, Agency data root, and five effective storage paths. No derived directory or blueprint may be created before the user approves this summary.
+Show one consolidated path summary containing the project workspace, authoritative config path, Flowgency data root, and five effective storage paths. No derived directory or blueprint may be created before the user approves this summary.
 
 When the launch prompt contains `Authoritative config:`, use that exact path and do not search for or choose another config. When the skill is invoked manually without an explicit authoritative path, find one config in this order: a valid `FLOWGENCY_CONFIG`, the current project's config, then common user-level Flowgency locations. Parse YAML and accept only a mapping where the required `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store` paths are present.
 
@@ -229,12 +229,12 @@ instructions in scoped prompt documents. Do not copy the conversational
 rationale, coverage map, or project-specific ownership text into blueprint
 source merely because it appeared in the approved profile. They do not contain
 identity, integration, schedules, runtime policy, or mutable memory. Do not
-create runtime-native `CLAUDE.md` or `GEMINI.md`; Agency's projector creates
+create runtime-native `CLAUDE.md` or `GEMINI.md`; Flowgency's projector creates
 disposable native layouts in `flowgency.compilation_cache`.
 
 ## 4. Register Instances
 
-Upsert one team whose `workspace_path` points to the project workspace and whose `path` points to the Agency-owned team-state root. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned team root. The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`. Preserve existing team workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the team; instance roots are additive and an instance tool policy is a complete override.
+Upsert one team whose `workspace_path` points to the project workspace and whose `path` points to the Flowgency-owned team-state root. `workspace_path` is the execution workspace and source repository; `path` is the Flowgency-owned team root. The team root is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`. Preserve existing team workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the team; instance roots are additive and an instance tool policy is a complete override.
 
 Use this canonical shape:
 
@@ -330,7 +330,7 @@ Write every approved workspace under the team's `workspaces` list. For a new tea
 
 Validate every blueprint, Agent Skill, and prompt document, plus config cross-reference, registered explicit integration, effective root union, complete tool override, routine prompt selection, channel, workspace, team naming, and storage path. Confirm every prompt document against the Standard Task Prompt contract in `references/templates.md` before writing the config.
 
-Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Agency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, team, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written.
+Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Flowgency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, team, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written.
 
 Then run the mechanical check and stop on a non-zero exit:
 
@@ -347,6 +347,6 @@ flowgency dispatch install --config "{config_path}"
 flowgency dispatch status --config "{config_path}"
 ```
 
-There must be exactly one Agency dashboard and one singleton scheduler; do not create a fallback project scheduler.
+There must be exactly one Flowgency dashboard and one singleton scheduler; do not create a fallback project scheduler.
 
-Report the Agency data root, effective storage paths, blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.
+Report the Flowgency data root, effective storage paths, blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.

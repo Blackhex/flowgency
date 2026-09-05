@@ -67,7 +67,7 @@ def test_setup_guidance_keeps_blueprint_skills_optional():
 
 def test_setup_registers_explicit_instances_routines_and_memory():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    assert "one authoritative canonical Agency config" in skill
+    assert "one authoritative canonical Flowgency config" in skill
     assert "flowgency.agent_library" in skill
     assert "blueprint:" in skill
     assert "integration:" in skill
@@ -104,7 +104,7 @@ def test_manual_setup_collects_root_then_workspace_without_hidden_mode_state():
     normalized = " ".join(skill.split())
 
     assert "without that complete guided context" in normalized
-    assert "ask for the Agency data root first" in normalized
+    assert "ask for the Flowgency data root first" in normalized
     assert "then ask for the first team project workspace" in normalized
     assert "No environment variable or hidden process state selects a mode." in skill
 
@@ -137,11 +137,11 @@ def test_setup_guide_describes_context_aware_team_synthesis():
 def test_setup_derives_canonical_paths_from_one_data_root():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     for phrase in (
-        "separate home for Agency-owned data",
+        "separate home for Flowgency-owned data",
         "existing directory or a new absolute path",
         "nearest existing parent is a writable real directory that can safely create it",
-        r"C:\Agency",
-        "~/Agency",
+        r"C:\Flowgency",
+        "~/Flowgency",
         "flowgency.agent_library = <root>/agent-library",
         "flowgency.compilation_cache = <root>/compiled-agents",
         "flowgency.memory_store = <root>/memory",
@@ -169,25 +169,25 @@ def test_setup_docs_present_one_data_root_default():
         "guide": guide,
         "readme": readme,
     }.items():
-        assert "Agency data root" in text, document_name
+        assert "Flowgency data root" in text, document_name
 
     for path in (
-        "C:/Agency/agent-library",
-        "C:/Agency/compiled-agents",
-        "C:/Agency/memory",
-        "C:/Agency/prompts",
-        "C:/Agency/teams/example",
+        "C:/Flowgency/agent-library",
+        "C:/Flowgency/compiled-agents",
+        "C:/Flowgency/memory",
+        "C:/Flowgency/prompts",
+        "C:/Flowgency/teams/example",
     ):
         assert path in templates
         assert path in guide
 
     assert (
-        templates.count("Default setup starts from one user-selected Agency data root.") == 1
+        templates.count("Default setup starts from one user-selected Flowgency data root.") == 1
     )
     for phrase in (
         "workspace_path is project source and execution",
-        "path is Agency-owned team state",
-        "Agency never loads or creates <workspace_path>/shared",
+        "path is Flowgency-owned team state",
+        "Flowgency never loads or creates <workspace_path>/shared",
         "durable jobs live in flowgency.memory_store/.jobs",
         "operation locks live in <team.path>/locks",
     ):
@@ -201,7 +201,7 @@ def test_setup_docs_present_one_data_root_default():
         assert marker in templates
 
     for document_name, text in {"guide": guide, "readme": readme}.items():
-        assert "~/Agency" in text, document_name
+        assert "~/Flowgency" in text, document_name
         assert "expands" in text.lower(), document_name
 
     assert "first question" in guide.lower()
@@ -290,7 +290,7 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
 def test_setup_maintains_one_authoritative_canonical_config():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     assert "one authoritative" in skill
-    assert "canonical Agency config" in skill
+    assert "canonical Flowgency config" in skill
     assert "revision" in skill
     assert "atomically" in skill
 
@@ -299,7 +299,7 @@ def test_setup_uses_official_singleton_scheduler_cli():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     assert "flowgency dispatch install --config" in skill
     assert "flowgency dispatch status --config" in skill
-    assert "exactly one Agency dashboard" in skill
+    assert "exactly one Flowgency dashboard" in skill
     assert "do not create a fallback project scheduler" in skill
 
 

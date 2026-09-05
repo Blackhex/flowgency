@@ -33,10 +33,10 @@ You are a {ROLE_NAME} for projects that use {LANGUAGE_OR_DOMAIN}.
 Keep project-specific identity, integration, runtime policy, schedules, and mutable memory out of this file.
 
 ## Canonical Team Registration
-Default setup starts from one user-selected Agency data root. For an Agency data root at `C:/Agency` and a team ID of `example`, derive:
+Default setup starts from one user-selected Flowgency data root. For a Flowgency data root at `C:/Flowgency` and a team ID of `example`, derive:
 
 ```text
-C:/Agency/
+C:/Flowgency/
 |-- agent-library/
 |-- compiled-agents/
 |-- memory/
@@ -49,19 +49,19 @@ Map those derived paths to the schema version 1 fields and keep the execution wo
 ```yaml
 schema_version: 1
 flowgency:
-  agent_library: C:/Agency/agent-library
-  compilation_cache: C:/Agency/compiled-agents
-  memory_store: C:/Agency/memory
-  prompt_store: C:/Agency/prompts
+  agent_library: C:/Flowgency/agent-library
+  compilation_cache: C:/Flowgency/compiled-agents
+  memory_store: C:/Flowgency/memory
+  prompt_store: C:/Flowgency/prompts
 teams:
   example:
     workspace_path: C:/Projects/example
-    path: C:/Agency/teams/example
+    path: C:/Flowgency/teams/example
 ```
 
-workspace_path is project source and execution. path is Agency-owned team state. Agency never loads or creates <workspace_path>/shared. durable jobs live in flowgency.memory_store/.jobs, and operation locks live in <team.path>/locks.
+workspace_path is project source and execution. path is Flowgency-owned team state. Flowgency never loads or creates <workspace_path>/shared. durable jobs live in flowgency.memory_store/.jobs, and operation locks live in <team.path>/locks.
 
-The project workspace stays at `teams.<team-id>.workspace_path`, while the derived root-backed fields remain Agency-owned storage.
+The project workspace stays at `teams.<team-id>.workspace_path`, while the derived root-backed fields remain Flowgency-owned storage.
 
 ## Standard Agent Skill
 

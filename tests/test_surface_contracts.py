@@ -256,7 +256,7 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
         REPO_ROOT / "skills" / "flowgency-setup" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "`workspace_path` points to the project workspace" in skill_text
-    assert "`path` points to the Agency-owned team-state root" in skill_text
+    assert "`path` points to the Flowgency-owned team-state root" in skill_text
     assert "agents" not in team["dispatch"]
     assert team["runtime"]["permissions"]["rules"]
     assert all({"name", "blueprint", "integration"} <= set(instance) for instance in team["agents"])
@@ -332,8 +332,8 @@ def test_non_domain_group_tokens_remain_unchanged():
 
 def test_readme_and_getting_started_describe_the_data_root_handoff():
     expected = (
-        "Start Agency, choose the Agency data root and supported AI integration, "
-        "complete the agency-setup conversation, and return to the dashboard automatically."
+        "Start Flowgency, choose the Flowgency data root and supported AI integration, "
+        "complete the flowgency-setup conversation, and return to the dashboard automatically."
     )
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     getting_started = (REPO_ROOT / "kb" / "getting-started.md").read_text(

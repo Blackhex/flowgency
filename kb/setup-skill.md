@@ -1,25 +1,25 @@
 # Flowgency Setup Skill
 
-The `flowgency-setup` skill owns the one authoritative canonical Agency config. Guided first-run setup supplies an approved Agency data root, authoritative config path, and supported AI integration; the guided conversation asks for the project workspace as its first question. Without guided context, the skill asks for the data root and then the workspace explicitly. The skill takes over team naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces. Generated native prompt files remain derived output.
+The `flowgency-setup` skill owns the one authoritative canonical Flowgency config. Guided first-run setup supplies an approved Flowgency data root, authoritative config path, and supported AI integration; the guided conversation asks for the project workspace as its first question. Without guided context, the skill asks for the data root and then the workspace explicitly. The skill takes over team naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces. Generated native prompt files remain derived output.
 
-Every generated config uses `schema_version: 1` and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store`. Each team has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned team root). The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`.
+Every generated config uses `schema_version: 1` and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store`. Each team has both `workspace_path` (the execution workspace and source repository) and `path` (the Flowgency-owned team root). The team root is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`; durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`.
 
-## Agency Data Root
+## Flowgency Data Root
 
 In guided mode, the data root is pre-supplied by the launcher; the project workspace is the first question. In manual mode, the skill asks for the data root first and then the project workspace. Read-only inspection follows workspace selection in both modes. The data root is a separate home for reusable agent blueprints, disposable compiled projections, semantic memory and durable jobs, and per-team records. The project workspace remains source code and execution context, while `config.yaml` remains at its authoritative path.
 
-The root may be an existing directory or a new absolute path whose nearest existing parent is a writable real directory that can safely create it. For a root at `C:/Agency` and team ID `example`, setup derives:
+The root may be an existing directory or a new absolute path whose nearest existing parent is a writable real directory that can safely create it. For a root at `C:/Flowgency` and team ID `example`, setup derives:
 
 ```text
-C:/Agency/
-|-- agent-library/       -> C:/Agency/agent-library
-|-- compiled-agents/     -> C:/Agency/compiled-agents
-|-- memory/              -> C:/Agency/memory
-|-- prompts/             -> C:/Agency/prompts
-`-- teams/example/      -> C:/Agency/teams/example
+C:/Flowgency/
+|-- agent-library/       -> C:/Flowgency/agent-library
+|-- compiled-agents/     -> C:/Flowgency/compiled-agents
+|-- memory/              -> C:/Flowgency/memory
+|-- prompts/             -> C:/Flowgency/prompts
+`-- teams/example/      -> C:/Flowgency/teams/example
 ```
 
-Users may enter home syntax such as `~/Agency`; setup expands it to the user's home directory before deriving and storing the canonical paths.
+Users may enter home syntax such as `~/Flowgency`; setup expands it to the user's home directory before deriving and storing the canonical paths.
 
 Setup then asks `Customize the derived storage paths?` once. Declining keeps the complete derived layout without individual path questions. Accepting opens one grouped review of all five paths. Nothing is created until the consolidated path summary is approved.
 

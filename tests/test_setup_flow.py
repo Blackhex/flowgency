@@ -29,12 +29,12 @@ def test_build_setup_prompt_supplies_guided_data_root_context(tmp_path: Path):
 
     for line in (
         "Setup mode: guided-first-run.",
-        f"Agency data root: {data_root.resolve()}.",
+        f"Flowgency data root: {data_root.resolve()}.",
         f"Authoritative config: {config_path.resolve()}.",
         "Selected integration: copilot.",
     ):
         assert line in prompt
-    assert "The Agency data root was selected in the browser; do not ask for it again." in prompt
+    assert "The Flowgency data root was selected in the browser; do not ask for it again." in prompt
     assert (
         "Ask for the first team project workspace as the first user-facing question."
         in prompt
@@ -42,7 +42,7 @@ def test_build_setup_prompt_supplies_guided_data_root_context(tmp_path: Path):
     assert "Project workspace:" not in prompt
 
 
-def test_build_setup_prompt_emits_v6_team_shape(tmp_path: Path):
+def test_build_setup_prompt_emits_v1_team_shape(tmp_path: Path):
     prompt = build_setup_prompt(tmp_path, tmp_path / "config.yaml", selected_integration="copilot")
 
     for phrase in (
@@ -186,7 +186,29 @@ def test_build_setup_prompt_survives_deleted_data_root(tmp_path: Path):
         selected_integration="copilot",
     )
 
-    assert f"Agency data root: {resolved}." in prompt
+    assert f"Flowgency data root: {resolved}." in prompt
+
+
+def test_build_setup_prompt_guided_marker_is_flowgency_data_root(tmp_path: Path):
+    data_root = tmp_path / "Flowgency"
+    data_root.mkdir()
+    prompt = build_setup_prompt(
+        data_root,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
+
+    assert f"Flowgency data root: {data_root.resolve()}." in prompt
+    assert "Agency data root:" not in prompt
+
+
+def test_build_setup_prompt_integration_sentence_is_complete(tmp_path: Path):
+    prompt = build_setup_prompt(
+        tmp_path, tmp_path / "config.yaml", selected_integration="copilot"
+    )
+
+    assert "a different registered integration. By default derive" in prompt
+    assert "a different registered By default" not in prompt
 
 
 def test_status_waits_when_config_is_absent(tmp_path: Path) -> None:

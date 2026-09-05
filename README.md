@@ -55,9 +55,9 @@ Workspace launchers are optional frontends. They start configured instances in t
 
 ## Quick start
 
-Start Agency, choose the Agency data root and supported AI integration, complete the agency-setup conversation, and return to the dashboard automatically. The launcher safely creates a missing root, attaches the bundled skill, and the guided conversation asks for the project workspace as its first question. The [Agency Setup Skill](kb/setup-skill.md) then owns team naming, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
+Start Flowgency, choose the Flowgency data root and supported AI integration, complete the flowgency-setup conversation, and return to the dashboard automatically. The launcher safely creates a missing root, attaches the bundled skill, and the guided conversation asks for the project workspace as its first question. The [Flowgency Setup Skill](kb/setup-skill.md) then owns team naming, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
 
-On first run, open `/setup` and choose the data root and supported integration to launch `agency-setup`. Users may enter home syntax such as `~/Agency`; setup expands it before deriving `agent-library`, `compiled-agents`, `memory`, `prompts`, and `teams/<team-id>` beneath the approved root. Advanced users can opt into one grouped path review; the default flow asks no individual storage-path questions.
+On first run, open `/setup` and choose the data root and supported integration to launch `flowgency-setup`. Users may enter home syntax such as `~/Flowgency`; setup expands it before deriving `agent-library`, `compiled-agents`, `memory`, `prompts`, and `teams/<team-id>` beneath the approved root. Advanced users can opt into one grouped path review; the default flow asks no individual storage-path questions.
 
 ## Pipeline and execution
 
@@ -66,8 +66,8 @@ Agents surface observations, converge them into proposals, and wait for human de
 Agency installs one user-level platform scheduler for all teams:
 
 ```text
-christag-agency dispatch install --config C:/Agency/config.yaml
-christag-agency dispatch status --config C:/Agency/config.yaml
+flowgency dispatch install --config C:/Flowgency/config.yaml
+flowgency dispatch status --config C:/Flowgency/config.yaml
 ```
 
 ## Superseded layout cleanup
