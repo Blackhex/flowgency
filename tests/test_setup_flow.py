@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agency.configuration import ConfigStore
-from agency.integrations import BaseIntegration
-from agency.web.directory_browser import DirectoryBrowseError, list_directories
-from agency.web.setup_flow import (
+from flowgency.configuration import ConfigStore
+from flowgency.integrations import BaseIntegration
+from flowgency.web.directory_browser import DirectoryBrowseError, list_directories
+from flowgency.web.setup_flow import (
     build_setup_prompt,
     inspect_setup_status,
     launchable_integrations,

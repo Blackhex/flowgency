@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import os
 
-from agency.health import (
+from flowgency.health import (
     AgentHealth,
     Lateness,
     RoutineSchedule,
@@ -169,7 +169,7 @@ def test_routine_schedules_reads_mappings():
 
 
 def test_routine_schedules_reads_config_models():
-    from agency.configuration.models import Routine
+    from flowgency.configuration.models import Routine
 
     routine = Routine(
         id="r",
@@ -323,7 +323,7 @@ def test_last_fired_at_reads_the_every_marker(tmp_path):
 
 def test_last_fired_at_reads_the_at_marker(tmp_path):
     """last_fired_at reads the mtime of the at-schedule marker (the common schedule kind)."""
-    from agency.dispatch.schedule import at_marker_path
+    from flowgency.dispatch.schedule import at_marker_path
     logs = _logs(tmp_path)
     day = NOW.strftime("%Y-%m-%d")
     marker = at_marker_path(logs, "product", "r", day)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.records.outbox import (
+from flowgency.records.outbox import (
     OUTBOX_RELATIVE_MEMORY,
     OUTBOX_RELATIVE_OBSERVATIONS,
     OUTBOX_RELATIVE_PROPOSALS,

@@ -10,8 +10,8 @@ from copy import deepcopy
 import yaml
 from fastapi.testclient import TestClient
 
-import agency.app as app_mod
-from agency.app import app
+import flowgency.app as app_mod
+from flowgency.app import app
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 

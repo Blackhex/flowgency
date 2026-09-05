@@ -6,20 +6,20 @@ import os
 import pytest
 import yaml
 
-import agency.app as app_mod
-from agency.integrations import FileChange, RunResult
-from agency.integrations.models import (
+import flowgency.app as app_mod
+from flowgency.integrations import FileChange, RunResult
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ResolvedPermissionRule,
 )
-from agency.jobs.authority import JobStore
-from agency.jobs import JobRequest, JobSubmissionError
-from agency.jobs.execution import execute_job
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import write_job
-from agency.memory.selectors import resolve_memory_selector
-from agency.configuration.models import MemorySelector
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs import JobRequest, JobSubmissionError
+from flowgency.jobs.execution import execute_job
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import write_job
+from flowgency.memory.selectors import resolve_memory_selector
+from flowgency.configuration.models import MemorySelector
 from test_proposal_questions import _setup_decision_team
 
 
@@ -150,7 +150,7 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
         integration=FakeIntegration(),
     )
     context.workspace_root.mkdir(parents=True)
-    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
+    monkeypatch.setattr("flowgency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     execute_job(_authority(spec))
 
@@ -195,7 +195,7 @@ def test_execute_job_projects_empty_changed_files_on_retry(tmp_path, monkeypatch
         ),
     )
     context.workspace_root.mkdir(parents=True)
-    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
+    monkeypatch.setattr("flowgency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     execute_job(_authority(spec))
 
@@ -224,7 +224,7 @@ def test_execute_job_projects_failed_status(tmp_path, monkeypatch):
         ),
     )
     context.workspace_root.mkdir(parents=True)
-    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
+    monkeypatch.setattr("flowgency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     execute_job(_authority(spec))
 
@@ -267,7 +267,7 @@ def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monk
         integration=SimpleNamespace(run=fake_run),
     )
     context.workspace_root.mkdir(parents=True)
-    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
+    monkeypatch.setattr("flowgency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     execute_job(_authority(spec))
 
@@ -278,7 +278,7 @@ def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monk
 def test_decide_submits_embedded_snapshot_and_persists_job_id(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     captured = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "approved", "execution_agent": "engineer"},
@@ -304,7 +304,7 @@ def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monk
         "execution_job_history: []\n---\n"
     )
     captured = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
     response = client.post(
         "/test/decisions/change/retry",
         data={"execution_agent": "engineer"}, follow_redirects=False,
@@ -319,7 +319,7 @@ def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monk
 
 def test_launch_failure_rolls_back_new_decision(tmp_path, monkeypatch):
     client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch)
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "approved", "execution_agent": "engineer"},
@@ -339,7 +339,7 @@ def test_retry_launch_failure_restores_original_decision_text(tmp_path, monkeypa
     )
     decision_path.write_text(original_text)
     monkeypatch.setattr(
-        "agency.app.submit_job_request",
+        "flowgency.app.submit_job_request",
         lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
     )
     response = client.post(
@@ -370,7 +370,7 @@ def test_decide_creates_decision_via_atomic_replace(tmp_path, monkeypatch):
     """Decision creation must write via a same-directory temp file + os.replace,
     not a plain write_text, so a crash mid-write never leaves a truncated file."""
     client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id=request.job_id))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: SimpleNamespace(job_id=request.job_id))
     calls = _spy_os_replace(monkeypatch)
 
     response = client.post(
@@ -394,7 +394,7 @@ def test_retry_updates_decision_via_atomic_replace(tmp_path, monkeypatch):
         "execution_agent: engineer\nexecution_job_id: old-job\n"
         "execution_job_history: []\n---\n"
     )
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id=request.job_id))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: SimpleNamespace(job_id=request.job_id))
     calls = _spy_os_replace(monkeypatch)
 
     response = client.post(
@@ -419,7 +419,7 @@ def test_retry_launch_failure_restores_decision_via_atomic_replace(tmp_path, mon
     )
     decision_path.write_text(original_text)
     monkeypatch.setattr(
-        "agency.app.submit_job_request",
+        "flowgency.app.submit_job_request",
         lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
     )
     calls = _spy_os_replace(monkeypatch)
@@ -472,7 +472,7 @@ def test_retry_launch_failure_rerenders_decision_detail_with_error(tmp_path, mon
     )
     decision_path.write_text(original_text)
     monkeypatch.setattr(
-        "agency.app.submit_job_request",
+        "flowgency.app.submit_job_request",
         lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", decision_path)),
     )
 
@@ -490,7 +490,7 @@ def test_retry_launch_failure_rerenders_decision_detail_with_error(tmp_path, mon
 def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     submitted = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: submitted.append(request))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: submitted.append(request))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "declined", "execution_agent": "engineer"},
@@ -507,7 +507,7 @@ def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_
 def test_declined_with_note_submits_job_and_persists_note(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     captured = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: captured.append(request))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "declined", "decision_note": "Implement the alternate path", "execution_agent": "engineer"},
@@ -524,7 +524,7 @@ def test_launch_failure_preserves_submitted_answers_and_note_in_rerender(tmp_pat
     (radio pre-selected) and the decision note so all user input survives."""
     client, proposal_path, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "agency.app.submit_job_request",
+        "flowgency.app.submit_job_request",
         lambda request: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)),
     )
     response = client.post(
@@ -551,7 +551,7 @@ def test_retry_prompt_keeps_decision_note(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_team(tmp_path, monkeypatch)
     decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: approved\ndecision_note: Keep rollback\nexecution_status: failed\nexecution_agent: engineer\n---\n")
     captured = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: captured.append(request))
     response = client.post("/test/decisions/change/retry", data={"execution_agent": "engineer"}, follow_redirects=False)
     assert response.status_code == 303
     assert "Keep rollback" in captured[0].task_input
@@ -565,7 +565,7 @@ def test_retry_allows_cancelled_status(tmp_path, monkeypatch):
         "execution_job_history: []\n---\n"
     )
     captured = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: captured.append(request) or SimpleNamespace(job_id=request.job_id))
 
     response = client.post(
         "/test/decisions/change/retry",
@@ -589,7 +589,7 @@ def test_retry_blocked_for_non_failed_status(tmp_path, monkeypatch, bad_status):
     original = f"---\nproposal: change.md\nexecution_status: {bad_status}\nexecution_agent: engineer\n---\n"
     decision_path.write_text(original)
     submitted = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: submitted.append(request))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: submitted.append(request))
     response = client.post("/test/decisions/change/retry", data={"execution_agent": "engineer"})
     assert response.status_code == 400, f"expected 400 for status={bad_status}, got {response.status_code}"
     assert submitted == [], f"submit_job must not be called for status={bad_status}"

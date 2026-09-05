@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import latest_terminal_job, write_job
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import latest_terminal_job, write_job
 
 
 def _spec(tmp_path: Path, job_id: str, agent_name: str, created_at: str) -> JobSpec:

@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 import os
 from unittest.mock import patch
 
-from agency import app as app_module
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import write_job
+from flowgency import app as app_module
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import write_job
 
 NOW = datetime(2026, 7, 28, 12, 0, 0)
 

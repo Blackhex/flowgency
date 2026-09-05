@@ -6,18 +6,18 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from agency.blueprints.projectors import get_projector
-from agency.blueprints.library import inspect_blueprint
-from agency.jobs.models import PromptSnapshot
-from agency.integrations import RunResult
-from agency.prompts import parse_prompt_document
-from agency.prompts.projection import project_prompt_snapshots, render_prompt
-from agency.fs.snapshot import (
+from flowgency.blueprints.projectors import get_projector
+from flowgency.blueprints.library import inspect_blueprint
+from flowgency.jobs.models import PromptSnapshot
+from flowgency.integrations import RunResult
+from flowgency.prompts import parse_prompt_document
+from flowgency.prompts.projection import project_prompt_snapshots, render_prompt
+from flowgency.fs.snapshot import (
     SnapshotFile,
     TreeSnapshot,
     compute_source_digest,
 )
-from agency.integrations import REGISTRY
+from flowgency.integrations import REGISTRY
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
     LIVE_SCENARIOS,

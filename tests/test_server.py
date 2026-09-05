@@ -8,9 +8,9 @@ import uvicorn
 from fastapi.testclient import TestClient
 import yaml
 
-from agency import app as app_mod
-from agency.configuration import ValidationFailed
-from agency.integrations import IntegrationError
+from flowgency import app as app_mod
+from flowgency.configuration import ValidationFailed
+from flowgency.integrations import IntegrationError
 
 
 def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
@@ -166,7 +166,7 @@ def test_run_server_reload_mode_uses_import_string_and_project_policy(
 
     assert events[0] == (
         "config",
-        "agency.app:app",
+        "flowgency.app:app",
         {
             "host": "127.0.0.1",
             "port": 8601,
@@ -189,7 +189,7 @@ def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
     root = tmp_path / "project"
     root.mkdir()
     config = uvicorn.Config(
-        "agency.app:app",
+        "flowgency.app:app",
         reload=True,
         reload_dirs=[str(root.resolve())],
         reload_includes=list(app_mod.RELOAD_INCLUDES),
@@ -199,13 +199,13 @@ def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
     assert supervisor.reloader_name == "WatchFiles"
 
     watched_paths = [
-        root / "agency" / "app.py",
-        root / "agency" / "templates" / "base.html",
-        root / "agency" / "static" / "app.css",
-        root / "agency" / "static" / "sw.js",
-        root / "agency" / "static" / "manifest.json",
-        root / "agency" / "themes" / "workshop.yaml",
-        root / "agency" / "themes" / "local.yml",
+        root / "flowgency" / "app.py",
+        root / "flowgency" / "templates" / "base.html",
+        root / "flowgency" / "static" / "app.css",
+        root / "flowgency" / "static" / "sw.js",
+        root / "flowgency" / "static" / "manifest.json",
+        root / "flowgency" / "themes" / "workshop.yaml",
+        root / "flowgency" / "themes" / "local.yml",
         root / "config.yaml",
     ]
     excluded_paths = [
@@ -239,9 +239,9 @@ def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
 def test_reload_filter_uses_directory_components_not_name_fragments(tmp_path):
     reload_filter = app_mod._AgencyReloadFilter(tmp_path.resolve())
 
-    assert reload_filter(tmp_path / "agency" / "shared_config.py")
-    assert reload_filter(tmp_path / "agency" / "venv_tools.py")
-    assert reload_filter(tmp_path / "agency" / "metadata.egg-info.json")
+    assert reload_filter(tmp_path / "flowgency" / "shared_config.py")
+    assert reload_filter(tmp_path / "flowgency" / "venv_tools.py")
+    assert reload_filter(tmp_path / "flowgency" / "metadata.egg-info.json")
 
 
 def test_reload_server_propagates_supervisor_errors(tmp_path, monkeypatch):
@@ -315,7 +315,7 @@ def test_run_server_reports_first_run_before_starting_uvicorn(
 def test_setup_get_renders_only_data_root_and_integration_fields(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.launchable_integrations",
+        "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, data_root: (
             _LaunchIntegration("copilot", "GitHub Copilot"),
         ),
@@ -375,7 +375,7 @@ def test_setup_get_rebuilds_services_before_redirect_when_config_appears_out_of_
 def test_setup_launch_rejects_relative_data_root(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.launchable_integrations",
+        "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (_LaunchIntegration(),),
     )
     response = TestClient(app_mod.app).post(
@@ -392,7 +392,7 @@ def test_setup_launch_rejects_unavailable_integration(tmp_path, monkeypatch):
     data_root = tmp_path / "Agency"
     data_root.mkdir()
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.launchable_integrations",
+        "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (_LaunchIntegration("claude-code", "Claude Code"),),
     )
     client = TestClient(app_mod.app)
@@ -412,7 +412,7 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     data_root.mkdir()
     integration = _LaunchIntegration()
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.launchable_integrations",
+        "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
 
@@ -423,7 +423,7 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.run_in_threadpool",
+        "flowgency.web.routes.admin_teams.run_in_threadpool",
         fake_run_in_threadpool,
     )
     client = TestClient(app_mod.app)
@@ -494,7 +494,7 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
         error=IntegrationError("Launch failed."),
     )
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.launchable_integrations",
+        "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
 
@@ -504,7 +504,7 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.run_in_threadpool",
+        "flowgency.web.routes.admin_teams.run_in_threadpool",
         fake_run_in_threadpool,
     )
     client = TestClient(app_mod.app)
@@ -529,7 +529,7 @@ def test_setup_launch_creates_and_uses_missing_data_root(tmp_path, monkeypatch):
     data_root = tmp_path / "new" / "Agency"
     integration = _LaunchIntegration()
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.launchable_integrations",
+        "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
     client = TestClient(app_mod.app)
@@ -558,7 +558,7 @@ def test_setup_launch_returns_to_form_when_launch_and_fallback_fail(
         fallback_error=IntegrationError("No valid fallback command."),
     )
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.launchable_integrations",
+        "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
 

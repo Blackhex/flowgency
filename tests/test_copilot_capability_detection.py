@@ -4,8 +4,8 @@ import subprocess
 
 import pytest
 
-from agency.integrations.agency import copilot as copilot_module
-from agency.integrations.agency.copilot import CopilotIntegration
+from flowgency.integrations.flowgency import copilot as copilot_module
+from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
 
 MEASURED_VERSION = "1.0.78-2"

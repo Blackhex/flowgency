@@ -8,22 +8,22 @@ from unittest.mock import Mock, patch
 import pytest
 import yaml
 
-from agency.blueprints import CompilationCache
-from agency.blueprints.library import BlueprintLibrary
-from agency.blueprints.projectors import StaticRuntimeProjector
-from agency.configuration.store import ConfigStore
-from agency.integrations import BaseIntegration
-from agency.integrations.models import ProjectorCapabilities, RuntimeCapabilities
-import agency.jobs as jobs_package
-from agency.jobs import JobSpec, JobSubmissionError, submit_job_request
-from agency.jobs.authority import JobStore
-from agency.jobs.resolution import JobRequest, JobValidationError, resolve_job_request
-from agency.jobs.models import BlueprintRef, MemoryBinding, RuntimePolicySnapshot
-from agency.prompts.assets import parse_prompt_document, prompt_source_path
-from agency.prompts import build_prompt_task_input
-from agency.prompts.catalog import effective_prompt_catalog, resolve_catalog_prompt
-from agency.prompts.store import PromptStore, StoredPrompt
-from agency.jobs.launcher import (
+from flowgency.blueprints import CompilationCache
+from flowgency.blueprints.library import BlueprintLibrary
+from flowgency.blueprints.projectors import StaticRuntimeProjector
+from flowgency.configuration.store import ConfigStore
+from flowgency.integrations import BaseIntegration
+from flowgency.integrations.models import ProjectorCapabilities, RuntimeCapabilities
+import flowgency.jobs as jobs_package
+from flowgency.jobs import JobSpec, JobSubmissionError, submit_job_request
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.resolution import JobRequest, JobValidationError, resolve_job_request
+from flowgency.jobs.models import BlueprintRef, MemoryBinding, RuntimePolicySnapshot
+from flowgency.prompts.assets import parse_prompt_document, prompt_source_path
+from flowgency.prompts import build_prompt_task_input
+from flowgency.prompts.catalog import effective_prompt_catalog, resolve_catalog_prompt
+from flowgency.prompts.store import PromptStore, StoredPrompt
+from flowgency.jobs.launcher import (
     CREATE_NEW_PROCESS_GROUP,
     DETACHED_PROCESS,
     DetachedProcessLauncher,
@@ -33,8 +33,8 @@ from agency.jobs.launcher import (
     _systemd_available,
     default_launcher,
 )
-from agency.jobs.store import read_job
-from agency.memory import MemoryStore
+from flowgency.jobs.store import read_job
+from flowgency.memory import MemoryStore
 
 
 @pytest.fixture
@@ -623,7 +623,7 @@ def test_full_run_validation_does_not_require_skill_activation_for_prompt_jobs(
     launcher = Mock()
     launcher.launch.return_value = LaunchResult(worker_pid=4321)
 
-    with patch.dict("agency.jobs.submission.REGISTRY", {"copilot": NoSkillIntegration()}, clear=True):
+    with patch.dict("flowgency.jobs.submission.REGISTRY", {"copilot": NoSkillIntegration()}, clear=True):
         handle = submit_job_request(request, launcher)
 
     assert handle.worker_pid == 4321
@@ -647,8 +647,8 @@ def test_submit_blocks_move_and_move_then_observes_active_job(
     tmp_path,
     monkeypatch,
 ):
-    from agency.instances import InstanceService, InstanceMoveConflict
-    import agency.jobs.submission as submission
+    from flowgency.instances import InstanceService, InstanceMoveConflict
+    import flowgency.jobs.submission as submission
 
     request = configured_request(tmp_path)
     config_store = ConfigStore(request.config_path)
@@ -913,8 +913,8 @@ def test_submit_releases_cache_pin_when_launch_fails(tmp_path):
 
 def test_windows_launcher_uses_detached_flags(tmp_path):
     authority = JobStore(tmp_path / "memory").reference("newsletter", "job", "a" * 64)
-    with patch("agency.jobs.launcher.os.name", "nt"), patch(
-        "agency.jobs.launcher.subprocess.Popen"
+    with patch("flowgency.jobs.launcher.os.name", "nt"), patch(
+        "flowgency.jobs.launcher.subprocess.Popen"
     ) as popen:
         popen.return_value.pid = 77
         result = DetachedProcessLauncher().launch(authority)
@@ -926,8 +926,8 @@ def test_windows_launcher_uses_detached_flags(tmp_path):
 
 def test_posix_launcher_starts_new_session(tmp_path):
     authority = JobStore(tmp_path / "memory").reference("newsletter", "job", "a" * 64)
-    with patch("agency.jobs.launcher.os.name", "posix"), patch(
-        "agency.jobs.launcher.subprocess.Popen"
+    with patch("flowgency.jobs.launcher.os.name", "posix"), patch(
+        "flowgency.jobs.launcher.subprocess.Popen"
     ) as popen:
         popen.return_value.pid = 78
         DetachedProcessLauncher().launch(authority)
@@ -941,7 +941,7 @@ def test_posix_launcher_starts_new_session(tmp_path):
 def test_systemd_launcher_argv_and_shell_false(tmp_path):
     """SystemdRunLauncher uses correct systemd-run argv with shell=False."""
     authority = JobStore(tmp_path / "memory").reference("newsletter", "abc-123", "a" * 64)
-    with patch("agency.jobs.launcher.subprocess.run") as run_mock:
+    with patch("flowgency.jobs.launcher.subprocess.run") as run_mock:
         result = SystemdRunLauncher().launch(authority)
     call_args = run_mock.call_args
     argv = call_args.args[0]
@@ -954,7 +954,7 @@ def test_systemd_launcher_argv_and_shell_false(tmp_path):
     sep_idx = argv.index("--")
     worker_part = argv[sep_idx + 1 :]
     assert "-m" in worker_part
-    assert "agency.jobs.worker" in worker_part
+    assert "flowgency.jobs.worker" in worker_part
     assert "--store-root" in worker_part
     assert str(authority.store_root) in worker_part
     assert "--job-id" in worker_part
@@ -971,7 +971,7 @@ def test_systemd_launcher_argv_and_shell_false(tmp_path):
 def test_systemd_launcher_no_stream_inheritance(tmp_path):
     """Streams are explicitly DEVNULL — no stdin/stdout/stderr leak."""
     authority = JobStore(tmp_path / "memory").reference("newsletter", "x", "a" * 64)
-    with patch("agency.jobs.launcher.subprocess.run") as run_mock:
+    with patch("flowgency.jobs.launcher.subprocess.run") as run_mock:
         SystemdRunLauncher().launch(authority)
     kw = run_mock.call_args.kwargs
     assert kw["stdin"] == subprocess.DEVNULL
@@ -992,7 +992,7 @@ def test_sanitize_unit_name_replaces_unsafe_chars():
 def test_systemd_launcher_launch_result_has_none_pid(tmp_path):
     """LaunchResult from systemd launcher has worker_pid=None."""
     authority = JobStore(tmp_path / "memory").reference("newsletter", "job", "a" * 64)
-    with patch("agency.jobs.launcher.subprocess.run"):
+    with patch("flowgency.jobs.launcher.subprocess.run"):
         result = SystemdRunLauncher().launch(authority)
     assert result == LaunchResult(worker_pid=None)
 
@@ -1002,42 +1002,42 @@ def test_systemd_launcher_launch_result_has_none_pid(tmp_path):
 
 def test_systemd_available_false_on_non_linux():
     """Detection returns False when not on Linux."""
-    with patch("agency.jobs.launcher.sys.platform", "win32"):
+    with patch("flowgency.jobs.launcher.sys.platform", "win32"):
         assert _systemd_available() is False
-    with patch("agency.jobs.launcher.sys.platform", "darwin"):
+    with patch("flowgency.jobs.launcher.sys.platform", "darwin"):
         assert _systemd_available() is False
 
 
 def test_systemd_available_false_when_no_binary():
     """Detection returns False when systemd-run not on PATH."""
-    with patch("agency.jobs.launcher.sys.platform", "linux"), \
-         patch("agency.jobs.launcher.shutil.which", return_value=None):
+    with patch("flowgency.jobs.launcher.sys.platform", "linux"), \
+         patch("flowgency.jobs.launcher.shutil.which", return_value=None):
         assert _systemd_available() is False
 
 
 def test_systemd_available_true_when_running():
     """Detection returns True when systemctl reports running."""
-    with patch("agency.jobs.launcher.sys.platform", "linux"), \
-         patch("agency.jobs.launcher.shutil.which", return_value="/usr/bin/systemd-run"), \
-         patch("agency.jobs.launcher.subprocess.run") as run_mock:
+    with patch("flowgency.jobs.launcher.sys.platform", "linux"), \
+         patch("flowgency.jobs.launcher.shutil.which", return_value="/usr/bin/systemd-run"), \
+         patch("flowgency.jobs.launcher.subprocess.run") as run_mock:
         run_mock.return_value.stdout = b"running\n"
         assert _systemd_available() is True
 
 
 def test_systemd_available_true_when_degraded():
     """Detection returns True when systemctl reports degraded."""
-    with patch("agency.jobs.launcher.sys.platform", "linux"), \
-         patch("agency.jobs.launcher.shutil.which", return_value="/usr/bin/systemd-run"), \
-         patch("agency.jobs.launcher.subprocess.run") as run_mock:
+    with patch("flowgency.jobs.launcher.sys.platform", "linux"), \
+         patch("flowgency.jobs.launcher.shutil.which", return_value="/usr/bin/systemd-run"), \
+         patch("flowgency.jobs.launcher.subprocess.run") as run_mock:
         run_mock.return_value.stdout = b"degraded\n"
         assert _systemd_available() is True
 
 
 def test_systemd_available_false_when_manager_offline():
     """Detection returns False when systemctl reports something else."""
-    with patch("agency.jobs.launcher.sys.platform", "linux"), \
-         patch("agency.jobs.launcher.shutil.which", return_value="/usr/bin/systemd-run"), \
-         patch("agency.jobs.launcher.subprocess.run") as run_mock:
+    with patch("flowgency.jobs.launcher.sys.platform", "linux"), \
+         patch("flowgency.jobs.launcher.shutil.which", return_value="/usr/bin/systemd-run"), \
+         patch("flowgency.jobs.launcher.subprocess.run") as run_mock:
         run_mock.return_value.stdout = b"offline\n"
         assert _systemd_available() is False
 
@@ -1065,7 +1065,7 @@ def test_submit_job_uses_default_launcher_when_none_provided(tmp_path):
     request = configured_request(tmp_path)
     fake_launcher = Mock()
     fake_launcher.launch.return_value = LaunchResult(worker_pid=999)
-    with patch("agency.jobs.queue.default_launcher", return_value=fake_launcher):
+    with patch("flowgency.jobs.queue.default_launcher", return_value=fake_launcher):
         handle = submit_job_request(request)
     assert fake_launcher.launch.called
     assert handle.worker_pid == 999
@@ -1157,8 +1157,8 @@ def test_resolve_snapshots_the_writable_agent_set(tmp_path):
 
 def test_tool_mode_derives_from_all_rules_not_just_pathless():
     """Regression: path-bearing rules were previously ignored."""
-    from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
-    from agency.jobs.resolution import _tool_mode_from_policy, _tool_names_from_policy
+    from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+    from flowgency.jobs.resolution import _tool_mode_from_policy, _tool_names_from_policy
 
     policy = EffectiveRuntimePolicy(
         timeout=30,
@@ -1176,10 +1176,10 @@ def test_tool_mode_derives_from_all_rules_not_just_pathless():
 import os
 from dataclasses import replace as dc_replace
 
-from agency.configuration.models import parse_config
-from agency.fs.locks import exclusive_lock
-from agency.jobs.models import RuntimePolicySnapshot, MemoryBinding, BlueprintRef, JobRecord
-from agency.jobs.store import queue_lock_path, write_job
+from flowgency.configuration.models import parse_config
+from flowgency.fs.locks import exclusive_lock
+from flowgency.jobs.models import RuntimePolicySnapshot, MemoryBinding, BlueprintRef, JobRecord
+from flowgency.jobs.store import queue_lock_path, write_job
 
 
 class _RecordingLauncher:
@@ -1409,7 +1409,7 @@ def test_a_pool_of_dead_workers_is_reclaimed_by_the_submission_drain(
     submission_env, monkeypatch
 ):
     """The drain reconciles before it counts, so ghosts never wedge the queue."""
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
     submission_env.fill_pool_with_dead_workers()
     handle = submit_job_request(submission_env.request(), submission_env.launcher)
     assert submission_env.launcher.launched == [handle.job_id]

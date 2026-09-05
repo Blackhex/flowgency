@@ -13,17 +13,17 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agency.configuration.effective import resolve_effective_policy
-from agency.configuration.issues import ValidationFailed
-from agency.configuration.store import ConfigStore
-from agency.integrations import BaseIntegration
-from agency.integrations.models import (
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.issues import ValidationFailed
+from flowgency.configuration.store import ConfigStore
+from flowgency.integrations import BaseIntegration
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     ResolvedPermissionRule,
     RuntimeCapabilities,
 )
-from agency.jobs.models import RuntimePolicySnapshot
-from agency.permissions.eligibility import may_execute_decisions
+from flowgency.jobs.models import RuntimePolicySnapshot
+from flowgency.permissions.eligibility import may_execute_decisions
 
 
 # ── Integration fixtures ─────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ def test_snapshot_dict_does_not_contain_deprecated_fields():
 
 def test_a_job_spec_persisted_before_the_write_boundary_still_loads(tmp_path):
     """Pre-upgrade job payloads must keep their shape, digest, and meaning."""
-    from agency.jobs.models import JobRecord
+    from flowgency.jobs.models import JobRecord
     from test_job_execution import queued_job
 
     _, spec = queued_job(tmp_path)

@@ -8,8 +8,8 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-import agency.app as app_mod
-from agency.configuration import ConfigStore
+import flowgency.app as app_mod
+from flowgency.configuration import ConfigStore
 
 
 class _FormParser(HTMLParser):

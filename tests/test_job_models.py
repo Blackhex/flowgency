@@ -8,11 +8,11 @@ from uuid import uuid4
 import pytest
 import yaml
 
-import agency.jobs.execution as execution_module
-import agency.jobs.models as job_models_module
-import agency.jobs.store as store_module
-from agency.jobs.authority import JobStore
-from agency.jobs.models import (
+import flowgency.jobs.execution as execution_module
+import flowgency.jobs.models as job_models_module
+import flowgency.jobs.store as store_module
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import (
     BlueprintRef,
     JobRecord,
     JobRequest,
@@ -21,7 +21,7 @@ from agency.jobs.models import (
     MemoryBinding,
     RuntimePolicySnapshot,
 )
-from agency.jobs.store import (
+from flowgency.jobs.store import (
     InvalidJobTransition,
     active_jobs,
     canonical_team_operation_lock_paths,
@@ -36,7 +36,7 @@ from agency.jobs.store import (
     transition_job,
     write_job,
 )
-import agency.config as strict_config_module
+import flowgency.config as strict_config_module
 
 
 def _canonical_team_store(tmp_path: Path) -> Path:
@@ -611,9 +611,9 @@ def test_job_record_loads_payload_without_session_id(tmp_path):
 
 
 def test_team_path_identity_resolves_configured_team_path(tmp_path):
-    from agency.jobs.store import _team_path_identity
-    from agency.configuration.models import parse_config
-    from agency.configuration.store import ConfigSnapshot
+    from flowgency.jobs.store import _team_path_identity
+    from flowgency.configuration.models import parse_config
+    from flowgency.configuration.store import ConfigSnapshot
 
     team_path = tmp_path / "teams" / "news"
     team_path.mkdir(parents=True)
@@ -647,8 +647,8 @@ def test_team_path_identity_resolves_configured_team_path(tmp_path):
 
 
 def test_revision_bound_team_operation_locks_and_yields_snapshot(tmp_path):
-    from agency.jobs.store import revision_bound_team_operation
-    from agency.configuration.store import ConfigStore
+    from flowgency.jobs.store import revision_bound_team_operation
+    from flowgency.configuration.store import ConfigStore
 
     team_path = tmp_path / "teams" / "news"
     team_path.mkdir(parents=True)
@@ -739,7 +739,7 @@ def test_an_unclaimed_queued_record_is_launchable(sample_spec):
 def test_a_queued_record_with_a_dead_worker_is_launchable_again(
     sample_spec, monkeypatch
 ):
-    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.store.worker_alive", lambda pid: False)
     record = JobRecord.from_spec(sample_spec)
     record.worker_pid = 999999
     assert occupies_slot(record) is False
@@ -749,7 +749,7 @@ def test_a_queued_record_with_a_dead_worker_is_launchable_again(
 def test_a_queued_record_with_an_unverifiable_worker_holds_its_slot(
     sample_spec, monkeypatch
 ):
-    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: None)
+    monkeypatch.setattr("flowgency.jobs.store.worker_alive", lambda pid: None)
     record = JobRecord.from_spec(sample_spec)
     record.worker_pid = 999999
     assert occupies_slot(record) is True
@@ -788,7 +788,7 @@ def test_a_pidless_claim_is_relaunchable_once_the_grace_expires(
 ):
     from datetime import datetime, timedelta, timezone
 
-    from agency.jobs.store import LAUNCH_GRACE_SECONDS
+    from flowgency.jobs.store import LAUNCH_GRACE_SECONDS
 
     stale = datetime.now(timezone.utc) - timedelta(seconds=LAUNCH_GRACE_SECONDS + 60)
     record = JobRecord.from_spec(sample_spec)
@@ -815,7 +815,7 @@ def test_blueprint_cache_ref_includes_instance_digest():
 
 def test_worker_accepts_team_id_and_rejects_group_id(tmp_path):
     import argparse
-    from agency.jobs.worker import main
+    from flowgency.jobs.worker import main
 
     jobs_root = tmp_path / ".jobs"
     jobs_root.mkdir()

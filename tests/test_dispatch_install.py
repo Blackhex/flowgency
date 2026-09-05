@@ -2,9 +2,9 @@ import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from agency.dispatch.install import detect_platform, get_timer_status, install_timer, uninstall_timer
+from flowgency.dispatch.install import detect_platform, get_timer_status, install_timer, uninstall_timer
 
-import agency.dispatch.install as dispatch_install
+import flowgency.dispatch.install as dispatch_install
 
 
 def test_detect_platform_linux():
@@ -25,15 +25,15 @@ def test_detect_platform_windows():
 def test_windows_python_launcher_prefers_pythonw(tmp_path):
     (tmp_path / "python.exe").write_text("")
     (tmp_path / "pythonw.exe").write_text("")
-    with patch("agency.dispatch.install.sys.executable", str(tmp_path / "python.exe")):
-        from agency.dispatch.install import _windows_python_launcher
+    with patch("flowgency.dispatch.install.sys.executable", str(tmp_path / "python.exe")):
+        from flowgency.dispatch.install import _windows_python_launcher
         assert _windows_python_launcher() == str(tmp_path / "pythonw.exe")
 
 
 def test_windows_python_launcher_falls_back_to_executable(tmp_path):
     (tmp_path / "python.exe").write_text("")
-    with patch("agency.dispatch.install.sys.executable", str(tmp_path / "python.exe")):
-        from agency.dispatch.install import _windows_python_launcher
+    with patch("flowgency.dispatch.install.sys.executable", str(tmp_path / "python.exe")):
+        from flowgency.dispatch.install import _windows_python_launcher
         assert _windows_python_launcher() == str(tmp_path / "python.exe")
 
 
@@ -48,7 +48,7 @@ def test_install_windows_registers_task():
 
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
-        from agency.dispatch.install import install_timer
+        from flowgency.dispatch.install import install_timer
         err = install_timer(r"C:\cfg\config.yaml", 15)
 
     assert err is None
@@ -59,8 +59,8 @@ def test_install_windows_registers_task():
     task_def.Actions.Create.assert_called_once_with(0)    # TASK_ACTION_EXEC
     # Verify canonical path is used
     assert "--config" in action.Arguments
-    assert "agency.dispatch.run" in action.Arguments
-    import agency.dispatch.install as _install_mod
+    assert "flowgency.dispatch.run" in action.Arguments
+    import flowgency.dispatch.install as _install_mod
     from pathlib import Path as _Path
     assert action.WorkingDirectory == str(_Path(_install_mod.__file__).parent.parent.parent)
     folder.RegisterTaskDefinition.assert_called_once()
@@ -73,7 +73,7 @@ def test_install_windows_registers_task():
 def test_install_windows_without_pywin32_returns_error():
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": None, "win32com.client": None}):
-        from agency.dispatch.install import install_timer
+        from flowgency.dispatch.install import install_timer
         err = install_timer("cfg", 15)
     assert err is not None
     assert "pywin32" in err
@@ -88,13 +88,13 @@ def test_status_windows_installed_and_active():
     task.State = 3  # TASK_STATE_READY
     action = task.Definition.Actions.Item.return_value
     action.Path = dispatch_install._windows_python_launcher()
-    action.Arguments = '-m agency.dispatch.run --config "C:\\config.yaml"'
+    action.Arguments = '-m flowgency.dispatch.run --config "C:\\config.yaml"'
     trigger = task.Definition.Triggers.Item.return_value
     trigger.Repetition.Interval = "PT15M"
 
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
-        from agency.dispatch.install import get_timer_status
+        from flowgency.dispatch.install import get_timer_status
         status = get_timer_status("C:\\config.yaml", 15)
 
     assert status["installed"] is True
@@ -111,7 +111,7 @@ def test_status_windows_not_installed():
 
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
-        from agency.dispatch.install import get_timer_status
+        from flowgency.dispatch.install import get_timer_status
         status = get_timer_status("C:\\config.yaml", 15)
 
     assert status["installed"] is False
@@ -128,13 +128,13 @@ def test_status_windows_installed_but_disabled():
     task.State = 3  # TASK_STATE_READY
     action = task.Definition.Actions.Item.return_value
     action.Path = dispatch_install._windows_python_launcher()
-    action.Arguments = '-m agency.dispatch.run --config "C:\\config.yaml"'
+    action.Arguments = '-m flowgency.dispatch.run --config "C:\\config.yaml"'
     trigger = task.Definition.Triggers.Item.return_value
     trigger.Repetition.Interval = "PT15M"
 
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
-        from agency.dispatch.install import get_timer_status
+        from flowgency.dispatch.install import get_timer_status
         status = get_timer_status("C:\\config.yaml", 15)
 
     assert status["installed"] is True
@@ -150,7 +150,7 @@ def test_uninstall_windows_deletes_task():
 
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
-        from agency.dispatch.install import uninstall_timer
+        from flowgency.dispatch.install import uninstall_timer
         err = uninstall_timer("C:\\config.yaml")
 
     assert err is None
@@ -166,7 +166,7 @@ def test_uninstall_windows_missing_task_is_success():
 
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
-        from agency.dispatch.install import uninstall_timer
+        from flowgency.dispatch.install import uninstall_timer
         err = uninstall_timer("C:\\config.yaml")
 
     assert err is None
@@ -179,7 +179,7 @@ def test_uninstall_windows_connect_failure_returns_error():
 
     with patch("platform.system", return_value="Windows"), \
          patch.dict(sys.modules, {"win32com": MagicMock(), "win32com.client": fake_client}):
-        from agency.dispatch.install import uninstall_timer
+        from flowgency.dispatch.install import uninstall_timer
         err = uninstall_timer("C:\\config.yaml")
 
     assert err is not None
@@ -196,7 +196,7 @@ def _configure_windows_task(fake_client, config_path, interval=15, enabled=True,
     task.State = state
     action = task.Definition.Actions.Item.return_value
     action.Path = dispatch_install._windows_python_launcher()
-    action.Arguments = f'-m agency.dispatch.run --config "{Path(config_path).resolve()}"'
+    action.Arguments = f'-m flowgency.dispatch.run --config "{Path(config_path).resolve()}"'
     trigger = task.Definition.Triggers.Item.return_value
     trigger.Repetition.Interval = f"PT{interval}M"
     return task
@@ -419,7 +419,7 @@ def test_linux_status_reports_wrong_config_and_interval(tmp_path, monkeypatch):
     unit_dir = tmp_path / "systemd"
     unit_dir.mkdir()
     (unit_dir / "agency-dispatch.service").write_text(
-        f'ExecStart="{python_path}" -m agency.dispatch.run --config "{other.resolve()}"\n',
+        f'ExecStart="{python_path}" -m flowgency.dispatch.run --config "{other.resolve()}"\n',
         encoding="utf-8",
     )
     (unit_dir / "agency-dispatch.timer").write_text(

@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from agency.dispatch.run import run_dispatch_cycle
-from agency.dispatch.schedule import at_marker_path, every_marker_path
-from agency.jobs import JobSubmissionError
+from flowgency.dispatch.run import run_dispatch_cycle
+from flowgency.dispatch.schedule import at_marker_path, every_marker_path
+from flowgency.jobs import JobSubmissionError
 
 
 def _make_team(tmp_path):
@@ -136,7 +136,7 @@ def test_due_schedule_submits_routine_request_then_touches_marker(tmp_path, monk
     captured = []
 
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda request, launcher=None: captured.append(request) or SimpleNamespace(job_id=request.job_id),
     )
 
@@ -174,7 +174,7 @@ def test_due_schedule_renders_routine_arguments_in_task_input(tmp_path, monkeypa
     captured = []
 
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda request, launcher=None: captured.append(request) or SimpleNamespace(job_id=request.job_id),
     )
 
@@ -193,7 +193,7 @@ def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypa
     )
 
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             JobSubmissionError("no", tmp_path / "job")
         ),
@@ -222,7 +222,7 @@ def test_schedule_skips_condition_rules(tmp_path, monkeypatch):
     submit_calls = []
 
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda request, launcher=None: submit_calls.append(request) or object(),
     )
 
@@ -239,7 +239,7 @@ def test_one_heartbeat_submits_due_work_for_multiple_enabled_teams(tmp_path, mon
     _write_config(second_config, second_workspace, second_team, routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}])
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda request, launcher=None: submitted.append((request.team_key, request.agent_name)),
     )
     run_dispatch_cycle({}, first_config)
@@ -264,7 +264,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
     )
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda request, launcher=None: submitted.append(request),
     )
     run_dispatch_cycle({}, config_path)
@@ -283,7 +283,7 @@ def test_disabled_team_is_skipped_in_multi_team_config(tmp_path, monkeypatch):
     _write_config(disabled_config, disabled_workspace, disabled_team, routines=[{"id": "daily-review", "prompt_name": "daily-review", "schedule": {"every": "1h"}}], enabled=False)
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda request, launcher=None: submitted.append(request.team_key),
     )
     run_dispatch_cycle({}, enabled_config)
@@ -308,7 +308,7 @@ def test_disabled_routine_is_never_submitted_or_marked(tmp_path, monkeypatch):
     )
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda request, launcher=None: submitted.append(request),
     )
 
@@ -332,7 +332,7 @@ def _patch_submit(monkeypatch, launcher):
     def _submit(req, _launcher_arg=None, _l=launcher):
         _l.launch(SimpleNamespace(job_id=req.routine_id))
         return SimpleNamespace(job_id=req.routine_id)
-    monkeypatch.setattr("agency.dispatch.run.submit_job_request", _submit)
+    monkeypatch.setattr("flowgency.dispatch.run.submit_job_request", _submit)
 
 
 def test_missed_morning_occurrence_recovers_later_the_same_day(
@@ -395,7 +395,7 @@ def test_default_bound_forgets_yesterdays_occurrence(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T03:00:00")
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda req, launcher=None: submitted.append(req.routine_id),
     )
 
@@ -425,7 +425,7 @@ def test_an_already_marked_occurrence_does_not_run_again(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
     submitted = []
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda req, launcher=None: submitted.append(req.routine_id),
     )
 
@@ -453,7 +453,7 @@ def test_every_marker_anchors_on_the_occurrence_not_the_launch(
     os.utime(marker, (anchor, anchor))
     monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda req, launcher=None: SimpleNamespace(job_id=req.routine_id),
     )
 
@@ -483,7 +483,7 @@ def test_a_routine_that_is_merely_not_due_is_not_reported_as_broken(
     os.utime(marker, (anchor, anchor))
     monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T10:00:00")
 
-    with caplog.at_level("WARNING", logger="agency.dispatch.run"):
+    with caplog.at_level("WARNING", logger="flowgency.dispatch.run"):
         run_dispatch_cycle(None, config_path, _RecordingLauncher())
 
     assert "no usable schedule" not in caplog.text
@@ -501,13 +501,13 @@ def test_a_routine_with_an_unreadable_period_is_still_reported(
                    "schedule": {"every": "6h"}}],
     )
     monkeypatch.setattr(
-        "agency.dispatch.run.parse_every", lambda value: None
+        "flowgency.dispatch.run.parse_every", lambda value: None
     )
     marker = every_marker_path(team_root / "logs", "product", "audit")
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
 
-    with caplog.at_level("WARNING", logger="agency.dispatch.run"):
+    with caplog.at_level("WARNING", logger="flowgency.dispatch.run"):
         run_dispatch_cycle(None, config_path, _RecordingLauncher())
 
     assert "no usable schedule" in caplog.text
@@ -515,9 +515,9 @@ def test_a_routine_with_an_unreadable_period_is_still_reported(
 
 def test_a_dispatch_cycle_drains_before_it_evaluates_routines(tmp_path, monkeypatch):
     order = []
-    monkeypatch.setattr("agency.dispatch.run.drain", lambda *a, **k: order.append("drain"))
+    monkeypatch.setattr("flowgency.dispatch.run.drain", lambda *a, **k: order.append("drain"))
     monkeypatch.setattr(
-        "agency.dispatch.run.submit_job_request",
+        "flowgency.dispatch.run.submit_job_request",
         lambda *a, **k: order.append("submit"),
     )
     workspace, team_root, config_path, _ = _make_team(tmp_path)

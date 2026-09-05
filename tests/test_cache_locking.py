@@ -4,10 +4,10 @@ import json
 from multiprocessing import Event, Process, Queue
 from pathlib import Path, PurePosixPath
 
-from agency.blueprints import BlueprintInspection
-from agency.blueprints.projectors import StaticRuntimeProjector
-from agency.fs.snapshot import capture_tree
-from agency.integrations.models import ProjectorCapabilities
+from flowgency.blueprints import BlueprintInspection
+from flowgency.blueprints.projectors import StaticRuntimeProjector
+from flowgency.fs.snapshot import capture_tree
+from flowgency.integrations.models import ProjectorCapabilities
 
 
 def _write_blueprint(root: Path, key: str = "advisor") -> Path:
@@ -61,7 +61,7 @@ def _compile_once(
     acquired: Event,
     release: Event,
 ) -> None:
-    from agency.blueprints.cache import CompilationCache
+    from flowgency.blueprints.cache import CompilationCache
 
     class BlockingProjector(StaticRuntimeProjector):
         def project(self, source, destination):

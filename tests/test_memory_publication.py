@@ -2,12 +2,12 @@ from dataclasses import replace
 
 import pytest
 
-from agency.configuration.models import MemorySelector
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import read_job, write_job
-from agency.memory import MemoryStore, resolve_memory_selector
-from agency.memory.publication import (
+from flowgency.configuration.models import MemorySelector
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import read_job, write_job
+from flowgency.memory import MemoryStore, resolve_memory_selector
+from flowgency.memory.publication import (
     MemoryPublicationError,
     apply_publication,
     finalize_publication,

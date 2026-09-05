@@ -15,7 +15,7 @@ ACTIVE_PATHS = (
     REPO_ROOT / "agency.service.example",
     *(REPO_ROOT / "kb").glob("*.md"),
     *(REPO_ROOT / "examples").glob("**/*.md"),
-    *(REPO_ROOT / "agency" / "setup_assets").glob("**/*.md"),
+    *(REPO_ROOT / "flowgency" / "setup_assets").glob("**/*.md"),
 )
 
 
@@ -36,7 +36,7 @@ def test_active_documents_use_v6_team_control_plane():
 def test_setup_assets_use_team_domain_terms():
     text = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in (REPO_ROOT / "agency" / "setup_assets").glob("**/*.md")
+        for path in (REPO_ROOT / "flowgency" / "setup_assets").glob("**/*.md")
     )
 
     assert "team display name" in text.lower()
@@ -85,7 +85,7 @@ def test_normal_test_fixtures_use_team_domain_terms():
 
 
 def test_example_config_blocks_are_valid_v6(tmp_path: Path) -> None:
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     example_readmes = [
         REPO_ROOT / "examples" / "code-review-team" / "README.md",

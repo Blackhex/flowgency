@@ -7,10 +7,10 @@ import re
 from dataclasses import replace
 from pathlib import Path
 
-from agency.cli import _snapshot_read_only
-from agency.fs.locks import exclusive_lock
-from agency.jobs.authority import JobStore
-from agency.jobs.store import job_lock_path, read_job, write_job
+from flowgency.cli import _snapshot_read_only
+from flowgency.fs.locks import exclusive_lock
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.store import job_lock_path, read_job, write_job
 
 
 _RESUME = re.compile(r"--resume[= ]([A-Za-z0-9_-]{1,128})")

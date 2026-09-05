@@ -5,13 +5,13 @@ import subprocess
 import sys
 from zipfile import ZipFile
 
-from agency.setup_assets import copilot_discovery_root
+from flowgency.setup_assets import copilot_discovery_root
 
 
 REPO_ROOT = Path(__file__).parents[1]
 CANONICAL_SKILL_DIR = (
     REPO_ROOT
-    / "agency"
+    / "flowgency"
     / "setup_assets"
     / "copilot"
     / ".github"
@@ -22,7 +22,7 @@ CANONICAL_SKILL_DIR = (
 
 def test_copilot_discovery_root_is_package_owned():
     assert copilot_discovery_root() == (
-        REPO_ROOT / "agency" / "setup_assets" / "copilot"
+        REPO_ROOT / "flowgency" / "setup_assets" / "copilot"
     ).resolve()
 
 
@@ -44,7 +44,7 @@ def test_wheel_contains_every_canonical_setup_skill_file(tmp_path: Path):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    wheels = list(tmp_path.glob("christag_agency-*.whl"))
+    wheels = list(tmp_path.glob("flowgency-*.whl"))
     assert len(wheels) == 1
 
     expected = {

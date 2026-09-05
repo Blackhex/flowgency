@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.configuration import ValidationFailed, ValidationIssue
+from flowgency.configuration import ValidationFailed, ValidationIssue
 
 
 def _clone_config(raw: dict) -> dict:
@@ -12,7 +12,7 @@ def _clone_config(raw: dict) -> dict:
 
 
 def test_parse_config_accepts_canonical_root(raw_config, config_paths):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
@@ -22,7 +22,7 @@ def test_parse_config_accepts_canonical_root(raw_config, config_paths):
 
 
 def test_schema_five_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
-    from agency.configuration.models import PromptSelector, parse_config
+    from flowgency.configuration.models import PromptSelector, parse_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
@@ -32,7 +32,7 @@ def test_schema_five_requires_prompt_store_and_scoped_routine(raw_config, config
 
 
 def test_schema_four_is_rejected_with_rewrite_hint(raw_config, config_paths):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config["schema_version"] = 4
 
@@ -44,7 +44,7 @@ def test_schema_four_is_rejected_with_rewrite_hint(raw_config, config_paths):
 
 
 def test_parse_config_requires_schema_version_six(raw_config, config_paths):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     assert parsed.resolved.schema_version == 6
@@ -60,7 +60,7 @@ def test_parse_config_requires_schema_version_six(raw_config, config_paths):
 
 
 def test_current_defaults_are_explicit(raw_config, config_paths):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
@@ -86,7 +86,7 @@ def test_current_defaults_are_explicit(raw_config, config_paths):
     ],
 )
 def test_v6_rejects_prior_group_control_plane(raw_config, config_paths, raw_change, required_code):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_change(raw_config)
 
@@ -96,7 +96,7 @@ def test_v6_rejects_prior_group_control_plane(raw_config, config_paths, raw_chan
 
 
 def test_configuration_exports_team_not_group_apis():
-    import agency.configuration as configuration
+    import flowgency.configuration as configuration
 
     assert hasattr(configuration, "TeamSettingsPatch")
     assert hasattr(configuration, "ResolvedTeamPaths")
@@ -107,7 +107,7 @@ def test_configuration_exports_team_not_group_apis():
 
 
 def test_rejects_routine_default_without_routine_context(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {"scope": "routine"}
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -115,7 +115,7 @@ def test_rejects_routine_default_without_routine_context(raw_config, config_path
 
 
 def test_validate_config_reports_team_dispatch_agents_not_supported(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["dispatch"] = {
         "enabled": False,
@@ -136,7 +136,7 @@ def test_validate_config_reports_team_dispatch_agents_not_supported(raw_config, 
 
 
 def test_parse_config_rejects_team_dispatch_agents_not_supported(raw_config, config_paths):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"]["dispatch"] = {
         "enabled": False,
@@ -152,7 +152,7 @@ def test_parse_config_rejects_team_dispatch_agents_not_supported(raw_config, con
 
 
 def test_accepts_supported_team_dispatch_and_routines(raw_config, config_paths):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     raw_config["teams"]["newsletter"]["dispatch"] = {
         "enabled": True,
@@ -167,7 +167,7 @@ def test_accepts_supported_team_dispatch_and_routines(raw_config, config_paths):
 
 
 def test_routine_enabled_is_typed_and_defaults_true(raw_config, config_paths):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     routine = raw_config["teams"]["newsletter"]["agents"][0]["routines"][0]
     parsed = parse_config(raw_config, config_paths["config_path"])
@@ -179,7 +179,7 @@ def test_routine_enabled_is_typed_and_defaults_true(raw_config, config_paths):
 
 
 def test_rejects_other_unknown_team_dispatch_keys(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["dispatch"] = {
         "enabled": True,
@@ -194,7 +194,7 @@ def test_rejects_other_unknown_team_dispatch_keys(raw_config, config_paths):
 
 @pytest.mark.parametrize("blueprint_value", [None, "", "   "])
 def test_rejects_missing_or_blank_blueprint(raw_config, config_paths, blueprint_value):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     agent = raw_config["teams"]["newsletter"]["agents"][0]
     if blueprint_value is None:
@@ -222,7 +222,7 @@ def test_rejects_missing_or_blank_blueprint(raw_config, config_paths, blueprint_
     ],
 )
 def test_validates_blueprint_identifiers(raw_config, config_paths, blueprint_value, expected_code):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["blueprint"] = blueprint_value
 
@@ -253,7 +253,7 @@ def test_validates_blueprint_identifiers(raw_config, config_paths, blueprint_val
 def test_validates_default_team_identifier_and_reference(
     raw_config, config_paths, default_team, expected_code
 ):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     if default_team == "newsletter-team":
         team_config = raw_config["teams"].pop("newsletter")
@@ -279,7 +279,7 @@ def test_validates_default_team_identifier_and_reference(
 
 
 def test_allows_omitted_default_team(raw_config, config_paths):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     raw_config["agency"]["default_team"] = ""
 
@@ -291,7 +291,7 @@ def test_allows_omitted_default_team(raw_config, config_paths):
 
 
 def test_team_requires_workspace_and_state_paths(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     for field in ("workspace_path", "path"):
         candidate = _clone_config(raw_config)
@@ -304,7 +304,7 @@ def test_team_requires_workspace_and_state_paths(raw_config, config_paths):
 
 
 def test_relative_team_paths_resolve_from_config_directory(raw_config, config_paths):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"]["workspace_path"] = "workspace"
     raw_config["teams"]["newsletter"]["path"] = "groups/newsletter"
@@ -317,7 +317,7 @@ def test_relative_team_paths_resolve_from_config_directory(raw_config, config_pa
 def test_parse_config_raises_validation_failed_for_missing_team_path_with_additional_roots(
     raw_config, config_paths
 ):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     del raw_config["teams"]["newsletter"]["workspace_path"]
     raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
@@ -340,7 +340,7 @@ def test_parse_config_raises_validation_failed_for_missing_team_path_with_additi
 def test_parse_config_rejects_malformed_agent_entries(
     raw_config, config_paths, agent_entry, expected_code, expected_field
 ):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"]["agents"] = [agent_entry]
 
@@ -351,7 +351,7 @@ def test_parse_config_rejects_malformed_agent_entries(
 
 
 def test_rejects_duplicate_agent_names(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"].append(
         {
@@ -373,7 +373,7 @@ def test_rejects_duplicate_agent_names(raw_config, config_paths):
     ],
 )
 def test_validates_team_keys_as_stable_identifiers(raw_config, config_paths, team_key, expected_code):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     team_config = raw_config["teams"].pop("newsletter")
     raw_config["teams"][team_key] = team_config
@@ -405,7 +405,7 @@ def test_validates_team_keys_as_stable_identifiers(raw_config, config_paths, tea
     ],
 )
 def test_validates_memory_channel_keys_as_stable_identifiers(raw_config, config_paths, channel_key, expected_code):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     raw_config["memory"]["channels"] = {channel_key: {"display_name": "Ops"}}
     raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {
@@ -430,7 +430,7 @@ def test_validates_memory_channel_keys_as_stable_identifiers(raw_config, config_
 
 
 def test_rejects_duplicate_routine_names(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     agent = raw_config["teams"]["newsletter"]["agents"][0]
     agent["routines"] = [
@@ -442,7 +442,7 @@ def test_rejects_duplicate_routine_names(raw_config, config_paths):
 
 
 def test_rejects_missing_explicit_integration(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     del raw_config["teams"]["newsletter"]["agents"][0]["integration"]
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -453,7 +453,7 @@ def test_rejects_missing_explicit_integration(raw_config, config_paths):
 def test_rejects_missing_or_blank_team_default_integration(
     raw_config, config_paths, default_integration_value
 ):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     if default_integration_value is None:
         del raw_config["teams"]["newsletter"]["default_integration"]
@@ -473,7 +473,7 @@ def test_rejects_missing_or_blank_team_default_integration(
 
 def test_rejects_invalid_team_allowlist(raw_config, config_paths):
     """v4 tools key is now rejected outright in v6."""
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["runtime"] = {
         "tools": {"mode": "allowlist", "names": ["", "  ", "ops"]}
@@ -486,7 +486,7 @@ def test_rejects_invalid_team_allowlist(raw_config, config_paths):
 
 def test_rejects_team_additional_roots(raw_config, config_paths):
     """v4 sandbox key is now rejected outright in v6."""
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": ["editorial"], "additional_roots": ["tmp"]}
@@ -499,7 +499,7 @@ def test_rejects_team_additional_roots(raw_config, config_paths):
 
 def test_rejects_agent_roots(raw_config, config_paths):
     """v4 sandbox key is now rejected outright in v6."""
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"mode": "restricted", "roots": ["tmp"]}
@@ -512,7 +512,7 @@ def test_rejects_agent_roots(raw_config, config_paths):
 
 def test_validates_team_sandbox_semantics(raw_config, config_paths):
     """v4 sandbox key is now rejected outright in v6."""
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["runtime"] = {"sandbox": {"mode": "unrestricted", "roots": ["tmp"]}}
 
@@ -522,7 +522,7 @@ def test_validates_team_sandbox_semantics(raw_config, config_paths):
 
 
 def test_accepts_restricted_team_permissions(raw_config, config_paths):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     raw_config["teams"]["newsletter"]["runtime"] = {
         "permissions": {"mode": "restricted", "rules": [{"tools": ["read"]}]}
@@ -537,7 +537,7 @@ def test_accepts_restricted_team_permissions(raw_config, config_paths):
 
 
 def test_accepts_agent_permission_rules(raw_config, config_paths):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
@@ -553,7 +553,7 @@ def test_accepts_agent_permission_rules(raw_config, config_paths):
 
 
 def test_rejects_channel_memory_reference_without_channel(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {"scope": "channel"}
     issues = validate_config(raw_config, config_paths["config_path"])
@@ -561,7 +561,7 @@ def test_rejects_channel_memory_reference_without_channel(raw_config, config_pat
 
 
 def test_rejects_undeclared_channel_memory_reference(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {
         "scope": "channel",
@@ -572,7 +572,7 @@ def test_rejects_undeclared_channel_memory_reference(raw_config, config_paths):
 
 
 def test_accepts_declared_channel_memory_reference(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["memory"]["channels"] = {"ops": {"display_name": "Ops"}}
     raw_config["teams"]["newsletter"]["agents"][0]["default_memory"] = {
@@ -589,7 +589,7 @@ def test_accepts_declared_channel_memory_reference(raw_config, config_paths):
 ])
 @pytest.mark.parametrize("channel_value", ["support", "   "])
 def test_rejects_non_channel_memory_selectors_with_channel(raw_config, config_paths, scope_path, channel_value):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     target = raw_config
     for segment in scope_path[:-1]:
@@ -610,7 +610,7 @@ def test_rejects_non_channel_memory_selectors_with_channel(raw_config, config_pa
 
 
 def test_rejects_schedule_without_one_of(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["routines"] = [
         {"id": "daily", "prompt": {"scope": "blueprint", "name": "daily"}, "schedule": {}},
@@ -621,7 +621,7 @@ def test_rejects_schedule_without_one_of(raw_config, config_paths):
 
 @pytest.mark.parametrize("schedule_value", ["daily", ["at", "09:00"], 42])
 def test_rejects_non_mapping_schedule_values(raw_config, config_paths, schedule_value):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["routines"] = [
         {"id": "daily", "prompt": {"scope": "blueprint", "name": "daily"}, "schedule": schedule_value},
@@ -633,7 +633,7 @@ def test_rejects_non_mapping_schedule_values(raw_config, config_paths, schedule_
 
 @pytest.mark.parametrize("routine_value", [None, "daily", ["daily"], 42])
 def test_rejects_non_mapping_routine_entries(raw_config, config_paths, routine_value):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["routines"] = [routine_value]
 
@@ -646,7 +646,7 @@ def test_rejects_non_mapping_routine_entries(raw_config, config_paths, routine_v
 
 @pytest.mark.parametrize("routine_value", [None, "daily", ["daily"], 42])
 def test_parse_config_rejects_non_mapping_routine_entries(raw_config, config_paths, routine_value):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["routines"] = [routine_value]
 
@@ -661,7 +661,7 @@ def test_parse_config_rejects_non_mapping_routine_entries(raw_config, config_pat
 
 def test_rejects_empty_allowlist(raw_config, config_paths):
     """v4 tools key is now rejected outright in v6."""
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "tools": {"mode": "allowlist", "names": []}
@@ -673,7 +673,7 @@ def test_rejects_empty_allowlist(raw_config, config_paths):
 @pytest.mark.parametrize("names, expected_field", [([""], "runtime.tools.names[0]"), (["   "], "runtime.tools.names[0]")])
 def test_rejects_blank_allowlist_names(raw_config, config_paths, names, expected_field):
     """v4 tools key is now rejected outright in v6."""
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "tools": {"mode": "allowlist", "names": names}
@@ -684,7 +684,7 @@ def test_rejects_blank_allowlist_names(raw_config, config_paths, names, expected
 
 def test_rejects_unrestricted_with_additions(raw_config, config_paths):
     """v4 sandbox key is now rejected outright in v6."""
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
         "sandbox": {"mode": "unrestricted", "additional_roots": ["/tmp"]}
@@ -695,7 +695,7 @@ def test_rejects_unrestricted_with_additions(raw_config, config_paths):
 
 def test_parse_validate_parity_for_superseded_keys(raw_config, config_paths):
     """v4 sandbox/tools keys produce superseded-config-key in v5."""
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     candidate = _clone_config(raw_config)
     candidate["teams"]["newsletter"]["runtime"] = {
@@ -715,7 +715,7 @@ def test_parse_validate_parity_for_superseded_keys(raw_config, config_paths):
 
 
 def test_preserves_supported_workspace_fields(raw_config, config_paths):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"]["workspaces"][0]["extra"] = "kept"
     parsed = parse_config(raw_config, config_paths["config_path"])
@@ -786,7 +786,7 @@ def test_preserves_supported_workspace_fields(raw_config, config_paths):
     ],
 )
 def test_parse_and_validate_reject_same_semantic_invalid_configs(raw_config, config_paths, mutator):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     candidate = _clone_config(raw_config)
     agent = candidate["teams"]["newsletter"]["agents"][0]
@@ -803,7 +803,7 @@ def test_parse_and_validate_reject_same_semantic_invalid_configs(raw_config, con
 
 
 def test_parse_and_validate_share_same_valid_result(raw_config, config_paths):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     candidate = _clone_config(raw_config)
 
@@ -815,7 +815,7 @@ def test_parse_and_validate_share_same_valid_result(raw_config, config_paths):
 
 
 def test_parse_config_preserves_routine_arguments_order_and_text(raw_config, config_paths):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["routines"][0]["arguments"] = [
         "--mode=review",
@@ -843,7 +843,7 @@ def test_parse_config_preserves_routine_arguments_order_and_text(raw_config, con
 def test_parse_config_rejects_malformed_routine_arguments(
     raw_config, config_paths, bad_arguments, expected_field
 ):
-    from agency.configuration.models import parse_config, validate_config
+    from flowgency.configuration.models import parse_config, validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["routines"][0]["arguments"] = bad_arguments
 
@@ -867,7 +867,7 @@ def test_parse_config_rejects_malformed_routine_arguments(
 def test_parse_config_rejects_malformed_top_level_mappings(
     raw_config, config_paths, field_name, bad_value, expected_field
 ):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config[field_name] = bad_value
 
@@ -885,7 +885,7 @@ def test_parse_config_rejects_malformed_top_level_mappings(
     ],
 )
 def test_parse_config_rejects_malformed_team_records(raw_config, config_paths, team_value, expected_field):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw_config["teams"]["newsletter"] = team_value
 
@@ -913,7 +913,7 @@ def test_parse_config_rejects_malformed_team_records(raw_config, config_paths, t
     ],
 )
 def test_parse_config_rejects_malformed_nested_shapes(raw_config, config_paths, path, bad_value, expected_field):
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     target = raw_config
     for segment in path[:-1]:
@@ -995,7 +995,7 @@ def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None,
 
 def load_config(config_path):
     import yaml
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.models import parse_config
 
     raw = yaml.safe_load(config_path.read_text())
     return parse_config(raw, config_path)
@@ -1048,7 +1048,7 @@ def test_jobs_pool_below_one_is_rejected(tmp_path):
 
 @pytest.mark.parametrize("key", ["sandbox", "tools"])
 def test_v5_group_runtime_rejects_v4_key(raw_config, config_paths, key):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["runtime"][key] = {"mode": "all"}
 
@@ -1062,7 +1062,7 @@ def test_v5_group_runtime_rejects_v4_key(raw_config, config_paths, key):
 
 @pytest.mark.parametrize("key", ["sandbox", "tools"])
 def test_v5_agent_runtime_rejects_v4_key(raw_config, config_paths, key):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {key: {"mode": "all"}}
 
@@ -1073,7 +1073,7 @@ def test_v5_agent_runtime_rejects_v4_key(raw_config, config_paths, key):
 
 
 def test_v5_agent_rejects_capabilities_key(raw_config, config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw_config["teams"]["newsletter"]["agents"][0]["capabilities"] = {"write": True}
 

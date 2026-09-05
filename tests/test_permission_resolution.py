@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agency.configuration.effective import resolve_effective_policy
-from agency.configuration.store import ConfigStore
-from agency.integrations.models import (
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.store import ConfigStore
+from flowgency.integrations.models import (
     ANY_TOOL,
     EffectiveRuntimePolicy,
     ResolvedPermissionRule,
 )
-from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
+from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 
 
 def policy(*rules, mode="restricted"):

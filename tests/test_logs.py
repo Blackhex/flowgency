@@ -5,8 +5,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-import agency.app as app_mod
-from agency.app import build_agent_timeline, collect_logs, get_agent_logs
+import flowgency.app as app_mod
+from flowgency.app import build_agent_timeline, collect_logs, get_agent_logs
 
 
 def test_collect_logs_omits_empty_error_files(tmp_path):

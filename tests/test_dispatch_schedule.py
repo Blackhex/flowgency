@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.dispatch.schedule import (
+from flowgency.dispatch.schedule import (
     DEFAULT_CATCH_UP,
     at_marker_path,
     catch_up_allows,

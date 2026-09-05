@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from agency.integrations import get_integration
-from agency.integrations.models import RuntimeCapabilities
+from flowgency.integrations import get_integration
+from flowgency.integrations.models import RuntimeCapabilities
 
 
 def test_capabilities_are_readable_as_a_property():

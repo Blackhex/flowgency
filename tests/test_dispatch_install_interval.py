@@ -2,7 +2,7 @@
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
-from agency.dispatch import install as dispatch_install
+from flowgency.dispatch import install as dispatch_install
 
 
 @pytest.mark.parametrize("interval", [4, 0, -1, 121, 150])

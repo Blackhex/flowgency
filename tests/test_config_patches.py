@@ -16,14 +16,14 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 
 @pytest.fixture
 def config_store(tmp_path, raw_config):
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration.store import ConfigStore
 
     path = _write_yaml(tmp_path / "config.yaml", raw_config)
     return ConfigStore(path)
 
 
 def test_routine_patch_round_trips_the_recovery_bound(config_store):
-    from agency.configuration.patches import replace_agent_routines
+    from flowgency.configuration.patches import replace_agent_routines
 
     snapshot = config_store.load()
     updated = replace_agent_routines(
@@ -50,7 +50,7 @@ def test_routine_patch_round_trips_the_recovery_bound(config_store):
 
 
 def test_agent_patch_preserves_workspaces_and_other_agents(config_store):
-    from agency.configuration.patches import (
+    from flowgency.configuration.patches import (
         AgentProfilePatch,
         patch_agent_profile,
     )
@@ -101,7 +101,7 @@ def test_agent_patch_preserves_workspaces_and_other_agents(config_store):
 
 
 def test_patch_agent_profile_preserves_extension_keys(config_store):
-    from agency.configuration.patches import (
+    from flowgency.configuration.patches import (
         AgentProfilePatch,
         patch_agent_profile,
     )
@@ -143,7 +143,7 @@ def test_patch_agent_profile_preserves_extension_keys(config_store):
 
 
 def test_patch_team_settings_preserves_unowned_team_fields(config_store):
-    from agency.configuration.patches import (
+    from flowgency.configuration.patches import (
         TeamSettingsPatch,
         patch_team_settings,
     )
@@ -192,7 +192,7 @@ def test_patch_team_settings_preserves_unowned_team_fields(config_store):
 
 
 def test_patch_team_settings_state_preserves_extension_keys(config_store):
-    from agency.configuration.patches import (
+    from flowgency.configuration.patches import (
         TeamSettingsStatePatch,
         patch_team_settings_state,
     )
@@ -264,7 +264,7 @@ def test_patch_team_settings_state_preserves_extension_keys(config_store):
 def test_create_team_rejects_unknown_root_key_on_load(
     config_store,
 ):
-    from agency.configuration import ValidationFailed
+    from flowgency.configuration import ValidationFailed
 
     snapshot = config_store.load()
     snapshot.raw["extensions"] = {"beta": {"enabled": True}}
@@ -279,7 +279,7 @@ def test_create_team_rejects_unknown_root_key_on_load(
 
 
 def test_create_team_state_uses_one_patch_and_rolls_back_on_failure(config_store, monkeypatch):
-    from agency.configuration.patches import TeamCreateStatePatch, create_team_state
+    from flowgency.configuration.patches import TeamCreateStatePatch, create_team_state
 
     snapshot = config_store.load()
     calls = 0
@@ -326,8 +326,8 @@ def test_create_team_state_uses_one_patch_and_rolls_back_on_failure(config_store
 
 
 def test_patch_memory_channels_rejects_unknown_root_key_on_load(config_store):
-    from agency.configuration import ValidationFailed
-    from agency.configuration.patches import patch_memory_channels
+    from flowgency.configuration import ValidationFailed
+    from flowgency.configuration.patches import patch_memory_channels
 
     snapshot = config_store.load()
     snapshot.raw["extensions"] = {"retention": "custom"}
@@ -343,7 +343,7 @@ def test_patch_memory_channels_rejects_unknown_root_key_on_load(config_store):
 
 
 def test_register_and_unregister_agent_prompt(config_store):
-    from agency.configuration.patches import (
+    from flowgency.configuration.patches import (
         register_agent_prompt,
         unregister_agent_prompt,
     )
@@ -374,7 +374,7 @@ def test_register_and_unregister_agent_prompt(config_store):
 
 
 def test_patch_agent_runtime_preserves_extension_keys(config_store):
-    from agency.configuration.patches import (
+    from flowgency.configuration.patches import (
         AgentRuntimePatch,
         patch_agent_runtime,
     )
@@ -421,7 +421,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
 
 
 def test_patch_agent_runtime_clears_only_known_fields(config_store):
-    from agency.configuration.patches import (
+    from flowgency.configuration.patches import (
         AgentRuntimePatch,
         patch_agent_runtime,
     )

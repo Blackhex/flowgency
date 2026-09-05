@@ -8,8 +8,8 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 
-from agency.configuration.store import ConfigStore
-from agency import app as app_mod
+from flowgency.configuration.store import ConfigStore
+from flowgency import app as app_mod
 
 
 class _FormParser(HTMLParser):
@@ -232,7 +232,7 @@ def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path)
     data_root.mkdir()
     integration = _LauncherIntegration()
     monkeypatch.setattr(
-        "agency.web.routes.admin_teams.launchable_integrations",
+        "flowgency.web.routes.admin_teams.launchable_integrations",
         lambda integrations, root: (integration,),
     )
     client = TestClient(app_mod.app)

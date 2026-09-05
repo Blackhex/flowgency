@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 
-import agency.app as app_mod
+import flowgency.app as app_mod
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 

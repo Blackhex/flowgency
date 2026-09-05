@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from agency.blueprints import BlueprintInspection
-from agency.blueprints import cache as cache_module
-from agency.blueprints.projectors import StaticRuntimeProjector
-from agency.fs.snapshot import capture_tree
-from agency.integrations.models import ProjectorCapabilities
+from flowgency.blueprints import BlueprintInspection
+from flowgency.blueprints import cache as cache_module
+from flowgency.blueprints.projectors import StaticRuntimeProjector
+from flowgency.fs.snapshot import capture_tree
+from flowgency.integrations.models import ProjectorCapabilities
 
 
 def _write_blueprint(root: Path, key: str = "advisor") -> Path:
@@ -70,7 +70,7 @@ def cache_root(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def cache(cache_root: Path):
-    from agency.blueprints.cache import CompilationCache
+    from flowgency.blueprints.cache import CompilationCache
 
     return CompilationCache(cache_root, {"copilot": _projector()})
 
@@ -221,7 +221,7 @@ def test_projector_version_separates_cache_keys(
     cache_root: Path,
     inspection: BlueprintInspection,
 ):
-    from agency.blueprints.cache import CompilationCache
+    from flowgency.blueprints.cache import CompilationCache
 
     first_cache = CompilationCache(cache_root, {"copilot": _projector("baseline")})
     second_cache = CompilationCache(cache_root, {"copilot": _projector("updated")})
@@ -269,7 +269,7 @@ def test_validate_artifact_rejects_manifest_runtime_mismatch(
     cache,
     inspection,
 ):
-    from agency.blueprints.cache import validate_artifact
+    from flowgency.blueprints.cache import validate_artifact
 
     artifact = cache.ensure_compiled("copilot", inspection)
     payload = json.loads(artifact.manifest_path.read_text(encoding="utf-8"))
@@ -300,7 +300,7 @@ def test_manifest_is_deterministic(cache, inspection):
 
 
 def test_pin_lifecycle_and_active_pins(cache, inspection):
-    from agency.blueprints.cache import active_pins
+    from flowgency.blueprints.cache import active_pins
 
     artifact = cache.ensure_compiled("copilot", inspection)
     pin_path = cache.pin(artifact, "job-123")
@@ -323,8 +323,8 @@ def test_create_launch_view_copies_runtime_tree_and_is_private(
     inspection,
     tmp_path: Path,
 ):
-    from agency.jobs.launch_view import create_launch_view
-    from agency.permissions.zones import ZONE_INSTRUCTIONS
+    from flowgency.jobs.launch_view import create_launch_view
+    from flowgency.permissions.zones import ZONE_INSTRUCTIONS
 
     artifact = cache.ensure_compiled("copilot", inspection)
     launch_root = tmp_path / "jobs" / "job-1" / "launch"
@@ -374,7 +374,7 @@ def test_create_launch_view_rejects_overlapping_destinations_without_mutating_ca
     destination_factory,
     expected_fragment: str,
 ):
-    from agency.jobs.launch_view import create_launch_view
+    from flowgency.jobs.launch_view import create_launch_view
 
     artifact = cache.ensure_compiled("copilot", inspection)
     cache_bytes_before = {
@@ -427,7 +427,7 @@ def test_pin_and_release_reject_unsafe_job_ids(
 
 
 def test_active_pins_ignores_unexpected_entries(cache, inspection):
-    from agency.blueprints.cache import active_pins
+    from flowgency.blueprints.cache import active_pins
 
     artifact = cache.ensure_compiled("copilot", inspection)
     pins_dir = (
@@ -456,7 +456,7 @@ def test_active_pins_ignores_unexpected_entries(cache, inspection):
 
 
 def test_validate_artifact_rejects_symlink_or_special_files(cache, inspection):
-    from agency.blueprints.cache import validate_artifact
+    from flowgency.blueprints.cache import validate_artifact
 
     artifact = cache.ensure_compiled("copilot", inspection)
     extra = artifact.runtime_path / "linked.md"

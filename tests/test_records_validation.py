@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from agency.records.outbox import create_outbox
-from agency.records.validation import (
+from flowgency.records.outbox import create_outbox
+from flowgency.records.validation import (
     MAX_OUTBOX_ENTRIES_PER_KIND,
     MAX_RECORD_BYTES,
     MAX_RECORDS_PER_KIND,

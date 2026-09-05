@@ -8,18 +8,18 @@ import yaml
 from fastapi.testclient import TestClient
 from starlette.routing import BaseRoute
 
-from agency.jobs.authority import JobStore
-from agency.jobs.models import (
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import (
     BlueprintRef,
     JobRecord,
     JobSpec,
     MemoryBinding,
     RuntimePolicySnapshot,
 )
-from agency.jobs.store import write_job
+from flowgency.jobs.store import write_job
 from tests._team_helpers import apply_team_paths, create_team_environment
-from agency.configuration import ConfigStore
-from agency import app as app_mod
+from flowgency.configuration import ConfigStore
+from flowgency import app as app_mod
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:
@@ -100,7 +100,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = T
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     if with_agent_prompts:
-        from agency.prompts import PromptStore
+        from flowgency.prompts import PromptStore
 
         PromptStore(Path(raw["agency"]["prompt_store"])).create(
             "newsletter",
@@ -338,7 +338,7 @@ def test_remove_instance_warns_when_prompt_namespace_is_orphaned(
     client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     snapshot = store.load()
-    from agency.prompts import PromptStore
+    from flowgency.prompts import PromptStore
 
     prompt_store = PromptStore(Path(snapshot.raw["agency"]["prompt_store"]))
     prompt_store.create(
@@ -401,7 +401,7 @@ def test_move_apply_warns_when_prompt_namespace_cleanup_is_orphaned(
     client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     store = ConfigStore(config_path)
     snapshot = store.load()
-    from agency.prompts import PromptStore
+    from flowgency.prompts import PromptStore
 
     prompt_store = PromptStore(Path(snapshot.raw["agency"]["prompt_store"]))
     created = prompt_store.read("newsletter", "advisor", "local-triage")

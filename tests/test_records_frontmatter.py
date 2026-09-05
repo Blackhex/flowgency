@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from agency.records.frontmatter import (
+from flowgency.records.frontmatter import (
     extract_display_title,
     parse_frontmatter,
     slugify,
@@ -51,8 +51,8 @@ def test_slugify_returns_empty_string_when_nothing_survives():
 def test_importing_frontmatter_does_not_import_the_web_app():
     """The worker imports this module; it must not drag in the FastAPI layer."""
     code = (
-        "import sys, agency.records.frontmatter; "
-        "sys.exit(1 if 'agency.app' in sys.modules else 0)"
+        "import sys, flowgency.records.frontmatter; "
+        "sys.exit(1 if 'flowgency.app' in sys.modules else 0)"
     )
     completed = subprocess.run([sys.executable, "-c", code], capture_output=True)
 

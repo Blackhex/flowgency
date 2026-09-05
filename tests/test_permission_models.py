@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from agency.configuration.models import (
+from flowgency.configuration.models import (
     CONFIG_SCHEMA_VERSION,
     PermissionRule,
     RuntimePermissions,
@@ -46,7 +46,7 @@ def test_permissions_reject_an_unknown_mode():
 
 
 def test_superseded_models_are_gone():
-    import agency.configuration.models as models
+    import flowgency.configuration.models as models
 
     for name in (
         "GroupRuntimeSandbox",
@@ -62,8 +62,8 @@ def test_superseded_models_are_gone():
 
 
 def test_schema_version_four_is_rejected(config_paths):
-    from agency.configuration import ValidationFailed
-    from agency.configuration.models import parse_config
+    from flowgency.configuration import ValidationFailed
+    from flowgency.configuration.models import parse_config
 
     raw = {
         "schema_version": 4,
@@ -83,7 +83,7 @@ def test_schema_version_four_is_rejected(config_paths):
 
 
 def test_schema_version_six_is_accepted(config_paths):
-    from agency.configuration.models import validate_config
+    from flowgency.configuration.models import validate_config
 
     raw = {
         "schema_version": 6,
@@ -102,8 +102,8 @@ def test_schema_version_six_is_accepted(config_paths):
 
 
 def test_unsupported_schema_version_hint_mentions_teams(config_paths):
-    from agency.configuration import ValidationFailed
-    from agency.configuration.models import parse_config
+    from flowgency.configuration import ValidationFailed
+    from flowgency.configuration.models import parse_config
 
     raw = {
         "schema_version": 4,

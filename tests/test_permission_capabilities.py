@@ -6,11 +6,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agency.configuration.effective import resolve_effective_policy
-from agency.configuration.issues import ValidationFailed
-from agency.configuration.store import ConfigStore
-from agency.integrations import BaseIntegration, get_integration
-from agency.integrations.models import (
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.issues import ValidationFailed
+from flowgency.configuration.store import ConfigStore
+from flowgency.integrations import BaseIntegration, get_integration
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     ResolvedPermissionRule,
     RuntimeCapabilities,

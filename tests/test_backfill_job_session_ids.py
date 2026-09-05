@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from agency.jobs.store import read_job, write_job
+from flowgency.jobs.store import read_job, write_job
 from tests.test_job_routes import _seed_app, _write_job_record
 from tools.backfill_job_session_ids import backfill
 

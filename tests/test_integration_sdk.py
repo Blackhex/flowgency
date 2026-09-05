@@ -1,7 +1,7 @@
 import pytest
-from agency.configuration import ValidationFailed
-from agency.integrations.agency.sdk import SdkIntegration
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
+from flowgency.configuration import ValidationFailed
+from flowgency.integrations.flowgency.sdk import SdkIntegration
+from flowgency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
 
 
 @pytest.fixture

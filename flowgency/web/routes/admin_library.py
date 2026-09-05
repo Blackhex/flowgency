@@ -1,0 +1,1099 @@
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import shutil
+import tempfile
+import stat
+import time
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from flowgency.configuration import ValidationFailed
+from flowgency.fs.locks import exclusive_lock
+from flowgency.fs.snapshot import AssetValidationError
+from flowgency.integrations import get_integration
+from flowgency.prompts.assets import PROMPT_SUFFIX, prompt_source_path
+from flowgency.web.dependencies import AgencyServices, get_services
+
+
+router = APIRouter()
+
+_IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_INFRA_TOKEN_LENGTH = 24  # 96 bits leaves room for staged files on Windows.
+
+
+def _templates(request: Request):
+    return request.app.state.templates
+
+
+def _theme_css(request: Request) -> str:
+    return request.app.state.theme_css_getter()
+
+
+def _is_symlink_or_reparse(path: Path) -> bool:
+    try:
+        stat_result = path.lstat()
+    except FileNotFoundError:
+        return False
+    file_attributes = getattr(stat_result, "st_file_attributes", 0) or 0
+    return bool(
+        stat.S_ISLNK(stat_result.st_mode)
+        or file_attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
+
+
+def _ensure_directory(path: Path, *, label: str) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        stat_result = path.lstat()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Missing {label} directory: {path}",
+        ) from exc
+    if _is_symlink_or_reparse(path):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unsafe {label} directory: {path}",
+        )
+    if not stat.S_ISDIR(stat_result.st_mode):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{label} path is not a directory: {path}",
+        )
+    return path
+
+
+def _ensure_child_directory(parent: Path, name: str, *, label: str) -> Path:
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or PurePosixPath(name).is_absolute()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Unsafe {label} segment: {name}",
+        )
+    candidate = _ensure_directory(parent, label=f"{label} parent") / name
+    return _ensure_directory(candidate, label=label)
+
+
+def _safe_key_hash(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _infra_token(value: str) -> str:
+    return _safe_key_hash(value)[:_INFRA_TOKEN_LENGTH]
+
+
+def _library_infra_root(services: AgencyServices) -> Path:
+    library_root = _require_library(services).root.resolve()
+    infra_root = _ensure_child_directory(
+        library_root.parent,
+        ".agency-agent-library",
+        label="Agent Library infrastructure root",
+    )
+    return _ensure_child_directory(
+        infra_root,
+        _infra_token(str(library_root)),
+        label="Agent Library infrastructure root",
+    )
+
+
+def _infra_bucket(services: AgencyServices, name: str) -> Path:
+    return _ensure_child_directory(
+        _library_infra_root(services),
+        name,
+        label=f"Agent Library {name}",
+    )
+
+
+def _create_verified_tempdir(parent: Path, *, prefix: str, label: str) -> Path:
+    created = Path(tempfile.mkdtemp(prefix=prefix, dir=str(parent)))
+    return _ensure_directory(created, label=label)
+
+
+def _base_admin_context(request: Request, snapshot) -> dict[str, Any]:
+    return {
+        "request": request,
+        "agency_title": snapshot.config.agency.title,
+        "admin_active": True,
+        "active": "admin",
+        "admin_page": "agent-library",
+        "theme_css": _theme_css(request),
+        "teams": {
+            key: tcfg.name for key, tcfg in snapshot.config.teams.items()
+        },
+    }
+
+
+def _issue_dicts(exc: ValidationFailed) -> list[dict[str, str]]:
+    return [
+        {
+            "code": issue.code,
+            "field": issue.field,
+            "message": issue.message,
+            "hint": issue.corrective_hint,
+        }
+        for issue in exc.issues
+    ]
+
+
+def _require_library(services: AgencyServices):
+    if services.blueprint_library is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Blueprint library unavailable",
+        )
+    return services.blueprint_library
+
+
+def _blueprint_root(services: AgencyServices, key: str) -> Path:
+    return _require_library(services).root / key
+
+
+def _load_blueprint(services: AgencyServices, key: str):
+    root = _blueprint_root(services, key)
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Unknown blueprint")
+    return _require_library(services).inspect(key)
+
+
+def _instance_users(snapshot, blueprint_key: str) -> list[dict[str, str]]:
+    users: list[dict[str, str]] = []
+    for team_key, tcfg in snapshot.config.teams.items():
+        for agent_key, agent in tcfg.agents.items():
+            if agent.blueprint != blueprint_key:
+                continue
+            display_name = agent.identity.display_name or agent_key
+            users.append(
+                {
+                    "team": tcfg.name,
+                    "agent": display_name,
+                    "href": f"/{team_key}/agents/{agent_key}/blueprint",
+                }
+            )
+    users.sort(key=lambda item: (item["team"], item["agent"]))
+    return users
+
+
+def _cache_status(
+    services: AgencyServices,
+    inspection,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for name in sorted(services.integrations):
+        integration = get_integration(name)
+        projector = integration.projector
+        if projector is None:
+            continue
+        capabilities = projector.capabilities
+        state = "missing"
+        if services.compilation_cache is not None:
+            manifest_path = (
+                services.compilation_cache.root
+                / name
+                / projector.version
+                / inspection.snapshot.digest
+                / "manifest.json"
+            )
+            if manifest_path.exists():
+                state = "compiled"
+        routine_compatibility = "Instructions only"
+        if (
+            capabilities.discovers_skills
+            and capabilities.activates_selected_skill
+        ):
+            routine_compatibility = "Full"
+        elif (
+            capabilities.discovers_skills
+            or capabilities.activates_selected_skill
+        ):
+            routine_compatibility = "Partial"
+        rows.append(
+            {
+                "integration": name,
+                "display_name": integration.display_name,
+                "projector_version": projector.version,
+                "instruction_target": (
+                    capabilities.instruction_target.as_posix()
+                ),
+                "skills_target": capabilities.skills_target.as_posix(),
+                "prompt_target": (
+                    capabilities.prompts_target.as_posix()
+                    if capabilities.prompts_target is not None
+                    else "n/a"
+                ),
+                "discovers_skills": (
+                    "Yes" if capabilities.discovers_skills else "No"
+                ),
+                "discovers_prompts": (
+                    "Yes" if capabilities.discovers_prompts else "No"
+                ),
+                "activates_selected_skill": (
+                    "Yes"
+                    if capabilities.activates_selected_skill
+                    else "No"
+                ),
+                "routine_compatibility": routine_compatibility,
+                "cache_state": state,
+            }
+        )
+    return rows
+
+
+def _skill_files(inspection, skill_name: str) -> list[dict[str, str]]:
+    files: list[dict[str, str]] = []
+    prefix = PurePosixPath(".agents", "skills", skill_name)
+    for item in inspection.snapshot.files:
+        if item.path.parts[:3] != prefix.parts:
+            continue
+        files.append(
+            {
+                "path": item.path.as_posix(),
+                "name": item.path.name,
+                "content": item.content.decode("utf-8"),
+            }
+        )
+    files.sort(key=lambda item: (item["name"] != "SKILL.md", item["path"]))
+    return files
+
+
+def _skill_resources(inspection) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for skill_name in inspection.skills:
+        files = _skill_files(inspection, skill_name)
+        rows.append(
+            {
+                "skill": skill_name,
+                "files": files,
+            }
+        )
+    return rows
+
+
+def _prompt_files(inspection) -> list[dict[str, str]]:
+    files: list[dict[str, str]] = []
+    for prompt in inspection.prompts:
+        source_path = prompt_source_path(prompt.name)
+        payload = inspection.snapshot.file(source_path.as_posix()).content
+        files.append(
+            {
+                "name": source_path.name,
+                "path": source_path.as_posix(),
+                "slug": prompt.name,
+                "description": prompt.description,
+                "argument_hint": prompt.argument_hint or "",
+                "content": payload.decode("utf-8"),
+            }
+        )
+    files.sort(key=lambda item: item["slug"])
+    return files
+
+
+def _selected_prompt_file(
+    prompt_files: list[dict[str, str]],
+    requested: str | None,
+) -> dict[str, str] | None:
+    if not prompt_files:
+        return None
+    if requested:
+        for item in prompt_files:
+            if (
+                item["path"] == requested
+                or item["name"] == requested
+                or item["slug"] == requested
+            ):
+                return item
+    return prompt_files[0]
+
+
+def _configured_prompt_users(
+    snapshot,
+    blueprint_key: str,
+    prompt_name: str,
+) -> list[dict[str, str]]:
+    users: list[dict[str, str]] = []
+    for team_key, tcfg in snapshot.config.teams.items():
+        for agent_key, agent in tcfg.agents.items():
+            if agent.blueprint != blueprint_key:
+                continue
+            for routine in agent.routines:
+                if (
+                    routine.prompt.scope == "blueprint"
+                    and routine.prompt.name == prompt_name
+                ):
+                    users.append(
+                        {
+                            "team_key": team_key,
+                            "team": tcfg.name,
+                            "agent": (
+                                agent.identity.display_name
+                                or agent_key
+                            ),
+                            "routine": routine.id,
+                        }
+                    )
+    users.sort(
+        key=lambda item: (
+            item["team"],
+            item["agent"],
+            item["routine"],
+        )
+    )
+    return users
+
+
+def _format_prompt_user_summary(users: list[dict[str, str]]) -> str:
+    summary = ", ".join(
+        f"{item['team']}/{item['agent']}:{item['routine']}"
+        for item in users
+    )
+    return f"Prompt is used by {summary}."
+
+
+def _stage_blueprint_delete(
+    inspection,
+    delete_path: str,
+    stage_root: Path,
+) -> None:
+    removed = False
+    for item in inspection.snapshot.files:
+        if item.path.as_posix() == delete_path:
+            removed = True
+            continue
+        destination = stage_root / Path(*item.path.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(item.content)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Unknown prompt")
+
+
+def _selected_skill_file(
+    skill_files: list[dict[str, str]],
+    requested: str | None,
+) -> dict[str, str] | None:
+    if not skill_files:
+        return None
+    if requested:
+        for item in skill_files:
+            if item["path"] == requested or item["name"] == requested:
+                return item
+    return skill_files[0]
+
+
+def _render_library_list(
+    request: Request,
+    services: AgencyServices,
+    snapshot,
+    *,
+    warning: str = "",
+    status_code: int = 200,
+):
+    blueprints = ()
+    if not warning:
+        library = _require_library(services)
+        root = library.root
+        try:
+            if not root.exists():
+                raise FileNotFoundError(
+                    f"Agent Library root does not exist: {root}"
+                )
+            if not root.is_dir():
+                raise NotADirectoryError(
+                    f"Agent Library root is not a directory: {root}"
+                )
+            blueprints = library.list()
+        except (
+            AssetValidationError,
+            FileNotFoundError,
+            NotADirectoryError,
+            OSError,
+        ) as exc:
+            warning = str(exc)
+            status_code = 409
+    rows = []
+    for inspection in blueprints:
+        users = _instance_users(snapshot, inspection.key)
+        rows.append(
+            {
+                "key": inspection.key,
+                "title": inspection.title,
+                "skills": inspection.skills,
+                "prompts": tuple(prompt.name for prompt in inspection.prompts),
+                "digest": inspection.snapshot.digest,
+                "user_count": len(users),
+            }
+        )
+    return _templates(request).TemplateResponse(
+        request,
+        "admin_agent_library.html",
+        {
+            **_base_admin_context(request, snapshot),
+            "blueprints": rows,
+            "warning": warning,
+        },
+        status_code=status_code,
+    )
+
+
+def _render_blueprint_detail(
+    request: Request,
+    services: AgencyServices,
+    snapshot,
+    key: str,
+    *,
+    warning: str = "",
+    issues: list[dict[str, str]] | None = None,
+    form_path: str = "AGENTS.md",
+    form_content: str | None = None,
+    status_code: int = 200,
+):
+    inspection = _load_blueprint(services, key)
+    agents_file = inspection.snapshot.file("AGENTS.md")
+    users = _instance_users(snapshot, key)
+    return _templates(request).TemplateResponse(
+        request,
+        "admin_blueprint_detail.html",
+        {
+            **_base_admin_context(request, snapshot),
+            "blueprint": inspection,
+            "users": users,
+            "skill_resources": _skill_resources(inspection),
+            "compatibility_rows": _cache_status(services, inspection),
+            "warning": warning,
+            "issues": issues or [],
+            "form_path": form_path,
+            "form_content": (
+                form_content
+                if form_content is not None
+                else agents_file.content.decode("utf-8")
+            ),
+            "user_summary": (
+                f"Used by {len(users)} instance"
+                + ("s" if len(users) != 1 else "")
+            ),
+        },
+        status_code=status_code,
+    )
+
+
+def _render_blueprint_skill(
+    request: Request,
+    services: AgencyServices,
+    snapshot,
+    key: str,
+    skill_name: str | None,
+    *,
+    selected_path: str | None = None,
+    warning: str = "",
+    issues: list[dict[str, str]] | None = None,
+    form_content: str | None = None,
+    status_code: int = 200,
+):
+    inspection = _load_blueprint(services, key)
+    active_skill = (
+        skill_name
+        or (inspection.skills[0] if inspection.skills else None)
+    )
+    if active_skill is None:
+        raise HTTPException(status_code=404, detail="Blueprint has no skills")
+    if active_skill not in inspection.skills:
+        raise HTTPException(status_code=404, detail="Unknown skill")
+    files = _skill_files(inspection, active_skill)
+    selected = _selected_skill_file(files, selected_path)
+    if selected is None:
+        raise HTTPException(status_code=404, detail="Unknown skill file")
+    return _templates(request).TemplateResponse(
+        request,
+        "admin_blueprint_skill.html",
+        {
+            **_base_admin_context(request, snapshot),
+            "blueprint": inspection,
+            "active_skill": active_skill,
+            "skill_files": files,
+            "selected_file": selected,
+            "warning": warning,
+            "issues": issues or [],
+            "form_path": selected["path"],
+            "form_content": (
+                form_content
+                if form_content is not None
+                else selected["content"]
+            ),
+        },
+        status_code=status_code,
+    )
+
+
+def _render_blueprint_prompts(
+    request: Request,
+    services: AgencyServices,
+    snapshot,
+    key: str,
+    *,
+    selected_path: str | None = None,
+    warning: str = "",
+    issues: list[dict[str, str]] | None = None,
+    form_content: str | None = None,
+    create_slug: str = "",
+    create_content: str = "",
+    status_code: int = 200,
+):
+    inspection = _load_blueprint(services, key)
+    files = _prompt_files(inspection)
+    selected = _selected_prompt_file(files, selected_path)
+    default_create_content = (
+        "---\n"
+        "name: new-prompt\n"
+        "description: Describe this prompt\n"
+        "argument-hint: Optional argument hint\n"
+        "---\n\n"
+        "Write the prompt body here.\n"
+    )
+    return _templates(request).TemplateResponse(
+        request,
+        "admin_blueprint_prompts.html",
+        {
+            **_base_admin_context(request, snapshot),
+            "blueprint": inspection,
+            "prompt_files": files,
+            "selected_prompt": selected,
+            "warning": warning,
+            "issues": issues or [],
+            "form_path": (
+                selected["path"] if selected is not None else ""
+            ),
+            "form_content": (
+                form_content
+                if form_content is not None
+                else (
+                    selected["content"] if selected is not None else ""
+                )
+            ),
+            "create_slug": create_slug,
+            "create_content": create_content or default_create_content,
+        },
+        status_code=status_code,
+    )
+
+
+def _lock_path(services: AgencyServices, key: str) -> Path:
+    return _infra_bucket(services, "locks") / f"{_safe_key_hash(key)}.lock"
+
+
+def _validate_source_path(path_value: str) -> str:
+    candidate = PurePosixPath(path_value.replace("\\", "/"))
+    if (
+        not path_value
+        or candidate.is_absolute()
+        or any(part in {"", ".", ".."} for part in candidate.parts)
+    ):
+        raise ValidationFailed(
+            (
+                type(
+                    "Issue",
+                    (),
+                    {
+                        "code": "invalid-blueprint-path",
+                        "field": "path",
+                        "message": (
+                            "Only AGENTS.md and files inside one "
+                            "skill tree can be edited."
+                        ),
+                        "corrective_hint": (
+                            "Pick AGENTS.md or a file under "
+                            ".agents/skills/<name>/ ."
+                        ),
+                    },
+                )(),
+            )
+        )
+    if candidate.as_posix() == "AGENTS.md":
+        return candidate.as_posix()
+    if len(candidate.parts) == 3 and candidate.parts[:2] == (
+        ".agents",
+        "prompts",
+    ):
+        filename = candidate.parts[2]
+        if not filename.endswith(PROMPT_SUFFIX):
+            raise ValidationFailed(
+                (
+                    type(
+                        "Issue",
+                        (),
+                        {
+                            "code": "invalid-blueprint-path",
+                            "field": "path",
+                            "message": (
+                                "Prompt files must use the .prompt.md "
+                                "suffix under .agents/prompts/."
+                            ),
+                            "corrective_hint": (
+                                "Use .agents/prompts/<slug>.prompt.md "
+                                "for shared prompt files."
+                            ),
+                        },
+                    )(),
+                )
+            )
+        slug = filename[: -len(PROMPT_SUFFIX)]
+        if not _IDENTIFIER_PATTERN.fullmatch(slug):
+            raise ValidationFailed(
+                (
+                    type(
+                        "Issue",
+                        (),
+                        {
+                            "code": "invalid-prompt-name",
+                            "field": "path",
+                            "message": (
+                                "Prompt file name must be a lowercase "
+                                "stable slug."
+                            ),
+                            "corrective_hint": (
+                                "Use .agents/prompts/<lowercase-slug>.prompt.md."
+                            ),
+                        },
+                    )(),
+                )
+            )
+        return candidate.as_posix()
+    if (
+        len(candidate.parts) < 4
+        or candidate.parts[:2] != (".agents", "skills")
+    ):
+        raise ValidationFailed(
+            (
+                type(
+                    "Issue",
+                    (),
+                    {
+                        "code": "invalid-blueprint-path",
+                        "field": "path",
+                        "message": (
+                            "Only AGENTS.md and files inside one "
+                            "skill tree can be edited."
+                        ),
+                        "corrective_hint": (
+                            "Pick AGENTS.md or a file under "
+                            ".agents/skills/<name>/ ."
+                        ),
+                    },
+                )(),
+            )
+        )
+    if not _IDENTIFIER_PATTERN.fullmatch(candidate.parts[2]):
+        raise ValidationFailed(
+            (
+                type(
+                    "Issue",
+                    (),
+                    {
+                        "code": "invalid-skill-name",
+                        "field": "path",
+                        "message": (
+                            "Skill directory must be a lowercase "
+                            "stable slug."
+                        ),
+                        "corrective_hint": (
+                            "Use .agents/skills/<lowercase-slug>/ "
+                            "for editable skill files."
+                        ),
+                    },
+                )(),
+            )
+        )
+    return candidate.as_posix()
+
+
+def _stage_blueprint(
+    inspection,
+    target_path: str,
+    content: bytes,
+    stage_root: Path,
+) -> None:
+    for item in inspection.snapshot.files:
+        destination = stage_root / Path(*item.path.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        payload = (
+            content
+            if item.path.as_posix() == target_path
+            else item.content
+        )
+        destination.write_bytes(payload)
+    if target_path not in {
+        item.path.as_posix() for item in inspection.snapshot.files
+    }:
+        destination = stage_root / Path(*PurePosixPath(target_path).parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+
+
+def _publish_stage(
+    target_root: Path,
+    stage_root: Path,
+    backup_root: Path,
+) -> None:
+    def replace_directory(source: Path, destination: Path) -> None:
+        deadline = time.monotonic() + 0.25
+        delay = 0.01
+        while True:
+            try:
+                os.replace(source, destination)
+                return
+            except PermissionError as exc:
+                if destination.exists():
+                    raise
+                if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32}:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, 0.05)
+
+    backup_target = backup_root / target_root.name
+    try:
+        if target_root.exists():
+            replace_directory(target_root, backup_target)
+        replace_directory(stage_root, target_root)
+    except Exception:
+        if not target_root.exists() and backup_target.exists():
+            replace_directory(backup_target, target_root)
+        raise
+    finally:
+        if backup_target.exists():
+            shutil.rmtree(backup_target, ignore_errors=True)
+
+
+def _redirect_after_save(key: str, edited_path: str) -> str:
+    candidate = PurePosixPath(edited_path)
+    if candidate.as_posix() == "AGENTS.md":
+        return f"/admin/agent-library/blueprints/{key}"
+    if candidate.parts[:2] == (".agents", "prompts"):
+        return (
+            f"/admin/agent-library/blueprints/{key}/prompts?"
+            f"path={candidate.as_posix()}"
+        )
+    return (
+        f"/admin/agent-library/blueprints/{key}/skills/"
+        f"{candidate.parts[2]}?path={candidate.as_posix()}"
+    )
+
+
+@router.get("/admin/agent-library", response_class=HTMLResponse)
+async def admin_agent_library(
+    request: Request,
+    services: AgencyServices = Depends(get_services),
+):
+    snapshot = services.config_store.load()
+    return _render_library_list(request, services, snapshot)
+
+
+@router.get(
+    "/admin/agent-library/blueprints/{key}",
+    response_class=HTMLResponse,
+)
+async def admin_blueprint_detail(
+    request: Request,
+    key: str,
+    services: AgencyServices = Depends(get_services),
+):
+    snapshot = services.config_store.load()
+    return _render_blueprint_detail(request, services, snapshot, key)
+
+
+@router.get(
+    "/admin/agent-library/blueprints/{key}/skills",
+    response_class=HTMLResponse,
+)
+async def admin_blueprint_skills(
+    request: Request,
+    key: str,
+    services: AgencyServices = Depends(get_services),
+):
+    snapshot = services.config_store.load()
+    selected_path = request.query_params.get("path")
+    return _render_blueprint_skill(
+        request,
+        services,
+        snapshot,
+        key,
+        None,
+        selected_path=selected_path,
+    )
+
+
+@router.get(
+    "/admin/agent-library/blueprints/{key}/skills/{skill}",
+    response_class=HTMLResponse,
+)
+async def admin_blueprint_skill_detail(
+    request: Request,
+    key: str,
+    skill: str,
+    services: AgencyServices = Depends(get_services),
+):
+    snapshot = services.config_store.load()
+    selected_path = request.query_params.get("path")
+    return _render_blueprint_skill(
+        request,
+        services,
+        snapshot,
+        key,
+        skill,
+        selected_path=selected_path,
+    )
+
+
+@router.get(
+    "/admin/agent-library/blueprints/{key}/prompts",
+    response_class=HTMLResponse,
+)
+async def admin_blueprint_prompts(
+    request: Request,
+    key: str,
+    services: AgencyServices = Depends(get_services),
+):
+    snapshot = services.config_store.load()
+    selected_path = request.query_params.get("path")
+    return _render_blueprint_prompts(
+        request,
+        services,
+        snapshot,
+        key,
+        selected_path=selected_path,
+    )
+
+
+@router.post(
+    "/admin/agent-library/blueprints/{key}/source",
+    response_class=HTMLResponse,
+)
+async def admin_blueprint_source_save(
+    request: Request,
+    key: str,
+    services: AgencyServices = Depends(get_services),
+):
+    snapshot = services.config_store.load()
+    form = await request.form()
+    expected_digest = str(form.get("expected_digest", "")).strip()
+    raw_path = str(form.get("path", "")).strip()
+    slug = str(form.get("slug", "")).strip()
+    if not raw_path and slug:
+        raw_path = prompt_source_path(slug).as_posix()
+    content = str(form.get("content", "")).encode("utf-8")
+    try:
+        target_path = _validate_source_path(raw_path)
+        with exclusive_lock(_lock_path(services, key), wait=True):
+            inspection = _load_blueprint(services, key)
+            if inspection.snapshot.digest != expected_digest:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Blueprint source changed; reload before saving",
+                )
+            stage_parent = _create_verified_tempdir(
+                _infra_bucket(services, "staging"),
+                prefix=f".{_infra_token(key)}.stage-",
+                label="Agent Library staging",
+            )
+            stage_root = stage_parent / key
+            stage_root.mkdir(parents=True, exist_ok=True)
+            backup_parent = _create_verified_tempdir(
+                _infra_bucket(services, "backups"),
+                prefix=f".{_infra_token(key)}.backup-",
+                label="Agent Library backup",
+            )
+            try:
+                _stage_blueprint(inspection, target_path, content, stage_root)
+                _require_library(services).inspect(key)
+                from flowgency.blueprints.library import inspect_blueprint
+
+                inspect_blueprint(stage_parent, key)
+                _publish_stage(
+                    _blueprint_root(services, key),
+                    stage_root,
+                    backup_parent,
+                )
+            finally:
+                if stage_parent.exists():
+                    shutil.rmtree(stage_parent, ignore_errors=True)
+                if backup_parent.exists():
+                    shutil.rmtree(backup_parent, ignore_errors=True)
+    except HTTPException as exc:
+        if raw_path.startswith(".agents/skills/"):
+            parts = PurePosixPath(raw_path.replace("\\", "/")).parts
+            skill_name = parts[2] if len(parts) >= 3 else None
+            return _render_blueprint_skill(
+                request,
+                services,
+                snapshot,
+                key,
+                skill_name,
+                selected_path=raw_path,
+                warning=str(exc.detail),
+                form_content=str(form.get("content", "")),
+                status_code=exc.status_code,
+            )
+        if raw_path.startswith(".agents/prompts/") or slug:
+            return _render_blueprint_prompts(
+                request,
+                services,
+                snapshot,
+                key,
+                selected_path=raw_path,
+                warning=str(exc.detail),
+                form_content=str(form.get("content", "")),
+                create_slug=slug,
+                create_content=str(form.get("content", "")),
+                status_code=exc.status_code,
+            )
+        return _render_blueprint_detail(
+            request,
+            services,
+            snapshot,
+            key,
+            warning=str(exc.detail),
+            form_path=raw_path or "AGENTS.md",
+            form_content=str(form.get("content", "")),
+            status_code=exc.status_code,
+        )
+    except ValidationFailed as exc:
+        if raw_path.startswith(".agents/skills/"):
+            parts = PurePosixPath(raw_path.replace("\\", "/")).parts
+            skill_name = parts[2] if len(parts) >= 3 else None
+            return _render_blueprint_skill(
+                request,
+                services,
+                snapshot,
+                key,
+                skill_name,
+                selected_path=raw_path,
+                issues=_issue_dicts(exc),
+                form_content=str(form.get("content", "")),
+                status_code=409,
+            )
+        if raw_path.startswith(".agents/prompts/") or slug:
+            return _render_blueprint_prompts(
+                request,
+                services,
+                snapshot,
+                key,
+                selected_path=raw_path,
+                issues=_issue_dicts(exc),
+                form_content=str(form.get("content", "")),
+                create_slug=slug,
+                create_content=str(form.get("content", "")),
+                status_code=409,
+            )
+        return _render_blueprint_detail(
+            request,
+            services,
+            snapshot,
+            key,
+            issues=_issue_dicts(exc),
+            form_path=raw_path or "AGENTS.md",
+            form_content=str(form.get("content", "")),
+            status_code=409,
+        )
+    return RedirectResponse(
+        _redirect_after_save(key, raw_path),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/admin/agent-library/blueprints/{key}/prompts/{prompt}/delete",
+    response_class=HTMLResponse,
+)
+async def admin_blueprint_prompt_delete(
+    request: Request,
+    key: str,
+    prompt: str,
+    services: AgencyServices = Depends(get_services),
+):
+    snapshot = services.config_store.load()
+    form = await request.form()
+    expected_digest = str(form.get("expected_digest", "")).strip()
+    confirmation = str(form.get("confirmation", "")).strip()
+    target_path = prompt_source_path(prompt).as_posix()
+    try:
+        if confirmation != prompt:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Delete blocked: type {prompt} to confirm prompt deletion."
+                ),
+            )
+        _validate_source_path(target_path)
+        with exclusive_lock(_lock_path(services, key), wait=True):
+            inspection = _load_blueprint(services, key)
+            if inspection.snapshot.digest != expected_digest:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Blueprint source changed; reload before deleting",
+                )
+            users = _configured_prompt_users(snapshot, key, prompt)
+            if users:
+                raise HTTPException(
+                    status_code=409,
+                    detail=_format_prompt_user_summary(users),
+                )
+            stage_parent = _create_verified_tempdir(
+                _infra_bucket(services, "staging"),
+                prefix=f".{_infra_token(key)}.stage-",
+                label="Agent Library staging",
+            )
+            stage_root = stage_parent / key
+            stage_root.mkdir(parents=True, exist_ok=True)
+            backup_parent = _create_verified_tempdir(
+                _infra_bucket(services, "backups"),
+                prefix=f".{_infra_token(key)}.backup-",
+                label="Agent Library backup",
+            )
+            try:
+                _stage_blueprint_delete(inspection, target_path, stage_root)
+                from flowgency.blueprints.library import inspect_blueprint
+
+                inspect_blueprint(stage_parent, key)
+                _publish_stage(
+                    _blueprint_root(services, key),
+                    stage_root,
+                    backup_parent,
+                )
+            finally:
+                if stage_parent.exists():
+                    shutil.rmtree(stage_parent, ignore_errors=True)
+                if backup_parent.exists():
+                    shutil.rmtree(backup_parent, ignore_errors=True)
+    except HTTPException as exc:
+        return _render_blueprint_prompts(
+            request,
+            services,
+            snapshot,
+            key,
+            selected_path=target_path,
+            warning=str(exc.detail),
+            status_code=exc.status_code,
+        )
+    except ValidationFailed as exc:
+        return _render_blueprint_prompts(
+            request,
+            services,
+            snapshot,
+            key,
+            selected_path=target_path,
+            issues=_issue_dicts(exc),
+            status_code=409,
+        )
+    return RedirectResponse(
+        f"/admin/agent-library/blueprints/{key}/prompts",
+        status_code=303,
+    )

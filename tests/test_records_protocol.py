@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from agency.proposals import SUPPORTED_QUESTION_TYPES
-from agency.records.outbox import (
+from flowgency.proposals import SUPPORTED_QUESTION_TYPES
+from flowgency.records.outbox import (
     MAX_MEMORY_FILE_BYTES,
     MAX_MEMORY_FILES,
     OUTBOX_RELATIVE_MEMORY,
     OUTBOX_RELATIVE_OBSERVATIONS,
     OUTBOX_RELATIVE_PROPOSALS,
 )
-from agency.records.protocol import append_reporting_protocol, build_reporting_protocol
-from agency.records.validation import MAX_RECORD_BYTES, MAX_RECORDS_PER_KIND
+from flowgency.records.protocol import append_reporting_protocol, build_reporting_protocol
+from flowgency.records.validation import MAX_RECORD_BYTES, MAX_RECORDS_PER_KIND
 
 
 def test_protocol_names_every_outbox_directory():

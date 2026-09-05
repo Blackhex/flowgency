@@ -9,12 +9,12 @@ from uuid import uuid4
 import pytest
 import yaml
 
-from agency.blueprints.library import BlueprintLibrary
-from agency.configuration.models import MemorySelector
-from agency.configuration.store import ConfigConflictError, ConfigStore
-from agency.fs.locks import exclusive_lock
-from agency.jobs.authority import JobStore
-from agency.jobs.models import (
+from flowgency.blueprints.library import BlueprintLibrary
+from flowgency.configuration.models import MemorySelector
+from flowgency.configuration.store import ConfigConflictError, ConfigStore
+from flowgency.fs.locks import exclusive_lock
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import (
     BlueprintRef,
     JobRecord,
     JobRequest,
@@ -22,11 +22,11 @@ from agency.jobs.models import (
     MemoryBinding,
     RuntimePolicySnapshot,
 )
-from agency.jobs.resolution import JobValidationError
-from agency.jobs.store import transition_job, write_job
-from agency.jobs.submission import submit_job_request
-from agency.memory import MemoryStore, resolve_memory_selector
-from agency.prompts import PromptNotFoundError, PromptService, PromptStore
+from flowgency.jobs.resolution import JobValidationError
+from flowgency.jobs.store import transition_job, write_job
+from flowgency.jobs.submission import submit_job_request
+from flowgency.memory import MemoryStore, resolve_memory_selector
+from flowgency.prompts import PromptNotFoundError, PromptService, PromptStore
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -217,7 +217,7 @@ def instance_env(tmp_path, raw_config):
 
 @pytest.fixture
 def instance_service(instance_env):
-    from agency.instances import InstanceService
+    from flowgency.instances import InstanceService
 
     return InstanceService(
         config_store=instance_env["config_store"],
@@ -230,9 +230,9 @@ def instance_service(instance_env):
 def test_create_instance_pins_team_and_validates_blueprint_and_integration(
     instance_service,
 ):
-    from agency.configuration.issues import ValidationFailed
-    from agency.fs.snapshot import AssetValidationError
-    from agency.instances import AgentInstanceCreate
+    from flowgency.configuration.issues import ValidationFailed
+    from flowgency.fs.snapshot import AssetValidationError
+    from flowgency.instances import AgentInstanceCreate
 
     result = instance_service.create(
         "newsletter",
@@ -380,7 +380,7 @@ def test_move_refuses_existing_destination_memory(
 
     assert preview.blocked_by == ("destination-memory-exists",)
 
-    from agency.instances import InstanceMoveConflict
+    from flowgency.instances import InstanceMoveConflict
 
     with pytest.raises(InstanceMoveConflict):
         instance_service.move(preview)
@@ -552,7 +552,7 @@ def test_move_rolls_back_created_targets_when_config_patch_fails(
     memory_mode,
     expected_created_files,
 ):
-    from agency.instances import get_instance
+    from flowgency.instances import get_instance
 
     agent_memory = _resolved_memory(
         instance_env["memory_root"],
@@ -1075,7 +1075,7 @@ def test_remove_instance_reports_orphaned_prompt_namespace_when_files_remain(
 
 
 def test_create_blocks_on_team_operation_lock_until_release(instance_env):
-    from agency.instances import AgentInstanceCreate, InstanceService
+    from flowgency.instances import AgentInstanceCreate, InstanceService
 
     service = InstanceService(
         config_store=instance_env["config_store"],
@@ -1115,9 +1115,9 @@ def test_submit_cannot_slip_past_create_team_lock(
     instance_env,
     monkeypatch,
 ):
-    from agency.instances import AgentInstanceCreate, InstanceService
-    import agency.instances as instances_module
-    import agency.jobs.submission as submission_module
+    from flowgency.instances import AgentInstanceCreate, InstanceService
+    import flowgency.instances as instances_module
+    import flowgency.jobs.submission as submission_module
 
     service = InstanceService(
         config_store=instance_env["config_store"],
@@ -1204,7 +1204,7 @@ def test_move_holds_team_lock_and_concurrent_submit_re_resolves_after_move(
     instance_env,
     monkeypatch,
 ):
-    import agency.jobs.submission as submission
+    import flowgency.jobs.submission as submission
 
     preview = instance_service.preview_move(
         "newsletter",
@@ -1277,8 +1277,8 @@ def test_move_holds_team_lock_and_concurrent_submit_re_resolves_after_move(
 
 
 def test_opposite_direction_move_lock_order_avoids_deadlock(instance_env):
-    from agency.instances import InstanceService
-    from agency.instances import AgentInstanceCreate
+    from flowgency.instances import InstanceService
+    from flowgency.instances import AgentInstanceCreate
 
     _write_blueprint(instance_env["library"].root, "advisor-two")
     service = InstanceService(
@@ -1325,7 +1325,7 @@ def test_remove_uses_team_lock_to_block_new_submissions(
     instance_env,
     monkeypatch,
 ):
-    import agency.jobs.submission as submission
+    import flowgency.jobs.submission as submission
 
     patch_started = threading.Event()
     release_patch = threading.Event()

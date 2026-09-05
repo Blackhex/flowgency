@@ -3,12 +3,12 @@ from pathlib import Path
 
 import yaml
 
-from agency.blueprints.cache import active_pins, pin_artifact
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.reconciliation import reconcile_jobs, worker_alive
-from agency.memory.recovery import recover_publications
-from agency.jobs.store import job_path, read_job, write_job
+from flowgency.blueprints.cache import active_pins, pin_artifact
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.reconciliation import reconcile_jobs, worker_alive
+from flowgency.memory.recovery import recover_publications
+from flowgency.jobs.store import job_path, read_job, write_job
 
 
 def _job_store(tmp_path: Path) -> JobStore:
@@ -87,7 +87,7 @@ def reconcile_for_test(teams, tmp_path, *, memory_store_root=None):
 
 
 def test_reconcile_accepts_teams_keyword_argument(tmp_path, monkeypatch):
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: True)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: True)
 
     result = reconcile_jobs(teams={}, memory_store_root=tmp_path / "memory")
 
@@ -97,7 +97,7 @@ def test_reconcile_accepts_teams_keyword_argument(tmp_path, monkeypatch):
 
 def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
     team_dir, decision, path = running_decision_job(tmp_path)
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: True)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: True)
     result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
     assert result.left_running == 1
     assert read_job(path).status == "running"
@@ -106,7 +106,7 @@ def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
 
 def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
     team_dir, decision, path = running_decision_job(tmp_path)
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
     result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
     assert result.failed == 1
     record = read_job(path)
@@ -128,7 +128,7 @@ def test_reconcile_releases_pin_for_dead_waiting_worker(tmp_path, monkeypatch):
         replace(record, status="waiting_for_memory", worker_pid=999999),
     )
 
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
 
     result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
@@ -164,7 +164,7 @@ def test_reconcile_releases_pin_for_dead_running_worker_but_keeps_live_pin(
     pin_artifact(live_record.spec.blueprint.cache_root, live_artifact.ref, live_record.spec.job_id)
 
     monkeypatch.setattr(
-        "agency.jobs.reconciliation.worker_alive",
+        "flowgency.jobs.reconciliation.worker_alive",
         lambda pid: False if pid == 999999 else True,
     )
 
@@ -239,7 +239,7 @@ def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
 
 def test_reconcile_leaves_uncertain_worker_running(tmp_path, monkeypatch):
     team_dir, _, path = running_decision_job(tmp_path)
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: None)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: None)
     result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
     assert result.left_running == 1
     assert read_job(path).status == "running"
@@ -253,7 +253,7 @@ def test_reconcile_fails_dead_waiting_worker(tmp_path, monkeypatch):
         replace(record, status="waiting_for_memory", worker_pid=999999),
     )
 
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
 
     result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
@@ -264,10 +264,10 @@ def test_reconcile_fails_dead_waiting_worker(tmp_path, monkeypatch):
 
 
 def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_path, monkeypatch):
-    from agency.configuration.models import MemorySelector
-    from agency.jobs.models import JobSpec
-    from agency.memory import MemoryStore, resolve_memory_selector
-    from agency.memory.publication import apply_publication, prepare_publication
+    from flowgency.configuration.models import MemorySelector
+    from flowgency.jobs.models import JobSpec
+    from flowgency.memory import MemoryStore, resolve_memory_selector
+    from flowgency.memory.publication import apply_publication, prepare_publication
 
     team_dir = tmp_path / "team"
     config_path = tmp_path / "config.yaml"
@@ -349,7 +349,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
     except Exception:
         pass
 
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
 
     result = reconcile_for_test(
         {"test": {"team_root": str(team_dir)}},
@@ -390,7 +390,7 @@ def test_reconcile_invokes_global_recovery_once_with_no_job_records(
     tmp_path,
     monkeypatch,
 ):
-    from agency.memory.recovery import RecoveryResult
+    from flowgency.memory.recovery import RecoveryResult
 
     group_a = tmp_path / "a"
     group_b = tmp_path / "b"
@@ -400,7 +400,7 @@ def test_reconcile_invokes_global_recovery_once_with_no_job_records(
         calls.append((Path(store_root), dict(job_stores)))
         return RecoveryResult()
 
-    monkeypatch.setattr("agency.jobs.reconciliation.recover_publications", observe)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.recover_publications", observe)
 
     reconcile_jobs(
         {
@@ -432,17 +432,17 @@ def test_reconcile_does_not_fail_recovery_blocked_dead_job(
     monkeypatch,
     caplog,
 ):
-    from agency.memory.recovery import RecoveryResult
+    from flowgency.memory.recovery import RecoveryResult
 
     team_dir, _, path = running_decision_job(tmp_path)
     monkeypatch.setattr(
-        "agency.jobs.reconciliation.recover_publications",
+        "flowgency.jobs.reconciliation.recover_publications",
         lambda *args: RecoveryResult(
             blocked_job_ids=("decision-job",),
             errors=("persistent recovery barrier",),
         ),
     )
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
 
     result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 

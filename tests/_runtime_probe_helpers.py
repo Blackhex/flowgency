@@ -5,10 +5,10 @@ from pathlib import Path, PurePosixPath
 import subprocess
 from uuid import uuid4
 
-from agency.configuration import ValidationFailed
-from agency.fs.snapshot import SnapshotFile, TreeSnapshot, compute_source_digest
-from agency.integrations import REGISTRY, RunResult
-from agency.integrations.models import (
+from flowgency.configuration import ValidationFailed
+from flowgency.fs.snapshot import SnapshotFile, TreeSnapshot, compute_source_digest
+from flowgency.integrations import REGISTRY, RunResult
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ResolvedPermissionRule,

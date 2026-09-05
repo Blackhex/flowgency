@@ -1,6 +1,6 @@
 import pytest
 
-from agency.proposals import (
+from flowgency.proposals import (
     question_option_labels,
     should_execute_decision,
     validate_answers,

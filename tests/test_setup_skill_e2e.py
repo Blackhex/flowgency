@@ -5,8 +5,8 @@ import re
 
 import yaml
 
-from agency import cli
-from agency.web.dependencies import build_services
+from flowgency import cli
+from flowgency.web.dependencies import build_services
 
 
 REPO_ROOT = Path(__file__).parents[1]

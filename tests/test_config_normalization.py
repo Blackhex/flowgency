@@ -2,9 +2,9 @@ from pathlib import Path
 
 import yaml
 
-import agency.config as strict_config_module
-from agency.configuration import ConfigStore
-from agency.web.state import runtime_team
+import flowgency.config as strict_config_module
+from flowgency.configuration import ConfigStore
+from flowgency.web.state import runtime_team
 
 
 def test_runtime_config_module_exposes_no_retired_agent_helper_surface():

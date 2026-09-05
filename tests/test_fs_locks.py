@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.fs.locks import ResourceBusyError, exclusive_lock, try_exclusive_lock
+from flowgency.fs.locks import ResourceBusyError, exclusive_lock, try_exclusive_lock
 
 
 def _hold_lock(path: str, acquired: Event, release: Event) -> None:

@@ -5,8 +5,8 @@ import stat
 
 import pytest
 
-from agency.configuration.models import parse_config
-from agency.configuration.paths import (
+from flowgency.configuration.models import parse_config
+from flowgency.configuration.paths import (
     DirectoryPreparationError,
     job_store_root,
     prepare_writable_directory,
@@ -142,8 +142,8 @@ def test_unwritable_nearest_parent_is_rejected_where_portable(tmp_path, raw_conf
 
 
 def test_resolved_team_paths_have_no_shared_segment(tmp_path, raw_config):
-    from agency.configuration.team_paths import resolve_team_paths
-    from agency.configuration.models import parse_config
+    from flowgency.configuration.team_paths import resolve_team_paths
+    from flowgency.configuration.models import parse_config
 
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -172,8 +172,8 @@ def test_resolved_team_paths_have_no_shared_segment(tmp_path, raw_config):
 def test_initialization_creates_team_state_but_not_workspace_shared(
     tmp_path, raw_config
 ):
-    from agency.configuration.models import parse_config
-    from agency.configuration.paths import initialize_storage_directories
+    from flowgency.configuration.models import parse_config
+    from flowgency.configuration.paths import initialize_storage_directories
 
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -244,8 +244,8 @@ def test_team_authorities_must_not_overlap(
 def test_initialize_storage_directories_rejects_symlink_or_reparse_cache_root(
     tmp_path, raw_config, monkeypatch
 ):
-    from agency.configuration.models import parse_config
-    from agency.configuration.paths import initialize_storage_directories
+    from flowgency.configuration.models import parse_config
+    from flowgency.configuration.paths import initialize_storage_directories
 
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
@@ -328,7 +328,7 @@ def test_prepare_writable_directory_rejects_unwritable_parent(
     root = parent / "Agency"
     original_access = os.access
     monkeypatch.setattr(
-        "agency.configuration.paths.os.access",
+        "flowgency.configuration.paths.os.access",
         lambda path, mode: False
         if Path(path) == parent and mode & os.W_OK
         else original_access(path, mode),
@@ -350,7 +350,7 @@ def test_prepare_writable_directory_rejects_inaccessible_existing_root(
     root.mkdir()
     original_access = os.access
     monkeypatch.setattr(
-        "agency.configuration.paths.os.access",
+        "flowgency.configuration.paths.os.access",
         lambda path, mode: False
         if Path(path) == root and mode == os.R_OK | os.W_OK
         else original_access(path, mode),

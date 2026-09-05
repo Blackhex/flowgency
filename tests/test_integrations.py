@@ -1,7 +1,7 @@
 import inspect
 import pytest
 from pathlib import Path
-from agency.integrations import (
+from flowgency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError,
     REGISTRY, get_integration, detect_integration,
 )
@@ -93,13 +93,13 @@ def test_base_integration_defaults():
 
 def test_load_integrations_from_config():
     """Config-driven loading populates the registry."""
-    from agency.integrations import REGISTRY
+    from flowgency.integrations import REGISTRY
     assert len(REGISTRY) >= 7
 
 
 def test_integrations_yaml_exists():
     """integrations.yaml config file exists."""
-    from agency.integrations import INTEGRATIONS_DIR
+    from flowgency.integrations import INTEGRATIONS_DIR
     config_path = INTEGRATIONS_DIR / "integrations.yaml"
     assert config_path.exists()
 

@@ -4,8 +4,8 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from agency.fs.snapshot import AssetValidationError
-from agency.prompts.assets import build_prompt_task_input, parse_prompt_document
+from flowgency.fs.snapshot import AssetValidationError
+from flowgency.prompts.assets import build_prompt_task_input, parse_prompt_document
 
 
 def prompt_bytes(name: str = "pr-review", body: str = "Review the pull request.\n") -> bytes:

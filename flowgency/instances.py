@@ -1,0 +1,801 @@
+from __future__ import annotations
+
+from contextlib import ExitStack
+from dataclasses import dataclass
+from pathlib import Path
+import shutil
+from typing import Literal
+
+from flowgency.blueprints.library import BlueprintLibrary
+from flowgency.configuration import (
+    ConfigConflictError,
+    ConfigSnapshot,
+    ConfigStore,
+)
+from flowgency.configuration.issues import ValidationFailed, ValidationIssue
+from flowgency.configuration.models import (
+    AgentIdentity,
+    AgentInstance,
+    MemorySelector,
+)
+from flowgency.configuration.patches import (
+    create_agent_instance,
+    remove_agent_instance,
+)
+from flowgency.integrations import get_integration
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.store import acquire_team_operation_locks
+from flowgency.memory import (
+    MemoryStore,
+    ResolvedMemory,
+    resolve_memory_selector,
+    select_effective_memory,
+)
+from flowgency.memory.store import (
+    _ensure_canonical_directory,
+    _memory_lock,
+    _read_canonical_files,
+    memory_content_revision,
+)
+from flowgency.memory.publication import _save_direct_locked
+from flowgency.prompts import PromptConflictError, PromptNotFoundError, PromptStore
+
+
+MemoryMode = Literal["copy", "empty"]
+
+
+@dataclass(frozen=True)
+class AgentInstanceCreate:
+    name: str
+    blueprint: str
+    integration: str
+    display_name: str
+
+    def to_model(self) -> AgentInstance:
+        return AgentInstance(
+            name=self.name,
+            blueprint=self.blueprint,
+            integration=self.integration,
+            identity=AgentIdentity(display_name=self.display_name),
+        )
+
+
+@dataclass(frozen=True)
+class InstanceMutationResult:
+    snapshot: ConfigSnapshot
+    instance: AgentInstance
+
+
+@dataclass(frozen=True)
+class RemoveInstanceResult:
+    snapshot: ConfigSnapshot
+    orphaned_memories: tuple[ResolvedMemory, ...]
+    orphaned_prompt_namespace: Path | None = None
+
+
+@dataclass(frozen=True)
+class MoveInstanceResult:
+    snapshot: ConfigSnapshot
+    orphaned_prompt_namespace: Path | None = None
+
+    def __getattr__(self, name: str):
+        return getattr(self.snapshot, name)
+
+
+@dataclass(frozen=True)
+class MovePreview:
+    source_team: str
+    target_team: str
+    agent_name: str
+    memory_mode: MemoryMode
+    source_memories: tuple[ResolvedMemory, ...]
+    destination_memories: tuple[ResolvedMemory, ...]
+    blocked_by: tuple[str, ...]
+    config_revision: str
+    source_revisions: tuple[tuple[str, str | None], ...]
+    memory_pairs: tuple[tuple[ResolvedMemory, ResolvedMemory], ...]
+    source_prompts: tuple[tuple[str, str], ...] = ()
+
+
+class InstanceMoveConflict(RuntimeError):
+    def __init__(self, reasons: tuple[str, ...]):
+        self.reasons = tuple(reasons)
+        super().__init__(", ".join(reasons) or "instance move conflict")
+
+
+class InstanceMoveRollbackError(RuntimeError):
+    def __init__(self, orphaned_targets: tuple[ResolvedMemory, ...]):
+        self.orphaned_targets = orphaned_targets
+        super().__init__("move failed after creating destination memories")
+
+
+def list_instances(
+    snapshot: ConfigSnapshot,
+    team_id: str,
+) -> tuple[AgentInstance, ...]:
+    return tuple(snapshot.config.teams[team_id].agents.values())
+
+
+def get_instance(
+    snapshot: ConfigSnapshot,
+    team_id: str,
+    agent_id: str,
+) -> AgentInstance:
+    return snapshot.config.teams[team_id].agents[agent_id]
+
+
+def create_instance(
+    store: ConfigStore,
+    expected_revision: str,
+    team_id: str,
+    agent: AgentInstance,
+) -> ConfigSnapshot:
+    snapshot = store.load()
+    team_path = snapshot.config.teams[team_id].path
+    with acquire_team_operation_locks(team_path):
+        refreshed = store.load()
+        if refreshed.revision != expected_revision:
+            raise ConfigConflictError(
+                "config.yaml changed; reload before saving"
+            )
+        return create_agent_instance(
+            store,
+            refreshed.revision,
+            team_id,
+            agent.model_dump(mode="json", exclude_none=True),
+        )
+
+
+def remove_instance(
+    store: ConfigStore,
+    expected_revision: str,
+    team_id: str,
+    agent_id: str,
+) -> ConfigSnapshot:
+    snapshot = store.load()
+    team_path = snapshot.config.teams[team_id].path
+    with acquire_team_operation_locks(team_path):
+        refreshed = store.load()
+        if refreshed.revision != expected_revision:
+            raise ConfigConflictError(
+                "config.yaml changed; reload before saving"
+            )
+        return remove_agent_instance(
+            store,
+            refreshed.revision,
+            team_id,
+            agent_id,
+        )
+
+
+def preview_move(
+    snapshot: ConfigSnapshot,
+    memory_store: MemoryStore,
+    prompt_store: PromptStore,
+    source_team: str,
+    agent_id: str,
+    target_team: str,
+    memory_mode: MemoryMode,
+) -> MovePreview:
+    source = get_instance(snapshot, source_team, agent_id)
+    source_prompts = _registered_prompt_entries(
+        prompt_store,
+        source_team,
+        source,
+    )
+    memory_pairs = _resolve_owned_memory_pairs(
+        snapshot,
+        memory_store,
+        source_team=source_team,
+        target_team=target_team,
+        agent=source,
+    )
+    source_memories = tuple(source for source, _ in memory_pairs)
+    destination_memories = tuple(
+        destination for _, destination in memory_pairs
+    )
+    blocked = list(
+        _preview_blocks(
+            snapshot,
+            source_team,
+            target_team,
+            agent_id,
+            destination_memories,
+            prompt_store,
+            source_prompts,
+        )
+    )
+    source_revisions = tuple(
+        (
+            resolved.memory_hash,
+            _memory_revision_if_present(memory_store, resolved),
+        )
+        for resolved in source_memories
+    )
+    return MovePreview(
+        source_team=source_team,
+        target_team=target_team,
+        agent_name=agent_id,
+        memory_mode=memory_mode,
+        source_memories=source_memories,
+        destination_memories=destination_memories,
+        blocked_by=tuple(blocked),
+        config_revision=snapshot.revision,
+        source_revisions=source_revisions,
+        memory_pairs=memory_pairs,
+        source_prompts=source_prompts,
+    )
+
+
+def move_instance(
+    store: ConfigStore,
+    memory_store: MemoryStore,
+    prompt_store: PromptStore,
+    preview: MovePreview,
+) -> MoveInstanceResult:
+    if preview.blocked_by:
+        raise InstanceMoveConflict(preview.blocked_by)
+
+    created_targets: list[ResolvedMemory] = []
+    snapshot = store.load()
+    source_team_path = snapshot.config.teams[preview.source_team].path
+    target_team_path = snapshot.config.teams[preview.target_team].path
+    orphaned_prompt_namespace: Path | None = None
+    with ExitStack() as stack:
+        stack.enter_context(
+            acquire_team_operation_locks(source_team_path, target_team_path)
+        )
+        prompt_lease = stack.enter_context(
+            prompt_store.namespace_transaction(
+                (preview.source_team, preview.agent_name),
+                (preview.target_team, preview.agent_name),
+            )
+        )
+
+        refreshed = store.load()
+        if refreshed.revision != preview.config_revision:
+            raise ConfigConflictError(
+                "config.yaml changed; reload before saving"
+            )
+        source_agent = get_instance(
+            refreshed,
+            preview.source_team,
+            preview.agent_name,
+        )
+        source_prompts = prompt_lease.registered_entries(
+            preview.source_team,
+            source_agent.name,
+            tuple(source_agent.prompts),
+        )
+        if source_prompts != preview.source_prompts:
+            raise InstanceMoveConflict(("source-prompts-changed",))
+        memory_pairs = _resolve_owned_memory_pairs(
+            refreshed,
+            memory_store,
+            source_team=preview.source_team,
+            target_team=preview.target_team,
+            agent=source_agent,
+        )
+        source_memories = tuple(source for source, _ in memory_pairs)
+        destination_memories = tuple(
+            destination for _, destination in memory_pairs
+        )
+        blocked = tuple(
+            _preview_blocks(
+                refreshed,
+                preview.source_team,
+                preview.target_team,
+                preview.agent_name,
+                destination_memories,
+                prompt_store,
+                source_prompts,
+            )
+        )
+        if blocked:
+            raise InstanceMoveConflict(blocked)
+
+        unique = {
+            resolved.memory_hash: resolved
+            for resolved in (*source_memories, *destination_memories)
+        }
+        leases = {
+            memory_hash: stack.enter_context(
+                _memory_lock(unique[memory_hash], wait=True)
+            )
+            for memory_hash in sorted(unique)
+        }
+
+        current_revisions = tuple(
+            (
+                resolved.memory_hash,
+                _memory_revision_if_present(memory_store, resolved),
+            )
+            for resolved in source_memories
+        )
+        if current_revisions != preview.source_revisions:
+            raise InstanceMoveConflict(("source-memory-changed",))
+
+        source_snapshots = {
+            source.memory_hash: _read_memory_without_relocking(source)
+            for source in source_memories
+            if source.directory.exists()
+        }
+        for resolved in destination_memories:
+            if resolved.directory.exists():
+                raise InstanceMoveConflict(("destination-memory-exists",))
+        try:
+            for source_resolved, target_resolved in memory_pairs:
+                created_targets.append(target_resolved)
+                _ensure_empty_memory_without_relocking(target_resolved)
+                if preview.memory_mode == "copy":
+                    source_snapshot = source_snapshots.get(
+                        source_resolved.memory_hash
+                    )
+                    if source_snapshot is not None:
+                        target_snapshot = _read_memory_without_relocking(
+                            target_resolved
+                        )
+                        _save_direct_locked(
+                            target_resolved,
+                            target_snapshot,
+                            source_snapshot.files,
+                            lease=leases[target_resolved.memory_hash],
+                        )
+
+            if source_prompts:
+                prompt_lease.copy_registered(
+                    preview.source_team,
+                    preview.agent_name,
+                    preview.target_team,
+                    preview.agent_name,
+                    registered=source_prompts,
+                )
+
+            updated = store.patch(
+                refreshed.revision,
+                lambda raw: _apply_move_patch(
+                    raw,
+                    source_team=preview.source_team,
+                    target_team=preview.target_team,
+                    agent_name=preview.agent_name,
+                ),
+            )
+        except Exception as exc:
+            rollback_errors = []
+            for resolved in reversed(created_targets):
+                try:
+                    if resolved.directory.exists():
+                        shutil.rmtree(resolved.directory)
+                except OSError:
+                    rollback_errors.append(resolved)
+            if rollback_errors:
+                raise InstanceMoveRollbackError(
+                    tuple(rollback_errors)
+                ) from exc
+            if source_prompts:
+                try:
+                    prompt_lease.delete_registered(
+                        preview.target_team,
+                        preview.agent_name,
+                        registered=source_prompts,
+                    )
+                except Exception as cleanup_exc:
+                    raise RuntimeError(
+                        "move failed after copying target prompts and prompt rollback failed"
+                    ) from cleanup_exc
+            raise
+        if source_prompts:
+            try:
+                prompt_lease.delete_registered(
+                    preview.source_team,
+                    preview.agent_name,
+                    registered=source_prompts,
+                )
+            except Exception:
+                orphaned_prompt_namespace = prompt_store.namespace_path(
+                    preview.source_team,
+                    preview.agent_name,
+                )
+    return MoveInstanceResult(
+        snapshot=updated,
+        orphaned_prompt_namespace=orphaned_prompt_namespace,
+    )
+
+
+class InstanceService:
+    def __init__(
+        self,
+        config_store: ConfigStore,
+        library: BlueprintLibrary,
+        memory_store: MemoryStore,
+        prompt_store: PromptStore | None = None,
+    ):
+        self.config_store = config_store
+        self.library = library
+        self.memory_store = memory_store
+        if prompt_store is None:
+            snapshot = config_store.load()
+            prompt_store = PromptStore(snapshot.config.agency.prompt_store)
+        self.prompt_store = prompt_store
+
+    def list(self, team_id: str) -> tuple[AgentInstance, ...]:
+        snapshot = self.config_store.load()
+        return list_instances(snapshot, team_id)
+
+    def get(self, team_id: str, agent_id: str) -> AgentInstance:
+        snapshot = self.config_store.load()
+        return get_instance(snapshot, team_id, agent_id)
+
+    def create(
+        self,
+        team_id: str,
+        request: AgentInstanceCreate,
+        expected_revision: str | None = None,
+    ) -> InstanceMutationResult:
+        self.library.inspect(request.blueprint)
+        _validate_integration(request.integration)
+        if expected_revision is None:
+            expected_revision = self.config_store.load().revision
+        updated = create_instance(
+            self.config_store,
+            expected_revision,
+            team_id,
+            request.to_model(),
+        )
+        return InstanceMutationResult(
+            snapshot=updated,
+            instance=updated.config.teams[team_id].agents[request.name],
+        )
+
+    def remove(
+        self,
+        team_id: str,
+        agent_id: str,
+        expected_revision: str | None = None,
+    ) -> RemoveInstanceResult:
+        snapshot = self.config_store.load()
+        agent = get_instance(snapshot, team_id, agent_id)
+        if expected_revision is None:
+            expected_revision = snapshot.revision
+        orphaned = _resolve_owned_memories(
+            snapshot,
+            self.memory_store,
+            team_id=team_id,
+            agent=agent,
+        )
+        registered_prompts = _registered_prompt_entries(
+            self.prompt_store,
+            team_id,
+            agent,
+        )
+        updated = remove_instance(
+            self.config_store,
+            expected_revision,
+            team_id,
+            agent_id,
+        )
+        orphaned_prompt_namespace: Path | None = None
+        if registered_prompts:
+            namespace = self.prompt_store.path(
+                team_id,
+                agent_id,
+                registered_prompts[0][0],
+            ).parent
+            try:
+                self.prompt_store.delete_namespace(
+                    team_id,
+                    agent_id,
+                    registered=registered_prompts,
+                )
+            except Exception:
+                orphaned_prompt_namespace = namespace
+            else:
+                if namespace.exists() and any(namespace.iterdir()):
+                    orphaned_prompt_namespace = namespace
+        return RemoveInstanceResult(
+            snapshot=updated,
+            orphaned_memories=orphaned,
+            orphaned_prompt_namespace=orphaned_prompt_namespace,
+        )
+
+    def preview_move(
+        self,
+        source_team: str,
+        agent_id: str,
+        target_team: str,
+        memory_mode: MemoryMode,
+        expected_revision: str | None = None,
+    ) -> MovePreview:
+        snapshot = self.config_store.load()
+        if expected_revision is None:
+            expected_revision = snapshot.revision
+        if snapshot.revision != expected_revision:
+            raise ConfigConflictError(
+                "config.yaml changed; reload before previewing move"
+            )
+        return preview_move(
+            snapshot,
+            self.memory_store,
+            self.prompt_store,
+            source_team,
+            agent_id,
+            target_team,
+            memory_mode,
+        )
+
+    def move(self, preview: MovePreview) -> MoveInstanceResult:
+        return move_instance(
+            self.config_store,
+            self.memory_store,
+            self.prompt_store,
+            preview,
+        )
+
+
+def _validate_integration(name: str) -> None:
+    try:
+        integration = get_integration(name)
+    except KeyError as exc:
+        raise ValidationFailed(
+            (
+                ValidationIssue(
+                    code="unknown-integration",
+                    scope="integration",
+                    field="integration",
+                    message=f"Integration '{name}' is not registered.",
+                    corrective_hint=(
+                        "Choose an installed integration or register it "
+                        "before creating the instance."
+                    ),
+                ),
+            )
+        ) from exc
+    issues: list[ValidationIssue] = []
+    if not integration.supports_execution:
+        issues.append(
+            ValidationIssue(
+                code="integration-not-executable",
+                scope=f"integrations.{name}",
+                field="integration",
+                message=(
+                    f"Integration '{name}' does not support runtime "
+                    "execution."
+                ),
+                corrective_hint=(
+                    "Choose an executable integration before creating "
+                    "the instance."
+                ),
+            )
+        )
+    if integration.projector is None:
+        issues.append(
+            ValidationIssue(
+                code="missing-runtime-projector",
+                scope=f"integrations.{name}",
+                field="integration",
+                message=f"Integration '{name}' has no runtime projector.",
+                corrective_hint=(
+                    "Choose an integration with a runtime projector "
+                    "before creating the instance."
+                ),
+            )
+        )
+    if issues:
+        raise ValidationFailed(tuple(issues))
+
+
+def _resolve_owned_memories(
+    snapshot: ConfigSnapshot,
+    memory_store: MemoryStore,
+    *,
+    team_id: str,
+    agent: AgentInstance,
+) -> tuple[ResolvedMemory, ...]:
+    resolved: dict[str, ResolvedMemory] = {}
+    for selector, routine_id in _owned_memory_specs(agent):
+        item = resolve_memory_selector(
+            selector,
+            job_id="instance-preview",
+            team_key=team_id,
+            agent_name=agent.name,
+            routine_id=routine_id,
+            channels=snapshot.config.memory.channels,
+            store_root=memory_store.root,
+        )
+        resolved[item.memory_hash] = item
+    return tuple(resolved[key] for key in sorted(resolved))
+
+
+def _resolve_owned_memory_pairs(
+    snapshot: ConfigSnapshot,
+    memory_store: MemoryStore,
+    *,
+    source_team: str,
+    target_team: str,
+    agent: AgentInstance,
+) -> tuple[tuple[ResolvedMemory, ResolvedMemory], ...]:
+    pairs: list[tuple[ResolvedMemory, ResolvedMemory]] = []
+    for selector, routine_id in _owned_memory_specs(agent):
+        pairs.append(
+            (
+                resolve_memory_selector(
+                    selector,
+                    job_id="instance-preview",
+                    team_key=source_team,
+                    agent_name=agent.name,
+                    routine_id=routine_id,
+                    channels=snapshot.config.memory.channels,
+                    store_root=memory_store.root,
+                ),
+                resolve_memory_selector(
+                    selector,
+                    job_id="instance-preview",
+                    team_key=target_team,
+                    agent_name=agent.name,
+                    routine_id=routine_id,
+                    channels=snapshot.config.memory.channels,
+                    store_root=memory_store.root,
+                ),
+            )
+        )
+    deduped: dict[tuple[str, str], tuple[ResolvedMemory, ResolvedMemory]] = {}
+    for source, target in pairs:
+        deduped[(source.memory_hash, target.memory_hash)] = (source, target)
+    return tuple(deduped[key] for key in sorted(deduped))
+
+
+def _owned_memory_specs(
+    agent: AgentInstance,
+) -> tuple[tuple[MemorySelector, str | None], ...]:
+    selectors: list[tuple[MemorySelector, str | None]] = []
+    if (
+        agent.default_memory is not None
+        and agent.default_memory.scope in {"agent", "routine"}
+    ):
+        selectors.append((agent.default_memory, None))
+    for routine in agent.routines:
+        selected = select_effective_memory(
+            None,
+            routine.memory,
+            agent.default_memory,
+        )
+        if selected.scope not in {"agent", "routine"}:
+            continue
+        routine_id = routine.id if selected.scope == "routine" else None
+        selectors.append((selected, routine_id))
+    return tuple(selectors)
+
+
+def _memory_revision_if_present(
+    memory_store: MemoryStore,
+    resolved: ResolvedMemory,
+) -> str | None:
+    if not resolved.directory.exists():
+        return None
+    return _read_memory_without_relocking(resolved).revision
+
+
+def _read_memory_without_relocking(resolved: ResolvedMemory):
+    files = _read_canonical_files(resolved.directory)
+    snapshot_type = type(
+        "MemorySnapshotLike",
+        (),
+        {
+            "files": files,
+            "revision": memory_content_revision(files),
+        },
+    )
+    return snapshot_type()
+
+
+def _ensure_empty_memory_without_relocking(resolved: ResolvedMemory) -> str:
+    directory = _ensure_canonical_directory(resolved)
+    if not any(directory.iterdir()):
+        (directory / "memory.md").write_bytes(b"")
+    files = _read_canonical_files(directory)
+    return memory_content_revision(files)
+
+
+def _preview_blocks(
+    snapshot: ConfigSnapshot,
+    source_team: str,
+    target_team: str,
+    agent_id: str,
+    destination_memories: tuple[ResolvedMemory, ...],
+    prompt_store: PromptStore,
+    source_prompts: tuple[tuple[str, str], ...],
+):
+    if agent_id in snapshot.config.teams[target_team].agents:
+        yield "target-instance-exists"
+        return
+    if _has_active_jobs(snapshot, source_team, target_team, agent_id):
+        yield "active-jobs"
+        return
+    if any(resolved.directory.exists() for resolved in destination_memories):
+        yield "destination-memory-exists"
+        return
+    if _prompt_namespace_exists(
+        prompt_store,
+        target_team,
+        agent_id,
+        source_prompts[0][0] if source_prompts else "placeholder",
+    ):
+        yield "destination-prompt-namespace-exists"
+
+
+def _has_active_jobs(
+    snapshot: ConfigSnapshot,
+    source_team: str,
+    target_team: str,
+    agent_id: str,
+) -> bool:
+    job_store = JobStore(snapshot.config.agency.memory_store)
+    return bool(
+        job_store.active(source_team, agent_id)
+        or job_store.active(target_team, agent_id)
+    )
+
+
+def _apply_move_patch(
+    raw: dict,
+    *,
+    source_team: str,
+    target_team: str,
+    agent_name: str,
+) -> None:
+    teams = raw["teams"]
+    source_agents = teams[source_team].setdefault("agents", [])
+    target_agents = teams[target_team].setdefault("agents", [])
+    if any(
+        isinstance(entry, dict) and entry.get("name") == agent_name
+        for entry in target_agents
+    ):
+        raise ValueError(f"Agent already exists: {agent_name}")
+    moved = None
+    for index, entry in enumerate(source_agents):
+        if isinstance(entry, dict) and entry.get("name") == agent_name:
+            moved = dict(entry)
+            del source_agents[index]
+            break
+    if moved is None:
+        raise KeyError(agent_name)
+    target_agents.append(moved)
+
+
+def _registered_prompt_entries(
+    prompt_store: PromptStore,
+    team_id: str,
+    agent: AgentInstance,
+) -> tuple[tuple[str, str], ...]:
+    entries: list[tuple[str, str]] = []
+    for name in agent.prompts:
+        stored = prompt_store.read(team_id, agent.name, name)
+        entries.append((name, stored.document.digest))
+    return tuple(entries)
+
+
+def _prompt_namespace_exists(
+    prompt_store: PromptStore,
+    team_id: str,
+    agent_id: str,
+    sample_prompt_name: str,
+) -> bool:
+    return prompt_store.path(team_id, agent_id, sample_prompt_name).parent.exists()
+
+
+__all__ = [
+    "AgentInstanceCreate",
+    "InstanceMoveConflict",
+    "InstanceMutationResult",
+    "InstanceService",
+    "MoveInstanceResult",
+    "MovePreview",
+    "RemoveInstanceResult",
+    "create_instance",
+    "get_instance",
+    "list_instances",
+    "move_instance",
+    "preview_move",
+    "remove_instance",
+]
+

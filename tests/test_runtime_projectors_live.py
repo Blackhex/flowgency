@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from agency.configuration import ValidationFailed
-from agency.integrations import REGISTRY
-from agency.integrations.models import (
+from flowgency.configuration import ValidationFailed
+from flowgency.integrations import REGISTRY
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     ResolvedPermissionRule,
 )
-from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_OUTBOX
+from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_OUTBOX
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
     assert_live_success,

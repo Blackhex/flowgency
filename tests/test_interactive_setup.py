@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from agency.integrations import BaseIntegration, IntegrationError
-from agency.integrations.agency.copilot import CopilotIntegration
-from agency.integrations.models import InteractiveSetupRequest
-from agency.setup_assets import copilot_discovery_root
+from flowgency.integrations import BaseIntegration, IntegrationError
+from flowgency.integrations.flowgency.copilot import CopilotIntegration
+from flowgency.integrations.models import InteractiveSetupRequest
+from flowgency.setup_assets import copilot_discovery_root
 
 
 def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -> None:
@@ -35,10 +35,10 @@ def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -
 def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, object] = {}
 
-    from agency.integrations.interactive import format_interactive_command
+    from flowgency.integrations.interactive import format_interactive_command
 
     monkeypatch.setattr(
-        "agency.integrations.agency.copilot.spawn_interactive_terminal",
+        "flowgency.integrations.flowgency.copilot.spawn_interactive_terminal",
         lambda command, cwd: captured.update(command=tuple(command), cwd=cwd)
         or format_interactive_command(command),
     )
@@ -61,7 +61,7 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
         data_root=tmp_path,
-        config_path=tmp_path / "agency.yaml",
+        config_path=tmp_path / "flowgency.yaml",
         prompt="Use the agency-setup skill.",
     )
 
@@ -104,7 +104,7 @@ def test_copilot_builds_fallback_command_without_launch(
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
         data_root=tmp_path,
-        config_path=tmp_path / "agency.yaml",
+        config_path=tmp_path / "flowgency.yaml",
         prompt="Use the agency-setup skill.",
     )
 
@@ -121,7 +121,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import agency.integrations.agency.copilot as copilot_mod
+    import flowgency.integrations.flowgency.copilot as copilot_mod
 
     wrappers = tmp_path / "npm-bin"
     wrappers.mkdir()
@@ -134,7 +134,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
     powershell = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
     captured: dict[str, object] = {}
 
-    from agency.integrations.interactive import format_interactive_command
+    from flowgency.integrations.interactive import format_interactive_command
 
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(copilot_mod.sys, "platform", "win32")
@@ -149,7 +149,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
     )
     monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: str(cmd_wrapper))
     monkeypatch.setattr(
-        "agency.integrations.agency.copilot.spawn_interactive_terminal",
+        "flowgency.integrations.flowgency.copilot.spawn_interactive_terminal",
         lambda command, cwd: captured.update(command=tuple(command), cwd=cwd)
         or format_interactive_command(command),
     )
@@ -157,7 +157,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
         data_root=project_dir,
-        config_path=tmp_path / "agency.yaml",
+        config_path=tmp_path / "flowgency.yaml",
         prompt="Use the agency-setup skill.",
     )
 
@@ -203,7 +203,7 @@ def test_copilot_interactive_setup_unavailable_without_safe_windows_route(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    import agency.integrations.agency.copilot as copilot_mod
+    import flowgency.integrations.flowgency.copilot as copilot_mod
 
     wrappers = tmp_path / "npm-bin"
     wrappers.mkdir()
@@ -225,14 +225,14 @@ def test_copilot_interactive_setup_unavailable_without_safe_windows_route(
     )
     monkeypatch.setattr(CopilotIntegration, "_find_cmd", lambda self: str(cmd_wrapper))
     monkeypatch.setattr(
-        "agency.integrations.agency.copilot.spawn_interactive_terminal",
+        "flowgency.integrations.flowgency.copilot.spawn_interactive_terminal",
         lambda command, cwd: (_ for _ in ()).throw(AssertionError("spawn must not run")),
     )
 
     integration = CopilotIntegration()
     request = InteractiveSetupRequest(
         data_root=project_dir,
-        config_path=tmp_path / "agency.yaml",
+        config_path=tmp_path / "flowgency.yaml",
         prompt="Use the agency-setup skill.",
     )
 
@@ -305,7 +305,7 @@ def test_terminal_available_on_windows_does_not_require_cmd(monkeypatch: pytest.
     monkeypatch.setattr(platform, "system", lambda: "Windows")
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    from agency.integrations.interactive import terminal_available
+    from flowgency.integrations.interactive import terminal_available
 
     assert terminal_available() is True
 
@@ -314,7 +314,7 @@ def test_terminal_available_on_posix_positive(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(shutil, "which", lambda name: "x-terminal-emulator" if name == "x-terminal-emulator" else None)
 
-    from agency.integrations.interactive import terminal_available
+    from flowgency.integrations.interactive import terminal_available
 
     assert terminal_available() is True
 
@@ -334,7 +334,7 @@ def test_spawn_interactive_terminal_windows_launches_direct_process(
         lambda args, **kwargs: calls.append((list(args), kwargs)),
     )
 
-    from agency.integrations.interactive import spawn_interactive_terminal
+    from flowgency.integrations.interactive import spawn_interactive_terminal
 
     command = [
         r"C:\Program Files\GitHub Copilot\copilot.exe",
@@ -379,7 +379,7 @@ def test_spawn_interactive_terminal_hands_environment_to_the_process(
         lambda args, **kwargs: calls.append((list(args), kwargs)),
     )
 
-    from agency.integrations.interactive import spawn_interactive_terminal
+    from flowgency.integrations.interactive import spawn_interactive_terminal
 
     env = {"PATH": "C:\\Windows", "COPILOT_HOME": str(tmp_path / "home")}
     spawn_interactive_terminal(["copilot"], project_dir, env=env)
@@ -405,7 +405,7 @@ def test_spawn_interactive_terminal_posix_uses_separate_argv_for_xterm_like_term
         lambda args, **kwargs: calls.append((list(args), kwargs)),
     )
 
-    from agency.integrations.interactive import spawn_interactive_terminal
+    from flowgency.integrations.interactive import spawn_interactive_terminal
 
     command = ["copilot", "-i", "Set up Agency."]
     result = spawn_interactive_terminal(command, tmp_path)
@@ -440,7 +440,7 @@ def test_spawn_interactive_terminal_posix_uses_double_dash_for_gnome_terminal(
         lambda args, **kwargs: calls.append((list(args), kwargs)),
     )
 
-    from agency.integrations.interactive import spawn_interactive_terminal
+    from flowgency.integrations.interactive import spawn_interactive_terminal
 
     command = ["copilot", "-i", "Set up Agency."]
     result = spawn_interactive_terminal(command, tmp_path)
@@ -475,7 +475,7 @@ def test_spawn_interactive_terminal_posix_quotes_joined_command_for_string_e_ter
         lambda args, **kwargs: calls.append((list(args), kwargs)),
     )
 
-    from agency.integrations.interactive import spawn_interactive_terminal
+    from flowgency.integrations.interactive import spawn_interactive_terminal
 
     command = ["copilot", "-i", "Set up Agency."]
     result = spawn_interactive_terminal(command, tmp_path)
@@ -499,7 +499,7 @@ def test_spawn_interactive_terminal_raises_without_supported_terminal(
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    from agency.integrations.interactive import spawn_interactive_terminal
+    from flowgency.integrations.interactive import spawn_interactive_terminal
 
     with pytest.raises(IntegrationError, match="No supported interactive terminal is available"):
         spawn_interactive_terminal(["copilot"], tmp_path)
@@ -512,14 +512,14 @@ def test_spawn_interactive_terminal_raises_for_nonexistent_cwd(
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(shutil, "which", lambda name: "x-terminal-emulator" if name == "x-terminal-emulator" else None)
 
-    from agency.integrations.interactive import spawn_interactive_terminal
+    from flowgency.integrations.interactive import spawn_interactive_terminal
 
     with pytest.raises(FileNotFoundError):
         spawn_interactive_terminal(["copilot"], tmp_path / "missing")
 
 
 def test_copilot_rejects_missing_packaged_setup_skill(monkeypatch, tmp_path):
-    import agency.integrations.agency.copilot as copilot_mod
+    import flowgency.integrations.flowgency.copilot as copilot_mod
 
     missing = tmp_path / "missing-discovery-root"
     monkeypatch.setattr(copilot_mod, "copilot_discovery_root", lambda: missing)
@@ -579,7 +579,7 @@ def test_copilot_accepts_repository_link_to_canonical_skill(monkeypatch):
 
 
 def test_copilot_rejects_unreadable_packaged_setup_skill(monkeypatch, tmp_path):
-    import agency.integrations.agency.copilot as copilot_mod
+    import flowgency.integrations.flowgency.copilot as copilot_mod
 
     skill_file = (
         copilot_discovery_root()

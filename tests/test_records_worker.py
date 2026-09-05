@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agency.configuration.models import parse_config
-from agency.integrations import RunResult
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
-from agency.jobs.execution import MAX_SUMMARY_REASONS, execute_job
-from agency.records.validation import writable_agent_names
+from flowgency.configuration.models import parse_config
+from flowgency.integrations import RunResult
+from flowgency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
+from flowgency.jobs.execution import MAX_SUMMARY_REASONS, execute_job
+from flowgency.records.validation import writable_agent_names
 from test_job_execution import _authority as _job_authority, queued_job
 
 
@@ -115,7 +115,7 @@ def test_execute_job_files_valid_observation(tmp_path, monkeypatch):
     team_root = tmp_path / "team"
     obs = "---\ntitle: Test Finding\n---\n\nSomething notable occurred.\n"
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: _fake_context(team_root, _obs_integration("obs.md", obs)),
     )
 
@@ -137,7 +137,7 @@ def test_execute_job_rejects_invalid_observation_retains_artifacts(tmp_path, mon
     # Empty body is rejected by validate_outbox.
     obs = "---\ntitle: Bad Record\n---\n\n"
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: _fake_context(team_root, _obs_integration("bad.md", obs)),
     )
 
@@ -151,20 +151,20 @@ def test_execute_job_rejects_invalid_observation_retains_artifacts(tmp_path, mon
 
 def test_observation_survives_publication_failure(tmp_path, monkeypatch):
     """ingest_records runs before prepare_publication; a pub failure cannot lose records."""
-    from agency.memory.publication import MemoryPublicationError
+    from flowgency.memory.publication import MemoryPublicationError
 
     _, spec = queued_job(tmp_path)
     team_root = tmp_path / "team"
     obs = "---\ntitle: Durable\n---\n\nThis record must survive a publication failure.\n"
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: _fake_context(team_root, _obs_integration("obs.md", obs)),
     )
 
     def _fail(*args, **kwargs):
         raise MemoryPublicationError("simulated")
 
-    monkeypatch.setattr("agency.jobs.execution.prepare_publication", _fail)
+    monkeypatch.setattr("flowgency.jobs.execution.prepare_publication", _fail)
 
     result = execute_job(_job_authority(spec))
 
@@ -242,7 +242,7 @@ def _run_with_outbox(tmp_path, monkeypatch, populate):
     _, spec = queued_job(tmp_path)
     team_root = tmp_path / "team"
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: _fake_context(team_root, _outbox_integration(populate)),
     )
     return execute_job(_job_authority(spec)), team_root

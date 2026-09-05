@@ -7,7 +7,7 @@ import pytest
 
 
 def _clock():
-    return importlib.import_module("agency.clock")
+    return importlib.import_module("flowgency.clock")
 
 
 def test_real_clock_falls_back_to_datetime_now(monkeypatch):
@@ -55,7 +55,7 @@ def test_invalid_fixed_clock_fails_clearly(monkeypatch):
 def test_dashboard_time_helpers_use_fixed_clock(monkeypatch):
     clock = _clock()
     monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-16T12:00:00+00:00")
-    from agency.app import build_pipeline_stats, relative_time
+    from flowgency.app import build_pipeline_stats, relative_time
 
     assert relative_time(datetime(2026, 7, 16, 10, 0, 0)) == "2h ago"
     stats = build_pipeline_stats(

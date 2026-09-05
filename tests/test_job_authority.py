@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agency.jobs.authority import JobAuthorityError, JobStore
-from agency.jobs.models import (
+from flowgency.jobs.authority import JobAuthorityError, JobStore
+from flowgency.jobs.models import (
     BlueprintRef,
     JobRecord,
     JobSpec,

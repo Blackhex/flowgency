@@ -1,5 +1,5 @@
 {
-  "name": "christag-agency-ui-gate",
+  "name": "flowgency-ui-gate",
   "private": true,
   "scripts": {
     "test:ui": "playwright test",

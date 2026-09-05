@@ -5,9 +5,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agency.blueprints.cache import CacheRef, _entry_path, instance_digest
-from agency.configuration.models import AgentIdentity
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from flowgency.blueprints.cache import CacheRef, _entry_path, instance_digest
+from flowgency.configuration.models import AgentIdentity
+from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
 def policy(*rules, timeout=60, mode="restricted"):
@@ -74,9 +74,9 @@ def test_digest_is_stable_across_processes():
 
     code = "\n".join([
         "from pathlib import Path",
-        "from agency.blueprints.cache import instance_digest",
-        "from agency.configuration.models import AgentIdentity",
-        "from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule",
+        "from flowgency.blueprints.cache import instance_digest",
+        "from flowgency.configuration.models import AgentIdentity",
+        "from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule",
         "rules = (ResolvedPermissionRule(path=Path('/ws').resolve(), tools=('read',)),)",
         "p = EffectiveRuntimePolicy(timeout=60, mode='restricted', rules=rules)",
         "identity = AgentIdentity(display_name='Duncan', title='Test Engineer')",

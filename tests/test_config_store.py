@@ -18,7 +18,7 @@ def _write_yaml(path: Path, raw: dict) -> Path:
 
 
 def _hold_config_lock(lock_path: str, acquired: Event, release: Event) -> None:
-    from agency.fs.locks import exclusive_lock
+    from flowgency.fs.locks import exclusive_lock
 
     with exclusive_lock(Path(lock_path), wait=True):
         acquired.set()
@@ -28,7 +28,7 @@ def _hold_config_lock(lock_path: str, acquired: Event, release: Event) -> None:
 def _patch_with_external_write(
     path_str: str, revision: str, queue: Queue
 ) -> None:
-    from agency.configuration.store import ConfigConflictError, ConfigStore
+    from flowgency.configuration.store import ConfigConflictError, ConfigStore
 
     path = Path(path_str)
     store = ConfigStore(path)
@@ -52,7 +52,7 @@ def _patch_with_external_write(
 def test_load_config_snapshot_uses_exact_file_bytes_for_revision(
     raw_config, config_paths
 ):
-    from agency.configuration.store import config_revision, load_config_snapshot
+    from flowgency.configuration.store import config_revision, load_config_snapshot
 
     path = _write_yaml(config_paths["config_path"], raw_config)
 
@@ -65,7 +65,7 @@ def test_load_config_snapshot_uses_exact_file_bytes_for_revision(
 
 
 def test_config_store_round_trips_canonical_config(tmp_path, raw_config):
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration.store import ConfigStore
 
     path = tmp_path / "config.yaml"
     snapshot = ConfigStore(path).create(raw_config)
@@ -75,7 +75,7 @@ def test_config_store_round_trips_canonical_config(tmp_path, raw_config):
 
 
 def test_create_requires_absent_file(raw_config, config_paths):
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration.store import ConfigStore
 
     store = ConfigStore(config_paths["config_path"])
     created = store.create(raw_config)
@@ -91,7 +91,7 @@ def test_create_requires_absent_file(raw_config, config_paths):
 def test_patch_rejects_stale_revision_and_preserves_newer_config(
     raw_config, config_paths
 ):
-    from agency.configuration.store import ConfigConflictError, ConfigStore
+    from flowgency.configuration.store import ConfigConflictError, ConfigStore
 
     path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
@@ -112,7 +112,7 @@ def test_patch_rejects_stale_revision_and_preserves_newer_config(
 
 
 def test_patch_writes_utf8_yaml(raw_config, config_paths):
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration.store import ConfigStore
 
     path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
@@ -136,8 +136,8 @@ def test_patch_writes_utf8_yaml(raw_config, config_paths):
 
 
 def test_patch_rejects_unknown_root_key(raw_config, config_paths):
-    from agency.configuration import ValidationFailed
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration import ValidationFailed
+    from flowgency.configuration.store import ConfigStore
 
     path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
@@ -155,8 +155,8 @@ def test_patch_rejects_unknown_root_key(raw_config, config_paths):
 
 
 def test_patch_reports_lock_contention(raw_config, config_paths):
-    from agency.configuration.store import ConfigStore
-    from agency.fs.locks import ResourceBusyError
+    from flowgency.configuration.store import ConfigStore
+    from flowgency.fs.locks import ResourceBusyError
 
     path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
@@ -181,7 +181,7 @@ def test_patch_reports_lock_contention(raw_config, config_paths):
 def test_patch_detects_external_uncoordinated_edit_before_replace(
     raw_config, config_paths
 ):
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration.store import ConfigStore
 
     path = _write_yaml(config_paths["config_path"], raw_config)
     snapshot = ConfigStore(path).load()
@@ -201,8 +201,8 @@ def test_patch_detects_external_uncoordinated_edit_before_replace(
 def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
     raw_config, config_paths
 ):
-    from agency.configuration import ValidationFailed
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration import ValidationFailed
+    from flowgency.configuration.store import ConfigStore
 
     path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
@@ -225,7 +225,7 @@ def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
 def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
     raw_config, config_paths
 ):
-    from agency.configuration.store import ConfigConflictError, ConfigStore
+    from flowgency.configuration.store import ConfigConflictError, ConfigStore
 
     path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
@@ -251,7 +251,7 @@ def test_late_conflict_does_not_initialize_candidate_team_storage(
     monkeypatch,
     operation,
 ):
-    from agency.configuration.store import ConfigConflictError, ConfigStore
+    from flowgency.configuration.store import ConfigConflictError, ConfigStore
 
     candidate_team = tmp_path / "candidate-team"
     raw = deepcopy(raw_config)
@@ -288,7 +288,7 @@ def test_late_conflict_does_not_initialize_candidate_team_storage(
 def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
     raw_config, config_paths
 ):
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration.store import ConfigStore
 
     path = _write_yaml(config_paths["config_path"], raw_config)
     store = ConfigStore(path)
@@ -314,9 +314,9 @@ def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
 
 
 def test_create_validates_before_initializing_storage(raw_config, config_paths):
-    from agency.configuration import ValidationFailed
-    from agency.configuration.paths import job_store_root
-    from agency.configuration.store import ConfigStore
+    from flowgency.configuration import ValidationFailed
+    from flowgency.configuration.paths import job_store_root
+    from flowgency.configuration.store import ConfigStore
 
     raw = deepcopy(raw_config)
     raw["teams"]["newsletter"]["workspace_path"] = str(

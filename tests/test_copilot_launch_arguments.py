@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from agency.integrations.agency.copilot import CopilotIntegration
-from agency.integrations.models import (
+from flowgency.integrations.flowgency.copilot import CopilotIntegration
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ResolvedPermissionRule,
@@ -28,7 +28,7 @@ class _FakeCompleted:
 
 def _launch(policy, tmp_path, monkeypatch, *, enforce_validation=True) -> list[str]:
     """Run Copilot against `policy` and return the argv it would have used."""
-    import agency.integrations.agency.copilot as copilot_mod
+    import flowgency.integrations.flowgency.copilot as copilot_mod
 
     prompt = tmp_path / "p.prompt"
     prompt.write_text("do the thing", encoding="utf-8")

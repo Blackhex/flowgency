@@ -1,0 +1,85 @@
+"""OpenAI Codex CLI integration."""
+
+import subprocess
+import time
+from pathlib import Path
+
+from flowgency.integrations import (
+    BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
+    read_sidecar, write_sidecar,
+)
+from flowgency.integrations.models import IntegrationRunRequest, RuntimeCapabilities
+
+
+class CodexIntegration(BaseIntegration):
+    name = "codex"
+    display_name = "OpenAI Codex"
+    cli_command = "codex"
+    supports_execution = True
+    supports_ai_backend = True
+    detect_priority = 10
+    projector = BaseIntegration._default_projector("AGENTS.md", discovers_instructions=True)
+    declared_runtime_capabilities = RuntimeCapabilities(
+        permission_modes=frozenset({"unrestricted"}),
+    )
+
+    def identity_filename(self) -> str:
+        return "AGENTS.md"
+
+    def detect(self, agent_dir: Path) -> bool:
+        return (agent_dir / "AGENTS.md").is_file()
+
+    def parse_identity(self, agent_dir: Path) -> AgentIdentity | None:
+        return self._parse_sidecar_identity(agent_dir, agent_dir / "AGENTS.md")
+
+    def write_identity(self, agent_dir: Path, identity: AgentIdentity) -> None:
+        self._write_sidecar_identity(agent_dir, agent_dir / "AGENTS.md", identity)
+
+    def run(self, request: IntegrationRunRequest) -> RunResult:
+        self.require_valid_run(request)
+        prompt_text = request.task_file.read_text()
+        cmd = self.require_executable()
+        start = time.monotonic()
+        # The CLI's own permission model is the only enforcement this
+        # integration has. Switching it off for an agent the operator withheld
+        # write from would hand back exactly what the policy took away.
+        cmd_args = [cmd, "exec"]
+        if request.runtime_policy.grants_write:
+            cmd_args.append("--yolo")
+        cmd_args.append(prompt_text)
+        try:
+            result = subprocess.run(
+                cmd_args,
+                capture_output=True, text=True, timeout=request.timeout,
+                cwd=str(request.launch_dir),
+            )
+            duration = time.monotonic() - start
+            return RunResult(
+                exit_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                duration_seconds=duration,
+            )
+        except subprocess.TimeoutExpired:
+            duration = time.monotonic() - start
+            return RunResult(exit_code=124, stdout="", stderr="Timed out", duration_seconds=duration)
+        except FileNotFoundError:
+            raise IntegrationError(f"Codex CLI not found. Looked for: {cmd}")
+
+    def prompt(self, text: str, timeout: int = 60) -> str:
+        cmd = self.require_executable()
+        try:
+            result = subprocess.run(
+                [cmd, "exec", "--full-auto", text],
+                capture_output=True, text=True, timeout=timeout,
+            )
+            if result.returncode != 0:
+                raise IntegrationError(f"codex exited with code {result.returncode}: {result.stderr}")
+            return result.stdout
+        except FileNotFoundError:
+            raise IntegrationError(f"Codex CLI not found. Looked for: {cmd}")
+        except subprocess.TimeoutExpired:
+            raise IntegrationError(f"codex timed out after {timeout}s")
+
+
+_register(CodexIntegration())

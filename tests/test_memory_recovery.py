@@ -7,13 +7,13 @@ from dataclasses import replace
 import pytest
 import yaml
 
-from agency.configuration.models import MemorySelector
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import read_job, write_job
-from agency.memory import MemoryStore, resolve_memory_selector
-from agency.memory.publication import apply_publication, prepare_publication
-from agency.memory.recovery import recover_publications
+from flowgency.configuration.models import MemorySelector
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import read_job, write_job
+from flowgency.memory import MemoryStore, resolve_memory_selector
+from flowgency.memory.publication import apply_publication, prepare_publication
+from flowgency.memory.recovery import recover_publications
 
 
 class RecoveryFixture:
@@ -354,7 +354,7 @@ def test_recovery_holds_canonical_memory_lock_before_reading_journal_state(
 ):
     recovery_fixture.crash_at("prepared")
     lock_path = recovery_fixture.store._lock_path(recovery_fixture.resolved)
-    from agency.fs.locks import exclusive_lock
+    from flowgency.fs.locks import exclusive_lock
     import threading
 
     finished = threading.Event()
@@ -385,7 +385,7 @@ def test_recovery_rereads_journal_after_waiting_for_live_publisher(
     )
     identity_read = __import__("threading").Event()
     original_read_identity = __import__(
-        "agency.memory.recovery",
+        "flowgency.memory.recovery",
         fromlist=["_read_identity"],
     )._read_identity
 
@@ -395,10 +395,10 @@ def test_recovery_rereads_journal_after_waiting_for_live_publisher(
         return result
 
     monkeypatch.setattr(
-        "agency.memory.recovery._read_identity",
+        "flowgency.memory.recovery._read_identity",
         observed_identity,
     )
-    from agency.fs.locks import exclusive_lock
+    from flowgency.fs.locks import exclusive_lock
     import threading
 
     outcome = {}
@@ -452,8 +452,8 @@ def test_direct_save_only_recovery_needs_no_job_store(tmp_path):
     )
     seeded = store.ensure(resolved)
     current = store.try_save(resolved, seeded.revision, {"memory.md": b"old\n"})
-    from agency.memory.publication import _prepare_direct_transaction, _run_transaction_locked
-    from agency.memory.store import _memory_lock
+    from flowgency.memory.publication import _prepare_direct_transaction, _run_transaction_locked
+    from flowgency.memory.store import _memory_lock
 
     operation = _prepare_direct_transaction(
         resolved,
@@ -542,7 +542,7 @@ def test_invalid_journal_schema_is_a_persistent_barrier(
 
 
 def test_job_store_owner_uses_team_id_field():
-    from agency.memory.recovery import _JobStoreOwner
+    from flowgency.memory.recovery import _JobStoreOwner
 
     owner = _JobStoreOwner(team_id="news", path=Path("/tmp"), team_root=None)
 
@@ -551,7 +551,7 @@ def test_job_store_owner_uses_team_id_field():
 
 
 def test_recovery_operation_uses_owner_team_id():
-    from agency.memory.recovery import _RecoveryOperation
+    from flowgency.memory.recovery import _RecoveryOperation
 
     assert "owner_team_id" in {f.name for f in __import__("dataclasses").fields(_RecoveryOperation)}
     assert "owner_group_id" not in {f.name for f in __import__("dataclasses").fields(_RecoveryOperation)}
@@ -587,10 +587,10 @@ def test_direct_save_crash_recovery_subprocess_keeps_complete_old_or_new(
 from pathlib import Path
 import os
 import sys
-from agency.configuration.models import MemorySelector
-from agency.memory import MemoryStore, resolve_memory_selector
-from agency.memory.publication import _prepare_direct_transaction, _run_transaction_locked
-from agency.memory.store import _memory_lock
+from flowgency.configuration.models import MemorySelector
+from flowgency.memory import MemoryStore, resolve_memory_selector
+from flowgency.memory.publication import _prepare_direct_transaction, _run_transaction_locked
+from flowgency.memory.store import _memory_lock
 
 root = Path(sys.argv[1])
 phase = sys.argv[2]
@@ -617,7 +617,7 @@ os._exit(0)
     recover_code = """
 from pathlib import Path
 import sys
-from agency.memory.recovery import recover_publications
+from flowgency.memory.recovery import recover_publications
 
 recover_publications(Path(sys.argv[1]), {})
 """

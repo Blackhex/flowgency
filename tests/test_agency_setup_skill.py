@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agency.setup_assets import copilot_discovery_root
+from flowgency.setup_assets import copilot_discovery_root
 
 
 REPO_ROOT = Path(__file__).parents[1]

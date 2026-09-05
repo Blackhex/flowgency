@@ -4,8 +4,8 @@ import unicodedata
 
 import pytest
 
-from agency.configuration.models import MemoryChannel, MemorySelector
-from agency.memory import resolve_memory_selector, select_effective_memory
+from flowgency.configuration.models import MemoryChannel, MemorySelector
+from flowgency.memory import resolve_memory_selector, select_effective_memory
 
 
 def test_routine_selector_is_stable_across_runs(tmp_path):
@@ -151,7 +151,7 @@ def test_case_collision_key_is_unicode_normalized_and_casefolded(tmp_path):
         channels={},
         store_root=tmp_path,
     )
-    from agency.memory import MemoryStore
+    from flowgency.memory import MemoryStore
 
     store = MemoryStore(tmp_path)
     seeded = store.ensure(resolved)
@@ -232,7 +232,7 @@ def test_group_memory_scope_is_rejected():
 
 
 def test_canonical_json_with_group_key_is_rejected(tmp_path):
-    from agency.memory.selectors import resolved_memory_from_canonical
+    from flowgency.memory.selectors import resolved_memory_from_canonical
     canonical = '{"group":"newsletter","scope":"team","version":1}'
     with pytest.raises(ValueError, match="canonical criteria keys are invalid"):
         resolved_memory_from_canonical(

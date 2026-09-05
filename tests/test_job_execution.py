@@ -11,23 +11,23 @@ import subprocess
 
 import yaml
 
-from agency.integrations import FileChange, RunResult
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedPermissionRule
-from agency.blueprints.projectors import get_projector
-from agency.jobs.authority import JobStore
-from agency.jobs.artifacts import JobArtifact
-from agency.jobs.execution import execute_job
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
-from agency.jobs.store import cancel_job
-from agency.jobs.reconciliation import worker_alive
-from agency.jobs.store import read_job, write_job
-from agency.jobs.worker import main as worker_main
-from agency.memory import MemoryStore
-from agency.memory.selectors import resolve_memory_selector
-from agency.configuration.models import MemorySelector
-from agency.blueprints.cache import active_pins, pin_artifact
-from agency.fs.locks import exclusive_lock
-from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
+from flowgency.integrations import FileChange, RunResult
+from flowgency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedPermissionRule
+from flowgency.blueprints.projectors import get_projector
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.artifacts import JobArtifact
+from flowgency.jobs.execution import execute_job
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
+from flowgency.jobs.store import cancel_job
+from flowgency.jobs.reconciliation import worker_alive
+from flowgency.jobs.store import read_job, write_job
+from flowgency.jobs.worker import main as worker_main
+from flowgency.memory import MemoryStore
+from flowgency.memory.selectors import resolve_memory_selector
+from flowgency.configuration.models import MemorySelector
+from flowgency.blueprints.cache import active_pins, pin_artifact
+from flowgency.fs.locks import exclusive_lock
+from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 
 
 def _authority(spec: JobSpec):
@@ -252,7 +252,7 @@ def test_execute_job_waits_for_memory_before_starting_run(tmp_path, monkeypatch)
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     with exclusive_lock(held_lock, wait=True):
@@ -299,7 +299,7 @@ def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_pat
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     with exclusive_lock(held_lock, wait=True):
@@ -322,7 +322,7 @@ def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_pat
 
 def test_job_execution_has_no_selector_lock_authority():
     import inspect
-    import agency.jobs.execution as execution
+    import flowgency.jobs.execution as execution
 
     source = inspect.getsource(execution)
     assert ".selectors" not in source
@@ -352,7 +352,7 @@ def test_execute_job_failed_run_keeps_canonical_memory_and_retains_stage(tmp_pat
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     result = execute_job(fixture.authority)
@@ -374,7 +374,7 @@ def test_execute_job_releases_cache_pin_after_terminal_state(tmp_path, monkeypat
     pin_artifact(fixture.spec.blueprint.cache_root, artifact.ref, fixture.spec.job_id)
 
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=fixture.team_root,
             integration=SimpleNamespace(run=lambda request: RunResult(0, "done", "", 0.1)),
@@ -432,14 +432,14 @@ def test_execute_job_persists_execution_evidence_when_publication_failure_pre_fa
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: context,
     )
 
-    from agency.memory.publication import MemoryPublicationError
+    from flowgency.memory.publication import MemoryPublicationError
 
     def fail_after_task9_terminalization(prepared, **kwargs):
-        from agency.jobs.store import transition_job
+        from flowgency.jobs.store import transition_job
 
         transition_job(
             fixture.job_path,
@@ -451,7 +451,7 @@ def test_execute_job_persists_execution_evidence_when_publication_failure_pre_fa
         raise MemoryPublicationError("simulated")
 
     monkeypatch.setattr(
-        "agency.jobs.execution.apply_publication",
+        "flowgency.jobs.execution.apply_publication",
         fail_after_task9_terminalization,
     )
 
@@ -515,7 +515,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     result = execute_job(authority)
@@ -568,7 +568,7 @@ def test_execute_job_v5_spec_carries_no_skill_to_integration(tmp_path, monkeypat
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     result = execute_job(_authority(spec))
@@ -618,7 +618,7 @@ def test_execute_job_schema_v4_runs_without_selected_skill(tmp_path, monkeypatch
     )
     context.workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     result = execute_job(_authority(spec))
@@ -677,7 +677,7 @@ def test_worker_projects_private_prompt_snapshot_without_rereading_source(
         sandbox_root=None,
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: context,
     )
 
@@ -735,7 +735,7 @@ def test_worker_private_prompt_overlay_does_not_mutate_shared_cache_bytes(
         sandbox_root=None,
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: context,
     )
 
@@ -784,7 +784,7 @@ def test_worker_rejects_private_overlay_collision_with_shared_runtime(
         sandbox_root=None,
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: context,
     )
 
@@ -800,7 +800,7 @@ def test_execute_job_does_not_create_empty_error_log(tmp_path, monkeypatch):
     workspace_root = tmp_path / "team"
     workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=workspace_root,
             integration=SimpleNamespace(
@@ -832,7 +832,7 @@ def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     result = execute_job(_authority(spec))
@@ -858,7 +858,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=tmp_path / "team",
             timeout=30,
@@ -882,7 +882,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
 def test_execute_job_treats_timeout_exit_code_as_failed(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=tmp_path / "team",
             timeout=30,
@@ -911,7 +911,7 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
         duration_seconds=0.2,
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=tmp_path / "team",
             timeout=30,
@@ -937,9 +937,9 @@ def test_execute_job_projection_failure_before_run_still_completes(tmp_path, mon
         if calls["count"] == 1:
             raise OSError("projection write failed")
 
-    monkeypatch.setattr("agency.jobs.execution.project_decision", flaky_project)
+    monkeypatch.setattr("flowgency.jobs.execution.project_decision", flaky_project)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=tmp_path / "team",
             timeout=30,
@@ -969,9 +969,9 @@ def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeyp
         if calls["count"] == 1:
             raise OSError("projection read failed")
 
-    monkeypatch.setattr("agency.jobs.execution.project_decision", flaky_project)
+    monkeypatch.setattr("flowgency.jobs.execution.project_decision", flaky_project)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=tmp_path / "team",
             timeout=30,
@@ -1022,7 +1022,7 @@ def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkey
     )
     context.workspace_root.mkdir(parents=True)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     result = execute_job(_authority(spec))
@@ -1043,11 +1043,11 @@ def test_worker_returns_status_as_exit_code(tmp_path, monkeypatch):
         seen.append(path)
         return SimpleNamespace(status="complete")
 
-    monkeypatch.setattr("agency.jobs.worker.execute_job", fake_execute)
+    monkeypatch.setattr("flowgency.jobs.worker.execute_job", fake_execute)
     assert worker_main(authority.worker_args()) == 0
 
     monkeypatch.setattr(
-        "agency.jobs.worker.execute_job",
+        "flowgency.jobs.worker.execute_job",
         lambda path: SimpleNamespace(status="failed"),
     )
     assert worker_main(authority.worker_args()) == 1
@@ -1068,7 +1068,7 @@ def test_execute_job_persists_session_id_from_successful_run(tmp_path, monkeypat
     workspace_root = tmp_path / "team"
     workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=workspace_root,
             integration=Integration(),
@@ -1103,7 +1103,7 @@ def test_execute_job_persists_session_id_from_failed_run(tmp_path, monkeypatch):
         runtime_policy=EffectiveRuntimePolicy(timeout=30),
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context", lambda ignored: context
+        "flowgency.jobs.execution.resolve_job_context", lambda ignored: context
     )
 
     execute_job(fixture.authority)
@@ -1142,7 +1142,7 @@ def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkey
     workspace_root = tmp_path / "team"
     workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=workspace_root,
             integration=Integration(),
@@ -1154,7 +1154,7 @@ def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkey
     )
     # queued_job uses a schema_version 4 config; stub writable-agents resolution
     # so the successful-run path completes without needing a schema v5 config.
-    monkeypatch.setattr("agency.jobs.execution._writable_agents", lambda spec: frozenset())
+    monkeypatch.setattr("flowgency.jobs.execution._writable_agents", lambda spec: frozenset())
 
     result = execute_job(_authority(spec))
 
@@ -1176,7 +1176,7 @@ def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, m
     Previous tests substitute fakes that never call require_valid_run; this
     test drives the script integration (which calls self.require_valid_run in
     its run()) to prove generated zone rules do not trigger rejection."""
-    from agency.integrations.agency.script import ScriptIntegration
+    from flowgency.integrations.flowgency.script import ScriptIntegration
 
     path, spec = queued_job(tmp_path, decision_context={"decision_path": "d.md", "proposal_path": "p.md"})
 
@@ -1203,7 +1203,7 @@ def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, m
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=workspace_root,
             integration=integration,
@@ -1213,7 +1213,7 @@ def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, m
             runtime_policy=authored_policy,
         ),
     )
-    monkeypatch.setattr("agency.jobs.execution._writable_agents", lambda spec: frozenset())
+    monkeypatch.setattr("flowgency.jobs.execution._writable_agents", lambda spec: frozenset())
 
     result = execute_job(_authority(spec))
 

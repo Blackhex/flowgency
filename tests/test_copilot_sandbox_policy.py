@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.integrations.agency.copilot_sandbox import build_sandbox_settings
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from flowgency.integrations.flowgency.copilot_sandbox import build_sandbox_settings
+from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
 def rule(path, tools, generated=False):

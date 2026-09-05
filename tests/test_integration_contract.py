@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from agency.configuration import ValidationFailed
-from agency.configuration.issues import ValidationIssue
-from agency.configuration.effective import resolve_effective_policy
-from agency.integrations import (
+from flowgency.configuration import ValidationFailed
+from flowgency.configuration.issues import ValidationIssue
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.integrations import (
     REGISTRY,
     AgentIdentity,
     BaseIntegration,
@@ -16,7 +16,7 @@ from agency.integrations import (
     IntegrationError,
     RunResult
 )
-from agency.integrations.models import (
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ProjectorCapabilities,
@@ -241,7 +241,7 @@ def test_public_executable_resolver_returns_launchable_path(tmp_path, monkeypatc
         cli_command = "probe"
 
     monkeypatch.setattr(
-        "agency.integrations.shutil.which",
+        "flowgency.integrations.shutil.which",
         lambda command: str(executable) if command == "probe" else None
     )
 
@@ -254,7 +254,7 @@ def test_public_executable_resolver_returns_none_when_missing(monkeypatch):
         display_name = "Probe"
         cli_command = "probe"
 
-    monkeypatch.setattr("agency.integrations.shutil.which", lambda command: None)
+    monkeypatch.setattr("flowgency.integrations.shutil.which", lambda command: None)
 
     assert ProbeIntegration().resolve_executable() is None
     with pytest.raises(IntegrationError, match="Probe CLI is unavailable"):
@@ -464,7 +464,7 @@ def test_filechange_fields():
 
 
 def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
-    from agency.configuration import ValidationFailed, parse_config
+    from flowgency.configuration import ValidationFailed, parse_config
 
     team = raw_config["teams"]["newsletter"]
     team["runtime"] = {

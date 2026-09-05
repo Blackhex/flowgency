@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 import pytest
 
-from agency.integrations import RunResult
-from agency.integrations.models import EffectiveRuntimePolicy
-from agency.jobs.execution import execute_job
-from agency.records.outbox import (
+from flowgency.integrations import RunResult
+from flowgency.integrations.models import EffectiveRuntimePolicy
+from flowgency.jobs.execution import execute_job
+from flowgency.records.outbox import (
     MAX_MEMORY_ENTRIES,
     MAX_MEMORY_FILE_BYTES,
     MAX_MEMORY_FILES,
@@ -227,7 +227,7 @@ def _run_memory_job(tmp_path, monkeypatch, edit):
     fixture = MemoryJobFixture(tmp_path)
     seen: dict = {"revision_before": fixture.store.read(fixture.resolved).revision}
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: SimpleNamespace(
             workspace_root=fixture.team_root,
             integration=_memory_editing_integration(seen, edit),

@@ -1,8 +1,8 @@
 import pytest
 
-from agency.jobs.authority import JobStore
-from agency.jobs.artifacts import JobArtifact, retain_failed_stage, retain_rejected_records
-from agency.records.validation import MAX_OUTBOX_ENTRIES_PER_KIND, MAX_RECORD_BYTES
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.artifacts import JobArtifact, retain_failed_stage, retain_rejected_records
+from flowgency.records.validation import MAX_OUTBOX_ENTRIES_PER_KIND, MAX_RECORD_BYTES
 
 
 def test_retain_rejected_records_labels_both_directories_without_collision(tmp_path):
@@ -91,7 +91,7 @@ def test_retain_failed_stage_rejects_symlinked_job_store(tmp_path):
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
-        "agency.jobs.artifacts._is_symlink_or_reparse",
+        "flowgency.jobs.artifacts._is_symlink_or_reparse",
         lambda path: path == job_store,
     )
     try:

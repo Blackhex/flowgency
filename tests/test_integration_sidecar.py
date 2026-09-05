@@ -1,16 +1,16 @@
 import platform
 
 import pytest
-from agency.configuration import ValidationFailed
-from agency.integrations import AgentIdentity, detect_integration
-from agency.integrations.agency.codex import CodexIntegration
-from agency.integrations.agency.gemini import GeminiIntegration
-from agency.integrations.agency.aider import AiderIntegration
-from agency.integrations.agency.goose import GooseIntegration
-from agency.integrations.agency.opencode import OpenCodeIntegration
-from agency.integrations.agency.pi import PiIntegration
-from agency.integrations.agency.copilot import CopilotIntegration
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedPermissionRule
+from flowgency.configuration import ValidationFailed
+from flowgency.integrations import AgentIdentity, detect_integration
+from flowgency.integrations.flowgency.codex import CodexIntegration
+from flowgency.integrations.flowgency.gemini import GeminiIntegration
+from flowgency.integrations.flowgency.aider import AiderIntegration
+from flowgency.integrations.flowgency.goose import GooseIntegration
+from flowgency.integrations.flowgency.opencode import OpenCodeIntegration
+from flowgency.integrations.flowgency.pi import PiIntegration
+from flowgency.integrations.flowgency.copilot import CopilotIntegration
+from flowgency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest, ResolvedPermissionRule
 
 
 class TestCodex:
@@ -430,7 +430,7 @@ class TestCopilot:
         assert integration.parse_identity(tmp_agent_dir) is None
 
     def test_run_builds_command(self, integration, tmp_agent_dir, monkeypatch):
-        import agency.integrations.agency.copilot as mod
+        import flowgency.integrations.flowgency.copilot as mod
         captured = {}
 
         class FakeCompleted:
@@ -489,7 +489,7 @@ class TestCopilot:
         assert excinfo.value is failure
 
     def test_prompt_returns_stdout(self, integration, monkeypatch):
-        import agency.integrations.agency.copilot as mod
+        import flowgency.integrations.flowgency.copilot as mod
 
         class FakeCompleted:
             returncode = 0
@@ -511,7 +511,7 @@ class TestCopilot:
         assert integration.supports_sandbox is True
 
     def test_copilot_run_unset_sandbox_uses_allow_all_paths(self, tmp_agent_dir, monkeypatch):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("do the thing")
@@ -559,7 +559,7 @@ class TestCopilot:
         assert captured["cwd"] == str(request.launch_dir)
 
     def test_copilot_run_none_and_empty_spec_equivalent(self, tmp_agent_dir, monkeypatch):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("do the thing")
@@ -608,7 +608,7 @@ class TestCopilot:
         assert cwd == str(request.launch_dir)
 
     def test_copilot_run_roots_only_blanket_tools(self, tmp_agent_dir, monkeypatch):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("do the thing")
@@ -665,7 +665,7 @@ class TestCopilot:
         tmp_agent_dir,
         monkeypatch
     ):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("Immutable task text.\n", encoding="utf-8")
@@ -717,7 +717,7 @@ class TestCopilot:
         tmp_agent_dir,
         monkeypatch
     ):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("Immutable task text.\n", encoding="utf-8")
@@ -758,7 +758,7 @@ class TestCopilot:
         assert prompt_text == "Immutable task text.\n"
 
     def test_copilot_run_roots_and_tools_least_privilege(self, tmp_agent_dir, monkeypatch):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("do the thing")
@@ -824,7 +824,7 @@ class TestCopilot:
         assert "creationflags" in captured["kwargs"]
 
     def test_copilot_resolve_real_cmd_skips_layered_windows_wrappers(self, monkeypatch):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         wrapper = r"C:\wrap\copilot.BAT"
         npm_wrapper = r"C:\npm\copilot.CMD"
@@ -845,7 +845,7 @@ class TestCopilot:
         assert calls == ["copilot.exe"]
 
     def test_copilot_resolve_real_cmd_noop_off_windows(self, monkeypatch):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         monkeypatch.setattr(copilot_mod.sys, "platform", "linux")
         assert CopilotIntegration._resolve_real_cmd("copilot") == "copilot"
@@ -855,7 +855,7 @@ class TestCopilot:
         monkeypatch,
         tmp_path
     ):
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         wrapper = tmp_path / "copilot.cmd"
         executable = tmp_path / "copilot.exe"
@@ -878,7 +878,7 @@ class TestCopilot:
     def test_parse_jsonl_extracts_native_edits(self):
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         root = Path("C:/repo") if False else Path("/repo")
         lines = [
             {"type": "tool.execution_start",
@@ -910,7 +910,7 @@ class TestCopilot:
     def test_parse_jsonl_records_failed_write_attempt_without_changed_file(self):
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
         root = Path("/repo")
         lines = [
@@ -937,7 +937,7 @@ class TestCopilot:
     def test_parse_jsonl_skips_readonly_view(self):
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         lines = [
             {"type": "tool.execution_start",
              "data": {"toolCallId": "v1", "toolName": "view",
@@ -955,7 +955,7 @@ class TestCopilot:
 
     def test_parse_jsonl_malformed_falls_back(self):
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         raw = "this is not json\nok"
         text, changes = CopilotIntegration._parse_jsonl_output(raw, Path("/repo"))
         assert text == raw
@@ -963,7 +963,7 @@ class TestCopilot:
 
     def test_run_emits_json_and_populates_changed_files(self, integration, tmp_agent_dir, monkeypatch):
         import json
-        import agency.integrations.agency.copilot as mod
+        import flowgency.integrations.flowgency.copilot as mod
 
         jsonl = "\n".join(json.dumps(l) for l in [
             {"type": "tool.execution_start",
@@ -1014,7 +1014,7 @@ class TestCopilot:
 
     def test_run_timeout_preserves_partial_output(self, integration, tmp_agent_dir, monkeypatch):
         import json
-        import agency.integrations.agency.copilot as mod
+        import flowgency.integrations.flowgency.copilot as mod
 
         jsonl = "\n".join(
             json.dumps(line)
@@ -1069,7 +1069,7 @@ class TestCopilot:
         """M2: result event with filesModified falls back when no per-tool edits parsed."""
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         root = Path("/repo")
         lines = [
             {"type": "result",
@@ -1085,7 +1085,7 @@ class TestCopilot:
 
     def test_usage_summary_reads_session_shutdown_metrics(self, tmp_path, monkeypatch):
         import json
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
         session_id = "12345678-abcd"
         state_dir = tmp_path / "session-state" / session_id
@@ -1133,7 +1133,7 @@ class TestCopilot:
         self, integration, tmp_agent_dir, tmp_path, monkeypatch
     ):
         import json
-        import agency.integrations.agency.copilot as mod
+        import flowgency.integrations.flowgency.copilot as mod
 
         session_id = "usage-session"
         state_dir = tmp_path / "session-state" / session_id
@@ -1188,7 +1188,7 @@ class TestCopilot:
         assert "Tokens     \u2191 60" in result.stderr
         # The executable resolves per machine, so build the expectation the same
         # way rather than pinning this developer's install path.
-        from agency.integrations import format_command_with_environment
+        from flowgency.integrations import format_command_with_environment
 
         expected = format_command_with_environment(
             [integration.require_executable(), "--resume=usage-session"], {}
@@ -1199,7 +1199,7 @@ class TestCopilot:
         """M3: create then edit on same path yields single FileChange with status=added and summed lines."""
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         root = Path("/repo")
         lines = [
             {"type": "tool.execution_start",
@@ -1229,7 +1229,7 @@ class TestCopilot:
         """M4: shell tool mutations are not tracked (limitation)."""
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         lines = [
             {"type": "tool.execution_start",
              "data": {"toolCallId": "s1", "toolName": "shell",
@@ -1246,7 +1246,7 @@ class TestCopilot:
     def test_parse_jsonl_ignores_failed_write_telemetry_but_keeps_text(self):
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
         root = Path("/repo")
         lines = [
@@ -1281,7 +1281,7 @@ class TestCopilot:
 
     def test_parse_session_id_reads_result_event(self):
         import json
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
         raw = "\n".join([
             json.dumps({"type": "assistant", "data": {"text": "hi"}}),
@@ -1293,14 +1293,14 @@ class TestCopilot:
 
     def test_parse_session_id_returns_none_without_result(self):
         import json
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
         raw = json.dumps({"type": "assistant", "data": {"text": "hi"}})
 
         assert CopilotIntegration._parse_session_id(raw) is None
 
     def test_base_integration_has_no_resume_command(self):
-        from agency.integrations import BaseIntegration
+        from flowgency.integrations import BaseIntegration
 
         assert BaseIntegration().resume_command("abc") is None
 
@@ -1313,7 +1313,7 @@ class TestCopilot:
 
     def test_copilot_run_captures_session_id(self, tmp_agent_dir, monkeypatch):
         import json
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("do the thing")
@@ -1347,7 +1347,7 @@ class TestCopilot:
     def test_copilot_run_captures_session_id_on_timeout(self, tmp_agent_dir, monkeypatch):
         import json
         import subprocess
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("do the thing")

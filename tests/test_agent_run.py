@@ -6,15 +6,15 @@ from fastapi.testclient import TestClient
 import pytest
 import yaml
 
-import agency.app as app_mod
-from agency.app import app, is_agent_running
-from agency.configuration import ConfigStore, PromptSelector
-from agency.configuration.models import MemorySelector
-from agency.jobs import JobRequest
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.prompts import PromptStore
-from agency.jobs.store import write_job
+import flowgency.app as app_mod
+from flowgency.app import app, is_agent_running
+from flowgency.configuration import ConfigStore, PromptSelector
+from flowgency.configuration.models import MemorySelector
+from flowgency.jobs import JobRequest
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.prompts import PromptStore
+from flowgency.jobs.store import write_job
 from tests._team_helpers import create_team_environment
 
 
@@ -110,7 +110,7 @@ def _configure_schedule(routine_id: str) -> None:
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     team_path = _setup_team(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post(
@@ -141,7 +141,7 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
 def test_run_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
     _setup_team(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post(
@@ -160,7 +160,7 @@ def test_run_renders_routine_arguments_in_task_input(tmp_path, monkeypatch):
 
 def test_run_unknown_routine_404(tmp_path, monkeypatch):
     _setup_team(tmp_path)
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post(
@@ -173,7 +173,7 @@ def test_run_unknown_routine_404(tmp_path, monkeypatch):
 
 def test_run_invalid_routine_id_400(tmp_path, monkeypatch):
     _setup_team(tmp_path)
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post(
@@ -266,7 +266,7 @@ def test_run_returns_400_when_private_prompt_disappears_after_validation(tmp_pat
 def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
     _setup_team(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id=f"job-{len(calls)}"))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id=f"job-{len(calls)}"))
     client = TestClient(app)
 
     payload = {"routine_id": "daily-review", "mode": "saved", "prompt_scope": "blueprint", "prompt_name": "daily-review"}
@@ -330,7 +330,7 @@ def test_agent_running_state_comes_from_active_job_records(tmp_path):
 def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):
     _setup_team(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post(
@@ -344,7 +344,7 @@ def test_run_accepts_valid_selector_override_for_routine(tmp_path, monkeypatch):
 
 def test_run_rejects_invalid_selector_override_for_routine(tmp_path, monkeypatch):
     _setup_team(tmp_path)
-    monkeypatch.setattr("agency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("flowgency.app.submit_job_request", lambda request: SimpleNamespace(job_id="job-1"))
     client = TestClient(app)
 
     resp = client.post(
@@ -366,7 +366,7 @@ def test_run_accepts_valid_channel_memory_override(tmp_path, monkeypatch):
     app_mod.refresh_services()
     calls = []
     monkeypatch.setattr(
-        "agency.app.submit_job_request",
+        "flowgency.app.submit_job_request",
         lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"),
     )
     client = TestClient(app)
@@ -419,7 +419,7 @@ def test_run_submits_typed_memory_override_for_manual_modes(
     _setup_team(tmp_path)
     calls = []
     monkeypatch.setattr(
-        "agency.app.submit_job_request",
+        "flowgency.app.submit_job_request",
         lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"),
     )
     client = TestClient(app)

@@ -6,7 +6,7 @@ from threading import Barrier, Event, Thread, current_thread
 
 import pytest
 
-from agency.prompts import PromptConflictError, PromptNotFoundError, PromptStore
+from flowgency.prompts import PromptConflictError, PromptNotFoundError, PromptStore
 
 
 def private_prompt_bytes(name: str = "local-triage") -> bytes:
@@ -126,7 +126,7 @@ def test_prompt_store_rejects_noncanonical_case_before_filesystem_access(
         raise AssertionError("filesystem should not be touched")
 
     monkeypatch.setattr(Path, "mkdir", fail_mkdir)
-    monkeypatch.setattr("agency.prompts.store.atomic_write_bytes", fail_atomic_write)
+    monkeypatch.setattr("flowgency.prompts.store.atomic_write_bytes", fail_atomic_write)
 
     with pytest.raises(ValueError, match="stable slug"):
         store.create(
@@ -415,7 +415,7 @@ def test_prompt_store_copy_namespace_rolls_back_created_files_on_error(
         "newsletter", "reviewer", "hotfix", private_prompt_bytes("hotfix")
     )
 
-    from agency.prompts import store as prompt_store_module
+    from flowgency.prompts import store as prompt_store_module
 
     real_atomic_write = prompt_store_module.atomic_write_bytes
     state = {"writes": 0}
@@ -427,7 +427,7 @@ def test_prompt_store_copy_namespace_rolls_back_created_files_on_error(
         real_atomic_write(path, payload)
 
     monkeypatch.setattr(
-        "agency.prompts.store.atomic_write_bytes",
+        "flowgency.prompts.store.atomic_write_bytes",
         fail_second_write,
     )
 
@@ -501,7 +501,7 @@ def test_prompt_store_delete_namespace_blocks_silent_update_loss(
         "newsletter", "reviewer", "local-triage", private_prompt_bytes()
     )
     target_path = store.path("newsletter", "reviewer", "local-triage")
-    original_read_regular_file = __import__("agency.prompts.store", fromlist=["_read_regular_file"])._read_regular_file
+    original_read_regular_file = __import__("flowgency.prompts.store", fromlist=["_read_regular_file"])._read_regular_file
     delete_ready = Event()
     allow_delete_to_continue = Event()
     update_done = Event()
@@ -523,7 +523,7 @@ def test_prompt_store_delete_namespace_blocks_silent_update_loss(
             return payload
         return original_read_regular_file(path)
 
-    monkeypatch.setattr("agency.prompts.store._read_regular_file", gated_read_regular_file)
+    monkeypatch.setattr("flowgency.prompts.store._read_regular_file", gated_read_regular_file)
 
     def run_delete():
         store.delete_namespace(

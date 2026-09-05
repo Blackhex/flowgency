@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from agency.integrations import get_integration
-from agency.integrations.models import (
+from flowgency.integrations import get_integration
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ResolvedPermissionRule,

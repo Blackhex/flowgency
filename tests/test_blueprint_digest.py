@@ -5,7 +5,7 @@ import stat
 
 import pytest
 
-from agency.fs.snapshot import AssetValidationError, SnapshotFile, capture_tree, compute_source_digest
+from flowgency.fs.snapshot import AssetValidationError, SnapshotFile, capture_tree, compute_source_digest
 
 
 def _write_blueprint(root, key: str = "advisor"):
@@ -41,7 +41,7 @@ class _FakeEntry:
 
 
 def _inject_entries(monkeypatch, blueprint, names):
-    import agency.fs.snapshot as snapshot_module
+    import flowgency.fs.snapshot as snapshot_module
 
     backing_file = blueprint / "AGENTS.md"
     original_scandir = snapshot_module.os.scandir
@@ -117,7 +117,7 @@ def test_capture_tree_rejects_windows_reserved_or_unstable_names(tmp_path, monke
 
 
 def test_capture_tree_retries_changed_source_then_succeeds(tmp_path, monkeypatch):
-    import agency.fs.snapshot as snapshot_module
+    import flowgency.fs.snapshot as snapshot_module
 
     blueprint = _write_blueprint(tmp_path)
     target = blueprint / "AGENTS.md"
@@ -140,7 +140,7 @@ def test_capture_tree_retries_changed_source_then_succeeds(tmp_path, monkeypatch
 
 
 def test_capture_tree_fails_after_three_changed_attempts(tmp_path, monkeypatch):
-    import agency.fs.snapshot as snapshot_module
+    import flowgency.fs.snapshot as snapshot_module
 
     blueprint = _write_blueprint(tmp_path)
     original = snapshot_module._scan_tree

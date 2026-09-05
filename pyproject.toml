@@ -1,5 +1,5 @@
 [project]
-name = "christag-agency"
+name = "flowgency"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -20,16 +20,16 @@ dependencies = [
 ]
 
 [project.scripts]
-christag-agency = "agency.cli:main"
+flowgency = "flowgency.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["agency*"]
+include = ["flowgency*"]
 
 [tool.setuptools.package-data]
-agency = ["templates/*.html", "static/*", "themes/*.yaml"]
-"agency.setup_assets" = [
-    "copilot/.github/skills/agency-setup/*.md",
-    "copilot/.github/skills/agency-setup/references/*.md",
+flowgency = ["templates/*.html", "static/*", "themes/*.yaml"]
+"flowgency.setup_assets" = [
+    "copilot/.github/skills/flowgency-setup/*.md",
+    "copilot/.github/skills/flowgency-setup/references/*.md",
 ]
 
 [tool.pytest.ini_options]

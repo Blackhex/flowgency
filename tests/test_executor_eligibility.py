@@ -5,8 +5,8 @@ from pathlib import Path
 
 import yaml
 
-from agency.configuration.store import ConfigStore
-from agency.permissions.eligibility import may_execute_decisions
+from flowgency.configuration.store import ConfigStore
+from flowgency.permissions.eligibility import may_execute_decisions
 
 
 def _config(tmp_path: Path, raw_config, rules):

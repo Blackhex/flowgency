@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from agency.integrations.agency.copilot import CopilotIntegration
-from agency.integrations.agency.copilot_sandbox import build_sandbox_settings
-from agency.integrations.models import (
+from flowgency.integrations.flowgency.copilot import CopilotIntegration
+from flowgency.integrations.flowgency.copilot_sandbox import build_sandbox_settings
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ResolvedPermissionRule,
@@ -31,7 +31,7 @@ def _launch(policy, tmp_path, monkeypatch, *, real_home=None):
 
     ``captured`` contains ``args`` and ``kwargs`` from the subprocess.run call.
     """
-    import agency.integrations.agency.copilot as copilot_mod
+    import flowgency.integrations.flowgency.copilot as copilot_mod
 
     prompt = tmp_path / "p.prompt"
     prompt.write_text("do the thing", encoding="utf-8")

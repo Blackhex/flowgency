@@ -9,20 +9,20 @@ import yaml
 from fastapi.testclient import TestClient
 import pytest
 
-from agency import app as app_mod
-from agency.configuration import ConfigConflictError, ConfigStore
-from agency.configuration.models import MemorySelector
-from agency.jobs.authority import JobStore
-from agency.jobs.models import (
+from flowgency import app as app_mod
+from flowgency.configuration import ConfigConflictError, ConfigStore
+from flowgency.configuration.models import MemorySelector
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import (
     BlueprintRef,
     JobRecord,
     JobSpec,
     MemoryBinding,
     RuntimePolicySnapshot,
 )
-from agency.jobs.store import read_job, write_job
+from flowgency.jobs.store import read_job, write_job
 from dataclasses import replace
-from agency.memory import resolve_memory_selector
+from flowgency.memory import resolve_memory_selector
 from tests._team_helpers import apply_team_paths, create_team_environment
 from tests._lock_helpers import hold_exclusive_lock
 

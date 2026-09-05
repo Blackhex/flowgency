@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from agency.records.frontmatter import parse_frontmatter
-from agency.records.ingest import ingest_records
-from agency.records.validation import OutboxValidation, RecordCandidate
+from flowgency.records.frontmatter import parse_frontmatter
+from flowgency.records.ingest import ingest_records
+from flowgency.records.validation import OutboxValidation, RecordCandidate
 
 NOW = datetime(2026, 7, 31, 9, 0, tzinfo=timezone.utc)
 
@@ -182,7 +182,7 @@ def test_ingest_creates_missing_target_directories(tmp_path: Path):
 
 def test_exhausting_collision_cap_raises_runtime_error(dirs):
     """Verify that exhausting the collision suffix cap raises RuntimeError."""
-    from agency.records.ingest import _MAX_COLLISION_SUFFIX
+    from flowgency.records.ingest import _MAX_COLLISION_SUFFIX
     
     observations, _ = dirs
     base_name = "2026-07-31-suite-is-red"

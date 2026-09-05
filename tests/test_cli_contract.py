@@ -10,14 +10,14 @@ import sys
 import pytest
 import yaml
 
-from agency import cli
-from agency.configuration import ConfigStore
-from agency.configuration.effective import resolve_effective_policy
-from agency.configuration.models import MemorySelector
-from agency.fs.locks import exclusive_lock
-from agency.jobs import JobHandle, JobSubmissionError
-from agency.memory import resolve_memory_selector
-from agency.web.dependencies import build_services
+from flowgency import cli
+from flowgency.configuration import ConfigStore
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.models import MemorySelector
+from flowgency.fs.locks import exclusive_lock
+from flowgency.jobs import JobHandle, JobSubmissionError
+from flowgency.memory import resolve_memory_selector
+from flowgency.web.dependencies import build_services
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -167,8 +167,8 @@ def test_cli_has_no_top_level_app_import_or_mutable_app_globals():
         for node in ast.walk(tree)
         if isinstance(node, (ast.Import, ast.ImportFrom))
         and (
-            any(alias.name == "agency.app" for alias in getattr(node, "names", ()))
-            or getattr(node, "module", None) == "agency.app"
+            any(alias.name == "flowgency.app" for alias in getattr(node, "names", ()))
+            or getattr(node, "module", None) == "flowgency.app"
         )
     ]
     assert app_imports == []
@@ -491,8 +491,8 @@ def test_memory_save_busy_returns_resource_busy_exit(cli_config, cli_runner):
 
 
 def test_lock_cancellation_maps_to_resource_busy_exit():
-    from agency.cli_output import ExitCode, exit_code_for
-    from agency.fs.locks import LockCancelledError
+    from flowgency.cli_output import ExitCode, exit_code_for
+    from flowgency.fs.locks import LockCancelledError
 
     assert exit_code_for(LockCancelledError("cancelled")) == ExitCode.RESOURCE_BUSY
 

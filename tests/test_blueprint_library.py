@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from agency.fs.snapshot import AssetValidationError, compute_source_digest
-from agency.blueprints.library import BlueprintLibrary, inspect_blueprint, list_blueprints
+from flowgency.fs.snapshot import AssetValidationError, compute_source_digest
+from flowgency.blueprints.library import BlueprintLibrary, inspect_blueprint, list_blueprints
 
 
 def _write_skill(path: Path, name: str, description: str = "Review daily editorial work.") -> None:
@@ -318,7 +318,7 @@ def test_list_blueprints_ignores_dot_prefixed_directories(tmp_path):
 
 
 def test_list_blueprints_still_reports_invalid_non_dot_directory(tmp_path):
-    from agency.fs.snapshot import AssetValidationError
+    from flowgency.fs.snapshot import AssetValidationError
 
     root = tmp_path / "library"
     _write_blueprint(root, "alpha")

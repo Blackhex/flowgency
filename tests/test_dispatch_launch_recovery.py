@@ -7,12 +7,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from agency.dispatch.run import _due_occurrence, lost_occurrences, run_dispatch_cycle
-from agency.dispatch.schedule import at_marker_path, every_marker_path
-from agency.jobs import JobRequest, submit_job_request
-from agency.jobs.authority import JobStore
-from agency.jobs.launcher import LaunchResult
-from agency.jobs.store import cancel_job, read_job
+from flowgency.dispatch.run import _due_occurrence, lost_occurrences, run_dispatch_cycle
+from flowgency.dispatch.schedule import at_marker_path, every_marker_path
+from flowgency.jobs import JobRequest, submit_job_request
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.launcher import LaunchResult
+from flowgency.jobs.store import cancel_job, read_job
 
 
 class _FlakyLauncher:

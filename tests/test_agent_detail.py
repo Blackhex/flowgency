@@ -8,10 +8,10 @@ import re
 import yaml
 from fastapi.testclient import TestClient
 
-from agency import app as app_mod
-from agency.configuration import ConfigStore
-from agency.configuration.models import MemorySelector
-from agency.memory import resolve_memory_selector
+from flowgency import app as app_mod
+from flowgency.configuration import ConfigStore
+from flowgency.configuration.models import MemorySelector
+from flowgency.memory import resolve_memory_selector
 from tests._lock_helpers import hold_exclusive_lock
 
 
@@ -882,7 +882,7 @@ def test_routines_get_fired_routine_shows_timestamp_and_next_occurrence(monkeypa
     """A routine whose marker file exists shows a timestamp and a relative next-due time."""
     import os
     from datetime import datetime
-    from agency.dispatch.schedule import every_marker_path
+    from flowgency.dispatch.schedule import every_marker_path
 
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))

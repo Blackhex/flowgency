@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from agency.integrations import RunResult
-from agency.integrations.agency.copilot import CopilotIntegration
-from agency.integrations.models import (
+from flowgency.integrations import RunResult
+from flowgency.integrations.flowgency.copilot import CopilotIntegration
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ResolvedPermissionRule,
 )
-from agency.jobs.execution import execute_job
+from flowgency.jobs.execution import execute_job
 from tests.test_job_execution import _authority, queued_job, read_metadata
 
 NOTE_HEADING = "Permission policy not fully enforced"
@@ -30,7 +30,7 @@ class _FakeCompleted:
 
 
 def _launch(policy, tmp_path, monkeypatch, *, real_home=None):
-    import agency.integrations.agency.copilot as copilot_mod
+    import flowgency.integrations.flowgency.copilot as copilot_mod
 
     prompt = tmp_path / "p.prompt"
     prompt.write_text("do the thing", encoding="utf-8")
@@ -158,7 +158,7 @@ def test_successful_run_records_the_path_and_tools_left_unenforced(
         "gate because the sandbox settings were not written."
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: _context(
             tmp_path,
             RunResult(0, "done", "", 0.1, unenforced_rules=[entry]),
@@ -176,7 +176,7 @@ def test_successful_run_records_the_path_and_tools_left_unenforced(
 def test_fully_enforced_run_leaves_the_summary_untouched(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: _context(tmp_path, RunResult(0, "done", "", 0.1)),
     )
 
@@ -191,7 +191,7 @@ def test_failed_run_still_records_what_was_not_enforced(tmp_path, monkeypatch):
     path, spec = queued_job(tmp_path)
     entry = "Rule granting write on C:/vault: dropped."
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: _context(
             tmp_path,
             RunResult(124, "partial", "timeout", 30.0, unenforced_rules=[entry]),
@@ -222,7 +222,7 @@ def test_note_reaches_the_decision_record(tmp_path, monkeypatch):
     )
     entry = "Rule granting write on C:/vault: dropped."
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: _context(
             tmp_path,
             RunResult(0, "done", "", 0.1, unenforced_rules=[entry]),
@@ -247,7 +247,7 @@ def test_note_order_is_stable_across_runs(tmp_path, monkeypatch):
         root.mkdir()
         path, spec = queued_job(root)
         monkeypatch.setattr(
-            "agency.jobs.execution.resolve_job_context",
+            "flowgency.jobs.execution.resolve_job_context",
             lambda ignored, root=root: _context(
                 root,
                 RunResult(0, "done", "", 0.1, unenforced_rules=list(entries)),

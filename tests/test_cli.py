@@ -10,11 +10,11 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-import agency.app as app_mod
-from agency import cli
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import write_job
+import flowgency.app as app_mod
+from flowgency import cli
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import write_job
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -136,7 +136,7 @@ def _setup_jobs_team(
 def test_cli_help_shows_subcommands():
     """Running agency --help should list available subcommands."""
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli", "--help"],
+        [sys.executable, "-m", "flowgency.cli", "--help"],
         capture_output=True,
         text=True,
     )
@@ -149,7 +149,7 @@ def test_cli_help_shows_subcommands():
 def test_cli_no_args_shows_help():
     """Running agency with no args should show help."""
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli"],
+        [sys.executable, "-m", "flowgency.cli"],
         capture_output=True,
         text=True,
     )
@@ -164,7 +164,7 @@ def test_command_handlers_return_integer_statuses(monkeypatch):
 
 def test_cli_serve_help_shows_reload():
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli", "serve", "--help"],
+        [sys.executable, "-m", "flowgency.cli", "serve", "--help"],
         capture_output=True,
         text=True,
     )
@@ -204,7 +204,7 @@ def test_cmd_serve_config_precedence_is_visible_at_lazy_import(tmp_path, monkeyp
     observed = []
 
     def fake_import(name):
-        assert name == "agency.app"
+        assert name == "flowgency.app"
         observed.append(Path(os.environ["AGENCY_CONFIG"]))
         return SimpleNamespace(run_server=lambda **options: None)
 
@@ -220,7 +220,7 @@ def test_serve_app_config_path_honors_agency_config_at_import(tmp_path):
     environment["AGENCY_CONFIG"] = str(selected_path)
 
     result = subprocess.run(
-        [sys.executable, "-c", "import agency.app; print(agency.app.CONFIG_PATH)"],
+        [sys.executable, "-c", "import flowgency.app; print(flowgency.app.CONFIG_PATH)"],
         capture_output=True,
         text=True,
         env=environment,
@@ -235,7 +235,7 @@ def test_serve_missing_config_bootstraps_selected_path_not_cwd(tmp_path):
     environment = os.environ.copy()
     environment["AGENCY_CONFIG"] = str(selected_path)
     script = (
-        "import agency.app as app; "
+        "import flowgency.app as app; "
         "app.uvicorn.run = lambda *args, **kwargs: None; "
         "app.run_server('127.0.0.1', 8500)"
     )
@@ -302,7 +302,7 @@ def _write_dispatch_config(path):
 
 def test_cli_help_shows_dispatch_subcommands():
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli", "dispatch", "--help"],
+        [sys.executable, "-m", "flowgency.cli", "dispatch", "--help"],
         capture_output=True,
         text=True,
     )
@@ -355,7 +355,7 @@ def test_cmd_dispatch_uninstall_forwards_force(tmp_path, monkeypatch):
 
 def test_cli_help_shows_jobs_and_logs():
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli", "--help"],
+        [sys.executable, "-m", "flowgency.cli", "--help"],
         capture_output=True,
         text=True,
     )
@@ -483,8 +483,8 @@ def test_cmd_jobs_and_logs_ignore_forged_team_jobs_records(tmp_path, monkeypatch
 
 # ── Task 5: CLI decide parity tests ─────────────────────────────────────────
 
-import agency.app as app_mod  # noqa: E402  (already imported above, this is a no-op re-import)
-from agency.jobs import JobSubmissionError  # noqa: E402
+import flowgency.app as app_mod  # noqa: E402  (already imported above, this is a no-op re-import)
+from flowgency.jobs import JobSubmissionError  # noqa: E402
 
 
 def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", questions=None):

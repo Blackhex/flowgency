@@ -9,17 +9,17 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from agency import app as app_mod
-from agency.app import (
+from flowgency import app as app_mod
+from flowgency.app import (
     app,
     build_activity_feed,
     build_dashboard_fleet,
     build_pipeline_stats,
     list_markdown_items,
 )
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import transition_job, write_job
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import transition_job, write_job
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -103,8 +103,8 @@ def test_decision_detail_shows_agent_log_and_changes(tmp_path, monkeypatch):
     """Verify decision_detail route passes executed_by, execution_log, and changed_files to template."""
     from pathlib import Path
     from fastapi.testclient import TestClient
-    import agency.app as app_mod
-    from agency.app import app
+    import flowgency.app as app_mod
+    from flowgency.app import app
 
     # Set up team with decision directory
     paths = create_team_environment(
@@ -597,7 +597,7 @@ def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
     app_mod.app.state.services = app_mod.build_services(config_path)
     (team_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
 
-    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+    with patch("flowgency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
 
     assert "daily-review due 09:00" in response.text
@@ -639,7 +639,7 @@ def test_overdue_agent_appears_in_the_attention_queue(monkeypatch, tmp_path, raw
     app_mod.app.state.services = app_mod.build_services(config_path)
     (team_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
 
-    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+    with patch("flowgency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
 
     assert "Routine daily-review was due at 09:00" in response.text
@@ -745,7 +745,7 @@ def test_health_sentence_fully_populated(tmp_path):
     mock_now = finished + timedelta(hours=4)
 
     status = SimpleNamespace(kind="job_failed")
-    with patch("agency.app.clock_now", return_value=mock_now):
+    with patch("flowgency.app.clock_now", return_value=mock_now):
         sentence = app_mod._health_sentence(status, record, mock_now)
     assert sentence == "Job job-full exited 1 after 12s, 4h ago."
 
@@ -762,7 +762,7 @@ def test_health_sentence_exit_code_none(tmp_path):
     mock_now = finished + timedelta(hours=4)
 
     status = SimpleNamespace(kind="job_failed")
-    with patch("agency.app.clock_now", return_value=mock_now):
+    with patch("flowgency.app.clock_now", return_value=mock_now):
         sentence = app_mod._health_sentence(status, record, mock_now)
     assert sentence == "Job job-noco failed after 12s, 4h ago."
 
@@ -779,7 +779,7 @@ def test_health_sentence_duration_none(tmp_path):
     mock_now = finished + timedelta(hours=4)
 
     status = SimpleNamespace(kind="job_failed")
-    with patch("agency.app.clock_now", return_value=mock_now):
+    with patch("flowgency.app.clock_now", return_value=mock_now):
         sentence = app_mod._health_sentence(status, record, mock_now)
     assert sentence == "Job job-nodu exited 1, 4h ago."
 
@@ -808,7 +808,7 @@ def test_attention_queue_header_singular(monkeypatch, tmp_path, raw_config):
     app_mod.app.state.services = app_mod.build_services(config_path)
     (team_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
 
-    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+    with patch("flowgency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
 
     assert "1 item" in response.text
@@ -862,7 +862,7 @@ def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, 
     write_job(running_path, JobRecord.from_spec(running_spec))
     transition_job(running_path, "queued", "running")
 
-    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+    with patch("flowgency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
         # Must be computed under the same frozen clock as the rendered page,
         # otherwise this compares a page built at 2026-07-16 12:00 against
@@ -886,7 +886,7 @@ def test_fleet_attention_matches_queue_for_running_unhealthy_agent(monkeypatch, 
 
 def test_startup_drain_failure_does_not_prevent_startup(monkeypatch):
     import asyncio
-    from agency.app import lifespan
+    from flowgency.app import lifespan
 
     mock_config = SimpleNamespace(agency=SimpleNamespace(memory_store=None))
     mock_snapshot = SimpleNamespace(config=mock_config)
@@ -894,12 +894,12 @@ def test_startup_drain_failure_does_not_prevent_startup(monkeypatch):
         startup_error=None,
         config_store=SimpleNamespace(load=lambda: mock_snapshot),
     )
-    monkeypatch.setattr("agency.app.refresh_services", lambda: mock_services)
+    monkeypatch.setattr("flowgency.app.refresh_services", lambda: mock_services)
 
     def _boom(*a, **k):
         raise RuntimeError("simulated drain failure")
 
-    monkeypatch.setattr("agency.app.drain", _boom)
+    monkeypatch.setattr("flowgency.app.drain", _boom)
 
     reached_yield = []
 
@@ -995,7 +995,7 @@ class TestWorkQueueStrip:
     def test_load_snapshot_exception_falls_back_to_idle(self, client, monkeypatch):
         # Patch queue_snapshot to raise while _load_snapshot (used by get_team) still works;
         # the work queue's try/except catches this and falls back to the idle line.
-        import agency.app as app_mod
+        import flowgency.app as app_mod
 
         def _raise(config, *, memory_store):
             raise RuntimeError("config unavailable")
@@ -1009,8 +1009,8 @@ class TestWorkQueueStrip:
         # Patching runtime_team prevents the earlier get_team call from failing on None.
         # The guard sends pool=8 (configured); without the guard queue_snapshot(…, None)
         # raises TypeError → except fires → pool=4, causing the assertion to fail.
-        import agency.app as app_mod
-        from agency.web.state import runtime_team as real_runtime_team
+        import flowgency.app as app_mod
+        from flowgency.web.state import runtime_team as real_runtime_team
         from dataclasses import replace as dc_replace
 
         real_snapshot = app_mod._load_snapshot()
@@ -1034,7 +1034,7 @@ class TestWorkQueueStrip:
         assert "idle" in body and "pool 8" in body
 
     def test_missing_job_directory_exception_falls_back_to_idle(self, client, monkeypatch):
-        import agency.app as app_mod
+        import flowgency.app as app_mod
 
         def _raise(config, *, memory_store):
             raise FileNotFoundError("job store directory missing")
@@ -1048,11 +1048,11 @@ class TestQueueDueTimeFilter:
     """Unit tests for the queue_due_time Jinja filter."""
 
     def test_none_returns_empty_string(self):
-        from agency.app import queue_due_time
+        from flowgency.app import queue_due_time
         assert queue_due_time(None) == ""
 
     def test_today_formats_as_hhmm(self, monkeypatch):
-        from agency.app import queue_due_time
+        from flowgency.app import queue_due_time
         import re
         monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-16T12:00:00")
         # Noon local time: local date is always 2026-07-16 on every machine
@@ -1062,7 +1062,7 @@ class TestQueueDueTimeFilter:
 
     def test_other_day_formats_with_weekday_prefix(self, monkeypatch):
         from datetime import timezone
-        from agency.app import queue_due_time
+        from flowgency.app import queue_due_time
         monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T12:00:00")
         due = datetime(2026, 7, 16, 8, 0, 0, tzinfo=timezone.utc)
         result = queue_due_time(due)
@@ -1070,7 +1070,7 @@ class TestQueueDueTimeFilter:
         assert re.fullmatch(r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}", result)
 
     def test_accepts_iso_string(self, monkeypatch):
-        from agency.app import queue_due_time
+        from flowgency.app import queue_due_time
         monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T12:00:00")
         result = queue_due_time("2026-07-16T08:00:00+00:00")
         import re
@@ -1079,8 +1079,8 @@ class TestQueueDueTimeFilter:
     def test_uses_astimezone_not_naive_strip(self, monkeypatch):
         """Naive replace(tzinfo=None) discards the UTC offset; astimezone must be used."""
         from datetime import timezone, timedelta
-        from agency.app import queue_due_time
-        from agency.clock import today as clock_today
+        from flowgency.app import queue_due_time
+        from flowgency.clock import today as clock_today
         # 08:00 UTC+3 = 05:00 UTC; naive strip gives "08:00", astimezone gives local hours
         utc_plus_3 = timezone(timedelta(hours=3))
         due = datetime(2026, 7, 16, 8, 0, 0, tzinfo=utc_plus_3)

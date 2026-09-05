@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from agency.configuration import parse_config
-from agency.configuration.effective import resolve_effective_policy
-from agency.configuration.issues import ValidationFailed
-from agency.integrations import BaseIntegration
-from agency.integrations.models import RuntimeCapabilities
+from flowgency.configuration import parse_config
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.issues import ValidationFailed
+from flowgency.integrations import BaseIntegration
+from flowgency.integrations.models import RuntimeCapabilities
 
 
 class _PermissiveIntegration(BaseIntegration):

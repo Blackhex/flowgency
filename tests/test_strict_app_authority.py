@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 
-APP_PATH = Path(__file__).parents[1] / "agency" / "app.py"
+APP_PATH = Path(__file__).parents[1] / "flowgency" / "app.py"
 
 
 def test_app_defines_no_parallel_config_authority() -> None:

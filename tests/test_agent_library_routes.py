@@ -10,10 +10,10 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from agency import app as app_mod
-from agency.web.routes import admin_library as admin_library_routes
-from agency.configuration import ConfigStore
-from agency.fs.snapshot import compute_source_digest
+from flowgency import app as app_mod
+from flowgency.web.routes import admin_library as admin_library_routes
+from flowgency.configuration import ConfigStore
+from flowgency.fs.snapshot import compute_source_digest
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 

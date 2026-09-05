@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
-from agency.jobs.models import RuntimePolicySnapshot
+from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from flowgency.jobs.models import RuntimePolicySnapshot
 
 
 def policy(*rules, mode="restricted"):

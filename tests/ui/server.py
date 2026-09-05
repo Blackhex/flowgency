@@ -14,12 +14,12 @@ from urllib.request import urlopen
 
 import yaml
 
-from agency.configuration.models import MemorySelector
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import transition_job, write_job
-from agency.memory import MemoryStore, resolve_memory_selector
-from agency.prompts import PromptStore
+from flowgency.configuration.models import MemorySelector
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import transition_job, write_job
+from flowgency.memory import MemoryStore, resolve_memory_selector
+from flowgency.prompts import PromptStore
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -320,7 +320,7 @@ def main() -> int:
         command = [
             sys.executable,
             "-m",
-            "agency.cli",
+            "flowgency.cli",
             "serve",
             "--host",
             "127.0.0.1",

@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from agency.jobs.launch_view import create_launch_view
-from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
+from flowgency.jobs.launch_view import create_launch_view
+from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 
 
 def test_zone_names_are_distinct():

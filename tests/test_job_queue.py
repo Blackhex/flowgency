@@ -8,20 +8,20 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agency.configuration.models import parse_config
-from agency.fs.locks import exclusive_lock
-from agency.jobs.authority import JobStore
-from agency.jobs.launcher import LaunchResult
-from agency.jobs.models import (
+from flowgency.configuration.models import parse_config
+from flowgency.fs.locks import exclusive_lock
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.launcher import LaunchResult
+from flowgency.jobs.models import (
     BlueprintRef,
     JobRecord,
     JobSpec,
     MemoryBinding,
     RuntimePolicySnapshot,
 )
-from agency.jobs.queue import drain, queue_snapshot
-from agency.jobs.store import cancel_job, queue_lock_path, read_job, write_job
-from agency.jobs.worker import main as worker_main
+from flowgency.jobs.queue import drain, queue_snapshot
+from flowgency.jobs.store import cancel_job, queue_lock_path, read_job, write_job
+from flowgency.jobs.worker import main as worker_main
 
 
 def _make_spec(tmp_path: Path, job_id: str) -> JobSpec:
@@ -240,7 +240,7 @@ def test_a_ghost_running_record_does_not_hold_a_slot_forever(
 ):
     # pool=1 means the ghost's slot is the only one; real job can only launch if
     # reconcile actually frees it. Patch the binding drain calls directly.
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
     queue_fixture_pool1.enqueue("ghost", status="running", worker_pid=999999)
     queue_fixture_pool1.enqueue("real", due_at="2026-07-29T08:00:00")
     drain(
@@ -299,7 +299,7 @@ def test_a_busy_queue_lock_leaves_the_drain_to_its_holder(queue_fixture):
 
 
 def test_team_roots_builds_team_root_mapping():
-    from agency.jobs.queue import _team_roots
+    from flowgency.jobs.queue import _team_roots
     from types import SimpleNamespace
 
     team = SimpleNamespace(path="C:/teams/news")
@@ -314,7 +314,7 @@ def test_a_drain_does_not_reproject_terminal_records(queue_fixture, monkeypatch)
     """Terminal projection is a startup sweep, not a per-drain cost."""
     projected: list[str] = []
     monkeypatch.setattr(
-        "agency.jobs.reconciliation.project_decision",
+        "flowgency.jobs.reconciliation.project_decision",
         lambda record: projected.append(record.spec.job_id),
     )
     queue_fixture.enqueue("done", status="complete")
@@ -331,7 +331,7 @@ def test_a_malformed_record_is_reported_rather_than_dropped(queue_fixture, caplo
     corrupt = store.path("newsletter", "corrupt")
     corrupt.parent.mkdir(parents=True, exist_ok=True)
     corrupt.write_text("spec: not-a-mapping\n", encoding="utf-8")
-    with caplog.at_level("WARNING", logger="agency.jobs.queue"):
+    with caplog.at_level("WARNING", logger="flowgency.jobs.queue"):
         queue_snapshot(queue_fixture.config, memory_store=queue_fixture.memory_store)
     assert "corrupt" in caplog.text
 
@@ -339,11 +339,11 @@ def test_a_malformed_record_is_reported_rather_than_dropped(queue_fixture, caplo
 def test_a_finishing_worker_starts_the_next_waiting_job(queue_fixture, monkeypatch):
     """The exiting worker's drain is what keeps a backlog moving headlessly."""
     monkeypatch.setattr(
-        "agency.jobs.worker.execute_job",
+        "flowgency.jobs.worker.execute_job",
         lambda ref: SimpleNamespace(status="complete"),
     )
     monkeypatch.setattr(
-        "agency.jobs.queue.default_launcher", lambda: queue_fixture.launcher
+        "flowgency.jobs.queue.default_launcher", lambda: queue_fixture.launcher
     )
     queue_fixture.enqueue("first", status="running", worker_pid=os.getpid())
     queue_fixture.enqueue("second", due_at="2026-07-29T09:00:00")

@@ -1,4 +1,4 @@
-import agency.app as app_mod
+import flowgency.app as app_mod
 
 
 def test_vscode_modern_theme_is_discovered_and_generates_css():

@@ -1,4 +1,4 @@
-from agency.fs.atomic import atomic_write_bytes
+from flowgency.fs.atomic import atomic_write_bytes
 
 
 def test_atomic_write_replaces_complete_bytes(tmp_path):

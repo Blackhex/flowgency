@@ -7,9 +7,9 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from agency import app as app_mod
-from agency.configuration import parse_config, validate_config
-from agency.configuration.paths import validate_resolved_paths
+from flowgency import app as app_mod
+from flowgency.configuration import parse_config, validate_config
+from flowgency.configuration.paths import validate_resolved_paths
 
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -134,11 +134,11 @@ def test_active_routes_use_team_placeholders_not_group_placeholders():
 
 def test_admin_team_surface_uses_team_vocabulary(repo_root: Path):
     paths = (
-        repo_root / "agency" / "app.py",
-        repo_root / "agency" / "web" / "routes" / "admin_teams.py",
-        repo_root / "agency" / "templates" / "admin_dispatch.html",
-        repo_root / "agency" / "templates" / "admin_teams.html",
-        repo_root / "agency" / "templates" / "admin_team_edit.html",
+        repo_root / "flowgency" / "app.py",
+        repo_root / "flowgency" / "web" / "routes" / "admin_teams.py",
+        repo_root / "flowgency" / "templates" / "admin_dispatch.html",
+        repo_root / "flowgency" / "templates" / "admin_teams.html",
+        repo_root / "flowgency" / "templates" / "admin_team_edit.html",
     )
     text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
@@ -154,7 +154,7 @@ def test_admin_team_surface_uses_team_vocabulary(repo_root: Path):
 
 def test_removed_conversion_surfaces_do_not_exist(repo_root: Path):
     removed = [
-        repo_root / "agency" / "configuration" / "compat.py",
+        repo_root / "flowgency" / "configuration" / "compat.py",
         repo_root / "tools" / "migrate_agent_model.py",
         repo_root / "skills" / "agency-migration",
         repo_root / ".github" / "skills" / "agency-migration",
@@ -219,7 +219,7 @@ def test_retired_routes_return_ordinary_404_without_mutating_source(tmp_path, mo
 
 
 def test_retired_templates_are_deleted_and_navigation_uses_current_surfaces():
-    template_root = REPO_ROOT / "agency" / "templates"
+    template_root = REPO_ROOT / "flowgency" / "templates"
     assert not {path.name for path in template_root.iterdir()} & RETIRED_TEMPLATES
     navigation = (template_root / "base.html").read_text(encoding="utf-8")
     for retired_href in ("/{{ group }}/documents", "/{{ group }}/prompts", "/{{ group }}/memory"):
@@ -319,10 +319,10 @@ def test_setup_skill_copilot_setup_is_automatic_not_manual_junction():
 
 
 def test_non_domain_group_tokens_remain_unchanged():
-    base = (REPO_ROOT / "agency" / "templates" / "base.html").read_text(encoding="utf-8")
-    home = (REPO_ROOT / "agency" / "templates" / "home.html").read_text(encoding="utf-8")
-    agents = (REPO_ROOT / "agency" / "templates" / "agents.html").read_text(encoding="utf-8")
-    schedule = (REPO_ROOT / "agency" / "dispatch" / "schedule.py").read_text(encoding="utf-8")
+    base = (REPO_ROOT / "flowgency" / "templates" / "base.html").read_text(encoding="utf-8")
+    home = (REPO_ROOT / "flowgency" / "templates" / "home.html").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "flowgency" / "templates" / "agents.html").read_text(encoding="utf-8")
+    schedule = (REPO_ROOT / "flowgency" / "dispatch" / "schedule.py").read_text(encoding="utf-8")
 
     assert " group" in base or " group" in home
     assert "group-hover:" in base or "group-hover:" in home

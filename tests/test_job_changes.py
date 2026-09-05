@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from agency.integrations import FileChange
-from agency.jobs.changes import capture_base_sha, capture_git_changes
+from flowgency.integrations import FileChange
+from flowgency.jobs.changes import capture_base_sha, capture_git_changes
 
 
 def _git(root: Path, *args: str) -> None:

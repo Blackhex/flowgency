@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agency.jobs.launcher import _systemd_available
-from agency.jobs.store import read_job
+from flowgency.jobs.launcher import _systemd_available
+from flowgency.jobs.store import read_job
 
 _SKIP_REASON = (
     "Requires Linux with user systemd manager and AGENCY_TEST_SYSTEMD=1"
@@ -81,7 +81,7 @@ def test_systemd_worker_survives_submitter_exit(tmp_path):
     submitter_script = tmp_path / "submitter.py"
     submitter_script.write_text(
         "import pathlib, sys\n"
-        "from agency.jobs import JobRequest, submit_job_request\n"
+        "from flowgency.jobs import JobRequest, submit_job_request\n"
         "config, job_id_file = map(pathlib.Path, sys.argv[1:])\n"
         "request = JobRequest(config_path=config, team_key='test', "
         "agent_name='product', trigger='manual_prompt', task_input='run', routine_id='run-product')\n"

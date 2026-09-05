@@ -1,0 +1,11 @@
+integrations:
+  - flowgency.claude_code
+  - flowgency.codex
+  - flowgency.copilot
+  - flowgency.gemini
+  - flowgency.aider
+  - flowgency.goose
+  - flowgency.opencode
+  - flowgency.pi
+  - flowgency.script
+  - flowgency.sdk

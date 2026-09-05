@@ -4,9 +4,9 @@ from pathlib import Path
 
 import yaml
 
-from agency.blueprints import BlueprintLibrary
-from agency.configuration import ConfigStore
-from agency.prompts import PromptStore, validate_prompt_catalogs
+from flowgency.blueprints import BlueprintLibrary
+from flowgency.configuration import ConfigStore
+from flowgency.prompts import PromptStore, validate_prompt_catalogs
 
 
 VALID_PROMPT = "---\nname: diff-review\ndescription: Review the change set.\n---\n\nReview it.\n"
@@ -122,7 +122,7 @@ def test_name_collision_across_scopes_keeps_its_own_code_and_hint(tmp_path):
 def _client(monkeypatch, tmp_path, config_path):
     from fastapi.testclient import TestClient
 
-    from agency import app as app_mod
+    from flowgency import app as app_mod
 
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
@@ -181,7 +181,7 @@ def test_missing_instance_prompt_still_reports_its_own_code(tmp_path):
 
 
 def test_build_services_reports_prompt_issues_without_failing_startup(tmp_path):
-    from agency.web.dependencies import build_services
+    from flowgency.web.dependencies import build_services
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -195,7 +195,7 @@ def test_build_services_reports_prompt_issues_without_failing_startup(tmp_path):
 
 
 def test_build_services_reports_no_prompt_issues_for_a_valid_library(tmp_path):
-    from agency.web.dependencies import build_services
+    from flowgency.web.dependencies import build_services
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", VALID_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -238,7 +238,7 @@ def test_roster_reports_malformed_blueprint_not_referenced_by_any_agent(monkeypa
 
 
 def test_validate_command_reports_the_prompt_issue(tmp_path, capsys):
-    from agency import cli
+    from flowgency import cli
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -252,7 +252,7 @@ def test_validate_command_reports_the_prompt_issue(tmp_path, capsys):
 
 
 def test_validate_command_succeeds_for_a_valid_library(tmp_path, capsys):
-    from agency import cli
+    from flowgency import cli
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", VALID_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -265,7 +265,7 @@ def test_validate_command_succeeds_for_a_valid_library(tmp_path, capsys):
 
 
 def test_validate_reports_orphan_malformed_blueprint(tmp_path, capsys):
-    from agency import cli
+    from flowgency import cli
 
     _write_blueprint(tmp_path / "agent-library", "orphan", NO_FRONTMATTER_PROMPT)
     config_path = _write_config(tmp_path, [])
@@ -278,7 +278,7 @@ def test_validate_reports_orphan_malformed_blueprint(tmp_path, capsys):
 
 
 def test_validate_deduplicates_broken_blueprint_referenced_and_in_library(tmp_path, capsys):
-    from agency import cli
+    from flowgency import cli
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -291,7 +291,7 @@ def test_validate_deduplicates_broken_blueprint_referenced_and_in_library(tmp_pa
 
 
 def test_validate_succeeds_when_library_has_dot_git_dir(tmp_path, capsys):
-    from agency import cli
+    from flowgency import cli
 
     library_root = tmp_path / "agent-library"
     _write_blueprint(library_root, "reviewer", VALID_PROMPT)
@@ -332,7 +332,7 @@ def test_blueprint_tab_returns_200_for_broken_catalog(monkeypatch, tmp_path):
 
 def test_routines_post_shows_catalog_issue_and_parse_issue_together(monkeypatch, tmp_path):
     """Broken catalog: both the root cause and the per-routine parse error must appear."""
-    from agency.configuration import ConfigStore
+    from flowgency.configuration import ConfigStore
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])

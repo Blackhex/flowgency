@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agency.blueprints.library import BlueprintLibrary
-from agency.configuration import ConfigConflictError, ConfigStore, ValidationFailed
-from agency.prompts import (
+from flowgency.blueprints.library import BlueprintLibrary
+from flowgency.configuration import ConfigConflictError, ConfigStore, ValidationFailed
+from flowgency.prompts import (
     PromptConflictError,
     PromptNotFoundError,
     PromptService,

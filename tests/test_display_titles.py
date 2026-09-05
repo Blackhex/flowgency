@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agency.app import extract_display_title
+from flowgency.app import extract_display_title
 
 
 class TestExtractDisplayTitle:

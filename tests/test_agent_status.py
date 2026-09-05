@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from agency import app as app_module
-from agency.app import (
+from flowgency import app as app_module
+from flowgency.app import (
     _apply_agent_status,
     _job_finished_at,
     compute_next_run,
@@ -17,10 +17,10 @@ from agency.app import (
     is_agent_running,
     relative_future,
 )
-from agency.dispatch.schedule import at_marker_path
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import job_path, write_job
+from flowgency.dispatch.schedule import at_marker_path
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import job_path, write_job
 
 
 def _team(tmp_path):
@@ -410,7 +410,7 @@ def _fleet_team(tmp_path, routines):
 def _enrich(tmp_path, routines):
     g = _fleet_team(tmp_path, routines)
     agent = {"name": "product"}
-    with patch("agency.app.clock_now", return_value=NOW):
+    with patch("flowgency.app.clock_now", return_value=NOW):
         _apply_agent_status(g, agent, routines, ENABLED_DISPATCH)
     return agent
 
@@ -446,7 +446,7 @@ def test_enricher_ignores_schedules_when_dispatch_is_off(tmp_path):
     g = _fleet_team(tmp_path, [{"id": "suite-health", "schedule": {"at": "08:00"}}])
     g["dispatch"] = {"enabled": False}
     agent = {"name": "product"}
-    with patch("agency.app.clock_now", return_value=NOW):
+    with patch("flowgency.app.clock_now", return_value=NOW):
         _apply_agent_status(g, agent, g["agents_full"][0]["routines"], {"enabled": False})
     assert agent["health_kind"] == "never_run"
     assert agent["next_run"] is None

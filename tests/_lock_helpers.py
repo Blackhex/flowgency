@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.fs.locks import exclusive_lock
+from flowgency.fs.locks import exclusive_lock
 
 
 def hold_exclusive_lock(lock_path: str, acquired, release, release_timeout: float) -> None:

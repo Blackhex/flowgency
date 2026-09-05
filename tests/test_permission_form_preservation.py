@@ -8,9 +8,9 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 
-import agency.app as app_mod
-from agency.configuration import ConfigStore
-from agency.configuration.patches import (
+import flowgency.app as app_mod
+from flowgency.configuration import ConfigStore
+from flowgency.configuration.patches import (
     AgentRuntimePatch,
     TeamSettingsStatePatch,
     patch_team_settings_state,
@@ -204,7 +204,7 @@ def test_agent_runtime_timeout_only_preserves_rules(tmp_path, monkeypatch, raw_c
     before = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     before_rules = deepcopy(before["teams"]["newsletter"]["agents"][0]["runtime"]["permissions"])
     revision = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    from agency.configuration import ConfigStore
+    from flowgency.configuration import ConfigStore
     rev = ConfigStore(config_path).load().revision
 
     response = client.post(
@@ -228,7 +228,7 @@ def test_agent_runtime_form_round_trips_rules(tmp_path, monkeypatch, raw_config)
     client, config_path = _make_agent_client(monkeypatch, tmp_path, raw_config)
     before = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     before_rules = before["teams"]["newsletter"]["agents"][0]["runtime"]["permissions"]["rules"]
-    from agency.configuration import ConfigStore
+    from flowgency.configuration import ConfigStore
     rev = ConfigStore(config_path).load().revision
     extra = tmp_path / "extra"
     rules_yaml = yaml.safe_dump(
@@ -482,7 +482,7 @@ def test_agent_patch_none_leaves_rules_alone(tmp_path, raw_config):
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
 
     from copy import deepcopy as dc
-    from agency.web.routes.agent_detail import _apply_runtime_patch
+    from flowgency.web.routes.agent_detail import _apply_runtime_patch
     raw_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     _apply_runtime_patch(raw_data, "grp", "bot", AgentRuntimePatch(timeout=1801, rules=None))
@@ -529,7 +529,7 @@ def test_agent_patch_empty_tuple_clears_rules(tmp_path, raw_config):
     }
     config_path = _write_yaml(tmp_path / "config.yaml", raw)
 
-    from agency.web.routes.agent_detail import _apply_runtime_patch
+    from flowgency.web.routes.agent_detail import _apply_runtime_patch
     raw_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     _apply_runtime_patch(raw_data, "grp", "bot", AgentRuntimePatch(timeout=900, rules=()))

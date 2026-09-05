@@ -1,8 +1,8 @@
 import pytest
-from agency.configuration import ValidationFailed
-from agency.integrations.agency.script import ScriptIntegration
-from agency.integrations import AgentIdentity
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
+from flowgency.configuration import ValidationFailed
+from flowgency.integrations.flowgency.script import ScriptIntegration
+from flowgency.integrations import AgentIdentity
+from flowgency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
 
 
 @pytest.fixture

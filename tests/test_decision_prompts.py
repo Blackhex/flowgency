@@ -1,5 +1,5 @@
 """Tests for immutable prompt construction with decision notes."""
-from agency.jobs.prompts import build_decision_prompt
+from flowgency.jobs.prompts import build_decision_prompt
 
 
 def test_decision_prompt_includes_note_and_decline_semantics():

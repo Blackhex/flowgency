@@ -8,8 +8,8 @@ import time
 import pytest
 import yaml
 
-from agency.jobs.authority import JobStore
-from agency.jobs.store import read_job
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.store import read_job
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -39,7 +39,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     # installed schema version doesn't match.
     probe = subprocess.run(
         [sys.executable, "-c",
-         "from agency.configuration.models import CONFIG_SCHEMA_VERSION; print(CONFIG_SCHEMA_VERSION)"],
+         "from flowgency.configuration.models import CONFIG_SCHEMA_VERSION; print(CONFIG_SCHEMA_VERSION)"],
         capture_output=True, text=True, cwd=tmp_path,
     )
     if probe.returncode != 0 or probe.stdout.strip() != "5":
@@ -107,7 +107,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     submitter_script.write_text(
         f"import sys; sys.path.insert(0, {worktree_root!r})\n"
         "import os, pathlib\n"
-        "from agency.jobs import JobRequest, submit_job_request\n"
+        "from flowgency.jobs import JobRequest, submit_job_request\n"
         "config, job_id_file, pid_file = map(pathlib.Path, sys.argv[1:])\n"
         "request = JobRequest(config_path=config, team_key='test', "
         "agent_name='product', trigger='decision', task_input='run')\n"

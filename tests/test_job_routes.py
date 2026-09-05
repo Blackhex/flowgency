@@ -8,10 +8,10 @@ from urllib.parse import quote
 import yaml
 from fastapi.testclient import TestClient
 
-from agency import app as app_mod
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import read_job, transition_job, write_job
+from flowgency import app as app_mod
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import read_job, transition_job, write_job
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -423,7 +423,7 @@ def test_job_detail_hides_resume_without_session(monkeypatch, tmp_path, raw_conf
 
 
 def test_job_detail_hides_resume_without_integration_support(monkeypatch, tmp_path, raw_config):
-    from agency.integrations.agency.copilot import CopilotIntegration
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(team_root, config_path, job_id="job-unsup", session_id="sess-9")
@@ -436,8 +436,8 @@ def test_job_detail_hides_resume_without_integration_support(monkeypatch, tmp_pa
 
 
 def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config):
-    import agency.web.routes.jobs as jobs_mod
-    from agency.integrations.agency.copilot import CopilotIntegration
+    import flowgency.web.routes.jobs as jobs_mod
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(team_root, config_path, job_id="job-spawn", session_id="sess-2")
@@ -460,9 +460,9 @@ def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config)
 
 
 def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
-    import agency.web.routes.jobs as jobs_mod
-    from agency.integrations import IntegrationError
-    from agency.integrations.agency.copilot import CopilotIntegration
+    import flowgency.web.routes.jobs as jobs_mod
+    from flowgency.integrations import IntegrationError
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(team_root, config_path, job_id="job-nospawn", session_id="sess-3")
@@ -480,7 +480,7 @@ def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
 
 
 def test_resume_rejects_unsafe_session_id(monkeypatch, tmp_path, raw_config):
-    import agency.web.routes.jobs as jobs_mod
+    import flowgency.web.routes.jobs as jobs_mod
 
     client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(
@@ -510,8 +510,8 @@ def test_resume_unknown_job_is_not_found(monkeypatch, tmp_path, raw_config):
 
 def test_resume_spawns_terminal_carries_copilot_home(monkeypatch, tmp_path, raw_config):
     import os
-    import agency.web.routes.jobs as jobs_mod
-    from agency.integrations.agency.copilot import CopilotIntegration
+    import flowgency.web.routes.jobs as jobs_mod
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     home_path = tmp_path / ".copilot-job"
@@ -538,8 +538,8 @@ def test_resume_spawns_terminal_carries_copilot_home(monkeypatch, tmp_path, raw_
 
 
 def test_resume_spawns_terminal_no_env_without_copilot_home(monkeypatch, tmp_path, raw_config):
-    import agency.web.routes.jobs as jobs_mod
-    from agency.integrations.agency.copilot import CopilotIntegration
+    import flowgency.web.routes.jobs as jobs_mod
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     client, config_path, team_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(team_root, config_path, job_id="job-noenv", session_id="sess-ne")

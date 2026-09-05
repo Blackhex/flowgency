@@ -4,9 +4,9 @@ import stat
 
 import pytest
 
-from agency.configuration.models import MemorySelector
-from agency.fs.locks import ResourceBusyError
-from agency.memory import (
+from flowgency.configuration.models import MemorySelector
+from flowgency.fs.locks import ResourceBusyError
+from flowgency.memory import (
     MemoryConflictError,
     MemoryStage,
     MemoryStore,
@@ -23,7 +23,7 @@ PROCESS_JOIN_TIMEOUT = 15
 
 
 def _hold_memory_lock(lock_path: str, acquired: Event, release: Event) -> None:
-    from agency.fs.locks import exclusive_lock
+    from flowgency.fs.locks import exclusive_lock
 
     with exclusive_lock(Path(lock_path), wait=True):
         acquired.set()
@@ -482,7 +482,7 @@ def test_try_save_uses_direct_save_journal_and_cleans_transaction_evidence(
         phases.append((operation.kind, phase))
 
     monkeypatch.setattr(
-        "agency.memory.publication._transaction_checkpoint",
+        "flowgency.memory.publication._transaction_checkpoint",
         observe,
     )
 
@@ -515,7 +515,7 @@ def test_try_save_rolls_back_if_install_fails_after_evacuating_old_files(
         seeded.revision,
         original,
     )
-    from agency.memory import store as memory_store_module
+    from flowgency.memory import store as memory_store_module
 
     real_move = memory_store_module._install_path
     state = {"new_moves": 0}
@@ -530,7 +530,7 @@ def test_try_save_rolls_back_if_install_fails_after_evacuating_old_files(
         return result
 
     monkeypatch.setattr(
-        "agency.memory.store._install_path",
+        "flowgency.memory.store._install_path",
         fail_after_first_new_move,
     )
 
@@ -566,7 +566,7 @@ def test_try_save_rolls_back_if_install_fails_immediately_after_evacuation(
         seeded.revision,
         original,
     )
-    from agency.memory import store as memory_store_module
+    from flowgency.memory import store as memory_store_module
 
     real_move = memory_store_module._install_path
 
@@ -577,7 +577,7 @@ def test_try_save_rolls_back_if_install_fails_immediately_after_evacuation(
         return real_move(src, dst)
 
     monkeypatch.setattr(
-        "agency.memory.store._install_path",
+        "flowgency.memory.store._install_path",
         fail_on_first_new_move,
     )
 
@@ -606,7 +606,7 @@ def test_try_save_preserves_backup_if_rollback_recovery_fails(
         seeded.revision,
         original,
     )
-    from agency.memory import store as memory_store_module
+    from flowgency.memory import store as memory_store_module
 
     real_install = memory_store_module._install_path
     state = {"new_failed": False, "restore_attempts": 0}
@@ -625,8 +625,8 @@ def test_try_save_preserves_backup_if_rollback_recovery_fails(
         state["restore_attempts"] += 1
         raise OSError("restore failed")
 
-    monkeypatch.setattr("agency.memory.store._install_path", fail_install)
-    monkeypatch.setattr("agency.memory.store._restore_path", fail_restore)
+    monkeypatch.setattr("flowgency.memory.store._install_path", fail_install)
+    monkeypatch.setattr("flowgency.memory.store._restore_path", fail_restore)
 
     with pytest.raises(RuntimeError, match="recovery failed") as excinfo:
         memory_store.try_save(

@@ -1,9 +1,9 @@
 import pytest
 from pathlib import Path
-from agency.configuration import ValidationFailed
-from agency.integrations.agency.claude_code import ClaudeCodeIntegration
-from agency.integrations import AgentIdentity
-from agency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
+from flowgency.configuration import ValidationFailed
+from flowgency.integrations.flowgency.claude_code import ClaudeCodeIntegration
+from flowgency.integrations import AgentIdentity
+from flowgency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
 
 
 @pytest.fixture
