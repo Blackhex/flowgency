@@ -5,7 +5,7 @@
       <linearGradient id="cf-blue" x1=".1" y1="1" x2=".85" y2="0"><stop offset="0" stop-color="#263d7b"/><stop offset=".57" stop-color="#31549f"/><stop offset="1" stop-color="#4b6ab3"/></linearGradient>
       <linearGradient id="cf-red" x1="0" y1=".75" x2="1" y2=".15"><stop offset="0" stop-color="#b84435"/><stop offset=".58" stop-color="#d5563f"/><stop offset="1" stop-color="#e57252"/></linearGradient>
       <linearGradient id="cf-gold" x1="0" y1=".8" x2="1" y2=".1"><stop offset="0" stop-color="#b77b21"/><stop offset=".58" stop-color="#dda42f"/><stop offset="1" stop-color="#ebbd52"/></linearGradient>
-      <linearGradient id="cf-fruit" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#668d70"/><stop offset=".5" stop-color="#4f745d"/><stop offset="1" stop-color="#365846"/></linearGradient>
+      <linearGradient id="cf-fruit" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#668d70"/><stop offset="1" stop-color="#365846"/></linearGradient>
       <filter id="cf-edge" x="-8%" y="-8%" width="116%" height="116%"><feTurbulence type="fractalNoise" baseFrequency=".008 .02" numOctaves="2" seed="71" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="1.2"/></filter>
       <path id="cf-stem" d="M86 0C119 21 165 70 174 116c3 50-21 92-34 136-16 53-10 108 25 157 11 15 4 31-14 34-21 3-35-8-44-24-29-53-30-114-11-174 15-49 37-87 34-129C128 79 105 35 86 0Z"/>
       <clipPath id="cf-stem-clip"><use href="#cf-stem"/></clipPath>
