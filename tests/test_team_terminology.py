@@ -32,6 +32,7 @@ def test_active_documents_use_v1_team_control_plane():
     assert "christag-agency config migrate" not in text
     assert "capabilities:" not in text
     assert "  sandbox:" not in text
+    assert "\nagency:\n" not in text, "YAML root key must be 'flowgency:', not 'agency:'"
 
 
 def test_setup_assets_use_team_domain_terms():

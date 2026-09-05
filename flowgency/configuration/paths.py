@@ -235,15 +235,15 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
     memory = Path(config.flowgency.memory_store).resolve(strict=False)
     prompt_store = Path(config.flowgency.prompt_store).resolve(strict=False)
     control_authorities = (
-        _Authority("agency", "agent_library", "agency.agent_library", library),
+        _Authority("flowgency", "agent_library", "flowgency.agent_library", library),
         _Authority(
-            "agency",
+            "flowgency",
             "compilation_cache",
-            "agency.compilation_cache",
+            "flowgency.compilation_cache",
             cache,
         ),
-        _Authority("agency", "memory_store", "agency.memory_store", memory),
-        _Authority("agency", "prompt_store", "agency.prompt_store", prompt_store),
+        _Authority("flowgency", "memory_store", "flowgency.memory_store", memory),
+        _Authority("flowgency", "prompt_store", "flowgency.prompt_store", prompt_store),
     )
     team_paths = {
         team_id: resolve_team_paths(team)
@@ -254,7 +254,7 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
         _validate_existing_directory(
             library,
             code="invalid-agent-library",
-            scope="agency",
+            scope="flowgency",
             field="agent_library",
             writable=False,
         )
@@ -263,7 +263,7 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
         _validate_creatable_directory(
             cache,
             code="invalid-control-directory",
-            scope="agency",
+            scope="flowgency",
             field="compilation_cache",
         )
     )
@@ -271,7 +271,7 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
         _validate_creatable_directory(
             memory,
             code="invalid-control-directory",
-            scope="agency",
+            scope="flowgency",
             field="memory_store",
         )
     )
@@ -279,7 +279,7 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
         _validate_creatable_directory(
             prompt_store,
             code="invalid-control-directory",
-            scope="agency",
+            scope="flowgency",
             field="prompt_store",
         )
     )

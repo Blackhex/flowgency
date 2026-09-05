@@ -25,7 +25,7 @@ def test_repository_skill_paths_resolve_to_package_owned_source():
 
 def test_setup_creates_standard_global_agent_library_blueprints():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    assert "agency.agent_library" in skill
+    assert "flowgency.agent_library" in skill
     assert "{agent_library}/{blueprint}/AGENTS.md" in skill
     assert "{agent_library}/{blueprint}/.agents/skills/{skill}/SKILL.md" in skill
     assert "standard Agent Skills" in skill
@@ -51,7 +51,7 @@ def test_setup_guidance_keeps_blueprint_skills_optional():
     exact_tree_fence = "```text\n{agent_library}/{blueprint}/\n`-- AGENTS.md\n```"
     assert exact_tree_fence in skill_text, "skill"
     assert skill_text.count(
-        "After the consolidated path summary is approved, create the approved `agency.agent_library`"
+        "After the consolidated path summary is approved, create the approved `flowgency.agent_library`"
     ) == 1, "skill contains a duplicated opening paragraph"
     # Fail if someone wrapped the replacement in a nested markdown fence
     assert "```markdown" not in skill_text, "skill contains unexpected nested markdown fence"
@@ -60,7 +60,7 @@ def test_setup_guidance_keeps_blueprint_skills_optional():
 def test_setup_registers_explicit_instances_routines_and_memory():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     assert "one authoritative canonical Agency config" in skill
-    assert "agency.agent_library" in skill
+    assert "flowgency.agent_library" in skill
     assert "blueprint:" in skill
     assert "integration:" in skill
     assert "routines:" in skill
@@ -134,10 +134,10 @@ def test_setup_derives_canonical_paths_from_one_data_root():
         "nearest existing parent is a writable real directory that can safely create it",
         r"C:\Agency",
         "~/Agency",
-        "agency.agent_library = <root>/agent-library",
-        "agency.compilation_cache = <root>/compiled-agents",
-        "agency.memory_store = <root>/memory",
-        "agency.prompt_store = <root>/prompts",
+        "flowgency.agent_library = <root>/agent-library",
+        "flowgency.compilation_cache = <root>/compiled-agents",
+        "flowgency.memory_store = <root>/memory",
+        "flowgency.prompt_store = <root>/prompts",
         "teams.<team-id>.path = <root>/teams/<team-id>",
         "teams.<team-id>.workspace_path = <project workspace>",
     ):
@@ -180,7 +180,7 @@ def test_setup_docs_present_one_data_root_default():
         "workspace_path is project source and execution",
         "path is Agency-owned team state",
         "Agency never loads or creates <workspace_path>/shared",
-        "durable jobs live in agency.memory_store/.jobs",
+        "durable jobs live in flowgency.memory_store/.jobs",
         "operation locks live in <team.path>/locks",
     ):
         assert phrase in templates

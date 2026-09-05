@@ -57,7 +57,7 @@ def test_only_schema_one_is_accepted(raw_config, config_paths):
         )
 
 
-def test_schema_five_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
+def test_v1_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
     from flowgency.configuration.models import PromptSelector, parse_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])

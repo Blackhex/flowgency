@@ -959,7 +959,7 @@ def _collect_post_parse_issues(parsed: ParsedConfig) -> list[ValidationIssue]:
             issues.append(
                 _build_issue(
                     code=f"invalid-{field_name}",
-                    scope="agency",
+                    scope="flowgency",
                     field=field_name,
                     message=f"{field_name} must resolve to an absolute path.",
                     hint="Use a path relative to the config directory or an absolute path.",

@@ -195,8 +195,8 @@ def test_initialization_creates_team_state_but_not_workspace_shared(
 @pytest.mark.parametrize(
     ("field", "other_authority"),
     [
-        ("workspace_path", "agency.memory_store"),
-        ("path", "agency.agent_library"),
+        ("workspace_path", "flowgency.memory_store"),
+        ("path", "flowgency.agent_library"),
         ("path", "teams.other.path"),
         ("path", "teams.other.workspace_path"),
         ("workspace_path", "path"),
@@ -212,9 +212,9 @@ def test_team_authorities_must_not_overlap(
     team["workspace_path"] = str(workspace)
     team["path"] = str(tmp_path / "groups" / "newsletter")
 
-    if other_authority.startswith("agency."):
-        _, agency_field = other_authority.split(".", 1)
-        team[field] = raw["flowgency"][agency_field]
+    if other_authority.startswith("flowgency."):
+        _, flowgency_field = other_authority.split(".", 1)
+        team[field] = raw["flowgency"][flowgency_field]
     elif other_authority == "path":
         team[field] = team["path"]
     else:
@@ -361,3 +361,43 @@ def test_prepare_writable_directory_rejects_inaccessible_existing_root(
         match="Agency data root is not readable and writable",
     ):
         prepare_writable_directory(root, label="Agency data root")
+
+
+def test_global_store_path_issues_report_flowgency_scope(tmp_path, raw_config):
+    raw = deepcopy(raw_config)
+    bad = tmp_path / "not-a-dir.txt"
+    bad.write_text("x", encoding="utf-8")
+    raw["flowgency"]["agent_library"] = str(bad)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    raw["teams"]["newsletter"]["workspace_path"] = str(workspace)
+    raw["teams"]["newsletter"]["path"] = str(tmp_path / "groups" / "newsletter")
+    config = parse_config(raw, tmp_path / "config.yaml").resolved
+
+    issues = validate_resolved_paths(config)
+
+    assert any(
+        issue.code == "invalid-agent-library" and issue.scope == "flowgency"
+        for issue in issues
+    ), f"Expected flowgency scope; got {[(i.code, i.scope) for i in issues]}"
+
+
+def test_overlap_message_uses_flowgency_authority_labels(tmp_path, raw_config):
+    raw = deepcopy(raw_config)
+    library = tmp_path / "library"
+    library.mkdir()
+    raw["flowgency"]["agent_library"] = str(library)
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
+    raw["flowgency"]["memory_store"] = str(tmp_path / "memory")
+    raw["flowgency"]["prompt_store"] = str(tmp_path / "prompts")
+    # Overlap team workspace with the agent_library directory
+    raw["teams"]["newsletter"]["workspace_path"] = str(library)
+    raw["teams"]["newsletter"]["path"] = str(tmp_path / "groups" / "newsletter")
+    config = parse_config(raw, tmp_path / "config.yaml").resolved
+
+    issues = validate_resolved_paths(config)
+
+    overlap = [i for i in issues if i.code == "unsafe-path-overlap"]
+    assert overlap, "Expected unsafe-path-overlap issues"
+    assert any("flowgency.agent_library" in i.message for i in overlap)
+    assert not any("agency.agent_library" in i.message for i in overlap)

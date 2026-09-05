@@ -44,11 +44,11 @@ C:/Agency/
     `-- example/
 ```
 
-Map those derived paths to the schema version 6 fields and keep the execution workspace separate from Agency-owned state:
+Map those derived paths to the schema version 1 fields and keep the execution workspace separate from Flowgency-owned state:
 
 ```yaml
 schema_version: 1
-agency:
+flowgency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents
   memory_store: C:/Agency/memory
@@ -59,7 +59,7 @@ teams:
     path: C:/Agency/teams/example
 ```
 
-workspace_path is project source and execution. path is Agency-owned team state. Agency never loads or creates <workspace_path>/shared. durable jobs live in agency.memory_store/.jobs, and operation locks live in <team.path>/locks.
+workspace_path is project source and execution. path is Agency-owned team state. Agency never loads or creates <workspace_path>/shared. durable jobs live in flowgency.memory_store/.jobs, and operation locks live in <team.path>/locks.
 
 The project workspace stays at `teams.<team-id>.workspace_path`, while the derived root-backed fields remain Agency-owned storage.
 

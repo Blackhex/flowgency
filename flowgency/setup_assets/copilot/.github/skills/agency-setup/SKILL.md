@@ -58,10 +58,10 @@ then continue. Do not fall back to a stock team.
 Derive these paths in memory without creating them:
 
 ```text
-agency.agent_library = <root>/agent-library
-agency.compilation_cache = <root>/compiled-agents
-agency.memory_store = <root>/memory
-agency.prompt_store = <root>/prompts
+flowgency.agent_library = <root>/agent-library
+flowgency.compilation_cache = <root>/compiled-agents
+flowgency.memory_store = <root>/memory
+flowgency.prompt_store = <root>/prompts
 teams.<team-id>.path = <root>/teams/<team-id>
 teams.<team-id>.workspace_path = <project workspace>
 ```
@@ -205,7 +205,7 @@ Resolve every effective path before creation. Require that each missing effectiv
 
 Show one consolidated path summary containing the project workspace, authoritative config path, Agency data root, and five effective storage paths. No derived directory or blueprint may be created before the user approves this summary.
 
-When the launch prompt contains `Authoritative config:`, use that exact path and do not search for or choose another config. When the skill is invoked manually without an explicit authoritative path, find one config in this order: a valid `AGENCY_CONFIG`, the current project's config, then common user-level Agency locations. Parse YAML and accept only a mapping where the required `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store` paths are present.
+When the launch prompt contains `Authoritative config:`, use that exact path and do not search for or choose another config. When the skill is invoked manually without an explicit authoritative path, find one config in this order: a valid `FLOWGENCY_CONFIG`, the current project's config, then common user-level Flowgency locations. Parse YAML and accept only a mapping where the required `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store` paths are present.
 
 If no config exists, record the absent revision and defer creation and replacement until Section 5. Do not write a placeholder or partial config. If an existing candidate is invalid or superseded, report validation errors and stop; never invoke another skill, never scan or convert superseded authority, and never convert old layouts. During manual invocation, if multiple canonical configs remain, ask the user which is authoritative; never choose implicitly.
 
@@ -213,7 +213,7 @@ Load the current revision before editing, or use the absent revision when the fi
 
 ## 3. Build The Agent Library
 
-After the consolidated path summary is approved, create the approved `agency.agent_library` through safe directory operations; do not place blueprints under the project workspace. For each approved role, always create:
+After the consolidated path summary is approved, create the approved `flowgency.agent_library` through safe directory operations; do not place blueprints under the project workspace. For each approved role, always create:
 
 ```text
 {agent_library}/{blueprint}/
@@ -230,11 +230,11 @@ rationale, coverage map, or project-specific ownership text into blueprint
 source merely because it appeared in the approved profile. They do not contain
 identity, integration, schedules, runtime policy, or mutable memory. Do not
 create runtime-native `CLAUDE.md` or `GEMINI.md`; Agency's projector creates
-disposable native layouts in `agency.compilation_cache`.
+disposable native layouts in `flowgency.compilation_cache`.
 
 ## 4. Register Instances
 
-Upsert one team whose `workspace_path` points to the project workspace and whose `path` points to the Agency-owned team-state root. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned team root. The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`. Preserve existing team workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the team; instance roots are additive and an instance tool policy is a complete override.
+Upsert one team whose `workspace_path` points to the project workspace and whose `path` points to the Agency-owned team-state root. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned team root. The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`. Preserve existing team workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the team; instance roots are additive and an instance tool policy is a complete override.
 
 Use this canonical shape:
 
