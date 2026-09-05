@@ -74,7 +74,7 @@ from flowgency.web.routes import (
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-CONFIG_PATH = Path(os.environ.get("AGENCY_CONFIG") or Path.cwd() / "config.yaml").expanduser().resolve()
+CONFIG_PATH = Path(os.environ.get("FLOWGENCY_CONFIG") or Path.cwd() / "config.yaml").expanduser().resolve()
 
 
 def refresh_services() -> FlowgencyServices:

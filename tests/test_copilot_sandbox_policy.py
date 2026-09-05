@@ -39,13 +39,13 @@ def test_generated_zone_rules_are_rendered(tmp_path):
     settings, _ = build_sandbox_settings(
         policy(
             rule(launch / "instructions", ("read",), generated=True),
-            rule(launch / ".agency" / "outbox", ("read", "write"), generated=True),
+            rule(launch / ".flowgency" / "outbox", ("read", "write"), generated=True),
         )
     )
     fs = settings["sandbox"]["userPolicy"]["filesystem"]
 
     assert str(launch / "instructions") in fs["readonlyPaths"]
-    assert str(launch / ".agency" / "outbox") in fs["readwritePaths"]
+    assert str(launch / ".flowgency" / "outbox") in fs["readwritePaths"]
 
 
 def test_omitted_tools_is_writable(tmp_path):
@@ -148,7 +148,7 @@ def test_generated_zones_alone_do_not_confine_an_unrestricted_policy(tmp_path):
     settings, _ = build_sandbox_settings(
         policy(
             rule(launch / "instructions", ("read",), generated=True),
-            rule(launch / ".agency" / "outbox", ("read", "write"), generated=True),
+            rule(launch / ".flowgency" / "outbox", ("read", "write"), generated=True),
             mode="unrestricted",
         )
     )
@@ -160,7 +160,7 @@ def test_an_authored_rule_confines_even_alongside_generated_zones(tmp_path):
     launch = tmp_path / "launch"
     settings, _ = build_sandbox_settings(
         policy(
-            rule(launch / ".agency" / "outbox", ("read", "write"), generated=True),
+            rule(launch / ".flowgency" / "outbox", ("read", "write"), generated=True),
             rule(tmp_path / "ws", ("read",)),
             mode="unrestricted",
         )
@@ -169,4 +169,4 @@ def test_an_authored_rule_confines_even_alongside_generated_zones(tmp_path):
 
     assert settings["sandbox"]["enabled"] is True
     assert str(tmp_path / "ws") in fs["readonlyPaths"]
-    assert str(launch / ".agency" / "outbox") in fs["readwritePaths"]
+    assert str(launch / ".flowgency" / "outbox") in fs["readwritePaths"]

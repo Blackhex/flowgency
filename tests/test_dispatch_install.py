@@ -65,7 +65,7 @@ def test_install_windows_registers_task():
     assert action.WorkingDirectory == str(_Path(_install_mod.__file__).parent.parent.parent)
     folder.RegisterTaskDefinition.assert_called_once()
     reg_args = folder.RegisterTaskDefinition.call_args.args
-    assert reg_args[0] == "AgencyDispatch"
+    assert reg_args[0] == "FlowgencyDispatch"
     assert reg_args[2] == 6   # TASK_CREATE_OR_UPDATE
     assert reg_args[5] == 3   # TASK_LOGON_INTERACTIVE_TOKEN
 
@@ -154,7 +154,7 @@ def test_uninstall_windows_deletes_task():
         err = uninstall_timer("C:\\config.yaml")
 
     assert err is None
-    folder.DeleteTask.assert_called_once_with("AgencyDispatch", 0)
+    folder.DeleteTask.assert_called_once_with("FlowgencyDispatch", 0)
 
 
 def test_uninstall_windows_missing_task_is_success():
@@ -418,11 +418,11 @@ def test_linux_status_reports_wrong_config_and_interval(tmp_path, monkeypatch):
     python_path = tmp_path / "python3"
     unit_dir = tmp_path / "systemd"
     unit_dir.mkdir()
-    (unit_dir / "agency-dispatch.service").write_text(
+    (unit_dir / "flowgency-dispatch.service").write_text(
         f'ExecStart="{python_path}" -m flowgency.dispatch.run --config "{other.resolve()}"\n',
         encoding="utf-8",
     )
-    (unit_dir / "agency-dispatch.timer").write_text(
+    (unit_dir / "flowgency-dispatch.timer").write_text(
         "[Timer]\nOnUnitActiveSec=30m\n",
         encoding="utf-8",
     )
@@ -467,10 +467,10 @@ def test_macos_status_reports_wrong_module_and_interval(tmp_path, monkeypatch):
     python_path = tmp_path / "python3"
     launch_agents = tmp_path / "LaunchAgents"
     launch_agents.mkdir()
-    with (launch_agents / "com.agency.dispatch.plist").open("wb") as plist_file:
+    with (launch_agents / "com.flowgency.dispatch.plist").open("wb") as plist_file:
         plistlib.dump(
             {
-                "Label": "com.agency.dispatch",
+                "Label": "com.flowgency.dispatch",
                 "ProgramArguments": [
                     str(python_path),
                     "-m",
@@ -498,7 +498,7 @@ def test_macos_status_reports_wrong_module_and_interval(tmp_path, monkeypatch):
 def test_uninstall_linux_removes_both_units(tmp_path, monkeypatch):
     unit_dir = tmp_path / "systemd"
     unit_dir.mkdir()
-    for name in ("agency-dispatch.timer", "agency-dispatch.service"):
+    for name in ("flowgency-dispatch.timer", "flowgency-dispatch.service"):
         (unit_dir / name).write_text("unit", encoding="utf-8")
     calls = []
     monkeypatch.setattr(dispatch_install, "SYSTEMD_USER_DIR", unit_dir)
@@ -508,15 +508,15 @@ def test_uninstall_linux_removes_both_units(tmp_path, monkeypatch):
         lambda command, **kwargs: calls.append(command) or MagicMock(returncode=0),
     )
     assert dispatch_install._uninstall_linux() is None
-    assert not (unit_dir / "agency-dispatch.timer").exists()
-    assert not (unit_dir / "agency-dispatch.service").exists()
+    assert not (unit_dir / "flowgency-dispatch.timer").exists()
+    assert not (unit_dir / "flowgency-dispatch.service").exists()
     assert ["systemctl", "--user", "daemon-reload"] in calls
 
 
 def test_uninstall_macos_unloads_and_removes_plist(tmp_path, monkeypatch):
     launch_agents = tmp_path / "LaunchAgents"
     launch_agents.mkdir()
-    plist_path = launch_agents / "com.agency.dispatch.plist"
+    plist_path = launch_agents / "com.flowgency.dispatch.plist"
     plist_path.write_text("plist", encoding="utf-8")
     calls = []
     monkeypatch.setattr(dispatch_install, "LAUNCHD_AGENTS_DIR", launch_agents)

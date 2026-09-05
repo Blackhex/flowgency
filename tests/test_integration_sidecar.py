@@ -37,7 +37,7 @@ class TestCodex:
 
     def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
         (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
-        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+        (tmp_agent_dir / ".flowgency-meta.yaml").write_text(
             "display_name: Product Manager\ntitle: PM\nemoji: \"📦\"\n"
         )
         identity = integration.parse_identity(tmp_agent_dir)
@@ -49,7 +49,7 @@ class TestCodex:
         identity = AgentIdentity(display_name="New", title="T", emoji="🤖", body="# New body")
         integration.write_identity(tmp_agent_dir, identity)
         assert "# New body" in (tmp_agent_dir / "AGENTS.md").read_text()
-        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        sidecar = (tmp_agent_dir / ".flowgency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
     def test_missing_file(self, integration, tmp_agent_dir):
@@ -97,7 +97,7 @@ class TestGemini:
 
     def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
         (tmp_agent_dir / "GEMINI.md").write_text("# Agent\n")
-        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+        (tmp_agent_dir / ".flowgency-meta.yaml").write_text(
             "display_name: Gemini Bot\ntitle: GB\nemoji: \"🌟\"\n"
         )
         identity = integration.parse_identity(tmp_agent_dir)
@@ -109,7 +109,7 @@ class TestGemini:
         identity = AgentIdentity(display_name="New", title="T", emoji="🌟", body="# New body")
         integration.write_identity(tmp_agent_dir, identity)
         assert "# New body" in (tmp_agent_dir / "GEMINI.md").read_text()
-        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        sidecar = (tmp_agent_dir / ".flowgency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
     def test_missing_file(self, integration, tmp_agent_dir):
@@ -143,7 +143,7 @@ class TestAider:
 
     def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
         (tmp_agent_dir / "CONVENTIONS.md").write_text("# Conventions\n")
-        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+        (tmp_agent_dir / ".flowgency-meta.yaml").write_text(
             "display_name: Aider Bot\ntitle: AB\n"
         )
         identity = integration.parse_identity(tmp_agent_dir)
@@ -155,7 +155,7 @@ class TestAider:
         identity = AgentIdentity(display_name="New", title="T", emoji="🔧", body="# New conventions")
         integration.write_identity(tmp_agent_dir, identity)
         assert "# New conventions" in (tmp_agent_dir / "CONVENTIONS.md").read_text()
-        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        sidecar = (tmp_agent_dir / ".flowgency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
     def test_missing_file(self, integration, tmp_agent_dir):
@@ -186,7 +186,7 @@ class TestGoose:
 
     def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
         (tmp_agent_dir / ".goosehints").write_text("Some hints\n")
-        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+        (tmp_agent_dir / ".flowgency-meta.yaml").write_text(
             "display_name: Goose Bot\ntitle: GB\nemoji: \"🪿\"\n"
         )
         identity = integration.parse_identity(tmp_agent_dir)
@@ -198,7 +198,7 @@ class TestGoose:
         identity = AgentIdentity(display_name="New", title="T", emoji="🪿", body="New hints")
         integration.write_identity(tmp_agent_dir, identity)
         assert "New hints" in (tmp_agent_dir / ".goosehints").read_text()
-        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        sidecar = (tmp_agent_dir / ".flowgency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
     def test_missing_file(self, integration, tmp_agent_dir):
@@ -237,7 +237,7 @@ class TestOpenCode:
     def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
         (tmp_agent_dir / ".opencode").mkdir()
         (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
-        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+        (tmp_agent_dir / ".flowgency-meta.yaml").write_text(
             "display_name: OpenCode Bot\ntitle: OC\nemoji: \"⚡\"\n"
         )
         identity = integration.parse_identity(tmp_agent_dir)
@@ -250,7 +250,7 @@ class TestOpenCode:
         identity = AgentIdentity(display_name="New", title="T", emoji="⚡", body="# New body")
         integration.write_identity(tmp_agent_dir, identity)
         assert "# New body" in (tmp_agent_dir / "AGENTS.md").read_text()
-        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        sidecar = (tmp_agent_dir / ".flowgency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
     def test_missing_file(self, integration, tmp_agent_dir):
@@ -289,7 +289,7 @@ class TestPi:
     def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
         (tmp_agent_dir / ".pi").mkdir()
         (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
-        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+        (tmp_agent_dir / ".flowgency-meta.yaml").write_text(
             "display_name: Pi Bot\ntitle: PB\nemoji: \"🥧\"\n"
         )
         identity = integration.parse_identity(tmp_agent_dir)
@@ -302,7 +302,7 @@ class TestPi:
         identity = AgentIdentity(display_name="New", title="T", emoji="🥧", body="# New body")
         integration.write_identity(tmp_agent_dir, identity)
         assert "# New body" in (tmp_agent_dir / "AGENTS.md").read_text()
-        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        sidecar = (tmp_agent_dir / ".flowgency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
     def test_missing_file(self, integration, tmp_agent_dir):
@@ -370,7 +370,7 @@ class TestCopilot:
 
     def test_parse_identity_metadata_from_sidecar(self, integration, tmp_agent_dir):
         (tmp_agent_dir / "AGENTS.md").write_text("# Agent\n")
-        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+        (tmp_agent_dir / ".flowgency-meta.yaml").write_text(
             "display_name: Copilot Bot\ntitle: CB\nemoji: \"🐙\"\n"
         )
         identity = integration.parse_identity(tmp_agent_dir)
@@ -381,7 +381,7 @@ class TestCopilot:
         identity = AgentIdentity(display_name="New", title="T", emoji="🐙", body="# New body")
         integration.write_identity(tmp_agent_dir, identity)
         assert "# New body" in (tmp_agent_dir / "AGENTS.md").read_text()
-        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        sidecar = (tmp_agent_dir / ".flowgency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
     def test_write_identity_creates_detection_marker(self, integration, tmp_agent_dir):
@@ -424,7 +424,7 @@ class TestCopilot:
 
         assert exc_info.value is error
         assert not (tmp_agent_dir / "AGENTS.md").exists()
-        assert not (tmp_agent_dir / ".agency-meta.yaml").exists()
+        assert not (tmp_agent_dir / ".flowgency-meta.yaml").exists()
 
     def test_missing_file(self, integration, tmp_agent_dir):
         assert integration.parse_identity(tmp_agent_dir) is None

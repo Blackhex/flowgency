@@ -23,7 +23,7 @@ MAX_MEMORY_FILES = 20
 MAX_MEMORY_FILE_BYTES = 65536
 MAX_MEMORY_ENTRIES = 100
 
-_AGENCY_DIRNAME = ".agency"
+_FLOWGENCY_DIRNAME = ".flowgency"
 
 
 def _is_reparse_point(file_stat: os.stat_result) -> bool:
@@ -59,7 +59,7 @@ def create_outbox(
         if Path(name).name != name or name in {"", ".", ".."}:
             raise ValueError(f"invalid memory file name: {name!r}")
 
-    root = launch_view / _AGENCY_DIRNAME
+    root = launch_view / _FLOWGENCY_DIRNAME
     if root.exists():
         shutil.rmtree(root)
 

@@ -138,7 +138,7 @@ def at_bench(tmp_path):
 
 def _queue_the_occurrence(bench, monkeypatch):
     """Cycle one: the pool is full, so the job waits and the marker is stamped."""
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T11:57:00")
     bench.fill_the_pool()
     bench.cycle()
     assert bench.launcher.launched == []
@@ -185,7 +185,7 @@ def test_the_catch_up_bound_still_forgets_a_lost_occurrence(at_bench, monkeypatc
     at_bench.cycle()
     assert [record.status for record in at_bench.scheduled()] == ["failed", "failed"]
 
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T03:00:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-30T03:00:00")
     at_bench.cycle()
 
     assert len(at_bench.scheduled()) == 2

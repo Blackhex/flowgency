@@ -5,14 +5,14 @@ from datetime import date, datetime, tzinfo
 
 
 def _fixed_datetime() -> datetime | None:
-    raw = os.environ.get("AGENCY_FIXED_NOW")
+    raw = os.environ.get("FLOWGENCY_FIXED_NOW")
     if raw is None:
         return None
     try:
         return datetime.fromisoformat(raw)
     except ValueError as exc:
         raise ValueError(
-            "AGENCY_FIXED_NOW must be a valid ISO-8601 datetime"
+            "FLOWGENCY_FIXED_NOW must be a valid ISO-8601 datetime"
         ) from exc
 
 

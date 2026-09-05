@@ -98,7 +98,7 @@
         "--host",
         "127.0.0.1"
       ],
-      "command": "christag-agency",
+      "command": "flowgency",
       "detail": "Start Agency dashboard on http://127.0.0.1:8500",
       "group": "none",
       "isBackground": true,
@@ -125,7 +125,7 @@
         "--host",
         "127.0.0.1"
       ],
-      "command": "christag-agency",
+      "command": "flowgency",
       "detail": "Start the Agency dashboard with hot-reload on http://127.0.0.1:8500",
       "group": "none",
       "hide": true,
@@ -170,7 +170,7 @@
     {
       "args": [
         "-m",
-        "agency.cli",
+        "flowgency.cli",
         "status"
       ],
       "command": "python",
@@ -183,7 +183,7 @@
     {
       "args": [
         "-m",
-        "agency.cli",
+        "flowgency.cli",
         "inbox"
       ],
       "command": "python",
@@ -196,7 +196,7 @@
     {
       "args": [
         "-m",
-        "agency.cli",
+        "flowgency.cli",
         "agents"
       ],
       "command": "python",
@@ -209,7 +209,7 @@
     {
       "args": [
         "-m",
-        "agency.dispatch.run",
+        "flowgency.dispatch.run",
         "--config",
         "${workspaceFolder}/config.yaml"
       ],

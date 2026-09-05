@@ -254,7 +254,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
     """
     workspace_path, team_root, config_path, log_dir = _make_team(tmp_path)
 
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-03T09:15:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-03T09:15:00")
 
     _write_config(
         config_path,
@@ -346,7 +346,7 @@ def test_missed_morning_occurrence_recovers_later_the_same_day(
         routines=[{"id": "suite-health", "prompt_name": "daily-review",
                    "schedule": {"at": "08:00"}}],
     )
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T11:57:00")
     launcher = _RecordingLauncher()
     _patch_submit(monkeypatch, launcher)
 
@@ -368,7 +368,7 @@ def test_recovery_marks_the_occurrence_day_not_today(tmp_path, monkeypatch):
         routines=[{"id": "suite-health", "prompt_name": "daily-review",
                    "schedule": {"at": "08:00", "catch_up": "always"}}],
     )
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T03:00:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T03:00:00")
     launcher = _RecordingLauncher()
     _patch_submit(monkeypatch, launcher)
 
@@ -392,7 +392,7 @@ def test_default_bound_forgets_yesterdays_occurrence(tmp_path, monkeypatch):
         routines=[{"id": "suite-health", "prompt_name": "daily-review",
                    "schedule": {"at": "08:00"}}],
     )
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T03:00:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T03:00:00")
     submitted = []
     monkeypatch.setattr(
         "flowgency.dispatch.run.submit_job_request",
@@ -422,7 +422,7 @@ def test_an_already_marked_occurrence_does_not_run_again(tmp_path, monkeypatch):
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
     stamp = marker.stat().st_mtime
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T11:57:00")
     submitted = []
     monkeypatch.setattr(
         "flowgency.dispatch.run.submit_job_request",
@@ -451,7 +451,7 @@ def test_every_marker_anchors_on_the_occurrence_not_the_launch(
     marker.touch()
     anchor = datetime(2026, 7, 29, 3, 0).timestamp()
     os.utime(marker, (anchor, anchor))
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T11:57:00")
     monkeypatch.setattr(
         "flowgency.dispatch.run.submit_job_request",
         lambda req, launcher=None: SimpleNamespace(job_id=req.routine_id),
@@ -481,7 +481,7 @@ def test_a_routine_that_is_merely_not_due_is_not_reported_as_broken(
     marker.touch()
     anchor = datetime(2026, 7, 29, 9, 0).timestamp()
     os.utime(marker, (anchor, anchor))
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T10:00:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T10:00:00")
 
     with caplog.at_level("WARNING", logger="flowgency.dispatch.run"):
         run_dispatch_cycle(None, config_path, _RecordingLauncher())

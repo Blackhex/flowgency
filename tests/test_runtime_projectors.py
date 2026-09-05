@@ -211,7 +211,7 @@ def test_live_success_failure_uses_full_runtime_label():
     )
 
     with pytest.raises(AssertionError, match=r"copilot/basic \(C:/bin/copilot\.exe\)"):
-        assert_live_success(result, runtime, "basic", "AGENCY_TOKEN")
+        assert_live_success(result, runtime, "basic", "FLOWGENCY_TOKEN")
 
 
 def test_projection_validation_failure_reports_full_label_and_issues(
@@ -436,8 +436,8 @@ def test_live_runtime_marker_and_docs_describe_automatic_installed_probes(
     ).read_text(encoding="utf-8")
 
     assert "automatic" in marker.lower()
-    assert "AGENCY_REAL_RUNTIME_PROBES" not in integrations_doc
-    assert "AGENCY_REAL_RUNTIME_PROBES" not in contributing_doc
+    assert "FLOWGENCY_REAL_RUNTIME_PROBES" not in integrations_doc
+    assert "FLOWGENCY_REAL_RUNTIME_PROBES" not in contributing_doc
     for text in (integrations_doc, contributing_doc):
         assert "python -m pytest -m real_runtime -v" in text
         assert 'python -m pytest -m "not real_runtime" -q' in text

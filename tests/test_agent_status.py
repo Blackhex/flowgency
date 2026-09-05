@@ -215,7 +215,7 @@ def test_next_run_at_future(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     future = (fixed_now + timedelta(hours=2)).strftime("%H:%M")
     g = _team_with_routines(tmp_path, [{"id": "r", "at": future}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result is not None
     assert result.date() == fixed_now.date()
@@ -227,7 +227,7 @@ def test_next_run_at_past_without_marker_stays_today(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
     g = _team_with_routines(tmp_path, [{"id": "r", "at": past}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result == datetime(2026, 1, 15, 10, 0, 0)
 
@@ -240,7 +240,7 @@ def test_next_run_at_past_with_marker_rolls_to_tomorrow(tmp_path):
     marker = at_marker_path(g["logs"], "product", "r", day)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result == datetime(2026, 1, 16, 10, 0, 0)
 
@@ -275,7 +275,7 @@ def test_next_run_returns_soonest(tmp_path):
     soon = (fixed_now + timedelta(minutes=30)).strftime("%H:%M")
     later = (fixed_now + timedelta(hours=5)).strftime("%H:%M")
     g = _team_with_routines(tmp_path, [{"id": "a", "at": later}, {"id": "b", "at": soon}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result.strftime("%H:%M") == soon
 
@@ -283,7 +283,7 @@ def test_next_run_returns_soonest(tmp_path):
 def test_next_run_detail_identifies_winning_rule(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     g = _team_with_routines(tmp_path, [{"id": "later", "at": "17:00"}, {"id": "soon", "at": "12:30"}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         detail = compute_next_run_detail(g, "product", ENABLED)
         compatible_value = compute_next_run(g, "product", ENABLED)
     assert detail == {
@@ -297,7 +297,7 @@ def test_next_run_detail_identifies_winning_rule(tmp_path):
 def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     g = _team_with_routines(tmp_path, [{"id": "first", "at": "13:00"}, {"id": "second", "at": "13:00"}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         detail = compute_next_run_detail(g, "product", ENABLED)
     assert detail["routine_id"] == "first"
     assert detail["rule_index"] == 0
@@ -324,7 +324,7 @@ def test_relative_future_minutes():
 def test_relative_future_hours():
     fixed_now = datetime(2026, 7, 11, 23, 30)
 
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         assert relative_future(fixed_now + timedelta(hours=2, minutes=1)) == "2h away"
 
 
@@ -332,7 +332,7 @@ def test_relative_future_tomorrow():
     fixed_now = datetime(2026, 7, 11, 12, 0)
     dt = fixed_now + timedelta(days=1)
 
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         assert relative_future(dt) == f"tomorrow {dt.strftime('%H:%M')}"
 
 

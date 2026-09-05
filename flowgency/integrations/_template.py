@@ -47,7 +47,7 @@ class YourToolIntegration(BaseIntegration):
 
         For tools with YAML frontmatter in their native file,
         parse it directly. For tools without frontmatter support,
-        read from .agency-meta.yaml sidecar file instead.
+        read from .flowgency-meta.yaml sidecar file instead.
         See existing integrations for examples of both patterns.
         """
         return AgentIdentity(display_name="", title="", emoji="", body="")

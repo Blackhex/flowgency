@@ -115,7 +115,7 @@ def _validation_failure(
 
 
 def _config_path(args: Namespace) -> Path:
-    selected = getattr(args, "config", None) or os.environ.get("AGENCY_CONFIG") or (Path.cwd() / "config.yaml")
+    selected = getattr(args, "config", None) or os.environ.get("FLOWGENCY_CONFIG") or (Path.cwd() / "config.yaml")
     return Path(selected).expanduser().resolve()
 
 
@@ -428,7 +428,7 @@ def cmd_validate(args: Namespace) -> int:
 
 
 def cmd_serve(args: Namespace) -> int:
-    os.environ["AGENCY_CONFIG"] = str(_config_path(args))
+    os.environ["FLOWGENCY_CONFIG"] = str(_config_path(args))
     run_server(host=args.host, port=args.port, reload=args.reload)
     return 0
 

@@ -217,7 +217,7 @@ def _memory_editing_integration(seen: dict, edit):
             )
             # Reach the directory through the launch view rather than the
             # request field, so a wire pointing elsewhere fails this test.
-            edit(request.launch_dir / ".agency" / "memory")
+            edit(request.launch_dir / ".flowgency" / "memory")
             return RunResult(0, "done", "", 0.1)
 
     return _Integration()
@@ -254,7 +254,7 @@ def test_memory_written_into_the_launch_view_reaches_canonical_storage(
         "memory.md": b"new",
         "decisions.md": b"added",
     }
-    assert seen["memory_working_dir"] == seen["launch_dir"] / ".agency" / "memory"
+    assert seen["memory_working_dir"] == seen["launch_dir"] / ".flowgency" / "memory"
 
 
 def test_untouched_launch_view_memory_publishes_no_change(tmp_path, monkeypatch):

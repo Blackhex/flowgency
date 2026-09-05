@@ -25,7 +25,7 @@ from flowgency.integrations.models import (
     RuntimeCapabilities,
 )
 
-SIDECAR_FILENAME = ".agency-meta.yaml"
+SIDECAR_FILENAME = ".flowgency-meta.yaml"
 
 
 @dataclass
@@ -387,7 +387,7 @@ class BaseIntegration:
 # ── Sidecar Helpers ───────────────────────────────────────────────────────────
 
 def read_sidecar(agent_dir: Path) -> dict:
-    """Read .agency-meta.yaml from agent dir. Returns {} if not found."""
+    """Read .flowgency-meta.yaml from agent dir. Returns {} if not found."""
     path = agent_dir / SIDECAR_FILENAME
     if not path.is_file():
         return {}
@@ -398,7 +398,7 @@ def read_sidecar(agent_dir: Path) -> dict:
 
 
 def write_sidecar(agent_dir: Path, meta: dict) -> None:
-    """Write .agency-meta.yaml to agent dir."""
+    """Write .flowgency-meta.yaml to agent dir."""
     path = agent_dir / SIDECAR_FILENAME
     path.write_text(yaml.dump(meta, default_flow_style=False, sort_keys=False))
 

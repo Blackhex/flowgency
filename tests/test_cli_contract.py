@@ -177,7 +177,7 @@ def test_cli_has_no_top_level_app_import_or_mutable_app_globals():
         "GROUPS",
         "CONFIG_PATH",
         "get_group",
-        "get_agency_config",
+        "get_FLOWGENCY_CONFIG",
         "collect_agents_with_identity",
     }
     assert forbidden.isdisjoint({node.id for node in ast.walk(tree) if isinstance(node, ast.Name)})
@@ -215,7 +215,7 @@ def test_cli_has_no_hidden_config_path_authority():
 
 
 def test_status_fallback_uses_cwd_at_command_call_time(cli_config, cli_runner, monkeypatch):
-    monkeypatch.delenv("AGENCY_CONFIG", raising=False)
+    monkeypatch.delenv("FLOWGENCY_CONFIG", raising=False)
     monkeypatch.chdir(cli_config.parent)
 
     result = cli_runner("status", "--json")

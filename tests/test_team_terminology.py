@@ -12,7 +12,7 @@ ACTIVE_PATHS = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "AGENTS.md",
     REPO_ROOT / "config.yaml.example",
-    REPO_ROOT / "agency.service.example",
+    REPO_ROOT / "flowgency.service.example",
     *(REPO_ROOT / "kb").glob("*.md"),
     *(REPO_ROOT / "examples").glob("**/*.md"),
     *(REPO_ROOT / "flowgency" / "setup_assets").glob("**/*.md"),

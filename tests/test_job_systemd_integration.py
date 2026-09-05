@@ -3,10 +3,10 @@ Linux-only integration test proving transient systemd services survive submitter
 
 Requires:
 - Linux with a user systemd manager (systemctl --user is-system-running → running/degraded)
-- The AGENCY_TEST_SYSTEMD=1 environment variable set
+- The FLOWGENCY_TEST_SYSTEMD=1 environment variable set
 
 Run command:
-    AGENCY_TEST_SYSTEMD=1 .venv/bin/python -m pytest tests/test_job_systemd_integration.py -v
+    FLOWGENCY_TEST_SYSTEMD=1 .venv/bin/python -m pytest tests/test_job_systemd_integration.py -v
 """
 
 import os
@@ -22,11 +22,11 @@ from flowgency.jobs.launcher import _systemd_available
 from flowgency.jobs.store import read_job
 
 _SKIP_REASON = (
-    "Requires Linux with user systemd manager and AGENCY_TEST_SYSTEMD=1"
+    "Requires Linux with user systemd manager and FLOWGENCY_TEST_SYSTEMD=1"
 )
 
 pytestmark = pytest.mark.skipif(
-    not (os.environ.get("AGENCY_TEST_SYSTEMD") == "1" and _systemd_available()),
+    not (os.environ.get("FLOWGENCY_TEST_SYSTEMD") == "1" and _systemd_available()),
     reason=_SKIP_REASON,
 )
 

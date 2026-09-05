@@ -1128,15 +1128,15 @@ def test_decision_task_input_carries_the_reporting_protocol(tmp_path):
 
     assert spec.task_input.startswith("Decide what changed.")
     assert "## Agency reporting protocol" in spec.task_input
-    assert ".agency/outbox/observations" in spec.task_input
+    assert ".flowgency/outbox/observations" in spec.task_input
 
 
 def test_ad_hoc_prompt_task_input_carries_the_reporting_protocol(tmp_path):
     spec = _resolve(tmp_path, trigger="manual_prompt", task_input="Run the suite.")
 
     assert spec.task_input.startswith("Run the suite.")
-    assert ".agency/outbox/proposals" in spec.task_input
-    assert ".agency/memory" in spec.task_input
+    assert ".flowgency/outbox/proposals" in spec.task_input
+    assert ".flowgency/memory" in spec.task_input
 
 
 def test_reporting_protocol_reports_the_granted_tool_policy(tmp_path):

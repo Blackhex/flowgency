@@ -41,7 +41,7 @@ def _team(tmp_path, *, routines, dispatch_enabled=True):
 def _health(tmp_path, *, routines, dispatch_enabled=True, now=NOW):
     team_data = _team(tmp_path, routines=routines, dispatch_enabled=dispatch_enabled)
     team_data["observations"].mkdir(parents=True, exist_ok=True)
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": now.isoformat()}):
         agents, _ = app_module.collect_agents_with_identity(team_data)
     return agents[0]["health"]
 

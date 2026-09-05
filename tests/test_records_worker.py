@@ -99,7 +99,7 @@ def _obs_integration(filename: str, content: str):
         def run(self, request: IntegrationRunRequest) -> RunResult:
             dest = (
                 request.launch_dir
-                / ".agency"
+                / ".flowgency"
                 / "outbox"
                 / "observations"
                 / filename
@@ -232,7 +232,7 @@ def _outbox_integration(populate):
         name = "fake"
 
         def run(self, request: IntegrationRunRequest) -> RunResult:
-            populate(request.launch_dir / ".agency" / "outbox")
+            populate(request.launch_dir / ".flowgency" / "outbox")
             return RunResult(0, "done", "", 0.1)
 
     return _Integration()

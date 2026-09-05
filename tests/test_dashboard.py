@@ -979,7 +979,7 @@ class TestWorkQueueStrip:
         """A job due today shows HH:MM with no weekday prefix."""
         import re
         # Fix "today" to 2026-07-16 so fixture jobs (due 2026-07-16 UTC) are today
-        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-16T12:00:00")
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-16T12:00:00")
         body = client.get("/newsletter/").text
         # No weekday prefix before the time (Mon/Tue/…/Sun HH:MM pattern absent)
         assert not re.search(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{2}:\d{2}", body)
@@ -988,7 +988,7 @@ class TestWorkQueueStrip:
         """A job due on a different day shows Mon HH:MM (abbreviated weekday prefix)."""
         import re
         # today is 2026-07-30; fixture jobs are due on 2026-07-16 — a past day
-        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T12:00:00")
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-30T12:00:00")
         body = client.get("/newsletter/").text
         assert re.search(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{2}:\d{2}", body)
 
@@ -1054,7 +1054,7 @@ class TestQueueDueTimeFilter:
     def test_today_formats_as_hhmm(self, monkeypatch):
         from flowgency.app import queue_due_time
         import re
-        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-16T12:00:00")
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-16T12:00:00")
         # Noon local time: local date is always 2026-07-16 on every machine
         due = datetime(2026, 7, 16, 12, 0, 0).astimezone()
         result = queue_due_time(due)
@@ -1063,7 +1063,7 @@ class TestQueueDueTimeFilter:
     def test_other_day_formats_with_weekday_prefix(self, monkeypatch):
         from datetime import timezone
         from flowgency.app import queue_due_time
-        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T12:00:00")
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-30T12:00:00")
         due = datetime(2026, 7, 16, 8, 0, 0, tzinfo=timezone.utc)
         result = queue_due_time(due)
         import re
@@ -1071,7 +1071,7 @@ class TestQueueDueTimeFilter:
 
     def test_accepts_iso_string(self, monkeypatch):
         from flowgency.app import queue_due_time
-        monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-30T12:00:00")
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-30T12:00:00")
         result = queue_due_time("2026-07-16T08:00:00+00:00")
         import re
         assert re.fullmatch(r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}", result)
@@ -1086,7 +1086,7 @@ class TestQueueDueTimeFilter:
         due = datetime(2026, 7, 16, 8, 0, 0, tzinfo=utc_plus_3)
         local = due.astimezone()
         # Set today to match the local date so the format branch is predictable
-        monkeypatch.setenv("AGENCY_FIXED_NOW", local.strftime("%Y-%m-%dT%H:%M:%S"))
+        monkeypatch.setenv("FLOWGENCY_FIXED_NOW", local.strftime("%Y-%m-%dT%H:%M:%S"))
         result = queue_due_time(due)
         assert result == local.strftime("%H:%M"), (
             f"got {result!r}; filter may be using replace(tzinfo=None) "

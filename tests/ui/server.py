@@ -314,8 +314,8 @@ def main() -> int:
     try:
         runtime, config_path = _prepare_runtime()
         env = os.environ.copy()
-        env["AGENCY_CONFIG"] = str(config_path)
-        env["AGENCY_FIXED_NOW"] = FIXED_NOW
+        env["FLOWGENCY_CONFIG"] = str(config_path)
+        env["FLOWGENCY_FIXED_NOW"] = FIXED_NOW
         env["PYTHONPATH"] = str(ROOT)
         command = [
             sys.executable,

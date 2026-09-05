@@ -12,8 +12,8 @@ from pathlib import Path
 from flowgency.integrations.models import ResolvedPermissionRule
 
 ZONE_INSTRUCTIONS = "instructions"
-ZONE_OUTBOX = ".agency/outbox"
-ZONE_MEMORY = ".agency/memory"
+ZONE_OUTBOX = ".flowgency/outbox"
+ZONE_MEMORY = ".flowgency/memory"
 
 
 def launch_zone_rules(launch_dir: Path) -> tuple[ResolvedPermissionRule, ...]:

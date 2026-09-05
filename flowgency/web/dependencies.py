@@ -41,7 +41,7 @@ class FlowgencyServices:
 def build_services(config_path: Path | None = None) -> FlowgencyServices:
     resolved = Path(
         config_path
-        or os.environ.get("AGENCY_CONFIG")
+        or os.environ.get("FLOWGENCY_CONFIG")
         or Path.cwd() / "config.yaml"
     ).expanduser().resolve()
     config_store = ConfigStore(resolved)
@@ -112,7 +112,7 @@ def get_services(request: Request) -> FlowgencyServices:
         Path(config_path_getter()).expanduser().resolve()
         if callable(config_path_getter)
         else Path(
-            os.environ.get("AGENCY_CONFIG") or Path.cwd() / "config.yaml"
+            os.environ.get("FLOWGENCY_CONFIG") or Path.cwd() / "config.yaml"
         ).expanduser().resolve()
     )
     if services is None or services.config_path != current_path:

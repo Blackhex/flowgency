@@ -190,7 +190,7 @@ def test_cmd_serve_config_precedence_is_visible_at_lazy_import(tmp_path, monkeyp
     environment_path = tmp_path / "environment.yaml"
     default_path = tmp_path / "config.yaml"
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("AGENCY_CONFIG", str(environment_path))
+    monkeypatch.setenv("FLOWGENCY_CONFIG", str(environment_path))
     args = Namespace(host="127.0.0.1", port=8700, reload=False)
     if selection == "explicit":
         args.config = str(explicit_path)
@@ -198,14 +198,14 @@ def test_cmd_serve_config_precedence_is_visible_at_lazy_import(tmp_path, monkeyp
     elif selection == "environment":
         expected = environment_path
     else:
-        monkeypatch.delenv("AGENCY_CONFIG")
+        monkeypatch.delenv("FLOWGENCY_CONFIG")
         expected = default_path
 
     observed = []
 
     def fake_import(name):
         assert name == "flowgency.app"
-        observed.append(Path(os.environ["AGENCY_CONFIG"]))
+        observed.append(Path(os.environ["FLOWGENCY_CONFIG"]))
         return SimpleNamespace(run_server=lambda **options: None)
 
     monkeypatch.setattr(cli.importlib, "import_module", fake_import)
@@ -214,10 +214,10 @@ def test_cmd_serve_config_precedence_is_visible_at_lazy_import(tmp_path, monkeyp
     assert observed == [expected.resolve()]
 
 
-def test_serve_app_config_path_honors_agency_config_at_import(tmp_path):
+def test_serve_app_config_path_honors_FLOWGENCY_CONFIG_at_import(tmp_path):
     selected_path = tmp_path / "missing.yaml"
     environment = os.environ.copy()
-    environment["AGENCY_CONFIG"] = str(selected_path)
+    environment["FLOWGENCY_CONFIG"] = str(selected_path)
 
     result = subprocess.run(
         [sys.executable, "-c", "import flowgency.app; print(flowgency.app.CONFIG_PATH)"],
@@ -233,7 +233,7 @@ def test_serve_app_config_path_honors_agency_config_at_import(tmp_path):
 def test_serve_missing_config_bootstraps_selected_path_not_cwd(tmp_path):
     selected_path = tmp_path / "selected.yaml"
     environment = os.environ.copy()
-    environment["AGENCY_CONFIG"] = str(selected_path)
+    environment["FLOWGENCY_CONFIG"] = str(selected_path)
     script = (
         "import flowgency.app as app; "
         "app.uvicorn.run = lambda *args, **kwargs: None; "

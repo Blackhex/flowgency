@@ -13,11 +13,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, TypedDict
 
-DISPATCH_CONF_DIR = Path.home() / ".config" / "agency"
+DISPATCH_CONF_DIR = Path.home() / ".config" / "flowgency"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 LAUNCHD_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
-LAUNCHD_PLIST = "com.agency.dispatch"
-WINDOWS_TASK_NAME = "AgencyDispatch"
+LAUNCHD_PLIST = "com.flowgency.dispatch"
+WINDOWS_TASK_NAME = "FlowgencyDispatch"
 
 
 TimerState = Literal["active", "inactive", "misconfigured"]
@@ -147,7 +147,7 @@ def install_timer(config_path: str | Path, interval: int = 15, replace: bool = F
     if status["error"] and not status["installed"]:
         return status["error"]
     if status["config_conflict"] and not replace:
-        return f"Agency dispatcher already targets another config: {status['config_path']}. Re-run with explicit replacement approval."
+        return f"Flowgency dispatcher already targets another config: {status['config_path']}. Re-run with explicit replacement approval."
     platform_name = detect_platform()
     if platform_name == "linux":
         return _install_linux(canonical_path, interval)
@@ -165,7 +165,7 @@ def uninstall_timer(config_path: str | Path, force: bool = False) -> str | None:
     if not status["installed"]:
         return None
     if status["config_conflict"] and not force:
-        return f"Agency dispatcher targets another config: {status['config_path']}. Re-run with explicit force approval."
+        return f"Flowgency dispatcher targets another config: {status['config_path']}. Re-run with explicit force approval."
     platform_name = detect_platform()
     if platform_name == "linux":
         return _uninstall_linux()
@@ -187,7 +187,7 @@ def _windows_python_launcher() -> str:
 
 
 def _install_windows(config_path: str, interval: int) -> str | None:
-    """Register the AgencyDispatch Task Scheduler task."""
+    """Register the FlowgencyDispatch Task Scheduler task."""
     try:
         from win32com.client import Dispatch
     except ImportError:
@@ -235,7 +235,7 @@ def _install_windows(config_path: str, interval: int) -> str | None:
 
 
 def _status_windows(config_path: str | Path, interval: int) -> TimerStatus:
-    """Report whether the AgencyDispatch task exists and is active."""
+    """Report whether the FlowgencyDispatch task exists and is active."""
     try:
         from win32com.client import Dispatch
     except ImportError:
@@ -297,7 +297,7 @@ def _status_windows(config_path: str | Path, interval: int) -> TimerStatus:
 
 
 def _uninstall_windows() -> str | None:
-    """Delete the AgencyDispatch task. Missing task is treated as success."""
+    """Delete the FlowgencyDispatch task. Missing task is treated as success."""
     try:
         from win32com.client import Dispatch
     except ImportError:
@@ -331,8 +331,8 @@ def _systemd_quote(value: str | Path) -> str:
 
 def _status_linux(config_path: str | Path, interval: int) -> TimerStatus:
     """Check systemd timer status."""
-    service_file = SYSTEMD_USER_DIR / "agency-dispatch.service"
-    timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
+    service_file = SYSTEMD_USER_DIR / "flowgency-dispatch.service"
+    timer_file = SYSTEMD_USER_DIR / "flowgency-dispatch.timer"
     installed = service_file.exists() or timer_file.exists()
     if not installed:
         return _make_status(
@@ -369,13 +369,13 @@ def _status_linux(config_path: str | Path, interval: int) -> TimerStatus:
         actual_interval = int(match.group(1)) if match else None
     try:
         enabled_result = subprocess.run(
-            ["systemctl", "--user", "is-enabled", "agency-dispatch.timer"],
+            ["systemctl", "--user", "is-enabled", "flowgency-dispatch.timer"],
             capture_output=True,
             text=True,
             timeout=5,
         )
         active_result = subprocess.run(
-            ["systemctl", "--user", "is-active", "agency-dispatch.timer"],
+            ["systemctl", "--user", "is-active", "flowgency-dispatch.timer"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -421,14 +421,14 @@ def _install_linux(config_path: str, interval: int) -> str | None:
         launcher = _linux_python_launcher()
         canonical_path = _canonical_config_path(config_path)
         SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
-        (SYSTEMD_USER_DIR / "agency-dispatch.service").write_text(
+        (SYSTEMD_USER_DIR / "flowgency-dispatch.service").write_text(
             "[Unit]\nDescription=Agency Agent Dispatch\n\n"
             "[Service]\nType=oneshot\n"
             f"ExecStart={_systemd_quote(launcher)} -m flowgency.dispatch.run --config {_systemd_quote(canonical_path)}\n"
             f"Environment=PATH={_build_path_env()}\nEnvironment=HOME=%h\n",
             encoding="utf-8",
         )
-        (SYSTEMD_USER_DIR / "agency-dispatch.timer").write_text(
+        (SYSTEMD_USER_DIR / "flowgency-dispatch.timer").write_text(
             "[Unit]\nDescription=Agency Agent Dispatch Timer\n\n"
             f"[Timer]\nOnBootSec={interval}m\nOnUnitActiveSec={interval}m\nPersistent=true\n\n"
             "[Install]\nWantedBy=timers.target\n",
@@ -442,7 +442,7 @@ def _install_linux(config_path: str, interval: int) -> str | None:
             check=True,
         )
         subprocess.run(
-            ["systemctl", "--user", "enable", "--now", "agency-dispatch.timer"],
+            ["systemctl", "--user", "enable", "--now", "flowgency-dispatch.timer"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -457,10 +457,10 @@ def _uninstall_linux() -> str | None:
     """Stop, disable, and remove systemd units."""
     try:
         subprocess.run(
-            ["systemctl", "--user", "disable", "--now", "agency-dispatch.timer"],
+            ["systemctl", "--user", "disable", "--now", "flowgency-dispatch.timer"],
             capture_output=True, text=True, timeout=10,
         )
-        for name in ("agency-dispatch.timer", "agency-dispatch.service"):
+        for name in ("flowgency-dispatch.timer", "flowgency-dispatch.service"):
             unit_file = SYSTEMD_USER_DIR / name
             if unit_file.exists():
                 unit_file.unlink()

@@ -243,7 +243,7 @@ def test_execute_job_projects_failed_status_when_records_rejected(tmp_path, monk
     def fake_run(request: IntegrationRunRequest) -> RunResult:
         # Write a proposal whose execution_agent is not in the writable set;
         # the test config has no groups, so the writable-agent frozenset is empty.
-        proposals_dir = request.launch_dir / ".agency" / "outbox" / "proposals"
+        proposals_dir = request.launch_dir / ".flowgency" / "outbox" / "proposals"
         (proposals_dir / "change.md").write_text(
             "---\nexecution_agent: unauthorized-agent\nquestions:\n"
             "  - id: q1\n    prompt: Should this be done?\n    type: boolean\n"
