@@ -87,9 +87,10 @@ Create `tests/test_flowgency_namespace.py`:
 ```python
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import json
 from pathlib import Path
+import pytest
 import tomllib
 
 
@@ -108,12 +109,13 @@ def test_python_distribution_and_import_namespace_are_flowgency():
         "flowgency*"
     ]
     assert (REPO_ROOT / "flowgency").is_dir()
-    assert importlib.util.find_spec("flowgency") is not None
-    assert importlib.util.find_spec("flowgency.integrations.flowgency") is not None
+    importlib.import_module("flowgency")
+    importlib.import_module("flowgency.integrations.flowgency")
 
     previous_package = "".join(("a", "gency"))
     assert not (REPO_ROOT / previous_package).exists()
-    assert importlib.util.find_spec(previous_package) is None
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(previous_package)
 
 
 def test_ui_test_package_uses_flowgency_name():
@@ -193,10 +195,13 @@ include = ["flowgency*"]
 [tool.setuptools.package-data]
 flowgency = ["templates/*.html", "static/*", "themes/*.yaml"]
 "flowgency.setup_assets" = [
-    "copilot/.github/skills/flowgency-setup/*.md",
-    "copilot/.github/skills/flowgency-setup/references/*.md",
+    "copilot/.github/skills/agency-setup/*.md",
+    "copilot/.github/skills/agency-setup/references/*.md",
 ]
 ```
+
+The glob uses the pre-Task-4 directory name `agency-setup`; Task 4 updates it to
+`flowgency-setup` alongside the directory rename.
 
 Keep the version and dependency constraints unchanged.
 
@@ -712,6 +717,15 @@ Expected: FAIL because target directories and content do not exist.
 ```powershell
 $previousSkill = -join ('a', 'gency-setup')
 git mv "flowgency/setup_assets/copilot/.github/skills/$previousSkill" "flowgency/setup_assets/copilot/.github/skills/flowgency-setup"
+```
+
+Also update the `pyproject.toml` package-data glob alongside the rename:
+
+```toml
+"flowgency.setup_assets" = [
+    "copilot/.github/skills/flowgency-setup/*.md",
+    "copilot/.github/skills/flowgency-setup/references/*.md",
+]
 ```
 
 - [ ] **Step 4: Recreate both symlinks with target names**
