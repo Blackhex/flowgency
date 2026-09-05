@@ -62,14 +62,7 @@ def test_active_documents_use_v1_team_control_plane():
 
 
 def test_active_docs_contain_no_superseded_brand_terms():
-    """Active operator docs must not contain superseded brand tokens.
-
-    examples/*/CLAUDE.md files are intentionally left untouched — they retain
-    'Agency-owned group root' as a domain term in example agent instructions.
-    """
-    excluded = {"CLAUDE.md"}
-    paths = [p for p in ACTIVE_PATHS if p.name not in excluded]
-    doc_text = "\n".join(p.read_text(encoding="utf-8") for p in paths)
+    doc_text = "\n".join(p.read_text(encoding="utf-8") for p in ACTIVE_PATHS)
     tasks_text = (REPO_ROOT / ".vscode" / "tasks.json").read_text(encoding="utf-8")
     assembled = doc_text + "\n" + tasks_text
     found = [term for term in _SUPERSEDED_BRAND_TERMS if term in assembled]
