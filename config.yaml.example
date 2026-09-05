@@ -1,4 +1,5 @@
 schema_version: 1
+# Set FLOWGENCY_CONFIG to the path of this file to make it the authoritative config.
 flowgency:
   title: Agency
   default_team: my-project
@@ -7,10 +8,10 @@ flowgency:
     interval: 15
   jobs:
     pool: 4
-  agent_library: C:/Agency/agent-library
-  compilation_cache: C:/Agency/compiled-agents
-  memory_store: C:/Agency/memory
-  prompt_store: C:/Agency/prompts
+  agent_library: C:/Flowgency/agent-library
+  compilation_cache: C:/Flowgency/compiled-agents
+  memory_store: C:/Flowgency/memory
+  prompt_store: C:/Flowgency/prompts
 
 memory:
   channels:
@@ -21,7 +22,7 @@ teams:
   my-project:
     name: My Project
     workspace_path: C:/Projects/my-project
-    path: C:/Agency/teams/my-project
+    path: C:/Flowgency/teams/my-project
     default_integration: copilot
     runtime:
       timeout: 1800

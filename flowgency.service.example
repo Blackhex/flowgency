@@ -8,6 +8,7 @@ ExecStart=/path/to/flowgency/.venv/bin/python3 -m flowgency.app
 Restart=always
 WorkingDirectory=/path/to/flowgency
 Environment=HOME=/path/to/home
+Environment=FLOWGENCY_CONFIG=/path/to/config.yaml
 
 [Install]
 WantedBy=default.target

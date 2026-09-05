@@ -27,10 +27,10 @@ flowgency:
   ai_backend: copilot
   jobs:
     pool: 4
-  agent_library: C:/Agency/agent-library
-  compilation_cache: C:/Agency/compiled-agents
-  memory_store: C:/Agency/memory
-  prompt_store: C:/Agency/prompts
+  agent_library: C:/Flowgency/agent-library
+  compilation_cache: C:/Flowgency/compiled-agents
+  memory_store: C:/Flowgency/memory
+  prompt_store: C:/Flowgency/prompts
 memory:
   channels:
     brand-strategy:
@@ -39,7 +39,7 @@ teams:
   newsletter:
     name: Newsletter
     workspace_path: C:/Projects/newsletter
-    path: C:/Agency/teams/newsletter
+    path: C:/Flowgency/teams/newsletter
     default_integration: copilot
     runtime:
       timeout: 1800
@@ -107,7 +107,7 @@ Preserve observation, proposal, decision, log, job, dashboard, and workspace beh
 
 ```text
 python -m pytest tests/ -q
-python -m agency.app
+python -m flowgency.app
 ```
 
 Routes use async FastAPI handlers, POST plus 303 redirects, shared domain validators, revision-checked config patches, and path validation. Config writes must lock, compare the expected revision, preserve unrelated data, validate the current config, and replace atomically.

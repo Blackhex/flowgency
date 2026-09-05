@@ -179,3 +179,34 @@ def test_readme_board_screenshot_matches_approved_dimensions():
         1440,
         850,
     )
+
+
+# ---------------------------------------------------------------------------
+# README and current operator document contracts
+# ---------------------------------------------------------------------------
+
+
+def test_readme_presents_ticket_driven_flowgency():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert readme.startswith("# Flowgency\n")
+    assert "Ticket-driven orchestration for teams of AI agents." in readme
+    assert "screenshots/logo.svg" in readme
+    assert "screenshots/flowgency-board.png" in readme
+    assert "https://github.com/Blackhex/flowgency" in readme
+    assert "flowgency serve" in readme
+    assert "schema_version: 1" in readme
+    assert "flowgency:" in readme
+
+
+def test_current_operator_documents_use_flowgency_schema_one():
+    paths = (
+        REPO_ROOT / "AGENTS.md",
+        REPO_ROOT / "config.yaml.example",
+        REPO_ROOT / "flowgency.service.example",
+        *(REPO_ROOT / "kb").glob("*.md"),
+        *(REPO_ROOT / "examples").glob("**/*.md"),
+    )
+    text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+    assert "schema_version: 1" in text
+    assert "flowgency:" in text
+    assert "FLOWGENCY_CONFIG" in text

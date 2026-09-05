@@ -1,6 +1,6 @@
 # Dispatch And Routines
 
-Agency has one platform-native singleton heartbeat. Global `agency.dispatch.interval` controls how often it checks all teams. Team `dispatch.enabled` controls whether that team submits work.
+Flowgency has one platform-native singleton heartbeat. Global `flowgency.dispatch.interval` controls how often it checks all teams. Team `dispatch.enabled` controls whether that team submits work.
 
 Schedules are instance routines, not prompt files. A routine selects one saved prompt from the effective catalog:
 
@@ -31,8 +31,8 @@ The stable routine ID preserves routine-scoped memory when timing or arguments c
 Install and inspect the scheduler with:
 
 ```text
-christag-agency dispatch install --config C:/Agency/config.yaml
-christag-agency dispatch status --config C:/Agency/config.yaml
+flowgency dispatch install --config C:/Flowgency/config.yaml
+flowgency dispatch status --config C:/Flowgency/config.yaml
 ```
 
 ## Recovery
@@ -62,7 +62,7 @@ recovery does not push subsequent occurrences later.
 
 ## Job queue
 
-`agency.jobs.pool` caps the number of concurrently running workers across the
+`flowgency.jobs.pool` caps the number of concurrently running workers across the
 whole installation. The default is 4; the minimum is 1.
 
 When a job is submitted and the pool has a free slot it launches immediately.

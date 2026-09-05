@@ -1,15 +1,15 @@
 # Configuration
 
-Agency uses one authoritative YAML document. The top-level `schema_version: 1`, `agency`, and `teams` fields are required. `memory.channels` may be empty.
+Flowgency uses one authoritative YAML document. The top-level `schema_version: 1`, `flowgency`, and `teams` fields are required. `memory.channels` may be empty.
 
 ## Global paths
 
-`agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and
-`agency.prompt_store` are required non-empty paths. Relative paths resolve against
-the directory containing the config. The library must exist and be readable; Agency
+`flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and
+`flowgency.prompt_store` are required non-empty paths. Relative paths resolve against
+the directory containing the config. The library must exist and be readable; Flowgency
 may create cache, memory, and prompt-store roots when their nearest parent is writable.
 
-`agency.jobs.pool` caps the number of concurrently running workers across the whole
+`flowgency.jobs.pool` caps the number of concurrently running workers across the whole
 installation. The default is 4; the minimum is 1. See [dispatch.md](dispatch.md)
 for queue behaviour.
 
@@ -21,13 +21,13 @@ Team runtime defaults include timeout and permission policy. A permission is a *
 
 `mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Relative rule paths resolve against the team workspace. Only the `copilot` integration currently supports `mode: restricted`, and it is the only one that enforces path rules; the others accept `unrestricted` and do not enforce the rules written under it. Writing a narrow rule for one of them expresses intent, not a boundary. What each integration did and did not enforce for a given run is recorded on that job.
 
-Agency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.agency/outbox` and `<launch>/.agency/memory` are `read` and `write`. An agent cannot rewrite the instructions it is executing under.
+Flowgency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.flowgency/outbox` and `<launch>/.flowgency/memory` are `read` and `write`. An agent cannot rewrite the instructions it is executing under.
 
 Executor eligibility is derived, not stored: an agent may execute decisions when its effective permissions grant `write` on a rule whose `path` is the team's `workspace_path` itself — not a subdirectory.
 
 Compilation is a per-instance projection keyed on blueprint × integration × projector version × instance digest, where the digest covers identity and the permission model. Timeout, memory selector, routines, and prompt registrations are excluded from the digest.
 
-The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`.
+The team root is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`.
 
 ## Routines and memory
 
@@ -41,7 +41,7 @@ Accepted values are `none`, `today`, `always`, or a duration in the same grammar
 as `every` (e.g. `8h`, `7d`). Absent means `today`. See
 [dispatch.md](dispatch.md) for recovery semantics.
 
-The effective prompt catalog is the union of blueprint-shared prompts from `.agents/prompts/*.prompt.md` and instance-private prompt names registered in config and stored under `agency.prompt_store`. Manual launches may use a saved catalog prompt or a one-off task; one-off input is runtime-only and does not create prompt authority.
+The effective prompt catalog is the union of blueprint-shared prompts from `.agents/prompts/*.prompt.md` and instance-private prompt names registered in config and stored under `flowgency.prompt_store`. Manual launches may use a saved catalog prompt or a one-off task; one-off input is runtime-only and does not create prompt authority.
 
 Memory selectors are semantic: `run`, `routine`, `agent`, `team`, or declared global `channel`. An instance default cannot use routine scope. Example selectors include `scope: routine` and `scope: channel` with a channel key.
 

@@ -4,11 +4,11 @@
 
 ```bash
 pip install -e .
-agency serve
-# or: python -m agency.app
+flowgency serve
+# or: python -m flowgency.app
 ```
 
-Agency serves on `http://localhost:8500` by default.
+Flowgency serves on `http://localhost:8500` by default.
 
 ## Dependencies
 
@@ -20,27 +20,27 @@ All defined in `pyproject.toml`. Install with `pip install -e .`.
 
 ## Running as a systemd User Service (Linux)
 
-A service template is provided at `agency.service.example`. Copy and customize it:
+A service template is provided at `flowgency.service.example`. Copy and customize it:
 
 ```bash
-cp agency.service.example ~/.config/systemd/user/agency.service
+cp flowgency.service.example ~/.config/systemd/user/flowgency.service
 # Edit the file to set your paths
 
 systemctl --user daemon-reload
-systemctl --user enable --now agency.service
+systemctl --user enable --now flowgency.service
 ```
 
 ### Service Management
 
 ```bash
-systemctl --user status agency.service       # Check status
-systemctl --user restart agency.service      # Restart after code changes
-journalctl --user -u agency.service -f       # Stream logs
+systemctl --user status flowgency.service       # Check status
+systemctl --user restart flowgency.service      # Restart after code changes
+journalctl --user -u flowgency.service -f       # Stream logs
 ```
 
 ## Running on macOS
 
-Run directly with `python -m agency.app`. For persistence, create a launchd agent or use a process manager like `brew services`.
+Run directly with `python -m flowgency.app`. For persistence, create a launchd agent or use a process manager like `brew services`.
 
 ## Platform Support
 
@@ -52,5 +52,5 @@ Agency runs on any OS with Python 3.11+:
 
 ## Notes
 
-- Agency assumes local/trusted access. There is no built-in authentication. Use a reverse proxy (Traefik, nginx, Caddy) if you need auth.
+- Flowgency assumes local/trusted access. There is no built-in authentication. Use a reverse proxy (Traefik, nginx, Caddy) if you need auth.
 - Use a **user-level** systemd service on Linux, not system-level. System services cannot access user home directories on immutable OSes like Fedora Kinoite.

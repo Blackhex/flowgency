@@ -1,80 +1,102 @@
-# Agency
+# Flowgency
 
-Agency is a FastAPI control plane for reusable AI agent blueprints, team-owned agent instances, scheduled routines, semantic memory, durable jobs, and an observation-to-decision pipeline. It supports multiple LLM runtimes without making native project layouts authoritative.
+![Flowgency tree mark](screenshots/logo.svg)
 
-## Install
+**Ticket-driven orchestration for teams of AI agents.**
 
-Agency requires Python 3.11 or newer.
+See agents take work, move tickets through predefined workflows, and keep every
+transition inspectable from one local-first control plane.
 
-```text
-pip install -e .
-python -m agency.app
-```
+![Flowgency delivery workflow with synthetic tickets and agents](screenshots/flowgency-board.png)
 
-The dashboard listens on `http://127.0.0.1:8500` by default. Set `AGENCY_CONFIG` to select the one authoritative config.
+## How tickets flow
 
-## Current configuration model
+Agents surface observations as they work. Observations converge into proposals —
+questions waiting for human decisions. Approved decisions become durable execution
+jobs. The board shows each ticket's status as agents take and complete work. Every
+transition is recorded and revisitable from the dashboard.
 
-Agency accepts one current `config.yaml` shape headed by `schema_version: 1`. `config.yaml` owns teams, explicit instances, runtime policy, routines, integration selection, identity, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
+## Supporting capabilities
 
-Global paths separate reusable and mutable data:
-
-- `agency.agent_library` contains standard blueprints.
-- `agency.compilation_cache` contains disposable immutable runtime projections.
-- `agency.memory_store` contains semantic mutable Markdown memory.
-- `agency.prompt_store` contains canonical prompt files referenced by config.
-
-Each team separates its source repository from Agency-owned state:
-
-- `workspace_path` is the execution workspace and source repository.
-- `path` is the Agency-owned team root.
-- The team root is automatically available to restricted agents.
-- Durable jobs live in `agency.memory_store/.jobs`.
-- Operation locks live in `<team.path>/locks`.
-- Agency never loads or creates `<workspace_path>/shared`.
-
-Each immediate Agent Library child is a blueprint with `AGENTS.md` and optional Agent Skills under `.agents/skills/<skill>/SKILL.md`. An instance belongs to one team and explicitly selects one blueprint and integration. Runtime projectors create disposable native layouts without changing source bytes.
-
-Runtime policy is a `permissions` block with a `mode` (`restricted` or `unrestricted`) and a `rules` list. Each rule binds a set of tools to a path. Instance rules are additive to team rules; the longest matching path governs. Agency adds generated rules for the launch view so the agent can read its instructions but cannot rewrite them.
-
-Routines select prompt-backed execution. Each routine has a stable ID, selects one scoped prompt, defines one schedule, and may use semantic memory selectors with `run`, `routine`, `agent`, `team`, or declared `channel` scope.
-
-The roster manual launcher uses the same effective prompt authority: users can run a saved blueprint or instance prompt from the catalog, or switch to a one-off task without changing config. Native integration prompt files remain generated output only.
-
-## Product surfaces
-
-- The Agents page lists team-owned instances.
-- Agent Detail provides `Profile/Blueprint/Runtime/Routines/Prompts/Memory/Activity`. Profile identity is the config display name, title, and emoji.
-- Agent Library manages standard `AGENTS.md` blueprint source and Agent Skills.
-- Memory Channels and semantic selectors own mutable memory.
-- Routines submit durable jobs; Jobs shows queued, waiting, running, completed, failed, and cancelled work.
-- Team Settings manages defaults only. It does not discover folders, initialize physical agents, or own instance CRUD.
-- Observations, proposals, decisions, logs, locks, and workspaces remain team-scoped.
-
-Workspace launchers are optional frontends. They start configured instances in the team workspace and do not own configuration or source.
+- **Reusable blueprints** — Agent Library holds standard `AGENTS.md` and Agent
+  Skills, separated from configured identity.
+- **Explicit instances** — Each instance belongs to one team and pins one
+  blueprint, one integration, and one permission policy.
+- **Scheduled routines** — Each routine selects one saved prompt, one schedule,
+  and optional semantic memory.
+- **Semantic memory** — Selectors for run, routine, agent, team, or declared
+  channel scope keep context focused without manual file management.
+- **Local-first** — No cloud account required. The dashboard and all data live on
+  your machine.
 
 ## Quick start
 
-Start Flowgency, choose the Flowgency data root and supported AI integration, complete the flowgency-setup conversation, and return to the dashboard automatically. The launcher safely creates a missing root, attaches the bundled skill, and the guided conversation asks for the project workspace as its first question. The [Flowgency Setup Skill](kb/setup-skill.md) then owns team naming, blueprint source, instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write.
+Flowgency requires Python 3.11 or newer.
 
-On first run, open `/setup` and choose the data root and supported integration to launch `flowgency-setup`. Users may enter home syntax such as `~/Flowgency`; setup expands it before deriving `agent-library`, `compiled-agents`, `memory`, `prompts`, and `teams/<team-id>` beneath the approved root. Advanced users can opt into one grouped path review; the default flow asks no individual storage-path questions.
+```text
+git clone https://github.com/Blackhex/flowgency.git
+cd flowgency
+python -m pip install -e .
+flowgency serve
+```
 
-## Pipeline and execution
+The dashboard opens at `http://127.0.0.1:8500`. Set `FLOWGENCY_CONFIG` to select
+the one authoritative config file.
 
-Agents surface observations, converge them into proposals, and wait for human decisions. Approved decisions and scheduled routines become durable jobs. Every proposal names an explicit writable execution instance, and every job snapshots its blueprint, selected prompt source, runtime policy, task input, and memory selector before launch.
+Start Flowgency, choose the Flowgency data root and supported AI integration, complete the flowgency-setup conversation, and return to the dashboard automatically.
+Users may enter home syntax such as `~/Flowgency`; setup expands it to the
+user's home directory before deriving canonical paths. The guided conversation asks
+for the project workspace as its first question, then names your team, proposes
+agent blueprints and instances, and writes one validated `config.yaml` with no
+individual storage-path questions.
 
-Agency installs one user-level platform scheduler for all teams:
+## Configuration
+
+Flowgency uses one authoritative YAML document. The top-level `schema_version: 1`
+and `flowgency` root are required:
+
+```yaml
+schema_version: 1
+flowgency:
+  title: My Project
+  default_team: my-project
+  agent_library: C:/Flowgency/agent-library
+  compilation_cache: C:/Flowgency/compiled-agents
+  memory_store: C:/Flowgency/memory
+  prompt_store: C:/Flowgency/prompts
+teams:
+  my-project:
+    name: My Project
+    workspace_path: C:/Projects/my-project
+    path: C:/Flowgency/teams/my-project
+    default_integration: copilot
+```
+
+See [config.yaml.example](config.yaml.example) and [Configuration](kb/configuration.md)
+for the complete reference. The [Flowgency Setup Skill](kb/setup-skill.md) generates
+a validated config from a guided conversation.
+
+## Scheduling
+
+Install the singleton dispatcher to run routines on a platform timer:
 
 ```text
 flowgency dispatch install --config C:/Flowgency/config.yaml
 flowgency dispatch status --config C:/Flowgency/config.yaml
 ```
 
-## Superseded layout cleanup
+## Integrations
 
-Runtime never parses or rewrites directory-coupled or sidecar-based authority. Older installations must be rewritten into the current config shape before Agency can load them.
+Flowgency supports multiple AI runtimes via pluggable integrations. Each instance
+pins one integration explicitly. See [Integrations](kb/integrations.md) for
+supported runtimes and [Contributing Integrations](kb/contributing-integrations.md)
+to add one.
 
-Files such as native identity sidecars, prompt directories, physical memory files, `dispatch.agents`, or `tmux_config` are not consulted by runtime.
+## Local-first operation
+
+Flowgency assumes trusted local access. There is no built-in authentication. The
+dashboard, config, blueprints, memory, and all records live on your local
+filesystem. Use a reverse proxy (Traefik, nginx, Caddy) if you need access controls.
 
 ## Documentation
 
@@ -86,13 +108,30 @@ Files such as native identity sidecars, prompt directories, physical memory file
 - [Dispatch and Routines](kb/dispatch.md)
 - [Data Formats](kb/data-formats.md)
 - [Deployment](kb/deployment.md)
-- [Agency Setup Skill](kb/setup-skill.md)
+- [Flowgency Setup Skill](kb/setup-skill.md)
 - [Contributing Integrations](kb/contributing-integrations.md)
 
 ## Development
 
 ```text
-.venv/Scripts/python -m pytest tests/ -q
+python -m pytest tests/ -q
 ```
 
-Agency uses Python, FastAPI, Jinja2, and filesystem-backed YAML and Markdown. See [LICENSE](LICENSE) for AGPL-3.0 terms.
+Install test dependencies (pytest, httpx, Pillow) with:
+
+```text
+python -m pip install -e '.[test]'
+```
+
+Flowgency uses Python, FastAPI, Jinja2, and filesystem-backed YAML and Markdown.
+
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for the repository guide, development workflow, and
+commit conventions. Contributions follow the development workflow described there:
+feature branches in `.worktrees/`, conventional commits, and a full test suite
+before integration.
+
+## License
+
+[AGPL-3.0](LICENSE)

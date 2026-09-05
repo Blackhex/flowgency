@@ -4,9 +4,9 @@ An integration adapts a configured current instance to one LLM runtime. Config s
 
 ## Quick start
 
-1. Create `agency/integrations/<author>/__init__.py` and copy `agency/integrations/_template.py` to that package.
+1. Create `flowgency/integrations/<author>/__init__.py` and copy `flowgency/integrations/_template.py` to that package.
 2. Implement execution, policy support, and a versioned runtime projector following the template and existing official adapters.
-3. Register the plugin in `agency/integrations/integrations.yaml` through Admin > Integrations.
+3. Register the plugin in `flowgency/integrations/integrations.yaml` through Admin > Integrations.
 4. Run the integration and projector contract suites.
 
 ```text
