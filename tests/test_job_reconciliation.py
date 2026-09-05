@@ -26,7 +26,7 @@ def running_decision_job(
     decision = team_dir / "decisions" / "change.md"
     decision.parent.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
     spec = JobSpec(
         schema_version=5,
         job_id="decision-job",
@@ -271,7 +271,7 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
 
     team_dir = tmp_path / "team"
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
     memory_binding = resolve_memory_selector(
         MemorySelector(scope="agent"),
         job_id="placeholder",

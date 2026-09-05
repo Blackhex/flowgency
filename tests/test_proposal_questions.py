@@ -165,9 +165,9 @@ def _setup_decision_team(tmp_path, monkeypatch, *, explicit_executor=True):
         (blueprint_root / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 6\n"
-        "agency:\n"
-        "  title: Agency\n"
+        "schema_version: 1\n"
+        "flowgency:\n"
+        "  title: Flowgency\n"
         "  default_team: test\n"
         "  ai_backend: claude-code\n"
         f"  agent_library: {(tmp_path / 'agent-library').as_posix()}\n"

@@ -69,10 +69,10 @@ def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = T
     _write_blueprint(library_root, "advisor", "Advisor", include_prompt=with_agent_prompts)
     _write_blueprint(library_root, "builder-blueprint", "Builder")
 
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(cache_root)
-    raw["agency"]["memory_store"] = str(memory_root)
-    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(cache_root)
+    raw["flowgency"]["memory_store"] = str(memory_root)
+    raw["flowgency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["teams"]["newsletter"]["name"] = "Newsletter"
     apply_team_paths(raw["teams"]["newsletter"], newsletter_paths)
     raw["teams"]["newsletter"]["default_integration"] = "copilot"
@@ -102,7 +102,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config, *, with_agent_prompts: bool = T
     if with_agent_prompts:
         from flowgency.prompts import PromptStore
 
-        PromptStore(Path(raw["agency"]["prompt_store"])).create(
+        PromptStore(Path(raw["flowgency"]["prompt_store"])).create(
             "newsletter",
             "advisor",
             "local-triage",
@@ -340,7 +340,7 @@ def test_remove_instance_warns_when_prompt_namespace_is_orphaned(
     snapshot = store.load()
     from flowgency.prompts import PromptStore
 
-    prompt_store = PromptStore(Path(snapshot.raw["agency"]["prompt_store"]))
+    prompt_store = PromptStore(Path(snapshot.raw["flowgency"]["prompt_store"]))
     prompt_store.create(
         "newsletter",
         "advisor",
@@ -403,7 +403,7 @@ def test_move_apply_warns_when_prompt_namespace_cleanup_is_orphaned(
     snapshot = store.load()
     from flowgency.prompts import PromptStore
 
-    prompt_store = PromptStore(Path(snapshot.raw["agency"]["prompt_store"]))
+    prompt_store = PromptStore(Path(snapshot.raw["flowgency"]["prompt_store"]))
     created = prompt_store.read("newsletter", "advisor", "local-triage")
 
     original_delete_namespace_locked = (
@@ -595,7 +595,7 @@ def test_roster_returns_actionable_warning_when_agent_library_is_unavailable(
     client, config_path, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     missing_root = tmp_path / "missing-library"
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["agency"]["agent_library"] = str(missing_root)
+    raw["flowgency"]["agent_library"] = str(missing_root)
     config_path.write_text(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",

@@ -3,14 +3,14 @@
 from .team_paths import ResolvedTeamPaths, resolve_team_paths
 from .issues import ValidationFailed, ValidationIssue
 from .models import (
-    AgencyConfig,
+    FlowgencyConfig,
     ParsedConfig,
     PromptSelector,
     parse_config,
     validate_config,
 )
 from .patches import (
-    AgencySettingsPatch,
+    FlowgencySettingsPatch,
     AgentProfilePatch,
     AgentRuntimePatch,
     TeamCreateStatePatch,
@@ -23,7 +23,7 @@ from .patches import (
     delete_team,
     dismiss_tip,
     hide_all_tips,
-    patch_agency_settings,
+    patch_flowgency_settings,
     patch_agent_profile,
     patch_agent_runtime,
     patch_team_dispatch,
@@ -47,9 +47,9 @@ from .store import (
 )
 
 __all__ = [
-    "AgencyConfig",
+    "FlowgencyConfig",
     "ABSENT_REVISION",
-    "AgencySettingsPatch",
+    "FlowgencySettingsPatch",
     "AgentProfilePatch",
     "AgentRuntimePatch",
     "ConfigFileSnapshot",
@@ -75,7 +75,7 @@ __all__ = [
     "hide_all_tips",
     "is_symlink_or_reparse",
     "load_config_snapshot",
-    "patch_agency_settings",
+    "patch_flowgency_settings",
     "patch_agent_profile",
     "patch_agent_runtime",
     "patch_team_dispatch",

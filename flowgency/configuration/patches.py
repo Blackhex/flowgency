@@ -8,7 +8,7 @@ from .store import ConfigSnapshot, ConfigStore
 
 
 @dataclass(frozen=True)
-class AgencySettingsPatch:
+class FlowgencySettingsPatch:
     title: str
     default_team: str
     ai_backend: str
@@ -110,22 +110,22 @@ def _clear_known_keys(mapping: dict[str, Any], keys: tuple[str, ...]) -> None:
         mapping.pop(key, None)
 
 
-def patch_agency_settings(
+def patch_flowgency_settings(
     store: ConfigStore,
     expected_revision: str,
-    patch: AgencySettingsPatch,
+    patch: FlowgencySettingsPatch,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agency = raw.setdefault("agency", {})
-        agency["title"] = patch.title
-        agency["default_team"] = patch.default_team
-        agency["ai_backend"] = patch.ai_backend
-        agency["theme"] = patch.theme
-        agency["agent_library"] = patch.agent_library
-        agency["compilation_cache"] = patch.compilation_cache
-        agency["memory_store"] = patch.memory_store
-        agency["prompt_store"] = patch.prompt_store
-        dispatch = agency.setdefault("dispatch", {})
+        flowgency = raw.setdefault("flowgency", {})
+        flowgency["title"] = patch.title
+        flowgency["default_team"] = patch.default_team
+        flowgency["ai_backend"] = patch.ai_backend
+        flowgency["theme"] = patch.theme
+        flowgency["agent_library"] = patch.agent_library
+        flowgency["compilation_cache"] = patch.compilation_cache
+        flowgency["memory_store"] = patch.memory_store
+        flowgency["prompt_store"] = patch.prompt_store
+        dispatch = flowgency.setdefault("dispatch", {})
         dispatch["interval"] = patch.dispatch_interval
 
     return store.patch(expected_revision, apply)
@@ -414,7 +414,7 @@ def dismiss_tip(
     tip_id: str,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agency = raw.setdefault("agency", {})
+        agency = raw.setdefault("flowgency", {})
         dismissed = agency.get("tips_dismissed")
         if not isinstance(dismissed, list):
             dismissed = []
@@ -430,7 +430,7 @@ def hide_all_tips(
     expected_revision: str,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agency = raw.setdefault("agency", {})
+        agency = raw.setdefault("flowgency", {})
         agency["show_tips"] = False
 
     return store.patch(expected_revision, apply)
@@ -447,7 +447,7 @@ def delete_team(
             raise KeyError(team_id)
         del teams[team_id]
 
-        agency = raw.setdefault("agency", {})
+        agency = raw.setdefault("flowgency", {})
         if agency.get("default_team") == team_id:
             agency["default_team"] = next(iter(teams), "")
 

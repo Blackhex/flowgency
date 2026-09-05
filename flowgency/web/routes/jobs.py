@@ -21,7 +21,7 @@ from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import JobRecord
 from flowgency.jobs.queue import queue_snapshot
 from flowgency.jobs.store import InvalidJobTransition, cancel_job, read_job
-from flowgency.web.dependencies import AgencyServices, get_services
+from flowgency.web.dependencies import FlowgencyServices, get_services
 
 
 router = APIRouter()
@@ -41,7 +41,7 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
         "team": team_id,
         "team_name": team_cfg.name,
         "teams": {key: value.name for key, value in snapshot.config.teams.items()},
-        "agency_title": snapshot.config.agency.title,
+        "agency_title": snapshot.config.flowgency.title,
         "admin_active": False,
         "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
         "workspaces_available": bool(team_cfg.workspaces),
@@ -237,7 +237,7 @@ def _job_detail_context(snapshot, team_id: str, record) -> dict[str, Any]:
     team_cfg = snapshot.config.teams[team_id]
     instance = team_cfg.agents.get(record.spec.agent_name)
     agent_name = record.spec.agent_name
-    artifact_dir = JobStore(snapshot.config.agency.memory_store).artifact_root(team_id, record.spec.job_id)
+    artifact_dir = JobStore(snapshot.config.flowgency.memory_store).artifact_root(team_id, record.spec.job_id)
     failed_artifacts = []
     if artifact_dir.exists():
         for artifact in sorted(artifact_dir.glob("*.md")):
@@ -282,7 +282,7 @@ def _job_detail_context(snapshot, team_id: str, record) -> dict[str, Any]:
 
 
 @router.get("/{team}/jobs", response_class=HTMLResponse)
-async def jobs_list(request: Request, team: str, services: AgencyServices = Depends(get_services)):
+async def jobs_list(request: Request, team: str, services: FlowgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
     if team not in snapshot.config.teams:
         raise HTTPException(status_code=404, detail="Unknown team")
@@ -301,7 +301,7 @@ async def jobs_list(request: Request, team: str, services: AgencyServices = Depe
 
 
 @router.get("/{team}/jobs/{job_id}", response_class=HTMLResponse)
-async def job_detail(request: Request, team: str, job_id: str, artifact: str = "", resume: str = "", services: AgencyServices = Depends(get_services)):
+async def job_detail(request: Request, team: str, job_id: str, artifact: str = "", resume: str = "", services: FlowgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
     if team not in snapshot.config.teams:
         raise HTTPException(status_code=404, detail="Unknown team")
@@ -332,7 +332,7 @@ async def job_detail(request: Request, team: str, job_id: str, artifact: str = "
 
 
 @router.post("/{team}/jobs/{job_id}/resume")
-async def job_resume(request: Request, team: str, job_id: str, services: AgencyServices = Depends(get_services)):
+async def job_resume(request: Request, team: str, job_id: str, services: FlowgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
     if team not in snapshot.config.teams:
         raise HTTPException(status_code=404, detail="Unknown team")
@@ -363,7 +363,7 @@ async def job_resume(request: Request, team: str, job_id: str, services: AgencyS
 
 
 @router.post("/{team}/jobs/{job_id}/cancel", response_class=HTMLResponse)
-async def job_cancel(request: Request, team: str, job_id: str, services: AgencyServices = Depends(get_services)):
+async def job_cancel(request: Request, team: str, job_id: str, services: FlowgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
     if team not in snapshot.config.teams:
         raise HTTPException(status_code=404, detail="Unknown team")

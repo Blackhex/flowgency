@@ -33,11 +33,11 @@ def _make_team_client(monkeypatch, tmp_path, raw_config):
     src = workspace / "src"
     src.mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["title"] = "Agency"
-    raw["agency"]["default_team"] = "grp"
-    raw["agency"]["agent_library"] = str(tmp_path / "library")
-    raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
-    raw["agency"]["memory_store"] = str(tmp_path / "memory")
+    raw["flowgency"]["title"] = "Agency"
+    raw["flowgency"]["default_team"] = "grp"
+    raw["flowgency"]["agent_library"] = str(tmp_path / "library")
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
+    raw["flowgency"]["memory_store"] = str(tmp_path / "memory")
     raw["teams"] = {
         "grp": {
             "name": "Grp",
@@ -95,10 +95,10 @@ def _make_agent_client(monkeypatch, tmp_path, raw_config):
     (team_root / "locks").mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor")
 
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
-    raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
-    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
+    raw["flowgency"]["memory_store"] = str(tmp_path / "memory-store")
+    raw["flowgency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["teams"]["newsletter"]["name"] = "Newsletter"
     raw["teams"]["newsletter"]["path"] = str(team_root)
     raw["teams"]["newsletter"]["workspace_path"] = str(workspace)
@@ -353,10 +353,10 @@ def test_team_patch_none_leaves_rules_alone(tmp_path, raw_config):
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "lib").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["default_team"] = "grp"
-    raw["agency"]["agent_library"] = str(tmp_path / "lib")
-    raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
-    raw["agency"]["memory_store"] = str(tmp_path / "mem")
+    raw["flowgency"]["default_team"] = "grp"
+    raw["flowgency"]["agent_library"] = str(tmp_path / "lib")
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
+    raw["flowgency"]["memory_store"] = str(tmp_path / "mem")
     raw["teams"] = {
         "grp": {
             "name": "Grp",
@@ -402,10 +402,10 @@ def test_team_patch_empty_tuple_clears_rules(tmp_path, raw_config):
     workspace.mkdir(parents=True, exist_ok=True)
     (tmp_path / "lib").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["default_team"] = "grp"
-    raw["agency"]["agent_library"] = str(tmp_path / "lib")
-    raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
-    raw["agency"]["memory_store"] = str(tmp_path / "mem")
+    raw["flowgency"]["default_team"] = "grp"
+    raw["flowgency"]["agent_library"] = str(tmp_path / "lib")
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
+    raw["flowgency"]["memory_store"] = str(tmp_path / "mem")
     raw["teams"] = {
         "grp": {
             "name": "Grp",
@@ -452,10 +452,10 @@ def test_agent_patch_none_leaves_rules_alone(tmp_path, raw_config):
     extra = tmp_path / "extra"
     extra.mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["default_team"] = "grp"
-    raw["agency"]["agent_library"] = str(tmp_path / "lib")
-    raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
-    raw["agency"]["memory_store"] = str(tmp_path / "mem")
+    raw["flowgency"]["default_team"] = "grp"
+    raw["flowgency"]["agent_library"] = str(tmp_path / "lib")
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
+    raw["flowgency"]["memory_store"] = str(tmp_path / "mem")
     raw["teams"] = {
         "grp": {
             "name": "Grp",
@@ -500,10 +500,10 @@ def test_agent_patch_empty_tuple_clears_rules(tmp_path, raw_config):
     extra = tmp_path / "extra"
     extra.mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["default_team"] = "grp"
-    raw["agency"]["agent_library"] = str(tmp_path / "lib")
-    raw["agency"]["compilation_cache"] = str(tmp_path / "cache")
-    raw["agency"]["memory_store"] = str(tmp_path / "mem")
+    raw["flowgency"]["default_team"] = "grp"
+    raw["flowgency"]["agent_library"] = str(tmp_path / "lib")
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
+    raw["flowgency"]["memory_store"] = str(tmp_path / "mem")
     raw["teams"] = {
         "grp": {
             "name": "Grp",

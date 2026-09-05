@@ -7,7 +7,7 @@ import stat
 
 from .team_paths import resolve_team_paths
 from .issues import ValidationIssue
-from .models import AgencyConfig
+from .models import FlowgencyConfig
 
 
 def job_store_root(memory_store: Path) -> Path:
@@ -228,12 +228,12 @@ def _overlap_issue(
     )
 
 
-def validate_resolved_paths(config: AgencyConfig) -> tuple[ValidationIssue, ...]:
+def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
-    library = Path(config.agency.agent_library).resolve(strict=False)
-    cache = Path(config.agency.compilation_cache).resolve(strict=False)
-    memory = Path(config.agency.memory_store).resolve(strict=False)
-    prompt_store = Path(config.agency.prompt_store).resolve(strict=False)
+    library = Path(config.flowgency.agent_library).resolve(strict=False)
+    cache = Path(config.flowgency.compilation_cache).resolve(strict=False)
+    memory = Path(config.flowgency.memory_store).resolve(strict=False)
+    prompt_store = Path(config.flowgency.prompt_store).resolve(strict=False)
     control_authorities = (
         _Authority("agency", "agent_library", "agency.agent_library", library),
         _Authority(
@@ -431,12 +431,12 @@ def _ensure_real_directory(path: Path, *, create: bool) -> Path:
     return Path(path).resolve(strict=False)
 
 
-def initialize_storage_directories(config: AgencyConfig) -> None:
+def initialize_storage_directories(config: FlowgencyConfig) -> None:
     directories = [
-        Path(config.agency.compilation_cache),
-        Path(config.agency.memory_store),
-        Path(config.agency.prompt_store),
-        job_store_root(Path(config.agency.memory_store)),
+        Path(config.flowgency.compilation_cache),
+        Path(config.flowgency.memory_store),
+        Path(config.flowgency.prompt_store),
+        job_store_root(Path(config.flowgency.memory_store)),
     ]
     for team in config.teams.values():
         paths = resolve_team_paths(team)

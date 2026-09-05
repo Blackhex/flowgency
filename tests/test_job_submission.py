@@ -40,7 +40,7 @@ from flowgency.memory import MemoryStore
 @pytest.fixture
 def prompt_env(tmp_path, raw_config):
     raw = deepcopy(raw_config)
-    library_root = Path(raw["agency"]["agent_library"])
+    library_root = Path(raw["flowgency"]["agent_library"])
     blueprint = library_root / "reviewer"
     prompt_dir = blueprint / ".agents" / "prompts"
     prompt_dir.mkdir(parents=True, exist_ok=True)
@@ -55,7 +55,7 @@ def prompt_env(tmp_path, raw_config):
     agent["prompts"] = ["local-triage"]
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
-    store = PromptStore(Path(raw["agency"]["prompt_store"]))
+    store = PromptStore(Path(raw["flowgency"]["prompt_store"]))
     store.create(
         "newsletter",
         "reviewer",
@@ -319,9 +319,9 @@ def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_pat
     (tmp_path / "workspaces" / "newsletter" / "repo").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 6\n"
-        "agency:\n"
-        "  title: Agency\n"
+        "schema_version: 1\n"
+        "flowgency:\n"
+        "  title: Flowgency\n"
         "  default_team: newsletter\n"
         "  ai_backend: claude-code\n"
         "  agent_library: agent-library\n"
@@ -464,9 +464,9 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
     (tmp_path / "agent-library").mkdir(parents=True, exist_ok=True)
     config = tmp_path / "config.yaml"
     config.write_text(
-        "schema_version: 6\n"
-        "agency:\n"
-        "  title: Agency\n"
+        "schema_version: 1\n"
+        "flowgency:\n"
+        "  title: Flowgency\n"
         "  default_team: newsletter\n"
         "  ai_backend: claude-code\n"
         "  agent_library: agent-library\n"
@@ -1203,8 +1203,8 @@ def _pool_config(tmp_path, *, pool=1):
     memory_store = tmp_path / "memory"
 
     raw = {
-        "schema_version": 6,
-        "agency": {
+        "schema_version": 1,
+        "flowgency": {
             "title": "Agency",
             "default_team": "newsletter",
             "ai_backend": "claude-code",
@@ -1345,7 +1345,7 @@ class _SubmissionEnv:
 
     def fill_pool(self):
         """Write running records with live PIDs to fill the pool."""
-        pool_size = self.config.agency.jobs.pool
+        pool_size = self.config.flowgency.jobs.pool
         for i in range(pool_size):
             spec = _queue_spec(self._tmp_path, f"running-{i}")
             record = dc_replace(
@@ -1357,7 +1357,7 @@ class _SubmissionEnv:
 
     def fill_pool_with_dead_workers(self):
         """Write running records with dead PIDs to fill the pool."""
-        pool_size = self.config.agency.jobs.pool
+        pool_size = self.config.flowgency.jobs.pool
         for i in range(pool_size):
             spec = _queue_spec(self._tmp_path, f"dead-{i}")
             record = dc_replace(

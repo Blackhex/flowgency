@@ -57,7 +57,7 @@ def test_systemd_worker_survives_submitter_exit(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump({
         "schema_version": 3,
-        "agency": {
+        "flowgency": {
             "agent_library": str((tmp_path / "agent-library").resolve()),
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),

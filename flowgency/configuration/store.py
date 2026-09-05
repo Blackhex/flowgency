@@ -13,7 +13,7 @@ from flowgency.fs.atomic import atomic_write_bytes
 from flowgency.fs.locks import exclusive_lock
 
 from .issues import ValidationFailed
-from .models import AgencyConfig, parse_config
+from .models import FlowgencyConfig, parse_config
 from .paths import initialize_storage_directories, validate_resolved_paths
 
 
@@ -29,7 +29,7 @@ class ConfigSnapshot:
     path: Path
     revision: str
     raw: dict[str, Any]
-    config: AgencyConfig
+    config: FlowgencyConfig
 
 
 @dataclass(frozen=True)

@@ -23,13 +23,13 @@ from uvicorn.supervisors.watchfilesreload import WatchFilesReload
 
 from flowgency.clock import now as clock_now, today as clock_today
 from flowgency.configuration import (
-    AgencySettingsPatch,
+    FlowgencySettingsPatch,
     ConfigConflictError,
     ConfigStore,
     PromptSelector,
     dismiss_tip,
     hide_all_tips,
-    patch_agency_settings,
+    patch_flowgency_settings,
     resolve_team_paths,
 )
 from flowgency.configuration.models import MemorySelector
@@ -61,8 +61,8 @@ from flowgency.proposals import validate_proposal_schema, validate_answers, shou
 from flowgency.records.frontmatter import extract_display_title, parse_frontmatter
 import json as json_module
 from flowgency.workspaces import REGISTRY as WORKSPACE_REGISTRY
-from flowgency.web import AgencyServices, build_services, get_services
-from flowgency.web.state import agency_settings, runtime_team
+from flowgency.web import FlowgencyServices, build_services, get_services
+from flowgency.web.state import flowgency_settings, runtime_team
 from flowgency.web.routes import (
     admin_teams_router,
     admin_library_router,
@@ -77,13 +77,13 @@ from flowgency.web.routes import (
 CONFIG_PATH = Path(os.environ.get("AGENCY_CONFIG") or Path.cwd() / "config.yaml").expanduser().resolve()
 
 
-def refresh_services() -> AgencyServices:
+def refresh_services() -> FlowgencyServices:
     services = build_services(CONFIG_PATH)
     app.state.services = services
     return services
 
 
-def _services() -> AgencyServices:
+def _services() -> FlowgencyServices:
     services = getattr(app.state, "services", None)
     if (
         services is None
@@ -121,10 +121,10 @@ def _update_tip_settings(patcher) -> None:
     raise ConfigConflictError("config.yaml changed; reload before saving")
 
 
-def get_agency_config() -> dict:
+def get_flowgency_config() -> dict:
     """Return agency-level config derived from the canonical config snapshot."""
     try:
-        return agency_settings(_load_snapshot())
+        return flowgency_settings(_load_snapshot())
     except Exception as error:
         if not _has_config_file():
             return {
@@ -302,7 +302,7 @@ _THEME_CSS_CACHE: dict[str, str] = {}
 def get_theme_css() -> str:
     """Return theme CSS for the currently selected theme, or empty string."""
     try:
-        theme_key = get_agency_config().get("theme", "")
+        theme_key = get_flowgency_config().get("theme", "")
     except HTTPException:
         return ""
     if not theme_key:
@@ -329,13 +329,13 @@ def _workspace_types_json() -> str:
 
 def get_dispatch_status() -> dict:
     """Return runtime scheduler status for the active singleton config."""
-    interval = int(get_agency_config().get("dispatch_interval", 15))
+    interval = int(get_flowgency_config().get("dispatch_interval", 15))
     return _get_timer_status(CONFIG_PATH.resolve(), interval)
 
 
 def install_dispatch(interval: int | None = None, replace: bool = False) -> str | None:
     """Install or repair the scheduler for the active singleton config."""
-    desired_interval = interval if interval is not None else int(get_agency_config().get("dispatch_interval", 15))
+    desired_interval = interval if interval is not None else int(get_flowgency_config().get("dispatch_interval", 15))
     return install_timer(str(CONFIG_PATH.resolve()), desired_interval, replace=replace)
 
 
@@ -350,7 +350,7 @@ async def lifespan(app: FastAPI):
         try:
             drain(
                 snapshot.config,
-                memory_store=snapshot.config.agency.memory_store,
+                memory_store=snapshot.config.flowgency.memory_store,
                 full_reconcile=True,
             )
         except Exception:
@@ -386,7 +386,7 @@ async def service_worker():
 @app.get("/manifest.json")
 async def manifest():
     """Serve PWA manifest with dynamic app title."""
-    cfg = get_agency_config()
+    cfg = get_flowgency_config()
     data = json_module.loads((STATIC_DIR / "manifest.json").read_text())
     data["name"] = cfg.get("title", "Agency")
     data["short_name"] = cfg.get("title", "Agency")
@@ -428,7 +428,7 @@ def safe_redirect(url: str, fallback: str = "/") -> str:
 def team_context(g: dict, observations: list[dict] | None = None, proposals: list[dict] | None = None) -> dict:
     """Return standard template context for a team."""
     snapshot = _load_snapshot()
-    agency = agency_settings(snapshot)
+    agency = flowgency_settings(snapshot)
     team_cfg = snapshot.config.teams[g["key"]]
     if observations is None:
         observations = list_observations(g)
@@ -1295,7 +1295,7 @@ async def root(request: Request):
     if services.startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
     snapshot = services.config_store.load()
-    agency = get_agency_config()
+    agency = get_flowgency_config()
     default = agency.get("default_team", "")
     if default and default in snapshot.config.teams:
         return RedirectResponse(f"/{default}/", status_code=303)
@@ -1313,7 +1313,7 @@ async def setup_complete(request: Request, team: str):
     services = _services()
     if services.startup_error is None:
         snapshot = services.config_store.load()
-        agency_title = agency_settings(snapshot).get("title", "Agency")
+        agency_title = flowgency_settings(snapshot).get("title", "Agency")
         if team in snapshot.config.teams:
             team_display = snapshot.config.teams[team].name
     return templates.TemplateResponse(request, "setup_complete.html", {
@@ -1359,7 +1359,7 @@ async def tip_hide_all(request: Request):
 def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dict:
     """Build common context for admin pages."""
     snapshot = _load_snapshot()
-    agency = agency_settings(snapshot)
+    agency = flowgency_settings(snapshot)
     team_summaries = []
     for key, tcfg in snapshot.config.teams.items():
         paths = resolve_team_paths(tcfg)
@@ -1401,10 +1401,10 @@ async def admin_settings_page(request: Request):
         "request": request,
         **admin_context("settings"),
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
-        "ai_backend": get_agency_config()["ai_backend"],
+        "ai_backend": get_flowgency_config()["ai_backend"],
         "installed_count": len(REGISTRY),
         "themes": load_themes(),
-        "current_theme": get_agency_config()["theme"],
+        "current_theme": get_flowgency_config()["theme"],
     })
 
 
@@ -1540,7 +1540,7 @@ async def admin_save_settings(request: Request):
     title = form.get("title", "Agency").strip()
     default_team = form.get("default_team", "").strip()
     snapshot = _load_snapshot()
-    settings = agency_settings(snapshot)
+    settings = flowgency_settings(snapshot)
     ai_backend = form.get("ai_backend", "claude-code")
     theme = form.get("theme", "").strip()
     _THEME_CSS_CACHE.clear()  # Invalidate cached CSS
@@ -1555,10 +1555,10 @@ async def admin_save_settings(request: Request):
         if 5 <= candidate_interval <= 120:
             dispatch_interval = candidate_interval
     try:
-        patch_agency_settings(
+        patch_flowgency_settings(
             ConfigStore(snapshot.path),
             revision or snapshot.revision,
-            AgencySettingsPatch(
+            FlowgencySettingsPatch(
                 title=title or "Agency",
                 default_team=default_team,
                 ai_backend=ai_backend,
@@ -1635,7 +1635,7 @@ async def admin_team_new(request: Request):
     """Create new team form."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
-    agency = get_agency_config()
+    agency = get_flowgency_config()
     snapshot = _load_snapshot()
     return templates.TemplateResponse(request, "admin_team_edit.html", {
         "request": request,
@@ -1667,7 +1667,7 @@ async def agent_run(
     request: Request,
     team: str,
     agent: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     try:
@@ -1802,11 +1802,11 @@ async def home(request: Request, team: str):
     # Work queue strip (between Pipeline and Attention Queue)
     try:
         snapshot = _load_snapshot()
-        ms = snapshot.config.agency.memory_store
+        ms = snapshot.config.flowgency.memory_store
         if ms is not None:
             view = queue_snapshot(snapshot.config, memory_store=ms)
         else:
-            view = QueueView(running=0, waiting=(), pool=snapshot.config.agency.jobs.pool)
+            view = QueueView(running=0, waiting=(), pool=snapshot.config.flowgency.jobs.pool)
     except Exception:
         view = QueueView(running=0, waiting=(), pool=4)
     work_queue = {
@@ -2095,7 +2095,7 @@ async def proposal_decide(request: Request, team: str, slug: str):
             status_code=400,
         )
 
-    agency_cfg = get_agency_config()
+    agency_cfg = get_flowgency_config()
     decided_by = agency_cfg.get("decided_by", "admin")
     today = clock_now().strftime("%Y-%m-%d")
 
@@ -2355,7 +2355,7 @@ async def decision_verify(request: Request, team: str, slug: str):
             status_code=400,
         )
 
-    agency_cfg = get_agency_config()
+    agency_cfg = get_flowgency_config()
     verifier = agency_cfg.get("decided_by", "admin")
     now = clock_now().isoformat(timespec="seconds")
 
@@ -2392,7 +2392,7 @@ def _create_follow_up_observation(g: dict, decision_slug: str, meta: dict, body:
     agent = (
         meta.get("executed_by")
         or meta.get("execution_agent")
-        or get_agency_config().get("decided_by", "admin")
+        or get_flowgency_config().get("decided_by", "admin")
     )
     proposal = meta.get("proposal", "")
     obs_meta = {

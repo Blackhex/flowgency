@@ -162,7 +162,7 @@ def test_launch_zones_cannot_be_widened_by_configuration(tmp_path: Path):
 
 def _config(tmp_path: Path, raw_config, *, team_rules, agent_rules):
     raw = deepcopy(raw_config)
-    raw["schema_version"] = 6
+    raw["schema_version"] = 1
     raw["teams"]["newsletter"]["runtime"] = {
         "permissions": {"mode": "restricted", "rules": team_rules}
     }

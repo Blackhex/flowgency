@@ -47,9 +47,9 @@ def _setup_team(tmp_path: Path) -> Path:
     )
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 6\n"
-        "agency:\n"
-        "  title: Agency\n"
+        "schema_version: 1\n"
+        "flowgency:\n"
+        "  title: Flowgency\n"
         "  default_team: test\n"
         "  ai_backend: claude-code\n"
         f"  agent_library: {library_root.as_posix()}\n"

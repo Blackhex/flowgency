@@ -69,12 +69,12 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     (tmp_path / "workspace" / "newsletter").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "newsletter-state").mkdir(parents=True, exist_ok=True)
     (tmp_path / "repo-root").mkdir(parents=True, exist_ok=True)
-    raw["agency"]["title"] = "Agency"
-    raw["agency"]["default_team"] = "newsletter"
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
-    raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
-    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
+    raw["flowgency"]["title"] = "Agency"
+    raw["flowgency"]["default_team"] = "newsletter"
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
+    raw["flowgency"]["memory_store"] = str(tmp_path / "memory-store")
+    raw["flowgency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["teams"]["newsletter"]["workspace_path"] = str(
         tmp_path / "workspace" / "newsletter"
     )
@@ -199,7 +199,7 @@ def test_stale_team_create_returns_conflict_without_writing_team(
     stale = store.load().revision
     store.patch(
         stale,
-        lambda raw: raw["agency"].__setitem__("title", "Elsewhere"),
+        lambda raw: raw["flowgency"].__setitem__("title", "Elsewhere"),
     )
 
     response = client.post(

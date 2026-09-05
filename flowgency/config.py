@@ -1,7 +1,7 @@
 """Configuration re-exports."""
 
 from flowgency.configuration import (
-    AgencyConfig,
+    FlowgencyConfig,
     ConfigConflictError,
     ConfigSnapshot,
     ConfigStore,
@@ -12,7 +12,7 @@ from flowgency.configuration import (
 )
 
 __all__ = [
-    "AgencyConfig",
+    "FlowgencyConfig",
     "ConfigConflictError",
     "ConfigSnapshot",
     "ConfigStore",

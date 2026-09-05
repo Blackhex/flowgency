@@ -47,8 +47,8 @@ def cli_config(tmp_path):
     )
     _write_blueprint(tmp_path / "agent-library")
     raw = {
-        "schema_version": 6,
-        "agency": {
+        "schema_version": 1,
+        "flowgency": {
             "title": "Contract Agency",
             "default_team": "newsletter",
             "agent_library": str((tmp_path / "agent-library").resolve()),
@@ -237,7 +237,7 @@ def test_argparse_usage_returns_two_without_escaping_handler(cli_runner):
 
 def test_invalid_config_has_shared_human_issue_and_exit_three(tmp_path, cli_runner):
     path = tmp_path / "invalid-config.yaml"
-    path.write_text("schema_version: 1\n", encoding="utf-8")
+    path.write_text("schema_version: 99\n", encoding="utf-8")
     result = cli_runner("status", config=path)
     assert result.exit_code == 3
     assert "configuration" in result.stderr.lower()
@@ -503,7 +503,7 @@ def test_v5_config_with_groups_is_rejected_without_migration_hint(tmp_path, cli_
         yaml.safe_dump(
             {
                 "schema_version": 5,
-                "agency": {
+                "flowgency": {
                     "title": "Old",
                     "default_team": "newsletter",
                     "agent_library": str(tmp_path / "lib"),
@@ -527,7 +527,7 @@ def test_v5_config_with_groups_is_rejected_without_migration_hint(tmp_path, cli_
     result = cli_runner("status", config=config_path)
 
     assert result.exit_code != 0
-    assert "schema_version must be 6" in result.stderr
+    assert "schema_version must be 1" in result.stderr
     assert "config migrate" not in result.stderr
 
 

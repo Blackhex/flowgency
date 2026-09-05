@@ -15,27 +15,27 @@ ScheduleKind = Literal["at", "every"]
 PromptScope = Literal["blueprint", "instance"]
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
-CONFIG_SCHEMA_VERSION = 6
-_ROOT_KEYS = {"schema_version", "agency", "memory", "teams"}
+CONFIG_SCHEMA_VERSION = 1
+_ROOT_KEYS = {"schema_version", "flowgency", "memory", "teams"}
 
 
-class AgencyDispatch(BaseModel):
+class FlowgencyDispatch(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     interval: int = 15
 
 
-class AgencyJobs(BaseModel):
+class FlowgencyJobs(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     pool: int = Field(default=4, ge=1)
 
 
-class AgencySettings(BaseModel):
+class FlowgencySettings(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
-    title: str = "Agency"
+    title: str = "Flowgency"
     default_team: str = ""
     ai_backend: str = "claude-code"
-    dispatch: AgencyDispatch = Field(default_factory=AgencyDispatch)
-    jobs: AgencyJobs = Field(default_factory=AgencyJobs)
+    dispatch: FlowgencyDispatch = Field(default_factory=FlowgencyDispatch)
+    jobs: FlowgencyJobs = Field(default_factory=FlowgencyJobs)
     agent_library: Path | None = None
     compilation_cache: Path | None = None
     memory_store: Path | None = None
@@ -150,10 +150,10 @@ class TeamConfig(BaseModel):
     workspaces: tuple[WorkspaceConfig, ...] = ()
 
 
-class AgencyConfig(BaseModel):
+class FlowgencyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    schema_version: Literal[6]
-    agency: AgencySettings
+    schema_version: Literal[1]
+    flowgency: FlowgencySettings
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     teams: dict[str, TeamConfig]
 
@@ -161,11 +161,11 @@ class AgencyConfig(BaseModel):
 class ParsedConfig(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     raw: dict[str, Any]
-    resolved: AgencyConfig
+    resolved: FlowgencyConfig
 
     @property
-    def agency(self) -> AgencySettings:
-        return self.resolved.agency
+    def flowgency(self) -> FlowgencySettings:
+        return self.resolved.flowgency
 
     @property
     def memory(self) -> MemoryConfig:
@@ -259,9 +259,9 @@ def _mapping_or_none(value: Any) -> Mapping[str, Any] | None:
 def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
-    agency = raw.get("agency")
-    if agency is not None and not _is_mapping(agency):
-        issues.append(_shape_issue("agency", "mapping"))
+    flowgency = raw.get("flowgency")
+    if flowgency is not None and not _is_mapping(flowgency):
+        issues.append(_shape_issue("flowgency", "mapping"))
 
     memory = raw.get("memory")
     memory_map = _mapping_or_none(memory)
@@ -526,7 +526,7 @@ def _reject_superseded_keys(
                     field=f"{prefix}.{key}",
                     message=(
                         f"'{key}' is a schema_version 4 key that is not "
-                        f"recognised in version 6."
+                        f"recognised in version 1."
                     ),
                     hint=(
                         "Remove the key and use runtime.permissions instead."
@@ -560,20 +560,20 @@ def _validate_default_team(default_team: Any, teams: Mapping[str, Any]) -> list[
         issues.append(
             _build_issue(
                 code="invalid-team-name",
-                scope="agency",
-                field="agency.default_team",
+                scope="flowgency",
+                field="flowgency.default_team",
                 message=f"Invalid team identifier: {default_team}",
                 hint="Use a lowercase stable slug containing only letters, digits, and single hyphen separators.",
             )
         )
         return issues
-    identifier_issue = _validate_identifier("team", default_team, "agency")
+    identifier_issue = _validate_identifier("team", default_team, "flowgency")
     if identifier_issue is not None:
         issues.append(
             ValidationIssue(
                 code=identifier_issue.code,
                 scope=identifier_issue.scope,
-                field="agency.default_team",
+                field="flowgency.default_team",
                 message=identifier_issue.message,
                 corrective_hint=identifier_issue.corrective_hint,
             )
@@ -583,10 +583,10 @@ def _validate_default_team(default_team: Any, teams: Mapping[str, Any]) -> list[
         issues.append(
             _build_issue(
                 code="missing-default-team",
-                scope="agency",
-                field="agency.default_team",
+                scope="flowgency",
+                field="flowgency.default_team",
                 message=f"Default team is not declared: {default_team}",
-                hint="Set agency.default_team to a declared team key or leave it blank when omission is intended.",
+                hint="Set flowgency.default_team to a declared team key or leave it blank when omission is intended.",
             )
         )
     return issues
@@ -601,22 +601,22 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 code="unsupported-schema-version",
                 scope="config",
                 field="schema_version",
-                message="schema_version must be 6.",
+                message="schema_version must be 1.",
                 hint=(
-                    "Rewrite the configuration to schema_version 6 with "
-                    "teams instead of groups."
+                    "Rewrite the configuration to schema 1 with "
+                    "teams."
                 ),
             )
         )
-    agency = raw.get("agency") if _is_mapping(raw.get("agency")) else {}
-    if "default_group" in agency:
+    flowgency = raw.get("flowgency") if _is_mapping(raw.get("flowgency")) else {}
+    if "default_group" in flowgency:
         issues.append(
             _build_issue(
                 code="superseded-default-group",
-                scope="agency",
+                scope="flowgency",
                 field="default_group",
-                message="agency.default_group is no longer recognised.",
-                hint="Rename agency.default_group to agency.default_team.",
+                message="flowgency.default_group is no longer recognised.",
+                hint="Rename flowgency.default_group to flowgency.default_team.",
             )
         )
     memory = raw.get("memory") if _is_mapping(raw.get("memory")) else {}
@@ -627,18 +627,18 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
         if identifier_issue:
             issues.append(identifier_issue)
     for field_name in ("agent_library", "compilation_cache", "memory_store", "prompt_store"):
-        if not str(agency.get(field_name, "")).strip():
+        if not str(flowgency.get(field_name, "")).strip():
             issues.append(
                 _build_issue(
                     code=f"missing-{field_name}",
-                    scope="agency",
+                    scope="flowgency",
                     field=field_name,
                     message=f"{field_name} is required.",
-                    hint=f"Set agency.{field_name} relative to config.yaml.",
+                    hint=f"Set flowgency.{field_name} relative to config.yaml.",
                 )
             )
     teams = raw.get("teams") if _is_mapping(raw.get("teams")) else {}
-    issues.extend(_validate_default_team(agency.get("default_team", ""), teams))
+    issues.extend(_validate_default_team(flowgency.get("default_team", ""), teams))
     for team_name, team in teams.items():
         identifier_issue = _validate_identifier("team", team_name, f"teams.{team_name}")
         if identifier_issue:
@@ -875,16 +875,16 @@ def _resolve_permission_paths(runtime_entry: dict[str, Any], workspace_path: Pat
 def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]:
     config_dir = config_path.parent.resolve()
     prepared = dict(raw)
-    agency = dict(prepared.get("agency") or {})
-    if agency.get("agent_library") is not None:
-        agency["agent_library"] = _path_from_config(agency["agent_library"], config_dir)
-    if agency.get("compilation_cache") is not None:
-        agency["compilation_cache"] = _path_from_config(agency["compilation_cache"], config_dir)
-    if agency.get("memory_store") is not None:
-        agency["memory_store"] = _path_from_config(agency["memory_store"], config_dir)
-    if agency.get("prompt_store") is not None:
-        agency["prompt_store"] = _path_from_config(agency["prompt_store"], config_dir)
-    prepared["agency"] = agency
+    flowgency = dict(prepared.get("flowgency") or {})
+    if flowgency.get("agent_library") is not None:
+        flowgency["agent_library"] = _path_from_config(flowgency["agent_library"], config_dir)
+    if flowgency.get("compilation_cache") is not None:
+        flowgency["compilation_cache"] = _path_from_config(flowgency["compilation_cache"], config_dir)
+    if flowgency.get("memory_store") is not None:
+        flowgency["memory_store"] = _path_from_config(flowgency["memory_store"], config_dir)
+    if flowgency.get("prompt_store") is not None:
+        flowgency["prompt_store"] = _path_from_config(flowgency["prompt_store"], config_dir)
+    prepared["flowgency"] = flowgency
 
     teams = dict(prepared.get("teams") or {})
     resolved_teams: dict[str, Any] = {}
@@ -944,15 +944,15 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
 def _collect_post_parse_issues(parsed: ParsedConfig) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     for field_name in ("agent_library", "compilation_cache", "memory_store", "prompt_store"):
-        value = getattr(parsed.agency, field_name)
+        value = getattr(parsed.flowgency, field_name)
         if value is None:
             issues.append(
                 _build_issue(
                     code=f"missing-{field_name}",
-                    scope="agency",
+                    scope="flowgency",
                     field=field_name,
                     message=f"{field_name} is required.",
-                    hint=f"Set agency.{field_name} relative to config.yaml.",
+                    hint=f"Set flowgency.{field_name} relative to config.yaml.",
                 )
             )
         elif not Path(value).is_absolute():
@@ -994,7 +994,7 @@ def _build_pipeline_result(raw: dict[str, Any], config_path: Path) -> _PipelineR
 
     prepared = _prepare_for_model(raw, config_path)
     try:
-        resolved = AgencyConfig.model_validate(prepared)
+        resolved = FlowgencyConfig.model_validate(prepared)
     except ValidationError as exc:
         issues.extend(_collect_pydantic_issues(exc))
         return _PipelineResult(parsed=None, issues=_sorted_issues(issues))

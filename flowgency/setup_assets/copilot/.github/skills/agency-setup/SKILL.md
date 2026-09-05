@@ -239,8 +239,8 @@ Upsert one team whose `workspace_path` points to the project workspace and whose
 Use this canonical shape:
 
 ```yaml
-schema_version: 6
-agency:
+schema_version: 1
+flowgency:
   title: Agency
   default_team: example
   ai_backend: copilot

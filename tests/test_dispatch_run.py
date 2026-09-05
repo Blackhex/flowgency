@@ -82,9 +82,9 @@ def _write_config(
         for routine in routines
     )
     config_path.write_text(
-        "schema_version: 6\n"
-        "agency:\n"
-        "  title: Agency\n"
+        "schema_version: 1\n"
+        "flowgency:\n"
+        "  title: Flowgency\n"
         "  default_team: test\n"
         "  ai_backend: claude-code\n"
         "  agent_library: agent-library\n"

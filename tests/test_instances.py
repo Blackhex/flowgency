@@ -168,10 +168,10 @@ def instance_env(tmp_path, raw_config):
     newsletter_path = newsletter_paths.state_root
     other_path = other_paths.state_root
     raw = deepcopy(raw_config)
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["memory_store"] = str(tmp_path / "memory-store")
-    raw["agency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
-    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["memory_store"] = str(tmp_path / "memory-store")
+    raw["flowgency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
+    raw["flowgency"]["prompt_store"] = str(tmp_path / "prompts")
     apply_team_paths(raw["teams"]["newsletter"], newsletter_paths)
     agent = raw["teams"]["newsletter"]["agents"][0]
     agent["default_memory"] = {"scope": "agent"}
@@ -675,7 +675,7 @@ def test_move_revalidates_revision_and_rolls_back_new_target_memory(
     snapshot = instance_env["config_store"].load()
     instance_env["config_store"].patch(
         snapshot.revision,
-        lambda raw: raw["agency"].update({"title": "Changed"}),
+        lambda raw: raw["flowgency"].update({"title": "Changed"}),
     )
 
     with pytest.raises(ConfigConflictError):

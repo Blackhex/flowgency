@@ -12,7 +12,7 @@ from flowgency.configuration.models import MemorySelector
 from flowgency.fs.snapshot import AssetValidationError
 from flowgency.instances import AgentInstanceCreate, InstanceMoveConflict
 from flowgency.prompts import PromptNotFoundError
-from flowgency.web.dependencies import AgencyServices, get_services
+from flowgency.web.dependencies import FlowgencyServices, get_services
 
 
 router = APIRouter()
@@ -32,7 +32,7 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict:
         "team": team_id,
         "team_name": team_cfg.name,
         "teams": {key: value.name for key, value in snapshot.config.teams.items()},
-        "agency_title": snapshot.config.agency.title,
+        "agency_title": snapshot.config.flowgency.title,
         "admin_active": False,
         "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
         "workspaces_available": bool(team_cfg.workspaces),
@@ -158,7 +158,7 @@ def _memory_channel_options(snapshot) -> tuple[dict[str, str], ...]:
 
 
 def _launcher_prompts(
-    services: AgencyServices, snapshot, team_id: str, agent_id: str
+    services: FlowgencyServices, snapshot, team_id: str, agent_id: str
 ) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, str], ...]]:
     if services.prompt_service is None:
         raise HTTPException(status_code=409, detail="Prompt service unavailable")
@@ -221,7 +221,7 @@ def _fallback_instance_rows(snapshot, team_id: str) -> list[dict[str, Any]]:
     return [_base_instance_row(snapshot, team_id, instance) for instance in team_cfg.agents.values()]
 
 
-def _instance_rows(snapshot, services: AgencyServices, team_id: str) -> list[dict]:
+def _instance_rows(snapshot, services: FlowgencyServices, team_id: str) -> list[dict]:
     team_cfg = snapshot.config.teams[team_id]
     if services.job_store is None:
         raise HTTPException(status_code=409, detail="Job store unavailable")
@@ -264,7 +264,7 @@ def _instance_rows(snapshot, services: AgencyServices, team_id: str) -> list[dic
     return rows
 
 
-def _available_blueprint_keys(services: AgencyServices) -> list[str]:
+def _available_blueprint_keys(services: FlowgencyServices) -> list[str]:
     root = Path(services.blueprint_library.root)
     if not root.exists():
         raise FileNotFoundError(f"Agent Library root does not exist: {root}")
@@ -275,7 +275,7 @@ def _available_blueprint_keys(services: AgencyServices) -> list[str]:
 
 def _render_roster(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     team_id: str,
     *,
     warning: str = "",
@@ -326,7 +326,7 @@ def _render_roster(
 
 
 @router.get("/{team}/agents", response_class=HTMLResponse)
-async def agents_roster(request: Request, team: str, services: AgencyServices = Depends(get_services)):
+async def agents_roster(request: Request, team: str, services: FlowgencyServices = Depends(get_services)):
     if services.instances is None:
         if isinstance(services.startup_error, ValidationFailed):
             return _render_roster(
@@ -341,7 +341,7 @@ async def agents_roster(request: Request, team: str, services: AgencyServices = 
 
 
 @router.post("/{team}/agents/create", response_class=HTMLResponse)
-async def agent_create(request: Request, team: str, services: AgencyServices = Depends(get_services)):
+async def agent_create(request: Request, team: str, services: FlowgencyServices = Depends(get_services)):
     if services.instances is None:
         raise HTTPException(status_code=409, detail="Instance services unavailable")
     form = await request.form()
@@ -385,7 +385,7 @@ async def agent_create(request: Request, team: str, services: AgencyServices = D
 
 
 @router.post("/{team}/agents/{agent}/remove", response_class=HTMLResponse)
-async def agent_remove(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_remove(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     if services.instances is None:
         raise HTTPException(status_code=409, detail="Instance services unavailable")
     form = await request.form()
@@ -413,7 +413,7 @@ async def agent_remove(request: Request, team: str, agent: str, services: Agency
 
 
 @router.post("/{team}/agents/{agent}/move", response_class=HTMLResponse)
-async def agent_move_preview(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_move_preview(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     if services.instances is None:
         raise HTTPException(status_code=409, detail="Instance services unavailable")
     form = await request.form()
@@ -449,7 +449,7 @@ async def agent_move_preview(request: Request, team: str, agent: str, services: 
 
 
 @router.post("/{team}/agents/{agent}/move/apply", response_class=HTMLResponse)
-async def agent_move_apply(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_move_apply(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     if services.instances is None:
         raise HTTPException(status_code=409, detail="Instance services unavailable")
     form = await request.form()

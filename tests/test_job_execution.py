@@ -42,7 +42,7 @@ def _authority(spec: JobSpec):
 def queued_job(tmp_path: Path, *, decision_context=None, private_prompt_content: str | None = None):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 6\nagency:\n  title: Test\n  default_team: ''\n"
+        "schema_version: 1\nflowgency:\n  title: Test\n  default_team: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
         "  prompt_store: /nonexistent\nmemory: {}\nteams: {}\n",
@@ -125,7 +125,7 @@ def memory_bound_job(tmp_path: Path):
     team_path = tmp_path / "team"
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "schema_version: 6\nagency:\n  title: Test\n  default_team: ''\n"
+        "schema_version: 1\nflowgency:\n  title: Test\n  default_team: ''\n"
         "  ai_backend: copilot\n  agent_library: /nonexistent\n"
         "  compilation_cache: /nonexistent\n  memory_store: /nonexistent\n"
         "  prompt_store: /nonexistent\nmemory: {}\nteams: {}\n",

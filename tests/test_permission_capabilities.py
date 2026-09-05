@@ -131,7 +131,7 @@ def test_only_copilot_scopes_write_and_only_when_detection_succeeds(monkeypatch)
 
 def _resolved_config(tmp_path, raw_config, *, integration, team_mode, team_rules, agent_rules):
     raw = deepcopy(raw_config)
-    raw["schema_version"] = 6
+    raw["schema_version"] = 1
     raw["teams"]["newsletter"]["runtime"] = {
         "permissions": {"mode": team_mode, "rules": team_rules}
     }

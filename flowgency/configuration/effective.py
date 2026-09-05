@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from flowgency.configuration.issues import ValidationFailed, ValidationIssue
-from flowgency.configuration.models import AgencyConfig, AgentInstance, TeamConfig, PermissionMode
+from flowgency.configuration.models import FlowgencyConfig, AgentInstance, TeamConfig, PermissionMode
 from flowgency.integrations import BaseIntegration, get_integration
 from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
@@ -21,7 +21,7 @@ def _platform_path_key(path: Path) -> str:
     return resolved
 
 
-def _get_team(config: AgencyConfig, team_id: str) -> TeamConfig:
+def _get_team(config: FlowgencyConfig, team_id: str) -> TeamConfig:
     try:
         return config.teams[team_id]
     except KeyError as exc:
@@ -90,7 +90,7 @@ def _merge_rules(
 
 
 def resolve_effective_policy(
-    config: AgencyConfig,
+    config: FlowgencyConfig,
     team_id: str,
     agent_id: str,
     *,

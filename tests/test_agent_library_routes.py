@@ -77,10 +77,10 @@ def _seed_library_app(monkeypatch, tmp_path, raw_config):
         )
     _write_blueprint(library_root, "advisor", "Advisor")
 
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(cache_root)
-    raw["agency"]["memory_store"] = str(memory_root)
-    raw["agency"]["prompt_store"] = str(prompt_root)
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(cache_root)
+    raw["flowgency"]["memory_store"] = str(memory_root)
+    raw["flowgency"]["prompt_store"] = str(prompt_root)
     raw["teams"] = {
         "newsletter": apply_team_paths({
             "name": "Newsletter",

@@ -21,9 +21,9 @@ def test_runtime_config_module_exposes_no_retired_agent_helper_surface():
 
 def test_runtime_team_exposes_resolved_agent_instances_without_mutating_raw_input():
     raw_config = {
-        "schema_version": 6,
+        "schema_version": 1,
 
-        "agency": {
+        "flowgency": {
             "title": "Agency",
             "default_team": "team",
             "ai_backend": "copilot",

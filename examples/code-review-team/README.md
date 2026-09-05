@@ -19,8 +19,8 @@ A 3-agent team for software projects: automated code review, security scanning, 
 
 2. Add the team to your Agency `config.yaml`:
    ```yaml
-   schema_version: 6
-   agency:
+   schema_version: 1
+   flowgency:
      prompt_store: /path/to/agency/prompts
    teams:
      review:

@@ -45,7 +45,7 @@ from flowgency.proposals import (
     validate_answers,
     validate_proposal_schema,
 )
-from flowgency.web.dependencies import AgencyServices, build_services
+from flowgency.web.dependencies import FlowgencyServices, build_services
 
 
 def _supports_color() -> bool:
@@ -119,7 +119,7 @@ def _config_path(args: Namespace) -> Path:
     return Path(selected).expanduser().resolve()
 
 
-def _services(args: Namespace) -> AgencyServices:
+def _services(args: Namespace) -> FlowgencyServices:
     services = build_services(_config_path(args))
     if services.startup_error is None:
         return services
@@ -157,7 +157,7 @@ def _snapshot_read_only(path: Path) -> ConfigSnapshot:
 
 
 def _team_id(args: Namespace, snapshot) -> str:
-    team_id = getattr(args, "team", None) or snapshot.config.agency.default_team
+    team_id = getattr(args, "team", None) or snapshot.config.flowgency.default_team
     if not team_id:
         raise _validation_failure(
             "missing-team",
@@ -277,7 +277,7 @@ def _markdown_items(directory: Path) -> list[dict[str, Any]]:
 
 
 def _job_records(snapshot, team_id: str):
-    job_store = JobStore(snapshot.config.agency.memory_store)
+    job_store = JobStore(snapshot.config.flowgency.memory_store)
     records = []
     for path in job_store.paths(team_id):
         try:
@@ -298,7 +298,7 @@ def _job_records(snapshot, team_id: str):
 
 
 def _active_job(snapshot, team_id: str, agent_name: str):
-    records = JobStore(snapshot.config.agency.memory_store).active(team_id, agent_name)
+    records = JobStore(snapshot.config.flowgency.memory_store).active(team_id, agent_name)
     return max(records, key=lambda record: (record.spec.created_at, record.spec.job_id), default=None)
 
 
@@ -325,7 +325,7 @@ def _policy_payload(policy) -> dict[str, Any]:
     }
 
 
-def _cache_status(services: AgencyServices, instance, inspection) -> str:
+def _cache_status(services: FlowgencyServices, instance, inspection) -> str:
     integration = services.integrations.get(instance.integration)
     projector = integration.projector if integration is not None else None
     if projector is None or services.compilation_cache is None:
@@ -335,7 +335,7 @@ def _cache_status(services: AgencyServices, instance, inspection) -> str:
 
 
 def _read_only_runtime(snapshot) -> tuple[BlueprintLibrary, dict[str, Any]]:
-    return BlueprintLibrary(Path(snapshot.config.agency.agent_library)), dict(REGISTRY)
+    return BlueprintLibrary(Path(snapshot.config.flowgency.agent_library)), dict(REGISTRY)
 
 
 def _cache_status_read_only(snapshot, integrations: dict[str, Any], instance, inspection) -> str:
@@ -343,7 +343,7 @@ def _cache_status_read_only(snapshot, integrations: dict[str, Any], instance, in
     projector = integration.projector if integration is not None else None
     if projector is None:
         return "unavailable"
-    entry = Path(snapshot.config.agency.compilation_cache) / instance.integration / projector.version / inspection.snapshot.digest
+    entry = Path(snapshot.config.flowgency.compilation_cache) / instance.integration / projector.version / inspection.snapshot.digest
     return "compiled" if (entry / "manifest.json").is_file() else "missing"
 
 
@@ -371,7 +371,7 @@ def _agent_payload_read_only(snapshot, team_id: str, instance) -> dict[str, Any]
     }
 
 
-def _agent_payload(services: AgencyServices, snapshot, team_id: str, instance) -> dict[str, Any]:
+def _agent_payload(services: FlowgencyServices, snapshot, team_id: str, instance) -> dict[str, Any]:
     team = snapshot.config.teams[team_id]
     current = _active_job(snapshot, team_id, instance.name)
     inspection = services.blueprint_library.inspect(instance.blueprint)
@@ -435,7 +435,7 @@ def cmd_serve(args: Namespace) -> int:
 
 def cmd_status(args: Namespace) -> int:
     snapshot = _snapshot(args)
-    job_store = JobStore(snapshot.config.agency.memory_store)
+    job_store = JobStore(snapshot.config.flowgency.memory_store)
     result = {}
     for team_id, team in snapshot.config.teams.items():
         paths = resolve_team_paths(team)
@@ -453,7 +453,7 @@ def cmd_status(args: Namespace) -> int:
     if args.json:
         _print_json(result)
     else:
-        print(f"\n{bold(snapshot.config.agency.title)} - Fleet Status\n")
+        print(f"\n{bold(snapshot.config.flowgency.title)} - Fleet Status\n")
         for team_id, item in result.items():
             print(f"  {bold(item['name'])} ({team_id})")
             print(
@@ -656,7 +656,7 @@ def cmd_inbox(args: Namespace) -> int:
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold(snapshot.config.agency.title)} - {resolved['name']}\n")
+        print(f"\n{bold(snapshot.config.flowgency.title)} - {resolved['name']}\n")
         print(f"  Needs decision: {len(actionable)}")
         print(f"  Floated signals: {len(floated)}")
         print(f"  Open observations: {len(open_items)}\n")
@@ -738,7 +738,7 @@ def _cmd_logs_inner(args: Namespace) -> int:
     return 0
 
 
-def _resolve_memory(args: Namespace, services: AgencyServices, snapshot):
+def _resolve_memory(args: Namespace, services: FlowgencyServices, snapshot):
     team_id = _team_id(args, snapshot)
     _instance(snapshot, team_id, args.agent)
     selector = MemorySelector(scope=args.scope, channel=args.channel)
@@ -757,15 +757,15 @@ def _resolve_memory(args: Namespace, services: AgencyServices, snapshot):
 
 def cmd_memory_show(args: Namespace) -> int:
     snapshot = _snapshot(args)
-    store = MemoryStore(Path(snapshot.config.agency.memory_store))
-    job_store = JobStore(Path(snapshot.config.agency.memory_store))
-    services = AgencyServices(
+    store = MemoryStore(Path(snapshot.config.flowgency.memory_store))
+    job_store = JobStore(Path(snapshot.config.flowgency.memory_store))
+    services = FlowgencyServices(
         config_path=snapshot.path,
         config_store=ConfigStore(snapshot.path),
         blueprint_library=None,
         compilation_cache=None,
         memory_store=store,
-        prompt_store=PromptStore(Path(snapshot.config.agency.prompt_store)),
+        prompt_store=PromptStore(Path(snapshot.config.flowgency.prompt_store)),
         job_store=job_store,
         instances=None,
         integrations=REGISTRY,
@@ -791,15 +791,15 @@ def cmd_memory_show(args: Namespace) -> int:
 
 def cmd_memory_save(args: Namespace) -> int:
     snapshot = _snapshot(args)
-    store = MemoryStore(Path(snapshot.config.agency.memory_store))
-    job_store = JobStore(Path(snapshot.config.agency.memory_store))
-    services = AgencyServices(
+    store = MemoryStore(Path(snapshot.config.flowgency.memory_store))
+    job_store = JobStore(Path(snapshot.config.flowgency.memory_store))
+    services = FlowgencyServices(
         config_path=snapshot.path,
         config_store=ConfigStore(snapshot.path),
         blueprint_library=None,
         compilation_cache=None,
         memory_store=store,
-        prompt_store=PromptStore(Path(snapshot.config.agency.prompt_store)),
+        prompt_store=PromptStore(Path(snapshot.config.flowgency.prompt_store)),
         job_store=job_store,
         instances=None,
         integrations=REGISTRY,
@@ -818,9 +818,9 @@ def cmd_memory_save(args: Namespace) -> int:
 
 
 def _dispatch_interval(config: Any) -> int:
-    if hasattr(config, "agency"):
-        return config.agency.dispatch.interval
-    return int(config.get("agency", {}).get("dispatch", {}).get("interval", 15))
+    if hasattr(config, "flowgency"):
+        return config.flowgency.dispatch.interval
+    return int(config.get("flowgency", {}).get("dispatch", {}).get("interval", 15))
 
 
 def _dispatch_status_exit_code(status: dict[str, Any]) -> int:
@@ -867,7 +867,7 @@ def _cmd_dispatch_inner(args: Namespace) -> int:
         if args.interval is not None:
             snapshot = store.patch(
                 snapshot.revision,
-                lambda raw: raw.setdefault("agency", {}).setdefault("dispatch", {}).update({"interval": interval}),
+                lambda raw: raw.setdefault("flowgency", {}).setdefault("dispatch", {}).update({"interval": interval}),
             )
         error = install_timer(str(snapshot.path), interval, replace=args.replace)
         if error:

@@ -19,13 +19,14 @@ ACTIVE_PATHS = (
 )
 
 
-def test_active_documents_use_v6_team_control_plane():
+def test_active_documents_use_v1_team_control_plane():
     text = "\n".join(path.read_text(encoding="utf-8") for path in ACTIVE_PATHS)
 
-    assert "schema_version: 6" in text
+    assert "schema_version: 1" in text
     assert "default_team:" in text
     assert "teams:" in text
     assert "schema_version: 5" not in text
+    assert "schema_version: 6" not in text
     assert "default_group:" not in text
     assert "\ngroups:\n" not in text
     assert "christag-agency config migrate" not in text
@@ -84,7 +85,7 @@ def test_normal_test_fixtures_use_team_domain_terms():
     assert not [term for term in forbidden_terms if term in text]
 
 
-def test_example_config_blocks_are_valid_v6(tmp_path: Path) -> None:
+def test_example_config_blocks_are_valid_v1(tmp_path: Path) -> None:
     from flowgency.configuration.models import validate_config
 
     example_readmes = [
@@ -96,7 +97,7 @@ def test_example_config_blocks_are_valid_v6(tmp_path: Path) -> None:
         m = re.search(r"```yaml\n(.*?)```", text, re.DOTALL)
         assert m, f"No YAML block in {readme.name}"
         raw = yaml.safe_load(m.group(1))
-        agency = raw.setdefault("agency", {})
+        agency = raw.setdefault("flowgency", {})
         for key in ("agent_library", "compilation_cache", "memory_store", "prompt_store"):
             agency[key] = str(tmp_path / key)
         for team in raw.get("teams", {}).values():

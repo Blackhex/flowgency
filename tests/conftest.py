@@ -33,9 +33,9 @@ def config_paths(tmp_path):
 @pytest.fixture
 def raw_config(config_paths):
     return {
-        "schema_version": 6,
-        "agency": {
-            "title": "Agency",
+        "schema_version": 1,
+        "flowgency": {
+            "title": "Flowgency",
             "default_team": "newsletter",
             "ai_backend": "claude-code",
             "agent_library": str(config_paths["agent_library"]),

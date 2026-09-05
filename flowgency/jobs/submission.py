@@ -43,13 +43,13 @@ def _resolve_request(
 ) -> JobSpec:
     config_store = ConfigStore(Path(request.config_path))
     config_dir = snapshot.path.resolve().parent
-    library_root = snapshot.config.agency.agent_library or (
+    library_root = snapshot.config.flowgency.agent_library or (
         config_dir / "agent-library"
     )
-    cache_root = snapshot.config.agency.compilation_cache or (
+    cache_root = snapshot.config.flowgency.compilation_cache or (
         config_dir / "compiled-agents"
     )
-    prompt_root = snapshot.config.agency.prompt_store or (
+    prompt_root = snapshot.config.flowgency.prompt_store or (
         config_dir / "prompts"
     )
     return resolve_job_request(
@@ -141,7 +141,7 @@ def submit_job_request(
                 if issues:
                     raise ValidationFailed(issues)
                 initialize_storage_directories(locked_snapshot.config)
-                job_store = JobStore(locked_snapshot.config.agency.memory_store)
+                job_store = JobStore(locked_snapshot.config.flowgency.memory_store)
                 handle = _submit_resolved(
                     _resolve_request(request, locked_snapshot),
                     job_store,

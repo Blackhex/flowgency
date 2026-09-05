@@ -41,7 +41,7 @@ from flowgency.jobs.authority import JobStore
 from flowgency.memory import MemoryConflictError, resolve_memory_selector
 from flowgency.prompts import PromptConflictError, PromptNotFoundError
 from flowgency.prompts.catalog import effective_prompt_catalog
-from flowgency.web.dependencies import AgencyServices, get_services
+from flowgency.web.dependencies import FlowgencyServices, get_services
 
 
 router = APIRouter()
@@ -79,7 +79,7 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
         "team": team_id,
         "team_name": team_cfg.name,
         "teams": {key: value.name for key, value in snapshot.config.teams.items()},
-        "agency_title": snapshot.config.agency.title,
+        "agency_title": snapshot.config.flowgency.title,
         "admin_active": False,
         "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
         "workspaces_available": bool(team_cfg.workspaces),
@@ -153,7 +153,7 @@ def _preview_job_id(team_id: str, agent_id: str) -> str:
     return f"detail-{team_id}-{agent_id}"
 
 
-def _resolve_tab_memory(snapshot, services: AgencyServices, team_id: str, agent_id: str, selector: MemorySelector | None):
+def _resolve_tab_memory(snapshot, services: FlowgencyServices, team_id: str, agent_id: str, selector: MemorySelector | None):
     if services.memory_store is None:
         raise HTTPException(status_code=409, detail="Memory store unavailable")
     resolved = resolve_memory_selector(
@@ -475,7 +475,7 @@ def _parse_routines_payload(form, available_prompts: frozenset[tuple[str, str]])
 
 
 def _available_prompts(
-    services: AgencyServices, snapshot, team_id: str, agent_id: str
+    services: FlowgencyServices, snapshot, team_id: str, agent_id: str
 ) -> tuple[tuple[tuple[str, str], ...], list[dict[str, str]]]:
     if services.blueprint_library is None or services.prompt_store is None:
         return (), []
@@ -498,7 +498,7 @@ def _available_prompts(
 
 
 def _prompts_context(
-    services: AgencyServices,
+    services: FlowgencyServices,
     snapshot,
     team_id: str,
     agent_id: str,
@@ -611,7 +611,7 @@ def _runtime_context(snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
     }
 
 
-def _blueprint_context(services: AgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
+def _blueprint_context(services: FlowgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
     _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     if services.blueprint_library is None:
         raise HTTPException(status_code=409, detail="Blueprint library unavailable")
@@ -658,7 +658,7 @@ def _routine_status(snapshot, team_id: str, instance) -> list[dict[str, Any]]:
     team_cfg = snapshot.config.teams[team_id]
     logs_root = resolve_team_paths(team_cfg).logs
     now = clock_now()
-    grace = grace_window(int(snapshot.config.agency.dispatch.interval))
+    grace = grace_window(int(snapshot.config.flowgency.dispatch.interval))
     dispatch_enabled = team_cfg.dispatch.enabled
     rows = []
     for schedule in routine_schedules(instance.routines):
@@ -717,7 +717,7 @@ def _next_due_text(schedule, logs_root, agent_name, now, grace, dispatch_enabled
     return "due now"
 
 
-def _routines_context(services: AgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
+def _routines_context(services: FlowgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
     _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     routines_yaml = yaml.safe_dump(
         [routine.model_dump(mode="json", exclude_none=True) for routine in instance.routines],
@@ -739,7 +739,7 @@ def _routines_context(services: AgencyServices, snapshot, team_id: str, agent_id
     return result
 
 
-def _memory_context(snapshot, services: AgencyServices, team_id: str, agent_id: str) -> dict[str, Any]:
+def _memory_context(snapshot, services: FlowgencyServices, team_id: str, agent_id: str) -> dict[str, Any]:
     _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     memory_snapshot = _resolve_tab_memory(snapshot, services, team_id, agent_id, instance.default_memory)
     selected_file = _selected_file(memory_snapshot)
@@ -762,7 +762,7 @@ def _memory_context(snapshot, services: AgencyServices, team_id: str, agent_id: 
 
 def _detail_context(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     team_id: str,
     agent_id: str,
     tab: str,
@@ -848,12 +848,12 @@ async def agent_detail_base(team: str, agent: str):
 
 
 @router.get("/{team}/agents/{agent}/profile", response_class=HTMLResponse)
-async def agent_detail_profile(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_profile(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     return _detail_context(request, services, team, agent, "profile")
 
 
 @router.post("/{team}/agents/{agent}/profile", response_class=HTMLResponse)
-async def agent_detail_profile_save(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_profile_save(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     try:
@@ -879,17 +879,17 @@ async def agent_detail_profile_save(request: Request, team: str, agent: str, ser
 
 
 @router.get("/{team}/agents/{agent}/blueprint", response_class=HTMLResponse)
-async def agent_detail_blueprint(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_blueprint(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     return _detail_context(request, services, team, agent, "blueprint")
 
 
 @router.get("/{team}/agents/{agent}/runtime", response_class=HTMLResponse)
-async def agent_detail_runtime(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_runtime(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     return _detail_context(request, services, team, agent, "runtime")
 
 
 @router.post("/{team}/agents/{agent}/runtime", response_class=HTMLResponse)
-async def agent_detail_runtime_save(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_runtime_save(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     timeout_text = str(form.get("timeout", "")).strip()
@@ -952,12 +952,12 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
 
 
 @router.get("/{team}/agents/{agent}/prompts", response_class=HTMLResponse)
-async def agent_detail_prompts(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_prompts(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     return _detail_context(request, services, team, agent, "prompts")
 
 
 @router.post("/{team}/agents/{agent}/prompts/create", response_class=HTMLResponse)
-async def agent_detail_prompts_create(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_prompts_create(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     name = str(form.get("name", "")).strip()
@@ -1039,7 +1039,7 @@ async def agent_detail_prompts_save(
     team: str,
     agent: str,
     name: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     form = await request.form()
     digest = str(form.get("digest", "")).strip()
@@ -1101,7 +1101,7 @@ async def agent_detail_prompts_delete(
     team: str,
     agent: str,
     name: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
@@ -1148,12 +1148,12 @@ async def agent_detail_prompts_delete(
 
 
 @router.get("/{team}/agents/{agent}/routines", response_class=HTMLResponse)
-async def agent_detail_routines(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_routines(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     return _detail_context(request, services, team, agent, "routines")
 
 
 @router.post("/{team}/agents/{agent}/routines", response_class=HTMLResponse)
-async def agent_detail_routines_save(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_routines_save(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     snapshot = services.config_store.load()
@@ -1178,12 +1178,12 @@ async def agent_detail_routines_save(request: Request, team: str, agent: str, se
 
 
 @router.get("/{team}/agents/{agent}/memory", response_class=HTMLResponse)
-async def agent_detail_memory(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_memory(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     return _detail_context(request, services, team, agent, "memory")
 
 
 @router.post("/{team}/agents/{agent}/memory", response_class=HTMLResponse)
-async def agent_detail_memory_save(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_memory_save(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     form = await request.form()
     action = str(form.get("action", "")).strip() or "content"
     revision = str(form.get("revision", "")).strip()
@@ -1283,5 +1283,5 @@ async def agent_detail_memory_save(request: Request, team: str, agent: str, serv
 
 
 @router.get("/{team}/agents/{agent}/activity", response_class=HTMLResponse)
-async def agent_detail_activity(request: Request, team: str, agent: str, services: AgencyServices = Depends(get_services)):
+async def agent_detail_activity(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     return _detail_context(request, services, team, agent, "activity")

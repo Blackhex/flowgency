@@ -24,7 +24,7 @@ def _resolved_config(tmp_path: Path, raw_config: dict):
     restricted = tmp_path / "restricted"
     for path in (library, cache, memory, prompt_store, workspace, restricted):
         path.mkdir(exist_ok=True)
-    raw["agency"].update(
+    raw["flowgency"].update(
         agent_library=str(library),
         compilation_cache=str(cache),
         memory_store=str(memory),
@@ -72,8 +72,8 @@ def _make_hostile_directory_entry(
 
 def test_job_store_is_under_memory_control_plane(tmp_path, raw_config):
     _, config = _resolved_config(tmp_path, raw_config)
-    assert job_store_root(config.agency.memory_store) == (
-        config.agency.memory_store / ".jobs"
+    assert job_store_root(config.flowgency.memory_store) == (
+        config.flowgency.memory_store / ".jobs"
     ).resolve()
 
 
@@ -109,13 +109,13 @@ def test_control_and_runtime_overlap_is_rejected_in_both_directions(
 ):
     raw, _ = _resolved_config(tmp_path, raw_config)
     if control_is_ancestor:
-        raw["agency"]["memory_store"] = str(tmp_path / "control")
+        raw["flowgency"]["memory_store"] = str(tmp_path / "control")
         runtime = tmp_path / "control" / "workspace"
     else:
         runtime = tmp_path / "runtime"
-        raw["agency"]["memory_store"] = str(runtime / "memory")
+        raw["flowgency"]["memory_store"] = str(runtime / "memory")
     runtime.mkdir(parents=True)
-    Path(raw["agency"]["memory_store"]).mkdir(parents=True, exist_ok=True)
+    Path(raw["flowgency"]["memory_store"]).mkdir(parents=True, exist_ok=True)
     raw["teams"]["newsletter"]["path"] = str(runtime)
     config = parse_config(raw, tmp_path / "config.yaml").resolved
 
@@ -132,7 +132,7 @@ def test_unwritable_nearest_parent_is_rejected_where_portable(tmp_path, raw_conf
     parent.mkdir()
     parent.chmod(0o500)
     try:
-        raw["agency"]["compilation_cache"] = str(parent / "missing-cache")
+        raw["flowgency"]["compilation_cache"] = str(parent / "missing-cache")
         config = parse_config(raw, tmp_path / "config.yaml").resolved
         issues = validate_resolved_paths(config)
     finally:
@@ -214,7 +214,7 @@ def test_team_authorities_must_not_overlap(
 
     if other_authority.startswith("agency."):
         _, agency_field = other_authority.split(".", 1)
-        team[field] = raw["agency"][agency_field]
+        team[field] = raw["flowgency"][agency_field]
     elif other_authority == "path":
         team[field] = team["path"]
     else:
@@ -251,7 +251,7 @@ def test_initialize_storage_directories_rejects_symlink_or_reparse_cache_root(
     workspace.mkdir(exist_ok=True)
     raw_config["teams"]["newsletter"]["workspace_path"] = str(workspace)
     cache_root = tmp_path / "cache-root"
-    raw_config["agency"]["compilation_cache"] = str(cache_root)
+    raw_config["flowgency"]["compilation_cache"] = str(cache_root)
     config = parse_config(raw_config, tmp_path / "config.yaml").resolved
     target = tmp_path / "cache-target"
     target.mkdir()

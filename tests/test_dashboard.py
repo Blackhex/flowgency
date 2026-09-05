@@ -150,8 +150,8 @@ Decision body
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 6,
-                "agency": {
+                "schema_version": 1,
+                "flowgency": {
                     "title": "Agency",
                     "default_team": "test",
                     "ai_backend": "script",
@@ -242,10 +242,10 @@ def _seed_dashboard_app(monkeypatch, tmp_path, raw_config):
         (team_root.joinpath(*rel)).mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
 
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(cache_root)
-    raw["agency"]["memory_store"] = str(memory_root)
-    raw["agency"]["prompt_store"] = str(prompt_root)
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(cache_root)
+    raw["flowgency"]["memory_store"] = str(memory_root)
+    raw["flowgency"]["prompt_store"] = str(prompt_root)
     raw["teams"] = {
         "newsletter": apply_team_paths({
             "name": "Newsletter",
@@ -1016,15 +1016,15 @@ class TestWorkQueueStrip:
         real_snapshot = app_mod._load_snapshot()
         real_group = real_runtime_team(real_snapshot, "newsletter")
 
-        modified_agency = real_snapshot.config.agency.model_copy(
+        modified_agency = real_snapshot.config.flowgency.model_copy(
             update={
                 "memory_store": None,
-                "jobs": real_snapshot.config.agency.jobs.model_copy(update={"pool": 8}),
+                "jobs": real_snapshot.config.flowgency.jobs.model_copy(update={"pool": 8}),
             }
         )
         mock_snapshot = dc_replace(
             real_snapshot,
-            config=real_snapshot.config.model_copy(update={"agency": modified_agency}),
+            config=real_snapshot.config.model_copy(update={"flowgency": modified_agency}),
         )
 
         monkeypatch.setattr(app_mod, "_load_snapshot", lambda: mock_snapshot)

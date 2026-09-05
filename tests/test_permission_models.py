@@ -12,8 +12,8 @@ from flowgency.configuration.models import (
 )
 
 
-def test_schema_version_is_six():
-    assert CONFIG_SCHEMA_VERSION == 6
+def test_schema_version_is_one():
+    assert CONFIG_SCHEMA_VERSION == 1
 
 
 def test_omitted_tools_means_every_tool():
@@ -67,7 +67,7 @@ def test_schema_version_four_is_rejected(config_paths):
 
     raw = {
         "schema_version": 4,
-        "agency": {
+        "flowgency": {
             "agent_library": str(config_paths["agent_library"]),
             "compilation_cache": str(config_paths["compilation_cache"]),
             "memory_store": str(config_paths["memory_store"]),
@@ -82,12 +82,12 @@ def test_schema_version_four_is_rejected(config_paths):
     assert any(issue.code == "unsupported-schema-version" for issue in excinfo.value.issues)
 
 
-def test_schema_version_six_is_accepted(config_paths):
+def test_schema_version_one_is_accepted(config_paths):
     from flowgency.configuration.models import validate_config
 
     raw = {
-        "schema_version": 6,
-        "agency": {
+        "schema_version": 1,
+        "flowgency": {
             "agent_library": str(config_paths["agent_library"]),
             "compilation_cache": str(config_paths["compilation_cache"]),
             "memory_store": str(config_paths["memory_store"]),
@@ -107,7 +107,7 @@ def test_unsupported_schema_version_hint_mentions_teams(config_paths):
 
     raw = {
         "schema_version": 4,
-        "agency": {
+        "flowgency": {
             "agent_library": str(config_paths["agent_library"]),
             "compilation_cache": str(config_paths["compilation_cache"]),
             "memory_store": str(config_paths["memory_store"]),

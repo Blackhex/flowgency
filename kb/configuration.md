@@ -1,6 +1,6 @@
 # Configuration
 
-Agency uses one authoritative YAML document. The top-level `schema_version: 6`, `agency`, and `teams` fields are required. `memory.channels` may be empty.
+Agency uses one authoritative YAML document. The top-level `schema_version: 1`, `agency`, and `teams` fields are required. `memory.channels` may be empty.
 
 ## Global paths
 

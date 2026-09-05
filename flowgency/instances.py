@@ -415,7 +415,7 @@ class InstanceService:
         self.memory_store = memory_store
         if prompt_store is None:
             snapshot = config_store.load()
-            prompt_store = PromptStore(snapshot.config.agency.prompt_store)
+            prompt_store = PromptStore(snapshot.config.flowgency.prompt_store)
         self.prompt_store = prompt_store
 
     def list(self, team_id: str) -> tuple[AgentInstance, ...]:
@@ -729,7 +729,7 @@ def _has_active_jobs(
     target_team: str,
     agent_id: str,
 ) -> bool:
-    job_store = JobStore(snapshot.config.agency.memory_store)
+    job_store = JobStore(snapshot.config.flowgency.memory_store)
     return bool(
         job_store.active(source_team, agent_id)
         or job_store.active(target_team, agent_id)

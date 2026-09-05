@@ -47,7 +47,7 @@ C:/Agency/
 Map those derived paths to the schema version 6 fields and keep the execution workspace separate from Agency-owned state:
 
 ```yaml
-schema_version: 6
+schema_version: 1
 agency:
   agent_library: C:/Agency/agent-library
   compilation_cache: C:/Agency/compiled-agents

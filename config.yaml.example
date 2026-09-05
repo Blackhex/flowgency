@@ -1,5 +1,5 @@
-schema_version: 6
-agency:
+schema_version: 1
+flowgency:
   title: Agency
   default_team: my-project
   ai_backend: copilot

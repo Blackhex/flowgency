@@ -11,7 +11,7 @@ from flowgency.permissions.eligibility import may_execute_decisions
 
 def _config(tmp_path: Path, raw_config, rules):
     raw = deepcopy(raw_config)
-    raw["schema_version"] = 6
+    raw["schema_version"] = 1
     workspace = raw["teams"]["newsletter"]["workspace_path"]
     raw["teams"]["newsletter"]["runtime"] = {
         "permissions": {

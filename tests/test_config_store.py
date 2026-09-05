@@ -35,7 +35,7 @@ def _patch_with_external_write(
 
     try:
         def apply(raw: dict) -> None:
-            raw["agency"]["title"] = "Updated"
+            raw["flowgency"]["title"] = "Updated"
             path.write_text(
                 path.read_text(encoding="utf-8") + "\n",
                 encoding="utf-8",
@@ -71,7 +71,7 @@ def test_config_store_round_trips_canonical_config(tmp_path, raw_config):
     snapshot = ConfigStore(path).create(raw_config)
 
     assert snapshot.raw == raw_config
-    assert snapshot.raw["schema_version"] == 6
+    assert snapshot.raw["schema_version"] == 1
 
 
 def test_create_requires_absent_file(raw_config, config_paths):
@@ -99,16 +99,16 @@ def test_patch_rejects_stale_revision_and_preserves_newer_config(
 
     store.patch(
         first.revision,
-        lambda raw: raw["agency"].update({"title": "New"}),
+        lambda raw: raw["flowgency"].update({"title": "New"}),
     )
 
     with pytest.raises(ConfigConflictError):
         store.patch(
             first.revision,
-            lambda raw: raw["agency"].update({"ai_backend": "copilot"}),
+            lambda raw: raw["flowgency"].update({"ai_backend": "copilot"}),
         )
 
-    assert store.load().raw["agency"]["title"] == "New"
+    assert store.load().raw["flowgency"]["title"] == "New"
 
 
 def test_patch_writes_utf8_yaml(raw_config, config_paths):
@@ -214,7 +214,7 @@ def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
             snapshot.revision,
             {
                 "schema_version": 3,
-                "agency": {"title": "Agency"},
+                "flowgency": {"title": "Agency"},
                 "teams": {},
             },
         )
@@ -233,7 +233,7 @@ def test_replace_rejects_stale_revision_and_preserves_newer_bytes(
 
     store.patch(
         first.revision,
-        lambda raw: raw["agency"].update({"title": "Elsewhere"}),
+        lambda raw: raw["flowgency"].update({"title": "Elsewhere"}),
     )
     newer = path.read_bytes()
 
@@ -295,22 +295,22 @@ def test_snapshot_raw_alias_isolated_from_disk_and_patch_caller(
 
     first = store.load()
     alias = first.raw
-    alias["agency"]["title"] = "Mutated in memory"
+    alias["flowgency"]["title"] = "Mutated in memory"
 
     assert path.read_text(encoding="utf-8") != "Mutated in memory"
-    assert store.load().raw["agency"]["title"] == raw_config["agency"]["title"]
+    assert store.load().raw["flowgency"]["title"] == raw_config["flowgency"]["title"]
 
     second = store.load()
-    assert second.raw["agency"]["title"] == raw_config["agency"]["title"]
+    assert second.raw["flowgency"]["title"] == raw_config["flowgency"]["title"]
 
     updated = store.patch(
         second.revision,
-        lambda raw: raw["agency"].update({"title": "Patched"}),
+        lambda raw: raw["flowgency"].update({"title": "Patched"}),
     )
 
-    assert first.raw["agency"]["title"] == "Mutated in memory"
-    assert second.raw["agency"]["title"] == raw_config["agency"]["title"]
-    assert updated.raw["agency"]["title"] == "Patched"
+    assert first.raw["flowgency"]["title"] == "Mutated in memory"
+    assert second.raw["flowgency"]["title"] == raw_config["flowgency"]["title"]
+    assert updated.raw["flowgency"]["title"] == "Patched"
 
 
 def test_create_validates_before_initializing_storage(raw_config, config_paths):

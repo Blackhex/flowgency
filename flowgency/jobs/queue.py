@@ -78,7 +78,7 @@ def queue_snapshot(config, *, memory_store: Path) -> QueueView:
         key=_order_key,
     )
     running = sum(1 for entry in entries if occupies_slot(entry.record))
-    return QueueView(running, tuple(waiting), config.agency.jobs.pool)
+    return QueueView(running, tuple(waiting), config.flowgency.jobs.pool)
 
 
 def _team_roots(config) -> dict:

@@ -22,7 +22,7 @@ class RecoveryFixture:
         self.team_root = tmp_path / "team"
         self.team_root.mkdir(parents=True)
         config_path = tmp_path / "config.yaml"
-        config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+        config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
         self.store_root = tmp_path / "memory-store"
         self.job_store_root = JobStore(self.store_root)
         self.store = MemoryStore(self.store_root)

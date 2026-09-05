@@ -32,7 +32,7 @@ def _team(tmp_path):
 def _write_job(tmp_path, status):
     memory_root = tmp_path.parent / "memory" if tmp_path.name == "grp" else tmp_path / "memory"
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
     spec = JobSpec(
         schema_version=5,
         job_id=f"job-{status}",

@@ -11,14 +11,50 @@ def _clone_config(raw: dict) -> dict:
     return copy.deepcopy(raw)
 
 
-def test_parse_config_accepts_canonical_root(raw_config, config_paths):
+def test_parse_config_accepts_flowgency_schema_one(raw_config, config_paths):
     from flowgency.configuration.models import parse_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
     assert parsed.raw == raw_config
-    assert parsed.resolved.agency.title == "Agency"
-    assert parsed.resolved.schema_version == 6
+    assert parsed.resolved.flowgency.title == "Flowgency"
+    assert parsed.flowgency.title == "Flowgency"
+    assert parsed.resolved.schema_version == 1
+
+
+def test_previous_root_is_rejected_without_conversion(raw_config, config_paths):
+    from flowgency.configuration.models import validate_config
+
+    previous_root = "".join(("a", "gency"))
+    candidate = _clone_config(raw_config)
+    candidate[previous_root] = candidate.pop("flowgency")
+
+    issues = validate_config(candidate, config_paths["config_path"])
+
+    assert any(
+        issue.code == "invalid-config" and issue.field == previous_root
+        for issue in issues
+    )
+    assert not any("convert" in issue.corrective_hint.lower() for issue in issues)
+
+
+def test_only_schema_one_is_accepted(raw_config, config_paths):
+    from flowgency.configuration.models import parse_config, validate_config
+
+    assert (
+        parse_config(raw_config, config_paths["config_path"]).resolved.schema_version
+        == 1
+    )
+    for value in (None, 0, 2, 3, 4, 5, 6):
+        candidate = _clone_config(raw_config)
+        if value is None:
+            candidate.pop("schema_version")
+        else:
+            candidate["schema_version"] = value
+        assert any(
+            issue.field == "schema_version"
+            for issue in validate_config(candidate, config_paths["config_path"])
+        )
 
 
 def test_schema_five_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
@@ -31,41 +67,13 @@ def test_schema_five_requires_prompt_store_and_scoped_routine(raw_config, config
     assert not hasattr(routine, "skill")
 
 
-def test_schema_four_is_rejected_with_rewrite_hint(raw_config, config_paths):
-    from flowgency.configuration.models import parse_config
-
-    raw_config["schema_version"] = 4
-
-    with pytest.raises(ValidationFailed) as excinfo:
-        parse_config(raw_config, config_paths["config_path"])
-
-    assert excinfo.value.issues[0].code == "unsupported-schema-version"
-    assert "schema_version 6" in excinfo.value.issues[0].corrective_hint
-
-
-def test_parse_config_requires_schema_version_six(raw_config, config_paths):
-    from flowgency.configuration.models import parse_config, validate_config
-
-    parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.resolved.schema_version == 6
-
-    for value in (None, 1, 2, 3, 4, 5):
-        candidate = _clone_config(raw_config)
-        if value is None:
-            candidate.pop("schema_version")
-        else:
-            candidate["schema_version"] = value
-        issues = validate_config(candidate, config_paths["config_path"])
-        assert any(issue.field == "schema_version" for issue in issues)
-
-
 def test_current_defaults_are_explicit(raw_config, config_paths):
     from flowgency.configuration.models import parse_config
 
     parsed = parse_config(raw_config, config_paths["config_path"])
 
-    assert parsed.resolved.schema_version == 6
-    assert parsed.resolved.agency.default_team == "newsletter"
+    assert parsed.resolved.schema_version == 1
+    assert parsed.resolved.flowgency.default_team == "newsletter"
     team = parsed.teams["newsletter"]
     assert team.runtime.timeout == 1800
     assert team.runtime.permissions.mode == "unrestricted"
@@ -78,14 +86,14 @@ def test_current_defaults_are_explicit(raw_config, config_paths):
         (lambda raw: raw.__setitem__("schema_version", 5), "unsupported-schema-version"),
         (lambda raw: raw.__setitem__("groups", raw.pop("teams")), "invalid-config"),
         (
-            lambda raw: raw["agency"].__setitem__(
-                "default_group", raw["agency"].pop("default_team")
+            lambda raw: raw["flowgency"].__setitem__(
+                "default_group", raw["flowgency"].pop("default_team")
             ),
             "superseded-default-group",
         ),
     ],
 )
-def test_v6_rejects_prior_group_control_plane(raw_config, config_paths, raw_change, required_code):
+def test_v1_rejects_prior_group_control_plane(raw_config, config_paths, raw_change, required_code):
     from flowgency.configuration.models import validate_config
 
     raw_change(raw_config)
@@ -258,36 +266,36 @@ def test_validates_default_team_identifier_and_reference(
     if default_team == "newsletter-team":
         team_config = raw_config["teams"].pop("newsletter")
         raw_config["teams"][default_team] = team_config
-    raw_config["agency"]["default_team"] = default_team
+    raw_config["flowgency"]["default_team"] = default_team
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
     if expected_code is None:
         assert not any(issue.code in {"invalid-team-name", "missing-default-team"} for issue in issues)
         parsed = parse_config(raw_config, config_paths["config_path"])
-        assert parsed.agency.default_team == default_team
+        assert parsed.flowgency.default_team == default_team
         return
 
-    assert any(issue.code == expected_code and issue.field == "agency.default_team" for issue in issues)
+    assert any(issue.code == expected_code and issue.field == "flowgency.default_team" for issue in issues)
 
     with pytest.raises(ValidationFailed) as excinfo:
         parse_config(raw_config, config_paths["config_path"])
 
     assert any(
-        issue.code == expected_code and issue.field == "agency.default_team" for issue in excinfo.value.issues
+        issue.code == expected_code and issue.field == "flowgency.default_team" for issue in excinfo.value.issues
     )
 
 
 def test_allows_omitted_default_team(raw_config, config_paths):
     from flowgency.configuration.models import parse_config, validate_config
 
-    raw_config["agency"]["default_team"] = ""
+    raw_config["flowgency"]["default_team"] = ""
 
     issues = validate_config(raw_config, config_paths["config_path"])
     parsed = parse_config(raw_config, config_paths["config_path"])
 
-    assert not any(issue.field == "agency.default_team" for issue in issues)
-    assert parsed.agency.default_team == ""
+    assert not any(issue.field == "flowgency.default_team" for issue in issues)
+    assert parsed.flowgency.default_team == ""
 
 
 def test_team_requires_workspace_and_state_paths(raw_config, config_paths):
@@ -377,8 +385,8 @@ def test_validates_team_keys_as_stable_identifiers(raw_config, config_paths, tea
 
     team_config = raw_config["teams"].pop("newsletter")
     raw_config["teams"][team_key] = team_config
-    if raw_config["agency"].get("default_team") == "newsletter":
-        raw_config["agency"]["default_team"] = team_key
+    if raw_config["flowgency"].get("default_team") == "newsletter":
+        raw_config["flowgency"]["default_team"] = team_key
 
     issues = validate_config(raw_config, config_paths["config_path"])
 
@@ -752,7 +760,7 @@ def test_preserves_supported_workspace_fields(raw_config, config_paths):
             id="invalid-blueprint-identifier",
         ),
         pytest.param(
-            lambda raw: raw["agency"].update({"default_team": "missing-team"}),
+            lambda raw: raw["flowgency"].update({"default_team": "missing-team"}),
             id="missing-default-team-reference",
         ),
         pytest.param(
@@ -859,7 +867,7 @@ def test_parse_config_rejects_malformed_routine_arguments(
 @pytest.mark.parametrize(
     ("field_name", "bad_value", "expected_field"),
     [
-        ("agency", [], "agency"),
+        ("flowgency", [], "flowgency"),
         ("memory", [], "memory"),
         ("teams", [], "teams"),
     ],
@@ -960,8 +968,8 @@ def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None,
         agency["jobs"] = {"pool": jobs_pool}
 
     raw = {
-        "schema_version": 6,
-        "agency": agency,
+        "schema_version": 1,
+        "flowgency": agency,
         "teams": {
             "grp": {
                 "name": "Grp",
@@ -1030,12 +1038,12 @@ def test_team_dispatch_rejects_daily_limit(tmp_path):
 
 def test_jobs_pool_defaults_to_four(tmp_path):
     parsed = load_config(_write_minimal_config(tmp_path))
-    assert parsed.agency.jobs.pool == 4
+    assert parsed.flowgency.jobs.pool == 4
 
 
 def test_jobs_pool_is_read_from_config(tmp_path):
     parsed = load_config(_write_minimal_config(tmp_path, jobs_pool=2))
-    assert parsed.agency.jobs.pool == 2
+    assert parsed.flowgency.jobs.pool == 2
 
 
 def test_jobs_pool_below_one_is_rejected(tmp_path):

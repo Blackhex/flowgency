@@ -58,10 +58,10 @@ def _seed_memory_app(monkeypatch, tmp_path, raw_config):
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
     _write_blueprint(library_root, "advisor")
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(cache_root)
-    raw["agency"]["memory_store"] = str(memory_root)
-    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(cache_root)
+    raw["flowgency"]["memory_store"] = str(memory_root)
+    raw["flowgency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["memory"] = {
         "channels": {
             "brand-strategy": {"display_name": "Brand Strategy"},
@@ -151,7 +151,7 @@ def _write_channel_job(
 ) -> Path:
     snapshot = ConfigStore(config_path).load()
     team = snapshot.config.teams["newsletter"]
-    authority = JobStore(snapshot.config.agency.memory_store)
+    authority = JobStore(snapshot.config.flowgency.memory_store)
     authority.team_root("newsletter").mkdir(parents=True, exist_ok=True)
     resolved = resolve_memory_selector(
         MemorySelector(scope="channel", channel=channel_key),
@@ -160,7 +160,7 @@ def _write_channel_job(
         agent_name="advisor",
         routine_id=None,
         channels=snapshot.config.memory.channels,
-        store_root=snapshot.config.agency.memory_store,
+        store_root=snapshot.config.flowgency.memory_store,
     )
     spec = JobSpec(
         schema_version=5,

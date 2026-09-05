@@ -72,8 +72,8 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         encoding="utf-8",
     )
     config_path.write_text(yaml.safe_dump({
-        "schema_version": 6,
-        "agency": {
+        "schema_version": 1,
+        "flowgency": {
             "title": "Agency",
             "default_team": "test",
             "ai_backend": "claude-code",

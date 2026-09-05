@@ -240,9 +240,9 @@ class TestWorkspaceRoutes:
         config_path.write_text(
             yaml.safe_dump(
                 {
-                    "schema_version": 6,
+                    "schema_version": 1,
 
-                    "agency": {
+                    "flowgency": {
                         "title": "Test",
                         "default_team": "test",
                         "ai_backend": "claude-code",

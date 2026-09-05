@@ -1,5 +1,5 @@
-schema_version: 6
-agency:
+schema_version: 1
+flowgency:
   title: Agency UI Gate
   default_team: newsletter
   ai_backend: copilot

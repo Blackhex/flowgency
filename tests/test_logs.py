@@ -91,9 +91,9 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 6,
+                "schema_version": 1,
 
-                "agency": {
+                "flowgency": {
                     "title": "Agency",
                     "default_team": "test",
                     "ai_backend": "claude-code",
@@ -154,8 +154,8 @@ def test_log_view_rejects_workspace_file_outside_team_logs(tmp_path, monkeypatch
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 6,
-                "agency": {
+                "schema_version": 1,
+                "flowgency": {
                     "title": "Agency",
                     "default_team": "test",
                     "ai_backend": "claude-code",

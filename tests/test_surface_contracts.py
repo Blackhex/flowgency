@@ -84,8 +84,8 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 6,
-                "agency": {
+                "schema_version": 1,
+                "flowgency": {
                     "title": "Agency",
                     "default_team": "newsletter",
                     "ai_backend": "claude-code",
@@ -246,8 +246,8 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert "\t" not in yaml_text
 
     config = yaml.safe_load(yaml_text)
-    assert config["schema_version"] == 6
-    assert set(config["agency"]) >= {"agent_library", "compilation_cache", "memory_store", "prompt_store"}
+    assert config["schema_version"] == 1
+    assert set(config["flowgency"]) >= {"agent_library", "compilation_cache", "memory_store", "prompt_store"}
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
     team = config["teams"]["example"]
     assert team["workspace_path"] == "C:/Projects/example"
@@ -281,9 +281,9 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     team_state = tmp_path / "groups" / "example"
-    config["agency"]["agent_library"] = str(library)
-    config["agency"]["compilation_cache"] = str(tmp_path / "cache")
-    config["agency"]["memory_store"] = str(tmp_path / "memory")
+    config["flowgency"]["agent_library"] = str(library)
+    config["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
+    config["flowgency"]["memory_store"] = str(tmp_path / "memory")
     config["teams"]["example"]["workspace_path"] = str(workspace)
     config["teams"]["example"]["path"] = str(team_state)
     config["teams"]["example"]["runtime"]["permissions"]["rules"] = [

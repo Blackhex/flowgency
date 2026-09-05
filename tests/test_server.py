@@ -21,9 +21,9 @@ def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
     (tmp_path / "prompts").mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         (
-            "schema_version: 6\n"
-            "agency:\n"
-            "  title: Agency\n"
+            "schema_version: 1\n"
+            "flowgency:\n"
+            "  title: Flowgency\n"
             "  default_team: ''\n"
             f"  agent_library: {(tmp_path / 'agent-library').as_posix()}\n"
             f"  compilation_cache: {(tmp_path / 'compiled-agents').as_posix()}\n"
@@ -54,10 +54,10 @@ def _materialize_ready_config(tmp_path: Path, raw_config: dict) -> dict:
     compiled_root.mkdir(parents=True, exist_ok=True)
     memory_root.mkdir(parents=True, exist_ok=True)
     prompt_root.mkdir(parents=True, exist_ok=True)
-    raw["agency"]["agent_library"] = str(library_root.resolve())
-    raw["agency"]["compilation_cache"] = str(compiled_root.resolve())
-    raw["agency"]["memory_store"] = str(memory_root.resolve())
-    raw["agency"]["prompt_store"] = str(prompt_root.resolve())
+    raw["flowgency"]["agent_library"] = str(library_root.resolve())
+    raw["flowgency"]["compilation_cache"] = str(compiled_root.resolve())
+    raw["flowgency"]["memory_store"] = str(memory_root.resolve())
+    raw["flowgency"]["prompt_store"] = str(prompt_root.resolve())
     for group in raw.get("teams", {}).values():
         for agent in group.get("agents", []):
             blueprint_root = library_root / agent["blueprint"]
@@ -661,7 +661,7 @@ def test_setup_status_returns_incomplete_when_config_has_no_teams(
 ):
     config_path = tmp_path / "config.yaml"
     raw_config = _materialize_ready_config(tmp_path, raw_config)
-    raw_config["agency"]["default_team"] = ""
+    raw_config["flowgency"]["default_team"] = ""
     raw_config["teams"] = {}
     config_path.write_text(
         __import__("yaml").safe_dump(raw_config, sort_keys=False),
@@ -761,7 +761,7 @@ def test_build_services_validates_before_initializing_storage(
     tmp_path, raw_config
 ):
     raw = dict(raw_config)
-    raw["agency"] = dict(raw_config["agency"])
+    raw["flowgency"] = dict(raw_config["flowgency"])
     raw["teams"] = dict(raw_config["teams"])
     raw["teams"]["newsletter"] = dict(raw_config["teams"]["newsletter"])
     raw["teams"]["newsletter"]["workspace_path"] = str(

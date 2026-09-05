@@ -27,7 +27,7 @@ from flowgency.jobs.worker import main as worker_main
 def _make_spec(tmp_path: Path, job_id: str) -> JobSpec:
     config_path = tmp_path / "config.yaml"
     if not config_path.exists():
-        config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+        config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
     return JobSpec(
         schema_version=5,
         job_id=job_id,
@@ -126,8 +126,8 @@ def _make_queue_fixture(tmp_path, *, pool: int = 3) -> _QueueFixture:
     workspace_path.mkdir(parents=True, exist_ok=True)
 
     raw = {
-        "schema_version": 6,
-        "agency": {
+        "schema_version": 1,
+        "flowgency": {
             "title": "Agency",
             "default_team": "newsletter",
             "ai_backend": "copilot",
@@ -186,7 +186,7 @@ def test_drain_starts_up_to_the_pool_and_no_further(queue_fixture):
         memory_store=queue_fixture.memory_store,
         launcher=queue_fixture.launcher,
     )
-    assert started == queue_fixture.config.agency.jobs.pool
+    assert started == queue_fixture.config.flowgency.jobs.pool
 
 
 def test_drain_claims_what_it_starts_so_a_second_drain_is_a_no_op(queue_fixture):

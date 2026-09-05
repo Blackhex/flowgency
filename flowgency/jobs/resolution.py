@@ -232,7 +232,7 @@ def resolve_job_request(
         agent_name=request.agent_name,
         routine_id=routine.id if routine is not None else None,
         channels=snapshot.config.memory.channels,
-        store_root=snapshot.config.agency.memory_store,
+        store_root=snapshot.config.flowgency.memory_store,
     )
 
     validation_task_file = paths.logs / f"{request.job_id}.prompt"

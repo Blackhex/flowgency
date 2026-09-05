@@ -27,7 +27,7 @@ def local_triage_source(body: str = "Review local work.\n") -> bytes:
 @pytest.fixture
 def prompt_service_env(tmp_path, raw_config):
     raw = deepcopy(raw_config)
-    library_root = Path(raw["agency"]["agent_library"])
+    library_root = Path(raw["flowgency"]["agent_library"])
     blueprint = library_root / "reviewer"
     blueprint.mkdir(parents=True, exist_ok=True)
     (blueprint / "AGENTS.md").write_text("# Reviewer\n", encoding="utf-8")
@@ -46,7 +46,7 @@ def prompt_service_env(tmp_path, raw_config):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     config_store = ConfigStore(config_path)
-    store = PromptStore(Path(raw["agency"]["prompt_store"]))
+    store = PromptStore(Path(raw["flowgency"]["prompt_store"]))
     service = PromptService(
         config_store=config_store,
         library=BlueprintLibrary(library_root),
@@ -77,7 +77,7 @@ def test_create_private_rolls_back_file_on_config_conflict(prompt_service_env):
     snapshot = prompt_service_env.config_store.load()
     prompt_service_env.config_store.patch(
         snapshot.revision,
-        lambda raw: raw["agency"].update(title="Updated title"),
+        lambda raw: raw["flowgency"].update(title="Updated title"),
     )
 
     with pytest.raises(ConfigConflictError):

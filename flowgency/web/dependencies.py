@@ -23,7 +23,7 @@ from flowgency.prompts import PromptService, PromptStore, validate_prompt_catalo
 
 
 @dataclass(frozen=True)
-class AgencyServices:
+class FlowgencyServices:
     config_path: Path
     config_store: ConfigStore
     blueprint_library: BlueprintLibrary | None
@@ -38,7 +38,7 @@ class AgencyServices:
     prompt_issues: tuple[ValidationIssue, ...] = ()
 
 
-def build_services(config_path: Path | None = None) -> AgencyServices:
+def build_services(config_path: Path | None = None) -> FlowgencyServices:
     resolved = Path(
         config_path
         or os.environ.get("AGENCY_CONFIG")
@@ -51,13 +51,13 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
         if issues:
             raise ValidationFailed(issues)
         initialize_storage_directories(snapshot.config)
-        agency = snapshot.config.agency
+        agency = snapshot.config.flowgency
         library_root = agency.agent_library
         cache_root = agency.compilation_cache
         memory_root = agency.memory_store
         prompt_root = agency.prompt_store
         if library_root is None or cache_root is None or memory_root is None or prompt_root is None:
-            raise ValueError("Agency services require agent_library, compilation_cache, memory_store, and prompt_store.")
+            raise ValueError("Flowgency services require agent_library, compilation_cache, memory_store, and prompt_store.")
         blueprint_library = BlueprintLibrary(Path(library_root))
         compilation_cache = CompilationCache(Path(cache_root), _projector_registry())
         memory_store = MemoryStore(Path(memory_root))
@@ -75,7 +75,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             memory_store=memory_store,
             prompt_store=prompt_store,
         )
-        return AgencyServices(
+        return FlowgencyServices(
             config_path=resolved,
             config_store=config_store,
             blueprint_library=blueprint_library,
@@ -90,7 +90,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
             prompt_issues=catalog_issues,
         )
     except Exception as exc:
-        return AgencyServices(
+        return FlowgencyServices(
             config_path=resolved,
             config_store=config_store,
             blueprint_library=None,
@@ -105,7 +105,7 @@ def build_services(config_path: Path | None = None) -> AgencyServices:
         )
 
 
-def get_services(request: Request) -> AgencyServices:
+def get_services(request: Request) -> FlowgencyServices:
     services = getattr(request.app.state, "services", None)
     config_path_getter = getattr(request.app.state, "get_config_path", None)
     current_path = (

@@ -15,7 +15,7 @@ The dashboard listens on `http://127.0.0.1:8500` by default. Set `AGENCY_CONFIG`
 
 ## Current configuration model
 
-Agency accepts one current `config.yaml` shape headed by `schema_version: 6`. `config.yaml` owns teams, explicit instances, runtime policy, routines, integration selection, identity, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
+Agency accepts one current `config.yaml` shape headed by `schema_version: 1`. `config.yaml` owns teams, explicit instances, runtime policy, routines, integration selection, identity, and semantic memory selectors. See [config.yaml.example](config.yaml.example).
 
 Global paths separate reusable and mutable data:
 

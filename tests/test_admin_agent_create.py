@@ -28,9 +28,9 @@ def _seed_client(monkeypatch, tmp_path, raw_config):
     cache_root = tmp_path / "cache"
     memory_root = tmp_path / "memory"
     _write_blueprint(library_root, "advisor", "Advisor")
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(cache_root)
-    raw["agency"]["memory_store"] = str(memory_root)
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(cache_root)
+    raw["flowgency"]["memory_store"] = str(memory_root)
     raw["teams"] = {
         "grp": apply_team_paths({
             "name": "Group",
@@ -39,7 +39,7 @@ def _seed_client(monkeypatch, tmp_path, raw_config):
             "workspaces": [],
         }, paths)
     }
-    raw["agency"]["default_team"] = "grp"
+    raw["flowgency"]["default_team"] = "grp"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()

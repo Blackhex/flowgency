@@ -4,7 +4,7 @@ Agency is a FastAPI and Jinja2 application with filesystem-backed canonical conf
 
 ## Authority boundaries
 
-- `config.yaml` with `schema_version: 6` is the sole control-plane authority.
+- `config.yaml` with `schema_version: 1` is the sole control-plane authority.
 - `agency.agent_library` contains reusable blueprint source: `AGENTS.md` and `.agents/skills/<name>/SKILL.md`.
 - `agency.compilation_cache` contains disposable immutable integration projections.
 - `agency.memory_store` contains hash-addressed mutable Markdown selected by semantic scope.
@@ -20,7 +20,7 @@ Do not add runtime directory-shape loaders, native-file integration detection fo
 ## Configuration
 
 ```yaml
-schema_version: 6
+schema_version: 1
 agency:
   title: Agency
   default_team: newsletter

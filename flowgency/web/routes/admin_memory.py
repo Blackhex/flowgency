@@ -22,7 +22,7 @@ from flowgency.memory.store import (
     _ensure_infrastructure_directory,
     _is_symlink_or_reparse,
 )
-from flowgency.web.dependencies import AgencyServices, get_services
+from flowgency.web.dependencies import FlowgencyServices, get_services
 
 
 router = APIRouter()
@@ -39,7 +39,7 @@ def _theme_css(request: Request) -> str:
 def _base_admin_context(request: Request, snapshot) -> dict[str, Any]:
     return {
         "request": request,
-        "agency_title": snapshot.config.agency.title,
+        "agency_title": snapshot.config.flowgency.title,
         "admin_active": True,
         "active": "admin",
         "admin_page": "memory-channels",
@@ -102,7 +102,7 @@ def _channel_references(snapshot, channel_key: str) -> list[dict[str, str]]:
 
 def _resolve_channel_memory(
     snapshot,
-    services: AgencyServices,
+    services: FlowgencyServices,
     channel_key: str,
 ):
     if services.memory_store is None:
@@ -122,7 +122,7 @@ def _resolve_channel_memory(
 
 def _render_channel_list(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     snapshot,
     *,
     warning: str = "",
@@ -155,7 +155,7 @@ def _render_channel_list(
 
 def _render_channel_detail(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     snapshot,
     channel_key: str,
     *,
@@ -242,14 +242,14 @@ def _validate_channel_key(channel_key: str) -> None:
         )
 
 
-def _remove_channel_directory(services: AgencyServices, resolved) -> None:
+def _remove_channel_directory(services: FlowgencyServices, resolved) -> None:
     if resolved.directory.exists():
         shutil.rmtree(resolved.directory, ignore_errors=True)
 
 
 def _active_channel_jobs(snapshot, channel_key: str) -> list[str]:
     references: list[str] = []
-    job_store = JobStore(snapshot.config.agency.memory_store)
+    job_store = JobStore(snapshot.config.flowgency.memory_store)
     for team_key, tcfg in snapshot.config.teams.items():
         for record in job_store.active(team_key):
             selector = dict(record.spec.memory.selector)
@@ -265,7 +265,7 @@ def _active_channel_jobs(snapshot, channel_key: str) -> list[str]:
     return references
 
 
-def _archive_channel_directory(services: AgencyServices, resolved):
+def _archive_channel_directory(services: FlowgencyServices, resolved):
     if not resolved.directory.exists():
         return None
     if _is_symlink_or_reparse(resolved.directory):
@@ -293,7 +293,7 @@ def _restore_channel_archive(resolved, archive_path):
 @router.get("/admin/memory-channels", response_class=HTMLResponse)
 async def admin_memory_channels(
     request: Request,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     return _render_channel_list(request, services, snapshot)
@@ -302,7 +302,7 @@ async def admin_memory_channels(
 @router.post("/admin/memory-channels/create", response_class=HTMLResponse)
 async def admin_memory_channel_create(
     request: Request,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     form = await request.form()
@@ -368,7 +368,7 @@ async def admin_memory_channel_create(
 async def admin_memory_channel_detail(
     request: Request,
     channel_key: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     return _render_channel_detail(request, services, snapshot, channel_key)
@@ -381,7 +381,7 @@ async def admin_memory_channel_detail(
 async def admin_memory_channel_save(
     request: Request,
     channel_key: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     form = await request.form()
@@ -488,7 +488,7 @@ async def admin_memory_channel_save(
 async def admin_memory_channel_delete(
     request: Request,
     channel_key: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     form = await request.form()
@@ -615,7 +615,7 @@ async def admin_memory_channel_delete(
 async def admin_memory_channel_content(
     request: Request,
     channel_key: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     form = await request.form()

@@ -20,7 +20,7 @@ def publication_fixture(tmp_path):
     team_path = tmp_path / "team"
     team_path.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
     memory_root = tmp_path / "memory-store"
     spec = JobSpec(
         schema_version=5,

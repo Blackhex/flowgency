@@ -18,7 +18,7 @@ from flowgency.fs.locks import exclusive_lock
 from flowgency.fs.snapshot import AssetValidationError
 from flowgency.integrations import get_integration
 from flowgency.prompts.assets import PROMPT_SUFFIX, prompt_source_path
-from flowgency.web.dependencies import AgencyServices, get_services
+from flowgency.web.dependencies import FlowgencyServices, get_services
 
 
 router = APIRouter()
@@ -93,7 +93,7 @@ def _infra_token(value: str) -> str:
     return _safe_key_hash(value)[:_INFRA_TOKEN_LENGTH]
 
 
-def _library_infra_root(services: AgencyServices) -> Path:
+def _library_infra_root(services: FlowgencyServices) -> Path:
     library_root = _require_library(services).root.resolve()
     infra_root = _ensure_child_directory(
         library_root.parent,
@@ -107,7 +107,7 @@ def _library_infra_root(services: AgencyServices) -> Path:
     )
 
 
-def _infra_bucket(services: AgencyServices, name: str) -> Path:
+def _infra_bucket(services: FlowgencyServices, name: str) -> Path:
     return _ensure_child_directory(
         _library_infra_root(services),
         name,
@@ -123,7 +123,7 @@ def _create_verified_tempdir(parent: Path, *, prefix: str, label: str) -> Path:
 def _base_admin_context(request: Request, snapshot) -> dict[str, Any]:
     return {
         "request": request,
-        "agency_title": snapshot.config.agency.title,
+        "agency_title": snapshot.config.flowgency.title,
         "admin_active": True,
         "active": "admin",
         "admin_page": "agent-library",
@@ -146,7 +146,7 @@ def _issue_dicts(exc: ValidationFailed) -> list[dict[str, str]]:
     ]
 
 
-def _require_library(services: AgencyServices):
+def _require_library(services: FlowgencyServices):
     if services.blueprint_library is None:
         raise HTTPException(
             status_code=409,
@@ -155,11 +155,11 @@ def _require_library(services: AgencyServices):
     return services.blueprint_library
 
 
-def _blueprint_root(services: AgencyServices, key: str) -> Path:
+def _blueprint_root(services: FlowgencyServices, key: str) -> Path:
     return _require_library(services).root / key
 
 
-def _load_blueprint(services: AgencyServices, key: str):
+def _load_blueprint(services: FlowgencyServices, key: str):
     root = _blueprint_root(services, key)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Unknown blueprint")
@@ -185,7 +185,7 @@ def _instance_users(snapshot, blueprint_key: str) -> list[dict[str, str]]:
 
 
 def _cache_status(
-    services: AgencyServices,
+    services: FlowgencyServices,
     inspection,
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
@@ -391,7 +391,7 @@ def _selected_skill_file(
 
 def _render_library_list(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     snapshot,
     *,
     warning: str = "",
@@ -446,7 +446,7 @@ def _render_library_list(
 
 def _render_blueprint_detail(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     snapshot,
     key: str,
     *,
@@ -487,7 +487,7 @@ def _render_blueprint_detail(
 
 def _render_blueprint_skill(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     snapshot,
     key: str,
     skill_name: str | None,
@@ -535,7 +535,7 @@ def _render_blueprint_skill(
 
 def _render_blueprint_prompts(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     snapshot,
     key: str,
     *,
@@ -585,7 +585,7 @@ def _render_blueprint_prompts(
     )
 
 
-def _lock_path(services: AgencyServices, key: str) -> Path:
+def _lock_path(services: FlowgencyServices, key: str) -> Path:
     return _infra_bucket(services, "locks") / f"{_safe_key_hash(key)}.lock"
 
 
@@ -791,7 +791,7 @@ def _redirect_after_save(key: str, edited_path: str) -> str:
 @router.get("/admin/agent-library", response_class=HTMLResponse)
 async def admin_agent_library(
     request: Request,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     return _render_library_list(request, services, snapshot)
@@ -804,7 +804,7 @@ async def admin_agent_library(
 async def admin_blueprint_detail(
     request: Request,
     key: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     return _render_blueprint_detail(request, services, snapshot, key)
@@ -817,7 +817,7 @@ async def admin_blueprint_detail(
 async def admin_blueprint_skills(
     request: Request,
     key: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     selected_path = request.query_params.get("path")
@@ -839,7 +839,7 @@ async def admin_blueprint_skill_detail(
     request: Request,
     key: str,
     skill: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     selected_path = request.query_params.get("path")
@@ -860,7 +860,7 @@ async def admin_blueprint_skill_detail(
 async def admin_blueprint_prompts(
     request: Request,
     key: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     selected_path = request.query_params.get("path")
@@ -880,7 +880,7 @@ async def admin_blueprint_prompts(
 async def admin_blueprint_source_save(
     request: Request,
     key: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     form = await request.form()
@@ -1017,7 +1017,7 @@ async def admin_blueprint_prompt_delete(
     request: Request,
     key: str,
     prompt: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     snapshot = services.config_store.load()
     form = await request.form()

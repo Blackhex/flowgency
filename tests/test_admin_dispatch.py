@@ -49,9 +49,9 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     _write_blueprint(library_root, "advisor", "Advisor")
     config_path = tmp_path / "config.yaml"
     config = {
-        "schema_version": 6,
+        "schema_version": 1,
 
-        "agency": {
+        "flowgency": {
             "title": "Agency",
             "default_team": "test",
             "ai_backend": "copilot",
@@ -99,7 +99,7 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
 def test_dispatch_status_ignores_persisted_installed_flag(tmp_path, monkeypatch):
     _configure_admin(tmp_path, monkeypatch, _status())
     config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
-    config["agency"]["dispatch"]["installed"] = True
+    config["flowgency"]["dispatch"]["installed"] = True
     app_mod.CONFIG_PATH.write_text(
         yaml.safe_dump(config, sort_keys=False),
         encoding="utf-8",
@@ -207,8 +207,8 @@ def test_interval_update_repairs_dispatcher_through_shared_api(tmp_path, monkeyp
     assert response.status_code == 303
     assert calls == [(str(app_mod.CONFIG_PATH.resolve()), 30, False)]
     saved = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
-    assert saved["agency"]["dispatch"]["interval"] == 30
-    assert "installed" not in saved["agency"]["dispatch"]
+    assert saved["flowgency"]["dispatch"]["interval"] == 30
+    assert "installed" not in saved["flowgency"]["dispatch"]
 
 
 def test_interval_update_returns_409_when_inspection_error(tmp_path, monkeypatch):
@@ -281,7 +281,7 @@ def test_admin_org_edit_schedule_rules_use_mobile_responsive_grid(tmp_path, monk
 def test_admin_org_edit_preserves_selected_theme(tmp_path, monkeypatch):
     client = _configure_admin(tmp_path, monkeypatch, _status(state="active", installed=True))
     config = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
-    config["agency"]["theme"] = "workshop"
+    config["flowgency"]["theme"] = "workshop"
     app_mod.CONFIG_PATH.write_text(
         yaml.safe_dump(config, sort_keys=False),
         encoding="utf-8",

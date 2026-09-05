@@ -69,10 +69,10 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
         encoding="utf-8",
     )
 
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(cache_root)
-    raw["agency"]["memory_store"] = str(memory_root)
-    raw["agency"]["prompt_store"] = str(prompt_root)
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(cache_root)
+    raw["flowgency"]["memory_store"] = str(memory_root)
+    raw["flowgency"]["prompt_store"] = str(prompt_root)
     raw["teams"]["newsletter"]["name"] = "Newsletter"
     raw["teams"]["newsletter"]["path"] = str(team_root)
     raw["teams"]["newsletter"]["default_integration"] = "copilot"
@@ -129,7 +129,7 @@ def _seed_activity_app(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     team_root = tmp_path / "groups" / "newsletter-workspace"
-    raw["agency"]["default_team"] = "newsletter-prod"
+    raw["flowgency"]["default_team"] = "newsletter-prod"
     raw["teams"] = {
         "newsletter-prod": {
             **raw["teams"]["newsletter"],
@@ -309,7 +309,7 @@ def test_agent_prompts_create_stale_revision_preserves_source(monkeypatch, tmp_p
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     stale_revision = _revision(config_path)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["agency"]["title"] = "Changed elsewhere"
+    raw["flowgency"]["title"] = "Changed elsewhere"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     app_mod.refresh_services()
 
@@ -820,7 +820,7 @@ def test_memory_post_selector_returns_409_for_stale_config_without_mutating_memo
     stale_revision = snapshot.revision
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    raw["agency"]["title"] = "Changed elsewhere"
+    raw["flowgency"]["title"] = "Changed elsewhere"
     config_path.write_text(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
         encoding="utf-8",

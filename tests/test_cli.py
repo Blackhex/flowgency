@@ -37,8 +37,8 @@ def _setup_jobs_team(
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 6,
-                "agency": {
+                "schema_version": 1,
+                "flowgency": {
                     "title": "Agency",
                     "default_team": "test",
                     "ai_backend": "claude-code",
@@ -284,8 +284,8 @@ def _write_dispatch_config(path):
     path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 6,
-                "agency": {
+                "schema_version": 1,
+                "flowgency": {
                     "agent_library": "agent-library",
                     "compilation_cache": "compiled-agents",
                     "memory_store": "memory",
@@ -322,7 +322,7 @@ def test_cmd_dispatch_install_persists_interval_and_forwards_replace(tmp_path, m
     assert exit_code == 0
     assert calls == [(str(config_path.resolve()), 30, True)]
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["agency"]["dispatch"] == {"interval": 30}
+    assert saved["flowgency"]["dispatch"] == {"interval": 30}
 
 
 @pytest.mark.parametrize(

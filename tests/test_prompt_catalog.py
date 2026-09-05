@@ -27,8 +27,8 @@ def _write_config(tmp_path: Path, agents: list[dict]) -> Path:
     workspace.mkdir(parents=True, exist_ok=True)
     team_root.mkdir(parents=True, exist_ok=True)
     raw = {
-        "schema_version": 6,
-        "agency": {
+        "schema_version": 1,
+        "flowgency": {
             "title": "Agency",
             "default_team": "reviewers",
             "ai_backend": "copilot",

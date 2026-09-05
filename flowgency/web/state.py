@@ -7,8 +7,8 @@ from flowgency.configuration import ConfigSnapshot, resolve_team_paths
 from flowgency.jobs.authority import JobStore
 
 
-def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
-    agency_raw = snapshot.raw.get("agency")
+def flowgency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
+    agency_raw = snapshot.raw.get("flowgency")
     if not isinstance(agency_raw, Mapping):
         agency_raw = {}
     dispatch_raw = agency_raw.get("dispatch")
@@ -19,7 +19,7 @@ def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
     if not isinstance(dismissed, list):
         dismissed = []
 
-    resolved = snapshot.config.agency
+    resolved = snapshot.config.flowgency
     default_team = str(
         agency_raw.get("default_team")
         or resolved.default_team
@@ -46,7 +46,7 @@ def agency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
 def runtime_team(snapshot: ConfigSnapshot, team_id: str) -> dict[str, Any]:
     team = snapshot.config.teams[team_id]
     paths = resolve_team_paths(team)
-    job_store = JobStore(snapshot.config.agency.memory_store)
+    job_store = JobStore(snapshot.config.flowgency.memory_store)
     agents_full = [
         instance.model_dump(mode="json") for instance in team.agents.values()
     ]
@@ -61,7 +61,7 @@ def runtime_team(snapshot: ConfigSnapshot, team_id: str) -> dict[str, Any]:
         "locks": paths.locks,
         "logs": paths.logs,
         "job_paths": job_store.paths(team_id),
-        "dispatch_interval": snapshot.config.agency.dispatch.interval,
+        "dispatch_interval": snapshot.config.flowgency.dispatch.interval,
         "agents": list(team.agents.keys()),
         "agents_full": agents_full,
         "dispatch": team.dispatch.model_dump(mode="json"),

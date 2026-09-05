@@ -151,12 +151,12 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
     """Run one full dispatch cycle across all enabled teams."""
     snapshot = config if hasattr(config, "config") else load_dispatch_config(str(config_path))
     resolved = snapshot.config
-    interval = resolved.agency.dispatch.interval
+    interval = resolved.flowgency.dispatch.interval
 
     try:
         drain(
             resolved,
-            memory_store=resolved.agency.memory_store,
+            memory_store=resolved.flowgency.memory_store,
             launcher=launcher,
             full_reconcile=True,
         )
@@ -175,7 +175,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
         log_dir = logs_root / today
         log_dir.mkdir(parents=True, exist_ok=True)
         lost = lost_occurrences(
-            _team_job_records(resolved.agency.memory_store, team_key)
+            _team_job_records(resolved.flowgency.memory_store, team_key)
         )
 
         for agent_name, agent in team.agents.items():

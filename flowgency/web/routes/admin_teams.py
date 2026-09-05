@@ -25,7 +25,7 @@ from flowgency.configuration import (
 from flowgency.integrations import BaseIntegration, REGISTRY
 from flowgency.integrations.models import InteractiveSetupRequest
 from flowgency.jobs.store import revision_bound_team_operation
-from flowgency.web.dependencies import AgencyServices, build_services, get_services
+from flowgency.web.dependencies import FlowgencyServices, build_services, get_services
 from flowgency.web.directory_browser import DirectoryBrowseError, list_directories
 from flowgency.web.setup_flow import (
     build_setup_prompt,
@@ -73,7 +73,7 @@ def _base_admin_context(request: Request, snapshot=None) -> dict:
             key: tcfg.name
             for key, tcfg in snapshot.config.teams.items()
         }
-        title = snapshot.config.agency.title
+        title = snapshot.config.flowgency.title
     return {
         "request": request,
         "agency_title": title,
@@ -85,7 +85,7 @@ def _base_admin_context(request: Request, snapshot=None) -> dict:
     }
 
 
-def _diagnostic_issues(services: AgencyServices) -> list[dict]:
+def _diagnostic_issues(services: FlowgencyServices) -> list[dict]:
     error = services.startup_error
     if error is None:
         return []
@@ -117,7 +117,7 @@ def _validation_warning(error: ValidationFailed) -> str:
 
 def _setup_response(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
     *,
     status,
     waiting: bool = False,
@@ -310,7 +310,7 @@ def _canonical_team_path(config_path: Path, value: str) -> Path:
     return candidate.resolve()
 
 
-def _setup_data_root_seed(services: AgencyServices, data_root_value: str) -> Path:
+def _setup_data_root_seed(services: FlowgencyServices, data_root_value: str) -> Path:
     candidate = (
         Path(data_root_value).expanduser()
         if data_root_value
@@ -323,7 +323,7 @@ def _setup_data_root_seed(services: AgencyServices, data_root_value: str) -> Pat
 
 
 def _setup_integrations(
-    services: AgencyServices,
+    services: FlowgencyServices,
     data_root_value: str,
 ) -> tuple[BaseIntegration, ...]:
     return tuple(
@@ -347,7 +347,7 @@ def _select_integration(
     return "", ""
 
 
-def _rebuild_services(request: Request, services: AgencyServices) -> AgencyServices:
+def _rebuild_services(request: Request, services: FlowgencyServices) -> FlowgencyServices:
     builder = getattr(request.app.state, "build_services", build_services)
     refreshed = builder(services.config_path)
     request.app.state.services = refreshed
@@ -356,7 +356,7 @@ def _rebuild_services(request: Request, services: AgencyServices) -> AgencyServi
 
 def _setup_status_with_fresh_services(
     request: Request,
-    services: AgencyServices,
+    services: FlowgencyServices,
 ):
     status = inspect_setup_status(services.config_store)
     if status.state != "ready":
@@ -373,7 +373,7 @@ def _setup_status_with_fresh_services(
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page(
     request: Request,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     services, status = _setup_status_with_fresh_services(request, services)
     if status.state == "ready":
@@ -396,7 +396,7 @@ async def setup_page(
 @router.post("/setup/launch", response_class=HTMLResponse)
 async def setup_launch(
     request: Request,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     status = inspect_setup_status(services.config_store)
     if status.state == "ready":
@@ -496,7 +496,7 @@ async def setup_launch(
 @router.post("/setup/browse")
 async def setup_browse(
     request: Request,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ) -> JSONResponse:
     client_host = request.client.host if request.client is not None else ""
     try:
@@ -545,7 +545,7 @@ async def setup_browse(
 @router.get("/setup/status")
 async def setup_status(
     request: Request,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ) -> JSONResponse:
     services, status = _setup_status_with_fresh_services(request, services)
     payload: dict[str, str] = {"state": status.state}
@@ -561,7 +561,7 @@ async def setup_status(
 async def admin_team_edit(
     request: Request,
     team: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
         return _setup_response(
@@ -579,7 +579,7 @@ async def admin_team_edit(
 async def admin_team_save(
     request: Request,
     team: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
         return _setup_response(
@@ -685,7 +685,7 @@ async def admin_team_save(
 @router.post("/admin/teams/create", response_class=HTMLResponse)
 async def admin_team_create(
     request: Request,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
         return _setup_response(
@@ -857,7 +857,7 @@ async def admin_team_create(
 async def admin_team_delete(
     request: Request,
     team: str,
-    services: AgencyServices = Depends(get_services),
+    services: FlowgencyServices = Depends(get_services),
 ):
     if services.startup_error is not None:
         return _setup_response(

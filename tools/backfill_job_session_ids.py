@@ -33,7 +33,7 @@ def backfill(
     dry_run: bool = False,
 ) -> list[tuple[str, str]]:
     snapshot = _snapshot_read_only(Path(config_path))
-    store = JobStore(snapshot.config.agency.memory_store)
+    store = JobStore(snapshot.config.flowgency.memory_store)
     team_ids = [team] if team else list(snapshot.config.teams)
     results: list[tuple[str, str]] = []
     for team_id in team_ids:

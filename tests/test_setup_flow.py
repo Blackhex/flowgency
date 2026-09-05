@@ -220,7 +220,7 @@ def test_status_is_invalid_for_yaml_parse_errors(tmp_path: Path) -> None:
 def test_status_is_incomplete_when_no_teams(tmp_path: Path, raw_config) -> None:
     store = ConfigStore(tmp_path / "config.yaml")
     incomplete = copy.deepcopy(raw_config)
-    incomplete["agency"]["default_team"] = ""
+    incomplete["flowgency"]["default_team"] = ""
     incomplete["teams"] = {}
     store.create(incomplete)
 

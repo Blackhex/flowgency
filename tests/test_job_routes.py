@@ -57,10 +57,10 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
         team_root.joinpath(*rel).mkdir(parents=True, exist_ok=True)
     _write_blueprint(library_root, "advisor", "Advisor")
 
-    raw["agency"]["agent_library"] = str(library_root)
-    raw["agency"]["compilation_cache"] = str(cache_root)
-    raw["agency"]["memory_store"] = str(memory_root)
-    raw["agency"]["prompt_store"] = str(tmp_path / "prompts")
+    raw["flowgency"]["agent_library"] = str(library_root)
+    raw["flowgency"]["compilation_cache"] = str(cache_root)
+    raw["flowgency"]["memory_store"] = str(memory_root)
+    raw["flowgency"]["prompt_store"] = str(tmp_path / "prompts")
     raw["teams"] = {
         "newsletter": apply_team_paths({
             "name": "Newsletter",

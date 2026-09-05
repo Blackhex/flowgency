@@ -46,9 +46,9 @@ def _setup_team(tmp_path, monkeypatch, *, decision_meta):
     config_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": 6,
+                "schema_version": 1,
 
-                "agency": {
+                "flowgency": {
                     "title": "Agency",
                     "default_team": "test",
                     "ai_backend": "claude-code",

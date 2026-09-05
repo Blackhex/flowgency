@@ -45,7 +45,7 @@ def _canonical_team_store(tmp_path: Path) -> Path:
 
 def make_spec(tmp_path: Path, agent: str = "product") -> JobSpec:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
     workspace_root = tmp_path / "workspace"
     team_root = tmp_path / "team"
     return JobSpec(
@@ -313,7 +313,7 @@ def test_transition_job_requires_expected_status(tmp_path):
 
 def test_job_spec_requires_prompt_source_for_prompt_jobs(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
 
     for trigger in ("manual_prompt", "scheduled_prompt"):
         with pytest.raises(ValueError, match="prompt-backed jobs require a prompt_source"):
@@ -400,7 +400,7 @@ def test_operation_lock_paths_use_platform_case_normalization(
 
 def test_job_request_no_longer_accepts_extra_prompt_source(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
 
     with pytest.raises(TypeError):
         JobRequest(
@@ -420,7 +420,7 @@ def test_job_spec_no_longer_exposes_create_constructor():
 
 def test_decision_jobs_require_null_routine_and_skill(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 6\nteams: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 1\nteams: {}\n", encoding="utf-8")
 
     spec = JobSpec(
         schema_version=5,
@@ -619,8 +619,8 @@ def test_team_path_identity_resolves_configured_team_path(tmp_path):
     team_path.mkdir(parents=True)
     config_path = tmp_path / "config.yaml"
     raw = {
-        "schema_version": 6,
-        "agency": {
+        "schema_version": 1,
+        "flowgency": {
             "agent_library": str(tmp_path / "lib"),
             "compilation_cache": str(tmp_path / "cache"),
             "memory_store": str(tmp_path / "memory"),
@@ -656,8 +656,8 @@ def test_revision_bound_team_operation_locks_and_yields_snapshot(tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         yaml.safe_dump({
-            "schema_version": 6,
-            "agency": {
+            "schema_version": 1,
+            "flowgency": {
                 "agent_library": str(tmp_path / "lib"),
                 "compilation_cache": str(tmp_path / "cache"),
                 "memory_store": str(tmp_path / "memory"),
