@@ -405,6 +405,10 @@ def test_linux_status_validates_units_config_and_interval(tmp_path, monkeypatch)
         ),
     )
     assert dispatch_install._install_linux(str(config_path), 15) is None
+    service_text = (tmp_path / "systemd" / "flowgency-dispatch.service").read_text(encoding="utf-8")
+    timer_text = (tmp_path / "systemd" / "flowgency-dispatch.timer").read_text(encoding="utf-8")
+    assert "Description=Flowgency Agent Dispatch\n" in service_text
+    assert "Description=Flowgency Agent Dispatch Timer\n" in timer_text
     status = dispatch_install._status_linux(config_path, 15)
     assert status["state"] == "active"
     assert status["config_path"] == str(config_path.resolve())

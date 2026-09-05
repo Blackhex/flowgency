@@ -177,7 +177,7 @@ def test_cli_has_no_top_level_app_import_or_mutable_app_globals():
         "GROUPS",
         "CONFIG_PATH",
         "get_group",
-        "get_FLOWGENCY_CONFIG",
+        "get_flowgency_config",
         "collect_agents_with_identity",
     }
     assert forbidden.isdisjoint({node.id for node in ast.walk(tree) if isinstance(node, ast.Name)})

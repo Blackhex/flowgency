@@ -422,14 +422,14 @@ def _install_linux(config_path: str, interval: int) -> str | None:
         canonical_path = _canonical_config_path(config_path)
         SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
         (SYSTEMD_USER_DIR / "flowgency-dispatch.service").write_text(
-            "[Unit]\nDescription=Agency Agent Dispatch\n\n"
+            "[Unit]\nDescription=Flowgency Agent Dispatch\n\n"
             "[Service]\nType=oneshot\n"
             f"ExecStart={_systemd_quote(launcher)} -m flowgency.dispatch.run --config {_systemd_quote(canonical_path)}\n"
             f"Environment=PATH={_build_path_env()}\nEnvironment=HOME=%h\n",
             encoding="utf-8",
         )
         (SYSTEMD_USER_DIR / "flowgency-dispatch.timer").write_text(
-            "[Unit]\nDescription=Agency Agent Dispatch Timer\n\n"
+            "[Unit]\nDescription=Flowgency Agent Dispatch Timer\n\n"
             f"[Timer]\nOnBootSec={interval}m\nOnUnitActiveSec={interval}m\nPersistent=true\n\n"
             "[Install]\nWantedBy=timers.target\n",
             encoding="utf-8",
