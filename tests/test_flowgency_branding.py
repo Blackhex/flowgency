@@ -145,8 +145,8 @@ def test_production_icon_512_matches_frozen_reference():
     """Renderer output must not drift from the frozen reference.
 
     Fails if the SVG or renderer changed without a deliberate re-capture.
-    To re-capture after an intentional update, copy icon-512.png over
-    docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.png.
+    Diagnose the change and re-render production to match the approved
+    reference. Reference recapture requires explicit user approval.
     """
     production = STATIC_ROOT / "icon-512.png"
     reference = (
@@ -162,10 +162,10 @@ def test_production_icon_512_matches_frozen_reference():
     ref_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
     assert prod_hash == ref_hash, (
         f"icon-512.png ({prod_hash[:12]}…) has drifted from the frozen "
-        f"reference ({ref_hash[:12]}…). If the icon was intentionally "
-        "updated, re-capture: "
-        "Copy-Item flowgency/static/icon-512.png "
-        "docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.png"
+        f"reference ({ref_hash[:12]}…). Diagnose the change: if the SVG "
+        "or renderer was modified intentionally, re-render production to "
+        "match the approved reference. Reference recapture requires "
+        "explicit user approval."
     )
 
 
