@@ -6,9 +6,9 @@
 
 ## Problem
 
-Agents only run on a schedule. The dispatcher (`agency/dispatch/run.py`) fires
+Agents only run on a schedule. The dispatcher (`flowgency/dispatch/run.py`) fires
 `at`/`every` rules via an OS-native timer, and the only web-initiated run today
-is decision execution (`execute_decision` in `agency/app.py`). There is no way
+is decision execution (`execute_decision` in `flowgency/app.py`). There is no way
 for a user to say "run this prompt as this agent, right now" from the UI.
 
 Users browsing `/{group}/agents` want to kick off a run on demand — for testing
@@ -47,7 +47,7 @@ Parity is therefore achieved by:
    app, so command construction, `cwd`, timeout resolution, the `.running-<agent>`
    marker, and `.out`/`.err` log conventions are identical.
 2. **Never overriding `env`.** The subprocess continues to inherit the calling
-   process's environment. Because both `agency.service` (the web app) and the
+   process's environment. Because both `flowgency.service` (the web app) and the
    dispatch timer run as **user-level** services under the same account, the
    inherited profile and PATH match.
 
@@ -63,7 +63,7 @@ route.** This mirrors the existing `execute_decision` pattern (FastAPI
 
 ### 1. Shared execution helper
 
-Extract the body of `_run_agent` in `agency/dispatch/run.py` into a reusable
+Extract the body of `_run_agent` in `flowgency/dispatch/run.py` into a reusable
 function (working name `run_agent_prompt`) that takes the resolved group dict,
 agent name, prompt filename, timeout, log dir, agent config, agent dir, and
 sandbox root. It:
@@ -74,7 +74,7 @@ sandbox root. It:
 - calls `integration.run(...)` with no `env=` override,
 - writes `.out`/`.err` logs using the existing naming convention.
 
-`agency/dispatch/run.py` calls this helper from its cycle; the web app imports
+`flowgency/dispatch/run.py` calls this helper from its cycle; the web app imports
 and calls the same helper from its background task.
 
 ### 2. New route: `POST /{group}/agents/{agent}/run`

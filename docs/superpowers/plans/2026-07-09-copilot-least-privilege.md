@@ -43,7 +43,7 @@ python -m pytest tests/test_config_normalization.py tests/test_integration_sidec
 
 ## Task 1 — `SandboxSpec` + `get_sandbox_root` (config layer)
 
-**Files:** `agency/config.py`, `tests/test_config_normalization.py`
+**Files:** `flowgency/config.py`, `tests/test_config_normalization.py`
 
 **TDD — write/adjust tests first** in `tests/test_config_normalization.py`
 (replace the 5 existing `get_sandbox_root` tests; keep the section header):
@@ -59,7 +59,7 @@ python -m pytest tests/test_config_normalization.py tests/test_integration_sidec
 8. Both set → both tuples populated.
 9. List with blank entries (`["/a", "  "]`) → blanks dropped.
 
-**Implementation** in `agency/config.py`:
+**Implementation** in `flowgency/config.py`:
 
 - Add:
   ```python
@@ -87,12 +87,12 @@ together, or commit 1+2 before running full suite.)
 
 ## Task 2 — Unified command builder in `copilot.py`
 
-**Files:** `agency/integrations/agency/copilot.py`,
+**Files:** `flowgency/integrations/flowgency/copilot.py`,
 `tests/test_integration_sidecar.py`, `tests/test_execute_decision.py`
 
 **TDD — write tests first** in `tests/test_integration_sidecar.py`
 (`TestCopilot`), reusing the existing `fake_run` capture pattern
-(captures `args`, `cwd`, `kwargs`). Import `SandboxSpec` from `agency.config`.
+(captures `args`, `cwd`, `kwargs`). Import `SandboxSpec` from `flowgency.config`.
 Replace/extend `test_copilot_run_set_sandbox_runs_from_sandbox_root`:
 
 1. **roots + tools set** — `SandboxSpec(roots=(r1, r2), allowed_tools=("shell","write"))`:
@@ -119,7 +119,7 @@ the assertion `captured["sandbox_root"] == Path(...)` becomes
 None: ... else: ...` flag block (keep everything below `start = time.monotonic()`):
 
 ```python
-from agency.config import SandboxSpec   # top of file
+from flowgency.config import SandboxSpec   # top of file
 
 spec = sandbox_root or SandboxSpec()
 roots, tools = spec.roots, spec.allowed_tools
@@ -150,9 +150,9 @@ else:
 - Replace the stale confined/unrestricted comment block with a concise comment:
   autopilot only with blanket tools (copilot-cli#2971), explicit grants validated
   by real-session probe 2026-07-09.
-- Import safety: verified `agency/config.py` imports only `pathlib` and nothing
-  in `agency/integrations` imports `config`, so a top-level
-  `from agency.config import SandboxSpec` in `copilot.py` is cycle-free.
+- Import safety: verified `flowgency/config.py` imports only `pathlib` and nothing
+  in `flowgency/integrations` imports `config`, so a top-level
+  `from flowgency.config import SandboxSpec` in `copilot.py` is cycle-free.
 
 **Verification:**
 `python -m pytest tests/test_integration_sidecar.py tests/test_execute_decision.py tests/test_config_normalization.py -q`
@@ -162,7 +162,7 @@ then full `python -m pytest tests/ -q` green.
 
 ## Task 3 — Base type hint + ripple check
 
-**Files:** `agency/integrations/__init__.py`, and a sweep of remaining tests.
+**Files:** `flowgency/integrations/__init__.py`, and a sweep of remaining tests.
 
 - Update `BaseIntegration.run` signature docstring/type: `sandbox_root:
   "SandboxSpec | None" = None`. A top-level import is cycle-free (verified in
@@ -191,7 +191,7 @@ path** via `run_agent_prompt`, exercising each mode, and scan for
 - Reuse `.superpowers/sdd/validate_permission_fix.py` (or a thin wrapper) but
   route through the real integration so `get_sandbox_root` → `SandboxSpec` →
   `copilot.run` is the actual code under test. Configure the sentinel group with:
-  `sandbox_root: [C:/Projects/msvc-digest, ~/.agency-cowork]`,
+  `sandbox_root: [C:/Projects/msvc-digest, ~/.flowgency-cowork]`,
   `allowed_tools: [shell, write]`.
 - **Pass criteria (ALL):** exit 0; zero permission-denied strings; positive
   shell **and** write evidence in the log.

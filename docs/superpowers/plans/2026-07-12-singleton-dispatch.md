@@ -2,20 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace project-specific schedulers with one verified per-user Agency scheduler that drives every enabled group in the singleton dashboard config and reports schedule configuration separately from runtime health.
+**Goal:** Replace project-specific schedulers with one verified per-user Flowgency scheduler that drives every enabled group in the singleton dashboard config and reports schedule configuration separately from runtime health.
 
-**Architecture:** `agency/dispatch/install.py` remains the only platform scheduler boundary and exposes a rich status dictionary plus guarded install/uninstall operations. The dashboard and a new `christag-agency dispatch` CLI consume that API, while Agency Setup writes rules into the singleton `config.yaml` and invokes the CLI instead of generating scheduler scripts. The existing Python heartbeat runner remains the sole scheduled execution path.
+**Architecture:** `flowgency/dispatch/install.py` remains the only platform scheduler boundary and exposes a rich status dictionary plus guarded install/uninstall operations. The dashboard and a new `flowgency dispatch` CLI consume that API, while Flowgency Setup writes rules into the singleton `config.yaml` and invokes the CLI instead of generating scheduler scripts. The existing Python heartbeat runner remains the sole scheduled execution path.
 
 **Tech Stack:** Python 3.11+, pytest, FastAPI, Jinja2, PyYAML, Windows Task Scheduler COM (`pywin32`), user systemd, launchd/plistlib, PowerShell for the one-time Windows cutover
 
 ## Global Constraints
 
-- Support exactly one Agency dashboard and one authoritative `config.yaml` per OS user; multiple dashboard configs for one user are unsupported.
-- Use one Agency-managed scheduler per user: `AgencyDispatch` on Windows, `agency-dispatch.timer` plus `agency-dispatch.service` on Linux, or `com.agency.dispatch` on macOS.
+- Support exactly one Flowgency dashboard and one authoritative `config.yaml` per OS user; multiple dashboard configs for one user are unsupported.
+- Use one Flowgency-managed scheduler per user: `FlowgencyDispatch` on Windows, `flowgency-dispatch.timer` plus `flowgency-dispatch.service` on Linux, or `com.flowgency.dispatch` on macOS.
 - Keep all group schedules in the singleton config; do not add a config registry or standalone dispatch manifest.
 - Do not add production discovery, compatibility, or migration behavior for project-specific historical schedulers.
-- Keep `agency.dispatch.interval` as desired configuration with a default of 15 minutes and an accepted range of 5 through 120 minutes.
-- Treat runtime scheduler inspection as authoritative; ignore any persisted `agency.dispatch.installed` key.
+- Keep `flowgency.dispatch.interval` as desired configuration with a default of 15 minutes and an accepted range of 5 through 120 minutes.
+- Treat runtime scheduler inspection as authoritative; ignore any persisted `flowgency.dispatch.installed` key.
 - Use current-user, non-elevated scheduling and never store credentials or weaken PowerShell execution policy.
 - Keep `at`, `every`, and `condition` rule semantics unchanged; `at` values use the scheduler host's local time.
 - Label group configuration as **Schedule enabled** and reserve **Dispatcher active/inactive/misconfigured** for host runtime state.
@@ -23,31 +23,31 @@
 
 ## File Structure
 
-- `agency/dispatch/install.py`: canonical path comparison, shared `TimerStatus`, guarded replacement/removal, and complete platform definition inspection.
-- `agency/config.py`: explicit-path atomic config writes for CLI use.
-- `agency/cli.py`: `dispatch install`, `dispatch status`, and `dispatch uninstall` without import-time dashboard config dependence.
-- `agency/app.py`: dashboard routes and contexts adapted to runtime status; interval repair delegated to the shared installer.
-- `agency/templates/admin_dispatch.html`: active, inactive, and misconfigured dispatcher states with setup/repair actions.
-- `agency/templates/admin_groups.html`, `agency/templates/admin_org_edit.html`, `agency/templates/agent_profile.html`: group schedule state independent of dispatcher health.
-- `skills/agency-setup/SKILL.md`: config-native schedule registration and official scheduler CLI invocation.
-- `skills/agency-setup/references/dispatch-templates.md`: prompt and interactive workspace templates only.
+- `flowgency/dispatch/install.py`: canonical path comparison, shared `TimerStatus`, guarded replacement/removal, and complete platform definition inspection.
+- `flowgency/config.py`: explicit-path atomic config writes for CLI use.
+- `flowgency/cli.py`: `dispatch install`, `dispatch status`, and `dispatch uninstall` without import-time dashboard config dependence.
+- `flowgency/app.py`: dashboard routes and contexts adapted to runtime status; interval repair delegated to the shared installer.
+- `flowgency/templates/admin_dispatch.html`: active, inactive, and misconfigured dispatcher states with setup/repair actions.
+- `flowgency/templates/admin_groups.html`, `flowgency/templates/admin_org_edit.html`, `flowgency/templates/agent_profile.html`: group schedule state independent of dispatcher health.
+- `skills/flowgency-setup/SKILL.md`: config-native schedule registration and official scheduler CLI invocation.
+- `skills/flowgency-setup/references/dispatch-templates.md`: prompt and interactive workspace templates only.
 - `kb/dispatch.md`, `kb/configuration.md`, `kb/setup-skill.md`, `README.md`, `CLAUDE.md`: singleton ownership documentation.
 - `tests/test_dispatch_install.py`: shared contract, platform matching, conflicts, idempotency, and removal.
 - `tests/test_cli.py`: nested commands, explicit config, interval persistence, forwarding, and exit status.
 - `tests/test_admin_dispatch.py`: dashboard state independence, copy, controls, and delegation.
 - `tests/test_dispatch_run.py`: multi-group heartbeat and marker deduplication.
-- `tests/test_agency_setup_skill.py`: no scheduler artifacts and required official CLI workflow.
+- `tests/test_flowgency_setup_skill.py`: no scheduler artifacts and required official CLI workflow.
 
 ---
 
 ### Task 1: Cross-Platform Scheduler Definition Contract
 
 **Files:**
-- Modify: `agency/dispatch/install.py`
+- Modify: `flowgency/dispatch/install.py`
 - Modify: `tests/test_dispatch_install.py`
 
 **Interfaces:**
-- Consumes: `WINDOWS_TASK_NAME = "AgencyDispatch"` and `_windows_python_launcher() -> str`.
+- Consumes: `WINDOWS_TASK_NAME = "FlowgencyDispatch"` and `_windows_python_launcher() -> str`.
 - Produces: `TimerStatus`; `get_timer_status(config_path: str | Path, interval: int = 15) -> TimerStatus`; `install_timer(config_path: str | Path, interval: int = 15, replace: bool = False) -> str | None`; `uninstall_timer(config_path: str | Path, force: bool = False) -> str | None`.
 - `TimerStatus` keys: `state`, `installed`, `enabled`, `timer_active`, `definition_matches`, `config_conflict`, `config_path`, `interval`, `expected_config_path`, `expected_interval`, `mismatches`, and `error`.
 
@@ -58,7 +58,7 @@ Add `Path`, import the module as `dispatch_install`, update old no-argument stat
 ```python
 from pathlib import Path
 
-import agency.dispatch.install as dispatch_install
+import flowgency.dispatch.install as dispatch_install
 
 
 def _configure_windows_task(fake_client, config_path, interval=15, enabled=True, state=3):
@@ -68,7 +68,7 @@ def _configure_windows_task(fake_client, config_path, interval=15, enabled=True,
     task.State = state
     action = task.Definition.Actions.Item.return_value
     action.Path = dispatch_install._windows_python_launcher()
-    action.Arguments = f'-m agency.dispatch.run --config "{Path(config_path).resolve()}"'
+    action.Arguments = f'-m flowgency.dispatch.run --config "{Path(config_path).resolve()}"'
     trigger = task.Definition.Triggers.Item.return_value
     trigger.Repetition.Interval = f"PT{interval}M"
     return task
@@ -272,7 +272,7 @@ Expected: FAIL because status does not accept expected config/interval, rich fie
 
 - [ ] **Step 3: Add the shared type, normalization helpers, and public guards**
 
-Add `os`, `re`, `Literal`, and `TypedDict`, then replace the three public operations in `agency/dispatch/install.py`:
+Add `os`, `re`, `Literal`, and `TypedDict`, then replace the three public operations in `flowgency/dispatch/install.py`:
 
 ```python
 import os
@@ -382,7 +382,7 @@ def install_timer(config_path: str | Path, interval: int = 15, replace: bool = F
     if status["error"] and not status["installed"]:
         return status["error"]
     if status["config_conflict"] and not replace:
-        return f"Agency dispatcher already targets another config: {status['config_path']}. Re-run with explicit replacement approval."
+        return f"Flowgency dispatcher already targets another config: {status['config_path']}. Re-run with explicit replacement approval."
     platform_name = detect_platform()
     if platform_name == "linux":
         return _install_linux(canonical_path, interval)
@@ -399,7 +399,7 @@ def uninstall_timer(config_path: str | Path, force: bool = False) -> str | None:
     if not status["installed"]:
         return None
     if status["config_conflict"] and not force:
-        return f"Agency dispatcher targets another config: {status['config_path']}. Re-run with explicit force approval."
+        return f"Flowgency dispatcher targets another config: {status['config_path']}. Re-run with explicit force approval."
     platform_name = detect_platform()
     if platform_name == "linux":
         return _uninstall_linux()
@@ -450,7 +450,7 @@ def _status_windows(config_path: str | Path, interval: int) -> TimerStatus:
         if not _paths_equal(action.Path, _windows_python_launcher()):
             mismatches.append("executable")
         arguments = str(action.Arguments or "")
-        if "-m agency.dispatch.run" not in arguments:
+        if "-m flowgency.dispatch.run" not in arguments:
             mismatches.append("module")
         actual_config_path = _extract_config_path(arguments)
     except Exception:
@@ -477,7 +477,7 @@ def _status_windows(config_path: str | Path, interval: int) -> TimerStatus:
 Inside `_install_windows()`, set `canonical_path = _canonical_config_path(config_path)` and use:
 
 ```python
-        action.Arguments = f'-m agency.dispatch.run --config "{canonical_path}"'
+        action.Arguments = f'-m flowgency.dispatch.run --config "{canonical_path}"'
 ```
 
 In the existing `test_install_windows_registers_task()`, make the preflight status
@@ -502,7 +502,7 @@ Expected: PASS. Preserve the missing-pywin32 and task-not-found tests by updatin
 #### Linux and macOS Definition Parity
 
 **Files:**
-- Modify: `agency/dispatch/install.py`
+- Modify: `flowgency/dispatch/install.py`
 - Modify: `tests/test_dispatch_install.py`
 
 **Interfaces:**
@@ -541,11 +541,11 @@ def test_linux_status_reports_wrong_config_and_interval(tmp_path, monkeypatch):
     python_path = tmp_path / "python3"
     unit_dir = tmp_path / "systemd"
     unit_dir.mkdir()
-    (unit_dir / "agency-dispatch.service").write_text(
-        f'ExecStart="{python_path}" -m agency.dispatch.run --config "{other.resolve()}"\n',
+    (unit_dir / "flowgency-dispatch.service").write_text(
+        f'ExecStart="{python_path}" -m flowgency.dispatch.run --config "{other.resolve()}"\n',
         encoding="utf-8",
     )
-    (unit_dir / "agency-dispatch.timer").write_text(
+    (unit_dir / "flowgency-dispatch.timer").write_text(
         "[Timer]\nOnUnitActiveSec=30m\n",
         encoding="utf-8",
     )
@@ -590,10 +590,10 @@ def test_macos_status_reports_wrong_module_and_interval(tmp_path, monkeypatch):
     python_path = tmp_path / "python3"
     launch_agents = tmp_path / "LaunchAgents"
     launch_agents.mkdir()
-    with (launch_agents / "com.agency.dispatch.plist").open("wb") as plist_file:
+    with (launch_agents / "com.flowgency.dispatch.plist").open("wb") as plist_file:
         plistlib.dump(
             {
-                "Label": "com.agency.dispatch",
+                "Label": "com.flowgency.dispatch",
                 "ProgramArguments": [
                     str(python_path),
                     "-m",
@@ -621,7 +621,7 @@ def test_macos_status_reports_wrong_module_and_interval(tmp_path, monkeypatch):
 def test_uninstall_linux_removes_both_units(tmp_path, monkeypatch):
     unit_dir = tmp_path / "systemd"
     unit_dir.mkdir()
-    for name in ("agency-dispatch.timer", "agency-dispatch.service"):
+    for name in ("flowgency-dispatch.timer", "flowgency-dispatch.service"):
         (unit_dir / name).write_text("unit", encoding="utf-8")
     calls = []
     monkeypatch.setattr(dispatch_install, "SYSTEMD_USER_DIR", unit_dir)
@@ -631,15 +631,15 @@ def test_uninstall_linux_removes_both_units(tmp_path, monkeypatch):
         lambda command, **kwargs: calls.append(command) or MagicMock(returncode=0),
     )
     assert dispatch_install._uninstall_linux() is None
-    assert not (unit_dir / "agency-dispatch.timer").exists()
-    assert not (unit_dir / "agency-dispatch.service").exists()
+    assert not (unit_dir / "flowgency-dispatch.timer").exists()
+    assert not (unit_dir / "flowgency-dispatch.service").exists()
     assert ["systemctl", "--user", "daemon-reload"] in calls
 
 
 def test_uninstall_macos_unloads_and_removes_plist(tmp_path, monkeypatch):
     launch_agents = tmp_path / "LaunchAgents"
     launch_agents.mkdir()
-    plist_path = launch_agents / "com.agency.dispatch.plist"
+    plist_path = launch_agents / "com.flowgency.dispatch.plist"
     plist_path.write_text("plist", encoding="utf-8")
     calls = []
     monkeypatch.setattr(dispatch_install, "LAUNCHD_AGENTS_DIR", launch_agents)
@@ -685,15 +685,15 @@ def _install_linux(config_path: str, interval: int) -> str | None:
         launcher = _linux_python_launcher()
         canonical_path = _canonical_config_path(config_path)
         SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
-        (SYSTEMD_USER_DIR / "agency-dispatch.service").write_text(
-            "[Unit]\nDescription=Agency Agent Dispatch\n\n"
+        (SYSTEMD_USER_DIR / "flowgency-dispatch.service").write_text(
+            "[Unit]\nDescription=Flowgency Agent Dispatch\n\n"
             "[Service]\nType=oneshot\n"
-            f"ExecStart={_systemd_quote(launcher)} -m agency.dispatch.run --config {_systemd_quote(canonical_path)}\n"
+            f"ExecStart={_systemd_quote(launcher)} -m flowgency.dispatch.run --config {_systemd_quote(canonical_path)}\n"
             f"Environment=PATH={_build_path_env()}\nEnvironment=HOME=%h\n",
             encoding="utf-8",
         )
-        (SYSTEMD_USER_DIR / "agency-dispatch.timer").write_text(
-            "[Unit]\nDescription=Agency Agent Dispatch Timer\n\n"
+        (SYSTEMD_USER_DIR / "flowgency-dispatch.timer").write_text(
+            "[Unit]\nDescription=Flowgency Agent Dispatch Timer\n\n"
             f"[Timer]\nOnBootSec={interval}m\nOnUnitActiveSec={interval}m\nPersistent=true\n\n"
             "[Install]\nWantedBy=timers.target\n",
             encoding="utf-8",
@@ -706,7 +706,7 @@ def _install_linux(config_path: str, interval: int) -> str | None:
             check=True,
         )
         subprocess.run(
-            ["systemctl", "--user", "enable", "--now", "agency-dispatch.timer"],
+            ["systemctl", "--user", "enable", "--now", "flowgency-dispatch.timer"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -718,8 +718,8 @@ def _install_linux(config_path: str, interval: int) -> str | None:
 
 
 def _status_linux(config_path: str | Path, interval: int) -> TimerStatus:
-    service_file = SYSTEMD_USER_DIR / "agency-dispatch.service"
-    timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
+    service_file = SYSTEMD_USER_DIR / "flowgency-dispatch.service"
+    timer_file = SYSTEMD_USER_DIR / "flowgency-dispatch.timer"
     installed = service_file.exists() or timer_file.exists()
     if not installed:
         return _make_status(
@@ -744,7 +744,7 @@ def _status_linux(config_path: str | Path, interval: int) -> TimerStatus:
             arguments = []
         if not arguments or not _paths_equal(arguments[0], _linux_python_launcher()):
             mismatches.append("executable")
-        if arguments[1:3] != ["-m", "agency.dispatch.run"]:
+        if arguments[1:3] != ["-m", "flowgency.dispatch.run"]:
             mismatches.append("module")
         if "--config" in arguments:
             config_index = arguments.index("--config") + 1
@@ -756,13 +756,13 @@ def _status_linux(config_path: str | Path, interval: int) -> TimerStatus:
         actual_interval = int(match.group(1)) if match else None
     try:
         enabled_result = subprocess.run(
-            ["systemctl", "--user", "is-enabled", "agency-dispatch.timer"],
+            ["systemctl", "--user", "is-enabled", "flowgency-dispatch.timer"],
             capture_output=True,
             text=True,
             timeout=5,
         )
         active_result = subprocess.run(
-            ["systemctl", "--user", "is-active", "agency-dispatch.timer"],
+            ["systemctl", "--user", "is-active", "flowgency-dispatch.timer"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -819,7 +819,7 @@ def _install_macos(config_path: str, interval: int) -> str | None:
                     "ProgramArguments": [
                         str(_macos_python_launcher()),
                         "-m",
-                        "agency.dispatch.run",
+                        "flowgency.dispatch.run",
                         "--config",
                         canonical_path,
                     ],
@@ -855,7 +855,7 @@ def _status_macos(config_path: str | Path, interval: int) -> TimerStatus:
         arguments = definition.get("ProgramArguments", [])
         if not arguments or not _paths_equal(arguments[0], _macos_python_launcher()):
             mismatches.append("executable")
-        if arguments[1:3] != ["-m", "agency.dispatch.run"]:
+        if arguments[1:3] != ["-m", "flowgency.dispatch.run"]:
             mismatches.append("module")
         actual_config_path = None
         if "--config" in arguments:
@@ -910,7 +910,7 @@ Expected: PASS for Windows, Linux, macOS, conflicts, missing dependencies, and i
 Commit:
 
 ```powershell
-git add agency/dispatch/install.py tests/test_dispatch_install.py
+git add flowgency/dispatch/install.py tests/test_dispatch_install.py
 git commit -m "feat(dispatch): validate global scheduler definitions"
 ```
 
@@ -919,8 +919,8 @@ git commit -m "feat(dispatch): validate global scheduler definitions"
 ### Task 2: Official Dispatch CLI and Explicit Atomic Config Writes
 
 **Files:**
-- Modify: `agency/config.py`
-- Modify: `agency/cli.py`
+- Modify: `flowgency/config.py`
+- Modify: `flowgency/cli.py`
 - Modify: `tests/test_config_normalization.py`
 - Modify: `tests/test_cli.py`
 
@@ -937,7 +937,7 @@ Append to `tests/test_config_normalization.py`:
 import os
 import yaml
 
-from agency.config import save_config_path
+from flowgency.config import save_config_path
 
 
 def test_save_config_path_atomically_replaces_destination(tmp_path, monkeypatch):
@@ -949,14 +949,14 @@ def test_save_config_path_atomically_replaces_destination(tmp_path, monkeypatch)
         replacements.append((Path(source), Path(destination)))
         real_replace(source, destination)
 
-    monkeypatch.setattr("agency.config.os.replace", recording_replace)
+    monkeypatch.setattr("flowgency.config.os.replace", recording_replace)
     save_config_path(
         config_path,
-        {"agency": {"dispatch": {"interval": 30}}, "groups": {}},
+        {"flowgency": {"dispatch": {"interval": 30}}, "groups": {}},
     )
     assert replacements[0][1] == config_path
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["agency"]["dispatch"]["interval"] == 30
+    assert saved["flowgency"]["dispatch"]["interval"] == 30
 ```
 
 Append to `tests/test_cli.py` and add `pytest`/`yaml` imports:
@@ -981,7 +981,7 @@ def _dispatch_status(state="active", installed=True, error=None):
 
 def test_cli_help_shows_dispatch_subcommands():
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli", "dispatch", "--help"],
+        [sys.executable, "-m", "flowgency.cli", "dispatch", "--help"],
         capture_output=True,
         text=True,
     )
@@ -991,7 +991,7 @@ def test_cli_help_shows_dispatch_subcommands():
 
 def test_cmd_dispatch_install_persists_interval_and_forwards_replace(tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("agency: {}\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("flowgency: {}\ngroups: {}\n", encoding="utf-8")
     calls = []
     monkeypatch.setattr(cli, "install_timer", lambda path, interval, replace=False: calls.append((path, interval, replace)))
     monkeypatch.setattr(cli, "get_timer_status", lambda path, interval: _dispatch_status())
@@ -1001,7 +1001,7 @@ def test_cmd_dispatch_install_persists_interval_and_forwards_replace(tmp_path, m
     assert exit_code == 0
     assert calls == [(str(config_path.resolve()), 30, True)]
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert saved["agency"]["dispatch"] == {"interval": 30}
+    assert saved["flowgency"]["dispatch"] == {"interval": 30}
 
 
 @pytest.mark.parametrize(
@@ -1016,7 +1016,7 @@ def test_cmd_dispatch_install_persists_interval_and_forwards_replace(tmp_path, m
 )
 def test_dispatch_status_exit_codes(tmp_path, monkeypatch, status, expected):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("agency:\n  dispatch:\n    interval: 15\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("flowgency:\n  dispatch:\n    interval: 15\ngroups: {}\n", encoding="utf-8")
     monkeypatch.setattr(cli, "get_timer_status", lambda path, interval: status)
     args = Namespace(dispatch_command="status", config=str(config_path), interval=None, replace=False, force=False)
     assert cli.cmd_dispatch(args) == expected
@@ -1024,7 +1024,7 @@ def test_dispatch_status_exit_codes(tmp_path, monkeypatch, status, expected):
 
 def test_cmd_dispatch_uninstall_forwards_force(tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("agency: {}\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("flowgency: {}\ngroups: {}\n", encoding="utf-8")
     calls = []
     monkeypatch.setattr(cli, "uninstall_timer", lambda path, force=False: calls.append((path, force)))
     args = Namespace(dispatch_command="uninstall", config=str(config_path), interval=None, replace=False, force=True)
@@ -1044,11 +1044,11 @@ Expected: FAIL because explicit-path saving and the dispatch CLI do not exist.
 
 - [ ] **Step 3: Add explicit atomic config saving**
 
-Add `os` and `tempfile` imports plus this function to `agency/config.py`:
+Add `os` and `tempfile` imports plus this function to `flowgency/config.py`:
 
 ```python
 def save_config_path(path: Path, config: dict) -> None:
-    """Atomically write an Agency config to an explicit path."""
+    """Atomically write an Flowgency config to an explicit path."""
     destination = path.expanduser().resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_path = tempfile.mkstemp(dir=destination.parent, suffix=".yaml")
@@ -1064,19 +1064,19 @@ def save_config_path(path: Path, config: dict) -> None:
 
 - [ ] **Step 4: Add command handlers and exact exit semantics**
 
-Import `Namespace`, explicit config helpers, and scheduler functions in `agency/cli.py`, then add:
+Import `Namespace`, explicit config helpers, and scheduler functions in `flowgency/cli.py`, then add:
 
 ```python
 def _dispatch_config_path(args: Namespace) -> Path:
     selected = Path(args.config).expanduser() if args.config else CONFIG_PATH
     config_path = selected.resolve()
     if not config_path.is_file():
-        raise ValueError(f"Agency config not found: {config_path}")
+        raise ValueError(f"Flowgency config not found: {config_path}")
     return config_path
 
 
 def _dispatch_interval(config: dict) -> int:
-    return int(config.get("agency", {}).get("dispatch", {}).get("interval", 15))
+    return int(config.get("flowgency", {}).get("dispatch", {}).get("interval", 15))
 
 
 def _dispatch_status_exit_code(status: dict) -> int:
@@ -1114,7 +1114,7 @@ def cmd_dispatch(args: Namespace) -> int:
     interval = args.interval if args.interval is not None else _dispatch_interval(config)
     if args.dispatch_command == "install":
         if args.interval is not None:
-            dispatch_config = config.setdefault("agency", {}).setdefault("dispatch", {})
+            dispatch_config = config.setdefault("flowgency", {}).setdefault("dispatch", {})
             dispatch_config.pop("installed", None)
             dispatch_config["interval"] = interval
             save_config_path(config_path, config)
@@ -1179,7 +1179,7 @@ Expected: PASS, including subprocess help and direct handler tests.
 Commit:
 
 ```powershell
-git add agency/config.py agency/cli.py tests/test_config_normalization.py tests/test_cli.py
+git add flowgency/config.py flowgency/cli.py tests/test_config_normalization.py tests/test_cli.py
 git commit -m "feat(cli): manage singleton dispatcher"
 ```
 
@@ -1189,11 +1189,11 @@ git commit -m "feat(cli): manage singleton dispatcher"
 
 **Files:**
 - Create: `tests/test_admin_dispatch.py`
-- Modify: `agency/app.py`
-- Modify: `agency/templates/admin_dispatch.html`
-- Modify: `agency/templates/admin_groups.html`
-- Modify: `agency/templates/admin_org_edit.html`
-- Modify: `agency/templates/agent_profile.html`
+- Modify: `flowgency/app.py`
+- Modify: `flowgency/templates/admin_dispatch.html`
+- Modify: `flowgency/templates/admin_groups.html`
+- Modify: `flowgency/templates/admin_org_edit.html`
+- Modify: `flowgency/templates/agent_profile.html`
 
 **Interfaces:**
 - Consumes: Rich `TimerStatus` and guarded `install_timer()` from Task 1.
@@ -1209,7 +1209,7 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 
-import agency.app as app_mod
+import flowgency.app as app_mod
 
 
 def _status(state="inactive", installed=False, conflict=False, mismatches=None):
@@ -1222,7 +1222,7 @@ def _status(state="inactive", installed=False, conflict=False, mismatches=None):
         "config_conflict": conflict,
         "config_path": "C:/other/config.yaml" if conflict else None,
         "interval": 15 if installed else None,
-        "expected_config_path": "C:/agency/config.yaml",
+        "expected_config_path": "C:/flowgency/config.yaml",
         "expected_interval": 15,
         "mismatches": list(mismatches or []),
         "error": None,
@@ -1236,8 +1236,8 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
     (group_path / "product").mkdir()
     config_path = tmp_path / "config.yaml"
     config = {
-        "agency": {
-            "title": "Agency",
+        "flowgency": {
+            "title": "Flowgency",
             "default_group": "test",
             "dispatch": {"installed": True, "interval": 15},
         },
@@ -1354,7 +1354,7 @@ def test_interval_update_repairs_dispatcher_through_shared_api(tmp_path, monkeyp
     response = client.post(
         "/admin/settings",
         data={
-            "title": "Agency",
+            "title": "Flowgency",
             "default_group": "test",
             "ai_backend": "copilot",
             "theme": "",
@@ -1365,8 +1365,8 @@ def test_interval_update_repairs_dispatcher_through_shared_api(tmp_path, monkeyp
     assert response.status_code == 303
     assert calls == [(str(app_mod.CONFIG_PATH.resolve()), 30, False)]
     saved = yaml.safe_load(app_mod.CONFIG_PATH.read_text(encoding="utf-8"))
-    assert saved["agency"]["dispatch"]["interval"] == 30
-    assert "installed" not in saved["agency"]["dispatch"]
+    assert saved["flowgency"]["dispatch"]["interval"] == 30
+    assert "installed" not in saved["flowgency"]["dispatch"]
 ```
 
 - [ ] **Step 2: Run the dashboard tests and verify current behavior fails**
@@ -1381,20 +1381,20 @@ Expected: FAIL because the stale installed flag is merged, schedules are hidden,
 
 - [ ] **Step 3: Make dashboard status runtime-authoritative**
 
-Replace the dispatch helpers in `agency/app.py`:
+Replace the dispatch helpers in `flowgency/app.py`:
 
 ```python
 def get_dispatch_status() -> dict:
     """Return runtime scheduler status for the active singleton config."""
     config = load_config()
-    interval = config.get("agency", {}).get("dispatch", {}).get("interval", 15)
+    interval = config.get("flowgency", {}).get("dispatch", {}).get("interval", 15)
     return _get_timer_status(CONFIG_PATH.resolve(), interval)
 
 
 def install_dispatch(interval: int | None = None, replace: bool = False) -> str | None:
     """Install or repair the scheduler for the active singleton config."""
     config = load_config()
-    dispatch_config = config.setdefault("agency", {}).setdefault("dispatch", {})
+    dispatch_config = config.setdefault("flowgency", {}).setdefault("dispatch", {})
     dispatch_config.pop("installed", None)
     desired_interval = interval if interval is not None else dispatch_config.get("interval", 15)
     if interval is not None:
@@ -1415,7 +1415,7 @@ In `admin_save_settings()`, remove direct `systemctl` calls. Persist the desired
             candidate_interval = 0
         if 5 <= candidate_interval <= 120:
             dispatch_interval = candidate_interval
-            dispatch_config = config.setdefault("agency", {}).setdefault("dispatch", {})
+            dispatch_config = config.setdefault("flowgency", {}).setdefault("dispatch", {})
             dispatch_config.pop("installed", None)
             dispatch_config["interval"] = dispatch_interval
 
@@ -1469,7 +1469,7 @@ Do not gate prompt or schedule data on that value.
 
 - [ ] **Step 5: Render platform-neutral global status and guarded repair**
 
-In `agency/templates/admin_dispatch.html`, stop branching the whole page on `dispatch.installed`. Use this status/action block above the retained interval and group sections:
+In `flowgency/templates/admin_dispatch.html`, stop branching the whole page on `dispatch.installed`. Use this status/action block above the retained interval and group sections:
 
 ```html
 <div class="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
@@ -1509,15 +1509,15 @@ Bind the interval input to `dispatch.expected_interval`. Keep interval and per-g
 Apply these exact template changes:
 
 ```html
-<!-- agency/templates/admin_groups.html -->
+<!-- flowgency/templates/admin_groups.html -->
 Schedule enabled
 
-<!-- agency/templates/agent_profile.html -->
+<!-- flowgency/templates/agent_profile.html -->
 title="Schedule {{ 'enabled' if dispatch_enabled else 'disabled' }}"
 No schedule configured
 ```
 
-In `agency/templates/admin_org_edit.html`, replace the old installed-state condition with edit mode plus an amber warning:
+In `flowgency/templates/admin_org_edit.html`, replace the old installed-state condition with edit mode plus an amber warning:
 
 ```html
 {% if mode == 'edit' %}
@@ -1543,21 +1543,21 @@ Expected: PASS with no direct platform command from interval updates and no sche
 Commit:
 
 ```powershell
-git add agency/app.py agency/templates/admin_dispatch.html agency/templates/admin_groups.html agency/templates/admin_org_edit.html agency/templates/agent_profile.html tests/test_admin_dispatch.py
+git add flowgency/app.py flowgency/templates/admin_dispatch.html flowgency/templates/admin_groups.html flowgency/templates/admin_org_edit.html flowgency/templates/agent_profile.html tests/test_admin_dispatch.py
 git commit -m "fix(dashboard): separate schedules from dispatcher health"
 ```
 
 ---
 
-### Task 4: Agency Setup Uses the Singleton Scheduler
+### Task 4: Flowgency Setup Uses the Singleton Scheduler
 
 **Files:**
-- Modify: `skills/agency-setup/SKILL.md`
-- Modify: `skills/agency-setup/references/dispatch-templates.md`
-- Modify: `tests/test_agency_setup_skill.py`
+- Modify: `skills/flowgency-setup/SKILL.md`
+- Modify: `skills/flowgency-setup/references/dispatch-templates.md`
+- Modify: `tests/test_flowgency_setup_skill.py`
 
 **Interfaces:**
-- Consumes: `christag-agency dispatch install --config PATH` and `christag-agency dispatch status --config PATH` from Task 2.
+- Consumes: `flowgency dispatch install --config PATH` and `flowgency dispatch status --config PATH` from Task 2.
 - Produces: Config-native 07:00/21:00 rules, no generated scheduler artifacts, and optional verified singleton scheduling.
 
 - [ ] **Step 1: Replace old template assertions with failing singleton assertions**
@@ -1567,9 +1567,9 @@ Replace `test_windows_templates_enumerate_real_copilot_executable()` and append:
 ```python
 def test_setup_uses_official_singleton_scheduler_cli():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    assert "christag-agency dispatch install --config" in skill
-    assert "christag-agency dispatch status --config" in skill
-    assert "exactly one Agency dashboard" in skill
+    assert "flowgency dispatch install --config" in skill
+    assert "flowgency dispatch status --config" in skill
+    assert "exactly one Flowgency dashboard" in skill
     assert "does not create a fallback project scheduler" in skill
 
 
@@ -1589,7 +1589,7 @@ def test_setup_does_not_generate_project_scheduler_artifacts():
 
 def test_setup_writes_schedule_rules_directly_from_assignments():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
+    registration = skill.split("### 4.7 Flowgency Registration", maxsplit=1)[1].split(
         "### 4.8 Singleton Scheduler Setup",
         maxsplit=1,
     )[0]
@@ -1613,14 +1613,14 @@ def test_windows_launcher_still_resolves_real_copilot_executable():
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py -v
+python -m pytest tests/test_flowgency_setup_skill.py -v
 ```
 
 Expected: FAIL because the skill still generates per-project dispatchers and scheduler installers.
 
 - [ ] **Step 3: Rewrite setup phases around config-native schedules**
 
-In `skills/agency-setup/SKILL.md`, remove `dispatch` from the frontmatter
+In `skills/flowgency-setup/SKILL.md`, remove `dispatch` from the frontmatter
 description's generated-directory list, change the Phase 4 reference description
 to "prompts and interactive workspace launchers", and make runtime profile control
 identity/workspace only:
@@ -1638,7 +1638,7 @@ Replace Phase 4.4 with:
 ### 4.4 Schedule Definitions
 
 Do not generate a dispatcher, Task Scheduler installer, systemd unit, launchd
-plist, or project-specific scheduler artifact. Agency's global 15-minute
+plist, or project-specific scheduler artifact. Flowgency's global 15-minute
 heartbeat runs schedule rules stored in the singleton dashboard config.
 
 Record each approved Phase 2 dispatch assignment for Phase 4.7:
@@ -1650,15 +1650,15 @@ Record each approved Phase 2 dispatch assignment for Phase 4.7:
 - All `at` values use the scheduler host's local time.
 
 Use `dispatch.timeout: 300` and `dispatch.daily_limit: 15`. Marker
-deduplication, logs, timeout enforcement, and job lifecycle belong to Agency's
+deduplication, logs, timeout enforcement, and job lifecycle belong to Flowgency's
 Python dispatcher and job system.
 ```
 
 At the start of Phase 4.7, add:
 
 ```markdown
-Agency supports exactly one Agency dashboard and one authoritative `config.yaml`
-per OS user. `$AGENCY_CONFIG` wins when valid. If more than one remaining valid
+Flowgency supports exactly one Flowgency dashboard and one authoritative `config.yaml`
+per OS user. `$FLOWGENCY_CONFIG` wins when valid. If more than one remaining valid
 candidate exists, ask which config is authoritative; never register or schedule
 all candidates.
 ```
@@ -1691,21 +1691,21 @@ Replace Phase 4.8 with:
 ### 4.8 Singleton Scheduler Setup
 
 Only offer scheduler setup after registration and on-disk verification succeed.
-If no authoritative Agency config was found, report that registration and
+If no authoritative Flowgency config was found, report that registration and
 scheduling were not completed and do not create a fallback project scheduler.
 
-Ask: "Enable the global Agency dispatcher? It checks all enabled groups every 15
+Ask: "Enable the global Flowgency dispatcher? It checks all enabled groups every 15
 minutes. (Y/n)"
 
 If yes:
 
 1. Resolve the selected config to a canonical absolute path.
-2. Run `christag-agency dispatch install --config "{config_path}"` as the current user.
-3. Run `christag-agency dispatch status --config "{config_path}"`.
+2. Run `flowgency dispatch install --config "{config_path}"` as the current user.
+3. Run `flowgency dispatch status --config "{config_path}"`.
 4. Treat only exit status 0 as verified active scheduling.
 5. If install reports another config, ask before rerunning with `--replace`.
 6. Never request credentials, elevation, or a weaker execution policy.
-7. If the CLI is unavailable, report the exact command to run after Agency is
+7. If the CLI is unavailable, report the exact command to run after Flowgency is
    installed; do not generate another scheduler implementation.
 ```
 
@@ -1713,7 +1713,7 @@ Update Phase 5 to report global dispatcher status instead of a generated timer.
 
 - [ ] **Step 5: Remove scheduler templates and preserve prompt/workspace templates**
 
-Delete these complete headings and bodies from `skills/agency-setup/references/dispatch-templates.md`:
+Delete these complete headings and bodies from `skills/flowgency-setup/references/dispatch-templates.md`:
 
 ```text
 ## dispatch.sh Template
@@ -1733,16 +1733,16 @@ they run inside a due job and are not scheduler infrastructure. Preserve absolut
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py -v
+python -m pytest tests/test_flowgency_setup_skill.py -v
 ```
 
-Expected: PASS; `.github/skills/agency-setup` still resolves to the canonical skill.
+Expected: PASS; `.github/skills/flowgency-setup` still resolves to the canonical skill.
 
 Commit:
 
 ```powershell
-git add skills/agency-setup/SKILL.md skills/agency-setup/references/dispatch-templates.md tests/test_agency_setup_skill.py
-git commit -m "fix(agency-setup): use global dispatcher"
+git add skills/flowgency-setup/SKILL.md skills/flowgency-setup/references/dispatch-templates.md tests/test_flowgency_setup_skill.py
+git commit -m "fix(flowgency-setup): use global dispatcher"
 ```
 
 ---
@@ -1770,7 +1770,7 @@ def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, mo
         first_path, _, _ = _make_group(tmp_path / "first")
         second_path, _, _ = _make_group(tmp_path / "second")
         config = {
-                "agency": {"dispatch": {"interval": 15}},
+                "flowgency": {"dispatch": {"interval": 15}},
                 "groups": {
                         "first": _enabled_config(first_path)["groups"]["test"],
                         "second": _enabled_config(second_path)["groups"]["test"],
@@ -1778,7 +1778,7 @@ def test_one_heartbeat_submits_due_work_for_multiple_enabled_groups(tmp_path, mo
         }
         submitted = []
         monkeypatch.setattr(
-                "agency.dispatch.run.submit_job",
+                "flowgency.dispatch.run.submit_job",
                 lambda spec, launcher=None: submitted.append((spec.group_key, spec.agent_name)),
         )
         run_dispatch_cycle(config, tmp_path / "config.yaml")
@@ -1793,7 +1793,7 @@ def test_repeated_heartbeat_does_not_duplicate_daily_at_rule(tmp_path, monkeypat
         ]
         submitted = []
         monkeypatch.setattr(
-                "agency.dispatch.run.submit_job",
+                "flowgency.dispatch.run.submit_job",
                 lambda spec, launcher=None: submitted.append(spec),
         )
         run_dispatch_cycle(config, tmp_path / "config.yaml")
@@ -1807,7 +1807,7 @@ def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
         disabled_group = _enabled_config(disabled_path)["groups"]["test"]
         disabled_group["dispatch"]["enabled"] = False
         config = {
-                "agency": {"dispatch": {"interval": 15}},
+                "flowgency": {"dispatch": {"interval": 15}},
                 "groups": {
                         "enabled": _enabled_config(enabled_path)["groups"]["test"],
                         "disabled": disabled_group,
@@ -1815,7 +1815,7 @@ def test_disabled_group_is_skipped_in_multi_group_config(tmp_path, monkeypatch):
         }
         submitted = []
         monkeypatch.setattr(
-                "agency.dispatch.run.submit_job",
+                "flowgency.dispatch.run.submit_job",
                 lambda spec, launcher=None: submitted.append(spec.group_key),
         )
         run_dispatch_cycle(config, tmp_path / "config.yaml")
@@ -1841,25 +1841,25 @@ blocks this plan and must be investigated before changing runner behavior.
 Update `kb/dispatch.md` with these exact facts and commands:
 
 ```markdown
-- Agency supports one dashboard config and one user-level dispatcher per OS user.
+- Flowgency supports one dashboard config and one user-level dispatcher per OS user.
 - `dispatch.enabled: true` means a group's schedule is configured; it does not
     prove the host dispatcher is active.
 - The global dispatcher checks every enabled group every 15 minutes by default.
 
     ```text
-    christag-agency dispatch install --config C:\path\to\config.yaml
-    christag-agency dispatch status --config C:\path\to\config.yaml
-    christag-agency dispatch uninstall --config C:\path\to\config.yaml
+    flowgency dispatch install --config C:\path\to\config.yaml
+    flowgency dispatch status --config C:\path\to\config.yaml
+    flowgency dispatch uninstall --config C:\path\to\config.yaml
     ```
 
-- Windows uses `AgencyDispatch`, Linux uses `agency-dispatch.timer` and
-    `agency-dispatch.service`, and macOS uses `com.agency.dispatch`.
+- Windows uses `FlowgencyDispatch`, Linux uses `flowgency-dispatch.timer` and
+    `flowgency-dispatch.service`, and macOS uses `com.flowgency.dispatch`.
 - Condition rules remain skipped by the Python heartbeat. External event
-    automation may submit corresponding work, but it is outside Agency's managed
-    scheduler and must not create another Agency dispatcher.
+    automation may submit corresponding work, but it is outside Flowgency's managed
+    scheduler and must not create another Flowgency dispatcher.
 ```
 
-Remove the Windows "not yet automated" statement, direct sequential integration execution claims, project-specific timer guidance, and `agency.dispatch.installed` from examples.
+Remove the Windows "not yet automated" statement, direct sequential integration execution claims, project-specific timer guidance, and `flowgency.dispatch.installed` from examples.
 
 In `kb/configuration.md`, replace the persisted installed row with:
 
@@ -1871,15 +1871,15 @@ State that installed/active state is inspected from the OS scheduler and is neve
 
 - [ ] **Step 4: Update setup and repository overview documentation**
 
-In `kb/setup-skill.md`, change each profile's Dispatch value to `Agency global dispatcher`, replace generated dispatcher/installer claims with config-native schedules and official CLI verification, and remove generated-script safety claims.
+In `kb/setup-skill.md`, change each profile's Dispatch value to `Flowgency global dispatcher`, replace generated dispatcher/installer claims with config-native schedules and official CLI verification, and remove generated-script safety claims.
 
-Replace the Agency Setup overview paragraph in `README.md` with:
+Replace the Flowgency Setup overview paragraph in `README.md` with:
 
 ```markdown
 It analyzes your project, proposes a tailored agent team, generates identities,
 memory, shared prompts, and an interactive workspace, then atomically registers
-the group and its schedules with the singleton Agency dashboard. With approval,
-it verifies Agency's one global user-level dispatcher; it never creates a
+the group and its schedules with the singleton Flowgency dashboard. With approval,
+it verifies Flowgency's one global user-level dispatcher; it never creates a
 project-specific scheduler.
 ```
 
@@ -1887,12 +1887,12 @@ Update `CLAUDE.md` architecture, config, route-helper, platform support, and set
 
 ```markdown
 - one authoritative `config.yaml` and one global platform scheduler per user;
-- `agency.dispatch.interval` is desired configuration and no
-    `agency.dispatch.installed` key is authoritative;
-- `agency/dispatch/install.py` supports systemd, launchd, and Windows Task
+- `flowgency.dispatch.interval` is desired configuration and no
+    `flowgency.dispatch.installed` key is authoritative;
+- `flowgency/dispatch/install.py` supports systemd, launchd, and Windows Task
     Scheduler and validates the complete definition;
 - the CLI exposes `dispatch install|status|uninstall`;
-- Agency Setup writes rules to config and never creates scheduler scripts or
+- Flowgency Setup writes rules to config and never creates scheduler scripts or
     units.
 ```
 
@@ -1903,7 +1903,7 @@ Keep `/admin/dispatch/install` documented as the dashboard setup/repair endpoint
 Run:
 
 ```powershell
-$stale = rg -n "installed:\s*true|Set after first dispatch init|Windows:.*Not yet automated|agents/shared/(dispatch|install-dispatch)|runs independently via its own timer|using a systemd timer" README.md CLAUDE.md kb skills/agency-setup
+$stale = rg -n "installed:\s*true|Set after first dispatch init|Windows:.*Not yet automated|agents/shared/(dispatch|install-dispatch)|runs independently via its own timer|using a systemd timer" README.md CLAUDE.md kb skills/flowgency-setup
 if ($LASTEXITCODE -eq 0) { $stale; throw 'Stale singleton-dispatch documentation remains.' }
 if ($LASTEXITCODE -ne 1) { throw "rg failed with exit code $LASTEXITCODE" }
 ```
@@ -1915,7 +1915,7 @@ Expected: no matches and no thrown error.
 Run:
 
 ```powershell
-python -m pytest tests/test_dispatch_run.py tests/test_agency_setup_skill.py -v
+python -m pytest tests/test_dispatch_run.py tests/test_flowgency_setup_skill.py -v
 python -m pytest tests/ -q
 ```
 
@@ -1940,7 +1940,7 @@ git commit -m "docs(dispatch): document singleton scheduler"
 
 **Interfaces:**
 - Consumes: Fully tested CLI, dashboard, setup, and scheduler implementation from Tasks 1-5.
-- Produces: One active local `AgencyDispatch` pointing at the authoritative checkout; no `christag-agency-dispatch` or obsolete generated scheduler scripts.
+- Produces: One active local `FlowgencyDispatch` pointing at the authoritative checkout; no `flowgency-dispatch` or obsolete generated scheduler scripts.
 
 - [ ] **Step 1: Confirm a clean authoritative checkout**
 
@@ -1953,14 +1953,14 @@ if ($root -ne $gitRoot) { throw "Run cutover from repository root: $gitRoot" }
 if ($gitRoot -match '[\\/]\.worktrees[\\/]') { throw 'Do not schedule an isolated worktree.' }
 if (git status --porcelain) { throw 'Commit or resolve working-tree changes before cutover.' }
 $configPath = (Resolve-Path .\config.yaml).Path
-if (Get-ScheduledTask -TaskName 'AgencyDispatch' -ErrorAction SilentlyContinue) {
-    python -m agency.cli dispatch status --config $configPath
-    throw 'AgencyDispatch already exists. Resolve its config ownership before cutover.'
+if (Get-ScheduledTask -TaskName 'FlowgencyDispatch' -ErrorAction SilentlyContinue) {
+    python -m flowgency.cli dispatch status --config $configPath
+    throw 'FlowgencyDispatch already exists. Resolve its config ownership before cutover.'
 }
 Write-Output "AUTHORITATIVE_CONFIG=$configPath"
 ```
 
-Expected: the printed path is the permanent `christag-agency\config.yaml` and
+Expected: the printed path is the permanent `flowgency\config.yaml` and
 there is no pre-existing global task whose ownership could be overwritten.
 
 - [ ] **Step 2: Capture and disable the historical task without deleting it**
@@ -1968,12 +1968,12 @@ there is no pre-existing global task whose ownership could be overwritten.
 Run:
 
 ```powershell
-$historicalTask = Get-ScheduledTask -TaskName 'christag-agency-dispatch' -ErrorAction Stop
-$historicalInfo = Get-ScheduledTaskInfo -TaskName 'christag-agency-dispatch'
+$historicalTask = Get-ScheduledTask -TaskName 'flowgency-dispatch' -ErrorAction Stop
+$historicalInfo = Get-ScheduledTaskInfo -TaskName 'flowgency-dispatch'
 $historicalTask | Select-Object TaskName, State | Format-Table
 $historicalInfo | Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List
-Disable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
-if ((Get-ScheduledTask -TaskName 'christag-agency-dispatch').State -ne 'Disabled') {
+Disable-ScheduledTask -TaskName 'flowgency-dispatch' | Out-Null
+if ((Get-ScheduledTask -TaskName 'flowgency-dispatch').State -ne 'Disabled') {
     throw 'Historical scheduler did not enter Disabled state.'
 }
 ```
@@ -1985,20 +1985,20 @@ Expected: the definition remains available for rollback but cannot fire.
 Run:
 
 ```powershell
-python -m agency.cli dispatch install --config $configPath --interval 15
+python -m flowgency.cli dispatch install --config $configPath --interval 15
 if ($LASTEXITCODE -ne 0) {
-    python -m agency.cli dispatch uninstall --config $configPath --force
-    Enable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
+    python -m flowgency.cli dispatch uninstall --config $configPath --force
+    Enable-ScheduledTask -TaskName 'flowgency-dispatch' | Out-Null
     throw 'Global installation failed; historical scheduler re-enabled.'
 }
-python -m agency.cli dispatch status --config $configPath
+python -m flowgency.cli dispatch status --config $configPath
 if ($LASTEXITCODE -ne 0) {
-    python -m agency.cli dispatch uninstall --config $configPath --force
-    Enable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
+    python -m flowgency.cli dispatch uninstall --config $configPath --force
+    Enable-ScheduledTask -TaskName 'flowgency-dispatch' | Out-Null
     throw 'Global verification failed; historical scheduler re-enabled.'
 }
-$globalTask = Get-ScheduledTask -TaskName 'AgencyDispatch' -ErrorAction Stop
-$globalInfo = Get-ScheduledTaskInfo -TaskName 'AgencyDispatch'
+$globalTask = Get-ScheduledTask -TaskName 'FlowgencyDispatch' -ErrorAction Stop
+$globalInfo = Get-ScheduledTaskInfo -TaskName 'FlowgencyDispatch'
 [pscustomobject]@{
     TaskName = $globalTask.TaskName
     State = $globalTask.State
@@ -2009,7 +2009,7 @@ $globalInfo = Get-ScheduledTaskInfo -TaskName 'AgencyDispatch'
 } | Format-List
 ```
 
-Expected: `AgencyDispatch` is enabled/ready, its action contains the canonical config path, and its next run is within 15 minutes.
+Expected: `FlowgencyDispatch` is enabled/ready, its action contains the canonical config path, and its next run is within 15 minutes.
 
 - [ ] **Step 4: Trigger one heartbeat and verify completion without blind sleeping**
 
@@ -2020,18 +2020,18 @@ $beforeJobs = @(
     Get-ChildItem .\agents\shared\jobs -Filter '*.yaml' -File -ErrorAction SilentlyContinue |
         Select-Object -ExpandProperty FullName
 )
-$before = (Get-ScheduledTaskInfo -TaskName 'AgencyDispatch').LastRunTime
+$before = (Get-ScheduledTaskInfo -TaskName 'FlowgencyDispatch').LastRunTime
 $scheduler = New-Object -ComObject 'Schedule.Service'
 $scheduler.Connect()
-$registeredTask = $scheduler.GetFolder('\').GetTask('AgencyDispatch')
+$registeredTask = $scheduler.GetFolder('\').GetTask('FlowgencyDispatch')
 $runningTask = $registeredTask.Run($null)
 if ($runningTask.EnginePID) {
     Wait-Process -Id $runningTask.EnginePID -Timeout 30 -ErrorAction SilentlyContinue
 }
-$info = Get-ScheduledTaskInfo -TaskName 'AgencyDispatch'
+$info = Get-ScheduledTaskInfo -TaskName 'FlowgencyDispatch'
 if ($info.LastRunTime -le $before -or $info.LastTaskResult -ne 0) {
-    python -m agency.cli dispatch uninstall --config $configPath --force
-    Enable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
+    python -m flowgency.cli dispatch uninstall --config $configPath --force
+    Enable-ScheduledTask -TaskName 'flowgency-dispatch' | Out-Null
     throw "Heartbeat failed with result $($info.LastTaskResult); historical scheduler re-enabled."
 }
 $info | Select-Object LastRunTime, LastTaskResult, NextRunTime | Format-List
@@ -2040,14 +2040,14 @@ $afterJobs = @(
     Select-Object -ExpandProperty FullName
 )
 $newJobs = @($afterJobs | Where-Object { $_ -notin $beforeJobs })
-$env:AGENCY_NEW_JOBS = $newJobs -join [System.IO.Path]::PathSeparator
+$env:FLOWGENCY_NEW_JOBS = $newJobs -join [System.IO.Path]::PathSeparator
 @'
 import os
 from pathlib import Path
 
 import yaml
 
-paths = [Path(value) for value in os.environ.get("AGENCY_NEW_JOBS", "").split(os.pathsep) if value]
+paths = [Path(value) for value in os.environ.get("FLOWGENCY_NEW_JOBS", "").split(os.pathsep) if value]
 identities = []
 for path in paths:
     record = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -2064,8 +2064,8 @@ if len(identities) != len(set(identities)):
 print(f"Verified {len(identities)} unique scheduled submission(s).")
 '@ | python -
 if ($LASTEXITCODE -ne 0) {
-  python -m agency.cli dispatch uninstall --config $configPath --force
-  Enable-ScheduledTask -TaskName 'christag-agency-dispatch' | Out-Null
+  python -m flowgency.cli dispatch uninstall --config $configPath --force
+  Enable-ScheduledTask -TaskName 'flowgency-dispatch' | Out-Null
   throw 'Duplicate-submission verification failed; historical scheduler re-enabled.'
 }
 ```
@@ -2078,8 +2078,8 @@ scheduled `(group, agent, prompt)` identity occurs at most once.
 Run:
 
 ```powershell
-Unregister-ScheduledTask -TaskName 'christag-agency-dispatch' -Confirm:$false
-if (Get-ScheduledTask -TaskName 'christag-agency-dispatch' -ErrorAction SilentlyContinue) {
+Unregister-ScheduledTask -TaskName 'flowgency-dispatch' -Confirm:$false
+if (Get-ScheduledTask -TaskName 'flowgency-dispatch' -ErrorAction SilentlyContinue) {
     throw 'Historical task still exists.'
 }
 ```
@@ -2105,7 +2105,7 @@ if (git status --porcelain -- config.yaml) {
 }
 ```
 
-Expected: the only possible config change is `agency.dispatch.interval: 15`; no `installed` key is added.
+Expected: the only possible config change is `flowgency.dispatch.interval: 15`; no `installed` key is added.
 
 - [ ] **Step 7: Start the dashboard and verify desktop/mobile UI with Playwright**
 
@@ -2134,14 +2134,14 @@ Run:
 
 ```powershell
 python -m pytest tests/ -q
-$agencyTasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
-    $_.TaskName -in @('AgencyDispatch', 'christag-agency-dispatch')
+$flowgencyTasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+    $_.TaskName -in @('FlowgencyDispatch', 'flowgency-dispatch')
 }
-if (@($agencyTasks).Count -ne 1 -or $agencyTasks[0].TaskName -ne 'AgencyDispatch') {
-    $agencyTasks | Select-Object TaskName, State | Format-Table
-    throw 'Expected exactly one AgencyDispatch task.'
+if (@($flowgencyTasks).Count -ne 1 -or $flowgencyTasks[0].TaskName -ne 'FlowgencyDispatch') {
+    $flowgencyTasks | Select-Object TaskName, State | Format-Table
+    throw 'Expected exactly one FlowgencyDispatch task.'
 }
-python -m agency.cli dispatch status --config (Resolve-Path .\config.yaml).Path
+python -m flowgency.cli dispatch status --config (Resolve-Path .\config.yaml).Path
 if ($LASTEXITCODE -ne 0) { throw 'Final dispatcher status is not active.' }
 git status --short
 ```

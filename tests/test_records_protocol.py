@@ -20,16 +20,16 @@ def test_protocol_names_every_outbox_directory():
     assert OUTBOX_RELATIVE_MEMORY in text
 
 
-def test_protocol_states_that_agency_assigns_identity_fields():
+def test_protocol_states_that_flowgency_assigns_identity_fields():
     text = build_reporting_protocol(tool_mode="all", tool_names=())
 
-    assert "Agency assigns the `agent`, `date`, and `status` fields" in text
+    assert "Flowgency assigns the `agent`, `date`, and `status` fields" in text
 
 
 def test_protocol_states_that_unknown_front_matter_is_dropped():
     text = build_reporting_protocol(tool_mode="all", tool_names=())
 
-    assert "Agency does not understand are dropped" in text
+    assert "Flowgency does not understand are dropped" in text
 
 
 def test_protocol_describes_partial_ingest_and_the_failed_run():

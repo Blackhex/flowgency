@@ -1,4 +1,4 @@
-"""Workspace plugin system for Agency.
+"""Workspace plugin system for Flowgency.
 
 Workspaces represent how users visualize and interact with their agent teams
 at runtime — tmux grids, IDE windows, chat channels, dedicated UIs, etc.

@@ -25,7 +25,7 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
         "schema_version": 1,
 
         "flowgency": {
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "test",
             "ai_backend": "claude-code",
             "agent_library": str((tmp_path / "agent-library").resolve()),
@@ -58,7 +58,7 @@ def test_conflict_repair_form_does_not_embed_path_in_onsubmit(tmp_path, monkeypa
         "timer_active": False,
         "definition_matches": False,
         "config_conflict": True,
-        "config_path": "C:/Users/O'Brien/projects/agency/config.yaml",
+        "config_path": "C:/Users/O'Brien/projects/flowgency/config.yaml",
         "interval": 15,
         "expected_config_path": str(config_path.resolve()),
         "expected_interval": 15,

@@ -254,7 +254,7 @@ class JobSpec:
             separators=(",", ":"),
             ensure_ascii=False,
         ).encode("utf-8")
-        return hashlib.sha256(b"agency-job-authority:v1\0" + payload).hexdigest()
+        return hashlib.sha256(b"flowgency-job-authority:v1\0" + payload).hexdigest()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "JobSpec":

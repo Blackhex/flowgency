@@ -8,20 +8,20 @@
 - Full suite: `\.venv\Scripts\python -m pytest tests\ -q` -> `1217 passed, 3 skipped in 149.58s (0:02:29)`
 
 ## Exact commands/results
-1. RED: `Set-Location 'C:\Projekty\christag-agency\.worktrees\group-storage-redesign'; .\.venv\Scripts\python -m pytest tests\test_effective_policy.py tests\test_job_submission.py -q`
+1. RED: `Set-Location 'C:\Projekty\flowgency\.worktrees\group-storage-redesign'; .\.venv\Scripts\python -m pytest tests\test_effective_policy.py tests\test_job_submission.py -q`
    - Result: `5 failed, 31 passed`
-2. GREEN: `Set-Location 'C:\Projekty\christag-agency\.worktrees\group-storage-redesign'; .\.venv\Scripts\python -m pytest tests\test_effective_policy.py tests\test_job_submission.py -q`
+2. GREEN: `Set-Location 'C:\Projekty\flowgency\.worktrees\group-storage-redesign'; .\.venv\Scripts\python -m pytest tests\test_effective_policy.py tests\test_job_submission.py -q`
    - Result: `36 passed`
-3. Verification: `Set-Location 'C:\Projekty\christag-agency\.worktrees\group-storage-redesign'; .\.venv\Scripts\python -m pytest tests\test_effective_policy.py tests\test_job_submission.py tests\test_agent_detail.py tests\test_cli.py -q`
+3. Verification: `Set-Location 'C:\Projekty\flowgency\.worktrees\group-storage-redesign'; .\.venv\Scripts\python -m pytest tests\test_effective_policy.py tests\test_job_submission.py tests\test_agent_detail.py tests\test_cli.py -q`
    - Result: `91 passed`
-4. Full suite: `Set-Location 'C:\Projekty\christag-agency\.worktrees\group-storage-redesign'; .\.venv\Scripts\python -m pytest tests\ -q`
+4. Full suite: `Set-Location 'C:\Projekty\flowgency\.worktrees\group-storage-redesign'; .\.venv\Scripts\python -m pytest tests\ -q`
    - Result: `1217 passed, 3 skipped`
-5. Diff check: `Set-Location 'C:\Projekty\christag-agency\.worktrees\group-storage-redesign'; git --no-pager diff --check`
+5. Diff check: `Set-Location 'C:\Projekty\flowgency\.worktrees\group-storage-redesign'; git --no-pager diff --check`
    - Result: clean
 
 ## Changed files
-- `agency/configuration/effective.py`
-- `agency/jobs/resolution.py`
+- `flowgency/configuration/effective.py`
+- `flowgency/jobs/resolution.py`
 - `tests/test_effective_policy.py`
 - `tests/test_job_submission.py`
 

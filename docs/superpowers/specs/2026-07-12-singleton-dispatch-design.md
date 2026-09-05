@@ -2,22 +2,22 @@
 
 **Date:** 2026-07-12
 **Status:** Approved design, pending written-spec review
-**Topic:** Unify group schedules and host scheduler status around one Agency dashboard configuration
+**Topic:** Unify group schedules and host scheduler status around one Flowgency dashboard configuration
 
 ## Problem
 
-Agency currently exposes two different meanings of dispatch without distinguishing
+Flowgency currently exposes two different meanings of dispatch without distinguishing
 them in the UI:
 
 - The Agent Groups page displays "Dispatch on" when a group has
   `dispatch.enabled: true` in `config.yaml`.
-- The Dispatch page displays "Set Up Dispatch" when Agency cannot find its
+- The Dispatch page displays "Set Up Dispatch" when Flowgency cannot find its
   platform scheduler.
 
-The local Agency Setup run also created a project-specific Windows task named
-`christag-agency-dispatch`. That task directly runs `agents/shared/dispatch.ps1`
+The local Flowgency Setup run also created a project-specific Windows task named
+`flowgency-dispatch`. That task directly runs `agents/shared/dispatch.ps1`
 at 07:00 and 21:00. The dashboard only recognizes its own global task,
-`AgencyDispatch`, which runs `agency.dispatch.run` every 15 minutes. Renaming the
+`FlowgencyDispatch`, which runs `flowgency.dispatch.run` every 15 minutes. Renaming the
 project task would make the UI appear healthy without changing its incompatible
 action, trigger, deduplication, or execution path.
 
@@ -27,7 +27,7 @@ the same agents twice.
 
 ## Product Invariant
 
-Agency supports exactly one dashboard installation and one authoritative
+Flowgency supports exactly one dashboard installation and one authoritative
 `config.yaml` per operating-system user. Every scheduled agent group is stored in
 that config. Multiple dashboard processes backed by different configs for the
 same user are unsupported.
@@ -36,15 +36,15 @@ The product does not need a registry of config paths or a second project schedul
 format. A platform scheduler stores the canonical absolute path to the singleton
 dashboard config in its action.
 
-If setup discovers multiple valid Agency configs and cannot identify the
-authoritative one from an explicit `$AGENCY_CONFIG` override, it stops and asks
+If setup discovers multiple valid Flowgency configs and cannot identify the
+authoritative one from an explicit `$FLOWGENCY_CONFIG` override, it stops and asks
 the user to select the singleton installation. It never schedules all candidates.
 
 ## Goals
 
 - Use one user-level platform scheduler for every group in the dashboard config.
 - Make configured group schedules and host scheduler health visibly distinct.
-- Give the dashboard, CLI, and Agency Setup one scheduler-management API.
+- Give the dashboard, CLI, and Flowgency Setup one scheduler-management API.
 - Prevent setup from creating project-specific scheduler implementations.
 - Detect scheduler definitions that point to the wrong config or use the wrong
   action or interval.
@@ -68,18 +68,18 @@ the user to select the singleton installation. It never schedules all candidates
 
 The platform scheduler invokes the existing Python dispatch runner with the
 canonical config path. Each heartbeat evaluates all groups whose
-`dispatch.enabled` value is true and submits due work through Agency's job system.
+`dispatch.enabled` value is true and submits due work through Flowgency's job system.
 
 Platform identities remain the existing global identities:
 
-- Windows Task Scheduler: `AgencyDispatch`
-- Linux user systemd: `agency-dispatch.timer` and `agency-dispatch.service`
-- macOS launchd: `com.agency.dispatch`
+- Windows Task Scheduler: `FlowgencyDispatch`
+- Linux user systemd: `flowgency-dispatch.timer` and `flowgency-dispatch.service`
+- macOS launchd: `com.flowgency.dispatch`
 
 ### Rejected: Rename the project task
 
-`christag-agency-dispatch` has different triggers and runs a generated PowerShell
-dispatcher directly. Renaming it would not turn it into the global Agency
+`flowgency-dispatch` has different triggers and runs a generated PowerShell
+dispatcher directly. Renaming it would not turn it into the global Flowgency
 heartbeat and could cause the dashboard to report a false healthy state.
 
 ### Rejected: Registry of project configs
@@ -102,22 +102,22 @@ The singleton `config.yaml` owns:
 
 - registered groups and agents;
 - each group's `dispatch.enabled`, timeout, daily limit, and schedule rules;
-- the desired global heartbeat interval under `agency.dispatch.interval`.
+- the desired global heartbeat interval under `flowgency.dispatch.interval`.
 
 The config does not own observed runtime state. In particular,
-`agency.dispatch.installed` is no longer used to decide whether the scheduler
+`flowgency.dispatch.installed` is no longer used to decide whether the scheduler
 exists. Existing occurrences of that key are ignored; no compatibility behavior
 is required.
 
 ### Scheduler management
 
-`agency/dispatch/install.py` remains the only module that creates, inspects, or
+`flowgency/dispatch/install.py` remains the only module that creates, inspects, or
 removes platform scheduler resources. Its public operations must:
 
 - install or idempotently update the global scheduler for a canonical config;
 - inspect the complete scheduler definition, not only its name;
 - identify absent, inactive, healthy, and misconfigured states;
-- remove only the global Agency scheduler;
+- remove only the global Flowgency scheduler;
 - use current-user, non-elevated execution without storing credentials.
 
 Status inspection compares the actual scheduler definition with the expected
@@ -127,7 +127,7 @@ reported as misconfigured rather than active.
 
 ### Dispatcher
 
-`agency/dispatch/run.py` continues to accept one required `--config` path. It
+`flowgency/dispatch/run.py` continues to accept one required `--config` path. It
 loads that config once per heartbeat, iterates every enabled group, evaluates due
 rules, and submits jobs through the existing job submission layer. Existing
 per-rule marker files remain the deduplication authority.
@@ -137,17 +137,17 @@ added to the runner.
 
 ### CLI
 
-`agency/cli.py` adds a `dispatch` command family:
+`flowgency/cli.py` adds a `dispatch` command family:
 
-- `christag-agency dispatch install [--config PATH] [--interval MINUTES] [--replace]`
-- `christag-agency dispatch status [--config PATH]`
-- `christag-agency dispatch uninstall [--config PATH] [--force]`
+- `flowgency dispatch install [--config PATH] [--interval MINUTES] [--replace]`
+- `flowgency dispatch status [--config PATH]`
+- `flowgency dispatch uninstall [--config PATH] [--force]`
 
 The commands default to the dashboard's active `CONFIG_PATH` and accept an
-explicit config path for Agency Setup. They delegate to
-`agency/dispatch/install.py`; they do not reproduce platform commands.
+explicit config path for Flowgency Setup. They delegate to
+`flowgency/dispatch/install.py`; they do not reproduce platform commands.
 
-Installation reads the desired interval from `agency.dispatch.interval`, using
+Installation reads the desired interval from `flowgency.dispatch.interval`, using
 15 minutes when it is absent. Supplying `--interval` atomically updates that
 desired value before installing the matching scheduler definition.
 
@@ -164,17 +164,17 @@ without parsing display text.
 
 The dashboard calls the same installer module directly. Runtime scheduler
 inspection is authoritative; `get_dispatch_status()` must not combine that result
-with the persisted `agency.dispatch.installed` flag.
+with the persisted `flowgency.dispatch.installed` flag.
 
 The desired heartbeat interval remains configuration, while installed, active,
 and definition-match values come from the platform scheduler on every status
 request.
 
-### Agency Setup skill
+### Flowgency Setup skill
 
-Agency Setup continues generating agent identities, memory, prompts, and the
+Flowgency Setup continues generating agent identities, memory, prompts, and the
 interactive runtime workspace. It also atomically registers the complete group
-and its schedule rules in the singleton Agency config.
+and its schedule rules in the singleton Flowgency config.
 
 It no longer generates or installs any of the following:
 
@@ -184,7 +184,7 @@ It no longer generates or installs any of the following:
 - project-specific systemd service or timer files.
 
 After config registration, setup asks whether scheduling should be enabled. On
-approval it invokes the official `christag-agency dispatch install` interface
+approval it invokes the official `flowgency dispatch install` interface
 with the selected config, then invokes `dispatch status` to verify the global
 scheduler. If no valid singleton dashboard config is available, setup may still
 generate the agent team, but it reports that dashboard registration and
@@ -194,7 +194,7 @@ scheduling were not completed. It does not create a fallback project scheduler.
 
 ### Setup
 
-1. Agency Setup locates and validates the singleton dashboard config.
+1. Flowgency Setup locates and validates the singleton dashboard config.
 2. It resolves the project and group paths to canonical absolute paths.
 3. It atomically merges the group's agents, workspace, and dispatch rules while
    preserving unrelated settings and concurrent changes.
@@ -206,7 +206,7 @@ scheduling were not completed. It does not create a fallback project scheduler.
 ### Scheduled heartbeat
 
 1. The platform scheduler invokes
-   `pythonw -m agency.dispatch.run --config <config>` on Windows, or the
+   `pythonw -m flowgency.dispatch.run --config <config>` on Windows, or the
    equivalent configured Python executable on Linux and macOS.
 2. The runner loads the singleton config.
 3. Disabled groups are skipped.
@@ -272,16 +272,16 @@ scheduler is absent.
 The current workstation is migrated explicitly after the implementation is
 available. This is an operational step, not product migration code:
 
-1. Disable `christag-agency-dispatch` without deleting its definition.
-2. Install `AgencyDispatch` against this repository's canonical `config.yaml`.
+1. Disable `flowgency-dispatch` without deleting its definition.
+2. Install `FlowgencyDispatch` against this repository's canonical `config.yaml`.
 3. Verify that its action, 15-minute trigger, enabled state, and config path all
   match.
 4. Invoke the global task once and verify a successful no-op or due-job
-  submission through Agency's job/log state.
-5. Remove the disabled `christag-agency-dispatch` task.
+  submission through Flowgency's job/log state.
+5. Remove the disabled `flowgency-dispatch` task.
 6. Remove the obsolete generated `agents/shared/dispatch.ps1` and
    `agents/shared/install-dispatch.ps1` files.
-7. Recheck Task Scheduler and confirm that exactly one Agency scheduler remains.
+7. Recheck Task Scheduler and confirm that exactly one Flowgency scheduler remains.
 
 If installation or verification fails, remove any newly created global task and
 re-enable the unchanged project task. This provides rollback without allowing
@@ -326,12 +326,12 @@ commands/files; automated tests do not modify real host schedulers.
   global scheduler state.
 - The Dispatch page renders active, inactive, and misconfigured states from
   runtime inspection.
-- Persisted `agency.dispatch.installed` cannot make an absent scheduler appear
+- Persisted `flowgency.dispatch.installed` cannot make an absent scheduler appear
   installed.
 - Group schedule controls remain available while the dispatcher is inactive.
 - Dispatch copy is platform-neutral.
 
-### Agency Setup contract tests
+### Flowgency Setup contract tests
 
 - The skill does not generate project-specific dispatcher or scheduler files.
 - It writes complete group schedule rules to the selected singleton config.
@@ -342,27 +342,27 @@ commands/files; automated tests do not modify real host schedulers.
 ### Local acceptance verification
 
 - The full pytest suite passes.
-- Exactly one Task Scheduler entry named `AgencyDispatch` exists.
+- Exactly one Task Scheduler entry named `FlowgencyDispatch` exists.
 - Its action points to this dashboard config and its next heartbeat is visible.
-- `christag-agency-dispatch` no longer exists.
+- `flowgency-dispatch` no longer exists.
 - The Agent Groups and Dispatch pages report their independent states correctly.
 - A manually triggered heartbeat exits successfully without duplicate job
   submissions.
 
 ## Documentation Changes
 
-Update user-facing dispatch and Agency Setup documentation to state:
+Update user-facing dispatch and Flowgency Setup documentation to state:
 
 - one dashboard config and one platform scheduler are supported per user;
 - group schedule enablement is not proof that the scheduler is active;
 - the global scheduler evaluates all enabled groups;
-- setup uses Agency's official scheduler interface and does not create
+- setup uses Flowgency's official scheduler interface and does not create
   project-specific tasks.
 
 ## Acceptance Criteria
 
 The change is complete when one global scheduler drives every enabled group in
 the singleton dashboard config, the dashboard accurately distinguishes schedule
-configuration from scheduler health, Agency Setup cannot create a second
+configuration from scheduler health, Flowgency Setup cannot create a second
 project-specific scheduler, the local historical task has been removed after verified
 replacement, and all automated and local acceptance checks pass.

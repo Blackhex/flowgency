@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the Agency domain term `group` with `team` across the strict schema-v6 control plane, runtime state, public interfaces, and active product documentation without preserving any old-format compatibility.
+**Goal:** Replace the Flowgency domain term `group` with `team` across the strict schema-v6 control plane, runtime state, public interfaces, and active product documentation without preserving any old-format compatibility.
 
 **Architecture:** The rename begins at the authoritative configuration model and propagates through typed callers. Durable jobs and hash-addressed memory selectors receive explicit current-format version changes, then CLI/public route/template contracts move to team terminology. The parser, worker, and serializers reject older inputs; no aliases, redirects, conversion, or migration path is retained.
 
@@ -11,15 +11,15 @@
 ## Global Constraints
 
 - Approved design: `docs/superpowers/specs/2026-09-04-v6-team-terminology-design.md` at commit `dcb9c85`.
-- Work from `C:/Projekty/christag-agency/.worktrees/v6-team-terminology` on `refactor/v6-team-terminology` until integration.
+- Work from `C:/Projekty/flowgency/.worktrees/v6-team-terminology` on `refactor/v6-team-terminology` until integration.
 - Baseline: **1998 passed, 5 skipped, 0 failed**.
 - This is a strict breaking rename. Do not add aliases, dual reads, redirects, deprecation paths, conversion, or startup fallback.
-- `schema_version: 6`, root `teams`, and `agency.default_team` are the only accepted control-plane shape.
+- `schema_version: 6`, root `teams`, and `flowgency.default_team` are the only accepted control-plane shape.
 - The durable job schema is `5` only, serializing `team_key` and `team_root`; prior job records must fail strict parse.
 - Memory selector scope is `team`; canonical selector criteria use `team`. No old selector hash is read.
 - Rename CLI selection to `--team`, worker selection to `--team-id`, administration routes to `/admin/teams`, and team-scoped routes to `/{team}/...`. Remove prior public forms.
 - Generated defaults and active examples use `<root>/teams/<team-id>`. Do not mechanically modify custom runtime path values beyond tracked fixtures/examples that the test suite creates itself.
-- Remove `config migrate`, `agency/configuration/migrate.py`, and `tests/test_config_migrate.py` completely. No supported config version remains for that converter to emit.
+- Remove `config migrate`, `flowgency/configuration/migrate.py`, and `tests/test_config_migrate.py` completely. No supported config version remains for that converter to emit.
 - Preserve behavior other than naming, version, serialized key, generated-default directory, and intentional old-format rejection.
 - Do not rename Python regex calls/variables that operate on capture groups; Tailwind `group`/`group-*` utilities; HTML `<optgroup>`; or historical docs/plans that describe historical formats.
 - Do not modify `config.yaml`, `config.yaml.lock`, live group/team state, logs, build output, or other runtime-local data.
@@ -45,7 +45,7 @@
 Task 1 creates the control-plane interfaces consumed by every later task:
 
 ```text
-# agency/configuration/models.py
+# flowgency/configuration/models.py
 CONFIG_SCHEMA_VERSION = 6
 MemoryScope = Literal["run", "routine", "agent", "team", "channel"]
 
@@ -53,10 +53,10 @@ class TeamDispatch(BaseModel): ...
 class TeamRuntime(BaseModel): ...
 class TeamConfig(BaseModel): ...
 
-class AgencySettings(BaseModel):
+class FlowgencySettings(BaseModel):
     default_team: str = ""
 
-class AgencyConfig(BaseModel):
+class FlowgencyConfig(BaseModel):
     schema_version: Literal[6]
     teams: dict[str, TeamConfig]
 
@@ -66,7 +66,7 @@ class ParsedConfig(BaseModel):
 ```
 
 ```text
-# agency/configuration/team_paths.py
+# flowgency/configuration/team_paths.py
 @dataclass(frozen=True)
 class ResolvedTeamPaths:
     workspace_root: Path
@@ -83,7 +83,7 @@ def resolve_team_paths(team: TeamConfig) -> ResolvedTeamPaths
 Task 2 creates runtime interfaces:
 
 ```text
-# agency/jobs/models.py
+# flowgency/jobs/models.py
 SCHEMA_VERSION = 5
 SUPPORTED_SCHEMA_VERSIONS = frozenset({5})
 
@@ -101,7 +101,7 @@ class JobSpec:
     @property
     def resolved_team_root(self) -> Path
 
-# agency/memory/selectors.py
+# flowgency/memory/selectors.py
 def resolve_memory_selector(
     selector: MemorySelector,
     *,
@@ -119,12 +119,12 @@ def resolve_memory_selector(
 ### Task 1: Replace The Configuration Control Plane With V6 Teams
 
 **Files:**
-- Rename: `agency/configuration/group_paths.py` to `agency/configuration/team_paths.py`
-- Modify: `agency/configuration/models.py`
-- Modify: `agency/configuration/__init__.py`
-- Modify: `agency/configuration/effective.py`
-- Modify: `agency/configuration/patches.py`
-- Modify: `agency/configuration/paths.py`
+- Rename: `flowgency/configuration/group_paths.py` to `flowgency/configuration/team_paths.py`
+- Modify: `flowgency/configuration/models.py`
+- Modify: `flowgency/configuration/__init__.py`
+- Modify: `flowgency/configuration/effective.py`
+- Modify: `flowgency/configuration/patches.py`
+- Modify: `flowgency/configuration/paths.py`
 - Modify: `tests/conftest.py`
 - Rename: `tests/_group_helpers.py` to `tests/_team_helpers.py`
 - Modify: `tests/test_config.py`
@@ -147,7 +147,7 @@ def test_current_defaults_are_explicit(raw_config, config_paths):
     parsed = parse_config(raw_config, config_paths.config)
 
     assert parsed.resolved.schema_version == 6
-    assert parsed.resolved.agency.default_team == "newsletter"
+    assert parsed.resolved.flowgency.default_team == "newsletter"
     team = parsed.teams["newsletter"]
     assert team.runtime.timeout == 1800
     assert team.runtime.permissions.mode == "unrestricted"
@@ -163,10 +163,10 @@ Add strict shape coverage:
         (lambda raw: raw.__setitem__("schema_version", 5), "schema-version"),
         (lambda raw: raw.__setitem__("groups", raw.pop("teams")), "unknown-root-key"),
         (
-            lambda raw: raw["agency"].__setitem__(
-                "default_group", raw["agency"].pop("default_team")
+            lambda raw: raw["flowgency"].__setitem__(
+                "default_group", raw["flowgency"].pop("default_team")
             ),
-            "unknown-agency-field",
+            "unknown-flowgency-field",
         ),
     ],
 )
@@ -182,7 +182,7 @@ Create a direct public-import check in `tests/test_config.py`:
 
 ```python
 def test_configuration_exports_team_not_group_apis():
-    import agency.configuration as configuration
+    import flowgency.configuration as configuration
 
     assert hasattr(configuration, "TeamSettingsPatch")
     assert hasattr(configuration, "ResolvedTeamPaths")
@@ -194,7 +194,7 @@ def test_configuration_exports_team_not_group_apis():
 
 Update `tests/conftest.py` fixture keys before this run: `schema_version: 6`,
 `default_team`, and `teams`. Rename its fixture locals to team where they are
-Agency-domain values.
+Flowgency-domain values.
 
 - [ ] **Step 2: Run config tests to observe RED**
 
@@ -210,14 +210,14 @@ all moved to v6 yet.
 
 - [ ] **Step 3: Rename the configuration model and parser atomically**
 
-In `agency/configuration/models.py` make these exact control-plane changes:
+In `flowgency/configuration/models.py` make these exact control-plane changes:
 
 ```python
 MemoryScope = Literal["run", "routine", "agent", "team", "channel"]
 CONFIG_SCHEMA_VERSION = 6
-_ROOT_KEYS = {"schema_version", "agency", "memory", "teams"}
+_ROOT_KEYS = {"schema_version", "flowgency", "memory", "teams"}
 
-class AgencySettings(BaseModel):
+class FlowgencySettings(BaseModel):
     default_team: str = ""
 
 class TeamDispatch(BaseModel):
@@ -229,10 +229,10 @@ class TeamRuntime(BaseModel):
 class TeamConfig(BaseModel):
     ...
 
-class AgencyConfig(BaseModel):
+class FlowgencyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: Literal[6]
-    agency: AgencySettings
+    flowgency: FlowgencySettings
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     teams: dict[str, TeamConfig]
 ```
@@ -297,7 +297,7 @@ compatibility alias to make it pass.
 - [ ] **Step 6: Commit the v6 control plane**
 
 ```powershell
-git add agency/configuration tests/conftest.py tests/_team_helpers.py tests/test_config.py tests/test_config_normalization.py tests/test_config_patches.py tests/test_config_store.py tests/test_effective_policy.py tests/test_path_validation.py
+git add flowgency/configuration tests/conftest.py tests/_team_helpers.py tests/test_config.py tests/test_config_normalization.py tests/test_config_patches.py tests/test_config_store.py tests/test_effective_policy.py tests/test_path_validation.py
 git commit -m "refactor(config): rename groups to teams in v6"
 ```
 
@@ -306,29 +306,29 @@ git commit -m "refactor(config): rename groups to teams in v6"
 ### Task 2: Rename Durable Jobs, Memory, And Runtime Team State
 
 **Files:**
-- Modify: `agency/jobs/__init__.py`
-- Modify: `agency/jobs/artifacts.py`
-- Modify: `agency/jobs/authority.py`
-- Modify: `agency/jobs/execution.py`
-- Modify: `agency/jobs/launcher.py`
-- Modify: `agency/jobs/models.py`
-- Modify: `agency/jobs/queue.py`
-- Modify: `agency/jobs/reconciliation.py`
-- Modify: `agency/jobs/resolution.py`
-- Modify: `agency/jobs/store.py`
-- Modify: `agency/jobs/submission.py`
-- Modify: `agency/jobs/worker.py`
-- Modify: `agency/memory/selectors.py`
-- Modify: `agency/memory/publication.py`
-- Modify: `agency/memory/recovery.py`
-- Modify: `agency/permissions/eligibility.py`
-- Modify: `agency/prompts/catalog.py`
-- Modify: `agency/prompts/service.py`
-- Modify: `agency/prompts/store.py`
-- Modify: `agency/records/ingest.py`
-- Modify: `agency/records/validation.py`
-- Modify: `agency/instances.py`
-- Modify: `agency/workspaces/*.py`
+- Modify: `flowgency/jobs/__init__.py`
+- Modify: `flowgency/jobs/artifacts.py`
+- Modify: `flowgency/jobs/authority.py`
+- Modify: `flowgency/jobs/execution.py`
+- Modify: `flowgency/jobs/launcher.py`
+- Modify: `flowgency/jobs/models.py`
+- Modify: `flowgency/jobs/queue.py`
+- Modify: `flowgency/jobs/reconciliation.py`
+- Modify: `flowgency/jobs/resolution.py`
+- Modify: `flowgency/jobs/store.py`
+- Modify: `flowgency/jobs/submission.py`
+- Modify: `flowgency/jobs/worker.py`
+- Modify: `flowgency/memory/selectors.py`
+- Modify: `flowgency/memory/publication.py`
+- Modify: `flowgency/memory/recovery.py`
+- Modify: `flowgency/permissions/eligibility.py`
+- Modify: `flowgency/prompts/catalog.py`
+- Modify: `flowgency/prompts/service.py`
+- Modify: `flowgency/prompts/store.py`
+- Modify: `flowgency/records/ingest.py`
+- Modify: `flowgency/records/validation.py`
+- Modify: `flowgency/instances.py`
+- Modify: `flowgency/workspaces/*.py`
 - Test: `tests/test_job_*.py`, `tests/test_memory_*.py`, `tests/test_instances.py`, `tests/test_permission_*.py`, `tests/test_workspaces.py`, `tests/test_write_boundary_contract.py`
 
 **Interfaces:**
@@ -392,7 +392,7 @@ def test_group_memory_scope_is_rejected():
         MemorySelector(scope="group")
 ```
 
-Add a worker parser test that invokes `agency.jobs.worker` with `--team-id` and
+Add a worker parser test that invokes `flowgency.jobs.worker` with `--team-id` and
 asserts `--group-id` fails argument parsing. Rename existing job/memory fixtures
 to `team_key` and `team_root` before running.
 
@@ -407,7 +407,7 @@ selector acceptance, and worker flag failures.
 
 - [ ] **Step 3: Make job schema 5 strict and rename serialized fields**
 
-In `agency/jobs/models.py`:
+In `flowgency/jobs/models.py`:
 
 ```python
 SCHEMA_VERSION = 5
@@ -429,7 +429,7 @@ worker command builder and parser must switch together to `--team-id`.
 
 - [ ] **Step 4: Rename selector canonical JSON without old hash fallback**
 
-In `agency/memory/selectors.py`, change `resolve_memory_selector(... team_key)`
+In `flowgency/memory/selectors.py`, change `resolve_memory_selector(... team_key)`
 and use this exact expected-key mapping:
 
 ```python
@@ -455,7 +455,7 @@ Do not rename `match.group()` or `match.groups()` in regex code.
 Mechanically replace domain test kwargs/attributes (`group_key`, `group_root`,
 `group_id`) with team forms in the files listed above. Change fixture-owned
 state paths from `groups` to `teams`; preserve arbitrary paths named `group`
-only when they do not represent Agency team state. Update memory scope fixtures
+only when they do not represent Flowgency team state. Update memory scope fixtures
 from `"group"` to `"team"` and expected canonical JSON field names together.
 
 Add direct strict-rejection tests for a v4 job payload holding `group_key` /
@@ -474,7 +474,7 @@ only through explicit tests.
 - [ ] **Step 7: Commit runtime team state**
 
 ```powershell
-git add agency/jobs agency/memory agency/permissions agency/prompts agency/records agency/instances.py agency/workspaces tests/test_job_*.py tests/test_memory_*.py tests/test_instances.py tests/test_permission_*.py tests/test_workspaces.py tests/test_write_boundary_contract.py
+git add flowgency/jobs flowgency/memory flowgency/permissions flowgency/prompts flowgency/records flowgency/instances.py flowgency/workspaces tests/test_job_*.py tests/test_memory_*.py tests/test_instances.py tests/test_permission_*.py tests/test_workspaces.py tests/test_write_boundary_contract.py
 git commit -m "refactor(runtime): rename group state to team state"
 ```
 
@@ -483,19 +483,19 @@ git commit -m "refactor(runtime): rename group state to team state"
 ### Task 3: Rename Dispatch, CLI, And Setup Public Contracts
 
 **Files:**
-- Modify: `agency/cli.py`
-- Modify: `agency/cli_output.py`
-- Modify: `agency/dispatch/*.py`
-- Modify: `agency/web/setup_flow.py`
-- Modify: `agency/app.py`
-- Delete: `agency/configuration/migrate.py`
+- Modify: `flowgency/cli.py`
+- Modify: `flowgency/cli_output.py`
+- Modify: `flowgency/dispatch/*.py`
+- Modify: `flowgency/web/setup_flow.py`
+- Modify: `flowgency/app.py`
+- Delete: `flowgency/configuration/migrate.py`
 - Delete: `tests/test_config_migrate.py`
 - Modify: `tests/test_cli.py`
 - Modify: `tests/test_cli_contract.py`
 - Modify: `tests/test_dispatch_*.py`
 - Modify: `tests/test_setup_flow.py`
 - Modify: `tests/test_server.py`
-- Modify: `tests/test_agency_setup_skill.py`
+- Modify: `tests/test_flowgency_setup_skill.py`
 
 **Interfaces:**
 - Consumes: Task 1 config APIs and Task 2 job/worker team APIs.
@@ -528,7 +528,7 @@ def test_build_setup_prompt_emits_v6_team_shape(tmp_path: Path):
     for phrase in (
         "first team project workspace",
         "team display name and stable team ID",
-        "agency.default_team",
+        "flowgency.default_team",
         "teams.<team-id>.path as <root>/teams/<team-id>",
         "Configure schema_version: 6.",
     ):
@@ -540,7 +540,7 @@ def test_build_setup_prompt_emits_v6_team_shape(tmp_path: Path):
 - [ ] **Step 2: Run CLI/dispatch/setup tests to observe RED**
 
 ```powershell
-python -m pytest tests/test_cli.py tests/test_cli_contract.py tests/test_dispatch_*.py tests/test_setup_flow.py tests/test_server.py tests/test_agency_setup_skill.py -q
+python -m pytest tests/test_cli.py tests/test_cli_contract.py tests/test_dispatch_*.py tests/test_setup_flow.py tests/test_server.py tests/test_flowgency_setup_skill.py -q
 ```
 
 Expected: CLI parser does not recognize `--team`, setup text still emits v5
@@ -549,11 +549,11 @@ schema/groups, and dispatch callers still consume `config.groups`.
 - [ ] **Step 3: Rename CLI parser, output, and dispatch values**
 
 Rename `_group_id`, `_group`, `_resolve_group`, `--group`, default lookup,
-diagnostics, and output keys in `agency/cli.py` to team forms. Remove the
+diagnostics, and output keys in `flowgency/cli.py` to team forms. Remove the
 `config migrate` subcommand, handler, imports, and any migrated-output code.
-In the same task, delete `agency/configuration/migrate.py` and
+In the same task, delete `flowgency/configuration/migrate.py` and
 `tests/test_config_migrate.py`; after deletion, run `git grep -n
-"migrate_v4_to_v5" -- agency tests` and require exit 1.
+"migrate_v4_to_v5" -- flowgency tests` and require exit 1.
 
 Change every dispatch loop/map/signature from `groups` to `teams`, consuming
 `resolved.teams` and team-named job APIs. Preserve scheduling decisions, timeout,
@@ -561,11 +561,11 @@ locking order, and status formatting.
 
 - [ ] **Step 4: Update setup prompt and setup status**
 
-In `agency/web/setup_flow.py`, replace all domain prose with team terminology
+In `flowgency/web/setup_flow.py`, replace all domain prose with team terminology
 and use only these config literals:
 
 ```text
-agency.default_team
+flowgency.default_team
 teams.<team-id>.path as <root>/teams/<team-id>
 schema_version: 6
 workspace_path to the approved team project execution workspace
@@ -583,7 +583,7 @@ command remains and no v4/v5 corrective hint remains in active CLI output.
 Run:
 
 ```powershell
-python -m pytest tests/test_cli.py tests/test_cli_contract.py tests/test_dispatch_*.py tests/test_setup_flow.py tests/test_server.py tests/test_agency_setup_skill.py tests/test_setup_skill_e2e.py -q
+python -m pytest tests/test_cli.py tests/test_cli_contract.py tests/test_dispatch_*.py tests/test_setup_flow.py tests/test_server.py tests/test_flowgency_setup_skill.py tests/test_setup_skill_e2e.py -q
 ```
 
 Expected: team CLI/setup/dispatch contracts pass; old CLI option/migration forms
@@ -592,7 +592,7 @@ fail or are absent without compatibility behavior.
 - [ ] **Step 6: Commit public command and setup contracts**
 
 ```powershell
-git add agency/cli.py agency/cli_output.py agency/dispatch agency/web/setup_flow.py agency/app.py tests/test_cli.py tests/test_cli_contract.py tests/test_dispatch_*.py tests/test_setup_flow.py tests/test_server.py tests/test_agency_setup_skill.py tests/test_setup_skill_e2e.py
+git add flowgency/cli.py flowgency/cli_output.py flowgency/dispatch flowgency/web/setup_flow.py flowgency/app.py tests/test_cli.py tests/test_cli_contract.py tests/test_dispatch_*.py tests/test_setup_flow.py tests/test_server.py tests/test_flowgency_setup_skill.py tests/test_setup_skill_e2e.py
 git commit -m "refactor(cli): replace group interfaces with teams"
 ```
 
@@ -601,15 +601,15 @@ git commit -m "refactor(cli): replace group interfaces with teams"
 ### Task 4: Replace Web Routes, Context, And Templates
 
 **Files:**
-- Modify: `agency/app.py`
-- Modify: `agency/web/state.py`
-- Modify: `agency/web/routes/admin_groups.py`
-- Modify: `agency/web/routes/admin_library.py`
-- Modify: `agency/web/routes/admin_memory.py`
-- Modify: `agency/web/routes/agents.py`
-- Modify: `agency/web/routes/agent_detail.py`
-- Modify: `agency/web/routes/jobs.py`
-- Modify: every affected `agency/templates/*.html`
+- Modify: `flowgency/app.py`
+- Modify: `flowgency/web/state.py`
+- Modify: `flowgency/web/routes/admin_groups.py`
+- Modify: `flowgency/web/routes/admin_library.py`
+- Modify: `flowgency/web/routes/admin_memory.py`
+- Modify: `flowgency/web/routes/agents.py`
+- Modify: `flowgency/web/routes/agent_detail.py`
+- Modify: `flowgency/web/routes/jobs.py`
+- Modify: every affected `flowgency/templates/*.html`
 - Modify: route/dashboard/admin/agent/job tests
 - Modify: `tests/ui/server.py`
 - Modify: `tests/ui/fixtures/config.yaml`
@@ -650,7 +650,7 @@ Expected: route registry/template context still use group names and old URLs.
 
 - [ ] **Step 3: Rename route decorators and handler/context variables**
 
-Rename only Agency-domain route placeholders from `{group}` to `{team}`.
+Rename only Flowgency-domain route placeholders from `{group}` to `{team}`.
 Replace `/admin/groups` and `/admin/orgs` segments with `/admin/teams`. Rename
 handler arguments/local state/context variables to `team`, `team_id`,
 `team_name`, `teams`, `team_path`, and `team_*` equivalents. Update redirects,
@@ -674,13 +674,13 @@ group-hover:underline
 
 Do not change those HTML/Tailwind constructs. Update memory selector labels and
 form values from `group`/`Group memory` to `team`/`Team memory` because those are
-serialized Agency domain values.
+serialized Flowgency domain values.
 
 - [ ] **Step 5: Update Python and Playwright fixtures**
 
 Change UI fixture YAML to v6 `teams` / `default_team` and its fixture-owned
 runtime directory from `groups` to `teams`. Rename UI server locals that represent
-Agency teams. Update Playwright route/heading/label assertions and snapshots only
+Flowgency teams. Update Playwright route/heading/label assertions and snapshots only
 when rendered behavior changes. Do not change `<optgroup>` selectors.
 
 - [ ] **Step 6: Run web and UI tests**
@@ -696,7 +696,7 @@ and accessibility checks reflect team terminology with no layout regression.
 - [ ] **Step 7: Commit web team interfaces**
 
 ```powershell
-git add agency/app.py agency/web/state.py agency/web/routes agency/templates tests/test_dashboard.py tests/test_agent_*.py tests/test_group_settings.py tests/test_admin_*.py tests/test_job_routes.py tests/test_memory_channel_routes.py tests/test_surface_contracts.py tests/ui
+git add flowgency/app.py flowgency/web/state.py flowgency/web/routes flowgency/templates tests/test_dashboard.py tests/test_agent_*.py tests/test_group_settings.py tests/test_admin_*.py tests/test_job_routes.py tests/test_memory_channel_routes.py tests/test_surface_contracts.py tests/ui
 git commit -m "refactor(web): replace group routes with teams"
 ```
 
@@ -708,11 +708,11 @@ git commit -m "refactor(web): replace group routes with teams"
 - Modify: `README.md`
 - Modify: `AGENTS.md`
 - Modify: `config.yaml.example`
-- Modify: `agency.service.example`
+- Modify: `flowgency.service.example`
 - Modify: `kb/*.md` where they describe current behavior
 - Modify: `examples/**/*.md`
-- Modify: `agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md`
-- Modify: `agency/setup_assets/copilot/.github/skills/agency-setup/references/*.md`
+- Modify: `flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md`
+- Modify: `flowgency/setup_assets/copilot/.github/skills/flowgency-setup/references/*.md`
 - Modify: tests for active documentation/setup skill
 - Create: `tests/test_team_terminology.py`
 
@@ -737,10 +737,10 @@ ACTIVE_PATHS = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "AGENTS.md",
     REPO_ROOT / "config.yaml.example",
-    REPO_ROOT / "agency.service.example",
+    REPO_ROOT / "flowgency.service.example",
     *(REPO_ROOT / "kb").glob("*.md"),
     *(REPO_ROOT / "examples").glob("**/*.md"),
-    *(REPO_ROOT / "agency" / "setup_assets").glob("**/*.md"),
+    *(REPO_ROOT / "flowgency" / "setup_assets").glob("**/*.md"),
 )
 
 
@@ -753,13 +753,13 @@ def test_active_documents_use_v6_team_control_plane():
     assert "schema_version: 5" not in text
     assert "default_group:" not in text
     assert "\ngroups:\n" not in text
-    assert "christag-agency config migrate" not in text
+    assert "flowgency config migrate" not in text
 
 
 def test_setup_assets_use_team_domain_terms():
     text = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in (REPO_ROOT / "agency" / "setup_assets").glob("**/*.md")
+        for path in (REPO_ROOT / "flowgency" / "setup_assets").glob("**/*.md")
     )
 
     assert "team display name" in text.lower()
@@ -772,12 +772,12 @@ Add focused exclusions to `tests/test_surface_contracts.py`:
 
 ```python
 def test_non_domain_group_tokens_remain_unchanged():
-    base = (REPO_ROOT / "agency" / "templates" / "base.html").read_text(encoding="utf-8")
-    agents = (REPO_ROOT / "agency" / "templates" / "agents.html").read_text(encoding="utf-8")
-    schedule = (REPO_ROOT / "agency" / "dispatch" / "schedule.py").read_text(encoding="utf-8")
+    base = (REPO_ROOT / "flowgency" / "templates" / "base.html").read_text(encoding="utf-8")
+    agents = (REPO_ROOT / "flowgency" / "templates" / "agents.html").read_text(encoding="utf-8")
+    schedule = (REPO_ROOT / "flowgency" / "dispatch" / "schedule.py").read_text(encoding="utf-8")
 
     assert " group" in base
-    assert "group-hover:" in base or "group-hover:" in (REPO_ROOT / "agency" / "templates" / "home.html").read_text(encoding="utf-8")
+    assert "group-hover:" in base or "group-hover:" in (REPO_ROOT / "flowgency" / "templates" / "home.html").read_text(encoding="utf-8")
     assert "<optgroup" in agents
     assert "match.group(" in schedule
 ```
@@ -785,7 +785,7 @@ def test_non_domain_group_tokens_remain_unchanged():
 - [ ] **Step 2: Run docs/scanner tests to observe RED**
 
 ```powershell
-python -m pytest tests/test_team_terminology.py tests/test_agency_setup_skill.py tests/test_setup_flow.py tests/test_surface_contracts.py -q
+python -m pytest tests/test_team_terminology.py tests/test_flowgency_setup_skill.py tests/test_setup_flow.py tests/test_surface_contracts.py -q
 ```
 
 Expected: active docs/examples/setup assets still contain current group/v5/migrate
@@ -806,7 +806,7 @@ historical design records. Do not alter regex APIs, Tailwind utilities, or
 - [ ] **Step 4: Run active docs and setup tests**
 
 ```powershell
-python -m pytest tests/test_team_terminology.py tests/test_agency_setup_skill.py tests/test_setup_flow.py tests/test_setup_skill_e2e.py tests/test_surface_contracts.py tests/test_repository_boundaries.py -q
+python -m pytest tests/test_team_terminology.py tests/test_flowgency_setup_skill.py tests/test_setup_flow.py tests/test_setup_skill_e2e.py tests/test_surface_contracts.py tests/test_repository_boundaries.py -q
 ```
 
 Expected: current docs, examples, setup assets, and protected exclusions pass.
@@ -814,7 +814,7 @@ Expected: current docs, examples, setup assets, and protected exclusions pass.
 - [ ] **Step 5: Commit active terminology documentation**
 
 ```powershell
-git add README.md AGENTS.md config.yaml.example agency.service.example kb examples agency/setup_assets tests/test_team_terminology.py tests/test_agency_setup_skill.py tests/test_setup_flow.py tests/test_setup_skill_e2e.py tests/test_surface_contracts.py
+git add README.md AGENTS.md config.yaml.example flowgency.service.example kb examples flowgency/setup_assets tests/test_team_terminology.py tests/test_flowgency_setup_skill.py tests/test_setup_flow.py tests/test_setup_skill_e2e.py tests/test_surface_contracts.py
 git commit -m "docs: adopt team terminology for schema v6"
 ```
 
@@ -824,13 +824,13 @@ git commit -m "docs: adopt team terminology for schema v6"
 
 **Files:**
 - Modify: all remaining domain-team production/test files identified by:
-  `git grep -n -E '\b(group|groups|Group[A-Z]|default_group|group_[a-z]+)\b' -- agency tests`
+  `git grep -n -E '\b(group|groups|Group[A-Z]|default_group|group_[a-z]+)\b' -- flowgency tests`
 - Verify: all active docs/examples/setup assets
 - Verify: all public CLI, routes, worker, job, and memory contracts
 
 **Interfaces:**
 - Consumes: Tasks 1-5.
-- Produces: no remaining Agency-domain group naming, all tests/fixtures migrated,
+- Produces: no remaining Flowgency-domain group naming, all tests/fixtures migrated,
   strict v6/team state, and explicit exclusions intact.
 
 - [ ] **Step 1: Create an allowed-exclusion terminology report**
@@ -838,13 +838,13 @@ git commit -m "docs: adopt team terminology for schema v6"
 Run this command and save its output to a temporary ignored file:
 
 ```powershell
-$remaining = git grep -n -E '\b(group|groups|Group[A-Z]|default_group|group_[a-z]+)\b' -- agency tests; $remaining | Set-Content "$env:TEMP\agency-v6-team-remaining.txt"; $remaining
+$remaining = git grep -n -E '\b(group|groups|Group[A-Z]|default_group|group_[a-z]+)\b' -- flowgency tests; $remaining | Set-Content "$env:TEMP\flowgency-v6-team-remaining.txt"; $remaining
 ```
 
 Classify every line as one of:
 
 ```text
-1. Agency domain rename still required
+1. Flowgency domain rename still required
 2. regex Match API / regex capture value
 3. Tailwind group utility
 4. HTML optgroup
@@ -858,7 +858,7 @@ The final implementation may retain only categories 2-6. Do not suppress categor
 - [ ] **Step 2: Write failing end-to-end strict-break tests**
 
 Add a test to `tests/test_cli_contract.py` that creates a raw v5 config containing
-`schema_version: 5`, `default_group`, and `groups`, then asserts `christag-agency
+`schema_version: 5`, `default_group`, and `groups`, then asserts `flowgency
 validate --config <path>` exits with validation failure, says `schema_version must
 be 6`, and does not mention a migration command.
 
@@ -895,10 +895,10 @@ is intentionally tested.
 - [ ] **Step 5: Verify no migration or old public interface remains**
 
 ```powershell
-python -m agency.cli --help
-python -m agency.cli config --help
-python -c "import agency.configuration as c; assert not hasattr(c, 'GroupConfig'); assert not hasattr(c, 'create_group'); assert hasattr(c, 'TeamConfig'); assert hasattr(c, 'create_team'); print('configuration export boundary passed')"
-python -c "from agency.jobs.models import JobSpec; assert 'team_key' in JobSpec.__dataclass_fields__; assert 'group_key' not in JobSpec.__dataclass_fields__; print('job field boundary passed')"
+python -m flowgency.cli --help
+python -m flowgency.cli config --help
+python -c "import flowgency.configuration as c; assert not hasattr(c, 'GroupConfig'); assert not hasattr(c, 'create_group'); assert hasattr(c, 'TeamConfig'); assert hasattr(c, 'create_team'); print('configuration export boundary passed')"
+python -c "from flowgency.jobs.models import JobSpec; assert 'team_key' in JobSpec.__dataclass_fields__; assert 'group_key' not in JobSpec.__dataclass_fields__; print('job field boundary passed')"
 ```
 
 Expected: no config-migration subcommand or `--group` argument appears; removed
@@ -908,7 +908,7 @@ configuration exports are absent; Team and job fields are current only.
 
 ```powershell
 git grep -n -E 'config migrate|migrate_v4_to_v5|default_group|schema_version: 5|^groups:' -- ':!docs/superpowers/**'
-git grep -n -E '"group_key"|"group_root"|--group-id|--group' -- agency tests
+git grep -n -E '"group_key"|"group_root"|--group-id|--group' -- flowgency tests
 ```
 
 Expected: both commands exit 1 except for explicitly named old-format rejection
@@ -918,7 +918,7 @@ test from Task 5 to prove regex/CSS/HTML tokens still exist.
 - [ ] **Step 7: Commit remaining migration consumers**
 
 ```powershell
-git add agency tests
+git add flowgency tests
 # Stage deleted and renamed test files discovered in Step 3 as well.
 git add -u
 git commit -m "refactor: complete strict v6 team terminology"
@@ -942,8 +942,8 @@ git commit -m "refactor: complete strict v6 team terminology"
 - [ ] **Step 1: Run focused v6 and public-interface checks**
 
 ```powershell
-python -m pytest tests/test_config.py tests/test_config_patches.py tests/test_cli.py tests/test_cli_contract.py tests/test_job_models.py tests/test_job_authority.py tests/test_memory_selectors.py tests/test_dispatch_run.py tests/test_dashboard.py tests/test_team_settings.py tests/test_setup_flow.py tests/test_agency_setup_skill.py tests/test_team_terminology.py tests/test_surface_contracts.py -q
-python -m agency.cli validate --config config.yaml.example
+python -m pytest tests/test_config.py tests/test_config_patches.py tests/test_cli.py tests/test_cli_contract.py tests/test_job_models.py tests/test_job_authority.py tests/test_memory_selectors.py tests/test_dispatch_run.py tests/test_dashboard.py tests/test_team_settings.py tests/test_setup_flow.py tests/test_flowgency_setup_skill.py tests/test_team_terminology.py tests/test_surface_contracts.py -q
+python -m flowgency.cli validate --config config.yaml.example
 ```
 
 Expected: tests pass and validation accepts the v6 example. If the local ignored
@@ -964,10 +964,10 @@ visually reviewed because terminology changed.
 - [ ] **Step 3: Perform a clean v6 CLI/dashboard smoke test**
 
 Create a temporary config outside the repository using the canonical v6 fixture
-shape. Start `christag-agency serve --config <temp-config> --host 127.0.0.1 --port
+shape. Start `flowgency serve --config <temp-config> --host 127.0.0.1 --port
 8768`, open `/admin/teams` and `/<team>/agents`, and verify team labels/navigation.
 Request `/admin/groups` and `/<team>/agents` under the old placeholder form; both
-must return 404. Run `christag-agency agents --team <team> --config <temp-config>`
+must return 404. Run `flowgency agents --team <team> --config <temp-config>`
 and verify `--group` fails. Stop the server and remove temporary config/storage.
 
 - [ ] **Step 4: Whole-branch review**
@@ -984,7 +984,7 @@ Minor findings but do not mix unrelated polish into this breaking migration.
 
 - [ ] **Step 5: Fast-forward, verify, push, and clean up**
 
-From `C:/Projekty/christag-agency`, confirm `master` is clean, fetch origin, and
+From `C:/Projekty/flowgency`, confirm `master` is clean, fetch origin, and
 verify `master` plus `origin/master` are ancestors of
 `refactor/v6-team-terminology`. Stash unrelated main-checkout changes with
 `git stash push --include-untracked` if present; restore them after integration.

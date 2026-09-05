@@ -19,18 +19,18 @@
 - Do not change routine, instance, integration, configuration, memory, or job schemas.
 - Do not synthesize placeholder skills, emit warnings for absent optional skills, or add compatibility loaders.
 - Runtime projectors must preserve source bytes and emit no skill directory for an instruction-only blueprint.
-- Run tests from `C:/Users/black/Projects/christag-agency/.worktrees/optional-blueprint-skills`; do not edit that worktree while the full suite or live runtime projector tests are running.
+- Run tests from `C:/Users/black/Projects/flowgency/.worktrees/optional-blueprint-skills`; do not edit that worktree while the full suite or live runtime projector tests are running.
 
 ---
 
 ## File Structure
 
-- Modify `agency/blueprints/library.py`: accept an empty collected skill set while retaining all validation for present skills.
+- Modify `flowgency/blueprints/library.py`: accept an empty collected skill set while retaining all validation for present skills.
 - Modify `tests/test_blueprint_library.py`: prove inspection returns an empty skill tuple and rename the misleading existing test.
 - Modify `tests/test_runtime_projectors.py`: prove all built-in static projectors emit only their instruction target for an instruction-only blueprint.
-- Modify `skills/agency-setup/SKILL.md`: make `AGENTS.md` the only unconditional blueprint file and create skills only for approved routine capabilities.
+- Modify `skills/flowgency-setup/SKILL.md`: make `AGENTS.md` the only unconditional blueprint file and create skills only for approved routine capabilities.
 - Modify `kb/setup-skill.md`: describe the same optional-skill contract in the public setup guide.
-- Modify `tests/test_agency_setup_skill.py`: lock the optional-skill wording across the canonical skill and public guide.
+- Modify `tests/test_flowgency_setup_skill.py`: lock the optional-skill wording across the canonical skill and public guide.
 
 No production projector, UI, configuration, job, or schema file changes are required.
 
@@ -41,7 +41,7 @@ No production projector, UI, configuration, job, or schema file changes are requ
 **Files:**
 - Modify: `tests/test_blueprint_library.py:10-38`
 - Modify: `tests/test_runtime_projectors.py:1-125`
-- Modify: `agency/blueprints/library.py:113-153`
+- Modify: `flowgency/blueprints/library.py:113-153`
 - Commit existing plan: `docs/superpowers/plans/2026-07-26-optional-blueprint-skills.md`
 
 **Interfaces:**
@@ -88,7 +88,7 @@ def test_blueprint_inspection_includes_standard_skill(tmp_path):
 Add the inspection import near the top of `tests/test_runtime_projectors.py`:
 
 ```python
-from agency.blueprints.library import inspect_blueprint
+from flowgency.blueprints.library import inspect_blueprint
 ```
 
 Add this test after the `blueprint_snapshot` fixture:
@@ -134,7 +134,7 @@ Expected: four failed cases. Each reaches `inspect_blueprint()` and raises `Asse
 
 - [ ] **Step 5: Remove only the mandatory-skill validation branch**
 
-Delete this block from `inspect_blueprint()` in `agency/blueprints/library.py`:
+Delete this block from `inspect_blueprint()` in `flowgency/blueprints/library.py`:
 
 ```diff
 -    if not skills:
@@ -167,7 +167,7 @@ Expected: all selected tests pass. In particular, the existing malformed-frontma
 - [ ] **Step 8: Commit the behavior change**
 
 ```powershell
-git add agency/blueprints/library.py tests/test_blueprint_library.py tests/test_runtime_projectors.py
+git add flowgency/blueprints/library.py tests/test_blueprint_library.py tests/test_runtime_projectors.py
 git commit -m "fix(blueprints): allow instruction-only blueprints"
 ```
 
@@ -182,17 +182,17 @@ Review the Task 1 commit against the spec and Global Constraints. Verify that no
 ### Task 2: Align Setup Guidance With Optional Skills
 
 **Files:**
-- Modify: `tests/test_agency_setup_skill.py:17-29`
-- Modify: `skills/agency-setup/SKILL.md:47-62`
+- Modify: `tests/test_flowgency_setup_skill.py:17-29`
+- Modify: `skills/flowgency-setup/SKILL.md:47-62`
 - Modify: `kb/setup-skill.md:45-58`
 
 **Interfaces:**
-- Consumes: canonical setup source at `skills/agency-setup/SKILL.md` and its discovery symlink at `.github/skills/agency-setup`.
+- Consumes: canonical setup source at `skills/flowgency-setup/SKILL.md` and its discovery symlink at `.github/skills/flowgency-setup`.
 - Produces: setup guidance that always creates `AGENTS.md`, creates `.agents/skills/<skill>/SKILL.md` only for approved routine capabilities, and explicitly forbids placeholder skills and empty skills directories.
 
 - [ ] **Step 1: Write the failing setup-guidance contract test**
 
-Add this test after `test_setup_creates_standard_global_agent_library_blueprints()` in `tests/test_agency_setup_skill.py`:
+Add this test after `test_setup_creates_standard_global_agent_library_blueprints()` in `tests/test_flowgency_setup_skill.py`:
 
 ```python
 def test_setup_guidance_keeps_blueprint_skills_optional():
@@ -215,17 +215,17 @@ def test_setup_guidance_keeps_blueprint_skills_optional():
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py::test_setup_guidance_keeps_blueprint_skills_optional -v
+python -m pytest tests/test_flowgency_setup_skill.py::test_setup_guidance_keeps_blueprint_skills_optional -v
 ```
 
 Expected: FAIL because neither required sentence exists yet. The failure must identify the `skill` document first, not a missing file or symlink problem.
 
 - [ ] **Step 3: Make only `AGENTS.md` unconditional in the canonical setup skill**
 
-Replace the role tree and its following creation paragraph in Section 3 of `skills/agency-setup/SKILL.md` with:
+Replace the role tree and its following creation paragraph in Section 3 of `skills/flowgency-setup/SKILL.md` with:
 
 ````markdown
-After the consolidated path summary is approved, create the approved `agency.agent_library` through safe directory operations; do not place blueprints under the project workspace. For each approved role, always create:
+After the consolidated path summary is approved, create the approved `flowgency.agent_library` through safe directory operations; do not place blueprints under the project workspace. For each approved role, always create:
 
 ```text
 {agent_library}/{blueprint}/
@@ -250,7 +250,7 @@ Replace item 7 in the `kb/setup-skill.md` run sequence with this single paragrap
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py::test_setup_guidance_keeps_blueprint_skills_optional -v
+python -m pytest tests/test_flowgency_setup_skill.py::test_setup_guidance_keeps_blueprint_skills_optional -v
 ```
 
 Expected: one passed test. The canonical skill and public guide contain both exact optional-skill contract sentences.
@@ -260,7 +260,7 @@ Expected: one passed test. The canonical skill and public guide contain both exa
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py -q
+python -m pytest tests/test_flowgency_setup_skill.py -q
 ```
 
 Expected: all setup contract tests pass, including canonical symlink discovery, standard skill paths, root-first storage selection, and templates.
@@ -268,11 +268,11 @@ Expected: all setup contract tests pass, including canonical symlink discovery, 
 - [ ] **Step 7: Commit the setup guidance**
 
 ```powershell
-git add skills/agency-setup/SKILL.md kb/setup-skill.md tests/test_agency_setup_skill.py
+git add skills/flowgency-setup/SKILL.md kb/setup-skill.md tests/test_flowgency_setup_skill.py
 git commit -m "docs(setup): make blueprint skills optional"
 ```
 
-Expected: `.github/skills/agency-setup` resolves the canonical change through its existing symlink and is not staged as a separate file.
+Expected: `.github/skills/flowgency-setup` resolves the canonical change through its existing symlink and is not staged as a separate file.
 
 - [ ] **Step 8: Review Task 2 before whole-branch verification**
 
@@ -283,12 +283,12 @@ Review the Task 2 commit against the spec and Global Constraints. Verify that ro
 ### Task 3: Verify The Complete Feature Branch
 
 **Files:**
-- Verify: `agency/blueprints/library.py`
+- Verify: `flowgency/blueprints/library.py`
 - Verify: `tests/test_blueprint_library.py`
 - Verify: `tests/test_runtime_projectors.py`
-- Verify: `skills/agency-setup/SKILL.md`
+- Verify: `skills/flowgency-setup/SKILL.md`
 - Verify: `kb/setup-skill.md`
-- Verify: `tests/test_agency_setup_skill.py`
+- Verify: `tests/test_flowgency_setup_skill.py`
 
 **Interfaces:**
 - Consumes: reviewed Task 1 and Task 2 commits.
@@ -300,7 +300,7 @@ Run:
 
 ```powershell
 git diff --check master...HEAD
-python -m pytest tests/test_blueprint_library.py tests/test_runtime_projectors.py tests/test_agency_setup_skill.py -q
+python -m pytest tests/test_blueprint_library.py tests/test_runtime_projectors.py tests/test_flowgency_setup_skill.py -q
 ```
 
 Expected: `git diff --check` emits nothing and every focused test passes.
@@ -321,7 +321,7 @@ Review:
 
 ```powershell
 git diff --stat master...HEAD
-git diff master...HEAD -- agency/blueprints/library.py tests/test_blueprint_library.py tests/test_runtime_projectors.py skills/agency-setup/SKILL.md kb/setup-skill.md tests/test_agency_setup_skill.py
+git diff master...HEAD -- flowgency/blueprints/library.py tests/test_blueprint_library.py tests/test_runtime_projectors.py skills/flowgency-setup/SKILL.md kb/setup-skill.md tests/test_flowgency_setup_skill.py
 ```
 
 Expected: no high-confidence correctness, standards-compliance, regression, or missing-test findings. Confirm specifically that `missing-blueprint-skills` is gone, every other skill validation remains, projector production code is unchanged, and setup text is consistent in both documents.
@@ -358,7 +358,7 @@ Expected: no output.
 Run:
 
 ```powershell
-Set-Location C:/Users/black/Projects/christag-agency
+Set-Location C:/Users/black/Projects/flowgency
 git status --short
 git merge-base --is-ancestor master feature/optional-blueprint-skills
 ```
@@ -377,7 +377,7 @@ Expected: `master` moves directly to the reviewed feature tip; Git creates no me
 
 - [ ] **Step 3: Re-run the complete suite on fast-forwarded master**
 
-Run from `C:/Users/black/Projects/christag-agency` with no concurrent edits:
+Run from `C:/Users/black/Projects/flowgency` with no concurrent edits:
 
 ```powershell
 python -m pytest tests/ -q

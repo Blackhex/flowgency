@@ -5,7 +5,7 @@
 
 ## Problem
 
-Copilot agents running under Agency dispatch in **confined mode** (a group with
+Copilot agents running under Flowgency dispatch in **confined mode** (a group with
 `sandbox_root` set) intermittently fail with:
 
 > Permission denied and could not request permission from user
@@ -33,8 +33,8 @@ upstream flag bug originally suspected):
 2. **`--allow-all-paths` was missing.** Copilot's shell **and** native file
    tools deny operations touching paths outside the working directory without
    `--allow-all-paths`, surfacing the same *“Permission denied…”* string. Real
-   routines legitimately read agency data outside the sandbox (the sentinel
-   routine reads `~/.agency-cowork/monitor-config.json` and the monitor venv).
+   routines legitimately read flowgency data outside the sandbox (the sentinel
+   routine reads `~/.flowgency-cowork/monitor-config.json` and the monitor venv).
    The proven production launch sets `--allow-all-paths`; the confined branch
    had dropped it. This falsifies the earlier assumption that “the shell tool
    was never path-confined.”
@@ -48,7 +48,7 @@ fixing the launch mechanism and path scope, not by a flag workaround alone.
 
 ## Current state (before this fix)
 
-`agency/integrations/agency/copilot.py` `run()`:
+`flowgency/integrations/flowgency/copilot.py` `run()`:
 
 - Resolved `copilot` via `shutil.which` — on Windows a `.bat` wrapper — and
   invoked it with a plain `subprocess.run` (console-attached).
@@ -61,7 +61,7 @@ showed it was **never committed**.
 
 ## The fix
 
-Three coordinated changes in `agency/integrations/agency/copilot.py` `run()`:
+Three coordinated changes in `flowgency/integrations/flowgency/copilot.py` `run()`:
 
 1. **Bypass the Windows wrapper.** New `CopilotIntegration._resolve_real_cmd()`
    (Windows-only): if the resolved command is a `.bat/.cmd/.ps1` wrapper,
@@ -78,7 +78,7 @@ Three coordinated changes in `agency/integrations/agency/copilot.py` `run()`:
    modes.
 
 3. **Restore `--allow-all-paths` in the confined branch**, alongside
-   `--allow-all-tools`, so out-of-sandbox agency data is readable (production
+   `--allow-all-tools`, so out-of-sandbox flowgency data is readable (production
    parity). `cwd = sandbox_root` still anchors relative writes to the sandbox
    tree. `--autopilot` remains omitted in confined mode.
 
@@ -125,7 +125,7 @@ The unrestricted-mode test is unchanged. Full suite runs green.
 ## Real-session validation (the decisive gate)
 
 Exercise the actual dispatch code path, not a synthetic harness. Call
-`agency.dispatch.run.run_agent_prompt()` directly with:
+`flowgency.dispatch.run.run_agent_prompt()` directly with:
 
 | Arg | Value |
 |-----|-------|

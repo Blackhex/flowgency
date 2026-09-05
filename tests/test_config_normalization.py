@@ -24,7 +24,7 @@ def test_runtime_team_exposes_resolved_agent_instances_without_mutating_raw_inpu
         "schema_version": 1,
 
         "flowgency": {
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "team",
             "ai_backend": "copilot",
             "agent_library": "/library",

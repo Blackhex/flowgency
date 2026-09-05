@@ -1,7 +1,7 @@
 """Tests for the integration-agnostic git-status changed-file capture.
 
 Copilot reports per-file edits natively; every other integration relies on the
-git-status fallback in ``agency.jobs.changes`` so decision outcomes are visible
+git-status fallback in ``flowgency.jobs.changes`` so decision outcomes are visible
 for all nine tools, not just one.
 """
 

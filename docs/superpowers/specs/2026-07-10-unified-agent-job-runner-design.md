@@ -5,7 +5,7 @@
 
 ## Problem
 
-Agency has one integration execution contract but multiple orchestration paths:
+Flowgency has one integration execution contract but multiple orchestration paths:
 
 - Scheduled prompts run inline in the platform-timer dispatch process.
 - Manually launched saved prompts run as FastAPI background tasks.
@@ -16,7 +16,7 @@ the dashboard kills those agents, and startup recovery then marks their decision
 failed. The orchestration paths also duplicate integration, timeout, sandbox,
 logging, and status logic.
 
-Decision execution has a separate policy problem: Agency always sends an approved
+Decision execution has a separate policy problem: Flowgency always sends an approved
 decision to the proposal's `origin_agent`. The agent that identifies or proposes
 work is not necessarily the agent that should implement it.
 
@@ -46,7 +46,7 @@ work is not necessarily the agent that should implement it.
 
 ## Architecture
 
-Add an `agency.jobs` package with three explicit boundaries.
+Add an `flowgency.jobs` package with three explicit boundaries.
 
 ### 1. Submission
 
@@ -75,7 +75,7 @@ class JobLauncher(Protocol):
 The initial `DetachedProcessLauncher` invokes:
 
 ```text
-python -m agency.jobs.worker <absolute-job-path>
+python -m flowgency.jobs.worker <absolute-job-path>
 ```
 
 It detaches the child from the submitting process on both supported platform
@@ -95,7 +95,7 @@ worker service.
 
 ### 3. Execution
 
-`agency.jobs.worker` loads the job record and current `config.yaml`, resolves the
+`flowgency.jobs.worker` loads the job record and current `config.yaml`, resolves the
 group and agent, then invokes a shared `execute_job()` function. This function is
 the sole orchestration-level caller of `integration.run()`.
 
@@ -190,14 +190,14 @@ form, the executor selection defaults in this order:
 1. Proposal `execution_agent`.
 2. Proposal `origin_agent` for existing proposals without an explicit executor.
 
-The human may change the selection before submitting the decision. Agency validates
+The human may change the selection before submitting the decision. Flowgency validates
 that the selected agent:
 
 - exists in the group,
 - resolves to an existing agent directory, and
 - uses an integration whose `supports_execution` is true.
 
-If validation fails, Agency renders the decision form again with a clear error. It
+If validation fails, Flowgency renders the decision form again with a clear error. It
 does not create the decision, change the proposal to `decided`, submit a job, or
 select a fallback agent.
 
@@ -221,7 +221,7 @@ cannot start a detached process. A failed launch is recorded as `failed` in its 
 record with a launch-error summary.
 
 Decision creation is transactional at the application level: executor validation
-and job construction occur first; if durable submission or launch fails, Agency
+and job construction occur first; if durable submission or launch fails, Flowgency
 does not leave the proposal marked `decided` or a decision claiming a pending run.
 A retry launch failure leaves the existing decision failed and preserves its prior
 job references.
@@ -240,7 +240,7 @@ detached worker is valid even when the dashboard PID changes.
 
 Status reconciliation checks the referenced job and worker PID. It leaves a live
 worker untouched. A `running` job is marked failed only when its worker is confirmed
-absent. If liveness cannot be determined reliably, Agency leaves the job running
+absent. If liveness cannot be determined reliably, Flowgency leaves the job running
 rather than risk corrupting a live run; an explicit stale-age threshold can be
 added with a daemon if operational experience requires it.
 
@@ -253,7 +253,7 @@ The launcher permits concurrent jobs without per-agent locking. Multiple jobs ma
 run for one agent at the same time. Each has an immutable ID, prompt snapshot, job
 record, and log files.
 
-This choice allows simultaneous edits in the same sandbox. Agency will not attempt
+This choice allows simultaneous edits in the same sandbox. Flowgency will not attempt
 to merge, serialize, or undo conflicting changes. The UI may report multiple active
 runs, but it must not collapse their job state into one shared per-agent marker.
 Historical `.running-{agent}` markers therefore cannot be the authoritative job-state
@@ -332,7 +332,7 @@ execution, integrations, and trigger routes remain unchanged.
 ## Addendum: Launcher Architecture Correction (2026-07-10)
 
 **Review finding:** On Linux/systemd deployments, POSIX `start_new_session=True`
-does not escape the submitting service's cgroup. When the Agency systemd service
+does not escape the submitting service's cgroup. When the Flowgency systemd service
 is stopped or restarted, systemd kills all processes in that cgroup — including
 "detached" workers created with `start_new_session=True`.
 
@@ -340,11 +340,11 @@ is stopped or restarted, systemd kills all processes in that cgroup — includin
 job as its own transient user systemd service via:
 
 ```
-systemd-run --user --collect --unit=agency-job-{safe_id} -- python -m agency.jobs.worker <path>
+systemd-run --user --collect --unit=flowgency-job-{safe_id} -- python -m flowgency.jobs.worker <path>
 ```
 
-This places the worker in an independent cgroup owned by systemd, not the Agency
-service. The worker survives Agency service stop/restart.
+This places the worker in an independent cgroup owned by systemd, not the Flowgency
+service. The worker survives Flowgency service stop/restart.
 
 **Fallback:** `DetachedProcessLauncher` (POSIX `start_new_session` / Windows
 creation flags) remains the fallback when systemd is unavailable and on non-Linux

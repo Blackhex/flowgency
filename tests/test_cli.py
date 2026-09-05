@@ -39,7 +39,7 @@ def _setup_jobs_team(
             {
                 "schema_version": 1,
                 "flowgency": {
-                    "title": "Agency",
+                    "title": "Flowgency",
                     "default_team": "test",
                     "ai_backend": "claude-code",
                     "agent_library": str((tmp_path / "agent-library").resolve()),
@@ -134,7 +134,7 @@ def _setup_jobs_team(
 
 
 def test_cli_help_shows_subcommands():
-    """Running agency --help should list available subcommands."""
+    """Running flowgency --help should list available subcommands."""
     result = subprocess.run(
         [sys.executable, "-m", "flowgency.cli", "--help"],
         capture_output=True,
@@ -147,7 +147,7 @@ def test_cli_help_shows_subcommands():
 
 
 def test_cli_no_args_shows_help():
-    """Running agency with no args should show help."""
+    """Running flowgency with no args should show help."""
     result = subprocess.run(
         [sys.executable, "-m", "flowgency.cli"],
         capture_output=True,
@@ -250,7 +250,7 @@ def test_serve_missing_config_bootstraps_selected_path_not_cwd(tmp_path):
 
     assert result.returncode == 0
     output = result.stdout + result.stderr
-    assert "First run: open http://localhost:8500/setup to launch guided Agency setup." in output
+    assert "First run: open http://localhost:8500/setup to launch guided Flowgency setup." in output
     assert "/admin/" not in output
     assert "/setup" in output
     assert not selected_path.exists()

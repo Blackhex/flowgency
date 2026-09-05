@@ -11,7 +11,7 @@ path out of the browser and opening it by hand, even though the dashboard
 already has a log viewer that the agent activity tab links to.
 
 Separately, a finished Copilot job cannot be picked up again. The Copilot CLI
-prints a session id that `copilot --resume=<id>` accepts, and Agency already
+prints a session id that `copilot --resume=<id>` accepts, and Flowgency already
 parses that id, but it is discarded into a formatted summary line instead of
 being kept as data.
 
@@ -34,7 +34,7 @@ being kept as data.
 
 ### Log links
 
-`_job_detail_context` in `agency/web/routes/jobs.py` gains `stdout_href` and
+`_job_detail_context` in `flowgency/web/routes/jobs.py` gains `stdout_href` and
 `stderr_href`. A module-level helper builds
 `/{group}/logs/view?path={path}` with both segments percent-encoded, and
 returns an empty string when the record's path is unset. `job_detail.html`
@@ -42,17 +42,17 @@ replaces its two plain-text lines with anchors whose text is the log file's
 basename and whose `title` carries the full path.
 
 This introduces no new route and no new path validation. `GET
-/{group}/logs/view` in `agency/app.py` already calls
+/{group}/logs/view` in `flowgency/app.py` already calls
 `validate_file_access(fpath, logs_dir)` against the group's resolved logs
-directory, and `agency/jobs/execution.py` writes job logs to
+directory, and `flowgency/jobs/execution.py` writes job logs to
 `<group.path>/logs/<date>/<agent>-<trigger>-<job_id>.{out,err}`, which is
 inside that root. The link shape matches `_recent_log_rows` in
-`agency/web/routes/agent_detail.py`, so both surfaces reach the viewer the
+`flowgency/web/routes/agent_detail.py`, so both surfaces reach the viewer the
 same way.
 
 ### Session id as a first-class field
 
-`RunResult` in `agency/integrations/__init__.py` gains
+`RunResult` in `flowgency/integrations/__init__.py` gains
 `session_id: str | None = None`.
 
 `CopilotIntegration` gains a `_parse_session_id(raw)` static method that scans
@@ -80,13 +80,13 @@ def resume_command(self, session_id: str) -> tuple[str, ...] | None:
 copyable text can never raise when the CLI is not installed. The POST handler
 resolves the real executable separately.
 
-`JobRecord` in `agency/jobs/models.py` gains
+`JobRecord` in `flowgency/jobs/models.py` gains
 `session_id: str | None = None`. Because `from_dict` expands the payload into
 keyword arguments, records written before this change load with the default
 and records written after round-trip through `to_dict`. No migration is needed
 to read old records.
 
-`agency/jobs/execution.py` threads `result.session_id` into the terminal
+`flowgency/jobs/execution.py` threads `result.session_id` into the terminal
 `transition_job` call alongside `stdout_path` and the other run outputs.
 
 ### Resume control
@@ -155,7 +155,7 @@ populated one, so it is idempotent and cannot clobber a record produced by the
 new run path. It reports per-record outcomes and, under `--dry-run`, performs
 no writes.
 
-It is not registered in `agency/cli.py`. It is a one-time utility for existing
+It is not registered in `flowgency/cli.py`. It is a one-time utility for existing
 local data, not a shipped command.
 
 ## Testing
@@ -194,13 +194,13 @@ Backfill:
 
 ## Files touched
 
-- `agency/web/routes/jobs.py` — log hrefs, resume context, resume POST route.
-- `agency/templates/job_detail.html` — log anchors, resume button, copy field.
-- `agency/integrations/__init__.py` — `RunResult.session_id`,
+- `flowgency/web/routes/jobs.py` — log hrefs, resume context, resume POST route.
+- `flowgency/templates/job_detail.html` — log anchors, resume button, copy field.
+- `flowgency/integrations/__init__.py` — `RunResult.session_id`,
   `BaseIntegration.resume_command`.
-- `agency/integrations/agency/copilot.py` — `_parse_session_id`,
+- `flowgency/integrations/flowgency/copilot.py` — `_parse_session_id`,
   `resume_command`, `run` wiring.
-- `agency/jobs/models.py` — `JobRecord.session_id`.
-- `agency/jobs/execution.py` — persist `session_id` on the terminal transition.
+- `flowgency/jobs/models.py` — `JobRecord.session_id`.
+- `flowgency/jobs/execution.py` — persist `session_id` on the terminal transition.
 - `tools/backfill_job_session_ids.py` — new.
 - `tests/` — coverage described above.

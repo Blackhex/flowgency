@@ -49,7 +49,7 @@ class EffectiveRuntimePolicy:
     def scoped_tools(self) -> frozenset[str]:
         """Tools whose grant differs between path-bearing authored rules.
 
-        Generated rules (Agency's own launch-zone grants) are excluded: they
+        Generated rules (Flowgency's own launch-zone grants) are excluded: they
         express intent for integrations that can scope writes per path, but are
         not part of the operator's policy and must not trigger capability
         negotiation rejection.
@@ -87,7 +87,7 @@ class EffectiveRuntimePolicy:
         hand the agent more than the policy allows.
 
         Generated rules are excluded for the same reason `scoped_tools`
-        excludes them: Agency attaches launch-zone write grants to every job,
+        excludes them: Flowgency attaches launch-zone write grants to every job,
         so counting them would answer yes for every agent, including exactly
         the read-only ones the question exists to protect.
 

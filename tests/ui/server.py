@@ -287,14 +287,14 @@ def _wait_ready(port: int, process: subprocess.Popen[bytes]) -> None:
     url = f"http://127.0.0.1:{port}/newsletter/"
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RuntimeError(f"Agency server exited with status {process.returncode}")
+            raise RuntimeError(f"Flowgency server exited with status {process.returncode}")
         try:
             with urlopen(url, timeout=1) as response:
                 if response.status == 200:
                     return
         except OSError:
             time.sleep(0.1)
-    raise TimeoutError(f"Agency server was not ready at {url}")
+    raise TimeoutError(f"Flowgency server was not ready at {url}")
 
 
 def main() -> int:

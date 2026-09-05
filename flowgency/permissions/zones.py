@@ -1,4 +1,4 @@
-"""Agency's own grants inside a job's launch view.
+"""Flowgency's own grants inside a job's launch view.
 
 These rules are generated, never authored, and cannot be widened by
 configuration: the instructions an agent runs under must not be writable by

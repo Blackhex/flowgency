@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- The Agency web-UI file boundary (`get_allowed_roots` / `validate_file_access`) MUST NOT be changed by this feature. `sandbox_root` governs agent runtime only.
+- The Flowgency web-UI file boundary (`get_allowed_roots` / `validate_file_access`) MUST NOT be changed by this feature. `sandbox_root` governs agent runtime only.
 - The agent always launches with `cwd = agent_dir`. `sandbox_root` changes only permission flags, never the working directory.
 - `run()` gains a keyword-only, defaulted argument (`*, sandbox_root: Path | None = None`) so every existing override and call site keeps working unchanged.
 - Config writes are atomic (`save_config`) and always followed by `reload_groups()`.
@@ -23,7 +23,7 @@
 ### Task 1: `get_sandbox_root` config helper
 
 **Files:**
-- Modify: `agency/config.py` (add helper after `get_allowed_roots`, ~line 61)
+- Modify: `flowgency/config.py` (add helper after `get_allowed_roots`, ~line 61)
 - Test: `tests/test_config_normalization.py`
 
 **Interfaces:**
@@ -36,7 +36,7 @@ Add to `tests/test_config_normalization.py`:
 ```python
 from pathlib import Path
 
-from agency.config import get_sandbox_root
+from flowgency.config import get_sandbox_root
 
 
 def test_get_sandbox_root_absolute_passthrough():
@@ -68,7 +68,7 @@ Expected: FAIL with `ImportError: cannot import name 'get_sandbox_root'`
 
 - [ ] **Step 3: Implement the helper**
 
-In `agency/config.py`, add after the `get_allowed_roots` function:
+In `flowgency/config.py`, add after the `get_allowed_roots` function:
 
 ```python
 def get_sandbox_root(g: dict) -> Path | None:
@@ -98,7 +98,7 @@ Expected: PASS (5 passed)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/config.py tests/test_config_normalization.py
+git add flowgency/config.py tests/test_config_normalization.py
 git commit -m "feat: add get_sandbox_root config helper"
 ```
 
@@ -107,7 +107,7 @@ git commit -m "feat: add get_sandbox_root config helper"
 ### Task 2: `supports_sandbox` flag + `run()` sandbox_root parameter on base class
 
 **Files:**
-- Modify: `agency/integrations/__init__.py` (class `BaseIntegration`, ~lines 55-64)
+- Modify: `flowgency/integrations/__init__.py` (class `BaseIntegration`, ~lines 55-64)
 - Test: `tests/test_integrations.py`
 
 **Interfaces:**
@@ -121,7 +121,7 @@ Add to `tests/test_integrations.py`:
 ```python
 import inspect
 
-from agency.integrations import BaseIntegration
+from flowgency.integrations import BaseIntegration
 
 
 def test_base_integration_supports_sandbox_defaults_false():
@@ -143,7 +143,7 @@ Expected: FAIL — `AttributeError: type object 'BaseIntegration' has no attribu
 
 - [ ] **Step 3: Implement the change**
 
-In `agency/integrations/__init__.py`, update the `BaseIntegration` class attributes and `run` signature. Change:
+In `flowgency/integrations/__init__.py`, update the `BaseIntegration` class attributes and `run` signature. Change:
 
 ```python
     supports_execution: bool = True
@@ -194,7 +194,7 @@ Expected: PASS (all)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/__init__.py tests/test_integrations.py
+git add flowgency/integrations/__init__.py tests/test_integrations.py
 git commit -m "feat: add supports_sandbox flag and sandbox_root param to BaseIntegration.run"
 ```
 
@@ -203,7 +203,7 @@ git commit -m "feat: add supports_sandbox flag and sandbox_root param to BaseInt
 ### Task 3: Copilot integration — sandbox-aware invocation
 
 **Files:**
-- Modify: `agency/integrations/agency/copilot.py` (class attrs ~line 12-17, `run` method ~lines 33-56)
+- Modify: `flowgency/integrations/flowgency/copilot.py` (class attrs ~line 12-17, `run` method ~lines 33-56)
 - Test: `tests/test_integration_sidecar.py`
 
 **Interfaces:**
@@ -216,13 +216,13 @@ Add to `tests/test_integration_sidecar.py`:
 
 ```python
 def test_copilot_supports_sandbox_true():
-    from agency.integrations.agency.copilot import CopilotIntegration
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
     assert CopilotIntegration.supports_sandbox is True
 
 
 def test_copilot_run_unset_sandbox_uses_allow_all_paths(tmp_path, monkeypatch):
-    from agency.integrations.agency import copilot as copilot_mod
-    from agency.integrations.agency.copilot import CopilotIntegration
+    from flowgency.integrations.flowgency import copilot as copilot_mod
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     prompt = tmp_path / "p.prompt"
     prompt.write_text("do the thing")
@@ -249,8 +249,8 @@ def test_copilot_run_unset_sandbox_uses_allow_all_paths(tmp_path, monkeypatch):
 
 
 def test_copilot_run_set_sandbox_uses_add_dir(tmp_path, monkeypatch):
-    from agency.integrations.agency import copilot as copilot_mod
-    from agency.integrations.agency.copilot import CopilotIntegration
+    from flowgency.integrations.flowgency import copilot as copilot_mod
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     prompt = tmp_path / "p.prompt"
     prompt.write_text("do the thing")
@@ -287,7 +287,7 @@ Expected: FAIL — `supports_sandbox` is False and argv contains neither `--allo
 
 - [ ] **Step 3: Implement the change**
 
-In `agency/integrations/agency/copilot.py`, add the class attribute after `supports_ai_backend`:
+In `flowgency/integrations/flowgency/copilot.py`, add the class attribute after `supports_ai_backend`:
 
 ```python
     name = "copilot"
@@ -346,7 +346,7 @@ Expected: PASS (all)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/agency/copilot.py tests/test_integration_sidecar.py
+git add flowgency/integrations/flowgency/copilot.py tests/test_integration_sidecar.py
 git commit -m "feat: copilot run confines to sandbox_root when set, full access otherwise"
 ```
 
@@ -355,7 +355,7 @@ git commit -m "feat: copilot run confines to sandbox_root when set, full access 
 ### Task 4: Thread sandbox_root through dispatch
 
 **Files:**
-- Modify: `agency/dispatch/run.py` (import ~line 15, `_run_agent` signature ~line 130 and `integration.run(...)` call ~line 197, `run_dispatch_cycle` resolution + call ~lines 100-143)
+- Modify: `flowgency/dispatch/run.py` (import ~line 15, `_run_agent` signature ~line 130 and `integration.run(...)` call ~line 197, `run_dispatch_cycle` resolution + call ~lines 100-143)
 - Test: `tests/test_dispatch_run.py`
 
 **Interfaces:**
@@ -364,10 +364,10 @@ git commit -m "feat: copilot run confines to sandbox_root when set, full access 
 
 - [ ] **Step 1: Read the current dispatch import and call structure**
 
-Confirm the current config import line in `agency/dispatch/run.py`:
+Confirm the current config import line in `flowgency/dispatch/run.py`:
 
 ```python
-from agency.config import normalize_agents, agent_names, get_agent_dir
+from flowgency.config import normalize_agents, agent_names, get_agent_dir
 ```
 
 Confirm `_run_agent` currently ends with:
@@ -385,7 +385,7 @@ Add to `tests/test_dispatch_run.py`:
 ```python
 def test_run_agent_forwards_sandbox_root(tmp_path, monkeypatch):
     from pathlib import Path
-    import agency.dispatch.run as run_mod
+    import flowgency.dispatch.run as run_mod
 
     agent_dir = tmp_path / "advisor"
     agent_dir.mkdir()
@@ -425,7 +425,7 @@ def test_run_agent_forwards_sandbox_root(tmp_path, monkeypatch):
 ```
 
 > NOTE: adjust the `_run_agent(...)` keyword arguments in this test to match the
-> real parameter names in `agency/dispatch/run.py` (read the function signature
+> real parameter names in `flowgency/dispatch/run.py` (read the function signature
 > first). The assertion — that `sandbox_root` reaches `integration.run` — is the
 > point of the test.
 
@@ -436,12 +436,12 @@ Expected: FAIL — `_run_agent() got an unexpected keyword argument 'sandbox_roo
 
 - [ ] **Step 4: Implement the change**
 
-In `agency/dispatch/run.py`:
+In `flowgency/dispatch/run.py`:
 
 1. Update the config import:
 
 ```python
-from agency.config import normalize_agents, agent_names, get_agent_dir, get_sandbox_root
+from flowgency.config import normalize_agents, agent_names, get_agent_dir, get_sandbox_root
 ```
 
 2. Add `sandbox_root` to the `_run_agent` signature (keyword-only, defaulted) and forward it. Change the call inside `_run_agent`:
@@ -479,7 +479,7 @@ Expected: PASS (all)
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/dispatch/run.py tests/test_dispatch_run.py
+git add flowgency/dispatch/run.py tests/test_dispatch_run.py
 git commit -m "feat: thread sandbox_root through dispatch to integration.run"
 ```
 
@@ -488,7 +488,7 @@ git commit -m "feat: thread sandbox_root through dispatch to integration.run"
 ### Task 5: Thread sandbox_root through decision execution
 
 **Files:**
-- Modify: `agency/app.py` (`execute_decision` — the `result = agent_integration.run(...)` call, and `g = GROUPS.get(group_key, {})` nearby)
+- Modify: `flowgency/app.py` (`execute_decision` — the `result = agent_integration.run(...)` call, and `g = GROUPS.get(group_key, {})` nearby)
 - Test: `tests/test_dashboard.py` (or a new `tests/test_execute_decision.py` if no suitable home exists)
 
 **Interfaces:**
@@ -497,16 +497,16 @@ git commit -m "feat: thread sandbox_root through dispatch to integration.run"
 
 - [ ] **Step 1: Add the import**
 
-In `agency/app.py`, update the config import to include `get_sandbox_root`. Change:
+In `flowgency/app.py`, update the config import to include `get_sandbox_root`. Change:
 
 ```python
-from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
+from flowgency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, find_agent_in_config, is_shared_agent
 ```
 
 to:
 
 ```python
-from agency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, get_sandbox_root, find_agent_in_config, is_shared_agent
+from flowgency.config import normalize_agents, agent_names, get_agent_dir, get_allowed_roots, get_sandbox_root, find_agent_in_config, is_shared_agent
 ```
 
 - [ ] **Step 2: Write the failing test**
@@ -516,7 +516,7 @@ Create `tests/test_execute_decision.py`:
 ```python
 from pathlib import Path
 
-import agency.app as app_mod
+import flowgency.app as app_mod
 
 
 def test_execute_decision_passes_sandbox_root(tmp_path, monkeypatch):
@@ -565,7 +565,7 @@ Expected: FAIL — `KeyError: 'sandbox_root'` in `captured` (value never set bec
 
 - [ ] **Step 4: Implement the change**
 
-In `agency/app.py` `execute_decision`, locate:
+In `flowgency/app.py` `execute_decision`, locate:
 
 ```python
         result = agent_integration.run(agent_dir, prompt_file, timeout=timeout)
@@ -591,7 +591,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/app.py tests/test_execute_decision.py
+git add flowgency/app.py tests/test_execute_decision.py
 git commit -m "feat: pass sandbox_root through decision execution to integration.run"
 ```
 
@@ -600,7 +600,7 @@ git commit -m "feat: pass sandbox_root through decision execution to integration
 ### Task 6: Persist sandbox_root in admin org save/create
 
 **Files:**
-- Modify: `agency/app.py` (`admin_org_save` and `admin_org_create` handlers)
+- Modify: `flowgency/app.py` (`admin_org_save` and `admin_org_create` handlers)
 - Test: `tests/test_dashboard.py` (append) or new `tests/test_admin_org_sandbox.py`
 
 **Interfaces:**
@@ -615,7 +615,7 @@ Create `tests/test_admin_org_sandbox.py`:
 import asyncio
 from pathlib import Path
 
-import agency.app as app_mod
+import flowgency.app as app_mod
 
 
 class FakeForm(dict):
@@ -640,7 +640,7 @@ def test_admin_org_save_persists_sandbox_root(tmp_path, monkeypatch):
     cfg_path = tmp_path / "config.yaml"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", cfg_path)
     app_mod.save_config({
-        "agency": {"title": "Agency", "default_group": "grp"},
+        "flowgency": {"title": "Flowgency", "default_group": "grp"},
         "groups": {"grp": {"name": "Grp", "path": str(tmp_path / "agents"), "agents": []}},
     })
     app_mod.reload_groups()
@@ -664,7 +664,7 @@ def test_admin_org_save_clears_sandbox_root_when_empty(tmp_path, monkeypatch):
     cfg_path = tmp_path / "config.yaml"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", cfg_path)
     app_mod.save_config({
-        "agency": {"title": "Agency", "default_group": "grp"},
+        "flowgency": {"title": "Flowgency", "default_group": "grp"},
         "groups": {"grp": {"name": "Grp", "path": str(tmp_path / "agents"),
                             "agents": [], "sandbox_root": "/old/root"}},
     })
@@ -692,7 +692,7 @@ Expected: FAIL — saved config has no `sandbox_root` key (first test) / key not
 
 - [ ] **Step 3: Implement the change in `admin_org_save`**
 
-In `agency/app.py` `admin_org_save`, after the block that sets `default_integration`:
+In `flowgency/app.py` `admin_org_save`, after the block that sets `default_integration`:
 
 ```python
     default_integration = form.get("default_integration", "claude-code")
@@ -711,7 +711,7 @@ add:
 
 - [ ] **Step 4: Implement the change in `admin_org_create`**
 
-In `agency/app.py` `admin_org_create`, locate where `group_cfg` is assembled:
+In `flowgency/app.py` `admin_org_create`, locate where `group_cfg` is assembled:
 
 ```python
     group_cfg = {
@@ -740,7 +740,7 @@ Expected: PASS (2 passed)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/app.py tests/test_admin_org_sandbox.py
+git add flowgency/app.py tests/test_admin_org_sandbox.py
 git commit -m "feat: persist sandbox_root in admin org save/create"
 ```
 
@@ -749,8 +749,8 @@ git commit -m "feat: persist sandbox_root in admin org save/create"
 ### Task 7: Admin org-edit UI — Sandbox root field
 
 **Files:**
-- Modify: `agency/app.py` (`admin_org_edit` GET context — add `sandbox_root` and `default_integration_supports_sandbox`)
-- Modify: `agency/templates/admin_org_edit.html` (add field after the Path field, ~line 49)
+- Modify: `flowgency/app.py` (`admin_org_edit` GET context — add `sandbox_root` and `default_integration_supports_sandbox`)
+- Modify: `flowgency/templates/admin_org_edit.html` (add field after the Path field, ~line 49)
 - Test: manual (template render) — covered functionally by Task 6 for persistence.
 
 **Interfaces:**
@@ -759,7 +759,7 @@ git commit -m "feat: persist sandbox_root in admin org save/create"
 
 - [ ] **Step 1: Add context in `admin_org_edit`**
 
-In `agency/app.py` `admin_org_edit`, in the `TemplateResponse` context dict (where `default_integration` is set), add:
+In `flowgency/app.py` `admin_org_edit`, in the `TemplateResponse` context dict (where `default_integration` is set), add:
 
 ```python
         "sandbox_root": g.get("sandbox_root", ""),
@@ -770,7 +770,7 @@ In `agency/app.py` `admin_org_edit`, in the `TemplateResponse` context dict (whe
 
 - [ ] **Step 2: Add the field to the template**
 
-In `agency/templates/admin_org_edit.html`, immediately after the Path field block (the `<div>` ending after the "Filesystem path to the agents directory." paragraph), add:
+In `flowgency/templates/admin_org_edit.html`, immediately after the Path field block (the `<div>` ending after the "Filesystem path to the agents directory." paragraph), add:
 
 ```html
     <div>
@@ -787,7 +787,7 @@ In `agency/templates/admin_org_edit.html`, immediately after the Path field bloc
 
 - [ ] **Step 3: Verify the app imports and template render without error**
 
-Run: `python -c "import agency.app"`
+Run: `python -c "import flowgency.app"`
 Expected: no output, exit 0 (module imports cleanly).
 
 Run: `python -m pytest tests/test_admin_org_sandbox.py -q`
@@ -797,13 +797,13 @@ Expected: PASS (persistence still green — the GET context change doesn't break
 
 Start the server and open an org edit page; confirm the "Sandbox root" field renders with any existing value and the helper text shows.
 
-Run: `python -m agency.app` then visit `http://localhost:8500/admin/orgs/<org>/edit`
+Run: `python -m flowgency.app` then visit `http://localhost:8500/admin/orgs/<org>/edit`
 Expected: Sandbox root input visible below Path.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py agency/templates/admin_org_edit.html
+git add flowgency/app.py flowgency/templates/admin_org_edit.html
 git commit -m "feat: add Sandbox root field to admin org edit UI"
 ```
 
@@ -844,7 +844,7 @@ Absolute paths are used as-is; relative paths resolve against the group `path`.
 Only runtimes that support sandboxing honor this setting. Runtimes that do not
 (shown with a warning in the admin UI) always run with their default access.
 
-This setting does **not** change the Agency dashboard's file browsers, which
+This setting does **not** change the Flowgency dashboard's file browsers, which
 remain scoped to the group path.
 ```
 

@@ -31,7 +31,7 @@ configuration authority. Prompts also need two ownership scopes:
 
 - Store shared prompt source under the owning blueprint at
   `.agents/prompts/<slug>.prompt.md`.
-- Store instance-private prompt source as Markdown in a dedicated Agency prompt
+- Store instance-private prompt source as Markdown in a dedicated Flowgency prompt
   store while registering the prompt slug in config.
 - Make schedules select prompts, never skills.
 - Support manual launches from either a saved shared/private prompt or one-off
@@ -64,9 +64,9 @@ generated runtime assets:
 | Authority | Owns |
 | --- | --- |
 | `config.yaml` | Groups, instances, pinned blueprints/integrations, private prompt registration, scoped routine selectors, schedules, arguments, runtime policy, and memory selectors |
-| `agency.agent_library` | Reusable blueprint `AGENTS.md`, Agent Skills, and shared prompt Markdown |
-| `agency.prompt_store` | Markdown source registered as private to one group instance |
-| `agency.compilation_cache` | Disposable immutable shared runtime projections |
+| `flowgency.agent_library` | Reusable blueprint `AGENTS.md`, Agent Skills, and shared prompt Markdown |
+| `flowgency.prompt_store` | Markdown source registered as private to one group instance |
+| `flowgency.compilation_cache` | Disposable immutable shared runtime projections |
 | Per-job private launch view | A copy of the shared projection plus rendered private prompt assets |
 | Durable job spec | Immutable task input, prompt provenance, runtime policy, memory binding, and blueprint digest |
 
@@ -122,8 +122,8 @@ key and new job provenance.
 Schema v4 adds one required global path:
 
 ```yaml
-agency:
-  prompt_store: C:/Agency/prompts
+flowgency:
+  prompt_store: C:/Flowgency/prompts
 ```
 
 The source path is deterministic and cannot be overridden in config:
@@ -169,8 +169,8 @@ Validation rules are strict:
 - Frontmatter must be a YAML mapping terminated before the Markdown body.
 - The body after frontmatter must be nonblank UTF-8 Markdown.
 
-The first version has no canonical placeholder language. Agency sends the
-Markdown body without frontmatter. If invocation input is present, Agency
+The first version has no canonical placeholder language. Flowgency sends the
+Markdown body without frontmatter. If invocation input is present, Flowgency
 appends one deterministic `## Invocation input` section. Routine arguments use
 a stable YAML list representation; manual additional instructions are appended
 verbatim. Native clients may apply their normal behavior when a person invokes
@@ -185,19 +185,19 @@ aliases, dual reads, fallback loaders, startup conversion, or implicit defaults.
 
 ```yaml
 schema_version: 4
-agency:
-  title: Agency
+flowgency:
+  title: Flowgency
   default_group: example
   ai_backend: copilot
-  agent_library: C:/Agency/agent-library
-  compilation_cache: C:/Agency/compiled-agents
-  memory_store: C:/Agency/memory
-  prompt_store: C:/Agency/prompts
+  agent_library: C:/Flowgency/agent-library
+  compilation_cache: C:/Flowgency/compiled-agents
+  memory_store: C:/Flowgency/memory
+  prompt_store: C:/Flowgency/prompts
 groups:
   example:
     name: Example
     workspace_path: C:/Projects/example
-    path: C:/Agency/groups/example
+    path: C:/Flowgency/groups/example
     default_integration: copilot
     dispatch:
       enabled: true
@@ -231,7 +231,7 @@ groups:
 
 The model changes are:
 
-- `AgencyConfig.prompt_store: Path` is required.
+- `FlowgencyConfig.prompt_store: Path` is required.
 - `AgentInstance.prompts` is an ordered tuple of registered private prompt slugs.
 - `Routine.prompt` is a required object with `scope` equal to `blueprint` or
   `instance` and a required prompt `name`.
@@ -304,7 +304,7 @@ Projector capabilities add an optional native prompt target/renderer and an
 explicit prompt-discovery flag. Shared prompt output belongs to the immutable
 blueprint compilation cache. Adding prompt output changes projector inventories,
 so affected projector versions increment. Every target below is relative to the
-compiled runtime or per-job private launch root; Agency does not write these
+compiled runtime or per-job private launch root; Flowgency does not write these
 generated files into the project workspace.
 
 | Integration | Native project output | Rendering |
@@ -314,9 +314,9 @@ generated files into the project workspace.
 | Gemini CLI | `.gemini/commands/<slug>.toml` | Deterministically encode description and Markdown body as structured TOML |
 | No safe project prompt format | None | Continue direct task-file/CLI execution without writing user-home files |
 
-Codex custom prompts are deprecated and user-scoped, so Agency never writes
+Codex custom prompts are deprecated and user-scoped, so Flowgency never writes
 `~/.codex/prompts`. The absence of a native project prompt target does not make
-an integration unable to run prompt-backed Agency jobs.
+an integration unable to run prompt-backed Flowgency jobs.
 
 Instruction and skill files retain their byte-preservation contract. A
 transformed prompt renderer validates output against deterministic expected
@@ -417,8 +417,8 @@ own schedules; prompt catalogs own reusable launch choices.
 
 ## Setup Flow
 
-The `agency-setup` skill and setup documentation move to schema v4 and derive a
-fifth global path, `<agency-data-root>/prompts`. The consolidated path review
+The `flowgency-setup` skill and setup documentation move to schema v4 and derive a
+fifth global path, `<flowgency-data-root>/prompts`. The consolidated path review
 includes that store and validates it against every other authority root.
 
 For each approved role, setup distinguishes:
@@ -504,7 +504,7 @@ successful UI state.
 - Cover fully expanded saved/one-off launchers, grouped options, no-prompt state,
   inline errors, `202` job links, and concurrent active counts.
 - Verify desktop and mobile rendering without control overlap or clipped text.
-- Update `agency-setup` contract tests for schema v4, prompt authoring, private
+- Update `flowgency-setup` contract tests for schema v4, prompt authoring, private
   registration, skill orthogonality, and the fifth storage path.
 - Run focused suites while iterating and the complete suite before review.
 
@@ -514,7 +514,7 @@ Update the repository guide, README/config examples, configuration, directory
 structure, integrations, dispatch, getting started, setup-skill, and agent
 identity documentation to describe:
 
-- Schema v4 and `agency.prompt_store`.
+- Schema v4 and `flowgency.prompt_store`.
 - Shared versus private prompt ownership.
 - Prompt-backed routines and manual launches.
 - Native projection as disposable output rather than authority.

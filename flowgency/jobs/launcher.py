@@ -81,7 +81,7 @@ class SystemdRunLauncher:
     """Launch jobs as transient user systemd services via systemd-run."""
 
     def launch(self, authority: JobAuthorityRef) -> LaunchResult:
-        unit_name = f"agency-job-{_sanitize_unit_name(authority.job_id)}"
+        unit_name = f"flowgency-job-{_sanitize_unit_name(authority.job_id)}"
         worker_cmd = [
             sys.executable,
             "-m",

@@ -6,8 +6,8 @@
 
 ## Problem
 
-Agency's dispatch scheduler works on Linux (systemd) and macOS (launchd), but on
-Windows all three operations in `agency/dispatch/install.py` return
+Flowgency's dispatch scheduler works on Linux (systemd) and macOS (launchd), but on
+Windows all three operations in `flowgency/dispatch/install.py` return
 "not yet implemented" placeholder strings. The admin dispatch page
 (`/admin/dispatch/install`) shows a red banner telling the user to set up a Task
 Scheduler entry manually. Windows users cannot install dispatch from the UI.
@@ -25,7 +25,7 @@ configured to run whether or not a window would otherwise appear.)
 
 ## Non-Goals
 
-- No change to the dispatch runner (`agency/dispatch/run.py`) — it is already
+- No change to the dispatch runner (`flowgency/dispatch/run.py`) — it is already
   cross-platform and platform-agnostic.
 - No "run when logged off" support. Dispatch runs only while the user is logged
   in (interactive token, no stored credentials, no elevation).
@@ -46,7 +46,7 @@ configured to run whether or not a window would otherwise appear.)
 
 ## Architecture
 
-Only `agency/dispatch/install.py` changes. It gains three private functions that
+Only `flowgency/dispatch/install.py` changes. It gains three private functions that
 parallel the existing Linux/macOS helpers, wired into the existing public
 dispatchers:
 
@@ -62,7 +62,7 @@ helpers.
 
 ### Task identity
 
-- **Task name:** `AgencyDispatch`
+- **Task name:** `FlowgencyDispatch`
 - **Folder:** root (`\`)
 - **Principal:** current user, `TASK_LOGON_INTERACTIVE_TOKEN` (3)
 - **Registration flag:** `TASK_CREATE_OR_UPDATE` (6) — re-installing updates the
@@ -73,8 +73,8 @@ helpers.
 - **Executable:** prefer `pythonw.exe` resolved from the directory of
   `sys.executable` (avoids a console window flashing every N minutes); fall back
   to `sys.executable` if `pythonw.exe` is not present.
-- **Arguments:** `-m agency.dispatch.run --config "<config_path>"`
-- **Working directory:** the repository root (parent of the `agency` package),
+- **Arguments:** `-m flowgency.dispatch.run --config "<config_path>"`
+- **Working directory:** the repository root (parent of the `flowgency` package),
   consistent with how the runner is invoked elsewhere.
 
 ### Trigger
@@ -107,7 +107,7 @@ helpers.
    settings (`StartWhenAvailable = True`, enabled), one `TimeTrigger` with the
    `PT<interval>M` repetition, and one `ExecAction` with the launcher + args +
    working dir.
-5. `RegisterTaskDefinition("AgencyDispatch", definition, TASK_CREATE_OR_UPDATE,
+5. `RegisterTaskDefinition("FlowgencyDispatch", definition, TASK_CREATE_OR_UPDATE,
    user_name, None, TASK_LOGON_INTERACTIVE_TOKEN)`.
 6. Return `None` on success; on `com_error`, return a readable error string.
 
@@ -115,7 +115,7 @@ helpers.
 
 1. Import guarded; on ImportError return `{"installed": False,
    "timer_active": False}` (nothing could have been installed without it).
-2. Connect, get root folder, `GetTask("AgencyDispatch")`.
+2. Connect, get root folder, `GetTask("FlowgencyDispatch")`.
 3. If found: `{"installed": True, "timer_active": <task.Enabled and
    state == TASK_STATE_READY or TASK_STATE_RUNNING>}`.
 4. If not found (`com_error`): `{"installed": False, "timer_active": False}`.
@@ -125,7 +125,7 @@ The returned dict shape matches the Linux/macOS helpers exactly.
 ### `_uninstall_windows() -> str | None`
 
 1. Import guarded.
-2. Connect, get root folder, `DeleteTask("AgencyDispatch", 0)`.
+2. Connect, get root folder, `DeleteTask("FlowgencyDispatch", 0)`.
 3. Treat "task not found" as success (idempotent). Return `None` on success, or
    an error string for other COM failures.
 
@@ -138,13 +138,13 @@ The returned dict shape matches the Linux/macOS helpers exactly.
 - **Install test:** assert the mock scheduler chain is driven correctly — a task
   definition is created, the trigger repetition is `PT<interval>M`, the exec
   action targets the resolved python launcher with
-  `-m agency.dispatch.run --config <path>`, and `RegisterTaskDefinition` is
+  `-m flowgency.dispatch.run --config <path>`, and `RegisterTaskDefinition` is
   called with `TASK_CREATE_OR_UPDATE` and the interactive logon constant.
 - **Status test (installed):** `GetTask` returns a mock task in READY state →
   `{"installed": True, "timer_active": True}`.
 - **Status test (not installed):** `GetTask` raises the mock `com_error` →
   `{"installed": False, "timer_active": False}`.
-- **Uninstall test:** `DeleteTask` is called with `"AgencyDispatch"`; a
+- **Uninstall test:** `DeleteTask` is called with `"FlowgencyDispatch"`; a
   not-found `com_error` still yields success (`None`).
 - **Import-missing test:** simulate `ImportError` for `win32com.client` and
   assert each helper returns the friendly error / safe status dict rather than

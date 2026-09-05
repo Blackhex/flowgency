@@ -2,8 +2,8 @@
 
 ## Goal
 
-Add an Agency theme that maps the official VS Code 2026 Dark and Light
-workbench palettes into Agency's existing theme system.
+Add an Flowgency theme that maps the official VS Code 2026 Dark and Light
+workbench palettes into Flowgency's existing theme system.
 
 ## Authoritative Sources
 
@@ -14,13 +14,13 @@ workbench palettes into Agency's existing theme system.
 
 - Theme key: `vscode-2026`
 - Display name: `VS Code 2026`
-- File: `agency/themes/vscode-2026.yaml`
+- File: `flowgency/themes/vscode-2026.yaml`
 - Replaces the incorrectly named `vscode-2016` theme.
 
 ## Dark Palette Mapping
 
-- Main Agency background: `#191A1B`
-- Agency sidebar: `#121314`
+- Main Flowgency background: `#191A1B`
+- Flowgency sidebar: `#121314`
 - Panel, status, terminal, and Agents panel surfaces: `#191A1B`
 - Widget and notification surfaces: `#202122`
 - Raised and hover surfaces: `#242526`
@@ -58,7 +58,7 @@ palette:
 ## Integration
 
 The CSS generator supports optional theme-level UI and input variables.
-Themes that omit those variables retain the existing Agency defaults.
+Themes that omit those variables retain the existing Flowgency defaults.
 Desktop content uses Segoe UI-compatible 13px typography; mobile content
 keeps the application's normal readable size.
 

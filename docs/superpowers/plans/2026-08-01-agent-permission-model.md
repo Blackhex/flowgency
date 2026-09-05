@@ -4,7 +4,7 @@
 
 **Goal:** Replace `runtime.sandbox`, `runtime.tools` and `capabilities` with one `runtime.permissions` section of path/tool rules, make compilation a per-instance projection, and render the launch view as access zones.
 
-**Architecture:** A permission is a tool acting on a path. `runtime.permissions` holds a `mode` and a list of rules, each `{path?, tools?}`. Group and instance carry the identical block; instance rules are additive and longest match governs. Agency contributes generated rules for the launch view zones. The compilation cache is keyed on blueprint × integration × the instance properties that affect rendering. `schema_version` becomes 5; version 4 is rejected and migrated by a CLI command.
+**Architecture:** A permission is a tool acting on a path. `runtime.permissions` holds a `mode` and a list of rules, each `{path?, tools?}`. Group and instance carry the identical block; instance rules are additive and longest match governs. Flowgency contributes generated rules for the launch view zones. The compilation cache is keyed on blueprint × integration × the instance properties that affect rendering. `schema_version` becomes 5; version 4 is rejected and migrated by a CLI command.
 
 **Tech Stack:** Python 3.13, Pydantic v2 config models, FastAPI/Jinja2, pytest. No new third-party dependencies.
 
@@ -18,14 +18,14 @@
 - Conventional Commits; subject ≤ 72 chars, imperative, lowercase, no trailing period; body wrapped at 72.
 - PowerShell has **no heredoc**. Write multi-line commit messages to a temp file and use `git commit -F <file>`. Keep every terminal command on **one line**.
 - Do not modify `config.yaml`, `config.yaml.lock`, group-state directories, or logs.
-- All writes into Agency-owned storage use `atomic_write_text` / `atomic_write_bytes` from `agency/fs/atomic.py`.
+- All writes into Flowgency-owned storage use `atomic_write_text` / `atomic_write_bytes` from `flowgency/fs/atomic.py`.
 
 ## Shared interfaces
 
 Every task depends on these. They are created in Task 1 and Task 2.
 
 ```python
-# agency/configuration/models.py
+# flowgency/configuration/models.py
 PermissionMode = Literal["restricted", "unrestricted"]
 
 class PermissionRule(BaseModel):
@@ -40,7 +40,7 @@ class RuntimePermissions(BaseModel):
 ```
 
 ```python
-# agency/integrations/models.py
+# flowgency/integrations/models.py
 @dataclass(frozen=True)
 class ResolvedPermissionRule:
     path: Path | None
@@ -63,7 +63,7 @@ class RuntimeCapabilities:
 ### Task 1: Permission models and schema version 5
 
 **Files:**
-- Modify: `agency/configuration/models.py`
+- Modify: `flowgency/configuration/models.py`
 - Test: `tests/test_permission_models.py`
 
 **Interfaces:**
@@ -83,7 +83,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.configuration.models import (
+from flowgency.configuration.models import (
     CONFIG_SCHEMA_VERSION,
     PermissionRule,
     RuntimePermissions,
@@ -124,7 +124,7 @@ def test_permissions_reject_an_unknown_mode():
 
 
 def test_superseded_models_are_gone():
-    import agency.configuration.models as models
+    import flowgency.configuration.models as models
 
     for name in (
         "GroupRuntimeSandbox",
@@ -142,7 +142,7 @@ Expected: FAIL with `ImportError: cannot import name 'PermissionRule'`
 
 - [ ] **Step 3: Add the permission models**
 
-In `agency/configuration/models.py`, replace the `ToolMode` and `SandboxMode` aliases with:
+In `flowgency/configuration/models.py`, replace the `ToolMode` and `SandboxMode` aliases with:
 
 ```python
 PermissionMode = Literal["restricted", "unrestricted"]
@@ -207,7 +207,7 @@ Change `schema_version: Literal[4]` to `Literal[5]`, and the validation block ne
                 field="schema_version",
                 message="schema_version must be 5.",
                 hint=(
-                    "Run `christag-agency config migrate` to convert a "
+                    "Run `flowgency config migrate` to convert a "
                     "schema_version 4 configuration."
                 ),
             )
@@ -227,7 +227,7 @@ Expected: **many failures.** Every fixture builds a `schema_version: 4` config w
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agency/configuration/models.py tests/test_permission_models.py
+git add flowgency/configuration/models.py tests/test_permission_models.py
 git commit -m "feat(config): add permission rules and schema version 5"
 ```
 
@@ -236,10 +236,10 @@ git commit -m "feat(config): add permission rules and schema version 5"
 ### Task 2: Resolution, merging, and the effective policy
 
 **Files:**
-- Modify: `agency/integrations/models.py`
-- Modify: `agency/configuration/effective.py`
-- Create: `agency/permissions/__init__.py`
-- Create: `agency/permissions/zones.py`
+- Modify: `flowgency/integrations/models.py`
+- Modify: `flowgency/configuration/effective.py`
+- Create: `flowgency/permissions/__init__.py`
+- Create: `flowgency/permissions/zones.py`
 - Test: `tests/test_permission_resolution.py`
 
 **Interfaces:**
@@ -248,8 +248,8 @@ git commit -m "feat(config): add permission rules and schema version 5"
   - `ResolvedPermissionRule`, and `EffectiveRuntimePolicy` reshaped to `(timeout, mode, rules)`
   - `EffectiveRuntimePolicy.tools_for(path) -> tuple[str, ...] | None`
   - `EffectiveRuntimePolicy.scoped_tools -> frozenset[str]`
-  - `agency.permissions.zones.ZONE_INSTRUCTIONS`, `ZONE_OUTBOX`, `ZONE_MEMORY`
-  - `agency.permissions.zones.launch_zone_rules(launch_dir) -> tuple[ResolvedPermissionRule, ...]`
+  - `flowgency.permissions.zones.ZONE_INSTRUCTIONS`, `ZONE_OUTBOX`, `ZONE_MEMORY`
+  - `flowgency.permissions.zones.launch_zone_rules(launch_dir) -> tuple[ResolvedPermissionRule, ...]`
   - `EffectiveRuntimePolicy.with_launch_zones(launch_dir) -> EffectiveRuntimePolicy`
 
 Removed: `sandbox_mode`, `sandbox_roots`, `writable_roots`, `writes_narrowed`, `narrows_writes`, `ResolvedToolPolicy`, `PathPolicyMode`, `ToolPolicyMode`.
@@ -267,10 +267,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agency.configuration.effective import resolve_effective_policy
-from agency.configuration.store import ConfigStore
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
-from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.store import ConfigStore
+from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 
 
 def policy(*rules, mode="restricted"):
@@ -385,11 +385,11 @@ def test_same_path_in_group_and_instance_unions_tools(tmp_path, raw_config):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_permission_resolution.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.permissions'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.permissions'`
 
 - [ ] **Step 3: Reshape the policy model**
 
-In `agency/integrations/models.py`, delete `PathPolicyMode`, `ToolPolicyMode` and `ResolvedToolPolicy`, and replace `EffectiveRuntimePolicy` and `RuntimeCapabilities` with:
+In `flowgency/integrations/models.py`, delete `PathPolicyMode`, `ToolPolicyMode` and `ResolvedToolPolicy`, and replace `EffectiveRuntimePolicy` and `RuntimeCapabilities` with:
 
 ```python
 PermissionMode = Literal["restricted", "unrestricted"]
@@ -444,7 +444,7 @@ class EffectiveRuntimePolicy:
         )
 
     def with_launch_zones(self, launch_dir: Path) -> "EffectiveRuntimePolicy":
-        from agency.permissions.zones import launch_zone_rules
+        from flowgency.permissions.zones import launch_zone_rules
 
         authored = tuple(
             rule
@@ -477,7 +477,7 @@ Add `from dataclasses import dataclass, replace`, `from pathlib import Path` and
 
 - [ ] **Step 4: Create the zones module**
 
-Create `agency/permissions/__init__.py`:
+Create `flowgency/permissions/__init__.py`:
 
 ```python
 from .zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX, launch_zone_rules
@@ -490,10 +490,10 @@ __all__ = [
 ]
 ```
 
-Create `agency/permissions/zones.py`:
+Create `flowgency/permissions/zones.py`:
 
 ```python
-"""Agency's own grants inside a job's launch view.
+"""Flowgency's own grants inside a job's launch view.
 
 These rules are generated, never authored, and cannot be widened by
 configuration: the instructions an agent runs under must not be writable by
@@ -504,11 +504,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.integrations.models import ResolvedPermissionRule
+from flowgency.integrations.models import ResolvedPermissionRule
 
 ZONE_INSTRUCTIONS = "instructions"
-ZONE_OUTBOX = ".agency/outbox"
-ZONE_MEMORY = ".agency/memory"
+ZONE_OUTBOX = ".flowgency/outbox"
+ZONE_MEMORY = ".flowgency/memory"
 
 
 def launch_zone_rules(launch_dir: Path) -> tuple[ResolvedPermissionRule, ...]:
@@ -531,7 +531,7 @@ def launch_zone_rules(launch_dir: Path) -> tuple[ResolvedPermissionRule, ...]:
 
 - [ ] **Step 5: Rewrite resolution**
 
-In `agency/configuration/effective.py`, replace `_resolve_tools` and `_resolve_sandbox` with a single merge, and rewrite `resolve_effective_policy` to build the new policy:
+In `flowgency/configuration/effective.py`, replace `_resolve_tools` and `_resolve_sandbox` with a single merge, and rewrite `resolve_effective_policy` to build the new policy:
 
 ```python
 def _merge_rules(
@@ -591,7 +591,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/integrations/models.py agency/configuration/effective.py agency/permissions/ tests/test_permission_resolution.py
+git add flowgency/integrations/models.py flowgency/configuration/effective.py flowgency/permissions/ tests/test_permission_resolution.py
 git commit -m "feat(permissions): resolve rules into an effective policy"
 ```
 
@@ -600,8 +600,8 @@ git commit -m "feat(permissions): resolve rules into an effective policy"
 ### Task 3: Capability negotiation
 
 **Files:**
-- Modify: `agency/integrations/__init__.py`
-- Modify: all nine integrations under `agency/integrations/agency/`
+- Modify: `flowgency/integrations/__init__.py`
+- Modify: all nine integrations under `flowgency/integrations/flowgency/`
 - Test: `tests/test_permission_capabilities.py`
 
 **Interfaces:**
@@ -617,8 +617,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.integrations import BaseIntegration, get_integration
-from agency.integrations.models import (
+from flowgency.integrations import BaseIntegration, get_integration
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     ResolvedPermissionRule,
     RuntimeCapabilities,
@@ -710,7 +710,7 @@ Expected: FAIL with `AttributeError` on `permission_modes`
 
 - [ ] **Step 3: Rewrite the validator**
 
-In `agency/integrations/__init__.py`, replace the two checks inside `validate_runtime_policy` with:
+In `flowgency/integrations/__init__.py`, replace the two checks inside `validate_runtime_policy` with:
 
 ```python
         if policy.mode not in self.runtime_capabilities.permission_modes:
@@ -778,7 +778,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/ tests/test_permission_capabilities.py
+git add flowgency/integrations/ tests/test_permission_capabilities.py
 git commit -m "feat(integrations): negotiate permission modes and tool scoping"
 ```
 
@@ -787,14 +787,14 @@ git commit -m "feat(integrations): negotiate permission modes and tool scoping"
 ### Task 4: Derived executor eligibility
 
 **Files:**
-- Modify: `agency/app.py` (`execution_agent_options`, and the decide-form validation)
-- Modify: `agency/records/validation.py` (`writable_agent_names`)
-- Modify: `agency/cli.py` (the two `capabilities` reads)
+- Modify: `flowgency/app.py` (`execution_agent_options`, and the decide-form validation)
+- Modify: `flowgency/records/validation.py` (`writable_agent_names`)
+- Modify: `flowgency/cli.py` (the two `capabilities` reads)
 - Test: `tests/test_executor_eligibility.py`
 
 **Interfaces:**
 - Consumes: `resolve_effective_policy`, `EffectiveRuntimePolicy.tools_for`.
-- Produces: `agency.permissions.eligibility.may_execute_decisions(config, group_key, agent_name) -> bool`.
+- Produces: `flowgency.permissions.eligibility.may_execute_decisions(config, group_key, agent_name) -> bool`.
 
 An agent is eligible when its effective policy grants `write` on a rule whose path is the group's `workspace_path` **itself**. A grant on a subdirectory does not qualify.
 
@@ -810,8 +810,8 @@ from pathlib import Path
 
 import yaml
 
-from agency.configuration.store import ConfigStore
-from agency.permissions.eligibility import may_execute_decisions
+from flowgency.configuration.store import ConfigStore
+from flowgency.permissions.eligibility import may_execute_decisions
 
 
 def _config(tmp_path: Path, raw_config, rules):
@@ -869,11 +869,11 @@ def test_unknown_group_is_not_eligible(tmp_path, raw_config):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_executor_eligibility.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.permissions.eligibility'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.permissions.eligibility'`
 
 - [ ] **Step 3: Implement the derivation**
 
-Create `agency/permissions/eligibility.py`:
+Create `flowgency/permissions/eligibility.py`:
 
 ```python
 """Whether an agent may be trusted to execute a decision.
@@ -886,8 +886,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.configuration.effective import resolve_effective_policy
-from agency.configuration.issues import ValidationFailed
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.issues import ValidationFailed
 
 
 def may_execute_decisions(config, group_key: str, agent_name: str) -> bool:
@@ -909,21 +909,21 @@ def may_execute_decisions(config, group_key: str, agent_name: str) -> bool:
     return False
 ```
 
-Export it from `agency/permissions/__init__.py`.
+Export it from `flowgency/permissions/__init__.py`.
 
 - [ ] **Step 4: Re-point the call sites**
 
-In `agency/app.py`, `execution_agent_options` currently reads
+In `flowgency/app.py`, `execution_agent_options` currently reads
 `instance.get("capabilities", {}).get("write") is True`. Replace that condition with
 `may_execute_decisions(config, group_key, instance_name)`, keeping the existing
 `integration.supports_execution` check beside it. Apply the same substitution to the
 decide-form validation that rejects a non-writable executor.
 
-In `agency/records/validation.py`, rewrite `writable_agent_names` to call
+In `flowgency/records/validation.py`, rewrite `writable_agent_names` to call
 `may_execute_decisions` for each agent in the group instead of reading
 `agent.capabilities.write`.
 
-In `agency/cli.py`, replace both `capabilities` reads the same way.
+In `flowgency/cli.py`, replace both `capabilities` reads the same way.
 
 - [ ] **Step 5: Run the focused tests**
 
@@ -933,7 +933,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/permissions/ agency/app.py agency/records/validation.py agency/cli.py tests/test_executor_eligibility.py
+git add flowgency/permissions/ flowgency/app.py flowgency/records/validation.py flowgency/cli.py tests/test_executor_eligibility.py
 git commit -m "feat(permissions): derive executor eligibility from the rules"
 ```
 
@@ -942,8 +942,8 @@ git commit -m "feat(permissions): derive executor eligibility from the rules"
 ### Task 5: Job spec carries the policy and the instance digest
 
 **Files:**
-- Modify: `agency/jobs/models.py` (`RuntimePolicySnapshot`, `BlueprintRef`)
-- Modify: `agency/jobs/resolution.py`
+- Modify: `flowgency/jobs/models.py` (`RuntimePolicySnapshot`, `BlueprintRef`)
+- Modify: `flowgency/jobs/resolution.py`
 - Test: `tests/test_job_policy_snapshot.py`
 
 **Interfaces:**
@@ -959,8 +959,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
-from agency.jobs.models import RuntimePolicySnapshot
+from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from flowgency.jobs.models import RuntimePolicySnapshot
 
 
 def policy(*rules, mode="restricted"):
@@ -1015,9 +1015,9 @@ Expected: FAIL with `TypeError` on the removed `sandbox_mode` argument
 
 - [ ] **Step 3: Reshape the snapshot**
 
-In `agency/jobs/models.py` (add `from pathlib import Path` and import
+In `flowgency/jobs/models.py` (add `from pathlib import Path` and import
 `EffectiveRuntimePolicy` and `ResolvedPermissionRule` from
-`agency.integrations.models`):
+`flowgency.integrations.models`):
 
 ```python
 @dataclass(frozen=True)
@@ -1060,7 +1060,7 @@ Add `instance_digest: str = ""` to `BlueprintRef`.
 
 `BlueprintRef.instance_digest` defaults to `""`. Do **not** try to populate it in
 this task — the value is produced by `instance_digest()`, which Task 6 creates.
-Task 6 wires the two together. Leave `agency/jobs/resolution.py` alone apart from
+Task 6 wires the two together. Leave `flowgency/jobs/resolution.py` alone apart from
 any change needed to keep it importable.
 
 - [ ] **Step 5: Run the focused tests**
@@ -1071,7 +1071,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/jobs/models.py agency/jobs/resolution.py tests/test_job_policy_snapshot.py
+git add flowgency/jobs/models.py flowgency/jobs/resolution.py tests/test_job_policy_snapshot.py
 git commit -m "feat(jobs): snapshot permission rules on the job spec"
 ```
 
@@ -1080,15 +1080,15 @@ git commit -m "feat(jobs): snapshot permission rules on the job spec"
 ### Task 6: Compilation becomes a per-instance projection
 
 **Files:**
-- Modify: `agency/blueprints/cache.py`
-- Modify: `agency/jobs/resolution.py` (the `cache.ensure_compiled` call)
+- Modify: `flowgency/blueprints/cache.py`
+- Modify: `flowgency/jobs/resolution.py` (the `cache.ensure_compiled` call)
 - Test: `tests/test_instance_projection.py`
 
 **Interfaces:**
 - Consumes: `EffectiveRuntimePolicy` (Task 2), `AgentIdentity`.
 - Produces:
   - `CacheRef.instance_digest: str`
-  - `agency.blueprints.cache.instance_digest(identity, policy) -> str`
+  - `flowgency.blueprints.cache.instance_digest(identity, policy) -> str`
   - `_entry_path` gains the digest component.
 
 - [ ] **Step 1: Write the failing test**
@@ -1100,9 +1100,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.blueprints.cache import CacheRef, _entry_path, instance_digest
-from agency.configuration.models import AgentIdentity
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from flowgency.blueprints.cache import CacheRef, _entry_path, instance_digest
+from flowgency.configuration.models import AgentIdentity
+from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
 def policy(*rules, timeout=60, mode="restricted"):
@@ -1165,7 +1165,7 @@ Expected: FAIL with `ImportError: cannot import name 'instance_digest'`
 
 - [ ] **Step 3: Implement the digest and re-key**
 
-In `agency/blueprints/cache.py`:
+In `flowgency/blueprints/cache.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -1225,7 +1225,7 @@ Give `ensure_compiled` an `instance_digest` keyword and thread it into the `Cach
 
 - [ ] **Step 4: Pass the digest from resolution**
 
-In `agency/jobs/resolution.py`, compute the digest after the policy is resolved,
+In `flowgency/jobs/resolution.py`, compute the digest after the policy is resolved,
 pass it to `cache.ensure_compiled`, and set it on the `BlueprintRef` that Task 5
 added:
 
@@ -1242,7 +1242,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/blueprints/cache.py agency/jobs/resolution.py tests/test_instance_projection.py
+git add flowgency/blueprints/cache.py flowgency/jobs/resolution.py tests/test_instance_projection.py
 git commit -m "feat(cache): key compiled artifacts on the agent instance"
 ```
 
@@ -1251,9 +1251,9 @@ git commit -m "feat(cache): key compiled artifacts on the agent instance"
 ### Task 7: Zoned launch view
 
 **Files:**
-- Modify: `agency/jobs/launch_view.py`
-- Modify: `agency/records/outbox.py` (zone constants)
-- Modify: `agency/jobs/execution.py` (apply the zones to the policy)
+- Modify: `flowgency/jobs/launch_view.py`
+- Modify: `flowgency/records/outbox.py` (zone constants)
+- Modify: `flowgency/jobs/execution.py` (apply the zones to the policy)
 - Test: `tests/test_launch_zones.py`
 
 **Interfaces:**
@@ -1269,20 +1269,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
+from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
 
 
 def test_zone_names_are_distinct():
     assert len({ZONE_INSTRUCTIONS, ZONE_OUTBOX, ZONE_MEMORY}) == 3
 
 
-def test_outbox_and_memory_live_under_the_agency_directory():
-    assert ZONE_OUTBOX.startswith(".agency/")
-    assert ZONE_MEMORY.startswith(".agency/")
+def test_outbox_and_memory_live_under_the_flowgency_directory():
+    assert ZONE_OUTBOX.startswith(".flowgency/")
+    assert ZONE_MEMORY.startswith(".flowgency/")
 
 
-def test_instructions_zone_is_not_under_the_agency_directory():
-    assert not ZONE_INSTRUCTIONS.startswith(".agency")
+def test_instructions_zone_is_not_under_the_flowgency_directory():
+    assert not ZONE_INSTRUCTIONS.startswith(".flowgency")
 ```
 
 Add to the same file a test driving `create_launch_view`:
@@ -1290,7 +1290,7 @@ Add to the same file a test driving `create_launch_view`:
 ```python
 from types import SimpleNamespace
 
-from agency.jobs.launch_view import create_launch_view
+from flowgency.jobs.launch_view import create_launch_view
 
 
 def _artifact(tmp_path: Path):
@@ -1325,14 +1325,14 @@ Expected: FAIL on the missing `instructions/` placement
 
 - [ ] **Step 3: Place the projected runtime under `instructions/`**
 
-In `agency/jobs/launch_view.py`, `create_launch_view` currently copies the cached runtime into the destination root. Copy it into `destination / ZONE_INSTRUCTIONS` instead, and create the outbox and memory zone directories beside it. Keep every existing reparse-point and non-regular-file guard exactly as it is.
+In `flowgency/jobs/launch_view.py`, `create_launch_view` currently copies the cached runtime into the destination root. Copy it into `destination / ZONE_INSTRUCTIONS` instead, and create the outbox and memory zone directories beside it. Keep every existing reparse-point and non-regular-file guard exactly as it is.
 
 - [ ] **Step 4: Point the outbox at the zone constants**
 
-In `agency/records/outbox.py`, redefine the relative constants in terms of the zones so the two modules cannot drift:
+In `flowgency/records/outbox.py`, redefine the relative constants in terms of the zones so the two modules cannot drift:
 
 ```python
-from agency.permissions.zones import ZONE_MEMORY, ZONE_OUTBOX
+from flowgency.permissions.zones import ZONE_MEMORY, ZONE_OUTBOX
 
 OUTBOX_RELATIVE_OBSERVATIONS = f"{ZONE_OUTBOX}/observations"
 OUTBOX_RELATIVE_PROPOSALS = f"{ZONE_OUTBOX}/proposals"
@@ -1341,9 +1341,9 @@ OUTBOX_RELATIVE_MEMORY = ZONE_MEMORY
 
 - [ ] **Step 5: Apply the zones to the policy at launch**
 
-In `agency/jobs/execution.py`, where the `IntegrationRunRequest` is built, pass
+In `flowgency/jobs/execution.py`, where the `IntegrationRunRequest` is built, pass
 `runtime_policy=runtime_policy.with_launch_zones(launch_view)` so the integration
-receives a policy that already contains Agency's generated rules.
+receives a policy that already contains Flowgency's generated rules.
 
 - [ ] **Step 6: Run the focused tests**
 
@@ -1353,7 +1353,7 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/jobs/launch_view.py agency/records/outbox.py agency/jobs/execution.py tests/test_launch_zones.py
+git add flowgency/jobs/launch_view.py flowgency/records/outbox.py flowgency/jobs/execution.py tests/test_launch_zones.py
 git commit -m "feat(jobs): render the launch view as access zones"
 ```
 
@@ -1362,8 +1362,8 @@ git commit -m "feat(jobs): render the launch view as access zones"
 ### Task 8: Migration command
 
 **Files:**
-- Create: `agency/configuration/migrate.py`
-- Modify: `agency/cli.py` (register `config migrate`)
+- Create: `flowgency/configuration/migrate.py`
+- Modify: `flowgency/cli.py` (register `config migrate`)
 - Test: `tests/test_config_migrate.py`
 
 **Interfaces:**
@@ -1379,13 +1379,13 @@ from __future__ import annotations
 
 import pytest
 
-from agency.configuration.migrate import migrate_v4_to_v5
+from flowgency.configuration.migrate import migrate_v4_to_v5
 
 
 def v4(group_runtime, agent):
     return {
         "schema_version": 4,
-        "agency": {"title": "Agency"},
+        "flowgency": {"title": "Flowgency"},
         "groups": {
             "g": {
                 "name": "G",
@@ -1493,11 +1493,11 @@ def test_a_version_five_document_is_refused():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_config_migrate.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.configuration.migrate'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.configuration.migrate'`
 
 - [ ] **Step 3: Implement the migration**
 
-Create `agency/configuration/migrate.py`:
+Create `flowgency/configuration/migrate.py`:
 
 ```python
 """Translate a schema_version 4 document into version 5.
@@ -1592,7 +1592,7 @@ def migrate_v4_to_v5(raw: dict[str, Any]) -> dict[str, Any]:
 
 - [ ] **Step 4: Register the CLI command**
 
-Add a `config migrate` subcommand to `agency/cli.py` that loads the raw YAML, calls `migrate_v4_to_v5`, and writes it back through the same locked, revision-checked, atomic path other config writes use. It must refuse when the document is already at version 5, and print the path it rewrote.
+Add a `config migrate` subcommand to `flowgency/cli.py` that loads the raw YAML, calls `migrate_v4_to_v5`, and writes it back through the same locked, revision-checked, atomic path other config writes use. It must refuse when the document is already at version 5, and print the path it rewrote.
 
 - [ ] **Step 5: Run the focused tests**
 
@@ -1602,7 +1602,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/configuration/migrate.py agency/cli.py tests/test_config_migrate.py
+git add flowgency/configuration/migrate.py flowgency/cli.py tests/test_config_migrate.py
 git commit -m "feat(config): migrate schema version 4 to 5"
 ```
 
@@ -1615,7 +1615,7 @@ By this point the suite has been red since Task 1. This task makes it green and 
 **Files:**
 - Modify: `tests/conftest.py` and every fixture building a v4 config
 - Modify: `AGENTS.md`, `kb/configuration.md`, `config.yaml.example`
-- Modify: `skills/agency-setup/references/*` where they describe the old keys
+- Modify: `skills/flowgency-setup/references/*` where they describe the old keys
 
 - [ ] **Step 1: Convert the shared fixtures**
 
@@ -1634,7 +1634,7 @@ Expected: PASS. Report the final counts against the 1748/5 baseline and account 
 
 Replace the sandbox and tools paragraphs in the configuration section with the permission model: one `runtime.permissions` block of `{path?, tools?}` rules, identical at group and instance level, instance rules additive, longest match governing, `tools` omitted meaning every tool and `[]` meaning none, and the two modes deciding only what happens to an uncovered path.
 
-State that Agency contributes generated rules for the launch view zones which configuration cannot widen, and that compilation is a projection of blueprint, integration and the instance properties that affect rendering.
+State that Flowgency contributes generated rules for the launch view zones which configuration cannot widen, and that compilation is a projection of blueprint, integration and the instance properties that affect rendering.
 
 Replace the `capabilities.write` paragraphs — including the phase-1 wording about `enforces_write_boundary` — with the derived executor eligibility rule. Update the example configuration to the new shape.
 
@@ -1645,7 +1645,7 @@ Same content, in each document's own voice. `config.yaml.example` must be a vali
 - [ ] **Step 6: Run the full suite once more**
 
 Run: `python -m pytest tests/ -q`
-Expected: PASS, including `tests/test_agency_setup_skill.py`.
+Expected: PASS, including `tests/test_flowgency_setup_skill.py`.
 
 - [ ] **Step 7: Commit**
 
@@ -1662,4 +1662,4 @@ git commit -m "docs(permissions): document the permission model"
 - [ ] Review the whole branch before integrating.
 - [ ] Fast-forward `master` to the reviewed tip, re-run the suite, push both branches, and remove the worktree.
 - [ ] Reinstall the editable package from the main checkout after the worktree is removed.
-- [ ] `config.yaml` in the main checkout is still version 4 and Agency will refuse to start until `christag-agency config migrate` is run against it. That is intended; do not migrate it as part of this branch.
+- [ ] `config.yaml` in the main checkout is still version 4 and Flowgency will refuse to start until `flowgency config migrate` is run against it. That is intended; do not migrate it as part of this branch.

@@ -19,7 +19,7 @@
 - Do not stage or modify `config.yaml`, `config.yaml.lock`, group-state directories, logs, or other untracked runtime data.
 - The session id validation pattern is exactly `^[A-Za-z0-9_-]{1,128}$`. Use this literal in every place it appears.
 - New routes use async handlers, and state-changing routes use POST plus a 303 redirect.
-- No new log-serving route. `GET /{group}/logs/view` in `agency/app.py` is the only log viewer.
+- No new log-serving route. `GET /{group}/logs/view` in `flowgency/app.py` is the only log viewer.
 
 ---
 
@@ -27,12 +27,12 @@
 
 | File | Responsibility | Task |
 | --- | --- | --- |
-| `agency/web/routes/jobs.py` | Log hrefs, resume context, resume POST route | 1, 4 |
-| `agency/templates/job_detail.html` | Log anchors, resume button, copy field | 1, 4 |
-| `agency/integrations/__init__.py` | `RunResult.session_id`, `BaseIntegration.resume_command` | 2 |
-| `agency/integrations/agency/copilot.py` | `_parse_session_id`, `resume_command`, `run` wiring | 2 |
-| `agency/jobs/models.py` | `JobRecord.session_id` | 3 |
-| `agency/jobs/execution.py` | Persist `session_id` on terminal transitions | 3 |
+| `flowgency/web/routes/jobs.py` | Log hrefs, resume context, resume POST route | 1, 4 |
+| `flowgency/templates/job_detail.html` | Log anchors, resume button, copy field | 1, 4 |
+| `flowgency/integrations/__init__.py` | `RunResult.session_id`, `BaseIntegration.resume_command` | 2 |
+| `flowgency/integrations/flowgency/copilot.py` | `_parse_session_id`, `resume_command`, `run` wiring | 2 |
+| `flowgency/jobs/models.py` | `JobRecord.session_id` | 3 |
+| `flowgency/jobs/execution.py` | Persist `session_id` on terminal transitions | 3 |
 | `tools/backfill_job_session_ids.py` | One-time backfill from stderr logs | 5 |
 
 Task order matters: Task 4 consumes `JobRecord.session_id` from Task 3, which consumes `RunResult.session_id` from Task 2. Task 1 is independent and goes first because it is the smallest. Task 5 is last because it depends on the field existing.
@@ -42,19 +42,19 @@ Task order matters: Task 4 consumes `JobRecord.session_id` from Task 3, which co
 ### Task 1: Link job detail logs to the viewer
 
 **Files:**
-- Modify: `agency/web/routes/jobs.py` (imports at lines 1-13; `_job_detail_context` at lines 177-212)
-- Modify: `agency/templates/job_detail.html:78-83`
+- Modify: `flowgency/web/routes/jobs.py` (imports at lines 1-13; `_job_detail_context` at lines 177-212)
+- Modify: `flowgency/templates/job_detail.html:78-83`
 - Test: `tests/test_job_routes.py`
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `_log_href(group_id: str, log_path: str | None) -> str` in `agency/web/routes/jobs.py`. Template context keys `stdout_href`, `stdout_name`, `stderr_href`, `stderr_name`, all `str`, empty string when the record has no path.
+- Produces: `_log_href(group_id: str, log_path: str | None) -> str` in `flowgency/web/routes/jobs.py`. Template context keys `stdout_href`, `stdout_name`, `stderr_href`, `stderr_name`, all `str`, empty string when the record has no path.
 
 **Background the implementer needs:**
 
-`GET /{group}/logs/view?path=<absolute path>` already exists in `agency/app.py` around line 2360. It calls `validate_file_access(fpath, logs_dir)` against the group's resolved logs directory before reading, so linking to it adds no new file exposure. Job logs are written by `agency/jobs/execution.py` to `<group.path>/logs/<date>/<agent>-<trigger>-<job_id>.out` and `.err`, which is inside that directory.
+`GET /{group}/logs/view?path=<absolute path>` already exists in `flowgency/app.py` around line 2360. It calls `validate_file_access(fpath, logs_dir)` against the group's resolved logs directory before reading, so linking to it adds no new file exposure. Job logs are written by `flowgency/jobs/execution.py` to `<group.path>/logs/<date>/<agent>-<trigger>-<job_id>.out` and `.err`, which is inside that directory.
 
-`agency/web/routes/agent_detail.py:222` already builds this href as `f"/{quote(group_id, safe='')}/logs/view?path={quote(str(candidate.resolve()))}"`. Match it exactly so both surfaces stay consistent. `quote` here is `urllib.parse.quote`, whose default `safe="/"` is what the activity tab relies on.
+`flowgency/web/routes/agent_detail.py:222` already builds this href as `f"/{quote(group_id, safe='')}/logs/view?path={quote(str(candidate.resolve()))}"`. Match it exactly so both surfaces stay consistent. `quote` here is `urllib.parse.quote`, whose default `safe="/"` is what the activity tab relies on.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -121,7 +121,7 @@ Expected: both FAIL. The first fails because the rendered page contains the bare
 
 - [ ] **Step 3: Add the href helper and context keys**
 
-In `agency/web/routes/jobs.py`, add to the imports:
+In `flowgency/web/routes/jobs.py`, add to the imports:
 
 ```python
 from urllib.parse import quote
@@ -147,7 +147,7 @@ In the dict returned by `_job_detail_context`, add these four keys next to `"can
 
 - [ ] **Step 4: Render the anchors**
 
-In `agency/templates/job_detail.html`, replace this block:
+In `flowgency/templates/job_detail.html`, replace this block:
 
 ```html
   {% if job.stdout_path or job.stderr_path %}
@@ -188,7 +188,7 @@ Expected: PASS with no new failures.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/web/routes/jobs.py agency/templates/job_detail.html tests/test_job_routes.py
+git add flowgency/web/routes/jobs.py flowgency/templates/job_detail.html tests/test_job_routes.py
 git commit -m "feat(jobs): link job detail logs to the log viewer"
 ```
 
@@ -212,8 +212,8 @@ directory the viewer already guards.
 ### Task 2: Capture the session id in the integration layer
 
 **Files:**
-- Modify: `agency/integrations/__init__.py` (`RunResult` at lines 37-46; `BaseIntegration` at lines 74-90)
-- Modify: `agency/integrations/agency/copilot.py` (add methods near `_usage_summary`; wire both return paths of `run` at lines 398-500)
+- Modify: `flowgency/integrations/__init__.py` (`RunResult` at lines 37-46; `BaseIntegration` at lines 74-90)
+- Modify: `flowgency/integrations/flowgency/copilot.py` (add methods near `_usage_summary`; wire both return paths of `run` at lines 398-500)
 - Test: `tests/test_integration_sidecar.py`
 
 **Interfaces:**
@@ -239,7 +239,7 @@ Add to `tests/test_integration_sidecar.py`, inside the same class that holds `te
 ```python
     def test_parse_session_id_reads_result_event(self):
         import json
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
         raw = "\n".join([
             json.dumps({"type": "assistant", "data": {"text": "hi"}}),
@@ -251,14 +251,14 @@ Add to `tests/test_integration_sidecar.py`, inside the same class that holds `te
 
     def test_parse_session_id_returns_none_without_result(self):
         import json
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
         raw = json.dumps({"type": "assistant", "data": {"text": "hi"}})
 
         assert CopilotIntegration._parse_session_id(raw) is None
 
     def test_base_integration_has_no_resume_command(self):
-        from agency.integrations import BaseIntegration
+        from flowgency.integrations import BaseIntegration
 
         assert BaseIntegration().resume_command("abc") is None
 
@@ -271,7 +271,7 @@ Add to `tests/test_integration_sidecar.py`, inside the same class that holds `te
 
     def test_copilot_run_captures_session_id(self, tmp_agent_dir, monkeypatch):
         import json
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("do the thing")
@@ -308,7 +308,7 @@ Add to `tests/test_integration_sidecar.py`, inside the same class that holds `te
     def test_copilot_run_captures_session_id_on_timeout(self, tmp_agent_dir, monkeypatch):
         import json
         import subprocess
-        import agency.integrations.agency.copilot as copilot_mod
+        import flowgency.integrations.flowgency.copilot as copilot_mod
 
         prompt = tmp_agent_dir / "p.prompt"
         prompt.write_text("do the thing")
@@ -361,7 +361,7 @@ Expected: FAIL with `AttributeError: type object 'CopilotIntegration' has no att
 
 - [ ] **Step 3: Extend RunResult and BaseIntegration**
 
-In `agency/integrations/__init__.py`, add a field to `RunResult`:
+In `flowgency/integrations/__init__.py`, add a field to `RunResult`:
 
 ```python
 @dataclass
@@ -386,7 +386,7 @@ Add this method to `BaseIntegration`, immediately after `run`:
 
 - [ ] **Step 4: Parse and return the session id in Copilot**
 
-In `agency/integrations/agency/copilot.py`, add these two methods immediately before `_usage_summary`:
+In `flowgency/integrations/flowgency/copilot.py`, add these two methods immediately before `_usage_summary`:
 
 ```python
     @staticmethod
@@ -455,7 +455,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/integrations/__init__.py agency/integrations/agency/copilot.py tests/test_integration_sidecar.py
+git add flowgency/integrations/__init__.py flowgency/integrations/flowgency/copilot.py tests/test_integration_sidecar.py
 git commit -m "feat(integrations): return the session id from a run"
 ```
 
@@ -483,8 +483,8 @@ caller. Claude Code and Codex can opt in later by overriding it.
 ### Task 3: Persist the session id on the job record
 
 **Files:**
-- Modify: `agency/jobs/models.py` (`JobRecord` at lines 295-312)
-- Modify: `agency/jobs/execution.py` (`_terminalize_failure` at lines 145-177; `_merge_failed_terminal_metadata` at lines 181-224; the success `replace` at lines 500-513; the three failure call sites that have a `result` in scope)
+- Modify: `flowgency/jobs/models.py` (`JobRecord` at lines 295-312)
+- Modify: `flowgency/jobs/execution.py` (`_terminalize_failure` at lines 145-177; `_merge_failed_terminal_metadata` at lines 181-224; the success `replace` at lines 500-513; the three failure call sites that have a `result` in scope)
 - Test: `tests/test_job_models.py`
 
 **Interfaces:**
@@ -533,7 +533,7 @@ Expected: FAIL with `TypeError: JobRecord.__init__() got an unexpected keyword a
 
 - [ ] **Step 3: Add the field**
 
-In `agency/jobs/models.py`, add the field as the last entry of `JobRecord`, after `memory_publication`:
+In `flowgency/jobs/models.py`, add the field as the last entry of `JobRecord`, after `memory_publication`:
 
 ```python
     memory_publication: dict[str, Any] | None = None
@@ -548,7 +548,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Thread the value through execution**
 
-In `agency/jobs/execution.py`, add a keyword parameter to `_terminalize_failure`, after `memory_publication`:
+In `flowgency/jobs/execution.py`, add a keyword parameter to `_terminalize_failure`, after `memory_publication`:
 
 ```python
     memory_publication: dict[str, object] | None = None,
@@ -589,7 +589,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agency/jobs/models.py agency/jobs/execution.py tests/test_job_models.py
+git add flowgency/jobs/models.py flowgency/jobs/execution.py tests/test_job_models.py
 git commit -m "feat(jobs): persist the run session id on the record"
 ```
 
@@ -615,8 +615,8 @@ No read migration is required.
 ### Task 4: Resume the session from job detail
 
 **Files:**
-- Modify: `agency/web/routes/jobs.py` (imports; `_job_detail_context`; `job_detail`; new POST route after `job_detail`)
-- Modify: `agency/templates/job_detail.html` (button row at lines 35-50; new copy block; new notice)
+- Modify: `flowgency/web/routes/jobs.py` (imports; `_job_detail_context`; `job_detail`; new POST route after `job_detail`)
+- Modify: `flowgency/templates/job_detail.html` (button row at lines 35-50; new copy block; new notice)
 - Test: `tests/test_job_routes.py`
 
 **Interfaces:**
@@ -625,15 +625,15 @@ No read migration is required.
 
 **Background the implementer needs:**
 
-`spawn_interactive_terminal(command: Sequence[str], cwd: Path) -> str` is re-exported from `agency.integrations`. It raises `IntegrationError` when no terminal is available, and on POSIX it can route the argv through `shlex.join` into `xterm -e`. That is why the session id must be validated against `^[A-Za-z0-9_-]{1,128}$` before it reaches the argv: it is the only attacker-influenceable element of the command, and an id from a tampered job record would otherwise be a shell-injection vector. Reject rather than sanitize.
+`spawn_interactive_terminal(command: Sequence[str], cwd: Path) -> str` is re-exported from `flowgency.integrations`. It raises `IntegrationError` when no terminal is available, and on POSIX it can route the argv through `shlex.join` into `xterm -e`. That is why the session id must be validated against `^[A-Za-z0-9_-]{1,128}$` before it reaches the argv: it is the only attacker-influenceable element of the command, and an id from a tampered job record would otherwise be a shell-injection vector. Reject rather than sanitize.
 
-`get_integration(name)` in `agency.integrations` resolves an integration by name and raises `KeyError` for an unknown one.
+`get_integration(name)` in `flowgency.integrations` resolves an integration by name and raises `KeyError` for an unknown one.
 
-`format_interactive_command(argv)`, also re-exported from `agency.integrations`, renders argv for display. Use it for the copyable text so the shown command matches what the spawn would run.
+`format_interactive_command(argv)`, also re-exported from `flowgency.integrations`, renders argv for display. Use it for the copyable text so the shown command matches what the spawn would run.
 
 `require_executable()` raises `IntegrationError` when the CLI is not installed. Tests must monkeypatch `CopilotIntegration.resolve_executable` so their result does not depend on whether the Copilot CLI happens to exist on the machine running the suite.
 
-The `POST /setup/launch` handler in `agency/web/routes/admin_groups.py` around line 413 is the pattern to follow, including `await run_in_threadpool(...)` around the blocking spawn.
+The `POST /setup/launch` handler in `flowgency/web/routes/admin_groups.py` around line 413 is the pattern to follow, including `await run_in_threadpool(...)` around the blocking spawn.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -671,7 +671,7 @@ def test_job_detail_hides_resume_without_session(monkeypatch, tmp_path, raw_conf
 
 
 def test_job_detail_hides_resume_without_integration_support(monkeypatch, tmp_path, raw_config):
-    from agency.integrations.agency.copilot import CopilotIntegration
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(group_root, config_path, job_id="job-unsup", session_id="sess-9")
@@ -684,8 +684,8 @@ def test_job_detail_hides_resume_without_integration_support(monkeypatch, tmp_pa
 
 
 def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config):
-    import agency.web.routes.jobs as jobs_mod
-    from agency.integrations.agency.copilot import CopilotIntegration
+    import flowgency.web.routes.jobs as jobs_mod
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(group_root, config_path, job_id="job-spawn", session_id="sess-2")
@@ -707,9 +707,9 @@ def test_resume_spawns_terminal_and_redirects(monkeypatch, tmp_path, raw_config)
 
 
 def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
-    import agency.web.routes.jobs as jobs_mod
-    from agency.integrations import IntegrationError
-    from agency.integrations.agency.copilot import CopilotIntegration
+    import flowgency.web.routes.jobs as jobs_mod
+    from flowgency.integrations import IntegrationError
+    from flowgency.integrations.flowgency.copilot import CopilotIntegration
 
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(group_root, config_path, job_id="job-nospawn", session_id="sess-3")
@@ -727,7 +727,7 @@ def test_resume_reports_failure(monkeypatch, tmp_path, raw_config):
 
 
 def test_resume_rejects_unsafe_session_id(monkeypatch, tmp_path, raw_config):
-    import agency.web.routes.jobs as jobs_mod
+    import flowgency.web.routes.jobs as jobs_mod
 
     client, config_path, group_root = _seed_app(monkeypatch, tmp_path, raw_config)
     _write_resumable_job(
@@ -763,14 +763,14 @@ Expected: FAIL. The POST tests return 405 because the route does not exist; the 
 
 - [ ] **Step 3: Add the resume context**
 
-In `agency/web/routes/jobs.py`, extend the imports:
+In `flowgency/web/routes/jobs.py`, extend the imports:
 
 ```python
 import re
 
 from starlette.concurrency import run_in_threadpool
 
-from agency.integrations import (
+from flowgency.integrations import (
     IntegrationError,
     format_interactive_command,
     get_integration,
@@ -827,7 +827,7 @@ def _integration_display_name(record) -> str:
 Change the `job_detail` signature to accept the query flag:
 
 ```python
-async def job_detail(request: Request, group: str, job_id: str, artifact: str = "", resume: str = "", services: AgencyServices = Depends(get_services)):
+async def job_detail(request: Request, group: str, job_id: str, artifact: str = "", resume: str = "", services: FlowgencyServices = Depends(get_services)):
 ```
 
 and add to the template payload, alongside `**context`:
@@ -843,7 +843,7 @@ Add this route immediately after `job_detail`:
 
 ```python
 @router.post("/{group}/jobs/{job_id}/resume")
-async def job_resume(request: Request, group: str, job_id: str, services: AgencyServices = Depends(get_services)):
+async def job_resume(request: Request, group: str, job_id: str, services: FlowgencyServices = Depends(get_services)):
     snapshot = services.config_store.load()
     if group not in snapshot.config.groups:
         raise HTTPException(status_code=404, detail="Unknown group")
@@ -874,7 +874,7 @@ Note the deliberate ordering: the record is loaded and validated before anything
 
 - [ ] **Step 5: Render the button, command, and notice**
 
-In `agency/templates/job_detail.html`, add inside the button row, after the Routines link and before the cancel form:
+In `flowgency/templates/job_detail.html`, add inside the button row, after the Routines link and before the cancel form:
 
 ```html
     {% if resume_available %}
@@ -943,7 +943,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agency/web/routes/jobs.py agency/templates/job_detail.html tests/test_job_routes.py
+git add flowgency/web/routes/jobs.py flowgency/templates/job_detail.html tests/test_job_routes.py
 git commit -m "feat(jobs): resume a finished session from job detail"
 ```
 
@@ -982,13 +982,13 @@ neither is influenced by the request.
 
 **Background the implementer needs:**
 
-The write cannot use `transition_job`. That function requires a status change and rejects terminal-to-terminal transitions, and these records are already terminal. Use `exclusive_lock(job_lock_path(path), wait=True)` from `agency.jobs.store`, re-read the record inside the lock, apply `dataclasses.replace`, and call `write_job`. Re-reading inside the lock is what makes a concurrent worker write safe; do not reuse a record read before acquiring it.
+The write cannot use `transition_job`. That function requires a status change and rejects terminal-to-terminal transitions, and these records are already terminal. Use `exclusive_lock(job_lock_path(path), wait=True)` from `flowgency.jobs.store`, re-read the record inside the lock, apply `dataclasses.replace`, and call `write_job`. Re-reading inside the lock is what makes a concurrent worker write safe; do not reuse a record read before acquiring it.
 
-The id is recovered from the stderr log, because `_usage_summary` appends a line reading `Resume     copilot --resume=<id>` to stderr, and `agency/jobs/execution.py` writes stderr to `<stem>.err`.
+The id is recovered from the stderr log, because `_usage_summary` appends a line reading `Resume     copilot --resume=<id>` to stderr, and `flowgency/jobs/execution.py` writes stderr to `<stem>.err`.
 
-Enumerate work with `JobStore(snapshot.config.agency.memory_store).paths(group_id)`, and load the config with the same read-only helper the CLI uses. `agency/cli.py:146` defines `_snapshot_read_only(path)`; import and reuse it rather than reimplementing config parsing.
+Enumerate work with `JobStore(snapshot.config.flowgency.memory_store).paths(group_id)`, and load the config with the same read-only helper the CLI uses. `flowgency/cli.py:146` defines `_snapshot_read_only(path)`; import and reuse it rather than reimplementing config parsing.
 
-This script is deliberately not registered in `agency/cli.py`. It is a one-time utility for existing local data.
+This script is deliberately not registered in `flowgency/cli.py`. It is a one-time utility for existing local data.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -997,7 +997,7 @@ Create `tests/test_backfill_job_session_ids.py`. It reuses the config and job bu
 ```python
 from dataclasses import replace
 
-from agency.jobs.store import read_job, write_job
+from flowgency.jobs.store import read_job, write_job
 from tests.test_job_routes import _seed_app, _write_job_record
 from tools.backfill_job_session_ids import backfill
 
@@ -1073,10 +1073,10 @@ import re
 from dataclasses import replace
 from pathlib import Path
 
-from agency.cli import _snapshot_read_only
-from agency.fs.locks import exclusive_lock
-from agency.jobs.authority import JobStore
-from agency.jobs.store import job_lock_path, read_job, write_job
+from flowgency.cli import _snapshot_read_only
+from flowgency.fs.locks import exclusive_lock
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.store import job_lock_path, read_job, write_job
 
 
 _RESUME = re.compile(r"--resume[= ]([A-Za-z0-9_-]{1,128})")
@@ -1099,7 +1099,7 @@ def backfill(
     dry_run: bool = False,
 ) -> list[tuple[str, str]]:
     snapshot = _snapshot_read_only(Path(config_path))
-    store = JobStore(snapshot.config.agency.memory_store)
+    store = JobStore(snapshot.config.flowgency.memory_store)
     group_ids = [group] if group else list(snapshot.config.groups)
     results: list[tuple[str, str]] = []
     for group_id in group_ids:

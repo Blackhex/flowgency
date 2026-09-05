@@ -15,17 +15,17 @@ Investigation showed three independent defects behind the one symptom.
 ### `capabilities.write` is not a runtime restriction
 
 `AgentCapabilities.write` is read only by the decision-executor gate in
-`agency/app.py` (`execution_agent_options`, and the decide-form validation),
-by the CLI equivalents in `agency/cli.py`, and by display code in
-`agency/web/routes/agent_detail.py`. `resolve_effective_policy` in
-`agency/configuration/effective.py` never consults it. It reaches neither the
+`flowgency/app.py` (`execution_agent_options`, and the decide-form validation),
+by the CLI equivalents in `flowgency/cli.py`, and by display code in
+`flowgency/web/routes/agent_detail.py`. `resolve_effective_policy` in
+`flowgency/configuration/effective.py` never consults it. It reaches neither the
 sandbox, nor the tool policy, nor the memory publish path.
 
 ### The tool allowlist is the actual blocker
 
 A group whose `runtime.tools` is `allowlist [read, search]` produces
 `--allow-tool read --allow-tool search` in
-`agency/integrations/agency/copilot.py`. No write tool, no shell. An agent under
+`flowgency/integrations/flowgency/copilot.py`. No write tool, no shell. An agent under
 that policy cannot run a command and cannot create a file, whatever its
 `capabilities.write` value.
 
@@ -37,8 +37,8 @@ contradicted it.
 
 ### Memory writing is wired but dead
 
-`_stage_memory_locked` in `agency/memory/store.py` copies canonical memory into
-`<memory_store>/.staging/<hash>/<job_id>/`, and `agency/jobs/execution.py`
+`_stage_memory_locked` in `flowgency/memory/store.py` copies canonical memory into
+`<memory_store>/.staging/<hash>/<job_id>/`, and `flowgency/jobs/execution.py`
 passes that directory as `IntegrationRunRequest.memory_working_dir`. No
 integration reads that field. It is never added to the sandbox roots, never
 named in the prompt, and never copied into the launch view. The stage therefore
@@ -51,7 +51,7 @@ no agent can read its memory either.
 The group root is already in the sandbox roots, so `<group.path>/observations/`
 is physically reachable. But nothing tells an agent the path, the filename
 convention, or the front-matter schema.
-`skills/agency-setup/references/templates.md` instructs agents to "record
+`skills/flowgency-setup/references/templates.md` instructs agents to "record
 observations or proposals through the project's configured pipeline" — a
 sentence describing something that does not exist.
 
@@ -77,11 +77,11 @@ design:
   conclusion this section supports is unchanged; only its stated reason was
   wrong.
 - `--add-dir` is what switches path verification on at all. With no `--add-dir`,
-  `--allow-tool write` is effectively unbounded. Agency takes that branch today
+  `--allow-tool write` is effectively unbounded. Flowgency takes that branch today
   by emitting `--allow-all-paths` whenever `sandbox_roots` is empty.
 - Listing roots does not fence off the working directory's ancestry. With roots
   listed, writes still succeeded to the parent of `cwd`, to a sibling directory,
-  and two levels up. Agency runs agents with `cwd` set to the launch view inside
+  and two levels up. Flowgency runs agents with `cwd` set to the launch view inside
   the job store, so an agent holding a write tool can reach the surrounding job
   store. This is a pre-existing isolation weakness, recorded here because the
   outbox design depends on knowing it, and deliberately not fixed here.
@@ -124,7 +124,7 @@ gains a `writable_roots` field alongside its existing `sandbox_roots`:
   `capabilities.write: false` it is **empty**.
 
 The reporting paths are deliberately absent from that field. The launch view —
-which holds `.agency/outbox/` and `.agency/memory/` — is **implicitly writable
+which holds `.flowgency/outbox/` and `.flowgency/memory/` — is **implicitly writable
 for every agent**, always, and it never appears in configuration. It is per-job,
 so it reaches integrations through `IntegrationRunRequest.launch_dir` and
 `memory_working_dir`. "Read-only" therefore means read-only to the workspace,
@@ -152,13 +152,13 @@ accepted: a contract that is declared but not enforced is the failure mode this
 whole design exists to remove. No integration is adapted here — this
 specification defines the contract only.
 
-**Failure reporting stops lying.** Agency records the effective runtime policy
+**Failure reporting stops lying.** Flowgency records the effective runtime policy
 alongside the run, so a blocked agent's self-diagnosis can be checked against
 what was actually granted.
 
 ### Outbox
 
-Location: `<launch_view>/.agency/outbox/{observations,proposals}/`.
+Location: `<launch_view>/.flowgency/outbox/{observations,proposals}/`.
 
 The outbox lives inside the launch view because the launch view is already the
 process working directory, so it is writable without granting any additional
@@ -167,7 +167,7 @@ outbox is inherently per-job and disposable.
 
 ### Memory
 
-`memory_working_dir` is repointed to `<launch_view>/.agency/memory/`, seeded
+`memory_working_dir` is repointed to `<launch_view>/.flowgency/memory/`, seeded
 with the canonical memory files so the agent can read its memory as well as
 write it. After a successful run the worker copies that directory's contents
 into the existing `stage.directory` and hands off to `prepare_publication`
@@ -188,7 +188,7 @@ Validation rules:
 - Only `*.md` files directly in each directory. No subdirectories, no other
   extensions, no symlinks or reparse points, reusing the checks already present
   in `create_launch_view`.
-- Agency assigns the final filename as `<job date>-<slug>.md`. The slug is taken
+- Flowgency assigns the final filename as `<job date>-<slug>.md`. The slug is taken
   from the front-matter `slug` field when it is present and matches
   `[a-z0-9-]{1,60}`, otherwise it is derived from the record's display title by
   the same rule `extract_display_title` already uses, otherwise it falls back to
@@ -199,7 +199,7 @@ Validation rules:
   pass `validate_proposal_schema`, including that `execution_agent` names a
   configured, executable, `write: true` instance — the same rule the decide form
   enforces, applied at authorship time instead of at decision time.
-- `agent`, `date`, and initial `status` are set by Agency, not read from the
+- `agent`, `date`, and initial `status` are set by Flowgency, not read from the
   file. An agent cannot file an observation under another agent's name and
   cannot backdate one.
 - At most 20 records per directory per run, and at most 64 KiB per record, so a
@@ -212,7 +212,7 @@ Validation failures neither discard the agent's work nor silently succeed.
 
 Valid records are ingested even when the same run also produced invalid ones.
 Discarding five good observations because a sixth file was malformed throws away
-work the agent did and that Agency already judged sound. The run still **fails**
+work the agent did and that Flowgency already judged sound. The run still **fails**
 and the summary still names every rejection, so nothing is hidden — but the good
 records land.
 
@@ -262,7 +262,7 @@ conflict therefore cannot lose an observation.
 
 The outbox contract is appended to the **task input** at job resolution time,
 alongside `build_routine_task_input` and `build_decision_prompt` in
-`agency/jobs/prompts.py`. It is not carried in the blueprint.
+`flowgency/jobs/prompts.py`. It is not carried in the blueprint.
 
 Blueprints are user-editable library content, so a protocol that depends on them
 is a protocol that disappears when someone edits `AGENTS.md`. Putting it in the
@@ -273,8 +273,8 @@ told instead of inferring it.
 
 ### Module boundaries
 
-A new `agency/records/` package owns outbox layout, validation, and ingest —
-deliberately not `agency/app.py`, which is already past two thousand lines and
+A new `flowgency/records/` package owns outbox layout, validation, and ingest —
+deliberately not `flowgency/app.py`, which is already past two thousand lines and
 mixes routing, parsing, and pipeline logic.
 
 The package exposes a narrow surface: build the outbox for a job, validate a
@@ -282,11 +282,11 @@ populated outbox, ingest a validated one. The worker calls those three functions
 and knows nothing about front matter.
 
 Existing helpers are reused rather than reimplemented: `validate_proposal_schema`
-from `agency/proposals.py`, `atomic_write_text` from `agency/fs/atomic.py`, and
-`resolve_group_paths` from `agency/configuration/group_paths.py`.
+from `flowgency/proposals.py`, `atomic_write_text` from `flowgency/fs/atomic.py`, and
+`resolve_group_paths` from `flowgency/configuration/group_paths.py`.
 
 One targeted move is required. `parse_frontmatter` and `extract_display_title`
-currently live in `agency/app.py`, which constructs the FastAPI application;
+currently live in `flowgency/app.py`, which constructs the FastAPI application;
 importing them from a worker-side package would drag the whole web layer into
 the job process. Both functions move to a small shared module, and `app.py`
 imports them from there. Nothing else in `app.py` is touched.
@@ -297,7 +297,7 @@ Development is test-driven. The cases that matter are the ones that currently
 fail silently:
 
 - A `write: false` agent files an observation and it lands, with `agent` and
-  `date` stamped by Agency rather than taken from the file.
+  `date` stamped by Flowgency rather than taken from the file.
 - An outbox file claiming `agent: someone-else` has that field overwritten.
 - Path traversal, nested directories, non-`.md` files, symlinks, oversized
   records, and too many records are each rejected.
@@ -323,7 +323,7 @@ fail silently:
   capability. Its statement that agent tools are a complete override stands
   unchanged — there is no tools exception.
 - `kb/configuration.md` gains the same.
-- `skills/agency-setup/references/templates.md` replaces "record observations or
+- `skills/flowgency-setup/references/templates.md` replaces "record observations or
   proposals through the project's configured pipeline" with the concrete
   protocol.
 
@@ -339,7 +339,7 @@ Recorded so they are not relitigated:
   `session-state/` and `logs/` that the existing `--resume` and usage-summary
   code reads. Until it lands, read-only agents on Copilot do not run at all.
 - The working-directory ancestry isolation weakness.
-- An Agency MCP server as an alternative transport. It is the only mechanism
+- An Flowgency MCP server as an alternative transport. It is the only mechanism
   that removes the filesystem write primitive entirely, and it remains the
   natural third step, but it is integration-specific and would sit on top of the
   same validated ingest path defined here.
@@ -350,7 +350,7 @@ Recorded so they are not relitigated:
 - **Making reporting a graded capability** (`capabilities: {workspace, records}`)
   was rejected as a knob for a case this design does not have: an agent that runs
   but must produce nothing.
-- **Granting a write tool to satisfy the protocol.** An earlier draft had Agency
+- **Granting a write tool to satisfy the protocol.** An earlier draft had Flowgency
   always append a write tool to the configured allowlist. Rejected after a live
   runtime test caught it: without path-scoped write permissions, granting the
   tool grants write to every readable root, so a `capabilities.write: false`
@@ -363,11 +363,11 @@ Recorded so they are not relitigated:
 - **Writing directly into `<group.path>/observations/`** was rejected because it
   would let any agent overwrite another agent's observations or edit a decision
   file, which the decision prompt currently prevents only by asking politely.
-  The outbox is the only supported way for an agent to add a record, and Agency
+  The outbox is the only supported way for an agent to add a record, and Flowgency
   holds the pen. Note that this specification makes that a protocol rule, not a
   filesystem-enforced one: until the dependent sandbox specification lands, an
   agent that holds a write tool and reaches the group root can still edit records
-  directly. Ingest validation constrains what Agency will accept, not what the
+  directly. Ingest validation constrains what Flowgency will accept, not what the
   filesystem will permit.
 - **Granting a write tool scoped to the outbox path**, proposed during design.
   Tool-permission path scoping is file-oriented and has no wildcard support, so

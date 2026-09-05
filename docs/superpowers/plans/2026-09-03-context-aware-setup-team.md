@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make first-run Agency setup synthesize an exact-size, project-grounded team whose identities and operating profiles incorporate the user's approved group choices.
+**Goal:** Make first-run Flowgency setup synthesize an exact-size, project-grounded team whose identities and operating profiles incorporate the user's approved group choices.
 
-**Architecture:** Strengthen the guided launch prompt, then make the package-owned `agency-setup` skill retain inspected project facts and prior answers as conversational context for team synthesis. The skill generates a complete exact-size draft, supports count changes with verbatim survivor preservation, and maps approved profiles only onto existing blueprint, prompt, group, and instance authority. The interactive session remains the context owner; Agency continues processing only the canonical config readiness signal and does not gain a second output model.
+**Architecture:** Strengthen the guided launch prompt, then make the package-owned `flowgency-setup` skill retain inspected project facts and prior answers as conversational context for team synthesis. The skill generates a complete exact-size draft, supports count changes with verbatim survivor preservation, and maps approved profiles only onto existing blueprint, prompt, group, and instance authority. The interactive session remains the context owner; Flowgency continues processing only the canonical config readiness signal and does not gain a second output model.
 
 **Tech Stack:** Python 3.13, Markdown Agent Skills, FastAPI setup launch prompt, pytest text-contract tests, GitHub Copilot CLI live acceptance. No new dependency.
 
@@ -27,10 +27,10 @@ semantic-category standard rather than exact-label presence.
 ## Global Constraints
 
 - Approved specification: `docs/superpowers/specs/2026-09-03-context-aware-setup-team-design.md`, committed in `deb8f0d` and clarified in `76f4751`.
-- Work in `C:/Projekty/christag-agency/.worktrees/context-aware-setup-team` on `fix/context-aware-setup-team` until the integration task.
+- Work in `C:/Projekty/flowgency/.worktrees/context-aware-setup-team` on `fix/context-aware-setup-team` until the integration task.
 - Baseline: **1983 passed, 5 skipped, 0 failed** from the isolated worktree.
 - Keep `schema_version: 5`; do not add configuration fields or a second team/output model.
-- The browser and launcher still select the Agency data root and integration. The guided session still asks for the project workspace first.
+- The browser and launcher still select the Flowgency data root and integration. The guided session still asks for the project workspace first.
 - Before the first team draft: inspect the workspace read-only, summarize concrete project facts, approve group display name and stable ID, then approve an initial positive agent count.
 - The first draft contains exactly the initial count. The count may change afterward.
 - A selected survivor keeps its entire profile verbatim. Survivors may not outnumber the revised count.
@@ -41,9 +41,9 @@ semantic-category standard rather than exact-label presence.
 - Team drafts, rationales, coverage maps, and survivor choices remain conversational state. Persist only existing schema, blueprint, and prompt fields after approval.
 - No blueprint, prompt, derived storage, or config write occurs while drafting or revising the team.
 - Preserve the data-root, grouped path approval, path safety, skill packaging/discovery, config validation, revision checking, atomic write, scheduler, and polling contracts.
-- Application changes are limited to `agency/web/setup_flow.py`. Do not modify setup routes, templates, integration models, integration command builders, jobs, dashboard behavior, group administration, or runtime execution.
+- Application changes are limited to `flowgency/web/setup_flow.py`. Do not modify setup routes, templates, integration models, integration command builders, jobs, dashboard behavior, group administration, or runtime execution.
 - `InteractiveSetupRequest` remains `(data_root, config_path, prompt)`. `InteractiveSetupResult` remains `(fallback_command)`. The canonical config remains the only setup completion output.
-- Edit the canonical skill at `agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md`; do not create a mirrored copy or replace either repository symlink.
+- Edit the canonical skill at `flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md`; do not create a mirrored copy or replace either repository symlink.
 - Do not modify or stage `config.yaml`, `config.yaml.lock`, group state, logs, build output, or other runtime-local files.
 - Do not run an individual `real_runtime` test. The complete suite owns its configured environment-dependent coverage.
 - Use Conventional Commits with lowercase imperative subjects no longer than 72 characters.
@@ -53,30 +53,30 @@ semantic-category standard rather than exact-label presence.
 
 ### Production And Guidance
 
-- `agency/web/setup_flow.py` - reinforce the context-aware team handoff in the existing guided launch prompt; no signature or return-type change.
-- `agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md` - own project context, exact-size team synthesis, operating profiles, revision/survivor rules, authority mapping, and consolidated approval.
+- `flowgency/web/setup_flow.py` - reinforce the context-aware team handoff in the existing guided launch prompt; no signature or return-type change.
+- `flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md` - own project context, exact-size team synthesis, operating profiles, revision/survivor rules, authority mapping, and consolidated approval.
 - `kb/setup-skill.md` - explain the user-facing context-aware team workflow without duplicating the complete skill.
 
 ### Focused Tests
 
 - `tests/test_setup_flow.py` - pin the concise guided launch handoff and canonical-output boundary.
 - `tests/test_server.py` - prove the actual setup launch request carries the strengthened prompt and still writes no config before the session completes.
-- `tests/test_agency_setup_skill.py` - pin context ordering, sparse-evidence behavior, exact-size profiles, identity/permission rules, count revision, survivor semantics, review mapping, and guide parity.
+- `tests/test_flowgency_setup_skill.py` - pin context ordering, sparse-evidence behavior, exact-size profiles, identity/permission rules, count revision, survivor semantics, review mapping, and guide parity.
 
 ### Explicitly Unchanged Application Boundaries
 
-- `agency/integrations/models.py` - no interactive request/result payload changes.
-- `agency/integrations/agency/copilot.py` - no command, skill-discovery, or terminal behavior changes.
-- `agency/web/routes/admin_groups.py` - no launch result or config-readiness processing changes.
-- `agency/templates/setup.html` - no browser workflow changes.
-- `agency/configuration/`, `agency/jobs/`, and other runtime modules - no changes.
+- `flowgency/integrations/models.py` - no interactive request/result payload changes.
+- `flowgency/integrations/flowgency/copilot.py` - no command, skill-discovery, or terminal behavior changes.
+- `flowgency/web/routes/admin_groups.py` - no launch result or config-readiness processing changes.
+- `flowgency/templates/setup.html` - no browser workflow changes.
+- `flowgency/configuration/`, `flowgency/jobs/`, and other runtime modules - no changes.
 
 ## Shared Contracts
 
 No new Python type or persisted data shape is introduced.
 
 ```text
-# agency/web/setup_flow.py - signature remains unchanged
+# flowgency/web/setup_flow.py - signature remains unchanged
 def build_setup_prompt(
     data_root: Path,
     config_path: Path,
@@ -123,7 +123,7 @@ conversation:    rationale, coverage analysis, handoff explanation
 ### Task 1: Strengthen The Guided Setup Handoff
 
 **Files:**
-- Modify: `agency/web/setup_flow.py`
+- Modify: `flowgency/web/setup_flow.py`
 - Modify: `tests/test_setup_flow.py`
 - Modify: `tests/test_server.py`
 
@@ -139,7 +139,7 @@ Add to `tests/test_setup_flow.py` after the guided data-root test:
 def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
     tmp_path: Path,
 ):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
 
     prompt = build_setup_prompt(
@@ -236,7 +236,7 @@ polling, and no-write behavior remains green.
 Run:
 
 ```powershell
-python -c "from dataclasses import fields; from agency.integrations.models import InteractiveSetupRequest, InteractiveSetupResult; assert tuple(f.name for f in fields(InteractiveSetupRequest)) == ('data_root', 'config_path', 'prompt'); assert tuple(f.name for f in fields(InteractiveSetupResult)) == ('fallback_command',); print('interactive setup boundary unchanged')"
+python -c "from dataclasses import fields; from flowgency.integrations.models import InteractiveSetupRequest, InteractiveSetupResult; assert tuple(f.name for f in fields(InteractiveSetupRequest)) == ('data_root', 'config_path', 'prompt'); assert tuple(f.name for f in fields(InteractiveSetupResult)) == ('fallback_command',); print('interactive setup boundary unchanged')"
 ```
 
 Expected: `interactive setup boundary unchanged`. Do not add this as a new
@@ -247,7 +247,7 @@ application API test; the feature intentionally does not alter those models.
 Run:
 
 ```powershell
-git add agency/web/setup_flow.py tests/test_setup_flow.py tests/test_server.py
+git add flowgency/web/setup_flow.py tests/test_setup_flow.py tests/test_server.py
 git commit -m "fix(setup): hand off contextual team synthesis"
 ```
 
@@ -256,8 +256,8 @@ git commit -m "fix(setup): hand off contextual team synthesis"
 ### Task 2: Implement Context-Aware Team Synthesis In The Skill
 
 **Files:**
-- Modify: `agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md`
-- Modify: `tests/test_agency_setup_skill.py`
+- Modify: `flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md`
+- Modify: `tests/test_flowgency_setup_skill.py`
 
 **Interfaces:**
 - Consumes: guided prompt markers and the selected integration/workspace already supplied to the skill; existing schema-version-5 config, blueprint, prompt, permission, routine, workspace, and memory contracts.
@@ -461,7 +461,7 @@ def test_setup_maps_review_profiles_only_to_existing_authority_surfaces():
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py -q
+python -m pytest tests/test_flowgency_setup_skill.py -q
 ```
 
 Expected: the new tests fail because Section 2 still proposes a fixed
@@ -497,7 +497,7 @@ then continue. Do not fall back to a stock team.
 
 - [ ] **Step 7: Replace Section 2's generic team paragraphs**
 
-Rename `## 2. Plan The Team And Resolve Agency` to
+Rename `## 2. Plan The Team And Resolve Flowgency` to
 `## 2. Synthesize And Approve The Team`.
 
 Replace the first two paragraphs of that section, through the sentence ending
@@ -646,7 +646,7 @@ paragraph.
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py tests/test_setup_skill_e2e.py tests/test_setup_assets.py tests/test_surface_contracts.py -q
+python -m pytest tests/test_flowgency_setup_skill.py tests/test_setup_skill_e2e.py tests/test_setup_assets.py tests/test_surface_contracts.py -q
 ```
 
 Expected: all tests pass. The wheel test proves the package-owned skill bytes
@@ -658,8 +658,8 @@ contracts remain green.
 Run:
 
 ```powershell
-git add agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md tests/test_agency_setup_skill.py
-git commit -m "fix(agency-setup): synthesize contextual teams"
+git add flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md tests/test_flowgency_setup_skill.py
+git commit -m "fix(flowgency-setup): synthesize contextual teams"
 ```
 
 ---
@@ -668,7 +668,7 @@ git commit -m "fix(agency-setup): synthesize contextual teams"
 
 **Files:**
 - Modify: `kb/setup-skill.md`
-- Modify: `tests/test_agency_setup_skill.py`
+- Modify: `tests/test_flowgency_setup_skill.py`
 
 **Interfaces:**
 - Consumes: the canonical skill behavior from Task 2.
@@ -676,7 +676,7 @@ git commit -m "fix(agency-setup): synthesize contextual teams"
 
 - [ ] **Step 1: Write the failing guide contract test**
 
-Add to `tests/test_agency_setup_skill.py`:
+Add to `tests/test_flowgency_setup_skill.py`:
 
 ```python
 def test_setup_guide_describes_context_aware_team_synthesis():
@@ -705,7 +705,7 @@ def test_setup_guide_describes_context_aware_team_synthesis():
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py::test_setup_guide_describes_context_aware_team_synthesis -q
+python -m pytest tests/test_flowgency_setup_skill.py::test_setup_guide_describes_context_aware_team_synthesis -q
 ```
 
 Expected: FAIL because the guide still describes proposing reusable roles
@@ -713,7 +713,7 @@ before asking the count and does not explain survivor or complete-profile review
 
 - [ ] **Step 3: Add a concise context-aware team section**
 
-Insert this section in `kb/setup-skill.md` after `## Agency Data Root` and before
+Insert this section in `kb/setup-skill.md` after `## Flowgency Data Root` and before
 `## Install`:
 
 ```markdown
@@ -769,7 +769,7 @@ validation, and result sections unchanged.
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py tests/test_surface_contracts.py tests/test_repository_boundaries.py -q
+python -m pytest tests/test_flowgency_setup_skill.py tests/test_surface_contracts.py tests/test_repository_boundaries.py -q
 ```
 
 Expected: all tests pass; no stale role-before-count wording remains in the
@@ -780,7 +780,7 @@ active setup guide and no repository prose boundary is violated.
 Run:
 
 ```powershell
-git add kb/setup-skill.md tests/test_agency_setup_skill.py
+git add kb/setup-skill.md tests/test_flowgency_setup_skill.py
 git commit -m "docs(setup): explain contextual team synthesis"
 ```
 
@@ -790,7 +790,7 @@ git commit -m "docs(setup): explain contextual team synthesis"
 
 **Files:**
 - Verify: every file changed in Tasks 1-3
-- Preserve unchanged: all application files outside `agency/web/setup_flow.py`
+- Preserve unchanged: all application files outside `flowgency/web/setup_flow.py`
 - Do not create tracked live-acceptance artifacts
 
 **Interfaces:**
@@ -802,7 +802,7 @@ git commit -m "docs(setup): explain contextual team synthesis"
 Run from the feature worktree:
 
 ```powershell
-$allowed = @('agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md','agency/web/setup_flow.py','docs/superpowers/plans/2026-09-03-context-aware-setup-team.md','docs/superpowers/specs/2026-09-03-context-aware-setup-team-design.md','kb/setup-skill.md','tests/test_agency_setup_skill.py','tests/test_server.py','tests/test_setup_flow.py'); $changed = @(git diff --name-only master...HEAD); $unexpected = @($changed | Where-Object { $_ -notin $allowed }); if ($unexpected) { throw "Unexpected changed files: $($unexpected -join ', ')" }; $changed
+$allowed = @('flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md','flowgency/web/setup_flow.py','docs/superpowers/plans/2026-09-03-context-aware-setup-team.md','docs/superpowers/specs/2026-09-03-context-aware-setup-team-design.md','kb/setup-skill.md','tests/test_flowgency_setup_skill.py','tests/test_server.py','tests/test_setup_flow.py'); $changed = @(git diff --name-only master...HEAD); $unexpected = @($changed | Where-Object { $_ -notin $allowed }); if ($unexpected) { throw "Unexpected changed files: $($unexpected -join ', ')" }; $changed
 ```
 
 Expected: only the eight listed paths are printed. In particular, no route,
@@ -814,7 +814,7 @@ Run:
 
 ```powershell
 git diff --check master...HEAD
-git grep -n -i -E "propose three to five distinct roles|which proposed roles to create now|exactly one builder normally receives write" -- agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md kb/setup-skill.md
+git grep -n -i -E "propose three to five distinct roles|which proposed roles to create now|exactly one builder normally receives write" -- flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md kb/setup-skill.md
 ```
 
 Expected: both commands emit no findings; the second exits 1 because all three
@@ -825,7 +825,7 @@ superseded instructions are absent.
 Run:
 
 ```powershell
-python -m pytest tests/test_setup_flow.py tests/test_server.py tests/test_agency_setup_skill.py tests/test_setup_skill_e2e.py tests/test_setup_assets.py tests/test_surface_contracts.py tests/test_repository_boundaries.py -q
+python -m pytest tests/test_setup_flow.py tests/test_server.py tests/test_flowgency_setup_skill.py tests/test_setup_skill_e2e.py tests/test_setup_assets.py tests/test_surface_contracts.py tests/test_repository_boundaries.py -q
 ```
 
 Expected: every focused test passes with only pre-existing environment-dependent
@@ -836,8 +836,8 @@ skips, if any.
 Run:
 
 ```powershell
-python -c "from dataclasses import fields; from agency.integrations.models import InteractiveSetupRequest, InteractiveSetupResult; assert tuple(f.name for f in fields(InteractiveSetupRequest)) == ('data_root', 'config_path', 'prompt'); assert tuple(f.name for f in fields(InteractiveSetupResult)) == ('fallback_command',); print('interactive setup boundary unchanged')"
-git diff --quiet master...HEAD -- agency/integrations/models.py agency/integrations/agency/copilot.py agency/web/routes/admin_groups.py agency/templates/setup.html agency/configuration agency/jobs
+python -c "from dataclasses import fields; from flowgency.integrations.models import InteractiveSetupRequest, InteractiveSetupResult; assert tuple(f.name for f in fields(InteractiveSetupRequest)) == ('data_root', 'config_path', 'prompt'); assert tuple(f.name for f in fields(InteractiveSetupResult)) == ('fallback_command',); print('interactive setup boundary unchanged')"
+git diff --quiet master...HEAD -- flowgency/integrations/models.py flowgency/integrations/flowgency/copilot.py flowgency/web/routes/admin_groups.py flowgency/templates/setup.html flowgency/configuration flowgency/jobs
 ```
 
 Expected: the Python command prints `interactive setup boundary unchanged`; Git
@@ -848,7 +848,7 @@ exits 0 with no output.
 Run:
 
 ```powershell
-$wheelDir = Join-Path $env:TEMP 'agency-context-team-wheel'; Remove-Item -Recurse -Force $wheelDir -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path $wheelDir | Out-Null; python -m pip wheel --disable-pip-version-check --no-deps --wheel-dir $wheelDir .; python -c "from pathlib import Path; from zipfile import ZipFile; wheel=next(Path(r'$wheelDir').glob('christag_agency-*.whl')); archive=ZipFile(wheel); skill='agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md'; assert skill in archive.namelist(); text=archive.read(skill).decode('utf-8'); assert 'Generate the first complete team draft with exactly that many profiles.' in text; assert 'Preserve every selected survivor profile verbatim' in text; print(skill)"; Remove-Item -Recurse -Force $wheelDir
+$wheelDir = Join-Path $env:TEMP 'flowgency-context-team-wheel'; Remove-Item -Recurse -Force $wheelDir -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path $wheelDir | Out-Null; python -m pip wheel --disable-pip-version-check --no-deps --wheel-dir $wheelDir .; python -c "from pathlib import Path; from zipfile import ZipFile; wheel=next(Path(r'$wheelDir').glob('flowgency-*.whl')); archive=ZipFile(wheel); skill='flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md'; assert skill in archive.namelist(); text=archive.read(skill).decode('utf-8'); assert 'Generate the first complete team draft with exactly that many profiles.' in text; assert 'Preserve every selected survivor profile verbatim' in text; print(skill)"; Remove-Item -Recurse -Force $wheelDir
 ```
 
 Expected: wheel build succeeds and prints the canonical packaged `SKILL.md`
@@ -871,7 +871,7 @@ session through the production command builder. Run the command with
 `run_in_terminal` in async mode so prompts can be answered one at a time:
 
 ```powershell
-$liveRoot = Join-Path $env:TEMP 'agency-context-team-live'; $dataRoot = Join-Path $liveRoot 'Agency'; $configPath = Join-Path $liveRoot 'config.yaml'; Remove-Item -Recurse -Force $liveRoot -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null; $projectRoot = (Get-Location).Path; python -c "import subprocess; from pathlib import Path; from agency.integrations.agency.copilot import CopilotIntegration; from agency.integrations.models import InteractiveSetupRequest; from agency.web.setup_flow import build_setup_prompt; root=Path(r'$dataRoot').resolve(strict=True); config=Path(r'$configPath').resolve(); prompt=build_setup_prompt(root, config, selected_integration='copilot'); request=InteractiveSetupRequest(data_root=root, config_path=config, prompt=prompt); command=tuple(CopilotIntegration()._interactive_setup_command(request)); raise SystemExit(subprocess.call(command, cwd=root))"
+$liveRoot = Join-Path $env:TEMP 'flowgency-context-team-live'; $dataRoot = Join-Path $liveRoot 'Flowgency'; $configPath = Join-Path $liveRoot 'config.yaml'; Remove-Item -Recurse -Force $liveRoot -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null; $projectRoot = (Get-Location).Path; python -c "import subprocess; from pathlib import Path; from flowgency.integrations.flowgency.copilot import CopilotIntegration; from flowgency.integrations.models import InteractiveSetupRequest; from flowgency.web.setup_flow import build_setup_prompt; root=Path(r'$dataRoot').resolve(strict=True); config=Path(r'$configPath').resolve(); prompt=build_setup_prompt(root, config, selected_integration='copilot'); request=InteractiveSetupRequest(data_root=root, config_path=config, prompt=prompt); command=tuple(CopilotIntegration()._interactive_setup_command(request)); raise SystemExit(subprocess.call(command, cwd=root))"
 ```
 
 Answer the setup questions one prompt at a time with these exact inputs:
@@ -892,7 +892,7 @@ any filesystem creation.
 Review the transcript and record evidence that:
 
 ```text
-- project summary names concrete Agency characteristics such as FastAPI/Jinja2,
+- project summary names concrete Flowgency characteristics such as FastAPI/Jinja2,
   pytest coverage, filesystem-backed authority, or durable jobs;
 - group name/ID and count were collected before the draft;
 - exactly 3 complete profiles are present;
@@ -913,7 +913,7 @@ After killing the async terminal, verify no pre-approval output was written and
 clean up:
 
 ```powershell
-$liveRoot = Join-Path $env:TEMP 'agency-context-team-live'; $dataRoot = Join-Path $liveRoot 'Agency'; $configPath = Join-Path $liveRoot 'config.yaml'; $forbidden = 'agent-library','compiled-agents','memory','prompts','groups'; $present = @($forbidden | Where-Object { Test-Path (Join-Path $dataRoot $_) }); if (Test-Path $configPath) { $present += 'config.yaml' }; if ($present) { throw "Pre-approval output exists: $($present -join ', ')" }; Remove-Item -Recurse -Force $liveRoot
+$liveRoot = Join-Path $env:TEMP 'flowgency-context-team-live'; $dataRoot = Join-Path $liveRoot 'Flowgency'; $configPath = Join-Path $liveRoot 'config.yaml'; $forbidden = 'agent-library','compiled-agents','memory','prompts','groups'; $present = @($forbidden | Where-Object { Test-Path (Join-Path $dataRoot $_) }); if (Test-Path $configPath) { $present += 'config.yaml' }; if ($present) { throw "Pre-approval output exists: $($present -join ', ')" }; Remove-Item -Recurse -Force $liveRoot
 ```
 
 Expected: no forbidden path exists. This one human-reviewed live check may
@@ -975,7 +975,7 @@ Before removing the worktree, copy the plan-scoped SDD ledger/report archive to
 a temporary path if subagent-driven execution created one. Stop every process
 whose cwd is inside the feature worktree.
 
-From `C:/Projekty/christag-agency`, run:
+From `C:/Projekty/flowgency`, run:
 
 ```powershell
 git status --short --branch
@@ -1046,7 +1046,7 @@ surviving main checkout before removing a worktree-backed editable install.
 Then run:
 
 ```powershell
-Set-Location C:/Projekty/christag-agency
+Set-Location C:/Projekty/flowgency
 python -m pip install -e .
 git worktree remove .worktrees/context-aware-setup-team
 git worktree prune
@@ -1060,8 +1060,8 @@ matches `origin/master`, and any pre-existing user changes are restored.
 
 - [ ] **Step 6: Verify the surviving installation and report evidence**
 
-From outside the repository, verify `christag-agency serve --help` succeeds and
-`python -m pip show christag-agency` reports the main checkout as its editable
+From outside the repository, verify `flowgency serve --help` succeeds and
+`python -m pip show flowgency` reports the main checkout as its editable
 location. Report:
 
 ```text

@@ -25,7 +25,7 @@ from .models import (
 )
 
 
-_REVISION_DOMAIN = b"agency-memory-content:v1\0"
+_REVISION_DOMAIN = b"flowgency-memory-content:v1\0"
 _ResultT = TypeVar("_ResultT")
 _LOWER_HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 _WINDOWS_RESERVED_NAMES = {

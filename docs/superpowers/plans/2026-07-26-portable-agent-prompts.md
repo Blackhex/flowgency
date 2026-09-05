@@ -4,13 +4,13 @@
 
 **Goal:** Add portable shared and instance-private Markdown prompts, prompt-backed schedules and manual launches, native prompt projection, and an operations-first Agents roster.
 
-**Architecture:** Canonical prompt parsing lives in a focused `agency.prompts` package. Blueprint prompts are digest-addressed shared source, private prompts are config-registered files in `agency.prompt_store`, and job schema v4 snapshots task text plus private prompt sources before the worker creates a job-local native overlay. Config accepts only schema v4; durable jobs write v4 while retaining explicit read support for historical v3 records.
+**Architecture:** Canonical prompt parsing lives in a focused `flowgency.prompts` package. Blueprint prompts are digest-addressed shared source, private prompts are config-registered files in `flowgency.prompt_store`, and job schema v4 snapshots task text plus private prompt sources before the worker creates a job-local native overlay. Config accepts only schema v4; durable jobs write v4 while retaining explicit read support for historical v3 records.
 
 **Tech Stack:** Python 3.11+, FastAPI, Pydantic 2, Jinja2, PyYAML, `tomli-w`, portalocker, pytest, TypeScript, Playwright, Tailwind utility classes.
 
 ## Global Constraints
 
-- Run every command from `C:\Users\black\Projects\christag-agency\.worktrees\portable-agent-prompts`; use `..\..\.venv\Scripts\python.exe` when the worktree has no local virtual environment.
+- Run every command from `C:\Users\black\Projects\flowgency\.worktrees\portable-agent-prompts`; use `..\..\.venv\Scripts\python.exe` when the worktree has no local virtual environment.
 - Keep `config.yaml` with schema version 4 as the sole control-plane authority; do not add config v3 aliases, conversion, dual reads, fallback paths, or startup migration.
 - Keep durable job v3 read compatibility separate from config compatibility; create only durable job v4 records after the cutover.
 - Shared prompts live only at `<agent_library>/<blueprint>/.agents/prompts/<slug>.prompt.md`.
@@ -28,36 +28,36 @@
 
 | File | Responsibility |
 | --- | --- |
-| `agency/prompts/assets.py` | Parse, validate, serialize, and digest canonical prompt Markdown; construct deterministic task input. |
-| `agency/prompts/store.py` | Resolve safe private paths and perform locked atomic source CRUD/namespace copies. |
-| `agency/prompts/catalog.py` | Build effective shared/private catalogs, resolve explicit selectors, validate registrations/references, and create immutable prompt provenance. |
-| `agency/prompts/projection.py` | Render canonical prompt documents to Copilot, Claude, and Gemini native formats and project job snapshots. |
-| `agency/prompts/service.py` | Coordinate private prompt files with revision-checked config registration and usage checks. |
-| `agency/prompts/__init__.py` | Export the public prompt-domain interfaces used by services, jobs, and web routes. |
-| `agency/configuration/models.py` | Own schema-v4 `prompt_store`, `PromptSelector`, private registrations, and prompt-backed routines. |
-| `agency/configuration/paths.py` | Validate and initialize the disjoint prompt-store authority root. |
-| `agency/configuration/patches.py` | Register and unregister private prompt slugs without exposing paths. |
-| `agency/blueprints/library.py` / `models.py` | Include validated shared prompt documents in blueprint inspection and digest-backed catalogs. |
-| `agency/blueprints/projectors.py` / `agency/projector_capabilities.py` | Declare prompt projection capability and include shared prompts in runtime output inventories. |
-| `agency/jobs/models.py` | Write durable job v4, read v3/v4, and carry immutable private prompt snapshots. |
-| `agency/jobs/resolution.py` / `prompts.py` / `submission.py` | Resolve scoped prompt source, build task input, bind provenance, and submit immutable jobs. |
-| `agency/jobs/execution.py` | Render private prompt snapshots into a job-local launch view before integration execution. |
-| `agency/instances.py` | Move and remove private prompt namespaces with instance lifecycle operations. |
-| `agency/web/routes/admin_library.py` | Own shared prompt authoring in the Agent Library. |
-| `agency/web/routes/agent_detail.py` | Own private prompt authoring and scoped routine editing. |
-| `agency/web/routes/agents.py` / `agency/templates/agents.html` | Build the effective launch catalog, hide creation in a dialog, and expose fully expanded launch controls. |
-| `agency/app.py` | Accept saved-prompt or one-off manual launch submissions at the existing run endpoint. |
+| `flowgency/prompts/assets.py` | Parse, validate, serialize, and digest canonical prompt Markdown; construct deterministic task input. |
+| `flowgency/prompts/store.py` | Resolve safe private paths and perform locked atomic source CRUD/namespace copies. |
+| `flowgency/prompts/catalog.py` | Build effective shared/private catalogs, resolve explicit selectors, validate registrations/references, and create immutable prompt provenance. |
+| `flowgency/prompts/projection.py` | Render canonical prompt documents to Copilot, Claude, and Gemini native formats and project job snapshots. |
+| `flowgency/prompts/service.py` | Coordinate private prompt files with revision-checked config registration and usage checks. |
+| `flowgency/prompts/__init__.py` | Export the public prompt-domain interfaces used by services, jobs, and web routes. |
+| `flowgency/configuration/models.py` | Own schema-v4 `prompt_store`, `PromptSelector`, private registrations, and prompt-backed routines. |
+| `flowgency/configuration/paths.py` | Validate and initialize the disjoint prompt-store authority root. |
+| `flowgency/configuration/patches.py` | Register and unregister private prompt slugs without exposing paths. |
+| `flowgency/blueprints/library.py` / `models.py` | Include validated shared prompt documents in blueprint inspection and digest-backed catalogs. |
+| `flowgency/blueprints/projectors.py` / `flowgency/projector_capabilities.py` | Declare prompt projection capability and include shared prompts in runtime output inventories. |
+| `flowgency/jobs/models.py` | Write durable job v4, read v3/v4, and carry immutable private prompt snapshots. |
+| `flowgency/jobs/resolution.py` / `prompts.py` / `submission.py` | Resolve scoped prompt source, build task input, bind provenance, and submit immutable jobs. |
+| `flowgency/jobs/execution.py` | Render private prompt snapshots into a job-local launch view before integration execution. |
+| `flowgency/instances.py` | Move and remove private prompt namespaces with instance lifecycle operations. |
+| `flowgency/web/routes/admin_library.py` | Own shared prompt authoring in the Agent Library. |
+| `flowgency/web/routes/agent_detail.py` | Own private prompt authoring and scoped routine editing. |
+| `flowgency/web/routes/agents.py` / `flowgency/templates/agents.html` | Build the effective launch catalog, hide creation in a dialog, and expose fully expanded launch controls. |
+| `flowgency/app.py` | Accept saved-prompt or one-off manual launch submissions at the existing run endpoint. |
 
 ---
 
 ### Task 1: Canonical Prompt Assets And Blueprint Catalog
 
 **Files:**
-- Create: `agency/prompts/__init__.py`
-- Create: `agency/prompts/assets.py`
+- Create: `flowgency/prompts/__init__.py`
+- Create: `flowgency/prompts/assets.py`
 - Create: `tests/test_prompt_assets.py`
-- Modify: `agency/blueprints/models.py:6-14`
-- Modify: `agency/blueprints/library.py:11-169`
+- Modify: `flowgency/blueprints/models.py:6-14`
+- Modify: `flowgency/blueprints/library.py:11-169`
 - Modify: `tests/test_blueprint_library.py:1-220`
 
 **Interfaces:**
@@ -74,8 +74,8 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from agency.fs.snapshot import AssetValidationError
-from agency.prompts.assets import parse_prompt_document
+from flowgency.fs.snapshot import AssetValidationError
+from flowgency.prompts.assets import parse_prompt_document
 
 
 def prompt_bytes(name: str = "pr-review", body: str = "Review the pull request.\n") -> bytes:
@@ -120,12 +120,12 @@ def test_parse_prompt_document_rejects_noncanonical_source(path, payload, code):
 
 Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_prompt_assets.py -v`
 
-Expected: FAIL during collection with `ModuleNotFoundError: No module named 'agency.prompts'`.
+Expected: FAIL during collection with `ModuleNotFoundError: No module named 'flowgency.prompts'`.
 
 - [ ] **Step 3: Implement the immutable prompt parser and task-input builder**
 
 ```python
-# agency/prompts/assets.py
+# flowgency/prompts/assets.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -135,8 +135,8 @@ import re
 
 import yaml
 
-from agency.configuration.issues import ValidationIssue
-from agency.fs.snapshot import AssetValidationError
+from flowgency.configuration.issues import ValidationIssue
+from flowgency.fs.snapshot import AssetValidationError
 
 PROMPT_PREFIX = PurePosixPath(".agents/prompts")
 PROMPT_SUFFIX = ".prompt.md"
@@ -178,7 +178,7 @@ Implement `parse_prompt_document()` with these exact checks in order: canonical 
 - [ ] **Step 4: Add deterministic task-input tests**
 
 ```python
-from agency.prompts.assets import build_prompt_task_input
+from flowgency.prompts.assets import build_prompt_task_input
 
 
 def test_build_prompt_task_input_appends_one_deterministic_section():
@@ -195,7 +195,7 @@ def test_build_prompt_task_input_appends_one_deterministic_section():
 - [ ] **Step 5: Extend blueprint inspection with prompt documents**
 
 ```python
-# agency/blueprints/models.py
+# flowgency/blueprints/models.py
 @dataclass(frozen=True)
 class BlueprintInspection:
     key: str
@@ -217,18 +217,18 @@ Expected: PASS, including a new assertion that editing prompt bytes changes `ins
 - [ ] **Step 7: Commit the prompt asset contract**
 
 ```bash
-git add agency/prompts agency/blueprints/models.py agency/blueprints/library.py tests/test_prompt_assets.py tests/test_blueprint_library.py
+git add flowgency/prompts flowgency/blueprints/models.py flowgency/blueprints/library.py tests/test_prompt_assets.py tests/test_blueprint_library.py
 git commit -m "feat(prompts): add canonical blueprint prompt assets"
 ```
 
 ### Task 2: Native Prompt Rendering And Shared Runtime Projection
 
 **Files:**
-- Create: `agency/prompts/projection.py`
-- Modify: `agency/prompts/__init__.py`
-- Modify: `agency/projector_capabilities.py:1-14`
-- Modify: `agency/blueprints/projectors.py:1-138`
-- Modify: `agency/integrations/__init__.py:260-295`
+- Create: `flowgency/prompts/projection.py`
+- Modify: `flowgency/prompts/__init__.py`
+- Modify: `flowgency/projector_capabilities.py:1-14`
+- Modify: `flowgency/blueprints/projectors.py:1-138`
+- Modify: `flowgency/integrations/__init__.py:260-295`
 - Modify: `pyproject.toml:5-20`
 - Modify: `tests/test_runtime_projectors.py:35-190`
 - Modify: `tests/test_compilation_cache.py`
@@ -255,8 +255,8 @@ Expected: exit 0 and `python -c "import tomli_w"` succeeds.
 ```python
 import tomllib
 
-from agency.prompts.assets import parse_prompt_document
-from agency.prompts.projection import render_prompt
+from flowgency.prompts.assets import parse_prompt_document
+from flowgency.prompts.projection import render_prompt
 
 
 def prompt_document():
@@ -294,7 +294,7 @@ Expected: FAIL because prompt projection capability and renderer do not exist.
 - [ ] **Step 4: Implement explicit projector prompt capability**
 
 ```python
-# agency/projector_capabilities.py
+# flowgency/projector_capabilities.py
 from typing import Literal
 
 PromptProjectionFormat = Literal[
@@ -324,7 +324,7 @@ Implement `render_prompt()` with exact filename rules and `tomli_w.dumps({"descr
 
 - [ ] **Step 6: Update every `ProjectorCapabilities(...)` constructor**
 
-Update constructors in `agency/integrations/__init__.py`, `tests/test_runtime_projectors.py`, `tests/test_compilation_cache.py`, `tests/test_cache_locking.py`, and `tests/test_job_submission.py` with explicit prompt fields. Do not add defaults that hide missing capability declarations.
+Update constructors in `flowgency/integrations/__init__.py`, `tests/test_runtime_projectors.py`, `tests/test_compilation_cache.py`, `tests/test_cache_locking.py`, and `tests/test_job_submission.py` with explicit prompt fields. Do not add defaults that hide missing capability declarations.
 
 - [ ] **Step 7: Run projector and cache tests**
 
@@ -335,16 +335,16 @@ Expected: PASS; cache manifests list native prompt paths and source-only files r
 - [ ] **Step 8: Commit native projection**
 
 ```bash
-git add pyproject.toml agency/prompts agency/projector_capabilities.py agency/blueprints/projectors.py agency/integrations/__init__.py tests/test_runtime_projectors.py tests/test_compilation_cache.py tests/test_cache_locking.py tests/test_job_submission.py
+git add pyproject.toml flowgency/prompts flowgency/projector_capabilities.py flowgency/blueprints/projectors.py flowgency/integrations/__init__.py tests/test_runtime_projectors.py tests/test_compilation_cache.py tests/test_cache_locking.py tests/test_job_submission.py
 git commit -m "feat(projectors): render portable prompt assets"
 ```
 
 ### Task 3: Safe Private Prompt Store
 
 **Files:**
-- Create: `agency/prompts/store.py`
+- Create: `flowgency/prompts/store.py`
 - Create: `tests/test_prompt_store.py`
-- Modify: `agency/prompts/__init__.py`
+- Modify: `flowgency/prompts/__init__.py`
 
 **Interfaces:**
 - Consumes: `PromptDocument` and `parse_prompt_document()` from Task 1.
@@ -439,7 +439,7 @@ Expected: PASS on Windows, including simulated reparse and concurrent-write test
 - [ ] **Step 5: Commit the private source store**
 
 ```bash
-git add agency/prompts tests/test_prompt_store.py
+git add flowgency/prompts tests/test_prompt_store.py
 git commit -m "feat(prompts): add safe private prompt store"
 ```
 
@@ -448,26 +448,26 @@ git commit -m "feat(prompts): add safe private prompt store"
 This task is one atomic reviewer gate. Removing `Routine.skill` earlier would leave dispatch, CLI, web runs, and most fixtures broken; do not split or commit the intermediate red state.
 
 **Files:**
-- Create: `agency/prompts/catalog.py`
-- Modify: `agency/prompts/__init__.py`
-- Modify: `agency/configuration/models.py:10-175,688-1040`
-- Modify: `agency/configuration/paths.py:1-385`
-- Modify: `agency/configuration/patches.py:1-370`
-- Modify: `agency/configuration/__init__.py`
-- Modify: `agency/web/state.py`
-- Modify: `agency/web/dependencies.py:20-90`
-- Modify: `agency/jobs/models.py:10-260`
-- Modify: `agency/jobs/prompts.py`
-- Modify: `agency/jobs/resolution.py:1-205`
-- Modify: `agency/jobs/submission.py:1-135`
-- Modify: `agency/jobs/__init__.py`
-- Modify: `agency/dispatch/run.py:1-155`
-- Modify: `agency/cli.py:320-550,720-785`
-- Modify: `agency/app.py:35-50,1605-1670`
-- Modify: `agency/app.py:1480-1520`
-- Modify: `agency/web/setup_flow.py:15-65`
-- Modify: `skills/agency-setup/SKILL.md`
-- Modify: `skills/agency-setup/references/templates.md`
+- Create: `flowgency/prompts/catalog.py`
+- Modify: `flowgency/prompts/__init__.py`
+- Modify: `flowgency/configuration/models.py:10-175,688-1040`
+- Modify: `flowgency/configuration/paths.py:1-385`
+- Modify: `flowgency/configuration/patches.py:1-370`
+- Modify: `flowgency/configuration/__init__.py`
+- Modify: `flowgency/web/state.py`
+- Modify: `flowgency/web/dependencies.py:20-90`
+- Modify: `flowgency/jobs/models.py:10-260`
+- Modify: `flowgency/jobs/prompts.py`
+- Modify: `flowgency/jobs/resolution.py:1-205`
+- Modify: `flowgency/jobs/submission.py:1-135`
+- Modify: `flowgency/jobs/__init__.py`
+- Modify: `flowgency/dispatch/run.py:1-155`
+- Modify: `flowgency/cli.py:320-550,720-785`
+- Modify: `flowgency/app.py:35-50,1605-1670`
+- Modify: `flowgency/app.py:1480-1520`
+- Modify: `flowgency/web/setup_flow.py:15-65`
+- Modify: `skills/flowgency-setup/SKILL.md`
+- Modify: `skills/flowgency-setup/references/templates.md`
 - Modify: `config.yaml.example`
 - Test: `tests/test_config.py`
 - Test: `tests/test_config_normalization.py`
@@ -478,7 +478,7 @@ This task is one atomic reviewer gate. Removing `Routine.skill` earlier would le
 - Test: `tests/test_dispatch_run.py`
 - Test: `tests/test_agent_run.py`
 - Test: `tests/test_cli_contract.py`
-- Test: `tests/test_agency_setup_skill.py`
+- Test: `tests/test_flowgency_setup_skill.py`
 - Test: `tests/test_setup_flow.py`
 - Test: `tests/test_surface_contracts.py`
 - Test: `tests/conftest.py`
@@ -488,7 +488,7 @@ This task is one atomic reviewer gate. Removing `Routine.skill` earlier would le
 - Consumes: `PromptDocument`, `PromptStore`, and projector output from Tasks 1-3.
 - Produces: config `PromptSelector(scope: Literal["blueprint", "instance"], name: str)`.
 - Produces: `CatalogPrompt(scope, document, source_path)` and `effective_prompt_catalog()`, `resolve_catalog_prompt()`, `validate_prompt_catalogs()`.
-- Changes: config `CONFIG_SCHEMA_VERSION = 4`, required `AgencySettings.prompt_store`, `AgentInstance.prompts`, and `Routine.prompt`.
+- Changes: config `CONFIG_SCHEMA_VERSION = 4`, required `FlowgencySettings.prompt_store`, `AgentInstance.prompts`, and `Routine.prompt`.
 - Changes: durable job `SCHEMA_VERSION = 4`, `SUPPORTED_SCHEMA_VERSIONS = {3, 4}`, v3/v4 validation, and `private_prompts: tuple[PromptSnapshot, ...]`.
 - Changes: `JobRequest` accepts `task_input`, `prompt`, and `invocation_input` as mutually constrained inputs.
 - Changes: `resolve_job_request(..., prompt_store: PromptStore, ...) -> JobSpec`.
@@ -498,7 +498,7 @@ This task is one atomic reviewer gate. Removing `Routine.skill` earlier would le
 ```python
 def test_schema_four_requires_prompt_store_and_scoped_routine(raw_config, config_paths):
     raw_config["schema_version"] = 4
-    raw_config["agency"]["prompt_store"] = str(config_paths["prompt_store"])
+    raw_config["flowgency"]["prompt_store"] = str(config_paths["prompt_store"])
     raw_config["groups"]["newsletter"]["agents"][0]["routines"][0] = {
         "id": "daily-review",
         "prompt": {"scope": "blueprint", "name": "daily-review"},
@@ -546,22 +546,22 @@ class Routine(BaseModel):
     enabled: bool = True
 ```
 
-Add `prompt_store: Path | None` to `AgencySettings`, `prompts: tuple[str, ...] = ()` to `AgentInstance`, and `schema_version: Literal[4]` to `AgencyConfig`. Validate prompt/private registration identifiers and duplicate registrations in `_validate_raw_config()`. Resolve `agency.prompt_store` in `_prepare_for_model()`. Add prompt store to every required-path loop, overlap authority set, sandbox-overlap check, and `initialize_storage_directories()`.
+Add `prompt_store: Path | None` to `FlowgencySettings`, `prompts: tuple[str, ...] = ()` to `AgentInstance`, and `schema_version: Literal[4]` to `FlowgencyConfig`. Validate prompt/private registration identifiers and duplicate registrations in `_validate_raw_config()`. Resolve `flowgency.prompt_store` in `_prepare_for_model()`. Add prompt store to every required-path loop, overlap authority set, sandbox-overlap check, and `initialize_storage_directories()`.
 
-Add `prompt_store: str` to `AgencySettingsPatch`; preserve it in
-`admin_save_settings()` and expose it from `agency_settings()` in
-`agency/web/state.py`. This admin POST does not let the form silently erase the
+Add `prompt_store: str` to `FlowgencySettingsPatch`; preserve it in
+`admin_save_settings()` and expose it from `flowgency_settings()` in
+`flowgency/web/state.py`. This admin POST does not let the form silently erase the
 new required path.
 
 - [ ] **Step 3: Add prompt store to shared test fixtures**
 
-In `tests/conftest.py`, add `prompt_store`, set `schema_version` to 4, add the agency path, replace routine `skill` with a scoped prompt selector, and create `.agents/prompts/daily-review.prompt.md` in test blueprint helpers. Apply that exact shape to every current config fixture listed under **Files**. Do not alter historical docs under `docs/superpowers/`.
+In `tests/conftest.py`, add `prompt_store`, set `schema_version` to 4, add the flowgency path, replace routine `skill` with a scoped prompt selector, and create `.agents/prompts/daily-review.prompt.md` in test blueprint helpers. Apply that exact shape to every current config fixture listed under **Files**. Do not alter historical docs under `docs/superpowers/`.
 
 Update `config.yaml.example`, `build_setup_prompt()`, the canonical
-`skills/agency-setup` skill/template, and their three contract tests in this
+`skills/flowgency-setup` skill/template, and their three contract tests in this
 same cutover. They must derive five storage paths, author task prompts separately
 from optional cross-task skills, write scoped routine selectors, and require
-schema v4. Do not edit `.github/skills/agency-setup` separately because it is a
+schema v4. Do not edit `.github/skills/flowgency-setup` separately because it is a
 symlink to the canonical skill.
 
 - [ ] **Step 4: Write failing catalog-resolution tests**
@@ -574,15 +574,15 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agency.blueprints.library import BlueprintLibrary
-from agency.configuration.store import ConfigStore
-from agency.prompts.store import PromptStore
+from flowgency.blueprints.library import BlueprintLibrary
+from flowgency.configuration.store import ConfigStore
+from flowgency.prompts.store import PromptStore
 
 
 @pytest.fixture
 def prompt_env(tmp_path, raw_config):
     raw = deepcopy(raw_config)
-    library_root = Path(raw["agency"]["agent_library"])
+    library_root = Path(raw["flowgency"]["agent_library"])
     blueprint = library_root / "reviewer"
     prompt_dir = blueprint / ".agents" / "prompts"
     prompt_dir.mkdir(parents=True, exist_ok=True)
@@ -597,7 +597,7 @@ def prompt_env(tmp_path, raw_config):
     agent["prompts"] = ["local-triage"]
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
-    store = PromptStore(Path(raw["agency"]["prompt_store"]))
+    store = PromptStore(Path(raw["flowgency"]["prompt_store"]))
     store.create(
         "newsletter",
         "reviewer",
@@ -664,7 +664,7 @@ def effective_prompt_catalog(
     return _validate_effective_catalog(shared + private, group_id, agent_id)
 ```
 
-Add `prompt_store: PromptStore | None` to `AgencyServices`; construct it from the required path, call `validate_prompt_catalogs()` during `build_services()`, and pass it to job resolution. Update the two manual `AgencyServices(...)` constructors in `agency/cli.py`.
+Add `prompt_store: PromptStore | None` to `FlowgencyServices`; construct it from the required path, call `validate_prompt_catalogs()` during `build_services()`, and pass it to job resolution. Update the two manual `FlowgencyServices(...)` constructors in `flowgency/cli.py`.
 
 - [ ] **Step 6: Write durable job v3/v4 compatibility tests**
 
@@ -763,11 +763,11 @@ with 400 and unknown scoped prompts with 404.
 
 - [ ] **Step 9: Run the atomic cutover suite**
 
-Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_config.py tests/test_config_normalization.py tests/test_path_validation.py tests/test_job_models.py tests/test_job_authority.py tests/test_job_submission.py tests/test_dispatch_run.py tests/test_agent_run.py tests/test_cli_contract.py tests/test_agency_setup_skill.py tests/test_setup_flow.py tests/test_surface_contracts.py -v`
+Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_config.py tests/test_config_normalization.py tests/test_path_validation.py tests/test_job_models.py tests/test_job_authority.py tests/test_job_submission.py tests/test_dispatch_run.py tests/test_agent_run.py tests/test_cli_contract.py tests/test_flowgency_setup_skill.py tests/test_setup_flow.py tests/test_surface_contracts.py -v`
 
 Expected: PASS.
 
-Run: `rg -n "schema_version:\s*3|\"schema_version\"\s*:\s*3|routine\.skill|\"skill\"\s*:" agency tests --glob "!tests/test_job_models.py" --glob "!tests/test_job_authority.py"`
+Run: `rg -n "schema_version:\s*3|\"schema_version\"\s*:\s*3|routine\.skill|\"skill\"\s*:" flowgency tests --glob "!tests/test_job_models.py" --glob "!tests/test_job_authority.py"`
 
 Expected: no config/routine matches; any remaining `skill` matches belong only to integration runtime capability tests, not `Routine`.
 
@@ -780,15 +780,15 @@ Expected: PASS. Fix every current config fixture before committing; do not defer
 - [ ] **Step 11: Commit the schema/execution cutover**
 
 ```bash
-git add agency tests skills/agency-setup config.yaml.example
+git add flowgency tests skills/flowgency-setup config.yaml.example
 git commit -m "feat(config): adopt prompt-backed schema v4"
 ```
 
 ### Task 5: Immutable Private Prompt Launch Overlays
 
 **Files:**
-- Modify: `agency/prompts/projection.py`
-- Modify: `agency/jobs/execution.py:300-420`
+- Modify: `flowgency/prompts/projection.py`
+- Modify: `flowgency/jobs/execution.py:300-420`
 - Modify: `tests/test_job_execution.py`
 - Modify: `tests/test_runtime_projectors.py`
 
@@ -825,7 +825,7 @@ def test_worker_projects_private_prompt_snapshot_without_rereading_source(
         sandbox_root=None,
     )
     monkeypatch.setattr(
-        "agency.jobs.execution.resolve_job_context",
+        "flowgency.jobs.execution.resolve_job_context",
         lambda ignored: context,
     )
 
@@ -875,21 +875,21 @@ Expected: PASS.
 - [ ] **Step 5: Commit immutable private overlays**
 
 ```bash
-git add agency/prompts/projection.py agency/jobs/execution.py tests/test_job_execution.py tests/test_runtime_projectors.py
+git add flowgency/prompts/projection.py flowgency/jobs/execution.py tests/test_job_execution.py tests/test_runtime_projectors.py
 git commit -m "feat(jobs): project immutable private prompts"
 ```
 
 ### Task 6: Private Prompt CRUD And Instance Lifecycle
 
 **Files:**
-- Create: `agency/prompts/service.py`
+- Create: `flowgency/prompts/service.py`
 - Create: `tests/test_prompt_service.py`
-- Modify: `agency/prompts/__init__.py`
-- Modify: `agency/configuration/patches.py:85-370`
-- Modify: `agency/configuration/__init__.py`
-- Modify: `agency/instances.py:1-580`
-- Modify: `agency/web/dependencies.py:20-90`
-- Modify: `agency/web/routes/agents.py:210-235`
+- Modify: `flowgency/prompts/__init__.py`
+- Modify: `flowgency/configuration/patches.py:85-370`
+- Modify: `flowgency/configuration/__init__.py`
+- Modify: `flowgency/instances.py:1-580`
+- Modify: `flowgency/web/dependencies.py:20-90`
+- Modify: `flowgency/web/routes/agents.py:210-235`
 - Modify: `tests/test_instances.py`
 - Modify: `tests/test_agent_roster.py`
 
@@ -897,7 +897,7 @@ git commit -m "feat(jobs): project immutable private prompts"
 - Produces: `register_agent_prompt()` and `unregister_agent_prompt()` config patches.
 - Produces: `PromptMutationResult(snapshot: ConfigSnapshot, document: PromptDocument, orphaned_path: Path | None = None)`.
 - Produces: `PromptService.create_private()`, `update_private()`, `delete_private()`, and `catalog()`.
-- Changes: `AgencyServices.prompt_service: PromptService | None`; successful service construction wires it from the same `ConfigStore`, `BlueprintLibrary`, and `PromptStore` instances.
+- Changes: `FlowgencyServices.prompt_service: PromptService | None`; successful service construction wires it from the same `ConfigStore`, `BlueprintLibrary`, and `PromptStore` instances.
 - Changes: `InstanceService(..., prompt_store: PromptStore)` and move/remove result metadata.
 
 - [ ] **Step 1: Write failing service transaction tests**
@@ -910,15 +910,15 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from agency.blueprints.library import BlueprintLibrary
-from agency.configuration import ConfigStore, ValidationFailed
-from agency.prompts import PromptService, PromptStore
+from flowgency.blueprints.library import BlueprintLibrary
+from flowgency.configuration import ConfigStore, ValidationFailed
+from flowgency.prompts import PromptService, PromptStore
 
 
 @pytest.fixture
 def prompt_service_env(tmp_path, raw_config):
     raw = deepcopy(raw_config)
-    library_root = Path(raw["agency"]["agent_library"])
+    library_root = Path(raw["flowgency"]["agent_library"])
     blueprint = library_root / "reviewer"
     blueprint.mkdir(parents=True, exist_ok=True)
     (blueprint / "AGENTS.md").write_text("# Reviewer\n", encoding="utf-8")
@@ -930,7 +930,7 @@ def prompt_service_env(tmp_path, raw_config):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     config_store = ConfigStore(config_path)
-    store = PromptStore(Path(raw["agency"]["prompt_store"]))
+    store = PromptStore(Path(raw["flowgency"]["prompt_store"]))
     service = PromptService(
         config_store=config_store,
         library=BlueprintLibrary(library_root),
@@ -1034,17 +1034,17 @@ Expected: PASS, including existing memory move/remove tests.
 - [ ] **Step 6: Commit prompt CRUD/lifecycle**
 
 ```bash
-git add agency/prompts agency/configuration agency/instances.py agency/web/dependencies.py agency/web/routes/agents.py tests/test_prompt_service.py tests/test_instances.py tests/test_config_patches.py tests/test_agent_roster.py
+git add flowgency/prompts flowgency/configuration flowgency/instances.py flowgency/web/dependencies.py flowgency/web/routes/agents.py tests/test_prompt_service.py tests/test_instances.py tests/test_config_patches.py tests/test_agent_roster.py
 git commit -m "feat(prompts): manage private prompt lifecycle"
 ```
 
 ### Task 7: Shared Prompt Authoring In Agent Library
 
 **Files:**
-- Create: `agency/templates/admin_blueprint_prompts.html`
-- Modify: `agency/templates/admin_agent_library.html`
-- Modify: `agency/templates/admin_blueprint_detail.html`
-- Modify: `agency/web/routes/admin_library.py:1-700`
+- Create: `flowgency/templates/admin_blueprint_prompts.html`
+- Modify: `flowgency/templates/admin_agent_library.html`
+- Modify: `flowgency/templates/admin_blueprint_detail.html`
+- Modify: `flowgency/web/routes/admin_library.py:1-700`
 - Modify: `tests/test_agent_library_routes.py`
 
 **Interfaces:**
@@ -1115,17 +1115,17 @@ Expected: PASS.
 - [ ] **Step 6: Commit shared prompt authoring**
 
 ```bash
-git add agency/web/routes/admin_library.py agency/templates/admin_agent_library.html agency/templates/admin_blueprint_detail.html agency/templates/admin_blueprint_prompts.html tests/test_agent_library_routes.py
+git add flowgency/web/routes/admin_library.py flowgency/templates/admin_agent_library.html flowgency/templates/admin_blueprint_detail.html flowgency/templates/admin_blueprint_prompts.html tests/test_agent_library_routes.py
 git commit -m "feat(library): author shared blueprint prompts"
 ```
 
 ### Task 8: Agent Detail Private Prompts And Scoped Routines
 
 **Files:**
-- Create: `agency/templates/agent_detail_prompts.html`
-- Modify: `agency/templates/agent_detail.html`
-- Modify: `agency/templates/agent_detail_routines.html`
-- Modify: `agency/web/routes/agent_detail.py:20-780`
+- Create: `flowgency/templates/agent_detail_prompts.html`
+- Modify: `flowgency/templates/agent_detail.html`
+- Modify: `flowgency/templates/agent_detail_routines.html`
+- Modify: `flowgency/web/routes/agent_detail.py:20-780`
 - Modify: `tests/test_agent_detail.py`
 
 **Interfaces:**
@@ -1203,15 +1203,15 @@ Expected: PASS across Profile, Blueprint, Runtime, Prompts, Routines, Memory, an
 - [ ] **Step 6: Commit Agent Detail prompt ownership**
 
 ```bash
-git add agency/web/routes/agent_detail.py agency/templates/agent_detail.html agency/templates/agent_detail_prompts.html agency/templates/agent_detail_routines.html tests/test_agent_detail.py
+git add flowgency/web/routes/agent_detail.py flowgency/templates/agent_detail.html flowgency/templates/agent_detail_prompts.html flowgency/templates/agent_detail_routines.html tests/test_agent_detail.py
 git commit -m "feat(agents): manage private prompts and routines"
 ```
 
 ### Task 9: Operations-First Roster And Manual Launchers
 
 **Files:**
-- Modify: `agency/web/routes/agents.py:80-310`
-- Modify: `agency/templates/agents.html`
+- Modify: `flowgency/web/routes/agents.py:80-310`
+- Modify: `flowgency/templates/agents.html`
 - Modify: `tests/test_agent_roster.py`
 - Modify: `tests/test_agent_run.py`
 
@@ -1276,7 +1276,7 @@ Expected: PASS, including saved shared/private and one-off requests.
 - [ ] **Step 6: Commit the roster UX**
 
 ```bash
-git add agency/web/routes/agents.py agency/templates/agents.html tests/test_agent_roster.py tests/test_agent_run.py
+git add flowgency/web/routes/agents.py flowgency/templates/agents.html tests/test_agent_roster.py tests/test_agent_run.py
 git commit -m "feat(agents): restore prompt launch controls"
 ```
 
@@ -1321,7 +1321,7 @@ Add Prompts to the tab semantics test and accessibility page list. Exercise Add 
 
 - [ ] **Step 4: Run current documentation contract tests**
 
-Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_agency_setup_skill.py tests/test_setup_flow.py tests/test_surface_contracts.py -v`
+Run: `..\..\.venv\Scripts\python.exe -m pytest tests/test_flowgency_setup_skill.py tests/test_setup_flow.py tests/test_surface_contracts.py -v`
 
 Expected: PASS.
 
@@ -1399,7 +1399,7 @@ Invoke `superpowers:requesting-code-review` against the approved spec and the di
 
 ```bash
 git add -u
-git add agency tests skills kb examples README.md CLAUDE.md config.yaml.example pyproject.toml
+git add flowgency tests skills kb examples README.md CLAUDE.md config.yaml.example pyproject.toml
 git status --short
 git commit -m "fix(prompts): address branch review findings"
 ```

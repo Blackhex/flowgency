@@ -1,6 +1,6 @@
 ---
 name: New Integration Request
-about: Suggest a new LLM tool integration for Agency
+about: Suggest a new LLM tool integration for Flowgency
 title: "Integration: [Tool Name]"
 labels: enhancement, integration
 ---

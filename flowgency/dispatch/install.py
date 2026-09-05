@@ -205,8 +205,8 @@ def _install_windows(config_path: str, interval: int) -> str | None:
         folder = scheduler.GetFolder("\\")
         task_def = scheduler.NewTask(0)
 
-        task_def.RegistrationInfo.Description = "Agency Agent Dispatch"
-        task_def.RegistrationInfo.Author = "Agency"
+        task_def.RegistrationInfo.Description = "Flowgency Agent Dispatch"
+        task_def.RegistrationInfo.Author = "Flowgency"
 
         settings = task_def.Settings
         settings.Enabled = True

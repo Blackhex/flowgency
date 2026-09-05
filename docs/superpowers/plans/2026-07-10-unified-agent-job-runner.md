@@ -4,7 +4,7 @@
 
 **Goal:** Route scheduled prompts, manually launched saved prompts, approved decisions, and decision retries through one durable detached-process job runner, with explicit proposal-selected decision executors.
 
-**Architecture:** A versioned `JobSpec` is persisted atomically under each group's `shared/jobs` directory, then handed to a replaceable `JobLauncher`. The initial launcher starts `python -m agency.jobs.worker` as a detached process; the worker reloads configuration, resolves the integration, runs the immutable prompt snapshot, persists results, and projects decision state without importing the FastAPI app.
+**Architecture:** A versioned `JobSpec` is persisted atomically under each group's `shared/jobs` directory, then handed to a replaceable `JobLauncher`. The initial launcher starts `python -m flowgency.jobs.worker` as a detached process; the worker reloads configuration, resolves the integration, runs the immutable prompt snapshot, persists results, and projects decision state without importing the FastAPI app.
 
 **Tech Stack:** Python 3.11+, dataclasses, PyYAML, `subprocess`, FastAPI/Jinja2, pytest, platform-native POSIX process APIs, and pywin32 on Windows.
 
@@ -20,30 +20,30 @@
 - Job, decision, and config writes use temporary files plus `os.replace`.
 - Job paths are passed as subprocess argument-list elements with `shell=False`.
 - Existing proposals and decisions remain readable; no filesystem migration command is required.
-- Do not edit generated `build/`, `agency.egg-info/`, or `christag_agency.egg-info/` files.
+- Do not edit generated `build/`, `flowgency.egg-info/`, or `flowgency.egg-info/` files.
 
 ## File Structure
 
 ### New production files
 
-- `agency/jobs/__init__.py`: stable public submission and model exports.
-- `agency/jobs/models.py`: versioned `JobSpec`, mutable `JobRecord`, `JobHandle`, validation constants, and serialization.
-- `agency/jobs/store.py`: atomic job persistence, state transitions, and active-job queries.
-- `agency/jobs/context.py`: config reload, normalized group/agent resolution, integration capability validation, timeout, and sandbox resolution.
-- `agency/jobs/launcher.py`: `JobLauncher` protocol and cross-platform `DetachedProcessLauncher`.
-- `agency/jobs/submission.py`: durable validation/write/launch transaction.
-- `agency/jobs/execution.py`: sole orchestration-level `integration.run()` caller, isolated logs, and decision projection.
-- `agency/jobs/worker.py`: `python -m agency.jobs.worker <job-path>` entry point.
-- `agency/jobs/reconciliation.py`: conservative worker liveness checks and stale decision/job repair.
-- `agency/jobs/prompts.py`: immutable decision prompt construction.
+- `flowgency/jobs/__init__.py`: stable public submission and model exports.
+- `flowgency/jobs/models.py`: versioned `JobSpec`, mutable `JobRecord`, `JobHandle`, validation constants, and serialization.
+- `flowgency/jobs/store.py`: atomic job persistence, state transitions, and active-job queries.
+- `flowgency/jobs/context.py`: config reload, normalized group/agent resolution, integration capability validation, timeout, and sandbox resolution.
+- `flowgency/jobs/launcher.py`: `JobLauncher` protocol and cross-platform `DetachedProcessLauncher`.
+- `flowgency/jobs/submission.py`: durable validation/write/launch transaction.
+- `flowgency/jobs/execution.py`: sole orchestration-level `integration.run()` caller, isolated logs, and decision projection.
+- `flowgency/jobs/worker.py`: `python -m flowgency.jobs.worker <job-path>` entry point.
+- `flowgency/jobs/reconciliation.py`: conservative worker liveness checks and stale decision/job repair.
+- `flowgency/jobs/prompts.py`: immutable decision prompt construction.
 
 ### Modified production files
 
-- `agency/config.py`: add `load_config_path(path)` so workers never import `agency.app`.
-- `agency/dispatch/run.py`: submit scheduled jobs and write schedule markers only after launch succeeds.
-- `agency/app.py`: migrate manual, decision, retry, startup recovery, and running-state call sites to jobs APIs.
-- `agency/templates/proposal_detail.html`: executor selector and validation error.
-- `agency/templates/decision_detail.html`: retry executor selector and current job metadata.
+- `flowgency/config.py`: add `load_config_path(path)` so workers never import `flowgency.app`.
+- `flowgency/dispatch/run.py`: submit scheduled jobs and write schedule markers only after launch succeeds.
+- `flowgency/app.py`: migrate manual, decision, retry, startup recovery, and running-state call sites to jobs APIs.
+- `flowgency/templates/proposal_detail.html`: executor selector and validation error.
+- `flowgency/templates/decision_detail.html`: retry executor selector and current job metadata.
 - `kb/data-formats.md`: document proposal and decision execution fields.
 
 ### Tests
@@ -63,9 +63,9 @@
 ### Task 1: Durable Job Contract And Atomic Store
 
 **Files:**
-- Create: `agency/jobs/models.py`
-- Create: `agency/jobs/store.py`
-- Modify: `agency/config.py`
+- Create: `flowgency/jobs/models.py`
+- Create: `flowgency/jobs/store.py`
+- Modify: `flowgency/config.py`
 - Test: `tests/test_job_models.py`
 
 **Interfaces:**
@@ -82,9 +82,9 @@ from pathlib import Path
 
 import pytest
 
-from agency.config import load_config_path
-from agency.jobs.models import JobRecord, JobSpec
-from agency.jobs.store import InvalidJobTransition, active_jobs, job_path, read_job, transition_job, write_job
+from flowgency.config import load_config_path
+from flowgency.jobs.models import JobRecord, JobSpec
+from flowgency.jobs.store import InvalidJobTransition, active_jobs, job_path, read_job, transition_job, write_job
 
 
 def make_spec(tmp_path: Path, *, agent: str = "product") -> JobSpec:
@@ -148,26 +148,26 @@ Run:
 python -m pytest tests/test_job_models.py -v
 ```
 
-Expected: collection fails with `ModuleNotFoundError: No module named 'agency.jobs'`.
+Expected: collection fails with `ModuleNotFoundError: No module named 'flowgency.jobs'`.
 
 - [ ] **Step 3: Implement `load_config_path` and the versioned models**
 
-Add to `agency/config.py`:
+Add to `flowgency/config.py`:
 
 ```python
 import yaml
 
 
 def load_config_path(path: Path) -> dict:
-    """Load an Agency YAML config from an explicit path."""
+    """Load an Flowgency YAML config from an explicit path."""
     path = Path(path)
     if not path.exists():
-        return {"agency": {"title": "Agency", "default_group": ""}, "groups": {}}
+        return {"flowgency": {"title": "Flowgency", "default_group": ""}, "groups": {}}
     with path.open() as stream:
         return yaml.safe_load(stream) or {}
 ```
 
-Create `agency/jobs/models.py` with these public shapes and exact field names:
+Create `flowgency/jobs/models.py` with these public shapes and exact field names:
 
 ```python
 from dataclasses import asdict, dataclass, field
@@ -270,7 +270,7 @@ The nested in-memory `spec` representation is serialized intentionally. It keeps
 
 - [ ] **Step 4: Implement atomic persistence and transitions**
 
-Create `agency/jobs/store.py`:
+Create `flowgency/jobs/store.py`:
 
 ```python
 from dataclasses import replace
@@ -351,7 +351,7 @@ Expected: all tests pass.
 - [ ] **Step 6: Commit the durable contract**
 
 ```bash
-git add agency/config.py agency/jobs/models.py agency/jobs/store.py tests/test_job_models.py
+git add flowgency/config.py flowgency/jobs/models.py flowgency/jobs/store.py tests/test_job_models.py
 git commit -m "feat(jobs): add durable job records"
 ```
 
@@ -360,10 +360,10 @@ git commit -m "feat(jobs): add durable job records"
 ### Task 2: Context Resolution, Detached Launcher, And Submission
 
 **Files:**
-- Create: `agency/jobs/context.py`
-- Create: `agency/jobs/launcher.py`
-- Create: `agency/jobs/submission.py`
-- Create: `agency/jobs/__init__.py`
+- Create: `flowgency/jobs/context.py`
+- Create: `flowgency/jobs/launcher.py`
+- Create: `flowgency/jobs/submission.py`
+- Create: `flowgency/jobs/__init__.py`
 - Test: `tests/test_job_submission.py`
 
 **Interfaces:**
@@ -380,12 +380,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from agency.jobs import JobSpec, JobSubmissionError, JobValidationError, submit_job
-from agency.jobs.launcher import (
+from flowgency.jobs import JobSpec, JobSubmissionError, JobValidationError, submit_job
+from flowgency.jobs.launcher import (
     CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
     DetachedProcessLauncher, LaunchResult,
 )
-from agency.jobs.store import read_job
+from flowgency.jobs.store import read_job
 
 
 def configured_spec(tmp_path: Path, *, agent="product") -> JobSpec:
@@ -444,7 +444,7 @@ def test_submit_rejects_missing_or_non_executable_agent(tmp_path):
 
 
 def test_windows_launcher_uses_detached_flags(tmp_path):
-    with patch("agency.jobs.launcher.os.name", "nt"), patch("agency.jobs.launcher.subprocess.Popen") as popen:
+    with patch("flowgency.jobs.launcher.os.name", "nt"), patch("flowgency.jobs.launcher.subprocess.Popen") as popen:
         popen.return_value.pid = 77
         result = DetachedProcessLauncher().launch(tmp_path / "job.yaml")
     flags = popen.call_args.kwargs["creationflags"]
@@ -454,7 +454,7 @@ def test_windows_launcher_uses_detached_flags(tmp_path):
 
 
 def test_posix_launcher_starts_new_session(tmp_path):
-    with patch("agency.jobs.launcher.os.name", "posix"), patch("agency.jobs.launcher.subprocess.Popen") as popen:
+    with patch("flowgency.jobs.launcher.os.name", "posix"), patch("flowgency.jobs.launcher.subprocess.Popen") as popen:
         popen.return_value.pid = 78
         DetachedProcessLauncher().launch(tmp_path / "job.yaml")
     assert popen.call_args.kwargs["start_new_session"] is True
@@ -469,19 +469,19 @@ Run:
 python -m pytest tests/test_job_submission.py -v
 ```
 
-Expected: collection fails because `agency.jobs` does not yet export submission APIs.
+Expected: collection fails because `flowgency.jobs` does not yet export submission APIs.
 
 - [ ] **Step 3: Implement context resolution without importing FastAPI**
 
-Create `agency/jobs/context.py`. `ResolvedJobContext` must expose `config`, `group`, `group_path`, `agent_config`, `agent_dir`, `integration`, `timeout`, and `sandbox_root`. Resolve integrations in the same order as the current app: filesystem detection, configured integration, then `claude-code`.
+Create `flowgency/jobs/context.py`. `ResolvedJobContext` must expose `config`, `group`, `group_path`, `agent_config`, `agent_dir`, `integration`, `timeout`, and `sandbox_root`. Resolve integrations in the same order as the current app: filesystem detection, configured integration, then `claude-code`.
 
 ```python
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agency.config import SandboxSpec, get_agent_dir, get_sandbox_root, load_config_path, normalize_agents
-from agency.integrations import BaseIntegration, detect_integration, get_integration
+from flowgency.config import SandboxSpec, get_agent_dir, get_sandbox_root, load_config_path, normalize_agents
+from flowgency.integrations import BaseIntegration, detect_integration, get_integration
 
 from .models import JobSpec
 
@@ -546,7 +546,7 @@ def resolve_job_context(spec: JobSpec) -> ResolvedJobContext:
 
 - [ ] **Step 4: Implement the replaceable detached launcher**
 
-Create `agency/jobs/launcher.py`:
+Create `flowgency/jobs/launcher.py`:
 
 ```python
 from dataclasses import dataclass
@@ -588,7 +588,7 @@ class DetachedProcessLauncher:
         else:
             kwargs["start_new_session"] = True
         process = subprocess.Popen(
-            [sys.executable, "-m", "agency.jobs.worker", str(Path(job_path).resolve())],
+            [sys.executable, "-m", "flowgency.jobs.worker", str(Path(job_path).resolve())],
             **kwargs,
         )
         return LaunchResult(worker_pid=process.pid)
@@ -598,7 +598,7 @@ Do not persist the launcher-returned PID into the queued record. The worker reco
 
 - [ ] **Step 5: Implement submit-after-durable-write behavior**
 
-Create `agency/jobs/submission.py`:
+Create `flowgency/jobs/submission.py`:
 
 ```python
 from dataclasses import replace
@@ -631,7 +631,7 @@ def submit_job(spec: JobSpec, launcher: JobLauncher | None = None) -> JobHandle:
     return JobHandle(spec.job_id, "queued", path, result.worker_pid)
 ```
 
-Create `agency/jobs/__init__.py` with only stable exports:
+Create `flowgency/jobs/__init__.py` with only stable exports:
 
 ```python
 from .context import JobValidationError
@@ -659,7 +659,7 @@ Expected: all tests pass.
 - [ ] **Step 7: Commit submission and launcher**
 
 ```bash
-git add agency/jobs tests/test_job_submission.py
+git add flowgency/jobs tests/test_job_submission.py
 git commit -m "feat(jobs): submit detached agent jobs"
 ```
 
@@ -668,8 +668,8 @@ git commit -m "feat(jobs): submit detached agent jobs"
 ### Task 3: Worker Execution And Decision Projection
 
 **Files:**
-- Create: `agency/jobs/execution.py`
-- Create: `agency/jobs/worker.py`
+- Create: `flowgency/jobs/execution.py`
+- Create: `flowgency/jobs/worker.py`
 - Test: `tests/test_job_execution.py`
 - Modify: `tests/test_execute_decision.py`
 
@@ -685,10 +685,10 @@ Create `tests/test_job_execution.py` with a fixture that writes a queued record 
 from pathlib import Path
 from types import SimpleNamespace
 
-from agency.integrations import FileChange, RunResult
-from agency.jobs.execution import execute_job
-from agency.jobs.models import JobRecord, JobSpec
-from agency.jobs.store import read_job, write_job
+from flowgency.integrations import FileChange, RunResult
+from flowgency.jobs.execution import execute_job
+from flowgency.jobs.models import JobRecord, JobSpec
+from flowgency.jobs.store import read_job, write_job
 
 
 def queued_job(tmp_path: Path, *, decision_context=None):
@@ -724,7 +724,7 @@ def test_execute_job_transitions_writes_logs_and_changes(tmp_path, monkeypatch):
         group_path=tmp_path / "group",
     )
     context.agent_dir.mkdir(parents=True)
-    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
+    monkeypatch.setattr("flowgency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     result = execute_job(path)
 
@@ -742,7 +742,7 @@ def test_execute_job_records_exception_as_failed(tmp_path, monkeypatch):
         group_path=tmp_path / "group",
         integration=SimpleNamespace(run=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))),
     )
-    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: context)
+    monkeypatch.setattr("flowgency.jobs.execution.resolve_job_context", lambda ignored: context)
 
     result = execute_job(path)
 
@@ -756,7 +756,7 @@ def test_old_decision_job_cannot_overwrite_current_retry(tmp_path, monkeypatch):
     decision = decisions / "proposal.md"
     decision.write_text("---\nexecution_job_id: newer-job\nexecution_status: running\n---\n")
     path, _ = queued_job(tmp_path, decision_context={"decision_path": str(decision), "proposal_path": "proposal.md"})
-    monkeypatch.setattr("agency.jobs.execution.resolve_job_context", lambda ignored: SimpleNamespace(
+    monkeypatch.setattr("flowgency.jobs.execution.resolve_job_context", lambda ignored: SimpleNamespace(
         agent_dir=tmp_path, timeout=30, sandbox_root=None, group_path=tmp_path / "group",
         integration=SimpleNamespace(run=lambda *args, **kwargs: RunResult(0, "done", "", 0.1)),
     ))
@@ -776,11 +776,11 @@ Run:
 python -m pytest tests/test_job_execution.py tests/test_execute_decision.py -v
 ```
 
-Expected: collection fails with `ModuleNotFoundError: agency.jobs.execution`.
+Expected: collection fails with `ModuleNotFoundError: flowgency.jobs.execution`.
 
 - [ ] **Step 3: Implement guarded decision frontmatter projection**
 
-In `agency/jobs/execution.py`, implement private YAML frontmatter parsing and atomic writing locally; do not import `agency.app`. The projection must update only when the decision's current `execution_job_id` equals the completing job ID:
+In `flowgency/jobs/execution.py`, implement private YAML frontmatter parsing and atomic writing locally; do not import `flowgency.app`. The projection must update only when the decision's current `execution_job_id` equals the completing job ID:
 
 ```python
 def project_decision(record: JobRecord) -> None:
@@ -866,7 +866,7 @@ Use `getattr(result, "changed_files", [])` to preserve compatibility with test d
 
 - [ ] **Step 5: Implement the worker CLI**
 
-Create `agency/jobs/worker.py`:
+Create `flowgency/jobs/worker.py`:
 
 ```python
 import argparse
@@ -876,7 +876,7 @@ from .execution import execute_job
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Execute one Agency job")
+    parser = argparse.ArgumentParser(description="Execute one Flowgency job")
     parser.add_argument("job_path", type=Path)
     args = parser.parse_args(argv)
     result = execute_job(args.job_path.resolve())
@@ -900,7 +900,7 @@ Expected: all tests pass.
 - [ ] **Step 7: Commit worker execution**
 
 ```bash
-git add agency/jobs/execution.py agency/jobs/worker.py tests/test_job_execution.py tests/test_execute_decision.py
+git add flowgency/jobs/execution.py flowgency/jobs/worker.py tests/test_job_execution.py tests/test_execute_decision.py
 git commit -m "feat(jobs): execute jobs in detached workers"
 ```
 
@@ -909,8 +909,8 @@ git commit -m "feat(jobs): execute jobs in detached workers"
 ### Task 4: Migrate Scheduled And Manual Saved-Prompt Triggers
 
 **Files:**
-- Modify: `agency/dispatch/run.py`
-- Modify: `agency/app.py`
+- Modify: `flowgency/dispatch/run.py`
+- Modify: `flowgency/app.py`
 - Modify: `tests/test_dispatch_run.py`
 - Modify: `tests/test_agent_run.py`
 
@@ -925,7 +925,7 @@ In `tests/test_dispatch_run.py`, keep schedule timing tests and replace `run_age
 ```python
 def _enabled_config(group_path):
     return {
-        "agency": {"dispatch": {"interval": 15}},
+        "flowgency": {"dispatch": {"interval": 15}},
         "groups": {"test": {
             "path": str(group_path), "agents": ["product"],
             "dispatch": {
@@ -941,7 +941,7 @@ def test_due_schedule_submits_snapshot_then_touches_marker(tmp_path, monkeypatch
     config_path = tmp_path / "config.yaml"
     config = _enabled_config(group_path)
     captured = []
-    monkeypatch.setattr("agency.dispatch.run.submit_job", lambda spec, launcher=None: captured.append(spec) or object())
+    monkeypatch.setattr("flowgency.dispatch.run.submit_job", lambda spec, launcher=None: captured.append(spec) or object())
 
     run_dispatch_cycle(config, config_path)
 
@@ -953,18 +953,18 @@ def test_due_schedule_submits_snapshot_then_touches_marker(tmp_path, monkeypatch
 def test_schedule_does_not_touch_marker_when_submission_fails(tmp_path, monkeypatch):
     group_path, _, _ = _make_group(tmp_path)
     config = _enabled_config(group_path)
-    monkeypatch.setattr("agency.dispatch.run.submit_job", lambda *args, **kwargs: (_ for _ in ()).throw(JobSubmissionError("no", tmp_path / "job")))
+    monkeypatch.setattr("flowgency.dispatch.run.submit_job", lambda *args, **kwargs: (_ for _ in ()).throw(JobSubmissionError("no", tmp_path / "job")))
     run_dispatch_cycle(config, tmp_path / "config.yaml")
     assert not (group_path / "shared" / "logs" / ".last-product-routine").exists()
 ```
 
-In `tests/test_agent_run.py`, change the success test to monkeypatch `agency.app.submit_job` and assert `trigger == "manual_prompt"`, snapshot content, agent, group, and response JSON `{"status": "started", "job_id": "job-1"}`. Replace `test_run_already_running_409` with:
+In `tests/test_agent_run.py`, change the success test to monkeypatch `flowgency.app.submit_job` and assert `trigger == "manual_prompt"`, snapshot content, agent, group, and response JSON `{"status": "started", "job_id": "job-1"}`. Replace `test_run_already_running_409` with:
 
 ```python
 def test_run_allows_concurrent_jobs_for_same_agent(tmp_path, monkeypatch):
     _setup_group(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: calls.append(spec) or SimpleNamespace(job_id=f"job-{len(calls)}"))
+    monkeypatch.setattr("flowgency.app.submit_job", lambda spec: calls.append(spec) or SimpleNamespace(job_id=f"job-{len(calls)}"))
     client = TestClient(app)
     assert client.post("/test/agents/product/run", data={"prompt": "routine.md"}).status_code == 202
     assert client.post("/test/agents/product/run", data={"prompt": "routine.md"}).status_code == 202
@@ -1049,7 +1049,7 @@ Expected: all tests pass.
 Run:
 
 ```text
-rg "run_agent_prompt|background_tasks\.add_task|integration\.run" agency/dispatch/run.py agency/app.py
+rg "run_agent_prompt|background_tasks\.add_task|integration\.run" flowgency/dispatch/run.py flowgency/app.py
 ```
 
 Expected: no `run_agent_prompt`; decision background-task matches may remain until Task 5; `integration.run` remains only in the historical decision function until Task 5.
@@ -1057,7 +1057,7 @@ Expected: no `run_agent_prompt`; decision background-task matches may remain unt
 - [ ] **Step 7: Commit saved-prompt trigger migration**
 
 ```bash
-git add agency/dispatch/run.py agency/app.py tests/test_dispatch_run.py tests/test_agent_run.py
+git add flowgency/dispatch/run.py flowgency/app.py tests/test_dispatch_run.py tests/test_agent_run.py
 git commit -m "refactor(jobs): submit scheduled and manual runs"
 ```
 
@@ -1066,10 +1066,10 @@ git commit -m "refactor(jobs): submit scheduled and manual runs"
 ### Task 5: Decision Executor Selection And Job Submission
 
 **Files:**
-- Create: `agency/jobs/prompts.py`
-- Modify: `agency/app.py`
-- Modify: `agency/templates/proposal_detail.html`
-- Modify: `agency/templates/decision_detail.html`
+- Create: `flowgency/jobs/prompts.py`
+- Modify: `flowgency/app.py`
+- Modify: `flowgency/templates/proposal_detail.html`
+- Modify: `flowgency/templates/decision_detail.html`
 - Modify: `tests/test_proposal_questions.py`
 - Modify: `tests/test_execute_decision.py`
 - Modify: `kb/data-formats.md`
@@ -1084,8 +1084,8 @@ Add this self-contained route fixture to `tests/test_proposal_questions.py` and 
 
 ```python
 from fastapi.testclient import TestClient
-import agency.app as app_mod
-from agency.app import app
+import flowgency.app as app_mod
+from flowgency.app import app
 
 
 def _setup_decision_group(tmp_path, monkeypatch, *, explicit_executor=True):
@@ -1152,7 +1152,7 @@ from test_proposal_questions import _setup_decision_group
 def test_decide_submits_embedded_snapshot_and_persists_job_id(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     captured = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec) or SimpleNamespace(job_id=spec.job_id))
+    monkeypatch.setattr("flowgency.app.submit_job", lambda spec: captured.append(spec) or SimpleNamespace(job_id=spec.job_id))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "approved", "execution_agent": "engineer"},
@@ -1175,7 +1175,7 @@ def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monk
         "execution_job_history: []\n---\n"
     )
     captured = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec) or SimpleNamespace(job_id=spec.job_id))
+    monkeypatch.setattr("flowgency.app.submit_job", lambda spec: captured.append(spec) or SimpleNamespace(job_id=spec.job_id))
     response = client.post(
         "/test/decisions/change/retry",
         data={"execution_agent": "engineer"}, follow_redirects=False,
@@ -1188,7 +1188,7 @@ def test_retry_defaults_to_persisted_executor_and_appends_history(tmp_path, monk
 
 def test_launch_failure_rolls_back_new_decision(tmp_path, monkeypatch):
     client, proposal_path, decision_path = _setup_decision_group(tmp_path, monkeypatch)
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)))
+    monkeypatch.setattr("flowgency.app.submit_job", lambda spec: (_ for _ in ()).throw(JobSubmissionError("spawn denied", proposal_path)))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "approved", "execution_agent": "engineer"},
@@ -1211,7 +1211,7 @@ Expected: failures show missing executor context, no job IDs, and historical `or
 
 - [ ] **Step 3: Implement immutable decision prompt construction**
 
-Create `agency/jobs/prompts.py`:
+Create `flowgency/jobs/prompts.py`:
 
 ```python
 import yaml
@@ -1228,7 +1228,7 @@ def build_decision_prompt(proposal_body: str, answers: dict) -> str:
         "If approved or accepted, execute the proposed action. If deferred, "
         "acknowledge it without doing the deferred work. If rejected, close the "
         "loop without proceeding. Use choice and free-response answers as binding "
-        "implementation guidance. Do not modify the Agency decision file."
+        "implementation guidance. Do not modify the Flowgency decision file."
     )
 ```
 
@@ -1236,7 +1236,7 @@ Test exact inclusion of proposal text and YAML answers, then ensure changing sou
 
 - [ ] **Step 4: Add executor-option and reusable proposal rendering helpers**
 
-In `agency/app.py`, add a helper that lists only configured agents whose directories exist and integrations support execution. Add a proposal-context helper used by both GET and POST so validation errors can render the same page:
+In `flowgency/app.py`, add a helper that lists only configured agents whose directories exist and integrations support execution. Add a proposal-context helper used by both GET and POST so validation errors can render the same page:
 
 ```python
 def execution_agent_options(g: dict) -> list[str]:
@@ -1255,7 +1255,7 @@ The proposal template context must include `execution_agents`, `selected_executi
 
 - [ ] **Step 5: Render executor controls and errors**
 
-In `agency/templates/proposal_detail.html`, immediately inside the unanswered form, render:
+In `flowgency/templates/proposal_detail.html`, immediately inside the unanswered form, render:
 
 ```html
 {% if decision_error %}
@@ -1269,7 +1269,7 @@ In `agency/templates/proposal_detail.html`, immediately inside the unanswered fo
 </select>
 ```
 
-In `agency/templates/decision_detail.html`, show `execution_job_id` as muted monospace metadata and place an executor selector inside the failed retry form. The selector defaults to persisted `execution_agent`, and options come from `execution_agents`.
+In `flowgency/templates/decision_detail.html`, show `execution_job_id` as muted monospace metadata and place an executor selector inside the failed retry form. The selector defaults to persisted `execution_agent`, and options come from `execution_agents`.
 
 - [ ] **Step 6: Replace decision background execution with validated job submission**
 
@@ -1315,15 +1315,15 @@ Expected: all tests pass.
 Run:
 
 ```text
-rg "integration\.run|background_tasks\.add_task|execute_decision|run_agent_prompt" agency
+rg "integration\.run|background_tasks\.add_task|execute_decision|run_agent_prompt" flowgency
 ```
 
-Expected: `integration.run` appears in `agency/jobs/execution.py` only; the other three patterns have no matches.
+Expected: `integration.run` appears in `flowgency/jobs/execution.py` only; the other three patterns have no matches.
 
 - [ ] **Step 10: Commit decision job migration**
 
 ```bash
-git add agency/app.py agency/jobs/prompts.py agency/templates/proposal_detail.html agency/templates/decision_detail.html tests/test_proposal_questions.py tests/test_execute_decision.py kb/data-formats.md
+git add flowgency/app.py flowgency/jobs/prompts.py flowgency/templates/proposal_detail.html flowgency/templates/decision_detail.html tests/test_proposal_questions.py tests/test_execute_decision.py kb/data-formats.md
 git commit -m "feat(decisions): select and submit execution agents"
 ```
 
@@ -1332,10 +1332,10 @@ git commit -m "feat(decisions): select and submit execution agents"
 ### Task 6: Running-State Queries And Conservative Reconciliation
 
 **Files:**
-- Create: `agency/jobs/reconciliation.py`
-- Modify: `agency/jobs/store.py`
-- Modify: `agency/jobs/__init__.py`
-- Modify: `agency/app.py`
+- Create: `flowgency/jobs/reconciliation.py`
+- Modify: `flowgency/jobs/store.py`
+- Modify: `flowgency/jobs/__init__.py`
+- Modify: `flowgency/app.py`
 - Create: `tests/test_job_reconciliation.py`
 - Modify: `tests/test_agent_run.py`
 
@@ -1351,9 +1351,9 @@ Create `tests/test_job_reconciliation.py`:
 from dataclasses import replace
 from pathlib import Path
 
-from agency.jobs.models import JobRecord, JobSpec
-from agency.jobs.reconciliation import reconcile_jobs, worker_alive
-from agency.jobs.store import job_path, read_job, write_job
+from flowgency.jobs.models import JobRecord, JobSpec
+from flowgency.jobs.reconciliation import reconcile_jobs, worker_alive
+from flowgency.jobs.store import job_path, read_job, write_job
 
 
 def running_decision_job(tmp_path: Path, pid: int = 999999):
@@ -1373,7 +1373,7 @@ def running_decision_job(tmp_path: Path, pid: int = 999999):
 
 def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
     group, decision, path = running_decision_job(tmp_path)
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: True)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: True)
     result = reconcile_jobs({"test": {"path": str(group)}})
     assert result.left_running == 1
     assert read_job(path).status == "running"
@@ -1382,7 +1382,7 @@ def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
 
 def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
     group, decision, path = running_decision_job(tmp_path)
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
     result = reconcile_jobs({"test": {"path": str(group)}})
     assert result.failed == 1
     assert read_job(path).status == "failed"
@@ -1391,7 +1391,7 @@ def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
 
 def test_reconcile_leaves_uncertain_worker_running(tmp_path, monkeypatch):
     group, _, path = running_decision_job(tmp_path)
-    monkeypatch.setattr("agency.jobs.reconciliation.worker_alive", lambda pid: None)
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: None)
     reconcile_jobs({"test": {"path": str(group)}})
     assert read_job(path).status == "running"
 
@@ -1419,7 +1419,7 @@ Expected: collection fails because reconciliation APIs do not exist; the running
 
 - [ ] **Step 3: Implement tri-state platform liveness**
 
-Create `agency/jobs/reconciliation.py` with:
+Create `flowgency/jobs/reconciliation.py` with:
 
 ```python
 def worker_alive(pid: int | None) -> bool | None:
@@ -1467,7 +1467,7 @@ def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
 
 Keep the `timeout` parameter temporarily for call-site compatibility but document that persisted jobs are authoritative. Remove historical `.running-{agent}` creation and recovery code. In lifespan call `reconcile_jobs(GROUPS)` instead of `recover_orphaned_executions()`.
 
-Export `reconcile_jobs` and `active_jobs` from `agency/jobs/__init__.py` only if app call sites need them; keep platform helpers internal unless tests import them directly.
+Export `reconcile_jobs` and `active_jobs` from `flowgency/jobs/__init__.py` only if app call sites need them; keep platform helpers internal unless tests import them directly.
 
 - [ ] **Step 6: Run focused reconciliation and UI tests**
 
@@ -1482,7 +1482,7 @@ Expected: all tests pass.
 - [ ] **Step 7: Commit reconciliation**
 
 ```bash
-git add agency/jobs/reconciliation.py agency/jobs/store.py agency/jobs/__init__.py agency/app.py tests/test_job_reconciliation.py tests/test_agent_run.py
+git add flowgency/jobs/reconciliation.py flowgency/jobs/store.py flowgency/jobs/__init__.py flowgency/app.py tests/test_job_reconciliation.py tests/test_agent_run.py
 git commit -m "feat(jobs): reconcile detached worker state"
 ```
 
@@ -1514,7 +1514,7 @@ import time
 
 import yaml
 
-from agency.jobs.store import read_job
+from flowgency.jobs.store import read_job
 
 
 def _shell_command(arguments):
@@ -1556,7 +1556,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     submitter_script = tmp_path / "submitter.py"
     submitter_script.write_text(
         "import os, pathlib, sys\n"
-        "from agency.jobs import JobSpec, submit_job\n"
+        "from flowgency.jobs import JobSpec, submit_job\n"
         "config, job_id_file, pid_file = map(pathlib.Path, sys.argv[1:])\n"
         "spec = JobSpec.create(config_path=config, group_key='test', "
         "agent_name='product', trigger='manual_prompt', "
@@ -1643,15 +1643,15 @@ Expected: all tests pass with no collection errors, failures, or errors.
 Run:
 
 ```text
-rg "integration\.run" agency
-rg "background_tasks\.add_task|execute_decision|run_agent_prompt|\.running-" agency
-python -m compileall -q agency
+rg "integration\.run" flowgency
+rg "background_tasks\.add_task|execute_decision|run_agent_prompt|\.running-" flowgency
+python -m compileall -q flowgency
 git diff --check
 ```
 
 Expected:
 
-- `integration.run` appears only in `agency/jobs/execution.py`.
+- `integration.run` appears only in `flowgency/jobs/execution.py`.
 - The historical orchestration and running-marker search produces no matches.
 - `compileall` exits zero.
 - `git diff --check` exits zero.

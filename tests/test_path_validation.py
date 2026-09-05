@@ -264,9 +264,9 @@ def test_initialize_storage_directories_rejects_symlink_or_reparse_cache_root(
 
 
 def test_prepare_writable_directory_creates_only_requested_root(tmp_path):
-    root = tmp_path / "new" / "Agency"
+    root = tmp_path / "new" / "Flowgency"
 
-    resolved = prepare_writable_directory(root, label="Agency data root")
+    resolved = prepare_writable_directory(root, label="Flowgency data root")
 
     assert resolved == root.resolve(strict=True)
     assert resolved.is_dir()
@@ -274,13 +274,13 @@ def test_prepare_writable_directory_creates_only_requested_root(tmp_path):
 
 
 def test_prepare_writable_directory_revalidates_existing_root(tmp_path):
-    root = tmp_path / "Agency"
+    root = tmp_path / "Flowgency"
     root.mkdir()
     marker = root / "user-content.txt"
     marker.write_text("keep\n", encoding="utf-8")
 
-    first = prepare_writable_directory(root, label="Agency data root")
-    second = prepare_writable_directory(root, label="Agency data root")
+    first = prepare_writable_directory(root, label="Flowgency data root")
+    second = prepare_writable_directory(root, label="Flowgency data root")
 
     assert first == second == root.resolve(strict=True)
     assert marker.read_text(encoding="utf-8") == "keep\n"
@@ -289,20 +289,20 @@ def test_prepare_writable_directory_revalidates_existing_root(tmp_path):
 def test_prepare_writable_directory_requires_absolute_path():
     with pytest.raises(
         DirectoryPreparationError,
-        match="Agency data root must be an absolute path",
+        match="Flowgency data root must be an absolute path",
     ):
-        prepare_writable_directory(Path("relative/Agency"), label="Agency data root")
+        prepare_writable_directory(Path("relative/Flowgency"), label="Flowgency data root")
 
 
 def test_prepare_writable_directory_rejects_file(tmp_path):
-    root = tmp_path / "Agency"
+    root = tmp_path / "Flowgency"
     root.write_text("not a directory", encoding="utf-8")
 
     with pytest.raises(
         DirectoryPreparationError,
-        match="Agency data root must be a directory",
+        match="Flowgency data root must be a directory",
     ):
-        prepare_writable_directory(root, label="Agency data root")
+        prepare_writable_directory(root, label="Flowgency data root")
 
 
 def test_prepare_writable_directory_rejects_link_or_reparse(
@@ -310,14 +310,14 @@ def test_prepare_writable_directory_rejects_link_or_reparse(
 ):
     target = tmp_path / "target"
     target.mkdir()
-    root = tmp_path / "Agency"
+    root = tmp_path / "Flowgency"
     _make_hostile_directory_entry(root, target, monkeypatch)
 
     with pytest.raises(
         DirectoryPreparationError,
         match="symlink or reparse point",
     ):
-        prepare_writable_directory(root, label="Agency data root")
+        prepare_writable_directory(root, label="Flowgency data root")
 
 
 def test_prepare_writable_directory_rejects_unwritable_parent(
@@ -325,7 +325,7 @@ def test_prepare_writable_directory_rejects_unwritable_parent(
 ):
     parent = tmp_path / "locked"
     parent.mkdir()
-    root = parent / "Agency"
+    root = parent / "Flowgency"
     original_access = os.access
     monkeypatch.setattr(
         "flowgency.configuration.paths.os.access",
@@ -336,9 +336,9 @@ def test_prepare_writable_directory_rejects_unwritable_parent(
 
     with pytest.raises(
         DirectoryPreparationError,
-        match="No writable real parent can create Agency data root",
+        match="No writable real parent can create Flowgency data root",
     ):
-        prepare_writable_directory(root, label="Agency data root")
+        prepare_writable_directory(root, label="Flowgency data root")
 
     assert not root.exists()
 
@@ -346,7 +346,7 @@ def test_prepare_writable_directory_rejects_unwritable_parent(
 def test_prepare_writable_directory_rejects_inaccessible_existing_root(
     tmp_path, monkeypatch
 ):
-    root = tmp_path / "Agency"
+    root = tmp_path / "Flowgency"
     root.mkdir()
     original_access = os.access
     monkeypatch.setattr(
@@ -358,9 +358,9 @@ def test_prepare_writable_directory_rejects_inaccessible_existing_root(
 
     with pytest.raises(
         DirectoryPreparationError,
-        match="Agency data root is not readable and writable",
+        match="Flowgency data root is not readable and writable",
     ):
-        prepare_writable_directory(root, label="Agency data root")
+        prepare_writable_directory(root, label="Flowgency data root")
 
 
 def test_global_store_path_issues_report_flowgency_scope(tmp_path, raw_config):
@@ -400,4 +400,5 @@ def test_overlap_message_uses_flowgency_authority_labels(tmp_path, raw_config):
     overlap = [i for i in issues if i.code == "unsafe-path-overlap"]
     assert overlap, "Expected unsafe-path-overlap issues"
     assert any("flowgency.agent_library" in i.message for i in overlap)
-    assert not any("agency.agent_library" in i.message for i in overlap)
+    _old_label = "".join(("a", "gency")) + ".agent_library"
+    assert not any(_old_label in i.message for i in overlap)

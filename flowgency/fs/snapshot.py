@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from flowgency.configuration.issues import ValidationFailed, ValidationIssue
 
 
-_PATH_PREFIX = b"agency-blueprint-source:v1\0"
+_PATH_PREFIX = b"flowgency-blueprint-source:v1\0"
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _WINDOWS_RESERVED = {
     "con",

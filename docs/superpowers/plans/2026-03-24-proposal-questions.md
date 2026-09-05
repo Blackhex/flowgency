@@ -17,7 +17,7 @@
 Update the status badge color mapping and any pipeline status references to support `decided` (green) and remove old terminal statuses.
 
 **Files:**
-- Modify: `agency/app.py:698-710` (status_badge function)
+- Modify: `flowgency/app.py:698-710` (status_badge function)
 - Test: `tests/test_needs_action.py`
 
 - [ ] **Step 1: Write failing test for `decided` badge**
@@ -43,7 +43,7 @@ This test should pass already since `decided` is not in the actionable set. Conf
 
 - [ ] **Step 3: Update status_badge colors in app.py**
 
-In `agency/app.py` at line 700, update the `colors` dict:
+In `flowgency/app.py` at line 700, update the `colors` dict:
 
 ```python
 colors = {
@@ -61,7 +61,7 @@ Remove `approved` from the color mapping. `decided` takes over as the green term
 
 - [ ] **Step 4: Update `enforce_ttl()` terminal statuses**
 
-In `agency/app.py` at line 396, update the terminal status list:
+In `flowgency/app.py` at line 396, update the terminal status list:
 
 ```python
     if status in ("archived", "dismissed", "decided"):
@@ -93,7 +93,7 @@ Expected: All tests pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/app.py tests/test_needs_action.py
+git add flowgency/app.py tests/test_needs_action.py
 git commit -m "feat: add 'decided' status, update enforce_ttl and pipeline constants"
 ```
 
@@ -104,9 +104,9 @@ git commit -m "feat: add 'decided' status, update enforce_ttl and pipeline const
 Replace the old approve/defer/reject handler with one that reads typed questions from the proposal, extracts answers from the form, builds a decision file with an `answers` dict, and always triggers execution.
 
 **Files:**
-- Modify: `agency/app.py:2279-2339` (proposal_decide route)
-- Modify: `agency/app.py:256-265` (update_decision_execution — simplify to flat field)
-- Modify: `agency/app.py:268-354` (execute_approved_decision — rename, update prompt)
+- Modify: `flowgency/app.py:2279-2339` (proposal_decide route)
+- Modify: `flowgency/app.py:256-265` (update_decision_execution — simplify to flat field)
+- Modify: `flowgency/app.py:268-354` (execute_approved_decision — rename, update prompt)
 - Test: `tests/test_proposal_questions.py` (new)
 
 - [ ] **Step 1: Write tests for the new decide logic**
@@ -255,7 +255,7 @@ Expected: All tests PASS (these are pure data structure tests).
 
 - [ ] **Step 3: Rewrite `proposal_decide()` route**
 
-Replace `agency/app.py` lines 2279-2339 with:
+Replace `flowgency/app.py` lines 2279-2339 with:
 
 ```python
 @app.post("/{group}/proposals/{slug}/decide", response_class=HTMLResponse)
@@ -286,8 +286,8 @@ async def proposal_decide(request: Request, group: str, slug: str,
         else:
             answers[q["id"]] = form.get(key, "")
 
-    agency_cfg = get_agency_config()
-    decided_by = agency_cfg.get("decided_by", "admin")
+    flowgency_cfg = get_flowgency_config()
+    decided_by = flowgency_cfg.get("decided_by", "admin")
     today = datetime.now().strftime("%Y-%m-%d")
 
     # Build decision frontmatter
@@ -322,7 +322,7 @@ async def proposal_decide(request: Request, group: str, slug: str,
 
 - [ ] **Step 4: Update `update_decision_execution()` to use flat `execution_status` field**
 
-Replace `agency/app.py` lines 256-265:
+Replace `flowgency/app.py` lines 256-265:
 
 ```python
 def update_decision_execution(decision_path: Path, field: str, value) -> None:
@@ -336,7 +336,7 @@ def update_decision_execution(decision_path: Path, field: str, value) -> None:
 
 - [ ] **Step 5: Rename and update `execute_approved_decision()` to `execute_decision()`**
 
-Replace `agency/app.py` lines 268-354 with:
+Replace `flowgency/app.py` lines 268-354 with:
 
 ```python
 def execute_decision(decision_path: Path, group_path: Path, agent: str,
@@ -426,7 +426,7 @@ Expected: All tests pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/app.py tests/test_proposal_questions.py
+git add flowgency/app.py tests/test_proposal_questions.py
 git commit -m "feat: rewrite proposal_decide for typed questions, simplify execution model"
 ```
 
@@ -437,12 +437,12 @@ git commit -m "feat: rewrite proposal_decide for typed questions, simplify execu
 Update the route handler to pass questions and answers to the template. Rewrite the template to render type-specific form controls (stacked cards) and the read-only decided state.
 
 **Files:**
-- Modify: `agency/app.py:2228-2276` (proposal_detail route)
-- Modify: `agency/templates/proposal_detail.html`
+- Modify: `flowgency/app.py:2228-2276` (proposal_detail route)
+- Modify: `flowgency/templates/proposal_detail.html`
 
 - [ ] **Step 1: Update proposal_detail() route handler**
 
-Replace `agency/app.py` lines 2259-2275 (the status sync block and template return):
+Replace `flowgency/app.py` lines 2259-2275 (the status sync block and template return):
 
 ```python
     # Sync proposal status if a decision exists but status is stale
@@ -471,7 +471,7 @@ Replace `agency/app.py` lines 2259-2275 (the status sync block and template retu
 
 - [ ] **Step 2: Rewrite proposal_detail.html template**
 
-Replace `agency/templates/proposal_detail.html` entirely:
+Replace `flowgency/templates/proposal_detail.html` entirely:
 
 ```html
 {% extends "base.html" %}
@@ -654,7 +654,7 @@ Expected: All tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agency/app.py agency/templates/proposal_detail.html
+git add flowgency/app.py flowgency/templates/proposal_detail.html
 git commit -m "feat: render typed question forms and read-only answers on proposal detail"
 ```
 
@@ -665,14 +665,14 @@ git commit -m "feat: render typed question forms and read-only answers on propos
 Update the decision detail template and route to show answers (rendered as read-only cards) instead of the old execution block format.
 
 **Files:**
-- Modify: `agency/app.py:2354-2389` (decision_detail route)
-- Modify: `agency/app.py:2392-2423` (decision_retry route)
-- Modify: `agency/templates/decision_detail.html`
-- Modify: `agency/templates/decisions.html` (list page badge)
+- Modify: `flowgency/app.py:2354-2389` (decision_detail route)
+- Modify: `flowgency/app.py:2392-2423` (decision_retry route)
+- Modify: `flowgency/templates/decision_detail.html`
+- Modify: `flowgency/templates/decisions.html` (list page badge)
 
 - [ ] **Step 1: Update decision_detail() route handler**
 
-In `agency/app.py`, update the `decision_detail()` function to also load the proposal's questions and pass them alongside answers:
+In `flowgency/app.py`, update the `decision_detail()` function to also load the proposal's questions and pass them alongside answers:
 
 Replace `execution = meta.get("execution", {})` (line 2377) and the template return (lines 2379-2389) with:
 
@@ -706,7 +706,7 @@ Replace `execution = meta.get("execution", {})` (line 2377) and the template ret
 
 - [ ] **Step 2: Update decision_retry() route**
 
-In `agency/app.py`, update `decision_retry()` (lines 2392-2423) to use the new flat fields and `execute_decision`:
+In `flowgency/app.py`, update `decision_retry()` (lines 2392-2423) to use the new flat fields and `execute_decision`:
 
 ```python
 @app.post("/{group}/decisions/{slug}/retry", response_class=HTMLResponse)
@@ -747,7 +747,7 @@ async def decision_retry(request: Request, group: str, slug: str,
 
 - [ ] **Step 3: Rewrite decision_detail.html template**
 
-Replace `agency/templates/decision_detail.html` entirely:
+Replace `flowgency/templates/decision_detail.html` entirely:
 
 ```html
 {% extends "base.html" %}
@@ -899,7 +899,7 @@ Replace `agency/templates/decision_detail.html` entirely:
 
 - [ ] **Step 4: Update decisions.html list page**
 
-In `agency/templates/decisions.html`, line 22, replace:
+In `flowgency/templates/decisions.html`, line 22, replace:
 
 ```html
 <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">{{ d.get("decision", "") }}</span>
@@ -919,7 +919,7 @@ Expected: All tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/app.py agency/templates/decision_detail.html agency/templates/decisions.html
+git add flowgency/app.py flowgency/templates/decision_detail.html flowgency/templates/decisions.html
 git commit -m "feat: show answers on decision detail/list, simplify execution status display"
 ```
 
@@ -930,11 +930,11 @@ git commit -m "feat: show answers on decision detail/list, simplify execution st
 Remove inline approve/defer/reject buttons, replace with "N questions" badge linking to proposal detail.
 
 **Files:**
-- Modify: `agency/templates/home.html:132-161`
+- Modify: `flowgency/templates/home.html:132-161`
 
 - [ ] **Step 1: Replace inline action buttons with questions badge**
 
-In `agency/templates/home.html`, replace lines 132-161 (the `{% for c in actionable_proposals %}` block) with:
+In `flowgency/templates/home.html`, replace lines 132-161 (the `{% for c in actionable_proposals %}` block) with:
 
 ```html
     {# ─ Proposals (high priority) ─ #}
@@ -970,7 +970,7 @@ Expected: All tests pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add agency/templates/home.html
+git add flowgency/templates/home.html
 git commit -m "feat: replace inline approve/defer/reject with questions badge on dashboard"
 ```
 
@@ -981,9 +981,9 @@ git commit -m "feat: replace inline approve/defer/reject with questions badge on
 Remove the three separate CLI commands and add a single interactive `decide` command that prompts for each question.
 
 **Files:**
-- Modify: `agency/cli.py:270-314` (remove _decide_proposal, cmd_approve, cmd_defer, cmd_reject)
-- Modify: `agency/cli.py:358-362` (remove approve/defer/reject parser registration)
-- Modify: `agency/cli.py` (add cmd_decide and its parser)
+- Modify: `flowgency/cli.py:270-314` (remove _decide_proposal, cmd_approve, cmd_defer, cmd_reject)
+- Modify: `flowgency/cli.py:358-362` (remove approve/defer/reject parser registration)
+- Modify: `flowgency/cli.py` (add cmd_decide and its parser)
 - Test: `tests/test_cli.py` (update if it tests approve/defer/reject)
 
 - [ ] **Step 1: Check existing CLI tests**
@@ -992,7 +992,7 @@ Read `tests/test_cli.py` to see if approve/defer/reject commands are tested.
 
 - [ ] **Step 2: Replace `_decide_proposal` and the three commands with `cmd_decide`**
 
-In `agency/cli.py`, replace lines 270-314 with:
+In `flowgency/cli.py`, replace lines 270-314 with:
 
 ```python
 def cmd_decide(args):
@@ -1088,7 +1088,7 @@ def cmd_decide(args):
 
 - [ ] **Step 3: Update CLI parser registration**
 
-In `agency/cli.py`, replace lines 358-362 (the approve/defer/reject for loop) with:
+In `flowgency/cli.py`, replace lines 358-362 (the approve/defer/reject for loop) with:
 
 ```python
     # decide
@@ -1112,7 +1112,7 @@ In the `main()` function, find where commands are dispatched and replace the `ap
 
 - [ ] **Step 5: Update `cmd_decisions` to show answers instead of old decision field**
 
-In `agency/cli.py`, replace lines 228-244 (`cmd_decisions` function) with:
+In `flowgency/cli.py`, replace lines 228-244 (`cmd_decisions` function) with:
 
 ```python
 def cmd_decisions(args):
@@ -1145,7 +1145,7 @@ Expected: All tests pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agency/cli.py tests/test_cli.py
+git add flowgency/cli.py tests/test_cli.py
 git commit -m "feat: replace approve/defer/reject CLI commands with interactive 'decide'"
 ```
 
@@ -1229,7 +1229,7 @@ Update the linked observations' `status` to `connected` and set their `linked_pr
 ### 6. Finalize proposed proposals
 If a proposal you originated has `feedback_received` matching `feedback_requested`,
 ensure your questions are well-formed and complete. Set `status: proposed`.
-The human will then see your questions in the Agency dashboard and answer them.
+The human will then see your questions in the Flowgency dashboard and answer them.
 ```
 
 - [ ] **Step 2: Commit**
@@ -1341,7 +1341,7 @@ Expected: All tests pass.
 
 - [ ] **Step 3: Start the app and manually verify**
 
-Run: `.venv/bin/python3 -m agency.app`
+Run: `.venv/bin/python3 -m flowgency.app`
 
 Verify:
 1. Dashboard loads, proposals show question count badges
@@ -1351,7 +1351,7 @@ Verify:
 
 - [ ] **Step 4: Restart the service**
 
-Run: `systemctl --user restart agency.service`
+Run: `systemctl --user restart flowgency.service`
 
 - [ ] **Step 5: Commit any remaining fixes**
 

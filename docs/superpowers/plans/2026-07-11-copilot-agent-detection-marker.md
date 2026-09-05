@@ -4,7 +4,7 @@
 
 **Goal:** Ensure setup-generated and dashboard-created GitHub Copilot agent directories carry the `.copilot/` marker and resolve through `CopilotIntegration` rather than Codex, without narrowing detection compatibility for pre-existing repository roots.
 
-**Architecture:** Add an integration preparation hook with a Copilot-specific marker implementation, call it from dashboard agent creation and Copilot identity writes, and require the same marker in Agency Setup. Keep filesystem-first detection and the unmarked `AGENTS.md` Codex fallback unchanged. Existing repository-root `.github/` detection remains a supported Copilot signal.
+**Architecture:** Add an integration preparation hook with a Copilot-specific marker implementation, call it from dashboard agent creation and Copilot identity writes, and require the same marker in Flowgency Setup. Keep filesystem-first detection and the unmarked `AGENTS.md` Codex fallback unchanged. Existing repository-root `.github/` detection remains a supported Copilot signal.
 
 **Tech Stack:** Python 3.11+, pytest, FastAPI route handlers, Markdown-based VS Code skill, Windows PowerShell generation instructions.
 
@@ -23,8 +23,8 @@
 ### Task 1: Integration Preparation Contract
 
 **Files:**
-- Modify: `agency/integrations/__init__.py`
-- Modify: `agency/integrations/agency/copilot.py`
+- Modify: `flowgency/integrations/__init__.py`
+- Modify: `flowgency/integrations/flowgency/copilot.py`
 - Test: `tests/test_integration_sidecar.py`
 
 **Interfaces:**
@@ -63,7 +63,7 @@ Expected: FAIL because `.copilot/` does not exist and detection returns `codex`.
 
 - [ ] **Step 3: Add the preparation hook and Copilot implementation**
 
-Add to `BaseIntegration` in `agency/integrations/__init__.py`:
+Add to `BaseIntegration` in `flowgency/integrations/__init__.py`:
 
 ```python
 def prepare_agent_dir(self, agent_dir: Path) -> None:
@@ -72,7 +72,7 @@ def prepare_agent_dir(self, agent_dir: Path) -> None:
 
 The base implementation returns without modifying the directory.
 
-Add to `CopilotIntegration` in `agency/integrations/agency/copilot.py`:
+Add to `CopilotIntegration` in `flowgency/integrations/flowgency/copilot.py`:
 
 ```python
 def prepare_agent_dir(self, agent_dir: Path) -> None:
@@ -101,7 +101,7 @@ unmarked-Codex assertions.
 ### Task 2: Dashboard Agent Creation
 
 **Files:**
-- Modify: `agency/app.py`
+- Modify: `flowgency/app.py`
 - Create: `tests/test_admin_agent_create.py`
 
 **Interfaces:**
@@ -115,8 +115,8 @@ Create `tests/test_admin_agent_create.py`:
 ```python
 import asyncio
 
-import agency.app as app_mod
-from agency.integrations import detect_integration
+import flowgency.app as app_mod
+from flowgency.integrations import detect_integration
 
 
 class FakeRequest:
@@ -137,7 +137,7 @@ def test_admin_create_prepares_copilot_agent_dir(tmp_path, monkeypatch):
     agents_dir.mkdir()
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.save_config({
-        "agency": {"title": "Agency", "default_group": "grp"},
+        "flowgency": {"title": "Flowgency", "default_group": "grp"},
         "groups": {
             "grp": {
                 "name": "Group",
@@ -191,11 +191,11 @@ Expected: PASS.
 
 ---
 
-### Task 3: Agency Setup Marker Contract
+### Task 3: Flowgency Setup Marker Contract
 
 **Files:**
-- Modify: `skills/agency-setup/SKILL.md`
-- Create: `tests/test_agency_setup_skill.py`
+- Modify: `skills/flowgency-setup/SKILL.md`
+- Create: `tests/test_flowgency_setup_skill.py`
 
 **Interfaces:**
 - Produces: Copilot/Windows generation requirement for `agents/{agent}/.copilot/`
@@ -203,13 +203,13 @@ Expected: PASS.
 
 - [ ] **Step 1: Write the failing skill contract test**
 
-Create `tests/test_agency_setup_skill.py`:
+Create `tests/test_flowgency_setup_skill.py`:
 
 ```python
 from pathlib import Path
 
 
-SKILL_PATH = Path(__file__).parents[1] / "skills" / "agency-setup" / "SKILL.md"
+SKILL_PATH = Path(__file__).parents[1] / "skills" / "flowgency-setup" / "SKILL.md"
 
 
 def test_copilot_profile_requires_detection_marker():
@@ -226,7 +226,7 @@ def test_copilot_profile_requires_detection_marker():
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py -q
+python -m pytest tests/test_flowgency_setup_skill.py -q
 ```
 
 Expected: FAIL because the skill creates no `.copilot/` marker and requires no detection
@@ -252,7 +252,7 @@ In Phase 4.2 add:
     `.github/` signal for pre-existing repository roots.
 ```
 
-In Phase 4 generation verification require, when Agency's Python package is importable,
+In Phase 4 generation verification require, when Flowgency's Python package is importable,
 that `detect_integration(agent_dir).name == "copilot"` for each Copilot agent. Otherwise
 verify that `.copilot/` and `AGENTS.md` both exist.
 
@@ -261,7 +261,7 @@ verify that `.copilot/` and `AGENTS.md` both exist.
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py -q
+python -m pytest tests/test_flowgency_setup_skill.py -q
 ```
 
 Expected: PASS. Then re-run the read-only baseline scenario and confirm it lists
@@ -292,7 +292,7 @@ detector migration or remove support for repository-root `.github/` signals.
 Run:
 
 ```powershell
-python -c 'from pathlib import Path; import yaml; from agency.integrations import detect_integration; c=yaml.safe_load(open("config.yaml", encoding="utf-8")); g=c["groups"]["agents"]; names=[a["name"] if isinstance(a,dict) else a for a in g["agents"]]; results={n:detect_integration(Path(g["path"])/n).name for n in names}; assert set(results.values())=={"copilot"},results; print(results)'
+python -c 'from pathlib import Path; import yaml; from flowgency.integrations import detect_integration; c=yaml.safe_load(open("config.yaml", encoding="utf-8")); g=c["groups"]["agents"]; names=[a["name"] if isinstance(a,dict) else a for a in g["agents"]]; results={n:detect_integration(Path(g["path"])/n).name for n in names}; assert set(results.values())=={"copilot"},results; print(results)'
 ```
 
 Expected: all ten values are `copilot`.

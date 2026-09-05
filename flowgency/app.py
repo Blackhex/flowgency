@@ -1,4 +1,4 @@
-"""Agency Dashboard — multi-team agent management interface."""
+"""Flowgency Dashboard — multi-team agent management interface."""
 
 import logging
 import os
@@ -122,13 +122,13 @@ def _update_tip_settings(patcher) -> None:
 
 
 def get_flowgency_config() -> dict:
-    """Return agency-level config derived from the canonical config snapshot."""
+    """Return flowgency-level config derived from the canonical config snapshot."""
     try:
         return flowgency_settings(_load_snapshot())
     except Exception as error:
         if not _has_config_file():
             return {
-                "title": "Agency",
+                "title": "Flowgency",
                 "default_team": "",
                 "decided_by": "admin",
                 "ai_backend": "claude-code",
@@ -358,7 +358,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Agency Dashboard", lifespan=lifespan)
+app = FastAPI(title="Flowgency Dashboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.state.templates = templates
@@ -388,8 +388,8 @@ async def manifest():
     """Serve PWA manifest with dynamic app title."""
     cfg = get_flowgency_config()
     data = json_module.loads((STATIC_DIR / "manifest.json").read_text())
-    data["name"] = cfg.get("title", "Agency")
-    data["short_name"] = cfg.get("title", "Agency")
+    data["name"] = cfg.get("title", "Flowgency")
+    data["short_name"] = cfg.get("title", "Flowgency")
     return data
 
 
@@ -428,7 +428,7 @@ def safe_redirect(url: str, fallback: str = "/") -> str:
 def team_context(g: dict, observations: list[dict] | None = None, proposals: list[dict] | None = None) -> dict:
     """Return standard template context for a team."""
     snapshot = _load_snapshot()
-    agency = flowgency_settings(snapshot)
+    flowgency = flowgency_settings(snapshot)
     team_cfg = snapshot.config.teams[g["key"]]
     if observations is None:
         observations = list_observations(g)
@@ -446,7 +446,7 @@ def team_context(g: dict, observations: list[dict] | None = None, proposals: lis
         "teams": {
             key: value.name for key, value in snapshot.config.teams.items()
         },
-        "flowgency_title": agency.get("title", "Flowgency"),
+        "flowgency_title": flowgency.get("title", "Flowgency"),
         "admin_active": False,
         "workspaces": [
             workspace.model_dump(mode="json")
@@ -458,8 +458,8 @@ def team_context(g: dict, observations: list[dict] | None = None, proposals: lis
         "nav_actionable_proposals": actionable_proposal_count,
         "nav_agent_count": len(g["agents"]),
         "nav_running_decisions": running_decisions,
-        "show_tips": agency.get("show_tips", True),
-        "tips_dismissed": agency.get("tips_dismissed", []),
+        "show_tips": flowgency.get("show_tips", True),
+        "tips_dismissed": flowgency.get("tips_dismissed", []),
         "theme_css": get_theme_css(),
     }
 
@@ -1295,8 +1295,8 @@ async def root(request: Request):
     if services.startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
     snapshot = services.config_store.load()
-    agency = get_flowgency_config()
-    default = agency.get("default_team", "")
+    flowgency = get_flowgency_config()
+    default = flowgency.get("default_team", "")
     if default and default in snapshot.config.teams:
         return RedirectResponse(f"/{default}/", status_code=303)
     first = next(iter(snapshot.config.teams), "")
@@ -1359,7 +1359,7 @@ async def tip_hide_all(request: Request):
 def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dict:
     """Build common context for admin pages."""
     snapshot = _load_snapshot()
-    agency = flowgency_settings(snapshot)
+    flowgency = flowgency_settings(snapshot)
     team_summaries = []
     for key, tcfg in snapshot.config.teams.items():
         paths = resolve_team_paths(tcfg)
@@ -1376,8 +1376,8 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
             "dispatch_enabled": dispatch_cfg.enabled,
         })
     return {
-        "flowgency_title": agency.get("title", "Flowgency"),
-        "default_team": agency.get("default_team", ""),
+        "flowgency_title": flowgency.get("title", "Flowgency"),
+        "default_team": flowgency.get("default_team", ""),
         "team_summaries": team_summaries,
         "teams": {
             key: tcfg.name for key, tcfg in snapshot.config.teams.items()
@@ -1500,7 +1500,7 @@ async def admin_integrations_unregister(request: Request):
 
 @app.post("/admin/integrations/restart", response_class=HTMLResponse)
 async def admin_integrations_restart(request: Request):
-    """Restart the agency service to apply integration changes."""
+    """Restart the flowgency service to apply integration changes."""
     try:
         subprocess.Popen(["systemctl", "--user", "restart", "flowgency.service"])
     except Exception:
@@ -1532,12 +1532,12 @@ async def admin_teams_page(request: Request):
 
 @app.post("/admin/settings", response_class=HTMLResponse)
 async def admin_save_settings(request: Request):
-    """Save agency-level settings."""
+    """Save flowgency-level settings."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
-    title = form.get("title", "Agency").strip()
+    title = form.get("title", "Flowgency").strip()
     default_team = form.get("default_team", "").strip()
     snapshot = _load_snapshot()
     settings = flowgency_settings(snapshot)
@@ -1559,7 +1559,7 @@ async def admin_save_settings(request: Request):
             ConfigStore(snapshot.path),
             revision or snapshot.revision,
             FlowgencySettingsPatch(
-                title=title or "Agency",
+                title=title or "Flowgency",
                 default_team=default_team,
                 ai_backend=ai_backend,
                 theme=theme,
@@ -1635,11 +1635,11 @@ async def admin_team_new(request: Request):
     """Create new team form."""
     if _services().startup_error is not None:
         return RedirectResponse("/setup", status_code=303)
-    agency = get_flowgency_config()
+    flowgency = get_flowgency_config()
     snapshot = _load_snapshot()
     return templates.TemplateResponse(request, "admin_team_edit.html", {
         "request": request,
-        "flowgency_title": agency.get("title", "Flowgency"),
+        "flowgency_title": flowgency.get("title", "Flowgency"),
         "admin_active": True,
         "active": "admin",
         "admin_page": "teams",
@@ -2095,8 +2095,8 @@ async def proposal_decide(request: Request, team: str, slug: str):
             status_code=400,
         )
 
-    agency_cfg = get_flowgency_config()
-    decided_by = agency_cfg.get("decided_by", "admin")
+    flowgency_cfg = get_flowgency_config()
+    decided_by = flowgency_cfg.get("decided_by", "admin")
     today = clock_now().strftime("%Y-%m-%d")
 
     decisions_dir.mkdir(exist_ok=True)
@@ -2335,7 +2335,7 @@ async def decision_verify(request: Request, team: str, slug: str):
     """Record whether an executed decision satisfied its originating proposal.
 
     This is a thin, governance-only outcome state on the existing decision
-    record — Agency observes and governs the result, it does not execute. When
+    record — Flowgency observes and governs the result, it does not execute. When
     the outcome did not satisfy the intent, this opens a follow-up observation
     (floated, linked back to the decision) so the loop stays connected.
     """
@@ -2355,8 +2355,8 @@ async def decision_verify(request: Request, team: str, slug: str):
             status_code=400,
         )
 
-    agency_cfg = get_flowgency_config()
-    verifier = agency_cfg.get("decided_by", "admin")
+    flowgency_cfg = get_flowgency_config()
+    verifier = flowgency_cfg.get("decided_by", "admin")
     now = clock_now().isoformat(timespec="seconds")
 
     meta["verification_status"] = outcome
@@ -2562,7 +2562,7 @@ RELOAD_EXCLUDE_DIRS = (
 )
 
 
-class _AgencyReloadFilter:
+class _FlowgencyReloadFilter:
     """Select watched source files without depending on directory existence."""
 
     def __init__(self, root: Path):
@@ -2584,14 +2584,14 @@ class _AgencyReloadFilter:
 
 
 def _create_reload_supervisor(config, server, sockets):
-    """Create Uvicorn's WatchFiles supervisor with Agency's path filter."""
+    """Create Uvicorn's WatchFiles supervisor with Flowgency's path filter."""
     supervisor = WatchFilesReload(config, target=server.run, sockets=sockets)
-    supervisor.watch_filter = _AgencyReloadFilter(config.reload_dirs[0])
+    supervisor.watch_filter = _FlowgencyReloadFilter(config.reload_dirs[0])
     return supervisor
 
 
 def _run_reload_server(host: str, port: int) -> None:
-    """Run Uvicorn's reload lifecycle with Agency's WatchFiles filter."""
+    """Run Uvicorn's reload lifecycle with Flowgency's WatchFiles filter."""
     reload_root = Path.cwd().resolve()
     config = uvicorn.Config(
         "flowgency.app:app",
@@ -2612,10 +2612,10 @@ def _run_reload_server(host: str, port: int) -> None:
 
 
 def run_server(host: str, port: int, reload: bool = False) -> None:
-    """Initialize Agency and run the web server."""
+    """Initialize Flowgency and run the web server."""
     if not CONFIG_PATH.exists():
         print(
-            f"First run: open http://localhost:{port}/setup to launch guided Agency setup."
+            f"First run: open http://localhost:{port}/setup to launch guided Flowgency setup."
         )
 
     refresh_services()
@@ -2628,7 +2628,7 @@ def run_server(host: str, port: int, reload: bool = False) -> None:
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Agency — Agent Management Dashboard")
+    parser = argparse.ArgumentParser(description="Flowgency — Agent Management Dashboard")
     parser.add_argument("--port", type=int, default=8500, help="Port to serve on (default: 8500)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
     parser.add_argument("--reload", action="store_true", help="Restart when project files change")

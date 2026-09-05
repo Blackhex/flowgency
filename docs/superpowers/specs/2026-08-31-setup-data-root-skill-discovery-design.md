@@ -7,27 +7,27 @@
 
 Guided first-run setup labels its only path input as `Project folder`, passes it
 through the application as `project_dir`, and launches the selected integration
-from that directory. The field is actually intended to select Agency's
+from that directory. The field is actually intended to select Flowgency's
 permanent data root. This misleading contract also leaves Copilot unable to
-discover `agency-setup` unless the selected directory happens to expose the
-repository's `.github/skills/agency-setup` link. A normal installed first launch
+discover `flowgency-setup` unless the selected directory happens to expose the
+repository's `.github/skills/flowgency-setup` link. A normal installed first launch
 therefore opens a session that reports:
 
 ```text
-skill(agency-setup) Skill not found: agency-setup
+skill(flowgency-setup) Skill not found: flowgency-setup
 ```
 
 The browser, launch request, prompt, integration, packaged resources, and setup
-skill must agree about both paths: the browser selects the Agency data root,
+skill must agree about both paths: the browser selects the Flowgency data root,
 while the setup conversation selects the first group's project workspace.
 
 ## Goals
 
-1. Present the existing setup path field unambiguously as the Agency data root.
+1. Present the existing setup path field unambiguously as the Flowgency data root.
 2. Accept an existing safe data root or safely create a missing absolute root.
 3. Use the selected data root as the interactive setup session's working
    directory.
-4. Make the canonical `agency-setup` skill discoverable from editable and wheel
+4. Make the canonical `flowgency-setup` skill discoverable from editable and wheel
    installations without requiring project-local or user-global installation.
 5. Ask for the first group's project workspace in the setup conversation.
 6. Preserve the final consolidated path approval, complete schema-version-5
@@ -35,18 +35,18 @@ while the setup conversation selects the first group's project workspace.
 
 ## Non-Goals
 
-- Adding an `agency.data_root` field to the configuration schema.
-- Treating the Agency data root as a group execution workspace.
+- Adding an `flowgency.data_root` field to the configuration schema.
+- Treating the Flowgency data root as a group execution workspace.
 - Installing or updating a user-global Copilot skill.
 - Writing Copilot-native skill files into the selected data root.
 - Creating derived storage directories before conversational path approval.
 - Changing dashboard polling, config authority, or runtime path ownership.
-- Migrating data for an existing configured Agency installation.
+- Migrating data for an existing configured Flowgency installation.
 
 ## Superseded First-Run Contract
 
 This design supersedes only the first-run handoff and root-question ordering in
-`2026-07-23-agency-data-root-setup-design.md`. That design deliberately kept the
+`2026-07-23-flowgency-data-root-setup-design.md`. That design deliberately kept the
 data root off the browser form and made it the skill's first question. The
 browser now selects the data root before launch, so the project workspace
 becomes the first setup-session question.
@@ -62,16 +62,16 @@ approval.
 The setup page retains one path field and one integration selector. The path
 surface uses the following terms consistently:
 
-- Introductory copy: choose the Agency data root and launch-capable integration.
-- Field label: `Agency data root`.
-- Windows placeholder: `C:\Agency`.
-- Directory dialog title: `Choose Agency data root`.
-- Selection feedback: `Agency data root selected.`
-- Validation errors: refer to an Agency data root, never a project folder.
-- Waiting summary label: `Agency data root`.
+- Introductory copy: choose the Flowgency data root and launch-capable integration.
+- Field label: `Flowgency data root`.
+- Windows placeholder: `C:\Flowgency`.
+- Directory dialog title: `Choose Flowgency data root`.
+- Selection feedback: `Flowgency data root selected.`
+- Validation errors: refer to an Flowgency data root, never a project folder.
+- Waiting summary label: `Flowgency data root`.
 
 The directory browser continues to select existing directories. Direct text
-entry additionally permits a missing absolute path that Agency can safely
+entry additionally permits a missing absolute path that Flowgency can safely
 create. The browser does not gain a directory-creation workflow.
 
 After launch, the guided conversation treats the supplied root as selected and
@@ -102,21 +102,21 @@ steps before constructing a launch request:
 
 This preflight may leave an empty root behind if a later terminal launch fails.
 It never creates `agent-library`, `compiled-agents`, `memory`, `prompts`, or
-`groups` and never writes configuration. Agency does not remove the root or any
+`groups` and never writes configuration. Flowgency does not remove the root or any
 missing parents it created: the user explicitly selected that permanent
 location, and deleting it after a launch failure could race with user content.
 A relaunch accepts and revalidates the now-existing root idempotently.
 
 ### Packaged Skill Ownership
 
-The canonical `agency-setup` files live in package data beneath a Copilot
+The canonical `flowgency-setup` files live in package data beneath a Copilot
 discovery root with this logical shape:
 
 ```text
-agency/setup_assets/copilot/
+flowgency/setup_assets/copilot/
 `-- .github/
     `-- skills/
-        `-- agency-setup/
+        `-- flowgency-setup/
             |-- SKILL.md
             `-- references/
 ```
@@ -124,22 +124,22 @@ agency/setup_assets/copilot/
 `pyproject.toml` declares the skill through `[tool.setuptools.package-data]`.
 The declaration includes `SKILL.md` and regular Markdown files directly beneath
 `references/`; the packaging test recursively compares all regular source files
-under `agency-setup` with the wheel entries so adding a reference without
+under `flowgency-setup` with the wheel entries so adding a reference without
 packaging it fails immediately. This includes the current
 `dispatch-templates.md`, `observation-system-steps.md`, and `templates.md`
 references in editable installations, source distributions, and wheels.
 
-The repository paths `skills/agency-setup` and
-`.github/skills/agency-setup` resolve to this same canonical source so repository
+The repository paths `skills/flowgency-setup` and
+`.github/skills/flowgency-setup` resolve to this same canonical source so repository
 discovery, documentation paths, package runtime behavior, and tests cannot
 drift between copies.
 
 The Copilot integration resolves the installed discovery root as
-`Path(agency.__file__).resolve().parent / "setup_assets" / "copilot"`. A normal
+`Path(flowgency.__file__).resolve().parent / "setup_assets" / "copilot"`. A normal
 editable or wheel installation exposes package resources as stable filesystem
 paths for the lifetime of the launched terminal, so no temporary extraction
 context is used. The integration verifies that
-`.github/skills/agency-setup/SKILL.md` is a real readable file and owns the
+`.github/skills/flowgency-setup/SKILL.md` is a real readable file and owns the
 Copilot-specific launch argument. Other integrations receive the data-root
 working-directory contract but remain responsible for exposing the standard
 skill through their own supported mechanism.
@@ -150,7 +150,7 @@ The interactive setup command includes both roots explicitly:
 
 ```text
 copilot -C <data-root> --add-dir <packaged-discovery-root> \
-  -i <setup-prompt> --name "Agency setup"
+  -i <setup-prompt> --name "Flowgency setup"
 ```
 
 The process working directory and `-C` value are the strictly resolved data
@@ -158,8 +158,8 @@ root. The packaged discovery root is read-only application content and is never
 configuration authority. The generated fallback command carries the same
 arguments.
 
-Before launch, Agency checks
-`<data-root>/.github/skills/agency-setup`. It proceeds when that path is absent
+Before launch, Flowgency checks
+`<data-root>/.github/skills/flowgency-setup`. It proceeds when that path is absent
 or resolves to the packaged canonical skill, and rejects any other local entry.
 This prevents a stale or unrelated local skill from shadowing the bundled setup
 contract. Other integration-native content in the root remains untouched.
@@ -171,47 +171,47 @@ lines:
 
 ```text
 Setup mode: guided-first-run.
-Agency data root: <strict absolute path>.
+Flowgency data root: <strict absolute path>.
 Authoritative config: <strict absolute path>.
 Selected integration: <registered integration name>.
 ```
 
 These lines supply three distinct values:
 
-- Agency data root: selected in the browser and already created.
-- Authoritative config path: supplied by the running Agency process.
+- Flowgency data root: selected in the browser and already created.
+- Authoritative config path: supplied by the running Flowgency process.
 - Selected integration: used for initial defaults unless the user approves a
   different registered integration.
 
-The prompt then states: `The Agency data root was selected in the browser; do
+The prompt then states: `The Flowgency data root was selected in the browser; do
 not ask for it again. Ask for the first group project workspace as the first
-user-facing question.` It instructs `agency-setup` to inspect that workspace
+user-facing question.` It instructs `flowgency-setup` to inspect that workspace
 read-only only after selection, derive default storage beneath the supplied data
 root, and retain the existing grouped override and consolidated approval flow.
 
 The canonical skill supports both invocation contexts without ambiguity:
 
 - A prompt containing both `Setup mode: guided-first-run.` and an
-   `Agency data root:` line does not ask for that root again; it asks for the
+   `Flowgency data root:` line does not ask for that root again; it asks for the
    project workspace first.
 - Any manual invocation without that complete guided context retains a root
    question, followed by the project workspace question. No environment variable
    or hidden process state selects a mode.
 
-In both cases the skill keeps Agency-owned storage disjoint from project source
+In both cases the skill keeps Flowgency-owned storage disjoint from project source
 and writes only one complete schema-version-5 configuration atomically.
 
 ## Data Flow
 
-1. The user enters or browses to an Agency data root and chooses an integration.
+1. The user enters or browses to an Flowgency data root and chooses an integration.
 2. The setup route validates and, when necessary, creates only the root.
-3. The route verifies that no local `agency-setup` shadows the packaged skill.
+3. The route verifies that no local `flowgency-setup` shadows the packaged skill.
 4. It builds an `InteractiveSetupRequest` carrying the data root, config path,
    and setup prompt.
 5. Copilot validates its packaged discovery tree and builds a command using the
    data root for both process cwd and `-C`, plus the package root for
    `--add-dir`.
-6. The setup session loads `agency-setup` and asks for the project workspace.
+6. The setup session loads `flowgency-setup` and asks for the project workspace.
 7. The skill inspects the selected project read-only, conducts the setup
    interview, and presents one consolidated path summary.
 8. Only after approval does the skill create derived storage and perform the
@@ -227,9 +227,9 @@ relative path, file, unsafe link or reparse point, inaccessible existing root,
 and root without a safe writable parent.
 
 A missing or unreadable packaged skill is an installation error. Command
-construction fails before terminal spawn and reports that `christag-agency`
-must be reinstalled. A conflicting local `agency-setup` names the conflicting
-path and asks the user to remove or rename it. Agency never silently omits
+construction fails before terminal spawn and reports that `flowgency`
+must be reinstalled. A conflicting local `flowgency-setup` names the conflicting
+path and asks the user to remove or rename it. Flowgency never silently omits
 `--add-dir`, falls back to an inline copy of the skill, or overwrites local
 content.
 
@@ -239,14 +239,14 @@ fallback can be constructed, the form reports the launch error directly instead
 of entering a false waiting state or offering a command known to fail.
 
 Relaunch posts the same data root and integration through the same preflight.
-The waiting summary identifies the value as `Agency data root`.
+The waiting summary identifies the value as `Flowgency data root`.
 
 ## Documentation
 
 Update the README, getting-started guide, setup-skill guide, canonical skill,
-and setup surface contract to state that the browser selects the Agency data
+and setup surface contract to state that the browser selects the Flowgency data
 root and the conversation selects the project workspace. Examples use
-`C:\Agency` and `~/Agency` for the data root and project-oriented paths only for
+`C:\Flowgency` and `~/Flowgency` for the data root and project-oriented paths only for
 the workspace question.
 
 Historical approved specifications remain unchanged. This specification records
@@ -257,7 +257,7 @@ the newer decision and its limited supersession explicitly.
 ### Setup Surface And Root Preparation
 
 - Assert that form, picker, feedback, validation, waiting summary, and relaunch
-  use Agency data-root copy and `data_root` fields with no stale project-folder
+  use Flowgency data-root copy and `data_root` fields with no stale project-folder
   wording.
 - Accept and create a missing absolute root with a writable real parent.
 - Accept an existing readable and writable real root.
@@ -284,7 +284,7 @@ the newer decision and its limited supersession explicitly.
 - Assert that both repository discovery paths resolve to the package-owned
   canonical skill source.
 - Build a wheel and recursively compare every regular file in the canonical
-   `agency-setup` source tree with entries beneath the packaged discovery root.
+   `flowgency-setup` source tree with entries beneath the packaged discovery root.
 - Assert that the guided prompt supplies the data root, asks for project
   workspace first, and no longer asks for the supplied root again.
 - Assert that manual skill invocation still covers the no-root fallback path.
@@ -301,26 +301,26 @@ waiting summary fit without overlap.
 
 ## Acceptance Criteria
 
-1. The browser path field is consistently presented as `Agency data root`.
+1. The browser path field is consistently presented as `Flowgency data root`.
 2. A safe missing absolute root is created before launch; unsafe roots fail
    before any integration starts.
 3. Copilot starts with the selected data root as its cwd and `-C` directory.
 4. A clean editable or wheel installation discovers the bundled
-   `agency-setup` skill without project-local or user-global setup.
+   `flowgency-setup` skill without project-local or user-global setup.
 5. The first guided conversational question selects the project workspace.
 6. Derived storage is not created until the consolidated path summary is
    approved.
 7. Setup still produces one complete, validated, atomically written
    schema-version-5 configuration.
-8. A reproduction that previously emitted `Skill not found: agency-setup`
+8. A reproduction that previously emitted `Skill not found: flowgency-setup`
    loads the skill successfully instead.
 
 ## Rejected Alternatives
 
 ### Project The Skill Into The Data Root
 
-Writing `<data-root>/.github/skills/agency-setup` would make cwd discovery
-obvious, but it would add Copilot-specific generated files to permanent Agency
+Writing `<data-root>/.github/skills/flowgency-setup` would make cwd discovery
+obvious, but it would add Copilot-specific generated files to permanent Flowgency
 storage and require overwrite, collision, and version-lifecycle rules. The
 selected design keeps runtime integration assets package-owned.
 
@@ -333,5 +333,5 @@ prompt remains a handoff to a packaged standard skill.
 ### Install A User-Global Skill
 
 A global installation would create state outside both the selected root and the
-Agency package, introduce cross-version conflicts between Agency installations,
+Flowgency package, introduce cross-version conflicts between Flowgency installations,
 and require cleanup or upgrade policy. First-run setup must be self-contained.

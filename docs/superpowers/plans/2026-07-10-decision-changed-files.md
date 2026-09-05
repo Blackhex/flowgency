@@ -23,10 +23,10 @@
 
 ## File Structure
 
-- `agency/integrations/__init__.py` — add `FileChange` dataclass; add `changed_files` field to `RunResult`. (interface)
-- `agency/integrations/agency/copilot.py` — switch `run()` to `--output-format json`; add `_parse_jsonl_output`. (Copilot implementation)
-- `agency/app.py` — `execute_decision` persists `executed_by`, `execution_log`, `changed_files`; `decision_detail` reads and passes them. (persistence + route)
-- `agency/templates/decision_detail.html` — render agent badge, log link, changed-files list inside the Execution block. (view)
+- `flowgency/integrations/__init__.py` — add `FileChange` dataclass; add `changed_files` field to `RunResult`. (interface)
+- `flowgency/integrations/flowgency/copilot.py` — switch `run()` to `--output-format json`; add `_parse_jsonl_output`. (Copilot implementation)
+- `flowgency/app.py` — `execute_decision` persists `executed_by`, `execution_log`, `changed_files`; `decision_detail` reads and passes them. (persistence + route)
+- `flowgency/templates/decision_detail.html` — render agent badge, log link, changed-files list inside the Execution block. (view)
 - `tests/test_integration_sidecar.py` — Copilot JSONL parsing tests.
 - `tests/test_execute_decision.py` — persistence tests.
 
@@ -35,7 +35,7 @@
 ### Task 1: Add `FileChange` record and `changed_files` to `RunResult`
 
 **Files:**
-- Modify: `agency/integrations/__init__.py:15-21` (imports at top + `RunResult` dataclass)
+- Modify: `flowgency/integrations/__init__.py:15-21` (imports at top + `RunResult` dataclass)
 - Test: `tests/test_integration_contract.py`
 
 **Interfaces:**
@@ -49,7 +49,7 @@
 Add to `tests/test_integration_contract.py` (create the file if it does not exist; if it exists, append the test function and ensure the import line is present):
 
 ```python
-from agency.integrations import RunResult, FileChange
+from flowgency.integrations import RunResult, FileChange
 
 
 def test_runresult_changed_files_defaults_empty():
@@ -72,7 +72,7 @@ Expected: FAIL with `ImportError: cannot import name 'FileChange'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `agency/integrations/__init__.py`, change the import line:
+In `flowgency/integrations/__init__.py`, change the import line:
 
 ```python
 from dataclasses import dataclass
@@ -126,7 +126,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/integrations/__init__.py tests/test_integration_contract.py
+git add flowgency/integrations/__init__.py tests/test_integration_contract.py
 git commit -m "feat(integrations): add FileChange and RunResult.changed_files"
 ```
 
@@ -135,7 +135,7 @@ git commit -m "feat(integrations): add FileChange and RunResult.changed_files"
 ### Task 2: Parse Copilot JSONL into changed files
 
 **Files:**
-- Modify: `agency/integrations/agency/copilot.py:1-13` (imports), add `_parse_jsonl_output` static method, and `run()` at `agency/integrations/agency/copilot.py:38-107`
+- Modify: `flowgency/integrations/flowgency/copilot.py:1-13` (imports), add `_parse_jsonl_output` static method, and `run()` at `flowgency/integrations/flowgency/copilot.py:38-107`
 - Test: `tests/test_integration_sidecar.py` (class `TestCopilot`, append after existing tests)
 
 **Interfaces:**
@@ -152,7 +152,7 @@ Append to `tests/test_integration_sidecar.py` inside `class TestCopilot`:
     def test_parse_jsonl_extracts_native_edits(self):
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         root = Path("C:/repo") if False else Path("/repo")
         lines = [
             {"type": "tool.execution_start",
@@ -184,7 +184,7 @@ Append to `tests/test_integration_sidecar.py` inside `class TestCopilot`:
     def test_parse_jsonl_skips_readonly_view(self):
         import json
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         lines = [
             {"type": "tool.execution_start",
              "data": {"toolCallId": "v1", "toolName": "view",
@@ -200,7 +200,7 @@ Append to `tests/test_integration_sidecar.py` inside `class TestCopilot`:
 
     def test_parse_jsonl_malformed_falls_back(self):
         from pathlib import Path
-        from agency.integrations.agency.copilot import CopilotIntegration
+        from flowgency.integrations.flowgency.copilot import CopilotIntegration
         raw = "this is not json\nok"
         text, changes = CopilotIntegration._parse_jsonl_output(raw, Path("/repo"))
         assert text == raw
@@ -214,7 +214,7 @@ Expected: FAIL with `AttributeError: type object 'CopilotIntegration' has no att
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `agency/integrations/agency/copilot.py`, add `import json` to the imports block and import the new types. Change:
+In `flowgency/integrations/flowgency/copilot.py`, add `import json` to the imports block and import the new types. Change:
 
 ```python
 import os
@@ -224,8 +224,8 @@ import sys
 import time
 from pathlib import Path
 
-from agency.config import SandboxSpec
-from agency.integrations import (
+from flowgency.config import SandboxSpec
+from flowgency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
 )
 ```
@@ -241,8 +241,8 @@ import sys
 import time
 from pathlib import Path
 
-from agency.config import SandboxSpec
-from agency.integrations import (
+from flowgency.config import SandboxSpec
+from flowgency.integrations import (
     BaseIntegration, RunResult, FileChange, AgentIdentity, IntegrationError, _register,
 )
 ```
@@ -369,7 +369,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/integrations/agency/copilot.py tests/test_integration_sidecar.py
+git add flowgency/integrations/flowgency/copilot.py tests/test_integration_sidecar.py
 git commit -m "feat(copilot): parse JSONL output into changed files"
 ```
 
@@ -378,7 +378,7 @@ git commit -m "feat(copilot): parse JSONL output into changed files"
 ### Task 3: Wire Copilot `run()` to emit JSON and populate `changed_files`
 
 **Files:**
-- Modify: `agency/integrations/agency/copilot.py` (the `run()` method, cmd args + return)
+- Modify: `flowgency/integrations/flowgency/copilot.py` (the `run()` method, cmd args + return)
 - Test: `tests/test_integration_sidecar.py` (class `TestCopilot`)
 
 **Interfaces:**
@@ -392,7 +392,7 @@ Append to `tests/test_integration_sidecar.py` inside `class TestCopilot`:
 ```python
     def test_run_emits_json_and_populates_changed_files(self, integration, tmp_agent_dir, monkeypatch):
         import json
-        import agency.integrations.agency.copilot as mod
+        import flowgency.integrations.flowgency.copilot as mod
 
         jsonl = "\n".join(json.dumps(l) for l in [
             {"type": "tool.execution_start",
@@ -497,7 +497,7 @@ Expected: PASS (all Copilot tests, including the existing flag-matrix and `test_
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/integrations/agency/copilot.py tests/test_integration_sidecar.py
+git add flowgency/integrations/flowgency/copilot.py tests/test_integration_sidecar.py
 git commit -m "feat(copilot): run with --output-format json and report changed files"
 ```
 
@@ -506,7 +506,7 @@ git commit -m "feat(copilot): run with --output-format json and report changed f
 ### Task 4: Persist executing agent, log path, and changed files in `execute_decision`
 
 **Files:**
-- Modify: `agency/app.py` — `execute_decision` (`agency/app.py:462-544`)
+- Modify: `flowgency/app.py` — `execute_decision` (`flowgency/app.py:462-544`)
 - Test: `tests/test_execute_decision.py`
 
 **Interfaces:**
@@ -523,8 +523,8 @@ Append to `tests/test_execute_decision.py` a test that runs `execute_decision` w
 
 ```python
 def test_execute_decision_persists_agent_log_and_changes(tmp_path, monkeypatch):
-    import agency.app as app
-    from agency.integrations import RunResult, FileChange
+    import flowgency.app as app
+    from flowgency.integrations import RunResult, FileChange
 
     # ... build group_path, decision_path, proposal with origin_agent="worker"
     # using the same helpers as the other tests in this file ...
@@ -597,7 +597,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/app.py tests/test_execute_decision.py
+git add flowgency/app.py tests/test_execute_decision.py
 git commit -m "feat(decisions): persist executed_by, execution_log, changed_files"
 ```
 
@@ -606,7 +606,7 @@ git commit -m "feat(decisions): persist executed_by, execution_log, changed_file
 ### Task 5: Pass new fields from `decision_detail` route to template
 
 **Files:**
-- Modify: `agency/app.py` — `decision_detail` (`agency/app.py:2826-2875`)
+- Modify: `flowgency/app.py` — `decision_detail` (`flowgency/app.py:2826-2875`)
 - Test: `tests/test_dashboard.py`
 
 **Interfaces:**
@@ -680,7 +680,7 @@ Expected: PASS (after Task 6 template edit; if the template does not yet render 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py tests/test_dashboard.py
+git add flowgency/app.py tests/test_dashboard.py
 git commit -m "feat(decisions): pass executed_by, execution_log, changed_files to template"
 ```
 
@@ -689,16 +689,16 @@ git commit -m "feat(decisions): pass executed_by, execution_log, changed_files t
 ### Task 6: Render agent badge, log link, and changed-files list in the template
 
 **Files:**
-- Modify: `agency/templates/decision_detail.html` (the Execution block)
+- Modify: `flowgency/templates/decision_detail.html` (the Execution block)
 - Test: `tests/test_dashboard.py::test_decision_detail_shows_agent_log_and_changes` (from Task 5)
 
 **Interfaces:**
-- Consumes: context keys `executed_by`, `execution_log`, `changed_files`, plus `group`, and the `agent_badge` Jinja filter (defined in `agency/app.py:917`).
+- Consumes: context keys `executed_by`, `execution_log`, `changed_files`, plus `group`, and the `agent_badge` Jinja filter (defined in `flowgency/app.py:917`).
 - Produces: rendered HTML — agent badge, "View log" link to `/{{ group }}/logs/view?path={{ execution_log }}`, and a changed-files list when non-empty.
 
 - [ ] **Step 1: Add the markup**
 
-In `agency/templates/decision_detail.html`, inside the Execution block, locate:
+In `flowgency/templates/decision_detail.html`, inside the Execution block, locate:
 
 ```html
     {% if execution_summary %}
@@ -761,7 +761,7 @@ Expected: PASS (all tests; previously 341 passed plus the new tests).
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agency/templates/decision_detail.html
+git add flowgency/templates/decision_detail.html
 git commit -m "feat(decisions): render agent, log link, and changed files in detail view"
 ```
 

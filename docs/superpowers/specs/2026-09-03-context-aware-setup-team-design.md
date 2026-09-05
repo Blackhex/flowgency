@@ -7,7 +7,7 @@
 
 First-run setup inspects the selected project, asks for a group name and ID,
 asks how many agents to create, and then proposes agent roles. The canonical
-`agency-setup` skill does not require the proposal to synthesize those inputs.
+`flowgency-setup` skill does not require the proposal to synthesize those inputs.
 Its current team-planning contract says only to summarize the project, propose
 three to five roles, ask for an agent count, and ask which roles to create.
 
@@ -37,7 +37,7 @@ coherent identities.
    grant for approval.
 9. Preserve configuration authority, reusable-blueprint boundaries, path
    approval, validation, and one atomic config write.
-10. Confine any application changes to launching `agency-setup` and processing
+10. Confine any application changes to launching `flowgency-setup` and processing
     that setup session's outputs.
 
 ## Non-Goals
@@ -45,7 +45,7 @@ coherent identities.
 - Adding configuration fields or changing schema version 5.
 - Persisting an inspection digest or conversational setup state.
 - Adding a browser form for team design.
-- Changing application functionality outside the canonical `agency-setup`
+- Changing application functionality outside the canonical `flowgency-setup`
   skill, the way that setup skill is launched, and the way its session outputs
   are processed.
 - Changing data-root selection semantics, canonical skill packaging or
@@ -59,7 +59,7 @@ coherent identities.
 ## Superseded Team-Planning Contract
 
 This design supersedes the generic role-proposal paragraph introduced by the
-Agency data-root setup work. Setup no longer proposes a fixed three-to-five role
+Flowgency data-root setup work. Setup no longer proposes a fixed three-to-five role
 slate and then asks which roles to instantiate. It asks for an initial count
 first and produces one full draft with exactly that many profiles.
 
@@ -83,7 +83,7 @@ context containing:
 - any user-stated near-term priorities.
 
 This context is conversational state only. It is not written to config, memory,
-the project, or Agency-owned storage.
+the project, or Flowgency-owned storage.
 
 Setup summarizes its understanding in user-facing prose before team synthesis.
 The summary need not cite file paths, but it must name concrete project
@@ -259,7 +259,7 @@ after the applicable approvals.
 
 ### Canonical Setup Skill
 
-`agency/setup_assets/copilot/.github/skills/agency-setup/SKILL.md` owns the
+`flowgency/setup_assets/copilot/.github/skills/flowgency-setup/SKILL.md` owns the
 context digest, sparse-evidence question, question order, exact-size synthesis,
 count revision, survivor semantics, operating-profile format, identity style,
 permission inference, team review, and transition into path approval.
@@ -291,7 +291,7 @@ conversational scratch state.
 
 ### Contract Tests
 
-`tests/test_agency_setup_skill.py` pins the skill behavior and ordering. Existing
+`tests/test_flowgency_setup_skill.py` pins the skill behavior and ordering. Existing
 skill, packaging, surface, schema, path, and atomic-write tests continue to
 protect unchanged authority boundaries.
 

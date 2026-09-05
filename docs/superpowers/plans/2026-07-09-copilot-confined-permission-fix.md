@@ -4,7 +4,7 @@
 
 **Goal:** Replace the three enumerated `--allow-tool` grants in Copilot confined-mode execution with a single `--allow-all-tools` pre-grant to eliminate intermittent permission-round-trip failures, then validate through a real agent dispatch session.
 
-**Architecture:** One-line flag swap in the confined branch of `CopilotIntegration.run()` in `agency/integrations/agency/copilot.py`, keeping `cwd=sandbox_root` path confinement intact (no `--allow-all-paths`). Update the corresponding behavioral test assertions. Validate via the real dispatch code path (`agency.dispatch.run.run_agent_prompt`) against a live Copilot agent in the `msvc-digest` sandbox.
+**Architecture:** One-line flag swap in the confined branch of `CopilotIntegration.run()` in `flowgency/integrations/flowgency/copilot.py`, keeping `cwd=sandbox_root` path confinement intact (no `--allow-all-paths`). Update the corresponding behavioral test assertions. Validate via the real dispatch code path (`flowgency.dispatch.run.run_agent_prompt`) against a live Copilot agent in the `msvc-digest` sandbox.
 
 **Tech Stack:** Python 3.11+, pytest, GitHub Copilot CLI (`copilot -p --autopilot --experimental`), FastAPI (unaffected).
 
@@ -15,7 +15,7 @@
 >    `copilot.ps1` → `copilot.EXE`; under `subprocess.run` the real `.exe` gets
 >    a console and behaves interactively, failing closed headless.
 > 2. `--allow-all-paths` was missing, so shell/read tools denied the routine's
->    legitimate out-of-sandbox reads (`~/.agency-cowork/...`).
+>    legitimate out-of-sandbox reads (`~/.flowgency-cowork/...`).
 >
 > **Shipped fix:** new `_resolve_real_cmd()` bypasses the wrapper to invoke
 > `copilot.EXE` directly; the shared `subprocess.run` adds
@@ -42,7 +42,7 @@
 ### Task 1: Swap confined-mode flags to `--allow-all-tools` (TDD)
 
 **Files:**
-- Modify: `agency/integrations/agency/copilot.py` (confined branch of `run()`, ~lines 40-56)
+- Modify: `flowgency/integrations/flowgency/copilot.py` (confined branch of `run()`, ~lines 40-56)
 - Test: `tests/test_integration_sidecar.py::TestCopilotIntegration::test_copilot_run_set_sandbox_runs_from_sandbox_root` (~lines 447-481)
 
 **Interfaces:**
@@ -73,7 +73,7 @@ Expected: FAIL — `assert "--allow-all-tools" in args` fails because the curren
 
 - [ ] **Step 3: Swap the confined-branch flags**
 
-In `agency/integrations/agency/copilot.py`, replace the confined branch (the `if sandbox_root is not None:` block) with:
+In `flowgency/integrations/flowgency/copilot.py`, replace the confined branch (the `if sandbox_root is not None:` block) with:
 
 ```python
         if sandbox_root is not None:
@@ -112,7 +112,7 @@ Expected: all tests pass (the unrestricted-mode test `test_copilot_run_unset_san
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/agency/copilot.py tests/test_integration_sidecar.py
+git add flowgency/integrations/flowgency/copilot.py tests/test_integration_sidecar.py
 git commit -m "fix: use --allow-all-tools for Copilot confined mode to avoid permission round-trip"
 ```
 
@@ -122,10 +122,10 @@ git commit -m "fix: use --allow-all-tools for Copilot confined mode to avoid per
 
 **Files:**
 - No source changes. This task runs the real dispatch path and inspects logs.
-- Reference: `agency/dispatch/run.py::run_agent_prompt` (~line 157)
+- Reference: `flowgency/dispatch/run.py::run_agent_prompt` (~line 157)
 
 **Interfaces:**
-- Consumes: `agency.dispatch.run.run_agent_prompt(group_path, agent_name, prompt_filename, timeout, log_dir, agent_config, agent_dir=None, *, sandbox_root=None) -> None` — reads `group_path/shared/prompts/{prompt_filename}`, resolves the integration from `agent_config["integration"]`, calls `integration.run(..., sandbox_root=sandbox_root)`, and writes `{agent_name}-{stem}-{ts}.out` / `.err` into `log_dir`.
+- Consumes: `flowgency.dispatch.run.run_agent_prompt(group_path, agent_name, prompt_filename, timeout, log_dir, agent_config, agent_dir=None, *, sandbox_root=None) -> None` — reads `group_path/shared/prompts/{prompt_filename}`, resolves the integration from `agent_config["integration"]`, calls `integration.run(..., sandbox_root=sandbox_root)`, and writes `{agent_name}-{stem}-{ts}.out` / `.err` into `log_dir`.
 - Produces: `.out`/`.err` log files whose contents are the pass/fail evidence.
 
 - [ ] **Step 1: Confirm the environment is ready**
@@ -140,9 +140,9 @@ Expected: a copilot path prints, both `Test-Path` return `True`. If any fails, S
 
 - [ ] **Step 2: Run the real agent session through the dispatch helper**
 
-Run (from `C:\Projects\christag-agency`):
+Run (from `C:\Projects\flowgency`):
 ```powershell
-python -c "import tempfile, pathlib; from agency.dispatch.run import run_agent_prompt; ld = pathlib.Path(tempfile.mkdtemp(prefix='copilot-validate-')); print('LOG_DIR', ld); run_agent_prompt(pathlib.Path(r'C:\Projects\msvc-digest\agents'), 'sentinel', 'sentinel-routine.md', 900, ld, {'integration': 'copilot'}, sandbox_root=pathlib.Path(r'C:\Projects\msvc-digest')); print('done')"
+python -c "import tempfile, pathlib; from flowgency.dispatch.run import run_agent_prompt; ld = pathlib.Path(tempfile.mkdtemp(prefix='copilot-validate-')); print('LOG_DIR', ld); run_agent_prompt(pathlib.Path(r'C:\Projects\msvc-digest\agents'), 'sentinel', 'sentinel-routine.md', 900, ld, {'integration': 'copilot'}, sandbox_root=pathlib.Path(r'C:\Projects\msvc-digest')); print('done')"
 ```
 Expected: prints `LOG_DIR <path>`, then `done`. Note the printed `LOG_DIR` path. A dispatch log line reports `DONE: sentinel` (success), or `ERROR`/`TIMEOUT` (failure).
 

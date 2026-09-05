@@ -16,11 +16,11 @@
 > `cwd = agent_dir` with `--allow-all-paths --allow-all-tools`. The config,
 > resolution, plumbing, admin UI, and security model in this spec are unchanged
 > and correct; only the Copilot invocation row of the matrix is superseded. See
-> `agency/integrations/agency/copilot.py` for the shipped behavior.
+> `flowgency/integrations/flowgency/copilot.py` for the shipped behavior.
 
 ## Problem
 
-Agency launches every agent runtime with `cwd = agent_dir` (the agent's own
+Flowgency launches every agent runtime with `cwd = agent_dir` (the agent's own
 folder). Some runtimes treat that `cwd` as a hard filesystem boundary. GitHub
 Copilot, launched with `--autopilot`, confines all file operations to the
 launch directory. Agents whose routines need files **outside** their own
@@ -51,8 +51,8 @@ agent's runtime filesystem access.
 
 ## Non-Goals
 
-- **The Agency web-UI file boundary is unchanged.** `get_allowed_roots(g)` in
-  `agency/config.py` (used only by `validate_file_access` in `app.py` to
+- **The Flowgency web-UI file boundary is unchanged.** `get_allowed_roots(g)` in
+  `flowgency/config.py` (used only by `validate_file_access` in `app.py` to
   constrain the dashboard's document/memory/log browsers) is a separate
   security concern and is **not** touched by this feature. A wider agent
   sandbox must not silently widen what the dashboard exposes.
@@ -108,7 +108,7 @@ groups:
 ```
 
 Resolution rules (implemented in a new helper `get_sandbox_root(g)` in
-`agency/config.py`):
+`flowgency/config.py`):
 
 - Absolute path → used as-is.
 - Relative path → resolved against the group `path`.
@@ -177,12 +177,12 @@ There are exactly two places that call `integration.run(...)`. Both already have
 the group config dict `g` in scope, so both resolve `get_sandbox_root(g)` and
 pass it through.
 
-1. **Dispatch** — `agency/dispatch/run.py`. The per-group loop has `g`
+1. **Dispatch** — `flowgency/dispatch/run.py`. The per-group loop has `g`
    available. Resolve `sandbox_root = get_sandbox_root(g)` in the loop and thread
    it into the helper that ultimately calls `integration.run(...)`
    (`_run_agent`), passing `sandbox_root=sandbox_root`.
 
-2. **Decision execution** — `agency/app.py`, `execute_decision(...)`. It already
+2. **Decision execution** — `flowgency/app.py`, `execute_decision(...)`. It already
    looks up `g = GROUPS.get(group_key, {})`. Resolve `sandbox_root =
    get_sandbox_root(g)` (note: `get_sandbox_root` must tolerate the partial
    `grp` dict — it only needs `path` and `sandbox_root`, so pass the real group
@@ -190,12 +190,12 @@ pass it through.
    `agent_integration.run(agent_dir, prompt_file, timeout=timeout,
    sandbox_root=sandbox_root)`.
 
-The Copilot `prompt()` method (Agency's own AI backbone, not an agent run) is
+The Copilot `prompt()` method (Flowgency's own AI backbone, not an agent run) is
 **not** changed — it keeps its current flags and is unaffected by `sandbox_root`.
 
 ## Admin UI
 
-In `agency/templates/admin_org_edit.html`, add a **"Sandbox root"** text input to
+In `flowgency/templates/admin_org_edit.html`, add a **"Sandbox root"** text input to
 the org edit/create form (near the group `path` field):
 
 - Label: **Sandbox root** (optional).

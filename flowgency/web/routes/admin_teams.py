@@ -424,7 +424,7 @@ async def setup_launch(
     try:
         resolved_data_root = prepare_writable_directory(
             Path(data_root_value),
-            label="Agency data root",
+            label="Flowgency data root",
         )
     except DirectoryPreparationError as exc:
         return _setup_response(

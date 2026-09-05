@@ -194,7 +194,7 @@ def test_patch_detects_external_uncoordinated_edit_before_replace(
     process.join(5)
     assert process.exitcode == 0
     assert (
-        queue.get(timeout=1) == "config.yaml changed outside the Agency lock"
+        queue.get(timeout=1) == "config.yaml changed outside the Flowgency lock"
     )
 
 
@@ -214,7 +214,7 @@ def test_replace_preserves_existing_bytes_when_new_payload_is_invalid(
             snapshot.revision,
             {
                 "schema_version": 3,
-                "flowgency": {"title": "Agency"},
+                "flowgency": {"title": "Flowgency"},
                 "teams": {},
             },
         )
@@ -270,7 +270,7 @@ def test_late_conflict_does_not_initialize_candidate_team_storage(
 
     with pytest.raises(
         ConfigConflictError,
-        match="changed outside the Agency lock",
+        match="changed outside the Flowgency lock",
     ):
         if operation == "replace":
             store.replace(snapshot.revision, raw)

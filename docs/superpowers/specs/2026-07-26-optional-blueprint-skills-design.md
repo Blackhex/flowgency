@@ -2,7 +2,7 @@
 
 ## Context
 
-Agency blueprint source currently uses two interoperable formats:
+Flowgency blueprint source currently uses two interoperable formats:
 
 ```text
 <blueprint>/
@@ -50,7 +50,7 @@ The canonical blueprint remains a standards-based source tree:
 - Prompt and custom-agent formats remain integration-specific and outside the
   blueprint contract.
 
-Agency projectors may continue relocating source files into an integration's
+Flowgency projectors may continue relocating source files into an integration's
 native runtime discovery paths without changing source bytes.
 
 ## Behavior
@@ -90,7 +90,7 @@ state or warning is required for this correction.
 
 ## Setup Guidance
 
-The Agency setup skill will describe blueprint skills as optional. It will
+The Flowgency setup skill will describe blueprint skills as optional. It will
 always create the approved role's `AGENTS.md`, and create
 `.agents/skills/<skill>/SKILL.md` only for approved routine capabilities. A role
 without a routine does not need a placeholder skill or an empty skills

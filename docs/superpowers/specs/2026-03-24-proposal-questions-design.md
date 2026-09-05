@@ -161,7 +161,7 @@ No major changes. The status badge shows `decided` (green) instead of `approved`
 
 ### CLI Changes
 
-The CLI subcommands `approve`, `defer`, and `reject` are **removed**. They are replaced by a single `agency decide <slug>` command that:
+The CLI subcommands `approve`, `defer`, and `reject` are **removed**. They are replaced by a single `flowgency decide <slug>` command that:
 
 1. Reads the proposal's questions and prints them to the terminal.
 2. Prompts the user to answer each question interactively (selection for boolean/choice, text input for free-response).

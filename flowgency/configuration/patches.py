@@ -414,13 +414,13 @@ def dismiss_tip(
     tip_id: str,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agency = raw.setdefault("flowgency", {})
-        dismissed = agency.get("tips_dismissed")
+        flowgency = raw.setdefault("flowgency", {})
+        dismissed = flowgency.get("tips_dismissed")
         if not isinstance(dismissed, list):
             dismissed = []
         if tip_id not in dismissed:
             dismissed.append(tip_id)
-        agency["tips_dismissed"] = dismissed
+        flowgency["tips_dismissed"] = dismissed
 
     return store.patch(expected_revision, apply)
 
@@ -430,8 +430,8 @@ def hide_all_tips(
     expected_revision: str,
 ) -> ConfigSnapshot:
     def apply(raw: dict[str, Any]) -> None:
-        agency = raw.setdefault("flowgency", {})
-        agency["show_tips"] = False
+        flowgency = raw.setdefault("flowgency", {})
+        flowgency["show_tips"] = False
 
     return store.patch(expected_revision, apply)
 
@@ -447,8 +447,8 @@ def delete_team(
             raise KeyError(team_id)
         del teams[team_id]
 
-        agency = raw.setdefault("flowgency", {})
-        if agency.get("default_team") == team_id:
-            agency["default_team"] = next(iter(teams), "")
+        flowgency = raw.setdefault("flowgency", {})
+        if flowgency.get("default_team") == team_id:
+            flowgency["default_team"] = next(iter(teams), "")
 
     return store.patch(expected_revision, apply)

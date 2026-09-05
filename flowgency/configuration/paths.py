@@ -149,7 +149,7 @@ def _validate_existing_directory(
                 scope,
                 field,
                 f"Configured path must be a real directory, not a symlink or reparse point: {path}",
-                "Use a real local directory that Agency can access directly.",
+                "Use a real local directory that Flowgency can access directly.",
             )
         )
         return issues
@@ -160,7 +160,7 @@ def _validate_existing_directory(
                 scope,
                 field,
                 f"Configured path must exist as a directory: {path}",
-                "Create the directory and grant Agency the required access.",
+                "Create the directory and grant Flowgency the required access.",
             )
         )
         return issues
@@ -172,7 +172,7 @@ def _validate_existing_directory(
                 scope,
                 field,
                 f"Configured directory is not {'readable and writable' if writable else 'readable'}: {path}",
-                "Grant Agency the required filesystem permissions.",
+                "Grant Flowgency the required filesystem permissions.",
             )
         )
     return issues

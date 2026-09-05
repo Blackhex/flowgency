@@ -21,10 +21,10 @@ GREEN:
 ## Files changed
 
 Production:
-- `agency/jobs/models.py`, `resolution.py`, `execution.py`, `store.py`, `reconciliation.py`, `__init__.py`
-- `agency/integrations/models.py`, `agency/integrations/agency/copilot.py`, `script.py`
-- `agency/memory/recovery.py`
-- `agency/app.py`
+- `flowgency/jobs/models.py`, `resolution.py`, `execution.py`, `store.py`, `reconciliation.py`, `__init__.py`
+- `flowgency/integrations/models.py`, `flowgency/integrations/flowgency/copilot.py`, `script.py`
+- `flowgency/memory/recovery.py`
+- `flowgency/app.py`
 
 Tests updated for strict schema-3/root contracts across job, execution, integration, route, dashboard, CLI, decision, roster/status, memory, and UI fixtures.
 

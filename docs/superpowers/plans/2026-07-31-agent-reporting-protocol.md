@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let every agent — including those with `capabilities.write: false` — record observations, create proposals, and update its own memory, through a per-job outbox that Agency validates and ingests.
+**Goal:** Let every agent — including those with `capabilities.write: false` — record observations, create proposals, and update its own memory, through a per-job outbox that Flowgency validates and ingests.
 
-**Architecture:** Agency creates `<launch_view>/.agency/outbox/{observations,proposals}/` and `<launch_view>/.agency/memory/` before each run, seeds the memory directory with the agent's canonical memory, and tells the agent about both in the immutable task input. After a zero-exit run the worker validates the outbox, ingests valid records into `<group.path>/observations/` and `proposals/` with Agency-assigned filenames and Agency-stamped `agent`/`date`/`status`, then copies the memory directory into the existing staging directory so the untouched publication machinery can publish it.
+**Architecture:** Flowgency creates `<launch_view>/.flowgency/outbox/{observations,proposals}/` and `<launch_view>/.flowgency/memory/` before each run, seeds the memory directory with the agent's canonical memory, and tells the agent about both in the immutable task input. After a zero-exit run the worker validates the outbox, ingests valid records into `<group.path>/observations/` and `proposals/` with Flowgency-assigned filenames and Flowgency-stamped `agent`/`date`/`status`, then copies the memory directory into the existing staging directory so the untouched publication machinery can publish it.
 
 **Tech Stack:** Python 3.11+, FastAPI/Jinja2 app, Pydantic config models, pytest. No new third-party dependencies.
 
@@ -19,7 +19,7 @@
 - Commit messages follow Conventional Commits; subject ≤ 72 chars, imperative, lowercase, no trailing period; body wrapped at 72.
 - No new third-party dependencies.
 - `schema_version` stays `4`. No config-file format changes in this plan.
-- All filesystem writes that land in Agency-owned storage use `atomic_write_text` / `atomic_write_bytes` from `agency/fs/atomic.py`.
+- All filesystem writes that land in Flowgency-owned storage use `atomic_write_text` / `atomic_write_bytes` from `flowgency/fs/atomic.py`.
 - Windows path safety: compare paths case-insensitively, reject reparse points and symlinks, reject reserved filenames.
 - `MAX_RECORDS_PER_KIND = 20`, `MAX_RECORD_BYTES = 65536` — exact values, used verbatim.
 - Slug pattern is exactly `[a-z0-9-]{1,60}`.
@@ -29,12 +29,12 @@
 
 ### Task 1: Shared front-matter module
 
-Move `parse_frontmatter` and `extract_display_title` out of `agency/app.py` so worker-side code can use them without importing the FastAPI layer. Add `slugify`, which later tasks need.
+Move `parse_frontmatter` and `extract_display_title` out of `flowgency/app.py` so worker-side code can use them without importing the FastAPI layer. Add `slugify`, which later tasks need.
 
 **Files:**
-- Create: `agency/records/__init__.py`
-- Create: `agency/records/frontmatter.py`
-- Modify: `agency/app.py` (delete the two function bodies at lines 492-503 and 585-607, import from the new module)
+- Create: `flowgency/records/__init__.py`
+- Create: `flowgency/records/frontmatter.py`
+- Modify: `flowgency/app.py` (delete the two function bodies at lines 492-503 and 585-607, import from the new module)
 - Test: `tests/test_records_frontmatter.py`
 
 **Interfaces:**
@@ -54,7 +54,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from agency.records.frontmatter import (
+from flowgency.records.frontmatter import (
     extract_display_title,
     parse_frontmatter,
     slugify,
@@ -102,8 +102,8 @@ def test_slugify_returns_empty_string_when_nothing_survives():
 def test_importing_frontmatter_does_not_import_the_web_app():
     """The worker imports this module; it must not drag in the FastAPI layer."""
     code = (
-        "import sys, agency.records.frontmatter; "
-        "sys.exit(1 if 'agency.app' in sys.modules else 0)"
+        "import sys, flowgency.records.frontmatter; "
+        "sys.exit(1 if 'flowgency.app' in sys.modules else 0)"
     )
     completed = subprocess.run([sys.executable, "-c", code], capture_output=True)
 
@@ -113,11 +113,11 @@ def test_importing_frontmatter_does_not_import_the_web_app():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_records_frontmatter.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.records'`
 
 - [ ] **Step 3: Create the package and module**
 
-Create `agency/records/__init__.py`:
+Create `flowgency/records/__init__.py`:
 
 ```python
 from .frontmatter import extract_display_title, parse_frontmatter, slugify
@@ -125,7 +125,7 @@ from .frontmatter import extract_display_title, parse_frontmatter, slugify
 __all__ = ["extract_display_title", "parse_frontmatter", "slugify"]
 ```
 
-Create `agency/records/frontmatter.py`:
+Create `flowgency/records/frontmatter.py`:
 
 ```python
 """Markdown record parsing shared by the web layer and the job worker."""
@@ -188,15 +188,15 @@ def slugify(value: str) -> str:
 Run: `python -m pytest tests/test_records_frontmatter.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Re-point `agency/app.py` at the shared module**
+- [ ] **Step 5: Re-point `flowgency/app.py` at the shared module**
 
-In `agency/app.py`, delete the `parse_frontmatter` definition (currently at line 492) and the `extract_display_title` definition (currently at line 585), then add to the import block near the other `agency.` imports:
+In `flowgency/app.py`, delete the `parse_frontmatter` definition (currently at line 492) and the `extract_display_title` definition (currently at line 585), then add to the import block near the other `flowgency.` imports:
 
 ```python
-from agency.records.frontmatter import extract_display_title, parse_frontmatter
+from flowgency.records.frontmatter import extract_display_title, parse_frontmatter
 ```
 
-Leave every call site unchanged — the names stay in `agency.app`'s namespace, so `from agency.app import parse_frontmatter` keeps working for existing tests.
+Leave every call site unchanged — the names stay in `flowgency.app`'s namespace, so `from flowgency.app import parse_frontmatter` keeps working for existing tests.
 
 - [ ] **Step 6: Run the full suite**
 
@@ -206,7 +206,7 @@ Expected: PASS, same count as the pre-task baseline.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/records/__init__.py agency/records/frontmatter.py agency/app.py tests/test_records_frontmatter.py
+git add flowgency/records/__init__.py flowgency/records/frontmatter.py flowgency/app.py tests/test_records_frontmatter.py
 git commit -m "refactor(records): extract front-matter helpers from app"
 ```
 
@@ -215,8 +215,8 @@ git commit -m "refactor(records): extract front-matter helpers from app"
 ### Task 2: Outbox construction
 
 **Files:**
-- Create: `agency/records/outbox.py`
-- Modify: `agency/records/__init__.py`
+- Create: `flowgency/records/outbox.py`
+- Modify: `flowgency/records/__init__.py`
 - Test: `tests/test_records_outbox.py`
 
 **Interfaces:**
@@ -224,9 +224,9 @@ git commit -m "refactor(records): extract front-matter helpers from app"
 - Produces:
   - `OutboxPaths` frozen dataclass with fields `root: Path`, `observations: Path`, `proposals: Path`, `memory: Path`
   - `create_outbox(launch_view: Path, *, memory_files: Mapping[str, bytes]) -> OutboxPaths`
-  - `OUTBOX_RELATIVE_OBSERVATIONS = ".agency/outbox/observations"`
-  - `OUTBOX_RELATIVE_PROPOSALS = ".agency/outbox/proposals"`
-  - `OUTBOX_RELATIVE_MEMORY = ".agency/memory"`
+  - `OUTBOX_RELATIVE_OBSERVATIONS = ".flowgency/outbox/observations"`
+  - `OUTBOX_RELATIVE_PROPOSALS = ".flowgency/outbox/proposals"`
+  - `OUTBOX_RELATIVE_MEMORY = ".flowgency/memory"`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -239,7 +239,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.records.outbox import (
+from flowgency.records.outbox import (
     OUTBOX_RELATIVE_MEMORY,
     OUTBOX_RELATIVE_OBSERVATIONS,
     OUTBOX_RELATIVE_PROPOSALS,
@@ -298,11 +298,11 @@ def test_create_outbox_rejects_memory_file_names_with_separators(tmp_path: Path)
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_records_outbox.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records.outbox'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.records.outbox'`
 
 - [ ] **Step 3: Implement the module**
 
-Create `agency/records/outbox.py`:
+Create `flowgency/records/outbox.py`:
 
 ```python
 """Per-job outbox that agents write records and memory into."""
@@ -314,13 +314,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from agency.fs.atomic import atomic_write_bytes
+from flowgency.fs.atomic import atomic_write_bytes
 
-OUTBOX_RELATIVE_OBSERVATIONS = ".agency/outbox/observations"
-OUTBOX_RELATIVE_PROPOSALS = ".agency/outbox/proposals"
-OUTBOX_RELATIVE_MEMORY = ".agency/memory"
+OUTBOX_RELATIVE_OBSERVATIONS = ".flowgency/outbox/observations"
+OUTBOX_RELATIVE_PROPOSALS = ".flowgency/outbox/proposals"
+OUTBOX_RELATIVE_MEMORY = ".flowgency/memory"
 
-_AGENCY_DIRNAME = ".agency"
+_FLOWGENCY_DIRNAME = ".flowgency"
 
 
 @dataclass(frozen=True)
@@ -344,7 +344,7 @@ def create_outbox(
         if Path(name).name != name or name in {"", ".", ".."}:
             raise ValueError(f"invalid memory file name: {name!r}")
 
-    root = launch_view / _AGENCY_DIRNAME
+    root = launch_view / _FLOWGENCY_DIRNAME
     if root.exists():
         shutil.rmtree(root)
 
@@ -365,7 +365,7 @@ def create_outbox(
 
 - [ ] **Step 4: Export from the package**
 
-Append to `agency/records/__init__.py`:
+Append to `flowgency/records/__init__.py`:
 
 ```python
 from .outbox import OutboxPaths, create_outbox
@@ -381,7 +381,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/records/outbox.py agency/records/__init__.py tests/test_records_outbox.py
+git add flowgency/records/outbox.py flowgency/records/__init__.py tests/test_records_outbox.py
 git commit -m "feat(records): add per-job outbox construction"
 ```
 
@@ -390,8 +390,8 @@ git commit -m "feat(records): add per-job outbox construction"
 ### Task 3: Outbox validation
 
 **Files:**
-- Create: `agency/records/validation.py`
-- Modify: `agency/records/__init__.py`
+- Create: `flowgency/records/validation.py`
+- Modify: `flowgency/records/__init__.py`
 - Test: `tests/test_records_validation.py`
 
 **Interfaces:**
@@ -417,8 +417,8 @@ from pathlib import Path
 
 import pytest
 
-from agency.records.outbox import create_outbox
-from agency.records.validation import (
+from flowgency.records.outbox import create_outbox
+from flowgency.records.validation import (
     MAX_RECORD_BYTES,
     MAX_RECORDS_PER_KIND,
     validate_outbox,
@@ -566,11 +566,11 @@ def test_symlinked_record_is_rejected(outbox, tmp_path: Path):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_records_validation.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records.validation'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.records.validation'`
 
 - [ ] **Step 3: Implement the module**
 
-Create `agency/records/validation.py`:
+Create `flowgency/records/validation.py`:
 
 ```python
 """Validation of a populated per-job outbox."""
@@ -582,7 +582,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-from agency.proposals import validate_proposal_schema
+from flowgency.proposals import validate_proposal_schema
 
 from .frontmatter import parse_frontmatter
 from .outbox import OutboxPaths
@@ -735,7 +735,7 @@ def validate_outbox(
 
 - [ ] **Step 4: Export from the package**
 
-Append to `agency/records/__init__.py`:
+Append to `flowgency/records/__init__.py`:
 
 ```python
 from .validation import (
@@ -765,7 +765,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/records/validation.py agency/records/__init__.py tests/test_records_validation.py
+git add flowgency/records/validation.py flowgency/records/__init__.py tests/test_records_validation.py
 git commit -m "feat(records): validate outbox records before ingest"
 ```
 
@@ -774,8 +774,8 @@ git commit -m "feat(records): validate outbox records before ingest"
 ### Task 4: Record ingest
 
 **Files:**
-- Create: `agency/records/ingest.py`
-- Modify: `agency/records/__init__.py`
+- Create: `flowgency/records/ingest.py`
+- Modify: `flowgency/records/__init__.py`
 - Test: `tests/test_records_ingest.py`
 
 **Interfaces:**
@@ -784,7 +784,7 @@ git commit -m "feat(records): validate outbox records before ingest"
   - `IngestedRecord(kind: str, path: Path)`
   - `ingest_records(validation: OutboxValidation, *, observations_dir: Path, proposals_dir: Path, agent_name: str, now: datetime, job_id: str) -> tuple[IngestedRecord, ...]`
 
-Agency stamps `agent`, `date`, and `status`, and assigns the filename `<YYYY-MM-DD>-<slug>.md`, suffixing `-2`, `-3` on collision.
+Flowgency stamps `agent`, `date`, and `status`, and assigns the filename `<YYYY-MM-DD>-<slug>.md`, suffixing `-2`, `-3` on collision.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -798,9 +798,9 @@ from pathlib import Path
 
 import pytest
 
-from agency.records.frontmatter import parse_frontmatter
-from agency.records.ingest import ingest_records
-from agency.records.validation import OutboxValidation, RecordCandidate
+from flowgency.records.frontmatter import parse_frontmatter
+from flowgency.records.ingest import ingest_records
+from flowgency.records.validation import OutboxValidation, RecordCandidate
 
 NOW = datetime(2026, 7, 31, 9, 0, tzinfo=timezone.utc)
 
@@ -845,7 +845,7 @@ def test_observation_lands_in_the_observations_directory(dirs):
     assert written[0].path.name == "2026-07-31-suite-is-red.md"
 
 
-def test_agency_stamps_agent_date_and_status(dirs):
+def test_flowgency_stamps_agent_date_and_status(dirs):
     written = ingest(dirs, candidate(meta={"agent": "someone-else", "date": "1999-01-01"}))
 
     meta, _ = parse_frontmatter(written[0].path.read_text(encoding="utf-8"))
@@ -927,11 +927,11 @@ def test_ingest_creates_missing_target_directories(tmp_path: Path):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_records_ingest.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records.ingest'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.records.ingest'`
 
 - [ ] **Step 3: Implement the module**
 
-Create `agency/records/ingest.py`:
+Create `flowgency/records/ingest.py`:
 
 ```python
 """Ingest validated outbox records into the group's pipeline directories."""
@@ -945,14 +945,14 @@ from pathlib import Path
 
 import yaml
 
-from agency.fs.atomic import atomic_write_text
+from flowgency.fs.atomic import atomic_write_text
 
 from .frontmatter import extract_display_title, slugify
 from .validation import OutboxValidation, RecordCandidate
 
 _SLUG_PATTERN = re.compile(r"^[a-z0-9-]{1,60}$")
 
-# Agency owns these; an author-supplied value is discarded.
+# Flowgency owns these; an author-supplied value is discarded.
 _STAMPED_FIELDS = ("agent", "date", "status")
 
 
@@ -1027,7 +1027,7 @@ def ingest_records(
 
 - [ ] **Step 4: Export from the package**
 
-Append to `agency/records/__init__.py`:
+Append to `flowgency/records/__init__.py`:
 
 ```python
 from .ingest import IngestedRecord, ingest_records
@@ -1043,7 +1043,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/records/ingest.py agency/records/__init__.py tests/test_records_ingest.py
+git add flowgency/records/ingest.py flowgency/records/__init__.py tests/test_records_ingest.py
 git commit -m "feat(records): ingest validated records into group storage"
 ```
 
@@ -1052,9 +1052,9 @@ git commit -m "feat(records): ingest validated records into group storage"
 ### Task 5: Reporting protocol in the task input
 
 **Files:**
-- Create: `agency/records/protocol.py`
-- Modify: `agency/records/__init__.py`
-- Modify: `agency/jobs/resolution.py` (the `JobSpec(...)` construction, `task_input=task_input`)
+- Create: `flowgency/records/protocol.py`
+- Modify: `flowgency/records/__init__.py`
+- Modify: `flowgency/jobs/resolution.py` (the `JobSpec(...)` construction, `task_input=task_input`)
 - Test: `tests/test_records_protocol.py`
 
 **Interfaces:**
@@ -1072,12 +1072,12 @@ Create `tests/test_records_protocol.py`:
 ```python
 from __future__ import annotations
 
-from agency.records.outbox import (
+from flowgency.records.outbox import (
     OUTBOX_RELATIVE_MEMORY,
     OUTBOX_RELATIVE_OBSERVATIONS,
     OUTBOX_RELATIVE_PROPOSALS,
 )
-from agency.records.protocol import append_reporting_protocol, build_reporting_protocol
+from flowgency.records.protocol import append_reporting_protocol, build_reporting_protocol
 
 
 def test_protocol_names_every_outbox_directory():
@@ -1088,7 +1088,7 @@ def test_protocol_names_every_outbox_directory():
     assert OUTBOX_RELATIVE_MEMORY in text
 
 
-def test_protocol_states_that_agency_assigns_identity_fields():
+def test_protocol_states_that_flowgency_assigns_identity_fields():
     text = build_reporting_protocol(tool_mode="all", tool_names=())
 
     assert "agent" in text
@@ -1133,11 +1133,11 @@ def test_append_is_idempotent():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python -m pytest tests/test_records_protocol.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.records.protocol'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.records.protocol'`
 
 - [ ] **Step 3: Implement the module**
 
-Create `agency/records/protocol.py`:
+Create `flowgency/records/protocol.py`:
 
 ```python
 """The reporting contract appended to every job's immutable task input."""
@@ -1150,7 +1150,7 @@ from .outbox import (
     OUTBOX_RELATIVE_PROPOSALS,
 )
 
-_MARKER = "## Agency reporting protocol"
+_MARKER = "## Flowgency reporting protocol"
 
 
 def _tool_sentence(tool_mode: str, tool_names: tuple[str, ...]) -> str:
@@ -1177,7 +1177,7 @@ def build_reporting_protocol(
             _MARKER,
             "",
             "Report findings by writing Markdown files into these directories,",
-            "relative to your working directory. Agency validates and files them",
+            "relative to your working directory. Flowgency validates and files them",
             "after the run; do not write anywhere else to record them.",
             "",
             f"- Observations: `{OUTBOX_RELATIVE_OBSERVATIONS}`",
@@ -1186,7 +1186,7 @@ def build_reporting_protocol(
             "",
             "Each record is one Markdown file with YAML front matter and a body.",
             "Open the body with a bold summary sentence; it becomes the title.",
-            "Agency assigns the `agent`, `date`, and `status` fields and the file",
+            "Flowgency assigns the `agent`, `date`, and `status` fields and the file",
             "name, so anything you set for those is discarded.",
             "",
             "A proposal additionally requires `execution_agent` naming a",
@@ -1217,7 +1217,7 @@ def append_reporting_protocol(
 
 - [ ] **Step 4: Export from the package**
 
-Append to `agency/records/__init__.py`:
+Append to `flowgency/records/__init__.py`:
 
 ```python
 from .protocol import append_reporting_protocol, build_reporting_protocol
@@ -1232,10 +1232,10 @@ Expected: PASS
 
 - [ ] **Step 6: Wire it into job resolution**
 
-In `agency/jobs/resolution.py`, add the import beside the other `agency.` imports:
+In `flowgency/jobs/resolution.py`, add the import beside the other `flowgency.` imports:
 
 ```python
-from agency.records.protocol import append_reporting_protocol
+from flowgency.records.protocol import append_reporting_protocol
 ```
 
 Then in the `return JobSpec(` block, replace the line `task_input=task_input,` with:
@@ -1282,16 +1282,16 @@ def test_decision_task_input_carries_the_reporting_protocol(tmp_path):
     spec = _resolve(tmp_path, trigger="decision", task_input="Decide what changed.")
 
     assert spec.task_input.startswith("Decide what changed.")
-    assert "## Agency reporting protocol" in spec.task_input
-    assert ".agency/outbox/observations" in spec.task_input
+    assert "## Flowgency reporting protocol" in spec.task_input
+    assert ".flowgency/outbox/observations" in spec.task_input
 
 
 def test_ad_hoc_prompt_task_input_carries_the_reporting_protocol(tmp_path):
     spec = _resolve(tmp_path, trigger="manual_prompt", task_input="Run the suite.")
 
     assert spec.task_input.startswith("Run the suite.")
-    assert ".agency/outbox/proposals" in spec.task_input
-    assert ".agency/memory" in spec.task_input
+    assert ".flowgency/outbox/proposals" in spec.task_input
+    assert ".flowgency/memory" in spec.task_input
 
 
 def test_reporting_protocol_reports_the_granted_tool_policy(tmp_path):
@@ -1314,7 +1314,7 @@ Expected: PASS. If a job-resolution test asserts an exact `task_input` string, u
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agency/records/protocol.py agency/records/__init__.py agency/jobs/resolution.py tests/test_records_protocol.py
+git add flowgency/records/protocol.py flowgency/records/__init__.py flowgency/jobs/resolution.py tests/test_records_protocol.py
 git commit -m "feat(records): tell agents how to report in the task input"
 ```
 
@@ -1327,10 +1327,10 @@ Express the write boundary as paths. `capabilities.write` stops being a label an
 An earlier draft of this task granted a write *tool* instead. It was wrong: without path-scoped write permissions, granting the tool grants write to every readable root, so a `capabilities.write: false` agent would gain workspace write access. Do not reintroduce a tool grant. `runtime.tools` stays a complete override with no exception.
 
 **Files:**
-- Modify: `agency/integrations/models.py` (`EffectiveRuntimePolicy`, `RuntimeCapabilities`)
-- Modify: `agency/configuration/effective.py` (`_resolve_sandbox` / `resolve_effective_policy`)
-- Modify: `agency/integrations/__init__.py` (`BaseIntegration.validate_runtime_policy`)
-- Modify: `agency/jobs/models.py` (`RuntimePolicySnapshot` must round-trip the new field)
+- Modify: `flowgency/integrations/models.py` (`EffectiveRuntimePolicy`, `RuntimeCapabilities`)
+- Modify: `flowgency/configuration/effective.py` (`_resolve_sandbox` / `resolve_effective_policy`)
+- Modify: `flowgency/integrations/__init__.py` (`BaseIntegration.validate_runtime_policy`)
+- Modify: `flowgency/jobs/models.py` (`RuntimePolicySnapshot` must round-trip the new field)
 - Test: `tests/test_write_boundary_contract.py`
 
 **Interfaces:**
@@ -1362,16 +1362,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agency.configuration.effective import resolve_effective_policy
-from agency.configuration.issues import ValidationFailed
-from agency.configuration.store import ConfigStore
-from agency.integrations import BaseIntegration
-from agency.integrations.models import (
+from flowgency.configuration.effective import resolve_effective_policy
+from flowgency.configuration.issues import ValidationFailed
+from flowgency.configuration.store import ConfigStore
+from flowgency.integrations import BaseIntegration
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     ResolvedToolPolicy,
     RuntimeCapabilities,
 )
-from agency.jobs.models import RuntimePolicySnapshot
+from flowgency.jobs.models import RuntimePolicySnapshot
 
 
 class EnforcingIntegration(BaseIntegration):
@@ -1526,7 +1526,7 @@ Expected: FAIL with `TypeError: EffectiveRuntimePolicy.__init__() got an unexpec
 
 - [ ] **Step 3: Extend the policy and capability models**
 
-In `agency/integrations/models.py`, replace `EffectiveRuntimePolicy` and `RuntimeCapabilities` with:
+In `flowgency/integrations/models.py`, replace `EffectiveRuntimePolicy` and `RuntimeCapabilities` with:
 
 ```python
 @dataclass(frozen=True)
@@ -1557,7 +1557,7 @@ class RuntimeCapabilities:
 
 - [ ] **Step 4: Derive the writable set from `capabilities.write`**
 
-In `agency/configuration/effective.py`, change `_resolve_sandbox` to return the writable set as well. Replace its signature and both `return` statements:
+In `flowgency/configuration/effective.py`, change `_resolve_sandbox` to return the writable set as well. Replace its signature and both `return` statements:
 
 ```python
 def _resolve_sandbox(
@@ -1616,7 +1616,7 @@ Then in `resolve_effective_policy`, replace the unpacking and the policy constru
 
 - [ ] **Step 5: Fail closed in the integration contract**
 
-In `agency/integrations/__init__.py`, inside `BaseIntegration.validate_runtime_policy`, append this check after the existing tool-mode check and before `return tuple(issues)`:
+In `flowgency/integrations/__init__.py`, inside `BaseIntegration.validate_runtime_policy`, append this check after the existing tool-mode check and before `return tuple(issues)`:
 
 ```python
         if policy.narrows_writes and not self.runtime_capabilities.enforces_write_boundary:
@@ -1628,7 +1628,7 @@ In `agency/integrations/__init__.py`, inside `BaseIntegration.validate_runtime_p
                     message=(
                         f"Integration '{self.name}' does not implement the write-"
                         f"boundary contract. This agent has capabilities.write "
-                        f"false, so Agency must grant it read access to its "
+                        f"false, so Flowgency must grant it read access to its "
                         f"workspace while withholding write access, and "
                         f"'{self.name}' cannot enforce that separation. Running "
                         f"the agent anyway would give it write access it is "
@@ -1648,7 +1648,7 @@ Do **not** set `enforces_write_boundary` on any shipped integration. Every exist
 
 - [ ] **Step 6: Round-trip the field through the job spec**
 
-In `agency/jobs/models.py`, add the field to `RuntimePolicySnapshot` and carry it both ways:
+In `flowgency/jobs/models.py`, add the field to `RuntimePolicySnapshot` and carry it both ways:
 
 ```python
 @dataclass(frozen=True)
@@ -1692,7 +1692,7 @@ Expected: failures are likely, and each needs judging rather than silencing. Tes
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agency/integrations/models.py agency/integrations/__init__.py agency/configuration/effective.py agency/jobs/models.py tests/test_write_boundary_contract.py
+git add flowgency/integrations/models.py flowgency/integrations/__init__.py flowgency/configuration/effective.py flowgency/jobs/models.py tests/test_write_boundary_contract.py
 git commit -m "feat(integrations): define the write-boundary contract"
 ```
 
@@ -1703,13 +1703,13 @@ git commit -m "feat(integrations): define the write-boundary contract"
 Today `memory_working_dir` points at the staging directory, no integration reads it, and the stage always returns unchanged. This task builds the helper that mirrors the agent-visible memory directory back onto the stage; Task 8 wires it into the worker.
 
 **Files:**
-- Modify: `agency/records/outbox.py`
-- Modify: `agency/records/__init__.py`
+- Modify: `flowgency/records/outbox.py`
+- Modify: `flowgency/records/__init__.py`
 - Test: `tests/test_memory_round_trip.py`
 
 **Interfaces:**
 - Consumes: `create_outbox` and `OutboxPaths` from Task 2.
-- Produces: `copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> None` in `agency/records/outbox.py`.
+- Produces: `copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> None` in `flowgency/records/outbox.py`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1722,7 +1722,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.records.outbox import copy_outbox_memory_to_stage, create_outbox
+from flowgency.records.outbox import copy_outbox_memory_to_stage, create_outbox
 
 
 @pytest.fixture
@@ -1806,7 +1806,7 @@ Expected: FAIL with `ImportError: cannot import name 'copy_outbox_memory_to_stag
 
 - [ ] **Step 3: Implement the copy-back helper**
 
-Append to `agency/records/outbox.py`:
+Append to `flowgency/records/outbox.py`:
 
 ```python
 def copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> None:
@@ -1832,7 +1832,7 @@ def copy_outbox_memory_to_stage(outbox: OutboxPaths, stage_directory: Path) -> N
             entry.unlink()
 ```
 
-Export it by appending to `agency/records/__init__.py`:
+Export it by appending to `flowgency/records/__init__.py`:
 
 ```python
 from .outbox import copy_outbox_memory_to_stage
@@ -1848,7 +1848,7 @@ Expected: PASS
 - [ ] **Step 5: Commit the helper**
 
 ```bash
-git add agency/records/outbox.py agency/records/__init__.py tests/test_memory_round_trip.py
+git add flowgency/records/outbox.py flowgency/records/__init__.py tests/test_memory_round_trip.py
 git commit -m "feat(records): mirror launch-view memory onto the stage"
 ```
 
@@ -1859,12 +1859,12 @@ git commit -m "feat(records): mirror launch-view memory onto the stage"
 Create the outbox before the run, validate and ingest after it, and mirror memory into the stage before publication.
 
 **Files:**
-- Modify: `agency/jobs/execution.py` (inside `with _memory_lock(...)`, around lines 351-500)
+- Modify: `flowgency/jobs/execution.py` (inside `with _memory_lock(...)`, around lines 351-500)
 - Test: `tests/test_records_worker.py`
 
 **Interfaces:**
 - Consumes: `create_outbox`, `copy_outbox_memory_to_stage` (Tasks 2, 7); `validate_outbox` (Task 3); `ingest_records` (Task 4).
-- Produces: `writable_agent_names(config, group_key) -> frozenset[str]` in `agency/records/validation.py`.
+- Produces: `writable_agent_names(config, group_key) -> frozenset[str]` in `flowgency/records/validation.py`.
 
 - [ ] **Step 1: Write the failing test for the writable-agent helper**
 
@@ -1873,13 +1873,13 @@ Create `tests/test_records_worker.py`:
 ```python
 from __future__ import annotations
 
-from agency.configuration.models import AgencyConfig
-from agency.records.validation import writable_agent_names
+from flowgency.configuration.models import FlowgencyConfig
+from flowgency.records.validation import writable_agent_names
 
 
 def build_config(raw_config, agents):
     raw_config["groups"]["newsletter"]["agents"] = agents
-    return AgencyConfig.model_validate(raw_config)
+    return FlowgencyConfig.model_validate(raw_config)
 
 
 def test_only_writable_agents_are_returned(raw_config):
@@ -1932,12 +1932,12 @@ Expected: FAIL with `ImportError: cannot import name 'writable_agent_names'`
 
 - [ ] **Step 3: Implement the helper**
 
-Append to `agency/records/validation.py`:
+Append to `flowgency/records/validation.py`:
 
 ```python
 def writable_agent_names(config, group_key: str) -> frozenset[str]:
     """Configured instances in a group that may be trusted to execute."""
-    from agency.integrations import get_integration
+    from flowgency.integrations import get_integration
 
     group = config.groups.get(group_key)
     if group is None:
@@ -1963,13 +1963,13 @@ Expected: PASS
 
 - [ ] **Step 5: Wire the outbox into execution**
 
-In `agency/jobs/execution.py`, add the imports beside the other `agency.` imports:
+In `flowgency/jobs/execution.py`, add the imports beside the other `flowgency.` imports:
 
 ```python
-from agency.configuration.store import load_config_snapshot
-from agency.records.ingest import ingest_records
-from agency.records.outbox import copy_outbox_memory_to_stage, create_outbox
-from agency.records.validation import validate_outbox, writable_agent_names
+from flowgency.configuration.store import load_config_snapshot
+from flowgency.records.ingest import ingest_records
+from flowgency.records.outbox import copy_outbox_memory_to_stage, create_outbox
+from flowgency.records.validation import validate_outbox, writable_agent_names
 ```
 
 After the launch view is created (currently `launch_view = create_launch_view(artifact, launch_dir)`), add:
@@ -2070,7 +2070,7 @@ Expected: PASS
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agency/jobs/execution.py agency/records/validation.py agency/records/__init__.py tests/test_records_worker.py
+git add flowgency/jobs/execution.py flowgency/records/validation.py flowgency/records/__init__.py tests/test_records_worker.py
 git commit -m "feat(jobs): validate and ingest agent records after a run"
 ```
 
@@ -2081,8 +2081,8 @@ git commit -m "feat(jobs): validate and ingest agent records after a run"
 **Files:**
 - Modify: `AGENTS.md` (the authority-boundaries and configuration sections, and the stale Development block)
 - Modify: `kb/configuration.md:20`
-- Modify: `skills/agency-setup/references/templates.md:86`
-- Modify: `.github/skills/agency-setup/references/templates.md:86`
+- Modify: `skills/flowgency-setup/references/templates.md:86`
+- Modify: `.github/skills/flowgency-setup/references/templates.md:86`
 
 - [ ] **Step 1: Record the write-boundary contract in `AGENTS.md`**
 
@@ -2112,7 +2112,7 @@ false blocker — one already did. Replace the block with:
 
 ```text
 python -m pytest tests/ -q
-python -m agency.app
+python -m flowgency.app
 ```
 
 - [ ] **Step 2: Mirror it in `kb/configuration.md`**
@@ -2126,7 +2126,7 @@ when true, none of them when false. The tool policy is unaffected by it.
 
 - [ ] **Step 3: Replace the vague pipeline sentence in both skill copies**
 
-In `skills/agency-setup/references/templates.md` and `.github/skills/agency-setup/references/templates.md`, replace line 86:
+In `skills/flowgency-setup/references/templates.md` and `.github/skills/flowgency-setup/references/templates.md`, replace line 86:
 
 ```markdown
 3. Record observations or proposals through the project's configured pipeline.
@@ -2136,15 +2136,15 @@ with:
 
 ```markdown
 3. Record observations and proposals by writing Markdown files into
-   `.agency/outbox/observations/` and `.agency/outbox/proposals/`, relative to
-   the working directory. Agency validates and files them after the run, and
+   `.flowgency/outbox/observations/` and `.flowgency/outbox/proposals/`, relative to
+   the working directory. Flowgency validates and files them after the run, and
    assigns the `agent`, `date`, and `status` fields and the file name itself.
-   Keep durable knowledge by editing the seeded files in `.agency/memory/`.
+   Keep durable knowledge by editing the seeded files in `.flowgency/memory/`.
 ```
 
 - [ ] **Step 4: Verify the skill test still passes**
 
-Run: `python -m pytest tests/test_agency_setup_skill.py -v`
+Run: `python -m pytest tests/test_flowgency_setup_skill.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Run the full suite**
@@ -2155,7 +2155,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add AGENTS.md kb/configuration.md skills/agency-setup/references/templates.md .github/skills/agency-setup/references/templates.md
+git add AGENTS.md kb/configuration.md skills/flowgency-setup/references/templates.md .github/skills/flowgency-setup/references/templates.md
 git commit -m "docs(records): document the agent reporting protocol"
 ```
 

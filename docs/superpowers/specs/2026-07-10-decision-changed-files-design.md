@@ -5,7 +5,7 @@
 
 ## Problem
 
-When a proposal is decided, Agency dispatches the proposal's `origin_agent` to
+When a proposal is decided, Flowgency dispatches the proposal's `origin_agent` to
 act on the decision. The decision detail page shows a generic execution status
 (e.g. *"Agent completed execution (inferred from exit code)."*) but does **not**
 show:
@@ -60,7 +60,7 @@ Confirmed by live probes on 2026-07-09/10 against `copilot -p ... --output-forma
 
 ## Design
 
-### 1. Integration interface (`agency/integrations/__init__.py`)
+### 1. Integration interface (`flowgency/integrations/__init__.py`)
 
 Introduce a structured per-file change record and extend `RunResult`:
 
@@ -87,7 +87,7 @@ class RunResult:
 working unchanged and simply reports no changes. This is the generic contract:
 any integration *may* populate it; only Copilot does today.
 
-### 2. Copilot implementation (`agency/integrations/agency/copilot.py`)
+### 2. Copilot implementation (`flowgency/integrations/flowgency/copilot.py`)
 
 - Switch `run()` to pass `--output-format json` and capture the JSONL stream.
 - Add a private parser `_parse_jsonl_output(raw) -> tuple[str, list[FileChange]]`:
@@ -115,7 +115,7 @@ any integration *may* populate it; only Copilot does today.
 The existing least-privilege flag matrix, sandbox handling, and the
 `CREATE_NO_WINDOW` / `stdin=DEVNULL` Windows launch fix are all preserved.
 
-### 3. Persistence (`execute_decision` in `agency/app.py`)
+### 3. Persistence (`execute_decision` in `flowgency/app.py`)
 
 `execute_decision` already resolves the executing agent (`origin_agent`) and
 writes the `.out` log (`out_path`, absolute, under
@@ -129,13 +129,13 @@ records, via `update_decision_execution`:
 - `changed_files` — the `RunResult.changed_files` serialized as a list of dicts
   (`{path, status, lines_added, lines_removed}`), written **only when non-empty**.
 
-### 4. Route (`decision_detail` in `agency/app.py`)
+### 4. Route (`decision_detail` in `flowgency/app.py`)
 
 Read `executed_by`, `execution_log`, and `changed_files` from the decision
 frontmatter and pass them to the template. `changed_files` is a list of dicts as
 persisted.
 
-### 5. Template (`agency/templates/decision_detail.html`)
+### 5. Template (`flowgency/templates/decision_detail.html`)
 
 Inside the existing **Execution** block:
 
@@ -154,7 +154,7 @@ Inside the existing **Execution** block:
 proposal decided
       │
       ▼
-execute_decision(origin_agent)            agency/app.py
+execute_decision(origin_agent)            flowgency/app.py
       │  dispatch via integration.run()
       ▼
 CopilotIntegration.run(--output-format json)   copilot.py

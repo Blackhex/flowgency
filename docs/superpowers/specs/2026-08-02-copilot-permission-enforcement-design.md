@@ -11,8 +11,8 @@ Phase 2 shipped a model nothing enforces.
 
 ### The zone grants are advisory
 
-Agency generates three rules for every job — `instructions` readable,
-`.agency/outbox` and `.agency/memory` writable. They are excluded from capability
+Flowgency generates three rules for every job — `instructions` readable,
+`.flowgency/outbox` and `.flowgency/memory` writable. They are excluded from capability
 negotiation, so no integration has to reject a policy on their account. Copilot
 then excludes them from rendering too, because its tool permissions are global
 and it cannot grant `write` for the outbox without granting it everywhere.
@@ -39,7 +39,7 @@ enforces anything.
 ### Eight integrations enforce nothing
 
 Copilot's rendering is careful: a policy granting no tools produces no grant, and
-Agency's generated zone rules are kept out of the global allowlist. The other
+Flowgency's generated zone rules are kept out of the global allowlist. The other
 eight translate no rule into any argument, and two of them — `claude_code` and
 `codex` — unconditionally pass a flag that disables their own permission model.
 An operator writing narrow rules for those agents is writing documentation.
@@ -67,7 +67,7 @@ that shape. This phase starts using the second gate.
 
 Each job gets its own `COPILOT_HOME`, because `settings.json` is the only place a
 sandbox policy can be expressed and a repository-level file will not accept a
-`sandbox` key. Into it Agency writes:
+`sandbox` key. Into it Flowgency writes:
 
 | Setting | Value | Why |
 |---|---|---|
@@ -91,7 +91,7 @@ configuration that is meant to be unconfined.
 rather than granting broadly and carving out.
 
 Sandboxing is an **experimental** feature. The `/sandbox` command is registered
-only when experimental features are on, so Agency passes `--experimental` on
+only when experimental features are on, so Flowgency passes `--experimental` on
 every sandboxed launch. An integration that renders a policy without it produces
 a settings file the CLI will not act on — the worst possible outcome, because it
 looks enforced and is not. Detection therefore treats the absence of the flag as
@@ -122,7 +122,7 @@ failure this phase exists to remove.
 
 ### Enforcement is best effort, and the gaps are stated
 
-Agency applies as much of the policy as the integration can enforce and says
+Flowgency applies as much of the policy as the integration can enforce and says
 plainly what it could not.
 
 The reason is empirical, and was re-measured against the installed CLI
@@ -161,7 +161,7 @@ rule phase 2 derived instead of adding a second notion of trust.
 
 This control covers git and `gh` only. The sandbox inherits the rest of the shell
 environment apart from a fixed blocklist, so any other credential already present
-when Agency launches — a cloud access key, a registry token — remains visible to
+when Flowgency launches — a cloud access key, a registry token — remains visible to
 the agent regardless of its rules. A permission model expressed in paths cannot
 reach that. The launch environment is therefore reduced to what a job needs, and
 the spec states plainly that environment-borne secrets are outside the boundary.

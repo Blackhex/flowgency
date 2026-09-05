@@ -29,7 +29,7 @@ def _status(state="inactive", installed=False, conflict=False, mismatches=None):
         "config_conflict": conflict,
         "config_path": "C:/other/config.yaml" if conflict else None,
         "interval": 15 if installed else None,
-        "expected_config_path": "C:/agency/config.yaml",
+        "expected_config_path": "C:/flowgency/config.yaml",
         "expected_interval": 15,
         "mismatches": list(mismatches or []),
         "error": None,
@@ -52,7 +52,7 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
         "schema_version": 1,
 
         "flowgency": {
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "test",
             "ai_backend": "copilot",
             "agent_library": str(library_root),
@@ -196,7 +196,7 @@ def test_interval_update_repairs_dispatcher_through_shared_api(tmp_path, monkeyp
     response = client.post(
         "/admin/settings",
         data={
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "test",
             "ai_backend": "copilot",
             "theme": "",
@@ -219,7 +219,7 @@ def test_interval_update_returns_409_when_inspection_error(tmp_path, monkeypatch
     response = client.post(
         "/admin/settings",
         data={
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "test",
             "ai_backend": "copilot",
             "theme": "",

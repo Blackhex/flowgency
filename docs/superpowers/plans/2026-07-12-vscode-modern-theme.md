@@ -2,15 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a selectable Agency theme that faithfully maps VS Code Dark Modern and Light Modern colors into the existing theme system.
+**Goal:** Add a selectable Flowgency theme that faithfully maps VS Code Dark Modern and Light Modern colors into the existing theme system.
 
-**Architecture:** Add one declarative YAML theme under `agency/themes/`; existing discovery and CSS generation will expose it automatically. Add one focused integration-style unit test that loads the shipped theme and verifies representative metadata plus generated light and dark CSS variables.
+**Architecture:** Add one declarative YAML theme under `flowgency/themes/`; existing discovery and CSS generation will expose it automatically. Add one focused integration-style unit test that loads the shipped theme and verifies representative metadata plus generated light and dark CSS variables.
 
-**Tech Stack:** Python 3.11+, pytest, PyYAML, Agency's existing YAML theme loader and CSS generator.
+**Tech Stack:** Python 3.11+, pytest, PyYAML, Flowgency's existing YAML theme loader and CSS generator.
 
 ## Global Constraints
 
-- Add exactly one theme file: `agency/themes/vscode-modern.yaml`.
+- Add exactly one theme file: `flowgency/themes/vscode-modern.yaml`.
 - Do not change Python production code, templates, or the theme schema.
 - Preserve the existing light/dark toggle by providing both Dark Modern and Light Modern palettes.
 - Do not add editor chrome, syntax highlighting, or template-specific overrides.
@@ -22,12 +22,12 @@
 ### Task 1: Add and Verify the VS Code Modern Theme
 
 **Files:**
-- Create: `agency/themes/vscode-modern.yaml`
+- Create: `flowgency/themes/vscode-modern.yaml`
 - Create: `tests/test_themes.py`
 
 **Interfaces:**
-- Consumes: `agency.app.load_themes() -> dict[str, dict]`
-- Consumes: `agency.app.generate_theme_css(theme: dict) -> str`
+- Consumes: `flowgency.app.load_themes() -> dict[str, dict]`
+- Consumes: `flowgency.app.generate_theme_css(theme: dict) -> str`
 - Produces: a discovered theme under the key `vscode-modern`
 
 - [ ] **Step 1: Write the failing theme discovery and CSS test**
@@ -35,7 +35,7 @@
 Create `tests/test_themes.py`:
 
 ```python
-import agency.app as app_mod
+import flowgency.app as app_mod
 
 
 def test_vscode_modern_theme_is_discovered_and_generates_css():
@@ -66,12 +66,12 @@ Expected: FAIL because `load_themes()` does not contain the `vscode-modern` key.
 
 - [ ] **Step 3: Add the complete VS Code Modern theme**
 
-Create `agency/themes/vscode-modern.yaml`:
+Create `flowgency/themes/vscode-modern.yaml`:
 
 ```yaml
 name: VS Code Modern
 description: Dark Modern + Light Modern — familiar editor-focused workspace
-author: agency
+author: flowgency
 
 dark:
   # Surfaces
@@ -209,7 +209,7 @@ Run:
 
 ```powershell
 git --no-pager diff --check
-git --no-pager diff -- agency/themes/vscode-modern.yaml tests/test_themes.py
+git --no-pager diff -- flowgency/themes/vscode-modern.yaml tests/test_themes.py
 ```
 
 Expected: no whitespace errors; the diff contains only the new theme and its focused test.
@@ -219,7 +219,7 @@ Expected: no whitespace errors; the diff contains only the new theme and its foc
 Run:
 
 ```powershell
-git add -- agency/themes/vscode-modern.yaml tests/test_themes.py
+git add -- flowgency/themes/vscode-modern.yaml tests/test_themes.py
 git commit -m "feat: add VS Code Modern theme" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```
 

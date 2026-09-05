@@ -6,7 +6,7 @@
 
 ## Problem
 
-The integration system today requires contributors to edit `agency/integrations/__init__.py` to register new integrations — a code change in core files that creates friction for community contributions. There's no GUI for managing integrations, no template to start from, no test harness to validate against, and no documentation explaining how to build one. The growth strategy identifies the integration plugin loop as the primary flywheel for expanding Agency's user base.
+The integration system today requires contributors to edit `flowgency/integrations/__init__.py` to register new integrations — a code change in core files that creates friction for community contributions. There's no GUI for managing integrations, no template to start from, no test harness to validate against, and no documentation explaining how to build one. The growth strategy identifies the integration plugin loop as the primary flywheel for expanding Flowgency's user base.
 
 ## Solution
 
@@ -15,11 +15,11 @@ Restructure integrations into author-namespaced subdirectories, add config-drive
 ## Directory Structure
 
 ```
-agency/integrations/
+flowgency/integrations/
 ├── __init__.py              # BaseIntegration, REGISTRY, config-driven loading
 ├── integrations.yaml        # Which integrations are loaded (managed by admin UI)
 ├── _template.py             # Commented scaffolding for contributors
-├── agency/                  # Official integrations
+├── flowgency/                  # Official integrations
 │   ├── __init__.py
 │   ├── claude_code.py
 │   ├── codex.py
@@ -35,8 +35,8 @@ agency/integrations/
 
 ### Author Folder Convention
 
-- Official integrations live in `agency/integrations/agency/`
-- Community integrations live in `agency/integrations/{author_name}/`
+- Official integrations live in `flowgency/integrations/flowgency/`
+- Community integrations live in `flowgency/integrations/{author_name}/`
 - Author name is lowercase, alphanumeric + hyphens (e.g., `johndoe`, `acme-corp`)
 - Each author folder must contain an `__init__.py` (can be empty)
 
@@ -46,25 +46,25 @@ agency/integrations/
 
 ```yaml
 integrations:
-  - agency.claude_code
-  - agency.codex
-  - agency.gemini
-  - agency.aider
-  - agency.goose
-  - agency.script
-  - agency.sdk
+  - flowgency.claude_code
+  - flowgency.codex
+  - flowgency.gemini
+  - flowgency.aider
+  - flowgency.goose
+  - flowgency.script
+  - flowgency.sdk
 ```
 
-Each entry is `{author}.{module_name}`, which maps to `agency/integrations/{author}/{module_name}.py`.
+Each entry is `{author}.{module_name}`, which maps to `flowgency/integrations/{author}/{module_name}.py`.
 
-The file lives at `agency/integrations/integrations.yaml` (alongside `__init__.py`).
+The file lives at `flowgency/integrations/integrations.yaml` (alongside `__init__.py`).
 
 ### Startup Loading
 
-On app startup, `agency/integrations/__init__.py`:
+On app startup, `flowgency/integrations/__init__.py`:
 
 1. Reads `integrations.yaml` from the integrations directory
-2. For each entry, imports the module at `agency.integrations.{author}.{module_name}`
+2. For each entry, imports the module at `flowgency.integrations.{author}.{module_name}`
 3. The module's `_register()` call at module level adds it to `REGISTRY`
 4. If a module fails to import, log a warning and continue (don't crash the app)
 5. If `integrations.yaml` doesn't exist, create it with the default official integrations list
@@ -91,8 +91,8 @@ Table showing all currently registered integrations (from `REGISTRY`):
 
 | Name | Author | Native File | Execution | AI Backend | Action |
 |------|--------|-------------|-----------|------------|--------|
-| claude-code | agency | CLAUDE.md | Yes | Yes | Unregister |
-| codex | agency | AGENTS.md | Yes | Yes | Unregister |
+| claude-code | flowgency | CLAUDE.md | Yes | Yes | Unregister |
+| codex | flowgency | AGENTS.md | Yes | Yes | Unregister |
 | ... | ... | ... | ... | ... | ... |
 
 "Unregister" removes the entry from `integrations.yaml`. Shows a warning that a restart is needed.
@@ -109,13 +109,13 @@ Scanned from the integrations subdirectories. Shows `.py` files in author folder
 
 **Restart Banner**
 
-When a register or unregister action has occurred, a yellow banner appears: "Integration changes require a service restart to take effect. Restart now?" with a "Restart Service" button that triggers `systemctl --user restart agency.service`.
+When a register or unregister action has occurred, a yellow banner appears: "Integration changes require a service restart to take effect. Restart now?" with a "Restart Service" button that triggers `systemctl --user restart flowgency.service`.
 
 ### Discovery Logic
 
 To populate "Available to Register":
 
-1. Scan all subdirectories of `agency/integrations/` (skip `__pycache__`, files starting with `_`)
+1. Scan all subdirectories of `flowgency/integrations/` (skip `__pycache__`, files starting with `_`)
 2. For each `.py` file in a subdirectory, check if `{dirname}.{stem}` is already in `integrations.yaml`
 3. If not, try to detect if it contains a `BaseIntegration` subclass (simple text scan for `BaseIntegration` in the file content — no import needed)
 4. Show matches in the "Available" section
@@ -126,18 +126,18 @@ The existing "Installed Integrations" table on `/admin/` settings page is replac
 
 ## Integration Template
 
-### `agency/integrations/_template.py`
+### `flowgency/integrations/_template.py`
 
 A copy-and-fill scaffolding file:
 
 ```python
 """
-Integration template for Agency.
+Integration template for Flowgency.
 
 HOW TO USE:
-1. Create your author directory: agency/integrations/{your-name}/
+1. Create your author directory: flowgency/integrations/{your-name}/
 2. Add an empty __init__.py to your directory
-3. Copy this file there and rename it: agency/integrations/{your-name}/your_tool.py
+3. Copy this file there and rename it: flowgency/integrations/{your-name}/your_tool.py
 4. Fill in each method below (see comments for guidance)
 5. Visit Admin → Integrations in the dashboard to register
 6. Restart the service
@@ -147,7 +147,7 @@ TESTING:
 """
 
 from pathlib import Path
-from agency.integrations import BaseIntegration, AgentIdentity, RunResult, _register
+from flowgency.integrations import BaseIntegration, AgentIdentity, RunResult, _register
 
 
 class YourToolIntegration(BaseIntegration):
@@ -160,11 +160,11 @@ class YourToolIntegration(BaseIntegration):
     # Display name shown in the admin UI.
     display_name = "Your Tool"
 
-    # Can Agency invoke this tool to execute prompts?
+    # Can Flowgency invoke this tool to execute prompts?
     # True if the tool has a CLI that accepts a prompt/file.
     supports_execution = False
 
-    # Can Agency use this tool as its own AI backbone?
+    # Can Flowgency use this tool as its own AI backbone?
     # True if the tool has a non-interactive prompt mode.
     supports_ai_backend = False
 
@@ -174,7 +174,7 @@ class YourToolIntegration(BaseIntegration):
 
     def identity_filename(self) -> str:
         """The identity/config file this tool uses natively.
-        Agency reads/writes agent identity through this file.
+        Flowgency reads/writes agent identity through this file.
         Example: 'CLAUDE.md', 'AGENTS.md', '.cursorrules'
         """
         return "YOUR_CONFIG_FILE"
@@ -194,7 +194,7 @@ class YourToolIntegration(BaseIntegration):
 
         For tools with YAML frontmatter in their native file,
         parse it directly. For tools without frontmatter support,
-        read from .agency-meta.yaml sidecar file instead.
+        read from .flowgency-meta.yaml sidecar file instead.
         See existing integrations for examples of both patterns.
         """
         # TODO: implement
@@ -238,7 +238,7 @@ _register(YourToolIntegration())
 ### Developer Guide: `kb/contributing-integrations.md`
 
 Contents:
-- What integrations are and how they work in Agency
+- What integrations are and how they work in Flowgency
 - Directory structure and author folder convention
 - Step-by-step: copy template → fill in methods → register via admin
 - How each `BaseIntegration` method is called and what it should return
@@ -271,18 +271,18 @@ Fields:
 
 ## Migration
 
-Moving existing integrations from `agency/integrations/*.py` to `agency/integrations/agency/*.py`:
+Moving existing integrations from `flowgency/integrations/*.py` to `flowgency/integrations/flowgency/*.py`:
 
-1. Create `agency/integrations/agency/` directory with `__init__.py`
+1. Create `flowgency/integrations/flowgency/` directory with `__init__.py`
 2. Move all 7 integration files into the subdirectory
-3. Update all internal imports (integration files import from `agency.integrations` for base classes — these stay the same since `__init__.py` stays at the top level)
+3. Update all internal imports (integration files import from `flowgency.integrations` for base classes — these stay the same since `__init__.py` stays at the top level)
 4. Create `integrations.yaml` with all 7 official integrations listed
 5. Update `__init__.py` to load from config instead of hardcoded imports
 6. Update tests that import specific integrations
 
 ## Impact on Existing Code
 
-### `agency/integrations/__init__.py`
+### `flowgency/integrations/__init__.py`
 
 Major rewrite:
 - Remove hardcoded integration imports at module level
@@ -291,7 +291,7 @@ Major rewrite:
 - Add `register_integration(module_path)` and `unregister_integration(module_path)` functions that edit `integrations.yaml`
 - Keep `BaseIntegration`, `REGISTRY`, `get_integration()`, `detect_integration()`, `_register()` unchanged
 
-### `agency/app.py`
+### `flowgency/app.py`
 
 - Call `load_integrations()` at startup
 - Add 3 new routes (`/admin/integrations`, register, unregister)
@@ -299,8 +299,8 @@ Major rewrite:
 
 ### Templates
 
-- New: `agency/templates/admin_integrations.html`
-- Modify: `agency/templates/admin_settings.html` (remove integrations table, add link)
+- New: `flowgency/templates/admin_integrations.html`
+- Modify: `flowgency/templates/admin_settings.html` (remove integrations table, add link)
 
 ## Out of Scope
 

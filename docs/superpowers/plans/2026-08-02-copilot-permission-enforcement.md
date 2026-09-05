@@ -17,20 +17,20 @@
 - The permission model itself is settled. Rules, merge semantics, negotiation, eligibility and the `generated` marker do not change.
 - PowerShell has **no heredoc**. One command per line; `git commit -F <file>` for multi-line messages.
 - Do not modify `config.yaml`, `config.yaml.lock`, group-state directories or logs.
-- All writes into Agency-owned storage use `atomic_write_text` / `atomic_write_bytes` from `agency/fs/atomic.py`.
+- All writes into Flowgency-owned storage use `atomic_write_text` / `atomic_write_bytes` from `flowgency/fs/atomic.py`.
 
 ## Established facts
 
 Verified by exploration against this branch; do not re-derive.
 
 - `runtime_capabilities` is a plain class attribute: `BaseIntegration` line 89, and one per integration (`copilot.py:63`, the other eight around lines 21-28). No integration declares any `path_scopable_tools`.
-- It is read by `validate_runtime_policy` (`agency/integrations/__init__.py:174`), called from `resolve_effective_policy` (`agency/configuration/effective.py:121`) and `validate_run` (`agency/integrations/__init__.py:219`).
+- It is read by `validate_runtime_policy` (`flowgency/integrations/__init__.py:174`), called from `resolve_effective_policy` (`flowgency/configuration/effective.py:121`) and `validate_run` (`flowgency/integrations/__init__.py:219`).
 - `tests/test_integration_contract.py:130` compares `{name: integration.runtime_capabilities ...}` against a **static expected dict**. Making capabilities environment-dependent breaks it.
 - `tests/test_permission_capabilities.py:105` asserts **no** integration scopes `write`. It must change when Copilot starts doing so.
-- Copilot's `run()` is `agency/integrations/agency/copilot.py:426-563`. It already strips `generated` rules before building the tool allowlist, already emits no `--allow-all-tools` when `granted == ()`, and already passes `--experimental`.
-- `COPILOT_HOME` is read in exactly one place: `_usage_summary()` at `copilot.py:361`. It is never set. `subprocess.run` passes no `env=`, so the child inherits Agency's environment.
+- Copilot's `run()` is `flowgency/integrations/flowgency/copilot.py:426-563`. It already strips `generated` rules before building the tool allowlist, already emits no `--allow-all-tools` when `granted == ()`, and already passes `--experimental`.
+- `COPILOT_HOME` is read in exactly one place: `_usage_summary()` at `copilot.py:361`. It is never set. `subprocess.run` passes no `env=`, so the child inherits Flowgency's environment.
 - Copilot writes no CLI settings file today and never probes `copilot --version`.
-- `JobRecord.execution_summary` (`agency/jobs/models.py:324`) is Markdown, persisted in the job JSON, rendered at `agency/templates/job_detail.html:118`, and propagated into decision records by `project_decision`.
+- `JobRecord.execution_summary` (`flowgency/jobs/models.py:324`) is Markdown, persisted in the job JSON, rendered at `flowgency/templates/job_detail.html:118`, and propagated into decision records by `project_decision`.
 - `tests/test_copilot_launch_arguments.py` has the `_launch(policy, tmp_path, monkeypatch)` helper returning the argv, and `_granted(args)` extracting `--allow-tool` values.
 - `tests/_runtime_probe_helpers.py` provides `installed_ai_cli_runtimes()`, `write_boundary_supported(integration)` (which tests `"restricted" in permission_modes and bool(path_scopable_tools)`), and `assert_protected_state_unchanged()`.
 
@@ -39,7 +39,7 @@ Verified by exploration against this branch; do not re-derive.
 ### Task 1: Capabilities become derived
 
 **Files:**
-- Modify: `agency/integrations/__init__.py`
+- Modify: `flowgency/integrations/__init__.py`
 - Modify: `tests/test_integration_contract.py`
 - Test: `tests/test_capability_detection.py`
 
@@ -54,8 +54,8 @@ Create `tests/test_capability_detection.py`:
 ```python
 from __future__ import annotations
 
-from agency.integrations import get_integration
-from agency.integrations.models import RuntimeCapabilities
+from flowgency.integrations import get_integration
+from flowgency.integrations.models import RuntimeCapabilities
 
 
 def test_capabilities_are_readable_as_a_property():
@@ -126,7 +126,7 @@ Expected: FAIL with `AttributeError` on `declared_runtime_capabilities`
 
 - [ ] **Step 3: Implement the property**
 
-In `agency/integrations/__init__.py`, rename the class attribute to `declared_runtime_capabilities` and add:
+In `flowgency/integrations/__init__.py`, rename the class attribute to `declared_runtime_capabilities` and add:
 
 ```python
     declared_runtime_capabilities: RuntimeCapabilities = RuntimeCapabilities()
@@ -173,7 +173,7 @@ Expected: **1868 passed** or more, 0 failed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/ tests/test_capability_detection.py tests/test_integration_contract.py
+git add flowgency/integrations/ tests/test_capability_detection.py tests/test_integration_contract.py
 git commit -m "feat(integrations): derive capabilities from the environment"
 ```
 
@@ -182,7 +182,7 @@ git commit -m "feat(integrations): derive capabilities from the environment"
 ### Task 2: Copilot renders a sandbox policy
 
 **Files:**
-- Create: `agency/integrations/agency/copilot_sandbox.py`
+- Create: `flowgency/integrations/flowgency/copilot_sandbox.py`
 - Test: `tests/test_copilot_sandbox_policy.py`
 
 **Interfaces:**
@@ -199,8 +199,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agency.integrations.agency.copilot_sandbox import build_sandbox_settings
-from agency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from flowgency.integrations.flowgency.copilot_sandbox import build_sandbox_settings
+from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
 
 
 def rule(path, tools, generated=False):
@@ -235,14 +235,14 @@ def test_generated_zone_rules_are_rendered(tmp_path):
     settings, _ = build_sandbox_settings(
         policy(
             rule(launch / "instructions", ("read",), generated=True),
-            rule(launch / ".agency" / "outbox", ("read", "write"), generated=True),
+            rule(launch / ".flowgency" / "outbox", ("read", "write"), generated=True),
         ),
         launch_dir=launch,
     )
     fs = settings["sandbox"]["userPolicy"]["filesystem"]
 
     assert str(launch / "instructions") in fs["readonlyPaths"]
-    assert str(launch / ".agency" / "outbox") in fs["readwritePaths"]
+    assert str(launch / ".flowgency" / "outbox") in fs["readwritePaths"]
 
 
 def test_omitted_tools_is_writable(tmp_path):
@@ -298,7 +298,7 @@ Expected: FAIL with `ModuleNotFoundError`
 
 - [ ] **Step 3: Implement the translation**
 
-Create `agency/integrations/agency/copilot_sandbox.py`. A rule granting `write` (or `tools is None`) becomes a `readwritePaths` entry; a rule granting any tool but not `write` becomes `readonlyPaths`; a rule granting nothing appears in neither, because the filesystem policy is default-deny and omission is the denial. `deniedPaths` is never emitted — Windows ignores it, so the policy grants narrowly instead of carving out.
+Create `flowgency/integrations/flowgency/copilot_sandbox.py`. A rule granting `write` (or `tools is None`) becomes a `readwritePaths` entry; a rule granting any tool but not `write` becomes `readonlyPaths`; a rule granting nothing appears in neither, because the filesystem policy is default-deny and omission is the denial. `deniedPaths` is never emitted — Windows ignores it, so the policy grants narrowly instead of carving out.
 
 Generated rules **are** rendered here. That is the point of the task: the sandbox is the gate that can express them, unlike the global tool allowlist.
 
@@ -315,7 +315,7 @@ Expected: **1868 passed** or more, 0 failed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/integrations/agency/copilot_sandbox.py tests/test_copilot_sandbox_policy.py
+git add flowgency/integrations/flowgency/copilot_sandbox.py tests/test_copilot_sandbox_policy.py
 git commit -m "feat(copilot): translate permission rules into sandbox policy"
 ```
 
@@ -324,7 +324,7 @@ git commit -m "feat(copilot): translate permission rules into sandbox policy"
 ### Task 3: Per-job `COPILOT_HOME`
 
 **Files:**
-- Modify: `agency/integrations/agency/copilot.py`
+- Modify: `flowgency/integrations/flowgency/copilot.py`
 - Test: `tests/test_copilot_home.py`
 
 **Interfaces:**
@@ -368,7 +368,7 @@ Expected: **1868 passed** or more, 0 failed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/agency/copilot.py tests/test_copilot_home.py
+git add flowgency/integrations/flowgency/copilot.py tests/test_copilot_home.py
 git commit -m "feat(copilot): give each job its own copilot home"
 ```
 
@@ -377,7 +377,7 @@ git commit -m "feat(copilot): give each job its own copilot home"
 ### Task 4: Copilot detects whether the sandbox is usable
 
 **Files:**
-- Modify: `agency/integrations/agency/copilot.py`
+- Modify: `flowgency/integrations/flowgency/copilot.py`
 - Modify: `tests/test_permission_capabilities.py`
 - Test: `tests/test_copilot_capability_detection.py`
 
@@ -419,7 +419,7 @@ Expected: **1868 passed** or more, 0 failed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/agency/copilot.py tests/
+git add flowgency/integrations/flowgency/copilot.py tests/
 git commit -m "feat(copilot): declare path-scoped write when the sandbox holds"
 ```
 
@@ -428,8 +428,8 @@ git commit -m "feat(copilot): declare path-scoped write when the sandbox holds"
 ### Task 5: Unenforced rules are reported
 
 **Files:**
-- Modify: `agency/integrations/models.py` (the run result)
-- Modify: `agency/jobs/execution.py`
+- Modify: `flowgency/integrations/models.py` (the run result)
+- Modify: `flowgency/jobs/execution.py`
 - Test: `tests/test_unenforced_policy_reporting.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -450,7 +450,7 @@ Expected: FAIL
 
 Add a field to the integration run result listing the rules that were not enforced, populate it in Copilot from `build_sandbox_settings` and from the shell-backend condition, and have the worker append a Markdown note to `execution_summary`.
 
-`execution_summary` is rendered as Markdown at `agency/templates/job_detail.html:118` and propagated by `project_decision`, so no new field or template is required.
+`execution_summary` is rendered as Markdown at `flowgency/templates/job_detail.html:118` and propagated by `project_decision`, so no new field or template is required.
 
 The note must be specific. "Some rules could not be enforced" tells an operator nothing; naming the path and the tool tells them what to change.
 
@@ -465,7 +465,7 @@ Expected: **1868 passed** or more, 0 failed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/ tests/test_unenforced_policy_reporting.py
+git add flowgency/ tests/test_unenforced_policy_reporting.py
 git commit -m "feat(jobs): record the rules an integration could not enforce"
 ```
 
@@ -474,8 +474,8 @@ git commit -m "feat(jobs): record the rules an integration could not enforce"
 ### Task 6: Credentials
 
 **Files:**
-- Modify: `agency/integrations/agency/copilot_sandbox.py`
-- Modify: `agency/integrations/agency/copilot.py`
+- Modify: `flowgency/integrations/flowgency/copilot_sandbox.py`
+- Modify: `flowgency/integrations/flowgency/copilot.py`
 - Test: `tests/test_copilot_credentials.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -493,11 +493,11 @@ Expected: FAIL
 
 - [ ] **Step 3: Tie tokens to executor eligibility**
 
-An agent that may not change the project may not push it. Reuse the eligibility rule rather than inventing a second notion of trust — `agency/permissions/eligibility.py::may_execute_decisions` already answers exactly this question, so the sandbox builder needs whatever input lets it reach the same answer. Decide how to thread it and say so in your report.
+An agent that may not change the project may not push it. Reuse the eligibility rule rather than inventing a second notion of trust — `flowgency/permissions/eligibility.py::may_execute_decisions` already answers exactly this question, so the sandbox builder needs whatever input lets it reach the same answer. Decide how to thread it and say so in your report.
 
 - [ ] **Step 4: Reduce the launch environment**
 
-The sandbox inherits Agency's environment apart from a fixed blocklist, so a cloud key or registry token in Agency's environment is visible to every agent regardless of its rules. A path-based model cannot express that.
+The sandbox inherits Flowgency's environment apart from a fixed blocklist, so a cloud key or registry token in Flowgency's environment is visible to every agent regardless of its rules. A path-based model cannot express that.
 
 Pass an explicitly constructed environment rather than `{**os.environ, ...}`. Keep what the CLI needs — `PATH`, `COPILOT_HOME`, the platform's essential variables, and whatever the existing code depends on — and drop the rest. Err toward keeping a variable if removing it breaks a run, and record what you kept and why.
 
@@ -512,7 +512,7 @@ Expected: **1868 passed** or more, 0 failed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/agency/ tests/test_copilot_credentials.py
+git add flowgency/integrations/flowgency/ tests/test_copilot_credentials.py
 git commit -m "feat(copilot): gate credentials on executor eligibility"
 ```
 
@@ -521,7 +521,7 @@ git commit -m "feat(copilot): gate credentials on executor eligibility"
 ### Task 7: The eight stop disarming themselves
 
 **Files:**
-- Modify: `agency/integrations/agency/claude_code.py`, `codex.py`
+- Modify: `flowgency/integrations/flowgency/claude_code.py`, `codex.py`
 - Test: `tests/test_integration_launch_arguments.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -557,7 +557,7 @@ Expected: **1868 passed** or more, 0 failed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/integrations/agency/ tests/test_integration_launch_arguments.py
+git add flowgency/integrations/flowgency/ tests/test_integration_launch_arguments.py
 git commit -m "fix(integrations): stop disabling tool permission models"
 ```
 
@@ -580,7 +580,7 @@ Gate it on `write_boundary_supported(integration)` so it skips where the sandbox
 Update `AGENTS.md` and `kb/integrations.md` to say:
 
 - Copilot enforces path-scoped writes through its sandbox when the CLI supports it; a read-only agent can write only its outbox and memory.
-- Shell commands are unavailable under the sandbox on non-Insiders Windows, and Agency records the gap against the job rather than pretending.
+- Shell commands are unavailable under the sandbox on non-Insiders Windows, and Flowgency records the gap against the job rather than pretending.
 - Built-in file edits are policed in-process and cooperatively; only shell is OS-contained.
 - Environment-borne credentials are outside the boundary.
 - The other eight integrations do not enforce path rules at all; their permission modes are `unrestricted` only, and narrow rules under `unrestricted` are not enforced by them.

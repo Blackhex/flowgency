@@ -152,7 +152,7 @@ Decision body
             {
                 "schema_version": 1,
                 "flowgency": {
-                    "title": "Agency",
+                    "title": "Flowgency",
                     "default_team": "test",
                     "ai_backend": "script",
                     "agent_library": str(library_root),
@@ -888,7 +888,7 @@ def test_startup_drain_failure_does_not_prevent_startup(monkeypatch):
     import asyncio
     from flowgency.app import lifespan
 
-    mock_config = SimpleNamespace(agency=SimpleNamespace(memory_store=None))
+    mock_config = SimpleNamespace(flowgency=SimpleNamespace(memory_store=None))
     mock_snapshot = SimpleNamespace(config=mock_config)
     mock_services = SimpleNamespace(
         startup_error=None,
@@ -1016,7 +1016,7 @@ class TestWorkQueueStrip:
         real_snapshot = app_mod._load_snapshot()
         real_group = real_runtime_team(real_snapshot, "newsletter")
 
-        modified_agency = real_snapshot.config.flowgency.model_copy(
+        modified_flowgency = real_snapshot.config.flowgency.model_copy(
             update={
                 "memory_store": None,
                 "jobs": real_snapshot.config.flowgency.jobs.model_copy(update={"pool": 8}),
@@ -1024,7 +1024,7 @@ class TestWorkQueueStrip:
         )
         mock_snapshot = dc_replace(
             real_snapshot,
-            config=real_snapshot.config.model_copy(update={"flowgency": modified_agency}),
+            config=real_snapshot.config.model_copy(update={"flowgency": modified_flowgency}),
         )
 
         monkeypatch.setattr(app_mod, "_load_snapshot", lambda: mock_snapshot)

@@ -1,4 +1,4 @@
-"""Integration plugin system for Agency."""
+"""Integration plugin system for Flowgency."""
 
 import os
 import shutil
@@ -379,7 +379,7 @@ class BaseIntegration:
         )
 
     def prompt(self, text: str, timeout: int = 60) -> str:
-        """Simple prompt -> response for Agency's own AI features.
+        """Simple prompt -> response for Flowgency's own AI features.
 
         Raises IntegrationError on failure.
         """

@@ -13,7 +13,7 @@ from .outbox import (
     OUTBOX_RELATIVE_PROPOSALS,
 )
 
-_MARKER = "## Agency reporting protocol"
+_MARKER = "## Flowgency reporting protocol"
 
 
 def _tool_sentence(tool_mode: str, tool_names: tuple[str, ...]) -> str:
@@ -41,7 +41,7 @@ def build_reporting_protocol(
             _MARKER,
             "",
             "Report findings by writing Markdown files into these directories,",
-            "relative to your working directory. Agency validates and files them",
+            "relative to your working directory. Flowgency validates and files them",
             "after the run; do not write anywhere else to record them.",
             "",
             f"- Observations: `{OUTBOX_RELATIVE_OBSERVATIONS}`",
@@ -50,15 +50,15 @@ def build_reporting_protocol(
             "",
             "Each record is one Markdown file with YAML front matter and a body.",
             "Open the body with a bold summary sentence; it becomes the title.",
-            "Agency assigns the `agent`, `date`, and `status` fields and the file",
+            "Flowgency assigns the `agent`, `date`, and `status` fields and the file",
             "name, so anything you set for those is discarded. Front-matter keys",
-            "Agency does not understand are dropped rather than stored.",
+            "Flowgency does not understand are dropped rather than stored.",
             "",
             "Record file requirements: each file must have a `.md` extension,",
             f"be under {MAX_RECORD_BYTES} bytes, contain valid UTF-8 text, and have",
             "a non-empty body. Write files directly into the listed directories;",
             f"subdirectories are rejected. At most {MAX_RECORDS_PER_KIND} records per",
-            "directory; if you exceed this, Agency rejects the entire directory.",
+            "directory; if you exceed this, Flowgency rejects the entire directory.",
             "",
             "A proposal additionally requires `execution_agent` naming a",
             "configured agent that is allowed to write, and a non-empty",
@@ -67,7 +67,7 @@ def build_reporting_protocol(
             "A question of type `choice` additionally requires a non-empty `options`",
             "list.",
             "",
-            "Agency files every record that passes validation, even when another",
+            "Flowgency files every record that passes validation, even when another",
             "record in the same run is rejected. A run with any rejected record",
             "still fails, and the failure summary names each rejection, so fix the",
             "named files rather than resubmitting the ones that already landed.",

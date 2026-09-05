@@ -955,7 +955,7 @@ def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None,
     if catch_up is not None:
         schedule["catch_up"] = catch_up
 
-    agency = {
+    flowgency = {
         "title": "Test",
         "default_team": "grp",
         "ai_backend": "copilot",
@@ -965,11 +965,11 @@ def _write_minimal_config(tmp_path, *, catch_up=None, dispatch_daily_limit=None,
         "prompt_store": str(prompts),
     }
     if jobs_pool is not None:
-        agency["jobs"] = {"pool": jobs_pool}
+        flowgency["jobs"] = {"pool": jobs_pool}
 
     raw = {
         "schema_version": 1,
-        "flowgency": agency,
+        "flowgency": flowgency,
         "teams": {
             "grp": {
                 "name": "Grp",

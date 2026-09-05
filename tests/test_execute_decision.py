@@ -158,7 +158,7 @@ def test_execute_job_projects_running_and_success_with_sandbox(tmp_path, monkeyp
     authored_rules = tuple(r for r in seen["rules"] if not r.generated)
     assert authored_rules == (authored_rule,)
     # Execution must not widen the operator's grant on its way to the
-    # integration: only Agency's own launch zones may be added.
+    # integration: only Flowgency's own launch zones may be added.
     generated_rules = tuple(r for r in seen["rules"] if r.generated)
     assert generated_rules, "launch zones should have been attached"
     assert len(seen["rules"]) == len(authored_rules) + len(generated_rules)

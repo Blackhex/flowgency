@@ -2,11 +2,11 @@
 
 ## Goal
 
-Add an Agency theme that closely resembles Visual Studio Code's built-in Dark Modern theme while preserving Agency's existing light/dark toggle through a matching Light Modern palette.
+Add an Flowgency theme that closely resembles Visual Studio Code's built-in Dark Modern theme while preserving Flowgency's existing light/dark toggle through a matching Light Modern palette.
 
 ## Scope
 
-- Add one theme file: `agency/themes/vscode-modern.yaml`.
+- Add one theme file: `flowgency/themes/vscode-modern.yaml`.
 - Use the existing theme loader, CSS generator, settings selector, and dark-mode toggle unchanged.
 - Add focused automated coverage for theme discovery and generated light/dark CSS.
 - Do not add editor chrome, syntax highlighting, new theme properties, or template-specific overrides.
@@ -52,7 +52,7 @@ The theme file follows the same complete YAML structure as the shipped themes:
 - `status` semantic colors
 - Tailwind-compatible `scale`
 
-Because themes are discovered dynamically from `agency/themes/*.yaml`, the new theme will automatically appear in App Settings without Python or template changes.
+Because themes are discovered dynamically from `flowgency/themes/*.yaml`, the new theme will automatically appear in App Settings without Python or template changes.
 
 ## Error Handling
 

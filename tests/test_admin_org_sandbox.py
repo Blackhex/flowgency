@@ -55,7 +55,7 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     (tmp_path / "library").mkdir(parents=True, exist_ok=True)
     (tmp_path / "workspace").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["flowgency"]["title"] = "Agency"
+    raw["flowgency"]["title"] = "Flowgency"
     raw["flowgency"]["default_team"] = "grp"
     raw["flowgency"]["agent_library"] = str(tmp_path / "library")
     raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")

@@ -10,7 +10,7 @@ from flowgency.configuration.models import MemoryChannel, MemorySelector
 from .models import ResolvedMemory
 
 
-_MEMORY_HASH_DOMAIN = b"agency-memory:v1\0"
+_MEMORY_HASH_DOMAIN = b"flowgency-memory:v1\0"
 
 
 def resolved_memory_from_canonical(

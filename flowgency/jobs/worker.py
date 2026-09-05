@@ -11,7 +11,7 @@ from .store import read_job
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Execute one Agency job")
+    parser = argparse.ArgumentParser(description="Execute one Flowgency job")
     parser.add_argument("--store-root", required=True)
     parser.add_argument("--team-id", required=True)
     parser.add_argument("--job-id", required=True)

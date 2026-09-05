@@ -128,7 +128,7 @@ def _make_queue_fixture(tmp_path, *, pool: int = 3) -> _QueueFixture:
     raw = {
         "schema_version": 1,
         "flowgency": {
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "newsletter",
             "ai_backend": "copilot",
             "agent_library": str(tmp_path / "agent-library"),

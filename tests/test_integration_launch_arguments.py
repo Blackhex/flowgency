@@ -171,7 +171,7 @@ def test_zone_grants_alone_do_not_restore_the_bypass(tmp_path, monkeypatch, repo
 def test_no_generated_zone_path_reaches_the_command_line(
     name, tmp_path, monkeypatch, repo
 ):
-    """The zones are Agency's own bookkeeping. An integration that cannot
+    """The zones are Flowgency's own bookkeeping. An integration that cannot
     scope a tool to a path must not advertise those paths to the agent as
     though they were part of the operator's grant."""
     launch_dir = tmp_path / "launch"

@@ -74,7 +74,7 @@ def test_selector_uses_exact_canonical_json_and_domain_prefix(tmp_path):
         ensure_ascii=False,
     )
     expected_hash = hashlib.sha256(
-        b"agency-memory:v1\0" + expected_json.encode("utf-8")
+        b"flowgency-memory:v1\0" + expected_json.encode("utf-8")
     ).hexdigest()
 
     assert resolved.canonical_json == expected_json

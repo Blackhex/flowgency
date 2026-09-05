@@ -68,7 +68,7 @@ awkward for assistive technology, and cannot be scanned.
 
 ## Health reason model
 
-`agency/health.py` gains a lateness value that carries the offending routine
+`flowgency/health.py` gains a lateness value that carries the offending routine
 instead of only its severity.
 
 ```python
@@ -85,7 +85,7 @@ class Lateness(NamedTuple):
 - `schedule_state` keeps its signature and its return values and is reimplemented
   as `schedule_lateness(...).state`, so no existing caller or test changes.
 
-`agency/app.py` replaces `_agent_health` with `_agent_status`, returning:
+`flowgency/app.py` replaces `_agent_health` with `_agent_status`, returning:
 
 ```python
 class AgentHealth(NamedTuple):
@@ -263,7 +263,7 @@ table is added above the form:
 | Last fired | marker mtime as `YYYY-MM-DD HH:MM`, or `never` |
 | Next due | `relative_future(next occurrence)`, `overdue {relative}`, `due now`, or `—` for conditional and disabled routines |
 
-Values come from the same `agency/health.py` helpers the Inbox uses, and the tab
+Values come from the same `flowgency/health.py` helpers the Inbox uses, and the tab
 honours the group's `dispatch.enabled` exactly as the Inbox does. When dispatch
 is disabled the column reads `dispatch disabled` for every routine, because a
 routine cannot be late when nothing is scheduled to fire it. A tab that reported

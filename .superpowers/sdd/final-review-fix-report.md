@@ -91,10 +91,10 @@ write.
 .\.venv\Scripts\python -m pytest tests\ -q
 1227 passed, 3 skipped in 125.24s
 
-rg -n 'schema_version:\s*2|group\.path.*/.*shared|\["shared"\]|shared/(observations|proposals|decisions|jobs|logs)|workspace_dir|group_path=' agency tests CLAUDE.md README.md kb skills examples
+rg -n 'schema_version:\s*2|group\.path.*/.*shared|\["shared"\]|shared/(observations|proposals|decisions|jobs|logs)|workspace_dir|group_path=' flowgency tests CLAUDE.md README.md kb skills examples
 No stale matches
 
-.\.venv\Scripts\python -c "from pathlib import Path; from agency.configuration import ConfigStore; ConfigStore(Path('tests/ui/fixtures/config.yaml')).load(); print('valid')"
+.\.venv\Scripts\python -c "from pathlib import Path; from flowgency.configuration import ConfigStore; ConfigStore(Path('tests/ui/fixtures/config.yaml')).load(); print('valid')"
 valid
 
 git diff --check
@@ -107,16 +107,16 @@ present.
 
 ## Changed files
 
-- `agency/web/routes/admin_groups.py`: catches `ValidationFailed`, renders
+- `flowgency/web/routes/admin_groups.py`: catches `ValidationFailed`, renders
   submitted save/create values, preserves revisions, and returns 422
   diagnostics.
-- `agency/configuration/store.py`: separates side-effect-free validation from
+- `flowgency/configuration/store.py`: separates side-effect-free validation from
   storage initialization and moves initialization after final conflict checks.
-- `agency/jobs/store.py`: uses `os.path.normcase`; renames `job_path`'s
+- `flowgency/jobs/store.py`: uses `os.path.normcase`; renames `job_path`'s
   directory parameter to `jobs_dir`.
-- `agency/configuration/models.py`: renames the workspace-base local to
+- `flowgency/configuration/models.py`: renames the workspace-base local to
   `workspace_root`.
-- `agency/configuration/effective.py`: adds the missing EOF newline.
+- `flowgency/configuration/effective.py`: adds the missing EOF newline.
 - `tests/test_admin_org_sandbox.py`: adds save/create invalid-path regressions.
 - `tests/test_config_store.py`: adds replace/patch late-conflict regressions.
 - `tests/test_job_models.py`: adds platform case-normalization coverage.

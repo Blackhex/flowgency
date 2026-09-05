@@ -43,7 +43,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         capture_output=True, text=True, cwd=tmp_path,
     )
     if probe.returncode != 0 or probe.stdout.strip() != "5":
-        pytest.skip("installed agency package has different schema_version")
+        pytest.skip("installed flowgency package has different schema_version")
     paths = create_team_environment(tmp_path, "test")
     team_path = paths.state_root
     agent_dir = team_path / "product"
@@ -74,7 +74,7 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
     config_path.write_text(yaml.safe_dump({
         "schema_version": 1,
         "flowgency": {
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "test",
             "ai_backend": "claude-code",
             "agent_library": str(agent_library),

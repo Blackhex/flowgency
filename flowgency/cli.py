@@ -1,4 +1,4 @@
-"""Command-line interface for Agency's canonical control plane."""
+"""Command-line interface for Flowgency's canonical control plane."""
 
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ def _team_id(args: Namespace, snapshot) -> str:
             "missing-team",
             "No team was selected and no default team is configured.",
             field="team",
-            hint="Pass --team or configure agency.default_team.",
+            hint="Pass --team or configure flowgency.default_team.",
         )
     if team_id not in snapshot.config.teams:
         raise _validation_failure(
@@ -1049,7 +1049,7 @@ def _add_team_json(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="christag-agency", description="Agency - AI Agent Management")
+    parser = argparse.ArgumentParser(prog="flowgency", description="Flowgency - AI Agent Management")
     parser.add_argument("--config", help="Path to canonical config.yaml")
     subparsers = parser.add_subparsers(dest="command")
 

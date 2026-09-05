@@ -52,7 +52,7 @@ def test_observation_lands_in_the_observations_directory(dirs):
     assert written[0].path.name == "2026-07-31-suite-is-red.md"
 
 
-def test_agency_stamps_agent_date_and_status(dirs):
+def test_flowgency_stamps_agent_date_and_status(dirs):
     written = ingest(dirs, candidate(meta={"agent": "someone-else", "date": "1999-01-01"}))
 
     meta, _ = parse_frontmatter(written[0].path.read_text(encoding="utf-8"))
@@ -69,7 +69,7 @@ def test_author_supplied_fields_other_than_the_stamped_ones_survive(dirs):
     assert meta["float"] is True
 
 
-def test_front_matter_agency_does_not_understand_is_dropped(dirs):
+def test_front_matter_flowgency_does_not_understand_is_dropped(dirs):
     written = ingest(
         dirs,
         candidate(meta={"category": "suite", "execution_status": "complete", "x": 1}),

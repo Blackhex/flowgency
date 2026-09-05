@@ -4,7 +4,7 @@
 
 **Goal:** Make proposal decisions validate questionnaire data and dispatch only explicitly writable, human-selected executor agents while supporting open-ended guidance and decision notes.
 
-**Architecture:** Add pure proposal-policy helpers in `agency/proposals.py` and a fail-closed capability lookup in `agency/config.py`. FastAPI routes and the CLI consume those helpers, while existing route code continues to own atomic decision writes and durable job submission. Jinja templates render validated controls and historical-safe answer displays without mutating source proposal files.
+**Architecture:** Add pure proposal-policy helpers in `flowgency/proposals.py` and a fail-closed capability lookup in `flowgency/config.py`. FastAPI routes and the CLI consume those helpers, while existing route code continues to own atomic decision writes and durable job submission. Jinja templates render validated controls and historical-safe answer displays without mutating source proposal files.
 
 **Tech Stack:** Python 3.11+, FastAPI, Starlette form data, Jinja2, PyYAML, pytest
 
@@ -26,8 +26,8 @@
 ### Task 1: Fail-Closed Agent Write Authority
 
 **Files:**
-- Modify: `agency/config.py`
-- Modify: `agency/app.py`
+- Modify: `flowgency/config.py`
+- Modify: `flowgency/app.py`
 - Modify: `tests/test_config_normalization.py`
 - Modify: `tests/test_proposal_questions.py`
 
@@ -41,7 +41,7 @@
 Add to `tests/test_config_normalization.py`:
 
 ```python
-from agency.config import agent_can_write
+from flowgency.config import agent_can_write
 
 
 @pytest.mark.parametrize(
@@ -82,7 +82,7 @@ Expected: collection fails because `agent_can_write` does not exist, or the opti
 
 - [ ] **Step 3: Implement the capability helper and filter**
 
-Add to `agency/config.py`:
+Add to `flowgency/config.py`:
 
 ```python
 def agent_can_write(agents: list[dict], agent_name: str) -> bool:
@@ -94,7 +94,7 @@ def agent_can_write(agents: list[dict], agent_name: str) -> bool:
     return False
 ```
 
-Import it in `agency/app.py`, then update `execution_agent_options()`:
+Import it in `flowgency/app.py`, then update `execution_agent_options()`:
 
 ```python
 def execution_agent_options(g: dict) -> list[str]:
@@ -124,7 +124,7 @@ Expected: PASS. Existing fixtures that submit decisions must explicitly mark the
 - [ ] **Step 5: Commit the authority boundary**
 
 ```powershell
-git add agency/config.py agency/app.py tests/test_config_normalization.py tests/test_proposal_questions.py tests/test_execute_decision.py
+git add flowgency/config.py flowgency/app.py tests/test_config_normalization.py tests/test_proposal_questions.py tests/test_execute_decision.py
 git commit -m "feat(config): require explicit agent write capability"
 ```
 
@@ -133,7 +133,7 @@ git commit -m "feat(config): require explicit agent write capability"
 ### Task 2: Pure Proposal Schema and Answer Policy
 
 **Files:**
-- Create: `agency/proposals.py`
+- Create: `flowgency/proposals.py`
 - Create: `tests/test_proposal_validation.py`
 
 **Interfaces:**
@@ -150,7 +150,7 @@ Create `tests/test_proposal_validation.py` with table-driven tests:
 ```python
 import pytest
 
-from agency.proposals import (
+from flowgency.proposals import (
     question_option_labels,
     should_execute_decision,
     validate_answers,
@@ -204,11 +204,11 @@ Run:
 python -m pytest tests/test_proposal_validation.py -k "schema or option_labels" -v
 ```
 
-Expected: FAIL because `agency.proposals` does not exist.
+Expected: FAIL because `flowgency.proposals` does not exist.
 
 - [ ] **Step 3: Implement schema validation**
 
-Create `agency/proposals.py` with constants and the complete schema rules:
+Create `flowgency/proposals.py` with constants and the complete schema rules:
 
 ```python
 SUPPORTED_QUESTION_TYPES = {"boolean", "choice", "free-response", "text"}
@@ -313,7 +313,7 @@ def test_should_execute_decision(questions, answers, note, expected):
 
 - [ ] **Step 5: Implement answer and execution-intent validation**
 
-Add to `agency/proposals.py`:
+Add to `flowgency/proposals.py`:
 
 ```python
 def _is_required(question: dict) -> bool:
@@ -375,7 +375,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit the pure policy module**
 
 ```powershell
-git add agency/proposals.py tests/test_proposal_validation.py
+git add flowgency/proposals.py tests/test_proposal_validation.py
 git commit -m "feat(proposals): validate questionnaire schema and answers"
 ```
 
@@ -384,14 +384,14 @@ git commit -m "feat(proposals): validate questionnaire schema and answers"
 ### Task 3: Validated Web Decision Submission and Immutable Notes
 
 **Files:**
-- Modify: `agency/app.py`
-- Modify: `agency/jobs/prompts.py`
+- Modify: `flowgency/app.py`
+- Modify: `flowgency/jobs/prompts.py`
 - Modify: `tests/test_proposal_questions.py`
 - Modify: `tests/test_execute_decision.py`
 - Create: `tests/test_decision_prompts.py`
 
 **Interfaces:**
-- Consumes: all functions from `agency.proposals`
+- Consumes: all functions from `flowgency.proposals`
 - Changes: `build_decision_prompt(proposal_body: str, answers: dict, decision_note: str = "") -> str`
 - Adds render context: `proposal_errors: list[str]`, `submitted_answers: dict`, `decision_note: str`
 - Persists: `decision_note`, `execution_status: skipped`, and skipped `execution_summary`
@@ -401,7 +401,7 @@ git commit -m "feat(proposals): validate questionnaire schema and answers"
 Create `tests/test_decision_prompts.py`:
 
 ```python
-from agency.jobs.prompts import build_decision_prompt
+from flowgency.jobs.prompts import build_decision_prompt
 
 
 def test_decision_prompt_includes_note_and_decline_semantics():
@@ -441,7 +441,7 @@ def test_invalid_answers_preserve_submitted_values_without_side_effects(tmp_path
 def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     submitted = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: submitted.append(spec))
+    monkeypatch.setattr("flowgency.app.submit_job", lambda spec: submitted.append(spec))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "declined", "execution_agent": "engineer"},
@@ -458,7 +458,7 @@ def test_all_declined_without_guidance_creates_skipped_decision_without_job(tmp_
 def test_declined_with_note_submits_job_and_persists_note(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     captured = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec))
+    monkeypatch.setattr("flowgency.app.submit_job", lambda spec: captured.append(spec))
     response = client.post(
         "/test/proposals/change/decide",
         data={"answer_approve": "declined", "decision_note": "Implement the alternate path", "execution_agent": "engineer"},
@@ -495,7 +495,7 @@ return (
     f"{note_section}\n\n"
     "Execute approved items. Do not implement declined items. Use choice and "
     "open-ended answers plus the decision note as binding implementation guidance. "
-    "Do not modify the Agency decision file."
+    "Do not modify the Flowgency decision file."
 )
 ```
 
@@ -550,7 +550,7 @@ Expected: PASS, including launch rollback and atomic replacement tests.
 - [ ] **Step 6: Commit validated submission behavior**
 
 ```powershell
-git add agency/app.py agency/jobs/prompts.py tests/test_decision_prompts.py tests/test_proposal_questions.py tests/test_execute_decision.py
+git add flowgency/app.py flowgency/jobs/prompts.py tests/test_decision_prompts.py tests/test_proposal_questions.py tests/test_execute_decision.py
 git commit -m "feat(decisions): validate questionnaires before submission"
 ```
 
@@ -559,9 +559,9 @@ git commit -m "feat(decisions): validate questionnaires before submission"
 ### Task 4: Questionnaire UI and Historical-Safe Decision Display
 
 **Files:**
-- Modify: `agency/templates/proposal_detail.html`
-- Modify: `agency/templates/decision_detail.html`
-- Modify: `agency/app.py`
+- Modify: `flowgency/templates/proposal_detail.html`
+- Modify: `flowgency/templates/decision_detail.html`
+- Modify: `flowgency/app.py`
 - Modify: `tests/test_proposal_questions.py`
 - Modify: `tests/test_dashboard.py`
 
@@ -654,7 +654,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit the questionnaire UI**
 
 ```powershell
-git add agency/templates/proposal_detail.html agency/templates/decision_detail.html agency/app.py tests/test_proposal_questions.py tests/test_dashboard.py
+git add flowgency/templates/proposal_detail.html flowgency/templates/decision_detail.html flowgency/app.py tests/test_proposal_questions.py tests/test_dashboard.py
 git commit -m "feat(ui): render validated proposal questionnaires"
 ```
 
@@ -663,8 +663,8 @@ git commit -m "feat(ui): render validated proposal questionnaires"
 ### Task 5: Retry and CLI Policy Parity
 
 **Files:**
-- Modify: `agency/app.py`
-- Modify: `agency/cli.py`
+- Modify: `flowgency/app.py`
+- Modify: `flowgency/cli.py`
 - Modify: `tests/test_execute_decision.py`
 - Modify: `tests/test_cli.py`
 
@@ -690,7 +690,7 @@ def test_retry_prompt_keeps_decision_note(tmp_path, monkeypatch):
     client, _, decision_path = _setup_decision_group(tmp_path, monkeypatch)
     decision_path.write_text("---\nproposal: change.md\nanswers:\n  approve: approved\ndecision_note: Keep rollback\nexecution_status: failed\nexecution_agent: engineer\n---\n")
     captured = []
-    monkeypatch.setattr("agency.app.submit_job", lambda spec: captured.append(spec))
+    monkeypatch.setattr("flowgency.app.submit_job", lambda spec: captured.append(spec))
     response = client.post("/test/decisions/change/retry", data={"execution_agent": "engineer"}, follow_redirects=False)
     assert response.status_code == 303
     assert "Keep rollback" in captured[0].prompt_content
@@ -710,7 +710,7 @@ Expected: PASS.
 
 - [ ] **Step 3: Write CLI policy tests**
 
-Import `JobSubmissionError` from `agency.jobs`, then add this fixture and tests to `tests/test_cli.py`:
+Import `JobSubmissionError` from `flowgency.jobs`, then add this fixture and tests to `tests/test_cli.py`:
 
 ```python
 def setup_cli_proposal(tmp_path, monkeypatch, *, execution_agent="builder", questions=None):
@@ -838,7 +838,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit cross-entry-point parity**
 
 ```powershell
-git add agency/app.py agency/cli.py tests/test_execute_decision.py tests/test_cli.py
+git add flowgency/app.py flowgency/cli.py tests/test_execute_decision.py tests/test_cli.py
 git commit -m "fix(decisions): enforce executor policy across entry points"
 ```
 
@@ -854,8 +854,8 @@ git commit -m "fix(decisions): enforce executor policy across entry points"
 - Modify: `CLAUDE.md`
 - Modify: `examples/code-review-team/README.md`
 - Modify: `examples/content-team/README.md`
-- Modify: `skills/agency-setup/SKILL.md`
-- Modify: `tests/test_agency_setup_skill.py`
+- Modify: `skills/flowgency-setup/SKILL.md`
+- Modify: `tests/test_flowgency_setup_skill.py`
 
 **Interfaces:**
 - Documents and generates the exact `capabilities.write` and proposal schema consumed by Tasks 1-5.
@@ -863,12 +863,12 @@ git commit -m "fix(decisions): enforce executor policy across entry points"
 
 - [ ] **Step 1: Write failing setup-skill assertions**
 
-Add this contract test to `tests/test_agency_setup_skill.py`:
+Add this contract test to `tests/test_flowgency_setup_skill.py`:
 
 ```python
 def test_registration_writes_explicit_fail_closed_agent_capabilities():
         skill = SKILL_PATH.read_text(encoding="utf-8")
-        registration = skill.split("### 4.7 Agency Registration", maxsplit=1)[1].split(
+        registration = skill.split("### 4.7 Flowgency Registration", maxsplit=1)[1].split(
                 "### 4.8 Singleton Scheduler Setup", maxsplit=1
         )[0]
         normalized = " ".join(registration.split())
@@ -886,7 +886,7 @@ The corresponding skill change must instruct setup to grant `true` only to newly
 Run:
 
 ```powershell
-python -m pytest tests/test_agency_setup_skill.py tests/test_config_normalization.py -v
+python -m pytest tests/test_flowgency_setup_skill.py tests/test_config_normalization.py -v
 ```
 
 Expected: FAIL until generated examples and docs declare capabilities.
@@ -908,7 +908,7 @@ agents:
     write: false
 ```
 
-Change `config.yaml.example`, team examples, and agency setup output to explicit full-form agents with `capabilities.write`. Preserve existing integration, path, and integration-config fields when converting any dict or shorthand example.
+Change `config.yaml.example`, team examples, and flowgency setup output to explicit full-form agents with `capabilities.write`. Preserve existing integration, path, and integration-config fields when converting any dict or shorthand example.
 
 - [ ] **Step 4: Update user and maintainer documentation**
 
@@ -936,7 +936,7 @@ In `kb/data-formats.md`, update the proposal and decision examples and tables:
 Run:
 
 ```powershell
-python -m pytest tests/test_proposal_validation.py tests/test_proposal_questions.py tests/test_execute_decision.py tests/test_decision_prompts.py tests/test_cli.py tests/test_config_normalization.py tests/test_agency_setup_skill.py -v
+python -m pytest tests/test_proposal_validation.py tests/test_proposal_questions.py tests/test_execute_decision.py tests/test_decision_prompts.py tests/test_cli.py tests/test_config_normalization.py tests/test_flowgency_setup_skill.py -v
 python -m pytest tests/ -q
 ```
 
@@ -957,7 +957,7 @@ Expected: `yaml ok`, no whitespace errors, and only files named by this plan are
 - [ ] **Step 7: Commit migration and documentation**
 
 ```powershell
-git add config.yaml config.yaml.example kb/configuration.md kb/data-formats.md CLAUDE.md examples/code-review-team/README.md examples/content-team/README.md skills/agency-setup/SKILL.md tests/test_agency_setup_skill.py
+git add config.yaml config.yaml.example kb/configuration.md kb/data-formats.md CLAUDE.md examples/code-review-team/README.md examples/content-team/README.md skills/flowgency-setup/SKILL.md tests/test_flowgency_setup_skill.py
 git commit -m "docs: define proposal executor capabilities"
 ```
 

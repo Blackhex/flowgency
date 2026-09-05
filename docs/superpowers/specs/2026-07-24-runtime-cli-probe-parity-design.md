@@ -5,7 +5,7 @@
 
 ## Problem
 
-Agency has eight built-in executable AI CLI integrations, but its live runtime
+Flowgency has eight built-in executable AI CLI integrations, but its live runtime
 coverage is a single opt-in Copilot test. The test keeps a hand-written
 Copilot-only tuple and selects cases by selected-skill capability, which
 conflates two separate questions:
@@ -139,7 +139,7 @@ cases.
 
 ## Automatic Execution
 
-The `AGENCY_REAL_RUNTIME_PROBES` opt-in gate is removed. Installed CLI probes run
+The `FLOWGENCY_REAL_RUNTIME_PROBES` opt-in gate is removed. Installed CLI probes run
 as part of a normal `pytest` invocation.
 
 The `real_runtime` marker remains useful for selection:
@@ -235,7 +235,7 @@ tools: [read, search]
 This is the exact configured runtime policy, not a claim that the CLI cannot
 read its immutable launch bundle. The launch directory is the CLI working
 directory containing the projected instructions and is not added as a
-configured sandbox root. Agency reads the task file before subprocess launch
+configured sandbox root. Flowgency reads the task file before subprocess launch
 and passes its text through the adapter's native prompt mechanism; the CLI does
 not receive the task-file path. Both inputs are snapshotted and must remain
 unchanged.

@@ -774,7 +774,7 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
         arguments=("--mode=review", "literal value"),
     )
     assert spec.task_input.startswith(expected_base)
-    assert "## Agency reporting protocol" in spec.task_input
+    assert "## Flowgency reporting protocol" in spec.task_input
 
 
 def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
@@ -809,7 +809,7 @@ def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
         arguments=("--mode=review", "literal value"),
     )
     assert record.spec.task_input.startswith(expected_base)
-    assert "## Agency reporting protocol" in record.spec.task_input
+    assert "## Flowgency reporting protocol" in record.spec.task_input
 
 
 def test_decision_jobs_keep_empty_skill_arguments(tmp_path):
@@ -948,7 +948,7 @@ def test_systemd_launcher_argv_and_shell_false(tmp_path):
     assert argv[0] == "systemd-run"
     assert "--user" in argv
     assert "--collect" in argv
-    assert "--unit=agency-job-abc-123" in argv
+    assert "--unit=flowgency-job-abc-123" in argv
     assert "--" in argv
     # worker command after --
     sep_idx = argv.index("--")
@@ -1127,7 +1127,7 @@ def test_decision_task_input_carries_the_reporting_protocol(tmp_path):
     spec = _resolve(tmp_path, trigger="decision", task_input="Decide what changed.")
 
     assert spec.task_input.startswith("Decide what changed.")
-    assert "## Agency reporting protocol" in spec.task_input
+    assert "## Flowgency reporting protocol" in spec.task_input
     assert ".flowgency/outbox/observations" in spec.task_input
 
 
@@ -1205,7 +1205,7 @@ def _pool_config(tmp_path, *, pool=1):
     raw = {
         "schema_version": 1,
         "flowgency": {
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "newsletter",
             "ai_backend": "claude-code",
             "agent_library": str(tmp_path / "agent-library"),

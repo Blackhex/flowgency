@@ -29,7 +29,7 @@ a daily routine is late one hour after its routine fails to fire, not forty-eigh
 - Checking whether the OS-native dispatch timer is installed. A missing timer
   would turn every scheduled agent red, and `get_timer_status` shells out to
   `schtasks`/`systemctl`/`launchctl`, which is too expensive for a page render.
-- Reworking `agency/dispatch/run.py` scheduling. The runner keeps its current
+- Reworking `flowgency/dispatch/run.py` scheduling. The runner keeps its current
   behavior; this change only reads the trail it leaves behind.
 - Changing the running indicator. A queued or running job keeps its existing
   pulsing emerald dot and its job badge.
@@ -81,7 +81,7 @@ Both names pass agent and routine identifiers through `_marker_safe`, which
 replaces every run of characters outside `[A-Za-z0-9._-]` with a hyphen and strips
 leading and trailing dots and hyphens, falling back to `item`.
 
-The grace window is `agency.dispatch.interval + 2` minutes, defaulting to 17. This
+The grace window is `flowgency.dispatch.interval + 2` minutes, defaulting to 17. This
 mirrors the runner's own firing window in `check_at_rule`, so red means the runner
 genuinely failed to deliver rather than that it has not woken up yet.
 
@@ -109,16 +109,16 @@ any routine is overdue, else `due` if any routine is due, else no signal.
 
 ## Structure
 
-**`agency/dispatch/schedule.py`** (new). Owns everything the runner and the
+**`flowgency/dispatch/schedule.py`** (new). Owns everything the runner and the
 dashboard must agree on about schedules: `marker_safe`, the `.event-` path, the
 `.last-` path, and `parse_every`, which turns an `every` interval into a
-`timedelta` or `None`. `agency/dispatch/run.py` imports from it in place of its
+`timedelta` or `None`. `flowgency/dispatch/run.py` imports from it in place of its
 private `_marker_safe` and its inline interval parse. Marker filenames and
 interval semantics are the two places where a silent drift between the runner and
 the dashboard would make every scheduled agent look red, so both sides must
 derive them from the same code.
 
-**`agency/health.py`** (new). Owns the health model. Public surface:
+**`flowgency/health.py`** (new). Owns the health model. Public surface:
 
 - `schedule_state(routines, *, logs_root, agent_name, now, grace) -> str | None`
   returning `"overdue"`, `"due"`, or `None`.
@@ -128,19 +128,19 @@ derive them from the same code.
 Inputs are plain values, so the module is testable without FastAPI, a TestClient,
 or a config snapshot.
 
-**`agency/jobs/store.py`.** Add `latest_executed_job(job_paths, agent_name)` as
+**`flowgency/jobs/store.py`.** Add `latest_executed_job(job_paths, agent_name)` as
 the function `_agent_health` consumes, returning the newest `complete` or `failed`
 record, or `None`. `latest_terminal_job` is retained as public API but is not the
 health input. Both reuse the existing tolerant read loop, skipping unreadable
 records.
 
-**`agency/app.py`.** `agent_health_status` is replaced by calls into
-`agency/health.py` from both fleet builders, `collect_agents_with_identity` and
+**`flowgency/app.py`.** `agent_health_status` is replaced by calls into
+`flowgency/health.py` from both fleet builders, `collect_agents_with_identity` and
 `build_dashboard_fleet`. Both already resolve the group's logs root and job paths;
-they additionally need the agent's routines and the agency-level
+they additionally need the agent's routines and the flowgency-level
 `dispatch.interval`. The interval is added to the group runtime dictionary by
 `runtime_group`, alongside `logs` and `job_paths`, so that neither builder has to
-reach back into agency settings.
+reach back into flowgency settings.
 
 `compute_next_run_detail` currently reads `dispatch_cfg["routines"]`. Schema 4
 places routines on agent instances and `runtime_group` dumps only
@@ -167,8 +167,8 @@ so that color is not the only carrier of meaning.
 
 ## Testing
 
-Unit tests against `agency/health.py`, driving the clock through
-`AGENCY_FIXED_NOW`:
+Unit tests against `flowgency/health.py`, driving the clock through
+`FLOWGENCY_FIXED_NOW`:
 
 - never run, no routines, no failure — gray
 - never run, `at` routine whose time has not arrived — gray
@@ -184,7 +184,7 @@ Unit tests against `agency/health.py`, driving the clock through
 - a routine with a `condition` suppresses overdue
 - malformed `at` and malformed `every` produce no signal
 
-Marker-name tests assert that `agency/dispatch/schedule.py` produces exactly the
+Marker-name tests assert that `flowgency/dispatch/schedule.py` produces exactly the
 names `run.py` wrote before the extraction, and that `parse_every` accepts each
 unit and rejects malformed intervals.
 

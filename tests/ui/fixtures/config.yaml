@@ -1,6 +1,6 @@
 schema_version: 1
 flowgency:
-  title: Agency UI Gate
+  title: Flowgency UI Gate
   default_team: newsletter
   ai_backend: copilot
   agent_library: __RUNTIME__/agent-library

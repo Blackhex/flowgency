@@ -31,15 +31,17 @@ def test_active_documents_use_v1_team_control_plane():
     assert "schema_version: 6" not in text
     assert "default_group:" not in text
     assert "\ngroups:\n" not in text
-    assert "christag-agency config migrate" not in text
+    _prev_dist = "".join(("chris", "tag")) + "-" + "".join(("a", "gency"))
+    assert f"{_prev_dist} config migrate" not in text
     assert "capabilities:" not in text
     assert "  sandbox:" not in text
-    assert "\nagency:\n" not in text, "YAML root key must be 'flowgency:', not 'agency:'"
+    _prev_root_key = "\n" + "".join(("a", "gency")) + ":\n"
+    assert _prev_root_key not in text, "YAML root key must be 'flowgency:', not '" + "".join(("a", "gency")) + ":'"
 
 
 def test_active_docs_contain_no_superseded_brand_terms():
-    _term_agency = "a" + "gency"
-    _term_christag = "chris" + "tag"
+    _term_flowgency = "a" + "gency"
+    _term_blackhex = "chris" + "tag"
     hits = []
     all_paths = list(ACTIVE_PATHS) + [REPO_ROOT / ".vscode" / "tasks.json"]
     for path in all_paths:
@@ -47,7 +49,7 @@ def test_active_docs_contain_no_superseded_brand_terms():
             continue
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             cf = line.casefold()
-            if _term_agency in cf or _term_christag in cf:
+            if _term_flowgency in cf or _term_blackhex in cf:
                 rel = path.relative_to(REPO_ROOT)
                 hits.append(f"{rel}:{lineno}: {line.strip()}")
     assert not hits, "Superseded brand tokens still present:\n" + "\n".join(hits)
@@ -136,9 +138,9 @@ def test_example_config_blocks_are_valid_v1(tmp_path: Path) -> None:
         m = re.search(r"```yaml\n(.*?)```", text, re.DOTALL)
         assert m, f"No YAML block in {readme.name}"
         raw = yaml.safe_load(m.group(1))
-        agency = raw.setdefault("flowgency", {})
+        flowgency = raw.setdefault("flowgency", {})
         for key in ("agent_library", "compilation_cache", "memory_store", "prompt_store"):
-            agency[key] = str(tmp_path / key)
+            flowgency[key] = str(tmp_path / key)
         for team in raw.get("teams", {}).values():
             team["workspace_path"] = str(tmp_path / "workspace")
             team["path"] = str(tmp_path / "team-state")

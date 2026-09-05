@@ -29,7 +29,7 @@ def _write_config(tmp_path: Path, agents: list[dict]) -> Path:
     raw = {
         "schema_version": 1,
         "flowgency": {
-            "title": "Agency",
+            "title": "Flowgency",
             "default_team": "reviewers",
             "ai_backend": "copilot",
             "agent_library": str(tmp_path / "agent-library"),

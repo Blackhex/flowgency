@@ -1,6 +1,6 @@
 """Tests for the Verify stage — the governance-only outcome state on decisions.
 
-Agency observes and governs the result of a dispatched decision without executing
+Flowgency observes and governs the result of a dispatched decision without executing
 it. Verification records whether an executed outcome satisfied its originating
 proposal and, when it did not, floats a linked follow-up observation so the
 execute -> verify loop stays connected.
@@ -49,7 +49,7 @@ def _setup_team(tmp_path, monkeypatch, *, decision_meta):
                 "schema_version": 1,
 
                 "flowgency": {
-                    "title": "Agency",
+                    "title": "Flowgency",
                     "default_team": "test",
                     "ai_backend": "claude-code",
                     "decided_by": "captain",

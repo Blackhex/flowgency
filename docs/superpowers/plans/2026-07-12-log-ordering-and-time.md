@@ -22,14 +22,14 @@
 
 ## File Structure
 
-- Modify `agency/app.py`: add timestamp metadata and deterministic within-day ordering in `collect_logs()`.
-- Modify `agency/templates/logs.html`: display the supplied time before the OUT/ERR badge.
+- Modify `flowgency/app.py`: add timestamp metadata and deterministic within-day ordering in `collect_logs()`.
+- Modify `flowgency/templates/logs.html`: display the supplied time before the OUT/ERR badge.
 - Modify `tests/test_logs.py`: cover timestamp metadata, ordering, tie-breaking, rendered output, and the existing empty-ERR behavior.
 
 ### Task 1: Add Timestamp Metadata and Ordering
 
 **Files:**
-- Modify: `agency/app.py:713-737`
+- Modify: `flowgency/app.py:713-737`
 - Test: `tests/test_logs.py`
 
 **Interfaces:**
@@ -44,7 +44,7 @@ Update `tests/test_logs.py` imports and add a test that controls file mtimes:
 import os
 from datetime import datetime
 
-from agency.app import build_agent_timeline, collect_logs, get_agent_logs
+from flowgency.app import build_agent_timeline, collect_logs, get_agent_logs
 
 
 def test_collect_logs_orders_by_mtime_and_prefers_out_for_ties(tmp_path):
@@ -86,7 +86,7 @@ Expected: FAIL because entries are still sorted by filename and do not contain `
 
 - [ ] **Step 3: Enrich and sort entries in `collect_logs()`**
 
-Replace the inner collection logic in `agency/app.py` with:
+Replace the inner collection logic in `flowgency/app.py` with:
 
 ```python
         entries = []
@@ -127,14 +127,14 @@ Expected: all tests in `tests\test_logs.py` PASS, including the pre-existing emp
 - [ ] **Step 5: Commit timestamp collection and ordering**
 
 ```powershell
-git add agency\app.py tests\test_logs.py
+git add flowgency\app.py tests\test_logs.py
 git commit -m "fix(logs): sort daily entries by modification time" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```
 
 ### Task 2: Render the Time in the Execution Log List
 
 **Files:**
-- Modify: `agency/templates/logs.html:15-28`
+- Modify: `flowgency/templates/logs.html:15-28`
 - Test: `tests/test_logs.py`
 
 **Interfaces:**
@@ -149,7 +149,7 @@ Append this test to `tests/test_logs.py`:
 def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    import agency.app as app_mod
+    import flowgency.app as app_mod
 
     group_path = tmp_path / "group"
     shared = group_path / "shared"
@@ -166,7 +166,7 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
     monkeypatch.setattr(
         app_mod,
         "CONFIG",
-        {"agency": {}, "groups": {"test": {"name": "Test Group", "path": str(group_path)}}},
+        {"flowgency": {}, "groups": {"test": {"name": "Test Group", "path": str(group_path)}}},
     )
     monkeypatch.setattr(
         app_mod,
@@ -201,7 +201,7 @@ Expected: FAIL because `logs.html` does not render the entry timestamp.
 
 - [ ] **Step 3: Render the time before the log-type badge**
 
-In `agency/templates/logs.html`, update the row's left-side content:
+In `flowgency/templates/logs.html`, update the row's left-side content:
 
 ```html
         <div class="flex items-center gap-3 min-w-0">
@@ -246,11 +246,11 @@ git diff --check
 git status --short
 ```
 
-Expected: no whitespace errors; only `agency/templates/logs.html` and `tests/test_logs.py` are changed since the Task 1 commit.
+Expected: no whitespace errors; only `flowgency/templates/logs.html` and `tests/test_logs.py` are changed since the Task 1 commit.
 
 - [ ] **Step 7: Commit the rendered timestamp**
 
 ```powershell
-git add agency\templates\logs.html tests\test_logs.py
+git add flowgency\templates\logs.html tests\test_logs.py
 git commit -m "feat(logs): show execution time in daily lists" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```

@@ -97,7 +97,7 @@ def _library_infra_root(services: FlowgencyServices) -> Path:
     library_root = _require_library(services).root.resolve()
     infra_root = _ensure_child_directory(
         library_root.parent,
-        ".agency-agent-library",
+        ".flowgency-agent-library",
         label="Agent Library infrastructure root",
     )
     return _ensure_child_directory(

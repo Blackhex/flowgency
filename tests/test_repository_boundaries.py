@@ -64,7 +64,7 @@ def test_application_does_not_construct_project_local_shared_paths(repo_root: Pa
         re.compile(r'/\s*["\']shared["\']'),
     )
     matches = []
-    for path in (repo_root / "agency").rglob("*.py"):
+    for path in (repo_root / "flowgency").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         for line_number, line in enumerate(text.splitlines(), start=1):
             if any(pattern.search(line) for pattern in patterns):

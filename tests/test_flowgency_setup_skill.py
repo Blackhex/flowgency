@@ -210,7 +210,8 @@ def test_setup_docs_present_one_data_root_default():
     # Important 1: guided/manual modes must be described; stale inspection-first ordering must be absent
     assert "After read-only project inspection, the first question asks" not in guide
     # Important 2: stale Run list that puts inspection before root/workspace must be absent
-    assert "Asks for the Agency data root as the first question" not in guide
+    _stale_phrase = "Asks for the " + "".join(("A", "gency")) + " data root as the first question"
+    assert _stale_phrase not in guide
 
 
 def test_setup_keeps_path_overrides_behind_one_grouped_review():
@@ -282,7 +283,8 @@ def test_setup_accepts_only_canonical_configs_without_conversion_or_secondary_sk
         "never scan or convert superseded authority",
     ):
         assert phrase in combined
-    assert "agency-migration" not in combined
+    _migration_skill = "".join(("a", "gency")) + "-migration"
+    assert _migration_skill not in combined
     assert "tools/migrate_agent_model.py" not in combined
     assert "schema_version: 1" in skill
 

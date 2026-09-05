@@ -5,7 +5,7 @@
 
 ## Problem
 
-Agency currently allows a proposal decision to dispatch the wrong agent and to
+Flowgency currently allows a proposal decision to dispatch the wrong agent and to
 record incomplete answers:
 
 - A proposal without `execution_agent` falls back to `origin_agent`, even when
@@ -23,7 +23,7 @@ record incomplete answers:
 
 The immediate incident dispatched a decision to Sentinel because the proposal
 declared `origin_agent: sentinel` and omitted `execution_agent`. The proposal
-body said Builder should implement it and Sentinel was read-only, but Agency
+body said Builder should implement it and Sentinel was read-only, but Flowgency
 does not infer routing or permissions from prose.
 
 ## Goals
@@ -89,7 +89,7 @@ hold:
 
 The current project configuration and shipped examples will be updated for
 known roles. In the current Agents group, only Builder is writable; Advisor and
-Sentinel are read-only. Agency will not infer or persist capabilities for other
+Sentinel are read-only. Flowgency will not infer or persist capabilities for other
 user configurations.
 
 This capability controls decision implementation eligibility. It does not stop
@@ -179,7 +179,7 @@ alter answer validation.
 
 ## Execution Decision
 
-After validation, Agency determines whether the decision contains work to
+After validation, Flowgency determines whether the decision contains work to
 execute.
 
 | Questionnaire result | Execute? |
@@ -195,7 +195,7 @@ For this rule, substantive input means a non-empty choice selection, a
 non-whitespace open-ended answer, or a non-whitespace decision note. Optional
 empty answers do not count.
 
-When execution is skipped, Agency still creates the decision and marks the
+When execution is skipped, Flowgency still creates the decision and marks the
 proposal decided. The decision uses `execution_status: skipped`, has no job ID,
 and records an explanatory execution summary. No executor process is launched.
 

@@ -263,7 +263,7 @@ def test_library_source_write_keeps_infra_outside_source_root(
 
     assert response.status_code == 303
     assert not any(child.name == "_locks" for child in library_root.iterdir())
-    assert not any(child.name.startswith(".agency-agent-library") for child in library_root.iterdir())
+    assert not any(child.name.startswith(".flowgency-agent-library") for child in library_root.iterdir())
     assert (blueprint_root / "AGENTS.md").read_text(encoding="utf-8") == "# Advisor\n\nUpdated.\n"
     assert compute_source_digest(
         app_mod.build_services(tmp_path / "config.yaml")
@@ -289,7 +289,7 @@ def test_library_source_write_supports_long_windows_path(
 
     full_hash_stage_directory = (
         long_tmp_path
-        / ".agency-agent-library"
+        / ".flowgency-agent-library"
         / ("a" * 64)
         / "staging"
         / f".{('b' * 64)}.stage-12345678"
@@ -299,7 +299,7 @@ def test_library_source_write_supports_long_windows_path(
     )
     compact_stage_file = (
         long_tmp_path
-        / ".agency-agent-library"
+        / ".flowgency-agent-library"
         / ("a" * 24)
         / "staging"
         / f".{('b' * 24)}.stage-12345678"
@@ -338,7 +338,7 @@ def test_library_source_write_supports_long_windows_path(
             encoding="utf-8"
         ) == "# Advisor\n\nLong path update.\n"
         infrastructure_roots = list(
-            (long_tmp_path / ".agency-agent-library").iterdir()
+            (long_tmp_path / ".flowgency-agent-library").iterdir()
         )
         assert len(infrastructure_roots) == 1
         assert not any((infrastructure_roots[0] / "staging").iterdir())

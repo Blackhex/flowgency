@@ -21,11 +21,11 @@
 
 ## File Structure
 
-- `agency/dispatch/run.py` — add running-marker write/remove around the run in `_run_agent()`.
-- `agency/app.py` — add `is_agent_running()`, `compute_next_run()`, `relative_future` filter; enrich `collect_agents_with_identity()`; add `running`/`next_run` to the `agent_profile` route; add `fleet_running` count to the `home` route.
-- `agency/templates/agents.html` — combined status widget on main cards and subagent cards.
-- `agency/templates/home.html` — pulsing dot for running agents + `· N running` in the footer.
-- `agency/templates/agent_profile.html` — running badge / next-run line near the schedule pills.
+- `flowgency/dispatch/run.py` — add running-marker write/remove around the run in `_run_agent()`.
+- `flowgency/app.py` — add `is_agent_running()`, `compute_next_run()`, `relative_future` filter; enrich `collect_agents_with_identity()`; add `running`/`next_run` to the `agent_profile` route; add `fleet_running` count to the `home` route.
+- `flowgency/templates/agents.html` — combined status widget on main cards and subagent cards.
+- `flowgency/templates/home.html` — pulsing dot for running agents + `· N running` in the footer.
+- `flowgency/templates/agent_profile.html` — running badge / next-run line near the schedule pills.
 - `tests/test_dispatch_run.py` — dispatcher marker lifecycle tests.
 - `tests/test_agent_status.py` (new) — `is_agent_running` and `compute_next_run` tests.
 
@@ -34,7 +34,7 @@
 ### Task 1: Running marker in the dispatcher
 
 **Files:**
-- Modify: `agency/dispatch/run.py` (function `_run_agent`, around the `result = integration.run(...)` call)
+- Modify: `flowgency/dispatch/run.py` (function `_run_agent`, around the `result = integration.run(...)` call)
 - Test: `tests/test_dispatch_run.py`
 
 **Interfaces:**
@@ -47,7 +47,7 @@ Add to `tests/test_dispatch_run.py`:
 
 ```python
 from unittest.mock import patch, MagicMock
-from agency.dispatch.run import _run_agent
+from flowgency.dispatch.run import _run_agent
 
 
 def _make_group(tmp_path):
@@ -72,7 +72,7 @@ def test_run_agent_removes_running_marker_on_success(tmp_path):
     fake_integration = MagicMock(supports_execution=True)
     fake_integration.run.return_value = fake_result
 
-    with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
+    with patch("flowgency.dispatch.run.get_integration", return_value=fake_integration):
         _run_agent(group_path, "product", "routine.md", 1800, log_dir,
                    {"integration": "claude-code"}, agent_dir=agent_dir)
 
@@ -92,7 +92,7 @@ def test_run_agent_marker_present_during_run(tmp_path):
 
     fake_integration.run.side_effect = _run
 
-    with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
+    with patch("flowgency.dispatch.run.get_integration", return_value=fake_integration):
         _run_agent(group_path, "product", "routine.md", 1800, log_dir,
                    {"integration": "claude-code"}, agent_dir=agent_dir)
 
@@ -106,7 +106,7 @@ def test_run_agent_removes_marker_on_exception(tmp_path):
     fake_integration = MagicMock(supports_execution=True)
     fake_integration.run.side_effect = RuntimeError("boom")
 
-    with patch("agency.dispatch.run.get_integration", return_value=fake_integration):
+    with patch("flowgency.dispatch.run.get_integration", return_value=fake_integration):
         with pytest.raises(RuntimeError):
             _run_agent(group_path, "product", "routine.md", 1800, log_dir,
                        {"integration": "claude-code"}, agent_dir=agent_dir)
@@ -121,7 +121,7 @@ Expected: FAIL — marker is never created (`test_run_agent_marker_present_durin
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `agency/dispatch/run.py`, locate this block in `_run_agent`:
+In `flowgency/dispatch/run.py`, locate this block in `_run_agent`:
 
 ```python
     log.info("  RUNNING: %s with %s (timeout %ds, integration %s)",
@@ -171,7 +171,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/dispatch/run.py tests/test_dispatch_run.py
+git add flowgency/dispatch/run.py tests/test_dispatch_run.py
 git commit -m "feat(dispatch): write .running marker around agent runs"
 ```
 
@@ -180,7 +180,7 @@ git commit -m "feat(dispatch): write .running marker around agent runs"
 ### Task 2: `is_agent_running` helper
 
 **Files:**
-- Modify: `agency/app.py` (add helper near `get_agent_last_seen`, before `collect_agents_with_identity`)
+- Modify: `flowgency/app.py` (add helper near `get_agent_last_seen`, before `collect_agents_with_identity`)
 - Test: `tests/test_agent_status.py` (create)
 
 **Interfaces:**
@@ -199,7 +199,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.app import is_agent_running
+from flowgency.app import is_agent_running
 
 
 def _group(tmp_path):
@@ -235,7 +235,7 @@ Expected: FAIL with `ImportError: cannot import name 'is_agent_running'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `agency/app.py`, immediately after the `get_agent_last_seen` function (ends before `def relative_time`), add:
+In `flowgency/app.py`, immediately after the `get_agent_last_seen` function (ends before `def relative_time`), add:
 
 ```python
 def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
@@ -251,7 +251,7 @@ def is_agent_running(g: dict, agent_name: str, timeout: int = 1800) -> bool:
     return age < timeout
 ```
 
-Ensure `import time` is present at the top of `agency/app.py`. If it is not, add it with the other stdlib imports.
+Ensure `import time` is present at the top of `flowgency/app.py`. If it is not, add it with the other stdlib imports.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -261,7 +261,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py tests/test_agent_status.py
+git add flowgency/app.py tests/test_agent_status.py
 git commit -m "feat(agents): add is_agent_running helper"
 ```
 
@@ -270,7 +270,7 @@ git commit -m "feat(agents): add is_agent_running helper"
 ### Task 3: `compute_next_run` helper
 
 **Files:**
-- Modify: `agency/app.py` (add helper directly after `is_agent_running`)
+- Modify: `flowgency/app.py` (add helper directly after `is_agent_running`)
 - Test: `tests/test_agent_status.py`
 
 **Interfaces:**
@@ -282,7 +282,7 @@ git commit -m "feat(agents): add is_agent_running helper"
 Append to `tests/test_agent_status.py`:
 
 ```python
-from agency.app import compute_next_run
+from flowgency.app import compute_next_run
 
 
 def _group_with_logs(tmp_path):
@@ -372,7 +372,7 @@ Expected: FAIL with `ImportError: cannot import name 'compute_next_run'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `agency/app.py`, directly after `is_agent_running`, add:
+In `flowgency/app.py`, directly after `is_agent_running`, add:
 
 ```python
 def compute_next_run(g: dict, agent_name: str, dispatch_cfg: dict) -> datetime | None:
@@ -431,7 +431,7 @@ def compute_next_run(g: dict, agent_name: str, dispatch_cfg: dict) -> datetime |
     return min(candidates) if candidates else None
 ```
 
-Ensure `import re` and `from datetime import datetime, timedelta` are available at the top of `agency/app.py`. If `timedelta` is not already imported, add it to the existing `datetime` import.
+Ensure `import re` and `from datetime import datetime, timedelta` are available at the top of `flowgency/app.py`. If `timedelta` is not already imported, add it to the existing `datetime` import.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -441,7 +441,7 @@ Expected: PASS (all `is_agent_running` and `compute_next_run` tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py tests/test_agent_status.py
+git add flowgency/app.py tests/test_agent_status.py
 git commit -m "feat(agents): add compute_next_run helper"
 ```
 
@@ -450,7 +450,7 @@ git commit -m "feat(agents): add compute_next_run helper"
 ### Task 4: `relative_future` template filter
 
 **Files:**
-- Modify: `agency/app.py` (add filter + registration next to `relative_time`, around line 1011)
+- Modify: `flowgency/app.py` (add filter + registration next to `relative_time`, around line 1011)
 - Test: `tests/test_agent_status.py`
 
 **Interfaces:**
@@ -462,7 +462,7 @@ git commit -m "feat(agents): add compute_next_run helper"
 Append to `tests/test_agent_status.py`:
 
 ```python
-from agency.app import relative_future
+from flowgency.app import relative_future
 
 
 def test_relative_future_none():
@@ -493,7 +493,7 @@ Expected: FAIL with `ImportError: cannot import name 'relative_future'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `agency/app.py`, directly after the line `templates.env.filters["relative_time"] = relative_time`, add:
+In `flowgency/app.py`, directly after the line `templates.env.filters["relative_time"] = relative_time`, add:
 
 ```python
 def relative_future(dt: datetime | None) -> str:
@@ -526,7 +526,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py tests/test_agent_status.py
+git add flowgency/app.py tests/test_agent_status.py
 git commit -m "feat(agents): add relative_future template filter"
 ```
 
@@ -535,7 +535,7 @@ git commit -m "feat(agents): add relative_future template filter"
 ### Task 5: Enrich `collect_agents_with_identity` with running/next_run
 
 **Files:**
-- Modify: `agency/app.py` (function `collect_agents_with_identity`, both the main-agent loop and the `_subagents` loop)
+- Modify: `flowgency/app.py` (function `collect_agents_with_identity`, both the main-agent loop and the `_subagents` loop)
 - Test: `tests/test_agent_status.py`
 
 **Interfaces:**
@@ -548,7 +548,7 @@ This helper reads global `GROUPS` config, so the test drives it through the modu
 
 ```python
 from unittest.mock import patch
-from agency import app as app_module
+from flowgency import app as app_module
 
 
 def test_collect_agents_includes_running_and_next_run(tmp_path):
@@ -588,7 +588,7 @@ Expected: FAIL with `KeyError: 'running'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `agency/app.py`, at the top of `collect_agents_with_identity`, resolve the group's dispatch config once. Change the opening:
+In `flowgency/app.py`, at the top of `collect_agents_with_identity`, resolve the group's dispatch config once. Change the opening:
 
 ```python
 def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
@@ -681,7 +681,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py tests/test_agent_status.py
+git add flowgency/app.py tests/test_agent_status.py
 git commit -m "feat(agents): expose running/next_run in agent info"
 ```
 
@@ -690,7 +690,7 @@ git commit -m "feat(agents): expose running/next_run in agent info"
 ### Task 6: Combined status widget on the agents list
 
 **Files:**
-- Modify: `agency/templates/agents.html` (main-card status span and subagent-card status span)
+- Modify: `flowgency/templates/agents.html` (main-card status span and subagent-card status span)
 
 **Interfaces:**
 - Consumes: `a.running` (bool), `a.next_run` (datetime | None), plus existing `a.health`, `a.last_seen`, and the `relative_time` / `relative_future` filters.
@@ -698,7 +698,7 @@ git commit -m "feat(agents): expose running/next_run in agent info"
 
 - [ ] **Step 1: Update the main-card status span**
 
-In `agency/templates/agents.html`, find:
+In `flowgency/templates/agents.html`, find:
 
 ```html
     <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
@@ -760,13 +760,13 @@ and replace with:
 
 - [ ] **Step 3: Verify the templates still render**
 
-Run: `python -c "from agency.app import templates; templates.get_template('agents.html')"`
+Run: `python -c "from flowgency.app import templates; templates.get_template('agents.html')"`
 Expected: no output, exit code 0 (template compiles).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agency/templates/agents.html
+git add flowgency/templates/agents.html
 git commit -m "feat(agents): combined running/next-run status widget"
 ```
 
@@ -775,8 +775,8 @@ git commit -m "feat(agents): combined running/next-run status widget"
 ### Task 7: Fleet bar running indicator on the home dashboard
 
 **Files:**
-- Modify: `agency/app.py` (function `home`, the return context)
-- Modify: `agency/templates/home.html` (fleet bar dot + footer summary)
+- Modify: `flowgency/app.py` (function `home`, the return context)
+- Modify: `flowgency/templates/home.html` (fleet bar dot + footer summary)
 
 **Interfaces:**
 - Consumes: `agents` list from `collect_agents_with_identity` (now carrying `running`).
@@ -784,7 +784,7 @@ git commit -m "feat(agents): combined running/next-run status widget"
 
 - [ ] **Step 1: Add `fleet_running` to the home context**
 
-In `agency/app.py`, in the `home` route return dict, find:
+In `flowgency/app.py`, in the `home` route return dict, find:
 
 ```python
         # Zone 1: Fleet
@@ -803,7 +803,7 @@ and replace with:
 
 - [ ] **Step 2: Update the fleet dot in the template**
 
-In `agency/templates/home.html`, find:
+In `flowgency/templates/home.html`, find:
 
 ```html
       <span class="text-base">{{ a.emoji or '~' }}</span>
@@ -843,13 +843,13 @@ and replace with:
 
 - [ ] **Step 4: Verify the template renders**
 
-Run: `python -c "from agency.app import templates; templates.get_template('home.html')"`
+Run: `python -c "from flowgency.app import templates; templates.get_template('home.html')"`
 Expected: no output, exit code 0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py agency/templates/home.html
+git add flowgency/app.py flowgency/templates/home.html
 git commit -m "feat(home): show running agents in fleet bar"
 ```
 
@@ -858,8 +858,8 @@ git commit -m "feat(home): show running agents in fleet bar"
 ### Task 8: Running badge / next-run line on the agent profile
 
 **Files:**
-- Modify: `agency/app.py` (function `agent_profile`, the context dict)
-- Modify: `agency/templates/agent_profile.html` (near the schedule pills block)
+- Modify: `flowgency/app.py` (function `agent_profile`, the context dict)
+- Modify: `flowgency/templates/agent_profile.html` (near the schedule pills block)
 
 **Interfaces:**
 - Consumes: `is_agent_running`, `compute_next_run`, existing `dispatch_cfg` already computed in the route.
@@ -867,7 +867,7 @@ git commit -m "feat(home): show running agents in fleet bar"
 
 - [ ] **Step 1: Add running/next_run to the profile route**
 
-In `agency/app.py`, in `agent_profile`, find:
+In `flowgency/app.py`, in `agent_profile`, find:
 
 ```python
     # Get dispatch schedule for this agent
@@ -909,7 +909,7 @@ and replace with:
 
 - [ ] **Step 2: Render the state in the profile template**
 
-In `agency/templates/agent_profile.html`, find the schedule block:
+In `flowgency/templates/agent_profile.html`, find the schedule block:
 
 ```html
       {% if agent_schedule %}
@@ -933,13 +933,13 @@ Immediately **before** that line, insert a status row:
 
 - [ ] **Step 3: Verify the template renders**
 
-Run: `python -c "from agency.app import templates; templates.get_template('agent_profile.html')"`
+Run: `python -c "from flowgency.app import templates; templates.get_template('agent_profile.html')"`
 Expected: no output, exit code 0.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agency/app.py agency/templates/agent_profile.html
+git add flowgency/app.py flowgency/templates/agent_profile.html
 git commit -m "feat(profile): show running/next-run on agent profile"
 ```
 

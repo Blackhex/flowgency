@@ -49,7 +49,7 @@ def cli_config(tmp_path):
     raw = {
         "schema_version": 1,
         "flowgency": {
-            "title": "Contract Agency",
+            "title": "Contract Flowgency",
             "default_team": "newsletter",
             "agent_library": str((tmp_path / "agent-library").resolve()),
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),

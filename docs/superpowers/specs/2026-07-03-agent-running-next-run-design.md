@@ -14,7 +14,7 @@ them convey two things a user often wants at a glance:
 2. **When will it next be dispatched?**
 
 Today there is no signal for "currently running" anywhere in the system — the
-dispatcher (`agency/dispatch/run.py`) runs each agent synchronously and only
+dispatcher (`flowgency/dispatch/run.py`) runs each agent synchronously and only
 writes `.out`/`.err` log files after the run completes. And while the agent
 profile shows the raw schedule pills (`@ 09:00`, `every 6h`), it never computes
 the next occurrence.
@@ -52,7 +52,7 @@ already applies, so the displayed "next run" matches what will actually happen.
 
 ## Design
 
-### 1. Running marker (`agency/dispatch/run.py`)
+### 1. Running marker (`flowgency/dispatch/run.py`)
 
 In `_run_agent()`, immediately before calling `integration.run()`, write an
 empty marker file at `shared/logs/.running-<agent>` (its mtime records the run
@@ -62,7 +62,7 @@ run cannot leave a dangling marker mid-call.
 The dispatcher runs agents sequentially, so a single marker per agent name is
 sufficient — there is never more than one concurrent run for a given agent.
 
-### 2. Read helpers (`agency/app.py`)
+### 2. Read helpers (`flowgency/app.py`)
 
 **`is_agent_running(g, agent_name, timeout)` → bool**
 Returns `True` when `shared/logs/.running-<agent>` exists *and* its mtime is
@@ -83,7 +83,7 @@ Iterates the agent's dispatch rules and returns the soonest upcoming run:
   interval. If the marker does not exist, the rule is due now (return now).
 - Return the **minimum** datetime across all the agent's rules.
 
-### 3. Enrich `collect_agents_with_identity()` (`agency/app.py`)
+### 3. Enrich `collect_agents_with_identity()` (`flowgency/app.py`)
 
 Add two fields to every agent and subagent dict:
 
@@ -94,7 +94,7 @@ The group's dispatch config is read from `GROUPS[g["key"]]`. Because this helper
 feeds **both** the agents list and the home fleet bar, enriching it once covers
 two of the three surfaces.
 
-### 4. `relative_future` template filter (`agency/app.py`)
+### 4. `relative_future` template filter (`flowgency/app.py`)
 
 A forward-looking mirror of the existing `relative_time` filter, formatting an
 upcoming datetime:

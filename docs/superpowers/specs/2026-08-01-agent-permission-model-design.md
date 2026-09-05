@@ -5,7 +5,7 @@ Status: approved
 
 ## Problem
 
-Agency describes what an agent may do with three separate, overlapping
+Flowgency describes what an agent may do with three separate, overlapping
 settings, and none of them says what an operator actually wants to say.
 
 `runtime.sandbox` lists paths. `runtime.tools` lists tools. `capabilities.write`
@@ -18,7 +18,7 @@ The gaps this produces are concrete.
 
 ### Writability is all-or-nothing
 
-`_resolve_sandbox` in `agency/configuration/effective.py` ends with
+`_resolve_sandbox` in `flowgency/configuration/effective.py` ends with
 
 ```python
 return mode, roots, (roots if may_write else ()), not may_write
@@ -30,13 +30,13 @@ directory must be granted the whole workspace.
 ### The group root is writable by accident
 
 The phase-1 reporting-protocol specification states that group records stay
-read-only for every agent, because Agency holds the pen and validates records on
+read-only for every agent, because Flowgency holds the pen and validates records on
 ingest. The code does not do that: `sandbox_roots` includes `paths.group_root`,
 so any agent with `capabilities.write` true also gets write access to
 `observations/`, `proposals/` and `decisions/`. The decision prompt merely asks
 it not to. Nothing enforces the boundary the phase-1 design is built on.
 
-### Agency's own grants are invisible
+### Flowgency's own grants are invisible
 
 The phase-1 contract says the launch view is "implicitly writable for every
 agent" and never appears in configuration. That is an invisible clause: an
@@ -70,11 +70,11 @@ runtime:
     mode: restricted
     rules:
       - tools: [fetch]                                       # no path: pathless tool
-      - path: C:/Projekty/christag-agency
+      - path: C:/Projekty/flowgency
         tools: [read, search]
-      - path: C:/Projekty/christag-agency/tests
+      - path: C:/Projekty/flowgency/tests
         tools: [read, search, write]
-      - path: C:/Projekty/christag-agency/config.yaml
+      - path: C:/Projekty/flowgency/config.yaml
         tools: []                                            # reachable, untouchable
 ```
 
@@ -91,7 +91,7 @@ contradict the first.
 | `[read, search]` | exactly those tools |
 | `[]` | no tool may act here |
 
-Omission is what makes "all tools" expressible without Agency enumerating an
+Omission is what makes "all tools" expressible without Flowgency enumerating an
 integration's tool names, which it has no way to know.
 
 Rules are a list rather than a mapping keyed by path. Windows paths are hostile
@@ -114,9 +114,9 @@ agents:
     runtime:
       permissions:
         rules:
-          - path: C:/Projekty/christag-agency/tests
+          - path: C:/Projekty/flowgency/tests
             tools: [read, search, write]
-          - path: C:/Projekty/christag-agency/config.yaml
+          - path: C:/Projekty/flowgency/config.yaml
             tools: []
 ```
 
@@ -150,24 +150,24 @@ declares that it cannot restrict paths at all. Eight of the nine shipped
 integrations are in exactly that position, and without the mode the negotiation
 that makes them refuse has nothing to key on.
 
-### Agency's own grants become rules
+### Flowgency's own grants become rules
 
-The launch view stops being an implicit, undocumented write grant. Agency
+The launch view stops being an implicit, undocumented write grant. Flowgency
 contributes generated rules into the same table, so an agent's whole permission
 set is one list:
 
 | Generated rule | Tools |
 |---|---|
 | `<launch>/instructions` | `read` |
-| `<launch>/.agency/outbox` | `read`, `write` |
-| `<launch>/.agency/memory` | `read`, `write` |
+| `<launch>/.flowgency/outbox` | `read`, `write` |
+| `<launch>/.flowgency/memory` | `read`, `write` |
 
 These are generated, not authored — an operator cannot remove them — but they
 are visible, which the phase-1 arrangement was not.
 
 Generated rules are excluded from capability negotiation. `scoped_tools`
 considers only authored rules when determining whether an integration can
-enforce the operator's policy, because the generated grants are Agency's own
+enforce the operator's policy, because the generated grants are Flowgency's own
 intent rather than a demand the operator placed on the integration. The zone
 rules stay in the effective policy: an integration that declares `write` in
 `path_scopable_tools` will honour them. Until an integration exists that can
@@ -178,7 +178,7 @@ enforce them is a follow-up feature (phase 3), not part of this branch.
 ### Compilation becomes a per-instance projection
 
 Those generated rules need something to point at, and today nothing is rendered
-per instance. `_entry_path` in `agency/blueprints/cache.py` is
+per instance. `_entry_path` in `flowgency/blueprints/cache.py` is
 `<integration>/<projector_version>/<source_digest>`, so an artifact is a
 projection of *blueprint × integration* and two instances sharing a blueprint
 share one directory.
@@ -219,8 +219,8 @@ levels are exactly the generated rules above:
 | Zone | Contents | Rule |
 |---|---|---|
 | `instructions/` | projected instruction file, skills, prompts | `read` |
-| `.agency/outbox/` | `observations/`, `proposals/` | `read`, `write` |
-| `.agency/memory/` | the seeded memory directory | `read`, `write` |
+| `.flowgency/outbox/` | `observations/`, `proposals/` | `read`, `write` |
+| `.flowgency/memory/` | the seeded memory directory | `read`, `write` |
 
 An agent can therefore read exactly what it was told to do — which is what lets
 it report its own constraints accurately instead of guessing, the failure that
@@ -279,7 +279,7 @@ that the flag and the permissions disagree.
 `schema_version` becomes `5`. A configuration declaring `4` is rejected with a
 message naming the migration command.
 
-Agency does not read the superseded keys. `AGENTS.md` states that only the
+Flowgency does not read the superseded keys. `AGENTS.md` states that only the
 current control-plane shape is accepted at runtime and that superseded layouts
 must not be loaded, and a translation layer inside the loader would make the one
 document that forbids superseded shapes carry a permanent exception to itself. A
@@ -398,7 +398,7 @@ constraints that phase 3 cannot design around:
   it are refused by sandbox policy, a read/write subdirectory works, and the CLI
   runs with a non-writable working directory. Until an integration actually
   declares path-scoped write enforcement, the zone grants remain advisory at the
-  Agency layer.
+  Flowgency layer.
 - **Enabling the sandbox on this platform disables every sandboxed subprocess.**
   `search`, `glob`, `grep` and `shell` fail with `backend_unavailable`: the MXC
   ProcessContainer backend requires a Windows Insiders build, and its DACL

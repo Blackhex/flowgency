@@ -1,10 +1,10 @@
 """
-Integration template for Agency.
+Integration template for Flowgency.
 
 HOW TO USE:
-1. Create your author directory: agency/integrations/{your-name}/
+1. Create your author directory: flowgency/integrations/{your-name}/
 2. Add an empty __init__.py to your directory
-3. Copy this file there and rename it: agency/integrations/{your-name}/your_tool.py
+3. Copy this file there and rename it: flowgency/integrations/{your-name}/your_tool.py
 4. Fill in each method below (see comments for guidance)
 5. Visit Admin → Integrations in the dashboard to register
 6. Restart the service

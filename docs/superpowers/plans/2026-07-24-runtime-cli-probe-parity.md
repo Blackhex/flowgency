@@ -13,7 +13,7 @@
 - The supported AI CLI set is exactly `copilot`, `claude-code`, `gemini`, `codex`, `aider`, `goose`, `opencode`, and `pi`.
 - `script` is excluded because it has no intrinsic external AI command; `sdk` is excluded because it is non-executable.
 - Normal pytest runs live scenarios automatically for supported AI CLIs whose production resolver finds a launchable command.
-- Do not retain the `AGENCY_REAL_RUNTIME_PROBES` opt-in gate.
+- Do not retain the `FLOWGENCY_REAL_RUNTIME_PROBES` opt-in gate.
 - Missing CLIs do not produce one skip per CLI or scenario; when none are installed, the live-only module reports one actionable skip.
 - Installed but unauthenticated, offline, quota-limited, timed-out, malformed, or nonzero-exit CLIs fail with actionable diagnostics.
 - All eight adapters receive the same four scenario contracts: `basic`, `root-instructions`, `selected-skill`, and `write-boundary`.
@@ -35,10 +35,10 @@
 
 ## File Structure
 
-- `agency/integrations/__init__.py`: owns canonical CLI metadata, public executable resolution, required-command errors, and the default projector factory.
-- `agency/integrations/agency/{copilot,claude_code,gemini,codex,aider,goose,opencode,pi}.py`: declare canonical commands and truthful runtime capabilities; use the shared required executable in production runs.
-- `agency/projector_capabilities.py`: adds explicit root-instruction discovery capability.
-- `agency/blueprints/projectors.py`: declares root-instruction discovery for Copilot, Claude Code, and Gemini projectors.
+- `flowgency/integrations/__init__.py`: owns canonical CLI metadata, public executable resolution, required-command errors, and the default projector factory.
+- `flowgency/integrations/flowgency/{copilot,claude_code,gemini,codex,aider,goose,opencode,pi}.py`: declare canonical commands and truthful runtime capabilities; use the shared required executable in production runs.
+- `flowgency/projector_capabilities.py`: adds explicit root-instruction discovery capability.
+- `flowgency/blueprints/projectors.py`: declares root-instruction discovery for Copilot, Claude Code, and Gemini projectors.
 - `tests/_runtime_probe_helpers.py`: owns supported CLI/scenario constants, installed-runtime discovery, probe snapshots, request construction, and diagnostic assertions.
 - `tests/test_runtime_projectors.py`: retains deterministic projector tests and pins static eight-CLI parity.
 - `tests/test_runtime_projectors_live.py`: contains only automatically collected external-runtime scenarios.
@@ -53,15 +53,15 @@
 ### Task 1: Add Production-Owned CLI Discovery And Truthful Basic Runtime Support
 
 **Files:**
-- Modify: `agency/integrations/__init__.py`
-- Modify: `agency/integrations/agency/copilot.py`
-- Modify: `agency/integrations/agency/claude_code.py`
-- Modify: `agency/integrations/agency/gemini.py`
-- Modify: `agency/integrations/agency/codex.py`
-- Modify: `agency/integrations/agency/aider.py`
-- Modify: `agency/integrations/agency/goose.py`
-- Modify: `agency/integrations/agency/opencode.py`
-- Modify: `agency/integrations/agency/pi.py`
+- Modify: `flowgency/integrations/__init__.py`
+- Modify: `flowgency/integrations/flowgency/copilot.py`
+- Modify: `flowgency/integrations/flowgency/claude_code.py`
+- Modify: `flowgency/integrations/flowgency/gemini.py`
+- Modify: `flowgency/integrations/flowgency/codex.py`
+- Modify: `flowgency/integrations/flowgency/aider.py`
+- Modify: `flowgency/integrations/flowgency/goose.py`
+- Modify: `flowgency/integrations/flowgency/opencode.py`
+- Modify: `flowgency/integrations/flowgency/pi.py`
 - Modify: `tests/test_integration_contract.py`
 - Modify: `tests/test_integration_sidecar.py`
 - Modify: `tests/test_integration_claude_code.py`
@@ -78,7 +78,7 @@
 Add these constants and tests to `tests/test_integration_contract.py`:
 
 Extend the integration imports with `IntegrationError`, and keep the existing
-`RuntimeCapabilities` import from `agency.integrations.models`.
+`RuntimeCapabilities` import from `flowgency.integrations.models`.
 
 ```python
 AI_CLI_COMMANDS = {
@@ -130,7 +130,7 @@ def test_public_executable_resolver_returns_launchable_path(tmp_path, monkeypatc
         cli_command = "probe"
 
     monkeypatch.setattr(
-        "agency.integrations.shutil.which",
+        "flowgency.integrations.shutil.which",
         lambda command: str(executable) if command == "probe" else None,
     )
 
@@ -143,7 +143,7 @@ def test_public_executable_resolver_returns_none_when_missing(monkeypatch):
         display_name = "Probe"
         cli_command = "probe"
 
-    monkeypatch.setattr("agency.integrations.shutil.which", lambda command: None)
+    monkeypatch.setattr("flowgency.integrations.shutil.which", lambda command: None)
 
     assert ProbeIntegration().resolve_executable() is None
     with pytest.raises(IntegrationError, match="Probe CLI is unavailable"):
@@ -241,7 +241,7 @@ Expected: FAIL because `cli_command`, the public resolver, and seven runtime cap
 
 - [ ] **Step 3: Implement the shared executable contract**
 
-Add this class surface to `BaseIntegration` in `agency/integrations/__init__.py`:
+Add this class surface to `BaseIntegration` in `flowgency/integrations/__init__.py`:
 
 Add `import os` beside the existing standard-library imports.
 
@@ -336,7 +336,7 @@ def test_copilot_public_resolver_returns_real_windows_executable(
     monkeypatch,
     tmp_path,
 ):
-    import agency.integrations.agency.copilot as copilot_mod
+    import flowgency.integrations.flowgency.copilot as copilot_mod
 
     wrapper = tmp_path / "copilot.cmd"
     executable = tmp_path / "copilot.exe"
@@ -391,7 +391,7 @@ Expected: PASS with no external CLI launch because subprocesses and resolvers ar
 - [ ] **Step 7: Commit Task 1**
 
 ```powershell
-git add agency/integrations/__init__.py agency/integrations/agency tests/test_integration_contract.py tests/test_integration_claude_code.py tests/test_integration_sidecar.py
+git add flowgency/integrations/__init__.py flowgency/integrations/flowgency tests/test_integration_contract.py tests/test_integration_claude_code.py tests/test_integration_sidecar.py
 git commit -m "feat(integrations): declare AI CLI runtime commands"
 ```
 
@@ -400,14 +400,14 @@ git commit -m "feat(integrations): declare AI CLI runtime commands"
 ### Task 2: Make Root-Instruction Discovery Explicit
 
 **Files:**
-- Modify: `agency/projector_capabilities.py`
-- Modify: `agency/blueprints/projectors.py`
-- Modify: `agency/integrations/__init__.py`
-- Modify: `agency/integrations/agency/codex.py`
-- Modify: `agency/integrations/agency/aider.py`
-- Modify: `agency/integrations/agency/goose.py`
-- Modify: `agency/integrations/agency/opencode.py`
-- Modify: `agency/integrations/agency/pi.py`
+- Modify: `flowgency/projector_capabilities.py`
+- Modify: `flowgency/blueprints/projectors.py`
+- Modify: `flowgency/integrations/__init__.py`
+- Modify: `flowgency/integrations/flowgency/codex.py`
+- Modify: `flowgency/integrations/flowgency/aider.py`
+- Modify: `flowgency/integrations/flowgency/goose.py`
+- Modify: `flowgency/integrations/flowgency/opencode.py`
+- Modify: `flowgency/integrations/flowgency/pi.py`
 - Modify: `tests/test_integration_contract.py`
 - Modify: `tests/test_runtime_projectors.py`
 - Modify: `tests/test_cache_locking.py`
@@ -462,7 +462,7 @@ Do not provide a default; every constructor must make an explicit declaration.
 
 - [ ] **Step 4: Update production projectors**
 
-Set `discovers_instructions=True` in all three `PROJECTORS` entries in `agency/blueprints/projectors.py`.
+Set `discovers_instructions=True` in all three `PROJECTORS` entries in `flowgency/blueprints/projectors.py`.
 
 Change the default projector factory to:
 
@@ -473,7 +473,7 @@ Change the default projector factory to:
         *,
         discovers_instructions: bool = False,
     ) -> "RuntimeProjector":
-        from agency.blueprints.projectors import StaticRuntimeProjector
+        from flowgency.blueprints.projectors import StaticRuntimeProjector
 
         return StaticRuntimeProjector(
             version="v1",
@@ -510,7 +510,7 @@ Expected: PASS without external model calls.
 - [ ] **Step 7: Commit Task 2**
 
 ```powershell
-git add agency/projector_capabilities.py agency/blueprints/projectors.py agency/integrations tests/test_integration_contract.py tests/test_runtime_projectors.py tests/test_cache_locking.py tests/test_compilation_cache.py tests/test_job_submission.py
+git add flowgency/projector_capabilities.py flowgency/blueprints/projectors.py flowgency/integrations tests/test_integration_contract.py tests/test_runtime_projectors.py tests/test_cache_locking.py tests/test_compilation_cache.py tests/test_job_submission.py
 git commit -m "feat(projectors): declare instruction discovery"
 ```
 
@@ -611,9 +611,9 @@ from pathlib import Path, PurePosixPath
 import subprocess
 from uuid import uuid4
 
-from agency.fs.snapshot import SnapshotFile, TreeSnapshot, compute_source_digest
-from agency.integrations import REGISTRY, RunResult
-from agency.integrations.models import (
+from flowgency.fs.snapshot import SnapshotFile, TreeSnapshot, compute_source_digest
+from flowgency.integrations import REGISTRY, RunResult
+from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     PathPolicyMode,
@@ -681,7 +681,7 @@ def write_boundary_supported(integration) -> bool:
 
 
 def unique_token(label: str) -> str:
-    return f"AGENCY_{label}_{uuid4().hex.upper()}"
+    return f"FLOWGENCY_{label}_{uuid4().hex.upper()}"
 
 
 def assert_live_success(
@@ -826,8 +826,8 @@ from pathlib import Path
 
 import pytest
 
-from agency.configuration import ValidationFailed
-from agency.integrations import REGISTRY
+from flowgency.configuration import ValidationFailed
+from flowgency.integrations import REGISTRY
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
     assert_live_success,
@@ -1188,8 +1188,8 @@ def test_live_runtime_marker_and_docs_describe_automatic_installed_probes(
     ).read_text(encoding="utf-8")
 
     assert "automatic" in marker.lower()
-    assert "AGENCY_REAL_RUNTIME_PROBES" not in integrations_doc
-    assert "AGENCY_REAL_RUNTIME_PROBES" not in contributing_doc
+    assert "FLOWGENCY_REAL_RUNTIME_PROBES" not in integrations_doc
+    assert "FLOWGENCY_REAL_RUNTIME_PROBES" not in contributing_doc
     for text in (integrations_doc, contributing_doc):
         assert "python -m pytest -m real_runtime -v" in text
         assert 'python -m pytest -m "not real_runtime" -q' in text

@@ -2,7 +2,7 @@
 
 ## Problem
 
-Agency uses `AGENTS.md` for both OpenAI Codex and GitHub Copilot identities. An
+Flowgency uses `AGENTS.md` for both OpenAI Codex and GitHub Copilot identities. An
 `AGENTS.md` file without a tool-specific marker intentionally detects as Codex. The
 Copilot/Windows setup profile currently creates `AGENTS.md` and `memory.md`, but no
 `.copilot/` directory, so filesystem-first integration resolution overrides the
@@ -39,14 +39,14 @@ direct API/helper writes cannot create an unmarked Copilot identity.
 
 ### Setup Skill
 
-For the Copilot/Windows profile, Agency Setup creates `.copilot/` inside every generated
+For the Copilot/Windows profile, Flowgency Setup creates `.copilot/` inside every generated
 agent directory alongside `AGENTS.md` and `memory.md`. The canonical skill explicitly
 states that this marker disambiguates setup-generated agent directories from Codex and
 must not be omitted. This managed-directory requirement does not replace or narrow
 `.github/` detection for pre-existing repository roots.
 
 Generation verification checks that every Copilot agent has all three artifacts and,
-when Agency's Python package is available, that `detect_integration(agent_dir).name`
+when Flowgency's Python package is available, that `detect_integration(agent_dir).name`
 equals `copilot`.
 
 ### Existing Team Migration
@@ -62,7 +62,7 @@ filesystem for each agent collection.
 2. The integration-specific preparation step creates `.copilot/`.
 3. The identity writer creates or updates `AGENTS.md` and optional sidecar metadata.
 4. `detect_integration()` evaluates Copilot at priority 7 and sees `.copilot/`.
-5. Agency renders and executes the agent through `CopilotIntegration` rather than the
+5. Flowgency renders and executes the agent through `CopilotIntegration` rather than the
    generic Codex `AGENTS.md` fallback at priority 10.
 
 Pre-existing repository roots that use `.github/` continue through the existing
@@ -70,7 +70,7 @@ Copilot detection path; they are not required to add `.copilot/` under this desi
 
 ## Error Handling
 
-Marker creation is idempotent and propagates filesystem errors to the caller. Agency
+Marker creation is idempotent and propagates filesystem errors to the caller. Flowgency
 must not silently create only `AGENTS.md` after marker creation fails, because that
 would produce a valid-looking agent with the wrong runtime integration.
 
@@ -101,5 +101,5 @@ Copilot detection and is not treated as an unmarked Codex directory.
 - Changing integration resolution from filesystem-first to config-first.
 - Changing Codex detection or identity filenames.
 - Removing or narrowing existing repository-root `.github/` Copilot detection.
-- Adding integration metadata to `.agency-meta.yaml`.
+- Adding integration metadata to `.flowgency-meta.yaml`.
 - Altering Copilot CLI invocation, dispatch scheduling, or launcher behavior.

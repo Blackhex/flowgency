@@ -5,15 +5,15 @@
 
 ## Problem
 
-Agency uses `group` for its agent-team domain across configuration, models, CLI,
+Flowgency uses `group` for its agent-team domain across configuration, models, CLI,
 routes, jobs, memory, templates, setup, docs, and tests. The product will use
 `team` consistently, including persisted and public contracts, as a strict
 breaking rename with no compatibility behavior.
 
 ## Goals
 
-1. Make `team` the sole Agency domain term for a collection of agents.
-2. Introduce `schema_version: 6` with root `teams` and `agency.default_team`.
+1. Make `team` the sole Flowgency domain term for a collection of agents.
+2. Introduce `schema_version: 6` with root `teams` and `flowgency.default_team`.
 3. Rename internal, persisted, CLI, URL, template, setup, documentation, test,
    and default filesystem terminology from group to team.
 4. Preserve behavior except renamed formats and intentional old-format rejection.
@@ -34,7 +34,7 @@ breaking rename with no compatibility behavior.
 ## Strict Version Policy
 
 `schema_version: 6` is the sole accepted config version. Root keys are exactly
-`schema_version`, `agency`, `memory`, and `teams`. `groups`, `default_group`,
+`schema_version`, `flowgency`, `memory`, and `teams`. `groups`, `default_group`,
 and v5 config fail validation with v6/manual-rewrite diagnostics. There is no
 conversion.
 
@@ -53,21 +53,21 @@ unreachable intentionally. Run/channel semantics remain unchanged.
 
 ```yaml
 schema_version: 6
-agency:
-  title: Agency
+flowgency:
+  title: Flowgency
   default_team: newsletter
   ai_backend: copilot
   jobs:
     pool: 4
-  agent_library: C:/Agency/agent-library
-  compilation_cache: C:/Agency/compiled-agents
-  memory_store: C:/Agency/memory
-  prompt_store: C:/Agency/prompts
+  agent_library: C:/Flowgency/agent-library
+  compilation_cache: C:/Flowgency/compiled-agents
+  memory_store: C:/Flowgency/memory
+  prompt_store: C:/Flowgency/prompts
 teams:
   newsletter:
     name: Newsletter
     workspace_path: C:/Projects/newsletter
-    path: C:/Agency/teams/newsletter
+    path: C:/Flowgency/teams/newsletter
     default_integration: copilot
     runtime:
       permissions:
@@ -78,7 +78,7 @@ teams:
     agents: []
 ```
 
-`teams.<team-id>.path` is Agency-owned team state;
+`teams.<team-id>.path` is Flowgency-owned team state;
 `teams.<team-id>.workspace_path` is source/execution workspace. Generated
 defaults become `<root>/teams/<team-id>`. Custom configured paths remain
 authoritative and are never mechanically rewritten.
@@ -114,7 +114,7 @@ Old `/admin/groups`, `/admin/orgs`, `/{group}/...`, `--group`, and
 Rename team-scoped job, queue, lock, authority, dispatch, reconciliation,
 worker, prompt-store, instance-service, permission, record, memory-publication,
 recovery, and workspace fields/parameters from `group` to `team` where they
-denote the Agency domain.
+denote the Flowgency domain.
 
 `JobRequest.group_key`, `JobSpec.group_key`, `JobSpec.group_root`,
 `resolved_group_root`, and `JobAuthorityRef.group_id` become team equivalents.
@@ -131,7 +131,7 @@ canonical JSON.
 
 ### Setup, App, Docs, And Examples
 
-Setup prompts and the canonical `agency-setup` skill use team display name, team
+Setup prompts and the canonical `flowgency-setup` skill use team display name, team
 ID, team workspace, team root, team approval, and team configuration language.
 Exact config literals become v6 `teams`, `default_team`, and
 `teams.<team-id>`. Generated setup paths use `<root>/teams/<team-id>`.

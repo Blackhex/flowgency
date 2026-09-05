@@ -198,12 +198,12 @@ include = ["flowgency*"]
 [tool.setuptools.package-data]
 flowgency = ["templates/*.html", "static/*", "themes/*.yaml"]
 "flowgency.setup_assets" = [
-    "copilot/.github/skills/agency-setup/*.md",
-    "copilot/.github/skills/agency-setup/references/*.md",
+    "copilot/.github/skills/flowgency-setup/*.md",
+    "copilot/.github/skills/flowgency-setup/references/*.md",
 ]
 ```
 
-The glob uses the pre-Task-4 directory name `agency-setup`; Task 4 updates it to
+The glob uses the pre-Task-4 directory name `flowgency-setup`; Task 4 updates it to
 `flowgency-setup` alongside the directory rename.
 
 Keep the version and dependency constraints unchanged.

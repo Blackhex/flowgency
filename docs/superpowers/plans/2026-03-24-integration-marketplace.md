@@ -4,7 +4,7 @@
 
 **Goal:** Restructure integrations into author-namespaced subdirectories with config-driven loading, add an admin UI for registration/discovery, and provide contribution infrastructure.
 
-**Architecture:** Move official integrations into `agency/integrations/agency/`, load integrations from `integrations.yaml` config, add admin page at `/admin/integrations` with auto-discovery of unregistered integrations, and provide a template file + contract test + developer guide.
+**Architecture:** Move official integrations into `flowgency/integrations/flowgency/`, load integrations from `integrations.yaml` config, add admin page at `/admin/integrations` with auto-discovery of unregistered integrations, and provide a template file + contract test + developer guide.
 
 **Tech Stack:** Python/FastAPI, Jinja2 templates, Tailwind CSS, PyYAML
 
@@ -12,79 +12,79 @@
 
 ---
 
-### Task 1: Move integration files into `agency/` subdirectory
+### Task 1: Move integration files into `flowgency/` subdirectory
 
-Create the `agency/integrations/agency/` author directory and move all 7 official integration files there. Update the hardcoded imports in `__init__.py` to use the new paths.
+Create the `flowgency/integrations/flowgency/` author directory and move all 7 official integration files there. Update the hardcoded imports in `__init__.py` to use the new paths.
 
 **Files:**
-- Create: `agency/integrations/agency/__init__.py` (empty)
-- Move: `agency/integrations/claude_code.py` → `agency/integrations/agency/claude_code.py`
-- Move: `agency/integrations/codex.py` → `agency/integrations/agency/codex.py`
-- Move: `agency/integrations/gemini.py` → `agency/integrations/agency/gemini.py`
-- Move: `agency/integrations/aider.py` → `agency/integrations/agency/aider.py`
-- Move: `agency/integrations/goose.py` → `agency/integrations/agency/goose.py`
-- Move: `agency/integrations/script.py` → `agency/integrations/agency/script.py`
-- Move: `agency/integrations/sdk.py` → `agency/integrations/agency/sdk.py`
-- Modify: `agency/integrations/__init__.py:129-137` (import paths)
+- Create: `flowgency/integrations/flowgency/__init__.py` (empty)
+- Move: `flowgency/integrations/claude_code.py` → `flowgency/integrations/flowgency/claude_code.py`
+- Move: `flowgency/integrations/codex.py` → `flowgency/integrations/flowgency/codex.py`
+- Move: `flowgency/integrations/gemini.py` → `flowgency/integrations/flowgency/gemini.py`
+- Move: `flowgency/integrations/aider.py` → `flowgency/integrations/flowgency/aider.py`
+- Move: `flowgency/integrations/goose.py` → `flowgency/integrations/flowgency/goose.py`
+- Move: `flowgency/integrations/script.py` → `flowgency/integrations/flowgency/script.py`
+- Move: `flowgency/integrations/sdk.py` → `flowgency/integrations/flowgency/sdk.py`
+- Modify: `flowgency/integrations/__init__.py:129-137` (import paths)
 
-- [ ] **Step 1: Create the agency subdirectory**
+- [ ] **Step 1: Create the flowgency subdirectory**
 
 ```bash
-mkdir -p agency/integrations/agency
-touch agency/integrations/agency/__init__.py
+mkdir -p flowgency/integrations/flowgency
+touch flowgency/integrations/flowgency/__init__.py
 ```
 
 - [ ] **Step 2: Move all integration files**
 
 ```bash
-git mv agency/integrations/claude_code.py agency/integrations/agency/claude_code.py
-git mv agency/integrations/codex.py agency/integrations/agency/codex.py
-git mv agency/integrations/gemini.py agency/integrations/agency/gemini.py
-git mv agency/integrations/aider.py agency/integrations/agency/aider.py
-git mv agency/integrations/goose.py agency/integrations/agency/goose.py
-git mv agency/integrations/script.py agency/integrations/agency/script.py
-git mv agency/integrations/sdk.py agency/integrations/agency/sdk.py
+git mv flowgency/integrations/claude_code.py flowgency/integrations/flowgency/claude_code.py
+git mv flowgency/integrations/codex.py flowgency/integrations/flowgency/codex.py
+git mv flowgency/integrations/gemini.py flowgency/integrations/flowgency/gemini.py
+git mv flowgency/integrations/aider.py flowgency/integrations/flowgency/aider.py
+git mv flowgency/integrations/goose.py flowgency/integrations/flowgency/goose.py
+git mv flowgency/integrations/script.py flowgency/integrations/flowgency/script.py
+git mv flowgency/integrations/sdk.py flowgency/integrations/flowgency/sdk.py
 ```
 
 - [ ] **Step 3: Update imports in `__init__.py`**
 
-Replace lines 129-137 in `agency/integrations/__init__.py`:
+Replace lines 129-137 in `flowgency/integrations/__init__.py`:
 
 ```python
 # Import all integrations to trigger registration.
 # Each module calls _register() at import time.
-from agency.integrations.agency.claude_code import ClaudeCodeIntegration  # noqa: E402, F401
-from agency.integrations.agency.codex import CodexIntegration  # noqa: E402, F401
-from agency.integrations.agency.gemini import GeminiIntegration  # noqa: E402, F401
-from agency.integrations.agency.aider import AiderIntegration  # noqa: E402, F401
-from agency.integrations.agency.goose import GooseIntegration  # noqa: E402, F401
-from agency.integrations.agency.script import ScriptIntegration  # noqa: E402, F401
-from agency.integrations.agency.sdk import SdkIntegration  # noqa: E402, F401
+from flowgency.integrations.flowgency.claude_code import ClaudeCodeIntegration  # noqa: E402, F401
+from flowgency.integrations.flowgency.codex import CodexIntegration  # noqa: E402, F401
+from flowgency.integrations.flowgency.gemini import GeminiIntegration  # noqa: E402, F401
+from flowgency.integrations.flowgency.aider import AiderIntegration  # noqa: E402, F401
+from flowgency.integrations.flowgency.goose import GooseIntegration  # noqa: E402, F401
+from flowgency.integrations.flowgency.script import ScriptIntegration  # noqa: E402, F401
+from flowgency.integrations.flowgency.sdk import SdkIntegration  # noqa: E402, F401
 ```
 
 - [ ] **Step 4: Fix cross-references between integration files**
 
 Both `sdk.py` and `script.py` import from `claude_code.py`:
 ```python
-# In both agency/integrations/agency/sdk.py and agency/integrations/agency/script.py:
-from agency.integrations.claude_code import _parse_frontmatter
+# In both flowgency/integrations/flowgency/sdk.py and flowgency/integrations/flowgency/script.py:
+from flowgency.integrations.claude_code import _parse_frontmatter
 ```
 
 Update both to:
 ```python
-from agency.integrations.agency.claude_code import _parse_frontmatter
+from flowgency.integrations.flowgency.claude_code import _parse_frontmatter
 ```
 
 - [ ] **Step 5: Fix test imports**
 
 These test files import integration modules directly and need path updates:
 
-- `tests/test_integration_claude_code.py`: `from agency.integrations.claude_code import` → `from agency.integrations.agency.claude_code import`
-- `tests/test_integration_sidecar.py`: `from agency.integrations.codex import` → `from agency.integrations.agency.codex import` (and similarly for gemini, aider, goose)
-- `tests/test_integration_script.py`: `from agency.integrations.script import` → `from agency.integrations.agency.script import`
-- `tests/test_integration_sdk.py`: `from agency.integrations.sdk import` → `from agency.integrations.agency.sdk import`
+- `tests/test_integration_claude_code.py`: `from flowgency.integrations.claude_code import` → `from flowgency.integrations.flowgency.claude_code import`
+- `tests/test_integration_sidecar.py`: `from flowgency.integrations.codex import` → `from flowgency.integrations.flowgency.codex import` (and similarly for gemini, aider, goose)
+- `tests/test_integration_script.py`: `from flowgency.integrations.script import` → `from flowgency.integrations.flowgency.script import`
+- `tests/test_integration_sdk.py`: `from flowgency.integrations.sdk import` → `from flowgency.integrations.flowgency.sdk import`
 
-Search each file for `from agency.integrations.` imports and add `.agency` after `integrations`.
+Search each file for `from flowgency.integrations.` imports and add `.flowgency` after `integrations`.
 
 - [ ] **Step 6: Run tests**
 
@@ -94,8 +94,8 @@ Expected: All tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/integrations/
-git commit -m "refactor: move integrations into agency/ author subdirectory"
+git add flowgency/integrations/
+git commit -m "refactor: move integrations into flowgency/ author subdirectory"
 ```
 
 ---
@@ -105,23 +105,23 @@ git commit -m "refactor: move integrations into agency/ author subdirectory"
 Replace the hardcoded imports in `__init__.py` with config-driven loading from `integrations.yaml`.
 
 **Files:**
-- Create: `agency/integrations/integrations.yaml`
-- Modify: `agency/integrations/__init__.py:101-137` (registry + imports section)
+- Create: `flowgency/integrations/integrations.yaml`
+- Modify: `flowgency/integrations/__init__.py:101-137` (registry + imports section)
 - Test: `tests/test_integrations.py`
 
 - [ ] **Step 1: Create `integrations.yaml`**
 
-Create `agency/integrations/integrations.yaml`:
+Create `flowgency/integrations/integrations.yaml`:
 
 ```yaml
 integrations:
-  - agency.claude_code
-  - agency.codex
-  - agency.gemini
-  - agency.aider
-  - agency.goose
-  - agency.script
-  - agency.sdk
+  - flowgency.claude_code
+  - flowgency.codex
+  - flowgency.gemini
+  - flowgency.aider
+  - flowgency.goose
+  - flowgency.script
+  - flowgency.sdk
 ```
 
 - [ ] **Step 2: Write test for config-driven loading**
@@ -131,13 +131,13 @@ Add to `tests/test_integrations.py`:
 ```python
 def test_load_integrations_from_config(tmp_path):
     """Config-driven loading populates the registry."""
-    from agency.integrations import load_integrations, REGISTRY
+    from flowgency.integrations import load_integrations, REGISTRY
     # Registry should already be populated from app startup
     assert len(REGISTRY) >= 7
 
 def test_integrations_yaml_exists():
     """integrations.yaml config file exists."""
-    from agency.integrations import INTEGRATIONS_DIR
+    from flowgency.integrations import INTEGRATIONS_DIR
     config_path = INTEGRATIONS_DIR / "integrations.yaml"
     assert config_path.exists()
 ```
@@ -202,20 +202,20 @@ def load_integrations() -> None:
     """Load integrations from integrations.yaml config."""
     import importlib
     import logging
-    logger = logging.getLogger("agency.integrations")
+    logger = logging.getLogger("flowgency.integrations")
 
     modules = _read_config()
     if not modules:
         # First run or missing config — create default
         modules = [
-            "agency.claude_code", "agency.codex", "agency.gemini",
-            "agency.aider", "agency.goose", "agency.script", "agency.sdk",
+            "flowgency.claude_code", "flowgency.codex", "flowgency.gemini",
+            "flowgency.aider", "flowgency.goose", "flowgency.script", "flowgency.sdk",
         ]
         _write_config(modules)
 
     for module_path in modules:
-        # module_path is like "agency.claude_code" → import "agency.integrations.agency.claude_code"
-        full_module = f"agency.integrations.{module_path}"
+        # module_path is like "flowgency.claude_code" → import "flowgency.integrations.flowgency.claude_code"
+        full_module = f"flowgency.integrations.{module_path}"
         try:
             importlib.import_module(full_module)
         except Exception as e:
@@ -284,7 +284,7 @@ Expected: All tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/integrations/__init__.py agency/integrations/integrations.yaml tests/test_integrations.py
+git add flowgency/integrations/__init__.py flowgency/integrations/integrations.yaml tests/test_integrations.py
 git commit -m "feat: config-driven integration loading from integrations.yaml"
 ```
 
@@ -295,11 +295,11 @@ git commit -m "feat: config-driven integration loading from integrations.yaml"
 Create the `/admin/integrations` page with installed and available-to-register sections. Update admin settings to link to it.
 
 **Files:**
-- Modify: `agency/app.py:1200-1219` (admin settings route — remove integrations table)
-- Modify: `agency/app.py` (add 3 new routes)
-- Create: `agency/templates/admin_integrations.html`
-- Modify: `agency/templates/admin_settings.html:42-80` (replace table with link)
-- Modify: `agency/templates/base.html:259-265` (add nav link)
+- Modify: `flowgency/app.py:1200-1219` (admin settings route — remove integrations table)
+- Modify: `flowgency/app.py` (add 3 new routes)
+- Create: `flowgency/templates/admin_integrations.html`
+- Modify: `flowgency/templates/admin_settings.html:42-80` (replace table with link)
+- Modify: `flowgency/templates/base.html:259-265` (add nav link)
 
 - [ ] **Step 1: Add integrations routes to app.py**
 
@@ -308,14 +308,14 @@ Add these routes after the existing admin routes (after line 1219):
 ```python
 def _read_integration_config():
     """Read integration module list from config."""
-    from agency.integrations import _read_config
+    from flowgency.integrations import _read_config
     return _read_config()
 
 
 @app.get("/admin/integrations", response_class=HTMLResponse)
 async def admin_integrations_page(request: Request):
     """Admin integrations management page."""
-    from agency.integrations import scan_available
+    from flowgency.integrations import scan_available
 
     # Build reverse map: module_name → author from config
     config_modules = _read_integration_config()
@@ -323,7 +323,7 @@ async def admin_integrations_page(request: Request):
     for mod in config_modules:
         parts = mod.split(".")
         if len(parts) == 2:
-            module_to_author[parts[1]] = parts[0]  # e.g., claude_code → agency
+            module_to_author[parts[1]] = parts[0]  # e.g., claude_code → flowgency
 
     installed = []
     for name, i in REGISTRY.items():
@@ -353,7 +353,7 @@ async def admin_integrations_page(request: Request):
 @app.post("/admin/integrations/register", response_class=HTMLResponse)
 async def admin_integrations_register(request: Request):
     """Register an available integration."""
-    from agency.integrations import register_integration
+    from flowgency.integrations import register_integration
     form = await request.form()
     module_path = form.get("module_path", "")
     if module_path:
@@ -364,7 +364,7 @@ async def admin_integrations_register(request: Request):
 @app.post("/admin/integrations/unregister", response_class=HTMLResponse)
 async def admin_integrations_unregister(request: Request):
     """Unregister an installed integration."""
-    from agency.integrations import unregister_integration
+    from flowgency.integrations import unregister_integration
     form = await request.form()
     module_path = form.get("module_path", "")
     if module_path:
@@ -374,11 +374,11 @@ async def admin_integrations_unregister(request: Request):
 
 - [ ] **Step 2: Create admin_integrations.html template**
 
-Create `agency/templates/admin_integrations.html`:
+Create `flowgency/templates/admin_integrations.html`:
 
 ```html
 {% extends "base.html" %}
-{% block title %}Integrations — {{ agency_title }}{% endblock %}
+{% block title %}Integrations — {{ flowgency_title }}{% endblock %}
 {% block content %}
 <div class="max-w-3xl">
   <h1 class="text-2xl font-bold text-gray-900 mb-6">Integrations</h1>
@@ -388,7 +388,7 @@ Create `agency/templates/admin_integrations.html`:
     <div class="text-sm text-amber-800">Integration changes require a service restart to take effect.</div>
     <form method="POST" action="/admin/integrations/restart" class="inline">
       <button type="submit" class="px-3 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
-              onclick="return confirm('Restart the Agency service?')">
+              onclick="return confirm('Restart the Flowgency service?')">
         Restart Service
       </button>
     </form>
@@ -473,7 +473,7 @@ Create `agency/templates/admin_integrations.html`:
   <div class="mb-8">
     <h2 class="text-lg font-semibold text-gray-900 mb-3">Available to Register</h2>
     <div class="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400 text-sm">
-      No unregistered integrations found. Drop a <code>.py</code> file in a subdirectory of <code>agency/integrations/</code> to add one.
+      No unregistered integrations found. Drop a <code>.py</code> file in a subdirectory of <code>flowgency/integrations/</code> to add one.
     </div>
   </div>
   {% endif %}
@@ -488,7 +488,7 @@ Create `agency/templates/admin_integrations.html`:
 
 - [ ] **Step 3: Update admin_settings.html — replace integrations table with link**
 
-In `agency/templates/admin_settings.html`, replace lines 42-80 (the `{% if all_integrations_info %}` block) with:
+In `flowgency/templates/admin_settings.html`, replace lines 42-80 (the `{% if all_integrations_info %}` block) with:
 
 ```html
   <div class="mt-8">
@@ -506,14 +506,14 @@ Update the admin settings route in `app.py` to pass `installed_count` instead of
         "request": request,
         **admin_context("settings"),
         "integrations": {name: i.display_name for name, i in REGISTRY.items() if i.supports_ai_backend},
-        "ai_backend": CONFIG.get("agency", {}).get("ai_backend", "claude-code"),
+        "ai_backend": CONFIG.get("flowgency", {}).get("ai_backend", "claude-code"),
         "installed_count": len(REGISTRY),
     })
 ```
 
 - [ ] **Step 4: Add nav link in base.html**
 
-In `agency/templates/base.html`, add an "Integrations" nav link after the "Agent Groups" link (after line 265):
+In `flowgency/templates/base.html`, add an "Integrations" nav link after the "Agent Groups" link (after line 265):
 
 ```html
         <a href="/admin/integrations" class="nav-item {% if admin_page == 'integrations' %}active{% endif %}">
@@ -531,10 +531,10 @@ Add after the unregister route in `app.py`:
 ```python
 @app.post("/admin/integrations/restart", response_class=HTMLResponse)
 async def admin_integrations_restart(request: Request):
-    """Restart the agency service to apply integration changes."""
+    """Restart the flowgency service to apply integration changes."""
     import subprocess
     try:
-        subprocess.Popen(["systemctl", "--user", "restart", "agency.service"])
+        subprocess.Popen(["systemctl", "--user", "restart", "flowgency.service"])
     except Exception:
         pass  # Best effort — the service will restart and kill this process
     return RedirectResponse("/admin/integrations", status_code=303)
@@ -548,7 +548,7 @@ Expected: All tests pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/app.py agency/templates/admin_integrations.html agency/templates/admin_settings.html agency/templates/base.html
+git add flowgency/app.py flowgency/templates/admin_integrations.html flowgency/templates/admin_settings.html flowgency/templates/base.html
 git commit -m "feat: add admin integrations page with register/unregister/restart"
 ```
 
@@ -559,21 +559,21 @@ git commit -m "feat: add admin integrations page with register/unregister/restar
 Add the `_template.py` scaffolding file and a contract test that validates integrations against the `BaseIntegration` API.
 
 **Files:**
-- Create: `agency/integrations/_template.py`
+- Create: `flowgency/integrations/_template.py`
 - Create: `tests/test_integration_contract.py`
 
 - [ ] **Step 1: Create `_template.py`**
 
-Create `agency/integrations/_template.py`:
+Create `flowgency/integrations/_template.py`:
 
 ```python
 """
-Integration template for Agency.
+Integration template for Flowgency.
 
 HOW TO USE:
-1. Create your author directory: agency/integrations/{your-name}/
+1. Create your author directory: flowgency/integrations/{your-name}/
 2. Add an empty __init__.py to your directory
-3. Copy this file there and rename it: agency/integrations/{your-name}/your_tool.py
+3. Copy this file there and rename it: flowgency/integrations/{your-name}/your_tool.py
 4. Fill in each method below (see comments for guidance)
 5. Visit Admin → Integrations in the dashboard to register
 6. Restart the service
@@ -583,7 +583,7 @@ TESTING:
 """
 
 from pathlib import Path
-from agency.integrations import BaseIntegration, AgentIdentity, RunResult, _register
+from flowgency.integrations import BaseIntegration, AgentIdentity, RunResult, _register
 
 
 class YourToolIntegration(BaseIntegration):
@@ -596,11 +596,11 @@ class YourToolIntegration(BaseIntegration):
     # Display name shown in the admin UI.
     display_name = "Your Tool"
 
-    # Can Agency invoke this tool to execute prompts?
+    # Can Flowgency invoke this tool to execute prompts?
     # True if the tool has a CLI that accepts a prompt/file.
     supports_execution = False
 
-    # Can Agency use this tool as its own AI backbone?
+    # Can Flowgency use this tool as its own AI backbone?
     # True if the tool has a non-interactive prompt mode.
     supports_ai_backend = False
 
@@ -610,7 +610,7 @@ class YourToolIntegration(BaseIntegration):
 
     def identity_filename(self) -> str:
         """The identity/config file this tool uses natively.
-        Agency reads/writes agent identity through this file.
+        Flowgency reads/writes agent identity through this file.
         Example: 'CLAUDE.md', 'AGENTS.md', '.cursorrules'
         """
         return "YOUR_CONFIG_FILE"
@@ -630,7 +630,7 @@ class YourToolIntegration(BaseIntegration):
 
         For tools with YAML frontmatter in their native file,
         parse it directly. For tools without frontmatter support,
-        read from .agency-meta.yaml sidecar file instead.
+        read from .flowgency-meta.yaml sidecar file instead.
         See existing integrations for examples of both patterns.
         """
         # TODO: implement
@@ -677,7 +677,7 @@ Create `tests/test_integration_contract.py`:
 """Contract tests: validate all registered integrations meet the BaseIntegration API."""
 import pytest
 from pathlib import Path
-from agency.integrations import REGISTRY, BaseIntegration, AgentIdentity
+from flowgency.integrations import REGISTRY, BaseIntegration, AgentIdentity
 
 
 def all_integration_names():
@@ -743,7 +743,7 @@ Expected: All tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/integrations/_template.py tests/test_integration_contract.py
+git add flowgency/integrations/_template.py tests/test_integration_contract.py
 git commit -m "feat: add integration template and contract test harness"
 ```
 
@@ -764,19 +764,19 @@ Create `kb/contributing-integrations.md`:
 ```markdown
 # Contributing an Integration
 
-Agency uses a plugin system to support different LLM tools. Each integration is a Python class that teaches Agency how to interact with a specific tool.
+Flowgency uses a plugin system to support different LLM tools. Each integration is a Python class that teaches Flowgency how to interact with a specific tool.
 
 ## Quick Start
 
 1. **Create your author directory:**
    ```bash
-   mkdir -p agency/integrations/{your-name}
-   touch agency/integrations/{your-name}/__init__.py
+   mkdir -p flowgency/integrations/{your-name}
+   touch flowgency/integrations/{your-name}/__init__.py
    ```
 
 2. **Copy the template:**
    ```bash
-   cp agency/integrations/_template.py agency/integrations/{your-name}/your_tool.py
+   cp flowgency/integrations/_template.py flowgency/integrations/{your-name}/your_tool.py
    ```
 
 3. **Fill in the methods** — see the template comments for guidance on each method.
@@ -792,8 +792,8 @@ Agency uses a plugin system to support different LLM tools. Each integration is 
 ## Directory Structure
 
 ```
-agency/integrations/
-├── agency/           # Official integrations
+flowgency/integrations/
+├── flowgency/           # Official integrations
 │   ├── claude_code.py
 │   ├── codex.py
 │   └── ...
@@ -816,9 +816,9 @@ agency/integrations/
 
 ## Two Identity Patterns
 
-**Frontmatter tools** (like Claude Code with `CLAUDE.md`): Parse YAML frontmatter from the identity file directly. See `agency/integrations/agency/claude_code.py`.
+**Frontmatter tools** (like Claude Code with `CLAUDE.md`): Parse YAML frontmatter from the identity file directly. See `flowgency/integrations/flowgency/claude_code.py`.
 
-**Sidecar tools** (like Codex, Gemini): The native file doesn't support YAML frontmatter, so Agency stores metadata in `.agency-meta.yaml` next to the native file. See `agency/integrations/agency/codex.py` and use the `read_sidecar()`/`write_sidecar()` helpers.
+**Sidecar tools** (like Codex, Gemini): The native file doesn't support YAML frontmatter, so Flowgency stores metadata in `.flowgency-meta.yaml` next to the native file. See `flowgency/integrations/flowgency/codex.py` and use the `read_sidecar()`/`write_sidecar()` helpers.
 
 ## Submitting
 
@@ -835,7 +835,7 @@ Create `.github/ISSUE_TEMPLATE/new-integration.md`:
 ```markdown
 ---
 name: New Integration Request
-about: Suggest a new LLM tool integration for Agency
+about: Suggest a new LLM tool integration for Flowgency
 title: "Integration: [Tool Name]"
 labels: enhancement, integration
 ---
@@ -875,7 +875,7 @@ Update the root CLAUDE.md to document the new integration directory structure, c
 - [ ] **Step 1: Update Integration System section**
 
 In `CLAUDE.md`, find the "Integration System" section and update it to reflect:
-- The new directory structure (`agency/integrations/agency/` for official, `{author}/` for community)
+- The new directory structure (`flowgency/integrations/flowgency/` for official, `{author}/` for community)
 - `integrations.yaml` config-driven loading
 - The admin integrations page at `/admin/integrations`
 - The `_template.py` file and `kb/contributing-integrations.md` guide

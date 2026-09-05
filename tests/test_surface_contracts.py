@@ -86,7 +86,7 @@ def _config_only_client(tmp_path: Path, monkeypatch) -> tuple[TestClient, Path]:
             {
                 "schema_version": 1,
                 "flowgency": {
-                    "title": "Agency",
+                    "title": "Flowgency",
                     "default_team": "newsletter",
                     "ai_backend": "claude-code",
                     "agent_library": str(library),
@@ -156,8 +156,8 @@ def test_removed_conversion_surfaces_do_not_exist(repo_root: Path):
     removed = [
         repo_root / "flowgency" / "configuration" / "compat.py",
         repo_root / "tools" / "migrate_agent_model.py",
-        repo_root / "skills" / "agency-migration",
-        repo_root / ".github" / "skills" / "agency-migration",
+        repo_root / "skills" / "flowgency-migration",
+        repo_root / ".github" / "skills" / "flowgency-migration",
     ]
     assert not any(path.exists() for path in removed)
 

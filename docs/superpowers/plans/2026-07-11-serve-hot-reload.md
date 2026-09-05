@@ -2,20 +2,20 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add an opt-in `christag-agency serve --reload` mode that restarts for project code, UI assets, themes, and `config.yaml` while ignoring Agency runtime records.
+**Goal:** Add an opt-in `flowgency serve --reload` mode that restarts for project code, UI assets, themes, and `config.yaml` while ignoring Flowgency runtime records.
 
-**Architecture:** `agency.app` will own one `run_server(host, port, reload=False)` entry point shared by both command-line parsers. Normal mode will continue to pass the in-memory FastAPI application to `uvicorn.run()`. Reload mode will build Uvicorn's `Config`, `Server`, and `WatchFilesReload` directly, rooted at the current working directory, and replace only the supervisor's `watch_filter` with Agency's component-based policy. The console CLI will delegate directly to this function instead of rewriting `sys.argv`.
+**Architecture:** `flowgency.app` will own one `run_server(host, port, reload=False)` entry point shared by both command-line parsers. Normal mode will continue to pass the in-memory FastAPI application to `uvicorn.run()`. Reload mode will build Uvicorn's `Config`, `Server`, and `WatchFilesReload` directly, rooted at the current working directory, and replace only the supervisor's `watch_filter` with Flowgency's component-based policy. The console CLI will delegate directly to this function instead of rewriting `sys.argv`.
 
 **Tech Stack:** Python 3.11+, FastAPI, Uvicorn, WatchFiles, argparse, pytest, VS Code JSONC tasks.
 
 ## Global Constraints
 
 - Python remains `>=3.11` as declared in `pyproject.toml`.
-- Reload remains opt-in; `christag-agency serve` keeps host `0.0.0.0`, port `8500`, and non-reloading behavior.
+- Reload remains opt-in; `flowgency serve` keeps host `0.0.0.0`, port `8500`, and non-reloading behavior.
 - Reload watches `Path.cwd().resolve()` only; source installed outside that root is out of scope.
 - Included patterns are exactly `*.py`, `*.html`, `*.css`, `*.js`, `*.json`, `*.yaml`, and `*.yml`.
 - The root `config.yaml` is watched, so both manual edits and admin saves restart a reload-mode worker.
-- VCS metadata, virtual environments, Python/test/tool caches, package metadata, and Agency `shared/` runtime records must not trigger reloads.
+- VCS metadata, virtual environments, Python/test/tool caches, package metadata, and Flowgency `shared/` runtime records must not trigger reloads.
 - Keep the existing platform-specific Uvicorn declarations. Add `watchfiles>=0.20` only for Windows, where plain `uvicorn` otherwise falls back to a Python-only stat watcher and ignores custom includes/excludes.
 - Do not add browser refresh, state-preserving hot module replacement, custom watcher CLI flags, or production reload behavior.
 - Include the user's existing `.vscode/tasks.json` edits in this feature. Preserve the normal `Serve dashboard` task changes, update only the separate hot-reload task during Task 3, and commit the completed task file on the feature branch.
@@ -25,9 +25,9 @@
 ## File Structure
 
 - Modify `pyproject.toml`: guarantee the WatchFiles backend on Windows without undoing the platform-specific Uvicorn dependency split.
-- Modify `agency/app.py`: define the reload policy, add the shared server launcher, retain first-run setup, and expose `--reload` through `python -m agency.app`.
+- Modify `flowgency/app.py`: define the reload policy, add the shared server launcher, retain first-run setup, and expose `--reload` through `python -m flowgency.app`.
 - Create `tests/test_server.py`: isolate launcher mode, first-run, and real Uvicorn file-filter behavior.
-- Modify `agency/cli.py`: expose `serve --reload` and call the shared launcher directly.
+- Modify `flowgency/cli.py`: expose `serve --reload` and call the shared launcher directly.
 - Modify `tests/test_cli.py`: cover help text, argument forwarding, and the removal of `sys.argv` mutation.
 - Modify `.vscode/tasks.json`: route the existing hot-reload task through the public CLI while preserving the user's current task edits.
 - Modify `README.md`: show the supported executable and development reload command near Quick Start.
@@ -37,12 +37,12 @@
 
 **Files:**
 - Modify: `pyproject.toml:5-16`
-- Modify: `agency/app.py:3307-3330`
+- Modify: `flowgency/app.py:3307-3330`
 - Create: `tests/test_server.py`
 
 **Interfaces:**
-- Consumes: existing `agency.app.app`, `CONFIG_PATH`, `save_config(config: dict) -> None`, and `reload_groups() -> None`.
-- Produces: `run_server(host: str, port: int, reload: bool = False) -> None`, `_AgencyReloadFilter`, `_create_reload_supervisor()`, `_run_reload_server()`, and immutable reload-policy tuples used to configure and test Uvicorn.
+- Consumes: existing `flowgency.app.app`, `CONFIG_PATH`, `save_config(config: dict) -> None`, and `reload_groups() -> None`.
+- Produces: `run_server(host: str, port: int, reload: bool = False) -> None`, `_FlowgencyReloadFilter`, `_create_reload_supervisor()`, `_run_reload_server()`, and immutable reload-policy tuples used to configure and test Uvicorn.
 
 - [ ] **Step 1: Write failing server-launcher tests**
 
@@ -57,13 +57,13 @@ import pytest
 import uvicorn
 import yaml
 
-from agency import app as app_mod
+from flowgency import app as app_mod
 
 
 def _configure_existing_config(tmp_path: Path, monkeypatch) -> Path:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "agency:\n  title: Agency\n  default_group: ''\ngroups: {}\n",
+        "flowgency:\n  title: Flowgency\n  default_group: ''\ngroups: {}\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
@@ -127,7 +127,7 @@ def test_run_server_reload_mode_uses_import_string_and_project_policy(
 
     assert events[0] == (
         "config",
-        "agency.app:app",
+        "flowgency.app:app",
         {
             "host": "127.0.0.1",
             "port": 8601,
@@ -142,7 +142,7 @@ def test_run_server_reload_mode_uses_import_string_and_project_policy(
     assert events[4][0] == "supervisor"
     assert events[4][3] == ["socket"]
     assert events[5][0] == "run"
-    assert isinstance(events[5][1], app_mod._AgencyReloadFilter)
+    assert isinstance(events[5][1], app_mod._FlowgencyReloadFilter)
     assert events[5][1].root == tmp_path.resolve()
 
 
@@ -150,7 +150,7 @@ def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
     root = tmp_path / "project"
     root.mkdir()
     config = uvicorn.Config(
-        "agency.app:app",
+        "flowgency.app:app",
         reload=True,
         reload_dirs=[str(root.resolve())],
         reload_includes=list(app_mod.RELOAD_INCLUDES),
@@ -160,13 +160,13 @@ def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
     assert supervisor.reloader_name == "WatchFiles"
 
     watched_paths = [
-        root / "agency" / "app.py",
-        root / "agency" / "templates" / "base.html",
-        root / "agency" / "static" / "app.css",
-        root / "agency" / "static" / "sw.js",
-        root / "agency" / "static" / "manifest.json",
-        root / "agency" / "themes" / "workshop.yaml",
-        root / "agency" / "themes" / "local.yml",
+        root / "flowgency" / "app.py",
+        root / "flowgency" / "templates" / "base.html",
+        root / "flowgency" / "static" / "app.css",
+        root / "flowgency" / "static" / "sw.js",
+        root / "flowgency" / "static" / "manifest.json",
+        root / "flowgency" / "themes" / "workshop.yaml",
+        root / "flowgency" / "themes" / "local.yml",
         root / "config.yaml",
     ]
     excluded_paths = [
@@ -217,7 +217,7 @@ def test_run_server_creates_config_before_starting_uvicorn(
 
     assert events == ["reload_groups", "uvicorn.run"]
     assert yaml.safe_load(config_path.read_text(encoding="utf-8")) == {
-        "agency": {"title": "Agency", "default_group": ""},
+        "flowgency": {"title": "Flowgency", "default_group": ""},
         "groups": {},
     }
     output = capsys.readouterr().out
@@ -233,7 +233,7 @@ Run:
 python -m pytest tests/test_server.py -v
 ```
 
-Expected: normal and first-run tests pass while reload tests fail because `WatchFilesReload`, `_AgencyReloadFilter`, or `_create_reload_supervisor` are not yet exposed by `agency.app`. If collection instead reports that `watchfiles` is missing, that is also the expected pre-dependency failure on a clean Windows install.
+Expected: normal and first-run tests pass while reload tests fail because `WatchFilesReload`, `_FlowgencyReloadFilter`, or `_create_reload_supervisor` are not yet exposed by `flowgency.app`. If collection instead reports that `watchfiles` is missing, that is also the expected pre-dependency failure on a clean Windows install.
 
 - [ ] **Step 3: Guarantee WatchFiles on Windows**
 
@@ -274,7 +274,7 @@ Import `WatchFilesReload` next to the existing Uvicorn import:
 from uvicorn.supervisors.watchfilesreload import WatchFilesReload
 ```
 
-Replace the existing server-only `main()` block at the end of `agency/app.py` with:
+Replace the existing server-only `main()` block at the end of `flowgency/app.py` with:
 
 ```python
 RELOAD_INCLUDES = (
@@ -299,7 +299,7 @@ RELOAD_EXCLUDE_DIRS = (
 )
 
 
-class _AgencyReloadFilter:
+class _FlowgencyReloadFilter:
     """Select watched source files without depending on directory existence."""
 
     def __init__(self, root: Path):
@@ -321,17 +321,17 @@ class _AgencyReloadFilter:
 
 
 def _create_reload_supervisor(config, server, sockets):
-    """Create Uvicorn's WatchFiles supervisor with Agency's path filter."""
+    """Create Uvicorn's WatchFiles supervisor with Flowgency's path filter."""
     supervisor = WatchFilesReload(config, target=server.run, sockets=sockets)
-    supervisor.watch_filter = _AgencyReloadFilter(config.reload_dirs[0])
+    supervisor.watch_filter = _FlowgencyReloadFilter(config.reload_dirs[0])
     return supervisor
 
 
 def _run_reload_server(host: str, port: int) -> None:
-    """Run Uvicorn's reload lifecycle with Agency's WatchFiles filter."""
+    """Run Uvicorn's reload lifecycle with Flowgency's WatchFiles filter."""
     reload_root = Path.cwd().resolve()
     config = uvicorn.Config(
-        "agency.app:app",
+        "flowgency.app:app",
         host=host,
         port=port,
         reload=True,
@@ -349,9 +349,9 @@ def _run_reload_server(host: str, port: int) -> None:
 
 
 def run_server(host: str, port: int, reload: bool = False) -> None:
-    """Initialize Agency and run the web server."""
+    """Initialize Flowgency and run the web server."""
     if not CONFIG_PATH.exists():
-        save_config({"agency": {"title": "Agency", "default_group": ""}, "groups": {}})
+        save_config({"flowgency": {"title": "Flowgency", "default_group": ""}, "groups": {}})
         print(f"First run — created config.yaml in {CONFIG_PATH.parent}")
         print(f"Visit http://localhost:{port}/admin/ to set up your first agent group.")
 
@@ -365,7 +365,7 @@ def run_server(host: str, port: int, reload: bool = False) -> None:
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Agency — Agent Management Dashboard")
+    parser = argparse.ArgumentParser(description="Flowgency — Agent Management Dashboard")
     parser.add_argument("--port", type=int, default=8500, help="Port to serve on (default: 8500)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
     parser.add_argument("--reload", action="store_true", help="Restart when project files change")
@@ -392,7 +392,7 @@ Expected: all focused server tests pass, including future deep artifact rejectio
 Run:
 
 ```powershell
-git add pyproject.toml agency/app.py tests/test_server.py
+git add pyproject.toml flowgency/app.py tests/test_server.py
 git commit -m "feat(server): add opt-in reload launcher"
 ```
 
@@ -401,12 +401,12 @@ Expected: one commit containing the watcher dependency, shared launcher, and fou
 ### Task 2: Public CLI Wiring
 
 **Files:**
-- Modify: `agency/cli.py:8-17,81-91,369-374`
+- Modify: `flowgency/cli.py:8-17,81-91,369-374`
 - Modify: `tests/test_cli.py:1-25`
 
 **Interfaces:**
 - Consumes: `run_server(host: str, port: int, reload: bool = False) -> None` from Task 1.
-- Produces: `christag-agency serve [--host HOST] [--port PORT] [--reload]`, with direct argument forwarding and no process-global argument mutation.
+- Produces: `flowgency serve [--host HOST] [--port PORT] [--reload]`, with direct argument forwarding and no process-global argument mutation.
 
 - [ ] **Step 1: Add failing CLI contract tests**
 
@@ -419,13 +419,13 @@ from argparse import Namespace
 import subprocess
 import sys
 
-from agency import cli
+from flowgency import cli
 
 
 def test_cli_help_shows_subcommands():
-    """Running agency --help should list available subcommands."""
+    """Running flowgency --help should list available subcommands."""
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli", "--help"],
+        [sys.executable, "-m", "flowgency.cli", "--help"],
         capture_output=True,
         text=True,
     )
@@ -436,9 +436,9 @@ def test_cli_help_shows_subcommands():
 
 
 def test_cli_no_args_shows_help():
-    """Running agency with no args should show help."""
+    """Running flowgency with no args should show help."""
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli"],
+        [sys.executable, "-m", "flowgency.cli"],
         capture_output=True,
         text=True,
     )
@@ -448,7 +448,7 @@ def test_cli_no_args_shows_help():
 
 def test_cli_serve_help_shows_reload():
     result = subprocess.run(
-        [sys.executable, "-m", "agency.cli", "serve", "--help"],
+        [sys.executable, "-m", "flowgency.cli", "serve", "--help"],
         capture_output=True,
         text=True,
     )
@@ -476,15 +476,15 @@ Run:
 python -m pytest tests/test_cli.py -v
 ```
 
-Expected: the existing two tests pass; `test_cli_serve_help_shows_reload` fails because help lacks `--reload`, and the forwarding test fails because `agency.cli` has no imported `run_server` attribute.
+Expected: the existing two tests pass; `test_cli_serve_help_shows_reload` fails because help lacks `--reload`, and the forwarding test fails because `flowgency.cli` has no imported `run_server` attribute.
 
 - [ ] **Step 3: Replace the argument bridge with direct launcher delegation**
 
-Add `run_server` to the existing `agency.app` import in `agency/cli.py`:
+Add `run_server` to the existing `flowgency.app` import in `flowgency/cli.py`:
 
 ```python
-from agency.app import (
-    load_config, reload_groups, get_agency_config, get_group,
+from flowgency.app import (
+    load_config, reload_groups, get_flowgency_config, get_group,
     list_observations, list_proposals, list_decisions,
     collect_agents_with_identity, extract_display_title,
     parse_frontmatter, update_frontmatter_field,
@@ -509,7 +509,7 @@ Add the new flag to the existing `serve` parser:
     p.add_argument("--reload", action="store_true", help="Restart when project files change")
 ```
 
-Do not remove `sys`; the rest of `agency/cli.py` still uses it for errors and process exits.
+Do not remove `sys`; the rest of `flowgency/cli.py` still uses it for errors and process exits.
 
 - [ ] **Step 4: Run both server and CLI tests**
 
@@ -526,8 +526,8 @@ Expected: `10 passed`.
 Run:
 
 ```powershell
-christag-agency serve --help
-python -m agency.app --help
+flowgency serve --help
+python -m flowgency.app --help
 ```
 
 Expected: both help screens list `--host`, `--port`, and `--reload`; neither command starts a server.
@@ -537,7 +537,7 @@ Expected: both help screens list `--host`, `--port`, and `--reload`; neither com
 Run:
 
 ```powershell
-git add agency/cli.py tests/test_cli.py
+git add flowgency/cli.py tests/test_cli.py
 git commit -m "feat(cli): expose serve reload option"
 ```
 
@@ -551,7 +551,7 @@ Expected: one commit containing CLI delegation and its tests. `.vscode/tasks.jso
 - Modify: `kb/getting-started.md:9-18`
 
 **Interfaces:**
-- Consumes: the installed `christag-agency serve --reload` command from Task 2.
+- Consumes: the installed `flowgency serve --reload` command from Task 2.
 - Produces: one VS Code hot-reload task using the supported CLI and concise development documentation describing watcher scope and config-save restarts.
 
 - [ ] **Step 1: Capture the existing task-file diff before editing**
@@ -569,7 +569,7 @@ Expected: the feature diff includes the existing changes to the normal `Serve da
 Run:
 
 ```powershell
-python -c "from pathlib import Path; task=Path('.vscode/tasks.json').read_text(); readme=Path('README.md').read_text(); guide=Path('kb/getting-started.md').read_text(); assert '\"--reload\"' in task and 'agency.app:app' not in task and 'christag-agency serve --reload' in readme and 'christag-agency serve --reload' in guide"
+python -c "from pathlib import Path; task=Path('.vscode/tasks.json').read_text(); readme=Path('README.md').read_text(); guide=Path('kb/getting-started.md').read_text(); assert '\"--reload\"' in task and 'flowgency.app:app' not in task and 'flowgency serve --reload' in readme and 'flowgency serve --reload' in guide"
 ```
 
 Expected: `AssertionError` because the task still bypasses the CLI and the development command is not documented.
@@ -586,8 +586,8 @@ In `.vscode/tasks.json`, replace only the complete `Serve dashboard (hot-reload)
         "--host",
         "127.0.0.1"
       ],
-      "command": "christag-agency",
-      "detail": "Start the Agency dashboard with hot-reload on http://127.0.0.1:8500",
+      "command": "flowgency",
+      "detail": "Start the Flowgency dashboard with hot-reload on http://127.0.0.1:8500",
       "group": "none",
       "isBackground": true,
       "label": "Serve dashboard (hot-reload)",
@@ -618,29 +618,29 @@ In `README.md`, replace the Quick Start command block and the paragraph through 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e .
-.venv/bin/christag-agency serve
+.venv/bin/flowgency serve
 ```
 
-On first run, a setup wizard walks you through pointing Agency at your agent directory. It auto-detects your agents, creates the shared folder structure, and drops you into your dashboard.
+On first run, a setup wizard walks you through pointing Flowgency at your agent directory. It auto-detects your agents, creates the shared folder structure, and drops you into your dashboard.
 
 Visit `http://localhost:8500`.
 
 For development, start the same server with reload enabled:
 
 ```bash
-.venv/bin/christag-agency serve --reload
+.venv/bin/flowgency serve --reload
 ```
 
-Reload mode watches project code, templates, static assets, themes, and `config.yaml`. Saving Agency runtime records under a group's `shared/` directory does not restart the server.
+Reload mode watches project code, templates, static assets, themes, and `config.yaml`. Saving Flowgency runtime records under a group's `shared/` directory does not restart the server.
 ````
 
-In `kb/getting-started.md`, replace the First Run command with `christag-agency serve`, then insert this section after the first-run explanation:
+In `kb/getting-started.md`, replace the First Run command with `flowgency serve`, then insert this section after the first-run explanation:
 
 ````markdown
 ## Development Reload
 
 ```bash
-christag-agency serve --reload
+flowgency serve --reload
 ```
 
 Reload mode watches the current working directory for Python code, templates, static assets, themes, and YAML/JSON configuration. Changes to `config.yaml`, including saves from the admin UI, restart the development server. Runtime records under group `shared/` directories are excluded.
@@ -651,7 +651,7 @@ Reload mode watches the current working directory for Python code, templates, st
 Run:
 
 ```powershell
-python -c "from pathlib import Path; task=Path('.vscode/tasks.json').read_text(); readme=Path('README.md').read_text(); guide=Path('kb/getting-started.md').read_text(); assert '\"--reload\"' in task and 'agency.app:app' not in task and 'christag-agency serve --reload' in readme and 'christag-agency serve --reload' in guide; print('reload task and docs verified')"
+python -c "from pathlib import Path; task=Path('.vscode/tasks.json').read_text(); readme=Path('README.md').read_text(); guide=Path('kb/getting-started.md').read_text(); assert '\"--reload\"' in task and 'flowgency.app:app' not in task and 'flowgency serve --reload' in readme and 'flowgency serve --reload' in guide; print('reload task and docs verified')"
 ```
 
 Expected: prints `reload task and docs verified`.
@@ -671,7 +671,7 @@ Expected: the suite completes with zero failures.
 In terminal A, run:
 
 ```powershell
-christag-agency serve --reload --host 127.0.0.1 --port 8501
+flowgency serve --reload --host 127.0.0.1 --port 8501
 ```
 
 Expected: Uvicorn reports a reloader process using `WatchFiles`, followed by application startup on `http://127.0.0.1:8501`.

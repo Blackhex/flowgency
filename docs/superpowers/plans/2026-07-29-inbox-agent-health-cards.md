@@ -13,14 +13,14 @@
 
 **Goal:** Turn the Inbox fleet bar into a card grid that shows every agent's last run and next run, names the fault on unhealthy agents, and files those faults as Attention Queue items.
 
-**Architecture:** `agency/health.py` grows from returning a severity string to returning the routine that caused it, and pairs the existing colour with a reason `kind`. `agency/app.py` gains one `_apply_agent_status` helper that both fleet builders call, so the two code paths cannot drift. All user-visible strings are composed in Python and asserted in tests; the templates only place them.
+**Architecture:** `flowgency/health.py` grows from returning a severity string to returning the routine that caused it, and pairs the existing colour with a reason `kind`. `flowgency/app.py` gains one `_apply_agent_status` helper that both fleet builders call, so the two code paths cannot drift. All user-visible strings are composed in Python and asserted in tests; the templates only place them.
 
 **Tech Stack:** Python 3.11+, FastAPI, Jinja2, Tailwind utility classes, pytest, Playwright.
 
 ## Global Constraints
 
 - Work in the existing worktree `.worktrees/inbox-agent-health-cards` on branch `feat/inbox-agent-health-cards`. Run every command from that directory.
-- Run tests with `python -m pytest` from the worktree root. This repo has no `.venv`, despite what AGENTS.md says; `python` is 3.13 with the package installed editable, and running from the worktree root is what makes `import agency` resolve to the worktree rather than the main checkout. Baseline before this branch: 1491 passed, 2 skipped, about four minutes.
+- Run tests with `python -m pytest` from the worktree root. This repo has no `.venv`, despite what AGENTS.md says; `python` is 3.13 with the package installed editable, and running from the worktree root is what makes `import flowgency` resolve to the worktree rather than the main checkout. Baseline before this branch: 1491 passed, 2 skipped, about four minutes.
 - The specification is `docs/superpowers/specs/2026-07-29-inbox-agent-health-cards-design.md`. Its assets are `docs/superpowers/specs/assets/2026-07-29-inbox-agent-health-cards/fleet-cards.png` and `attention-queue.png`, rendered from `inbox-fleet-cards.html` in the same directory. The images are normative for layout, ordering, and copy; the prose is normative for behavior. Compare the rendered page against both images before calling Task 4 or Task 5 complete.
 - The health model is fixed. Four colours, the precedence `job_failed > overdue > due > never_run > healthy`, `grace_window(interval) == interval + 2 minutes`, and the marker file names all stay exactly as they are. `evaluate_agent_health` keeps its signature and its return values.
 - `running` is orthogonal: it changes the dot glyph and the next-run cell only. It never changes `color` or `kind`, and a running agent never produces a queue item.
@@ -36,11 +36,11 @@
 
 | File | Responsibility | Change |
 | --- | --- | --- |
-| `agency/health.py` | Pure health model over plain values | Add `Lateness`, `schedule_lateness`, `AgentHealth`, `describe_agent_health`, `elapsed_coarse`, `elapsed_precise`; reimplement `schedule_state` on top of `schedule_lateness` |
-| `agency/app.py` | Fleet assembly and dashboard route | Replace `_agent_health` with `_apply_agent_status`; add `_fault_line`, `_health_sentence`, `build_health_items`, the `initials` filter; wire the home route |
-| `agency/templates/home.html` | Inbox rendering | Zone 1 becomes a card grid; Zone 3 gains health items |
-| `agency/web/routes/agent_detail.py` | Agent Detail contexts | `_routines_context` gains a schedule status table |
-| `agency/templates/agent_detail_routines.html` | Routines tab | Render the status table above the form |
+| `flowgency/health.py` | Pure health model over plain values | Add `Lateness`, `schedule_lateness`, `AgentHealth`, `describe_agent_health`, `elapsed_coarse`, `elapsed_precise`; reimplement `schedule_state` on top of `schedule_lateness` |
+| `flowgency/app.py` | Fleet assembly and dashboard route | Replace `_agent_health` with `_apply_agent_status`; add `_fault_line`, `_health_sentence`, `build_health_items`, the `initials` filter; wire the home route |
+| `flowgency/templates/home.html` | Inbox rendering | Zone 1 becomes a card grid; Zone 3 gains health items |
+| `flowgency/web/routes/agent_detail.py` | Agent Detail contexts | `_routines_context` gains a schedule status table |
+| `flowgency/templates/agent_detail_routines.html` | Routines tab | Render the status table above the form |
 | `tests/test_health.py` | Health model unit tests | Cases for the four new functions |
 | `tests/test_agent_status.py` | Fleet assembly tests | Cases for `_apply_agent_status` |
 | `tests/test_dashboard.py` | Rendered page tests | Cards, fault lines, queue items, counters |
@@ -52,7 +52,7 @@
 ### Task 1: Lateness carries the offending routine
 
 **Files:**
-- Modify: `agency/health.py`
+- Modify: `flowgency/health.py`
 - Test: `tests/test_health.py`
 
 **Interfaces:**
@@ -67,7 +67,7 @@
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_health.py`. Add `Lateness`, `elapsed_coarse`, `elapsed_precise`, and `schedule_lateness` to the existing `from agency.health import (...)` block at the top of the file.
+Append to `tests/test_health.py`. Add `Lateness`, `elapsed_coarse`, `elapsed_precise`, and `schedule_lateness` to the existing `from flowgency.health import (...)` block at the top of the file.
 
 ```python
 def _lateness(tmp_path, *schedules, now=NOW):
@@ -167,11 +167,11 @@ def test_last_fired_at_reads_the_every_marker(tmp_path):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest tests/test_health.py -v`
-Expected: collection error, `ImportError: cannot import name 'Lateness' from 'agency.health'`.
+Expected: collection error, `ImportError: cannot import name 'Lateness' from 'flowgency.health'`.
 
 - [ ] **Step 3: Add the lateness value and the elapsed formatters**
 
-In `agency/health.py`, add `Lateness` directly below the existing `RoutineSchedule` class:
+In `flowgency/health.py`, add `Lateness` directly below the existing `RoutineSchedule` class:
 
 ```python
 class Lateness(NamedTuple):
@@ -239,7 +239,7 @@ module already owns. Marker naming must have exactly one definition.
 
 - [ ] **Step 4: Convert the private state helpers to return a `Lateness`**
 
-Replace `schedule_state`, `_routine_state`, `_at_state`, `_every_state`, and `_lateness` in `agency/health.py` with:
+Replace `schedule_state`, `_routine_state`, `_at_state`, `_every_state`, and `_lateness` in `flowgency/health.py` with:
 
 ```python
 def schedule_lateness(
@@ -384,7 +384,7 @@ Expected: PASS. `schedule_state` is behaviour-preserving, so nothing downstream 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/health.py tests/test_health.py
+git add flowgency/health.py tests/test_health.py
 git commit -m "feat(health): report which routine is late"
 ```
 
@@ -393,7 +393,7 @@ git commit -m "feat(health): report which routine is late"
 ### Task 2: Pair the health colour with its reason
 
 **Files:**
-- Modify: `agency/health.py`
+- Modify: `flowgency/health.py`
 - Test: `tests/test_health.py`
 
 **Interfaces:**
@@ -483,7 +483,7 @@ Expected: collection error, `ImportError: cannot import name 'AgentHealth'`.
 
 - [ ] **Step 3: Implement the description**
 
-In `agency/health.py`, add below `evaluate_agent_health`:
+In `flowgency/health.py`, add below `evaluate_agent_health`:
 
 ```python
 class AgentHealth(NamedTuple):
@@ -532,7 +532,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/health.py tests/test_health.py
+git add flowgency/health.py tests/test_health.py
 git commit -m "feat(health): describe why an agent is unhealthy"
 ```
 
@@ -541,7 +541,7 @@ git commit -m "feat(health): describe why an agent is unhealthy"
 ### Task 3: One fleet-entry enricher for both builders
 
 **Files:**
-- Modify: `agency/app.py`
+- Modify: `flowgency/app.py`
 - Test: `tests/test_agent_status.py`
 
 **Interfaces:**
@@ -553,7 +553,7 @@ git commit -m "feat(health): describe why an agent is unhealthy"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_agent_status.py`. Extend the `from agency.app import (...)` block with `_apply_agent_status`.
+Append to `tests/test_agent_status.py`. Extend the `from flowgency.app import (...)` block with `_apply_agent_status`.
 
 ```python
 NOW = datetime(2026, 7, 29, 11, 46, 0)
@@ -576,7 +576,7 @@ def _fleet_group(tmp_path, routines):
 def _enrich(tmp_path, routines):
     g = _fleet_group(tmp_path, routines)
     agent = {"name": "product"}
-    with patch("agency.app.clock_now", return_value=NOW):
+    with patch("flowgency.app.clock_now", return_value=NOW):
         _apply_agent_status(g, agent, routines, ENABLED_DISPATCH)
     return agent
 
@@ -612,7 +612,7 @@ def test_enricher_ignores_schedules_when_dispatch_is_off(tmp_path):
     g = _fleet_group(tmp_path, [{"id": "suite-health", "schedule": {"at": "08:00"}}])
     g["dispatch"] = {"enabled": False}
     agent = {"name": "product"}
-    with patch("agency.app.clock_now", return_value=NOW):
+    with patch("flowgency.app.clock_now", return_value=NOW):
         _apply_agent_status(g, agent, g["agents_full"][0]["routines"], {"enabled": False})
     assert agent["health_kind"] == "never_run"
     assert agent["next_run"] is None
@@ -621,14 +621,14 @@ def test_enricher_ignores_schedules_when_dispatch_is_off(tmp_path):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest tests/test_agent_status.py -k enricher -v`
-Expected: `ImportError: cannot import name '_apply_agent_status' from 'agency.app'`.
+Expected: `ImportError: cannot import name '_apply_agent_status' from 'flowgency.app'`.
 
-- [ ] **Step 3: Extend the health imports in `agency/app.py`**
+- [ ] **Step 3: Extend the health imports in `flowgency/app.py`**
 
-The existing block imports `evaluate_agent_health`, `grace_window`, `routine_schedules`, and `schedule_state` from `agency.health`. Replace `schedule_state` with the new names and drop `evaluate_agent_health`, which is now reached through `describe_agent_health`:
+The existing block imports `evaluate_agent_health`, `grace_window`, `routine_schedules`, and `schedule_state` from `flowgency.health`. Replace `schedule_state` with the new names and drop `evaluate_agent_health`, which is now reached through `describe_agent_health`:
 
 ```python
-from agency.health import (
+from flowgency.health import (
     describe_agent_health,
     elapsed_coarse,
     elapsed_precise,
@@ -737,7 +737,7 @@ def _apply_agent_status(g: dict, agent: dict, routines, dispatch_cfg: dict) -> N
     )
 ```
 
-`_health_sentence` calls `relative_time`, which is defined earlier in the module, and `timedelta`, which `agency/app.py` already imports.
+`_health_sentence` calls `relative_time`, which is defined earlier in the module, and `timedelta`, which `flowgency/app.py` already imports.
 
 - [ ] **Step 5: Route `collect_agents_with_identity` through the enricher**
 
@@ -807,7 +807,7 @@ Expected: PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agency/app.py tests/test_agent_status.py
+git add flowgency/app.py tests/test_agent_status.py
 git commit -m "refactor(dashboard): enrich fleet entries in one place"
 ```
 
@@ -816,7 +816,7 @@ git commit -m "refactor(dashboard): enrich fleet entries in one place"
 ### Task 4: Fleet cards
 
 **Files:**
-- Modify: `agency/app.py`, `agency/templates/home.html`
+- Modify: `flowgency/app.py`, `flowgency/templates/home.html`
 - Test: `tests/test_dashboard.py`
 
 **Interfaces:**
@@ -851,7 +851,7 @@ def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
     client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
 
-    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+    with patch("flowgency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
 
     assert "daily-review due 09:00" in response.text
@@ -863,11 +863,11 @@ def test_overdue_agent_renders_a_fault_line(monkeypatch, tmp_path, raw_config):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest tests/test_dashboard.py -k "initials or fleet_cards or fault_line" -v`
-Expected: `AttributeError: module 'agency.app' has no attribute 'initials'`.
+Expected: `AttributeError: module 'flowgency.app' has no attribute 'initials'`.
 
 - [ ] **Step 3: Add the `initials` filter**
 
-In `agency/app.py`, add beside the other filter registrations, immediately after `templates.env.filters["relative_future"] = relative_future`:
+In `flowgency/app.py`, add beside the other filter registrations, immediately after `templates.env.filters["relative_future"] = relative_future`:
 
 ```python
 def initials(name: str) -> str:
@@ -883,7 +883,7 @@ def initials(name: str) -> str:
 templates.env.filters["initials"] = initials
 ```
 
-- [ ] **Step 4: Replace Zone 1 in `agency/templates/home.html`**
+- [ ] **Step 4: Replace Zone 1 in `flowgency/templates/home.html`**
 
 Replace the whole `<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">` block and its `{% for a in fleet_agents %}` body — everything between `{% if fleet_agents %}` and the `<div class="mt-1.5 ...">` counter line — with:
 
@@ -949,7 +949,7 @@ Leave the `<div class="mt-1.5 ...">` counter line and the `{% else %}No agents c
 
 - [ ] **Step 5: Register the `elapsed` filter the template uses**
 
-The template renders `a.health_late | elapsed`. In `agency/app.py`, beside the `initials` registration:
+The template renders `a.health_late | elapsed`. In `flowgency/app.py`, beside the `initials` registration:
 
 ```python
 templates.env.filters["elapsed"] = elapsed_coarse
@@ -962,13 +962,13 @@ Expected: PASS, including `test_dashboard_reports_never_run_agents_separately`, 
 
 - [ ] **Step 7: Compare the rendered page against the sketch**
 
-Run: `python -m agency.app`
+Run: `python -m flowgency.app`
 Open `http://127.0.0.1:8500/atreides/`. Confirm against `docs/superpowers/specs/assets/2026-07-29-inbox-agent-health-cards/fleet-cards.png`: three cards per row, initials avatars, Duncan Idaho rose with `overdue 3h` and the fault line `suite-health due 08:00`, Paul Atreides dimmed and reading `never run` and an em dash, the other three green with a `Nd ago` / `Nd away` pair. Stop the server.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add agency/app.py agency/templates/home.html tests/test_dashboard.py
+git add flowgency/app.py flowgency/templates/home.html tests/test_dashboard.py
 git commit -m "feat(dashboard): render the fleet as health cards"
 ```
 
@@ -977,7 +977,7 @@ git commit -m "feat(dashboard): render the fleet as health cards"
 ### Task 5: Attention Queue health items
 
 **Files:**
-- Modify: `agency/app.py`, `agency/templates/home.html`
+- Modify: `flowgency/app.py`, `flowgency/templates/home.html`
 - Test: `tests/test_dashboard.py`
 
 **Interfaces:**
@@ -1020,7 +1020,7 @@ def test_overdue_agent_appears_in_the_attention_queue(monkeypatch, tmp_path, raw
     client, _, group_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     (group_root / "logs" / "2026-07-16" / "advisor-run.out").write_text("x", encoding="utf-8")
 
-    with patch("agency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
+    with patch("flowgency.app.clock_now", return_value=datetime(2026, 7, 16, 12, 0)):
         response = client.get("/newsletter/")
 
     assert "Routine daily-review was due at 09:00" in response.text
@@ -1039,11 +1039,11 @@ def test_never_run_agent_produces_no_queue_item(monkeypatch, tmp_path, raw_confi
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest tests/test_dashboard.py -k "health_items or running_agent or attention_queue or no_queue_item" -v`
-Expected: `AttributeError: module 'agency.app' has no attribute 'build_health_items'`.
+Expected: `AttributeError: module 'flowgency.app' has no attribute 'build_health_items'`.
 
 - [ ] **Step 3: Implement the builder**
 
-In `agency/app.py`, add immediately after `build_dashboard_fleet`:
+In `flowgency/app.py`, add immediately after `build_dashboard_fleet`:
 
 ```python
 _HEALTH_LABELS = {
@@ -1107,7 +1107,7 @@ Add `"health_items": health_items,` to the `TemplateResponse` context beside `"a
 
 - [ ] **Step 5: Render health items in Zone 3**
 
-In `agency/templates/home.html`, change the Attention Queue guard from
+In `flowgency/templates/home.html`, change the Attention Queue guard from
 
 ```html
     {% if actionable_proposals or open_observations or floated_observations %}
@@ -1134,9 +1134,9 @@ and insert this block immediately after that line, above the `{# ─ Proposals (
       <div class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ h.last_line }}</div>
       {% endif %}
       <div class="mt-1.5 flex flex-wrap gap-3 text-sm">
-        <a href="{{ h.routines_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Open routine</a>
-        {% if h.job_href %}<a href="{{ h.job_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Last job log</a>{% endif %}
-        <a href="{{ h.run_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Run now</a>
+        <a href="{{ h.routines_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Open routine</a>
+        {% if h.job_href %}<a href="{{ h.job_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Last job log</a>{% endif %}
+        <a href="{{ h.run_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Run now</a>
       </div>
     </div>
     {% endfor %}
@@ -1149,7 +1149,7 @@ Expected: PASS.
 
 - [ ] **Step 7: Compare the rendered queue against the sketch**
 
-Run: `python -m agency.app`
+Run: `python -m flowgency.app`
 Open `http://127.0.0.1:8500/atreides/`. Confirm against `attention-queue.png`: the header counts one item, the card reads `overdue`, a `Duncan Idaho` pill, the full sentence with the compound `3h NNm late`, the monospace last-run line, and the three links. Confirm the fleet footer's `1 needs attention` and the queue can no longer disagree. Stop the server.
 
 - [ ] **Step 8: Run the full suite**
@@ -1160,7 +1160,7 @@ Expected: PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agency/app.py agency/templates/home.html tests/test_dashboard.py
+git add flowgency/app.py flowgency/templates/home.html tests/test_dashboard.py
 git commit -m "feat(dashboard): file agent faults in the attention queue"
 ```
 
@@ -1169,11 +1169,11 @@ git commit -m "feat(dashboard): file agent faults in the attention queue"
 ### Task 6: Schedule status on the Routines tab
 
 **Files:**
-- Modify: `agency/web/routes/agent_detail.py`, `agency/templates/agent_detail_routines.html`
+- Modify: `flowgency/web/routes/agent_detail.py`, `flowgency/templates/agent_detail_routines.html`
 - Test: `tests/test_agent_detail.py`
 
 **Interfaces:**
-- Consumes: `schedule_lateness`, `elapsed_coarse`, `grace_window`, `routine_schedules` from Tasks 1 and 2; `parse_every`, `at_marker_path`, `every_marker_path` from `agency.dispatch.schedule`; the existing `resolve_group_paths`.
+- Consumes: `schedule_lateness`, `elapsed_coarse`, `grace_window`, `routine_schedules` from Tasks 1 and 2; `parse_every`, `at_marker_path`, `every_marker_path` from `flowgency.dispatch.schedule`; the existing `resolve_group_paths`.
 - Produces: a `routine_status` key in `_routines_context`, a list of `{"routine_id", "schedule", "last_fired", "next_due"}` dictionaries in configured order.
 
 - [ ] **Step 1: Write the failing test**
@@ -1204,7 +1204,7 @@ Expected: FAIL, `assert 'Schedule status' in ...`.
 
 - [ ] **Step 3: Build the status rows**
 
-In `agency/web/routes/agent_detail.py`, add above `_routines_context`:
+In `flowgency/web/routes/agent_detail.py`, add above `_routines_context`:
 
 ```python
 def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
@@ -1212,7 +1212,7 @@ def _routine_status(snapshot, group_id: str, instance) -> list[dict[str, Any]]:
     group = snapshot.config.groups[group_id]
     logs_root = resolve_group_paths(group).logs
     now = clock_now()
-    grace = grace_window(int(snapshot.config.agency.dispatch.interval))
+    grace = grace_window(int(snapshot.config.flowgency.dispatch.interval))
     rows = []
     for schedule in routine_schedules(instance.routines):
         if schedule.conditional:
@@ -1267,12 +1267,12 @@ def _next_due_text(schedule, logs_root, agent_name, now, grace) -> str:
     return "due now"
 ```
 
-Add the imports this needs to the top of `agency/web/routes/agent_detail.py`.
-`resolve_group_paths` is already imported from `agency.configuration`; add only:
+Add the imports this needs to the top of `flowgency/web/routes/agent_detail.py`.
+`resolve_group_paths` is already imported from `flowgency.configuration`; add only:
 
 ```python
-from agency.clock import now as clock_now
-from agency.health import (
+from flowgency.clock import now as clock_now
+from flowgency.health import (
     elapsed_coarse,
     grace_window,
     last_fired_at,
@@ -1287,7 +1287,7 @@ In `_routines_context`, add `"routine_status": _routine_status(snapshot, group_i
 
 - [ ] **Step 4: Render the table**
 
-In `agency/templates/agent_detail_routines.html`, insert above the `<form ...>` element:
+In `flowgency/templates/agent_detail_routines.html`, insert above the `<form ...>` element:
 
 ```html
   {% if routine_status %}
@@ -1320,7 +1320,7 @@ Expected: PASS. The `409` re-render paths pass `overrides` that omit `routine_st
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/web/routes/agent_detail.py agency/templates/agent_detail_routines.html tests/test_agent_detail.py
+git add flowgency/web/routes/agent_detail.py flowgency/templates/agent_detail_routines.html tests/test_agent_detail.py
 git commit -m "feat(agents): show what each routine actually fired"
 ```
 

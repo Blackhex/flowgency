@@ -20,7 +20,7 @@ def test_base_integration_does_not_advertise_interactive_setup(tmp_path: Path) -
     request = InteractiveSetupRequest(
         data_root=tmp_path,
         config_path=tmp_path / "config.yaml",
-        prompt="Set up Agency.",
+        prompt="Set up Flowgency.",
     )
 
     assert integration.interactive_setup_available() is False
@@ -62,7 +62,7 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
     request = InteractiveSetupRequest(
         data_root=tmp_path,
         config_path=tmp_path / "flowgency.yaml",
-        prompt="Use the agency-setup skill.",
+        prompt="Use the flowgency-setup skill.",
     )
 
     result = integration.launch_interactive_setup(request)
@@ -74,7 +74,7 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
         "--add-dir",
         str(copilot_discovery_root()),
         "-i",
-        "Use the agency-setup skill.",
+        "Use the flowgency-setup skill.",
         "--name",
         "Flowgency setup",
     )
@@ -105,14 +105,14 @@ def test_copilot_builds_fallback_command_without_launch(
     request = InteractiveSetupRequest(
         data_root=tmp_path,
         config_path=tmp_path / "flowgency.yaml",
-        prompt="Use the agency-setup skill.",
+        prompt="Use the flowgency-setup skill.",
     )
 
     assert integration.interactive_setup_fallback_command(request) == (
         "& 'C:\\Program Files\\GitHub Copilot\\copilot.exe' "
         f"'-C' '{tmp_path.resolve()}' "
         f"'--add-dir' '{copilot_discovery_root()}' "
-        "'-i' 'Use the agency-setup skill.' "
+        "'-i' 'Use the flowgency-setup skill.' "
         "'--name' 'Flowgency setup'"
     )
 
@@ -158,7 +158,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
     request = InteractiveSetupRequest(
         data_root=project_dir,
         config_path=tmp_path / "flowgency.yaml",
-        prompt="Use the agency-setup skill.",
+        prompt="Use the flowgency-setup skill.",
     )
 
     result = integration.launch_interactive_setup(request)
@@ -180,7 +180,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
         "--add-dir",
         str(copilot_discovery_root()),
         "-i",
-        "Use the agency-setup skill.",
+        "Use the flowgency-setup skill.",
         "--name",
         "Flowgency setup",
     )
@@ -194,7 +194,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
         f"'-ExecutionPolicy' 'Bypass' '-File' '{ps1_wrapper}' "
         f"'-C' '{project_dir.resolve()}' "
         f"'--add-dir' '{copilot_discovery_root()}' "
-        "'-i' 'Use the agency-setup skill.' "
+        "'-i' 'Use the flowgency-setup skill.' "
         "'--name' 'Flowgency setup'"
     )
 
@@ -233,7 +233,7 @@ def test_copilot_interactive_setup_unavailable_without_safe_windows_route(
     request = InteractiveSetupRequest(
         data_root=project_dir,
         config_path=tmp_path / "flowgency.yaml",
-        prompt="Use the agency-setup skill.",
+        prompt="Use the flowgency-setup skill.",
     )
 
     assert integration.interactive_setup_available() is False
@@ -341,14 +341,14 @@ def test_spawn_interactive_terminal_windows_launches_direct_process(
         "-C",
         str(project_dir.resolve()),
         "-i",
-        "Set up Agency.",
+        "Set up Flowgency.",
     ]
     result = spawn_interactive_terminal(command, project_dir)
 
     assert result == (
         "& 'C:\\Program Files\\GitHub Copilot\\copilot.exe' "
         f"'-C' '{project_dir.resolve()}' "
-        "'-i' 'Set up Agency.'"
+        "'-i' 'Set up Flowgency.'"
     )
     assert calls == [
         (
@@ -407,7 +407,7 @@ def test_spawn_interactive_terminal_posix_uses_separate_argv_for_xterm_like_term
 
     from flowgency.integrations.interactive import spawn_interactive_terminal
 
-    command = ["copilot", "-i", "Set up Agency."]
+    command = ["copilot", "-i", "Set up Flowgency."]
     result = spawn_interactive_terminal(command, tmp_path)
 
     assert result == shlex.join(command)
@@ -442,7 +442,7 @@ def test_spawn_interactive_terminal_posix_uses_double_dash_for_gnome_terminal(
 
     from flowgency.integrations.interactive import spawn_interactive_terminal
 
-    command = ["copilot", "-i", "Set up Agency."]
+    command = ["copilot", "-i", "Set up Flowgency."]
     result = spawn_interactive_terminal(command, tmp_path)
 
     assert result == shlex.join(command)
@@ -477,7 +477,7 @@ def test_spawn_interactive_terminal_posix_quotes_joined_command_for_string_e_ter
 
     from flowgency.integrations.interactive import spawn_interactive_terminal
 
-    command = ["copilot", "-i", "Set up Agency."]
+    command = ["copilot", "-i", "Set up Flowgency."]
     result = spawn_interactive_terminal(command, tmp_path)
 
     assert result == shlex.join(command)
@@ -527,7 +527,7 @@ def test_copilot_rejects_missing_packaged_setup_skill(monkeypatch, tmp_path):
     request = InteractiveSetupRequest(
         data_root=tmp_path,
         config_path=tmp_path / "config.yaml",
-        prompt="Use the agency-setup skill.",
+        prompt="Use the flowgency-setup skill.",
     )
 
     with pytest.raises(IntegrationError, match="reinstall flowgency"):
@@ -535,7 +535,7 @@ def test_copilot_rejects_missing_packaged_setup_skill(monkeypatch, tmp_path):
 
 
 def test_copilot_rejects_shadowing_data_root_skill(monkeypatch, tmp_path):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     local_skill = data_root / ".github" / "skills" / "flowgency-setup"
     local_skill.mkdir(parents=True)
     (local_skill / "SKILL.md").write_text("local\n", encoding="utf-8")
@@ -548,7 +548,7 @@ def test_copilot_rejects_shadowing_data_root_skill(monkeypatch, tmp_path):
     request = InteractiveSetupRequest(
         data_root=data_root,
         config_path=tmp_path / "config.yaml",
-        prompt="Use the agency-setup skill.",
+        prompt="Use the flowgency-setup skill.",
     )
 
     with pytest.raises(IntegrationError, match=re.escape(str(local_skill))):
@@ -565,7 +565,7 @@ def test_copilot_accepts_repository_link_to_canonical_skill(monkeypatch):
     request = InteractiveSetupRequest(
         data_root=repository_root,
         config_path=repository_root / "config.yaml",
-        prompt="Use the agency-setup skill.",
+        prompt="Use the flowgency-setup skill.",
     )
 
     command = CopilotIntegration()._interactive_setup_command(request)
@@ -599,7 +599,7 @@ def test_copilot_rejects_unreadable_packaged_setup_skill(monkeypatch, tmp_path):
     request = InteractiveSetupRequest(
         data_root=tmp_path,
         config_path=tmp_path / "config.yaml",
-        prompt="Use the agency-setup skill.",
+        prompt="Use the flowgency-setup skill.",
     )
 
     with pytest.raises(IntegrationError, match="reinstall flowgency"):

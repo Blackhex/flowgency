@@ -5,11 +5,11 @@
 
 ## Summary
 
-Add a new integration that lets Agency manage agents powered by the GitHub
+Add a new integration that lets Flowgency manage agents powered by the GitHub
 Copilot CLI. The integration follows the existing sidecar-based plugin pattern
 (as used by `codex`): `AGENTS.md` as the identity file plus an
-`.agency-meta.yaml` sidecar for display metadata. Copilot can both run/dispatch
-agents and serve as Agency's own AI backbone.
+`.flowgency-meta.yaml` sidecar for display metadata. Copilot can both run/dispatch
+agents and serve as Flowgency's own AI backbone.
 
 ## Model Rationale
 
@@ -19,24 +19,24 @@ as flat files `.github/agents/<name>.agent.md` invoked via `copilot --agent
 <name>`. There is no native concept of a per-agent directory with its own
 `memory.md`.
 
-Agency's model is directory-per-agent. Rather than reshape Agency to Copilot's
-flat-file model, this integration keeps Agency's convention — exactly as Agency
+Flowgency's model is directory-per-agent. Rather than reshape Flowgency to Copilot's
+flat-file model, this integration keeps Flowgency's convention — exactly as Flowgency
 already ignores Claude Code's native `.claude/agents/` flat files in favor of
-directory-per-agent. Each Agency agent is an isolated directory; Copilot runs
+directory-per-agent. Each Flowgency agent is an isolated directory; Copilot runs
 with `cwd=agent_dir` and reads that directory's `AGENTS.md`. Copilot's native
 `--agent` / `.github/agents/` feature is intentionally unused, consistent with
 every other integration.
 
 ## Motivation
 
-Agency already supports Claude Code, Codex, Gemini, Aider, Goose, OpenCode, and
+Flowgency already supports Claude Code, Codex, Gemini, Aider, Goose, OpenCode, and
 Pi. GitHub Copilot now ships a non-interactive CLI (`copilot -p`), making it a
 viable execution engine for autonomous agent dispatch. Adding it lets users run
 Copilot-backed agents alongside the rest of their fleet.
 
 ## Design
 
-### New file: `agency/integrations/agency/copilot.py`
+### New file: `flowgency/integrations/flowgency/copilot.py`
 
 A `CopilotIntegration(BaseIntegration)` class mirroring the sidecar pattern in
 `codex.py` / `opencode.py`.
@@ -74,7 +74,7 @@ whenever its marker is present; a bare `AGENTS.md` folder still falls through to
 ### Identity
 
 The identity file is `AGENTS.md` — plain markdown, with `display_name` /
-`title` / `emoji` stored in the `.agency-meta.yaml` sidecar. This is identical
+`title` / `emoji` stored in the `.flowgency-meta.yaml` sidecar. This is identical
 to `codex`'s identity handling.
 
 - `identity_filename()` → `"AGENTS.md"`
@@ -99,7 +99,7 @@ copilot -p "<text>" --autopilot --experimental
 
 A one-shot query with no working directory. Returns stdout; raises
 `IntegrationError` on non-zero exit, missing CLI, or timeout. This makes Copilot
-selectable as `agency.ai_backend` in `/admin/settings`.
+selectable as `flowgency.ai_backend` in `/admin/settings`.
 
 The only difference between `run()` and `prompt()` is that `run()` executes in
 the agent's directory while `prompt()` does not.
@@ -116,11 +116,11 @@ locate the binary.
 
 ## Wiring
 
-1. **`agency/integrations/__init__.py`** — add `"agency.copilot"` to the default
+1. **`flowgency/integrations/__init__.py`** — add `"flowgency.copilot"` to the default
    module list in `load_integrations()`.
-2. **`agency/integrations/integrations.yaml`** — add `"agency.copilot"` to the
+2. **`flowgency/integrations/integrations.yaml`** — add `"flowgency.copilot"` to the
    registered integrations list.
-3. **`agency/app.py`** — add a badge color for `copilot` in
+3. **`flowgency/app.py`** — add a badge color for `copilot` in
    `integration_badge_filter` (e.g. `"copilot": "bg-slate-100 text-slate-800"`).
 
 ## Testing
@@ -128,7 +128,7 @@ locate the binary.
 - Extend `tests/test_integration_sidecar.py` with `copilot` cases:
   - `detect()` true when `.copilot/` exists, true when `.github/` exists,
     false when neither exists (bare `AGENTS.md` folder)
-  - identity round-trip (body → `AGENTS.md`, metadata → `.agency-meta.yaml`)
+  - identity round-trip (body → `AGENTS.md`, metadata → `.flowgency-meta.yaml`)
   - `run()` builds `copilot -p <prompt> --autopilot --experimental` with
     `cwd=agent_dir` (mock `subprocess.run`)
   - `prompt()` builds `copilot -p <text> --autopilot --experimental` and returns

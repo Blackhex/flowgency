@@ -71,7 +71,7 @@ def write_boundary_supported(integration) -> bool:
 
 
 def unique_token(label: str) -> str:
-    return f"AGENCY_{label}_{uuid4().hex.upper()}"
+    return f"FLOWGENCY_{label}_{uuid4().hex.upper()}"
 
 
 def runtime_probe_label(runtime: InstalledRuntime, scenario: str) -> str:

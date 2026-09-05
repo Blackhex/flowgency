@@ -116,7 +116,7 @@ class ConfigStore:
             current = self.path.read_bytes() if self.path.exists() else None
             if current != original:
                 raise ConfigConflictError(
-                    "config.yaml changed outside the Agency lock"
+                    "config.yaml changed outside the Flowgency lock"
                 )
             candidate = self._validated_config(raw)
             initialize_storage_directories(candidate)
@@ -139,7 +139,7 @@ class ConfigStore:
             updated = self._encode(raw)
             if self.path.read_bytes() != original:
                 raise ConfigConflictError(
-                    "config.yaml changed outside the Agency lock"
+                    "config.yaml changed outside the Flowgency lock"
                 )
             candidate = self._validated_config(raw)
             initialize_storage_directories(candidate)
@@ -162,7 +162,7 @@ class ConfigStore:
             raw, sort_keys=False, allow_unicode=True
         ).encode("utf-8")
 
-    def _validated_config(self, raw: dict[str, Any]) -> AgencyConfig:
+    def _validated_config(self, raw: dict[str, Any]) -> FlowgencyConfig:
         parsed = parse_config(raw, self.path)
         issues = validate_resolved_paths(parsed.resolved)
         if issues:

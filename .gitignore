@@ -8,7 +8,7 @@ config.yaml
 config.yaml.lock
 !tests/ui/fixtures/config.yaml
 agents/
-agency.service
+flowgency.service
 docs/*
 !docs/superpowers/
 reports/

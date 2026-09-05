@@ -6,7 +6,7 @@
 
 **Architecture:** Firing becomes one predicate over *the most recent occurrence at or before now*, bounded by a new `schedule.catch_up` field that defaults to `today`. Execution gains a queue: `submit_job_request` launches only when the pool has capacity and otherwise leaves the record in the existing `queued` status, and a shared `drain()` — called at the end of submission, by every worker as it exits, and at the start of every dispatch cycle — starts waiting jobs in due-time order. `dispatch.daily_limit` is removed.
 
-**Tech Stack:** Python 3.11+, FastAPI, Jinja2, Pydantic, pytest, PyYAML. Filesystem-backed durable state, `agency/fs/locks.exclusive_lock` for mutual exclusion.
+**Tech Stack:** Python 3.11+, FastAPI, Jinja2, Pydantic, pytest, PyYAML. Filesystem-backed durable state, `flowgency/fs/locks.exclusive_lock` for mutual exclusion.
 
 ## Global Constraints
 
@@ -15,7 +15,7 @@
 - Test command: `python -m pytest tests/ -q`. Single test: `python -m pytest tests/test_x.py::test_y -v`.
 - `catch_up` accepts exactly `none`, `today`, `always`, or a duration matching the existing `every` grammar `(\d+)(m|h|d)`.
 - When `catch_up` is absent the effective value is `today`, for every cadence. There is no cadence-derived default.
-- `agency.jobs.pool` defaults to `4` and must be an integer `>= 1`.
+- `flowgency.jobs.pool` defaults to `4` and must be an integer `>= 1`.
 - Queue order is ascending `due_at`, ties broken by ascending `job_id`. Global across all groups.
 - `JobSpec` is digest-signed; **never** add a field to `JobSpec`, `JobSpec.to_dict`, or anything that feeds `immutable_digest()`. Existing stored records would fail their digest check on read. New job metadata goes on `JobRecord`, which tolerates missing keys via dataclass defaults.
 - A record occupies a pool slot when its status is `running` or `waiting_for_memory`, or when its status is `queued` and its `worker_pid` is not confirmed absent. `worker_alive` returning `None` means "cannot tell" and counts as alive.
@@ -27,7 +27,7 @@
 ### Task 1: Catch-up vocabulary
 
 **Files:**
-- Modify: `agency/dispatch/schedule.py`
+- Modify: `flowgency/dispatch/schedule.py`
 - Test: `tests/test_dispatch_schedule.py`
 
 **Interfaces:**
@@ -45,7 +45,7 @@ Append to `tests/test_dispatch_schedule.py`:
 ```python
 from datetime import datetime, timedelta
 
-from agency.dispatch.schedule import (
+from flowgency.dispatch.schedule import (
     DEFAULT_CATCH_UP,
     catch_up_allows,
     parse_catch_up,
@@ -114,7 +114,7 @@ Expected: FAIL with `ImportError: cannot import name 'DEFAULT_CATCH_UP'`.
 
 - [ ] **Step 3: Implement**
 
-Add to `agency/dispatch/schedule.py`:
+Add to `flowgency/dispatch/schedule.py`:
 
 ```python
 from datetime import datetime, timedelta
@@ -165,7 +165,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/dispatch/schedule.py tests/test_dispatch_schedule.py
+git add flowgency/dispatch/schedule.py tests/test_dispatch_schedule.py
 git commit -m "feat(dispatch): add the catch-up recovery vocabulary"
 ```
 
@@ -174,7 +174,7 @@ git commit -m "feat(dispatch): add the catch-up recovery vocabulary"
 ### Task 2: Most recent occurrence
 
 **Files:**
-- Modify: `agency/dispatch/schedule.py`
+- Modify: `flowgency/dispatch/schedule.py`
 - Test: `tests/test_dispatch_schedule.py`
 
 **Interfaces:**
@@ -188,7 +188,7 @@ git commit -m "feat(dispatch): add the catch-up recovery vocabulary"
 Append to `tests/test_dispatch_schedule.py`:
 
 ```python
-from agency.dispatch.schedule import last_at_occurrence, last_every_occurrence
+from flowgency.dispatch.schedule import last_at_occurrence, last_every_occurrence
 
 
 def test_at_occurrence_is_today_once_the_time_has_passed():
@@ -234,7 +234,7 @@ Expected: FAIL with `ImportError: cannot import name 'last_at_occurrence'`.
 
 - [ ] **Step 3: Implement**
 
-Add to `agency/dispatch/schedule.py`:
+Add to `flowgency/dispatch/schedule.py`:
 
 ```python
 from datetime import timedelta
@@ -276,7 +276,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/dispatch/schedule.py tests/test_dispatch_schedule.py
+git add flowgency/dispatch/schedule.py tests/test_dispatch_schedule.py
 git commit -m "feat(dispatch): compute the most recent schedule occurrence"
 ```
 
@@ -285,7 +285,7 @@ git commit -m "feat(dispatch): compute the most recent schedule occurrence"
 ### Task 3: `catch_up` in the configuration model
 
 **Files:**
-- Modify: `agency/configuration/models.py:93-96` (`ScheduleRule`), `agency/configuration/models.py:468-488` (`_validate_rule`)
+- Modify: `flowgency/configuration/models.py:93-96` (`ScheduleRule`), `flowgency/configuration/models.py:468-488` (`_validate_rule`)
 - Test: `tests/test_config.py`
 
 **Interfaces:**
@@ -327,7 +327,7 @@ Expected: FAIL — `ScheduleRule` forbids the extra key `catch_up`.
 
 - [ ] **Step 3: Implement**
 
-In `agency/configuration/models.py`:
+In `flowgency/configuration/models.py`:
 
 ```python
 class ScheduleRule(BaseModel):
@@ -340,7 +340,7 @@ class ScheduleRule(BaseModel):
 Extend `_validate_rule`, after the existing at/every check:
 
 ```python
-    from agency.dispatch.schedule import parse_catch_up
+    from flowgency.dispatch.schedule import parse_catch_up
 
     catch_up = rule.get("catch_up")
     if catch_up is not None and parse_catch_up(str(catch_up)) is None:
@@ -361,7 +361,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/configuration/models.py tests/test_config.py
+git add flowgency/configuration/models.py tests/test_config.py
 git commit -m "feat(config): accept a catch_up bound on routine schedules"
 ```
 
@@ -370,11 +370,11 @@ git commit -m "feat(config): accept a catch_up bound on routine schedules"
 ### Task 4: Remove `dispatch.daily_limit`
 
 **Files:**
-- Modify: `agency/configuration/models.py:129-133` (`GroupDispatch`)
-- Modify: `agency/configuration/patches.py:40-76` (`GroupDispatchPatch`, `GroupSettingsStatePatch`, `GroupCreateStatePatch`)
-- Modify: `agency/web/routes/admin_groups.py:200-210,545-560`
-- Modify: `agency/templates/admin_org_edit.html:130-145`
-- Modify: `agency/dispatch/run.py:60-95`
+- Modify: `flowgency/configuration/models.py:129-133` (`GroupDispatch`)
+- Modify: `flowgency/configuration/patches.py:40-76` (`GroupDispatchPatch`, `GroupSettingsStatePatch`, `GroupCreateStatePatch`)
+- Modify: `flowgency/web/routes/admin_groups.py:200-210,545-560`
+- Modify: `flowgency/templates/admin_org_edit.html:130-145`
+- Modify: `flowgency/dispatch/run.py:60-95`
 - Modify: `config.yaml.example`, `examples/code-review-team/config.yaml`, `examples/content-team/config.yaml`, `kb/dispatch.md`, `kb/configuration.md`
 - Test: `tests/test_config.py`, `tests/test_config_patches.py`, `tests/test_group_settings.py`, `tests/test_dispatch_run.py`
 
@@ -405,11 +405,11 @@ class GroupDispatch(BaseModel):
     enabled: bool = False
 ```
 
-In `agency/configuration/patches.py` delete `daily_limit` from `GroupDispatchPatch` and `dispatch_daily_limit` from `GroupSettingsStatePatch` and `GroupCreateStatePatch`, along with every write of those values into the raw mapping.
+In `flowgency/configuration/patches.py` delete `daily_limit` from `GroupDispatchPatch` and `dispatch_daily_limit` from `GroupSettingsStatePatch` and `GroupCreateStatePatch`, along with every write of those values into the raw mapping.
 
-In `agency/web/routes/admin_groups.py` delete the `dispatch_daily_limit` context entry and the `daily_limit = int(...)` form read. In `agency/templates/admin_org_edit.html` delete the Daily Limit label and input.
+In `flowgency/web/routes/admin_groups.py` delete the `dispatch_daily_limit` context entry and the `daily_limit = int(...)` form read. In `flowgency/templates/admin_org_edit.html` delete the Daily Limit label and input.
 
-In `agency/dispatch/run.py` delete `daily_limit = group.dispatch.daily_limit`, both `out_count = len(list(log_dir.glob("*.out")))` blocks, and the two limit checks. Keep the `log_dir.mkdir(parents=True, exist_ok=True)` call, because the marker path for an `at` rule lives under a day directory.
+In `flowgency/dispatch/run.py` delete `daily_limit = group.dispatch.daily_limit`, both `out_count = len(list(log_dir.glob("*.out")))` blocks, and the two limit checks. Keep the `log_dir.mkdir(parents=True, exist_ok=True)` call, because the marker path for an `at` rule lives under a day directory.
 
 In `config.yaml.example` and both `examples/*/config.yaml`, delete the `daily_limit:` lines. In `kb/dispatch.md` delete the `daily_limit` sentence in the install section and the closing paragraph about a group reaching its limit. In `kb/configuration.md` delete the `daily_limit` row or line.
 
@@ -434,11 +434,11 @@ Body must carry `BREAKING CHANGE: groups.<group>.dispatch.daily_limit is rejecte
 ### Task 5: The runner recovers the last missed occurrence
 
 **Files:**
-- Modify: `agency/dispatch/run.py`
+- Modify: `flowgency/dispatch/run.py`
 - Test: `tests/test_dispatch_run.py`
 
 **Interfaces:**
-- Consumes: `parse_catch_up`, `catch_up_allows`, `last_at_occurrence`, `last_every_occurrence`, `at_marker_path`, `every_marker_path` from Tasks 1 and 2; `agency.clock.now`; `agency.health.grace_window`.
+- Consumes: `parse_catch_up`, `catch_up_allows`, `last_at_occurrence`, `last_every_occurrence`, `at_marker_path`, `every_marker_path` from Tasks 1 and 2; `flowgency.clock.now`; `flowgency.health.grace_window`.
 - Produces: `run_dispatch_cycle(config, config_path, launcher=None) -> None` with unchanged signature. `check_at_rule` and `check_every_rule` are deleted.
 
 - [ ] **Step 1: Write the failing tests**
@@ -449,8 +449,8 @@ In `tests/test_dispatch_run.py`, delete the six `check_at_rule` / `check_every_r
 import os
 from datetime import datetime
 
-from agency.dispatch.run import run_dispatch_cycle
-from agency.dispatch.schedule import at_marker_path, every_marker_path
+from flowgency.dispatch.run import run_dispatch_cycle
+from flowgency.dispatch.schedule import at_marker_path, every_marker_path
 
 
 class _RecordingLauncher:
@@ -473,7 +473,7 @@ def test_missed_morning_occurrence_recovers_later_the_same_day(
         routines=[{"id": "suite-health", "prompt_name": "daily-review",
                    "schedule": {"at": "08:00"}}],
     )
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T11:57:00")
     launcher = _RecordingLauncher()
 
     run_dispatch_cycle(None, config_path, launcher)
@@ -494,7 +494,7 @@ def test_recovery_marks_the_occurrence_day_not_today(tmp_path, monkeypatch):
         routines=[{"id": "suite-health", "prompt_name": "daily-review",
                    "schedule": {"at": "08:00", "catch_up": "always"}}],
     )
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T03:00:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T03:00:00")
     launcher = _RecordingLauncher()
 
     run_dispatch_cycle(None, config_path, launcher)
@@ -517,7 +517,7 @@ def test_default_bound_forgets_yesterdays_occurrence(tmp_path, monkeypatch):
         routines=[{"id": "suite-health", "prompt_name": "daily-review",
                    "schedule": {"at": "08:00"}}],
     )
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T03:00:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T03:00:00")
     launcher = _RecordingLauncher()
 
     run_dispatch_cycle(None, config_path, launcher)
@@ -539,7 +539,7 @@ def test_an_already_marked_occurrence_does_not_run_again(tmp_path, monkeypatch):
     )
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T11:57:00")
     launcher = _RecordingLauncher()
 
     run_dispatch_cycle(None, config_path, launcher)
@@ -563,7 +563,7 @@ def test_every_marker_anchors_on_the_occurrence_not_the_launch(
     marker.touch()
     anchor = datetime(2026, 7, 29, 3, 0).timestamp()
     os.utime(marker, (anchor, anchor))
-    monkeypatch.setenv("AGENCY_FIXED_NOW", "2026-07-29T11:57:00")
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-29T11:57:00")
 
     run_dispatch_cycle(None, config_path, _RecordingLauncher())
 
@@ -581,15 +581,15 @@ Expected: FAIL — the 11:57 case launches nothing today because the 17-minute w
 
 - [ ] **Step 3: Replace the firing rule**
 
-In `agency/dispatch/run.py`, delete `check_at_rule` and `check_every_rule`, and replace the per-routine body inside `run_dispatch_cycle` with:
+In `flowgency/dispatch/run.py`, delete `check_at_rule` and `check_every_rule`, and replace the per-routine body inside `run_dispatch_cycle` with:
 
 ```python
 import os
 from datetime import datetime
 
-from agency.clock import now as clock_now
-from agency.health import grace_window
-from agency.dispatch.schedule import (
+from flowgency.clock import now as clock_now
+from flowgency.health import grace_window
+from flowgency.dispatch.schedule import (
     at_marker_path,
     catch_up_allows,
     every_marker_path,
@@ -669,7 +669,7 @@ Expected: PASS.
 Run: `python -m pytest tests/ -q`
 
 ```bash
-git add agency/dispatch/run.py tests/test_dispatch_run.py
+git add flowgency/dispatch/run.py tests/test_dispatch_run.py
 git commit -m "feat(dispatch): recover the last missed occurrence"
 ```
 
@@ -678,23 +678,23 @@ git commit -m "feat(dispatch): recover the last missed occurrence"
 ### Task 6: The pool setting
 
 **Files:**
-- Modify: `agency/configuration/models.py:23-38`
+- Modify: `flowgency/configuration/models.py:23-38`
 - Test: `tests/test_config.py`
 
 **Interfaces:**
-- Produces: `AgencyJobs(pool: int = 4)` and `AgencySettings.jobs: AgencyJobs`.
+- Produces: `FlowgencyJobs(pool: int = 4)` and `FlowgencySettings.jobs: FlowgencyJobs`.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 def test_jobs_pool_defaults_to_four(tmp_path):
     parsed = load_config(_write_minimal_config(tmp_path))
-    assert parsed.agency.jobs.pool == 4
+    assert parsed.flowgency.jobs.pool == 4
 
 
 def test_jobs_pool_is_read_from_config(tmp_path):
     parsed = load_config(_write_minimal_config(tmp_path, jobs_pool=2))
-    assert parsed.agency.jobs.pool == 2
+    assert parsed.flowgency.jobs.pool == 2
 
 
 def test_jobs_pool_below_one_is_rejected(tmp_path):
@@ -705,23 +705,23 @@ def test_jobs_pool_below_one_is_rejected(tmp_path):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest tests/test_config.py -k jobs_pool -v`
-Expected: FAIL with `AttributeError: 'AgencySettings' object has no attribute 'jobs'`.
+Expected: FAIL with `AttributeError: 'FlowgencySettings' object has no attribute 'jobs'`.
 
 - [ ] **Step 3: Implement**
 
 ```python
-class AgencyJobs(BaseModel):
+class FlowgencyJobs(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     pool: int = Field(default=4, ge=1)
 
 
-class AgencySettings(BaseModel):
+class FlowgencySettings(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
-    title: str = "Agency"
+    title: str = "Flowgency"
     default_group: str = ""
     ai_backend: str = "claude-code"
-    dispatch: AgencyDispatch = Field(default_factory=AgencyDispatch)
-    jobs: AgencyJobs = Field(default_factory=AgencyJobs)
+    dispatch: FlowgencyDispatch = Field(default_factory=FlowgencyDispatch)
+    jobs: FlowgencyJobs = Field(default_factory=FlowgencyJobs)
     agent_library: Path | None = None
     compilation_cache: Path | None = None
     memory_store: Path | None = None
@@ -736,7 +736,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/configuration/models.py tests/test_config.py
+git add flowgency/configuration/models.py tests/test_config.py
 git commit -m "feat(config): add the global job pool size"
 ```
 
@@ -745,8 +745,8 @@ git commit -m "feat(config): add the global job pool size"
 ### Task 7: Due time on the job record
 
 **Files:**
-- Modify: `agency/jobs/models.py:116-129` (`JobRequest`), `agency/jobs/models.py:296-315` (`JobRecord`)
-- Modify: `agency/jobs/submission.py:60-70`
+- Modify: `flowgency/jobs/models.py:116-129` (`JobRequest`), `flowgency/jobs/models.py:296-315` (`JobRecord`)
+- Modify: `flowgency/jobs/submission.py:60-70`
 - Test: `tests/test_jobs_models.py` (create if absent — check with `ls tests | grep job`)
 
 **Interfaces:**
@@ -812,7 +812,7 @@ and:
 
 `JobSpec` is untouched, so the digest is unchanged and records written before this field load with `due_at=None`.
 
-In `agency/jobs/submission.py`, `_submit_resolved` gains a `due_at: str | None = None` keyword that it forwards to `JobRecord.from_spec`, and the `JobRecord(...)` rebuild in its exception handler carries `due_at=record.due_at`.
+In `flowgency/jobs/submission.py`, `_submit_resolved` gains a `due_at: str | None = None` keyword that it forwards to `JobRecord.from_spec`, and the `JobRecord(...)` rebuild in its exception handler carries `due_at=record.due_at`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -822,7 +822,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/jobs/models.py agency/jobs/submission.py tests/test_jobs_models.py
+git add flowgency/jobs/models.py flowgency/jobs/submission.py tests/test_jobs_models.py
 git commit -m "feat(jobs): record the time a job was due"
 ```
 
@@ -831,11 +831,11 @@ git commit -m "feat(jobs): record the time a job was due"
 ### Task 8: Claiming and counting
 
 **Files:**
-- Modify: `agency/jobs/store.py`
+- Modify: `flowgency/jobs/store.py`
 - Test: `tests/test_job_store.py` (the file holding the existing `transition_job` tests — locate with `grep -rl "InvalidJobTransition" tests`)
 
 **Interfaces:**
-- Consumes: `worker_alive` from `agency/jobs/reconciliation.py`.
+- Consumes: `worker_alive` from `flowgency/jobs/reconciliation.py`.
 - Produces:
   - `queue_lock_path(store_root: Path) -> Path` — `<store_root>/.queue.lock`
   - `occupies_slot(record: JobRecord) -> bool`
@@ -845,7 +845,7 @@ git commit -m "feat(jobs): record the time a job was due"
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-from agency.jobs.store import claim_job, is_launchable, occupies_slot, queue_lock_path
+from flowgency.jobs.store import claim_job, is_launchable, occupies_slot, queue_lock_path
 
 
 def test_queue_lock_sits_beside_the_group_directories(tmp_path):
@@ -869,7 +869,7 @@ def test_an_unclaimed_queued_record_is_launchable(sample_spec):
 def test_a_queued_record_with_a_dead_worker_is_launchable_again(
     sample_spec, monkeypatch
 ):
-    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.store.worker_alive", lambda pid: False)
     record = JobRecord.from_spec(sample_spec)
     record.worker_pid = 999999
     assert occupies_slot(record) is False
@@ -879,7 +879,7 @@ def test_a_queued_record_with_a_dead_worker_is_launchable_again(
 def test_a_queued_record_with_an_unverifiable_worker_holds_its_slot(
     sample_spec, monkeypatch
 ):
-    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: None)
+    monkeypatch.setattr("flowgency.jobs.store.worker_alive", lambda pid: None)
     record = JobRecord.from_spec(sample_spec)
     record.worker_pid = 999999
     assert occupies_slot(record) is True
@@ -911,10 +911,10 @@ Expected: FAIL with `ImportError`.
 
 - [ ] **Step 3: Implement**
 
-Add to `agency/jobs/store.py`:
+Add to `flowgency/jobs/store.py`:
 
 ```python
-from agency.jobs.reconciliation import worker_alive
+from flowgency.jobs.reconciliation import worker_alive
 
 
 def queue_lock_path(store_root: Path) -> Path:
@@ -954,7 +954,7 @@ def claim_job(path: Path, worker_pid: int | None) -> JobRecord:
         return updated
 ```
 
-`agency/jobs/reconciliation.py` imports from `store`, so import `worker_alive` lazily inside `_worker_gone` if the module-level import introduces a cycle. Verify with `python -c "import agency.jobs.store"`.
+`flowgency/jobs/reconciliation.py` imports from `store`, so import `worker_alive` lazily inside `_worker_gone` if the module-level import introduces a cycle. Verify with `python -c "import flowgency.jobs.store"`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -964,7 +964,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/jobs/store.py tests/test_job_store.py
+git add flowgency/jobs/store.py tests/test_job_store.py
 git commit -m "feat(jobs): claim and count pool slots"
 ```
 
@@ -973,9 +973,9 @@ git commit -m "feat(jobs): claim and count pool slots"
 ### Task 9: The drain
 
 **Files:**
-- Create: `agency/jobs/queue.py`
+- Create: `flowgency/jobs/queue.py`
 - Create: `tests/test_job_queue.py`
-- Modify: `agency/jobs/__init__.py`
+- Modify: `flowgency/jobs/__init__.py`
 
 **Interfaces:**
 - Consumes: `JobStore`, `reconcile_jobs`, `read_job`, `claim_job`, `occupies_slot`, `is_launchable`, `queue_lock_path`, `default_launcher`, `get_timer_status`.
@@ -1012,7 +1012,7 @@ def test_drain_starts_up_to_the_pool_and_no_further(queue_fixture):
         memory_store=queue_fixture.memory_store,
         launcher=queue_fixture.launcher,
     )
-    assert started == queue_fixture.config.agency.jobs.pool
+    assert started == queue_fixture.config.flowgency.jobs.pool
 
 
 def test_drain_claims_what_it_starts_so_a_second_drain_is_a_no_op(queue_fixture):
@@ -1031,7 +1031,7 @@ def test_drain_claims_what_it_starts_so_a_second_drain_is_a_no_op(queue_fixture)
 def test_a_ghost_running_record_does_not_hold_a_slot_forever(
     queue_fixture, monkeypatch
 ):
-    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: False)
+    monkeypatch.setattr("flowgency.jobs.store.worker_alive", lambda pid: False)
     queue_fixture.enqueue("ghost", status="running", worker_pid=999999)
     queue_fixture.enqueue("real", due_at="2026-07-29T08:00:00")
     drain(queue_fixture.config, memory_store=queue_fixture.memory_store,
@@ -1050,7 +1050,7 @@ def test_a_failing_launch_marks_the_job_and_the_drain_continues(queue_fixture):
 
 
 def test_a_live_worker_counts_as_a_drainer(queue_fixture, monkeypatch):
-    monkeypatch.setattr("agency.jobs.store.worker_alive", lambda pid: True)
+    monkeypatch.setattr("flowgency.jobs.store.worker_alive", lambda pid: True)
     queue_fixture.enqueue("busy", status="running", worker_pid=4321)
     assert has_drainer(
         queue_fixture.config,
@@ -1061,7 +1061,7 @@ def test_a_live_worker_counts_as_a_drainer(queue_fixture, monkeypatch):
 
 def test_with_nothing_alive_the_installed_timer_decides(queue_fixture, monkeypatch):
     monkeypatch.setattr(
-        "agency.jobs.queue.get_timer_status",
+        "flowgency.jobs.queue.get_timer_status",
         lambda path, interval: {"installed": False, "enabled": False},
     )
     assert has_drainer(
@@ -1076,11 +1076,11 @@ Build `queue_fixture` in the same file: a `tmp_path` config with one group and a
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest tests/test_job_queue.py -v`
-Expected: FAIL — `agency.jobs.queue` does not exist.
+Expected: FAIL — `flowgency.jobs.queue` does not exist.
 
 - [ ] **Step 3: Implement**
 
-Create `agency/jobs/queue.py`:
+Create `flowgency/jobs/queue.py`:
 
 ```python
 """The global job queue and its worker pool."""
@@ -1092,8 +1092,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
-from agency.dispatch.install import get_timer_status
-from agency.fs.locks import exclusive_lock
+from flowgency.dispatch.install import get_timer_status
+from flowgency.fs.locks import exclusive_lock
 
 from .authority import JobStore
 from .launcher import JobLauncher, default_launcher
@@ -1108,7 +1108,7 @@ from .store import (
     write_job,
 )
 
-log = logging.getLogger("agency.jobs.queue")
+log = logging.getLogger("flowgency.jobs.queue")
 
 
 class QueueEntry(NamedTuple):
@@ -1151,7 +1151,7 @@ def queue_snapshot(config, *, memory_store: Path) -> QueueView:
         key=_order_key,
     )
     running = sum(1 for entry in entries if occupies_slot(entry.record))
-    return QueueView(running, tuple(waiting), config.agency.jobs.pool)
+    return QueueView(running, tuple(waiting), config.flowgency.jobs.pool)
 
 
 def _group_roots(config) -> dict:
@@ -1165,7 +1165,7 @@ def has_drainer(config, *, memory_store: Path, config_path: Path) -> bool:
     """Whether anything will start a job that is left waiting."""
     if any(occupies_slot(entry.record) for entry in _entries(config, memory_store)):
         return True
-    status = get_timer_status(config_path, config.agency.dispatch.interval)
+    status = get_timer_status(config_path, config.flowgency.dispatch.interval)
     return bool(status.get("installed") and status.get("enabled"))
 
 
@@ -1205,7 +1205,7 @@ def drain(config, *, memory_store: Path, launcher: JobLauncher | None = None) ->
     return started
 ```
 
-Export `drain`, `has_drainer`, and `queue_snapshot` from `agency/jobs/__init__.py` alongside `reconcile_jobs`.
+Export `drain`, `has_drainer`, and `queue_snapshot` from `flowgency/jobs/__init__.py` alongside `reconcile_jobs`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1215,7 +1215,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/jobs/queue.py agency/jobs/__init__.py tests/test_job_queue.py
+git add flowgency/jobs/queue.py flowgency/jobs/__init__.py tests/test_job_queue.py
 git commit -m "feat(jobs): drain a global queue into a bounded worker pool"
 ```
 
@@ -1224,7 +1224,7 @@ git commit -m "feat(jobs): drain a global queue into a bounded worker pool"
 ### Task 10: Submission goes through the pool
 
 **Files:**
-- Modify: `agency/jobs/submission.py:60-136`
+- Modify: `flowgency/jobs/submission.py:60-136`
 - Test: `tests/test_job_submission.py` (locate the existing submission tests with `grep -rl submit_job_request tests`)
 
 **Interfaces:**
@@ -1257,7 +1257,7 @@ def test_a_waiting_job_records_its_due_time(submission_env):
 def test_submission_is_refused_when_nothing_can_drain(submission_env, monkeypatch):
     submission_env.fill_pool_with_dead_workers()
     monkeypatch.setattr(
-        "agency.jobs.submission.has_drainer", lambda *a, **k: False
+        "flowgency.jobs.submission.has_drainer", lambda *a, **k: False
     )
     with pytest.raises(JobSubmissionError):
         submit_job_request(submission_env.request(), submission_env.launcher)
@@ -1313,7 +1313,7 @@ At the very end of `submit_job_request`, outside the locked block and inside a `
 
 The drain runs after the group lock is released so it cannot deadlock against the submission that created the job.
 
-In `agency/dispatch/run.py`, set `due_at=occurrence.isoformat()` on the `JobRequest` it builds.
+In `flowgency/dispatch/run.py`, set `due_at=occurrence.isoformat()` on the `JobRequest` it builds.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1323,7 +1323,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/jobs/submission.py agency/dispatch/run.py tests/test_job_submission.py
+git add flowgency/jobs/submission.py flowgency/dispatch/run.py tests/test_job_submission.py
 git commit -m "feat(jobs): submit through the pool instead of launching directly"
 ```
 
@@ -1332,9 +1332,9 @@ git commit -m "feat(jobs): submit through the pool instead of launching directly
 ### Task 11: Workers and cycles hand the baton on
 
 **Files:**
-- Modify: `agency/jobs/worker.py`
-- Modify: `agency/dispatch/run.py:48-60`
-- Modify: `agency/app.py:364-378`
+- Modify: `flowgency/jobs/worker.py`
+- Modify: `flowgency/dispatch/run.py:48-60`
+- Modify: `flowgency/app.py:364-378`
 - Test: `tests/test_job_queue.py`, `tests/test_dispatch_run.py`
 
 **Interfaces:**
@@ -1346,15 +1346,15 @@ git commit -m "feat(jobs): submit through the pool instead of launching directly
 ```python
 def test_a_finishing_worker_starts_the_next_waiting_job(queue_fixture, monkeypatch):
     calls = []
-    monkeypatch.setattr("agency.jobs.worker.drain", lambda *a, **k: calls.append(1))
-    monkeypatch.setattr("agency.jobs.worker.execute_job", lambda ref: SimpleNamespace(status="complete"))
+    monkeypatch.setattr("flowgency.jobs.worker.drain", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr("flowgency.jobs.worker.execute_job", lambda ref: SimpleNamespace(status="complete"))
     worker_main(queue_fixture.worker_argv("only"))
     assert calls == [1]
 
 
 def test_a_dispatch_cycle_drains_before_it_evaluates_routines(tmp_path, monkeypatch):
     order = []
-    monkeypatch.setattr("agency.dispatch.run.drain", lambda *a, **k: order.append("drain"))
+    monkeypatch.setattr("flowgency.dispatch.run.drain", lambda *a, **k: order.append("drain"))
     workspace, group_root, config_path, _ = _make_group(tmp_path)
     _write_config(config_path, workspace, group_root, routines=[])
     run_dispatch_cycle(None, config_path, _RecordingLauncher())
@@ -1368,7 +1368,7 @@ Expected: FAIL — neither module imports `drain`.
 
 - [ ] **Step 3: Implement**
 
-`agency/jobs/worker.py`, after `execute_job` returns and before the return value is computed:
+`flowgency/jobs/worker.py`, after `execute_job` returns and before the return value is computed:
 
 ```python
     result = execute_job(reference)
@@ -1376,22 +1376,22 @@ Expected: FAIL — neither module imports `drain`.
         config = ConfigStore(Path(read_job(reference.path).spec.config_path)).load().config
         drain(config, memory_store=store.memory_store)
     except Exception:
-        logging.getLogger("agency.jobs.worker").exception("drain after job failed")
+        logging.getLogger("flowgency.jobs.worker").exception("drain after job failed")
     return 0 if result.status == "complete" else 1
 ```
 
 The drain must never turn a completed job into a failed exit code, hence the bare `except Exception`.
 
-`agency/dispatch/run.py`, immediately after the snapshot is resolved and before the group loop:
+`flowgency/dispatch/run.py`, immediately after the snapshot is resolved and before the group loop:
 
 ```python
     try:
-        drain(resolved, memory_store=resolved.agency.memory_store)
+        drain(resolved, memory_store=resolved.flowgency.memory_store)
     except Exception:
         log.exception("queue drain failed")
 ```
 
-`agency/app.py` lifespan: replace the direct `reconcile_jobs(...)` call with `drain(...)`, which reconciles first. Keep the existing `try/except` around it.
+`flowgency/app.py` lifespan: replace the direct `reconcile_jobs(...)` call with `drain(...)`, which reconciles first. Keep the existing `try/except` around it.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1401,7 +1401,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/jobs/worker.py agency/dispatch/run.py agency/app.py tests/
+git add flowgency/jobs/worker.py flowgency/dispatch/run.py flowgency/app.py tests/
 git commit -m "feat(jobs): drain the queue from workers, cycles, and startup"
 ```
 
@@ -1410,8 +1410,8 @@ git commit -m "feat(jobs): drain the queue from workers, cycles, and startup"
 ### Task 12: Queue position on the Jobs list
 
 **Files:**
-- Modify: `agency/web/routes/jobs.py:185-212` (`_job_rows`)
-- Modify: `agency/templates/jobs.html`
+- Modify: `flowgency/web/routes/jobs.py:185-212` (`_job_rows`)
+- Modify: `flowgency/templates/jobs.html`
 - Test: `tests/test_jobs_routes.py` (locate with `grep -rl "/jobs" tests`)
 
 **Interfaces:**
@@ -1461,7 +1461,7 @@ and add to each row:
         "due_at": record.due_at,
 ```
 
-In `agency/templates/jobs.html`, beside the status badge:
+In `flowgency/templates/jobs.html`, beside the status badge:
 
 ```jinja
 {% if row.queue_position %}
@@ -1479,7 +1479,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/web/routes/jobs.py agency/templates/jobs.html tests/test_jobs_routes.py
+git add flowgency/web/routes/jobs.py flowgency/templates/jobs.html tests/test_jobs_routes.py
 git commit -m "feat(jobs): show queue position on the jobs list"
 ```
 
@@ -1488,8 +1488,8 @@ git commit -m "feat(jobs): show queue position on the jobs list"
 ### Task 13: The Inbox work queue strip
 
 **Files:**
-- Modify: `agency/app.py:1824-1868` (`home`)
-- Modify: `agency/templates/home.html:114-116` (between Zone 2 and Zone 3)
+- Modify: `flowgency/app.py:1824-1868` (`home`)
+- Modify: `flowgency/templates/home.html:114-116` (between Zone 2 and Zone 3)
 - Test: `tests/test_dashboard.py`
 
 **Interfaces:**
@@ -1530,12 +1530,12 @@ Expected: FAIL — `Work queue` does not appear.
 
 In `home`, before the `TemplateResponse`. `_load_snapshot()` is the accessor the
 route's neighbours already use — see `build_dashboard_fleet` — and it carries
-`config.agency.memory_store`:
+`config.flowgency.memory_store`:
 
 ```python
     snapshot = _load_snapshot()
     view = queue_snapshot(
-        snapshot.config, memory_store=snapshot.config.agency.memory_store
+        snapshot.config, memory_store=snapshot.config.flowgency.memory_store
     )
     work_queue = {
         "running": view.running,
@@ -1591,7 +1591,7 @@ Expected: PASS. Then start the dashboard, open a group, and compare the strip ag
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py agency/templates/home.html tests/test_dashboard.py
+git add flowgency/app.py flowgency/templates/home.html tests/test_dashboard.py
 git commit -m "feat(dashboard): show the work queue on the inbox"
 ```
 
@@ -1600,8 +1600,8 @@ git commit -m "feat(dashboard): show the work queue on the inbox"
 ### Task 14: Queued is not running on the fleet cards
 
 **Files:**
-- Modify: `agency/app.py:1170-1250` (`build_dashboard_fleet`, `_overlay_dashboard_job_state`)
-- Modify: `agency/templates/home.html:44-52`
+- Modify: `flowgency/app.py:1170-1250` (`build_dashboard_fleet`, `_overlay_dashboard_job_state`)
+- Modify: `flowgency/templates/home.html:44-52`
 - Test: `tests/test_dashboard.py`
 
 **Interfaces:**
@@ -1660,7 +1660,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py agency/templates/home.html tests/test_dashboard.py
+git add flowgency/app.py flowgency/templates/home.html tests/test_dashboard.py
 git commit -m "feat(dashboard): distinguish queued agents from running ones"
 ```
 
@@ -1670,19 +1670,19 @@ git commit -m "feat(dashboard): distinguish queued agents from running ones"
 
 **Files:**
 - Modify: `kb/dispatch.md`, `kb/configuration.md`, `config.yaml.example`, `AGENTS.md`
-- Test: `tests/test_agency_setup_skill.py` (it asserts on documented configuration shape — run it)
+- Test: `tests/test_flowgency_setup_skill.py` (it asserts on documented configuration shape — run it)
 
 - [ ] **Step 1: Update `kb/dispatch.md`**
 
-Add a Recovery section stating the predicate, the `catch_up` values, the default of `today`, that the marker records the recovered occurrence's own day, and that an `every` marker anchors to the occurrence. Add a Queue section covering `agency.jobs.pool`, due-time FIFO, who drains, and the refusal when nothing can drain.
+Add a Recovery section stating the predicate, the `catch_up` values, the default of `today`, that the marker records the recovered occurrence's own day, and that an `every` marker anchors to the occurrence. Add a Queue section covering `flowgency.jobs.pool`, due-time FIFO, who drains, and the refusal when nothing can drain.
 
 - [ ] **Step 2: Update `kb/configuration.md` and `config.yaml.example`**
 
-Add `agency.jobs.pool` and `schedule.catch_up` with the values from the Global Constraints. Confirm no `daily_limit` remains: `grep -rn daily_limit kb config.yaml.example examples agency tests` must return nothing.
+Add `flowgency.jobs.pool` and `schedule.catch_up` with the values from the Global Constraints. Confirm no `daily_limit` remains: `grep -rn daily_limit kb config.yaml.example examples flowgency tests` must return nothing.
 
 - [ ] **Step 3: Update `AGENTS.md`**
 
-In the configuration sample, add `jobs: {pool: 4}` under `agency` and remove `daily_limit` from the group `dispatch` block.
+In the configuration sample, add `jobs: {pool: 4}` under `flowgency` and remove `daily_limit` from the group `dispatch` block.
 
 - [ ] **Step 4: Run the suite**
 
@@ -1701,7 +1701,7 @@ git commit -m "docs(dispatch): document recovery and the job pool"
 ## Notes for the implementer
 
 - **The session ledger needs no task.** The spec's session-start ledger is the job record, which already carries `job_id`, `started_at`, and a `session_id` backfilled at completion. Task 7 adds the only missing field.
-- **Health is deliberately unchanged.** `agency/health.py` still reports lateness only for an occurrence that is already past on the current day. With `catch_up: always` the runner can recover yesterday's occurrence at 03:00, which the dashboard never showed as overdue. That is accepted, not a bug to fix in this branch.
+- **Health is deliberately unchanged.** `flowgency/health.py` still reports lateness only for an occurrence that is already past on the current day. With `catch_up: always` the runner can recover yesterday's occurrence at 03:00, which the dashboard never showed as overdue. That is accepted, not a bug to fix in this branch.
 - **Do not touch `JobSpec`.** Every field on it feeds `immutable_digest()`, and `JobRecord.from_dict` raises on a digest mismatch, so a new spec field would make every previously written job record unreadable.
 - **`worker_alive` has three answers.** `True`, `False`, and `None` for "cannot tell". Only `False` frees a slot.
 - **Run the suite from the worktree root.** Running from another checkout resolves the wrong local `tests` package.

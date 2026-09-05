@@ -18,7 +18,7 @@ from .validation import OutboxValidation, RecordCandidate
 _SLUG_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$")
 _MAX_COLLISION_SUFFIX = 200
 
-# Agency stamps identity and lifecycle itself, and keeps only the author fields
+# Flowgency stamps identity and lifecycle itself, and keeps only the author fields
 # it understands. Anything else an untrusted agent writes is discarded rather
 # than persisted into records the web layer reads.
 _ALLOWED_AUTHOR_FIELDS = {

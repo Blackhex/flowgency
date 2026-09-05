@@ -35,5 +35,5 @@ def build_decision_prompt(
         "and "
         "open-ended answers plus the decision note as binding implementation "
         "guidance. "
-        "Do not modify the Agency decision file."
+        "Do not modify the Flowgency decision file."
     )

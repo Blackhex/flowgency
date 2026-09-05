@@ -3,11 +3,11 @@
 ## Recovered-change assessment
 
 - Recovered changes were present in eight Task 7 files:
-  - `agency/app.py`
-  - `agency/templates/admin_groups.html`
-  - `agency/templates/admin_org_edit.html`
-  - `agency/web/routes/admin_groups.py`
-  - `agency/web/setup_flow.py`
+  - `flowgency/app.py`
+  - `flowgency/templates/admin_groups.html`
+  - `flowgency/templates/admin_org_edit.html`
+  - `flowgency/web/routes/admin_groups.py`
+  - `flowgency/web/setup_flow.py`
   - `tests/test_admin_dispatch.py`
   - `tests/test_group_settings.py`
   - `tests/test_setup_flow.py`
@@ -46,11 +46,11 @@
 
 ## Files changed
 
-- `agency/app.py`
-- `agency/templates/admin_groups.html`
-- `agency/templates/admin_org_edit.html`
-- `agency/web/routes/admin_groups.py`
-- `agency/web/setup_flow.py`
+- `flowgency/app.py`
+- `flowgency/templates/admin_groups.html`
+- `flowgency/templates/admin_org_edit.html`
+- `flowgency/web/routes/admin_groups.py`
+- `flowgency/web/setup_flow.py`
 - `tests/test_admin_dispatch.py`
 - `tests/test_group_settings.py`
 - `tests/test_setup_flow.py`
@@ -58,8 +58,8 @@
 
 ## Self-review
 
-- Verified normal `/admin/groups` path semantics in `agency/app.py`.
-- Verified conflict `/admin/groups` path semantics in `agency/web/routes/admin_groups.py`.
+- Verified normal `/admin/groups` path semantics in `flowgency/app.py`.
+- Verified conflict `/admin/groups` path semantics in `flowgency/web/routes/admin_groups.py`.
 - Confirmed initialization status is based on canonical record directories, not obsolete shared-state assumptions.
 - Confirmed form labels and help text match the new workspace/group split.
 - Confirmed the setup prompt states schema v3, disjoint roots, and no project-local shared directory.

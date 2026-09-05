@@ -7,7 +7,7 @@ runs through a bounded pool.
 
 On 2026-07-29 the routine `duncan/suite-health`, scheduled `at: "08:00"`, did not
 run. Nothing was broken. The machine slept at 22:04 the previous evening and
-resumed at 11:40; the `AgencyDispatch` task first fired at 11:57 and has run
+resumed at 11:40; the `FlowgencyDispatch` task first fired at 11:57 and has run
 every fifteen minutes since. Gurney's 18:00 routine ran normally the same day.
 
 The runner fires an `at` rule only inside a window of `interval + 2` minutes
@@ -33,10 +33,10 @@ belong to one change.
 
 ## Configuration
 
-### `agency.jobs.pool`
+### `flowgency.jobs.pool`
 
 ```yaml
-agency:
+flowgency:
   jobs:
     pool: 4
 ```
@@ -130,7 +130,7 @@ deliberate change to existing drift behavior.
 
 ### What does not change
 
-Marker paths, the per-day log directories, `agency/health.py`, and the health
+Marker paths, the per-day log directories, `flowgency/health.py`, and the health
 colours all keep their present meaning. Markers are written at submission, so a
 recovered routine stops reading overdue the moment it is queued, and the runner
 and the dashboard cannot disagree.
@@ -168,7 +168,7 @@ alone. What is missing is something that starts it.
 
 ### `drain`
 
-Draining is a function, not a process. `agency/jobs/queue.py` exposes one
+Draining is a function, not a process. `flowgency/jobs/queue.py` exposes one
 `drain` called from three places:
 
 1. at the end of every `submit_job_request`,
@@ -259,7 +259,7 @@ completion from the integration's output, as it is today. There is no second
 ledger to drift out of agreement with the first.
 
 With `daily_limit` gone, its `.out` glob in the runner goes with it, along with
-the `dispatch_daily_limit` fields in `agency/configuration/patches.py` and the
+the `dispatch_daily_limit` fields in `flowgency/configuration/patches.py` and the
 Daily Limit input in Group Settings.
 
 ## Interface
@@ -410,7 +410,7 @@ the Jobs list; cancelling a queued job; the queued state on an agent card.
   about one event.
 - *Capturing native session IDs at start.* Rejected: backend-specific and
   undocumented for the Copilot CLI.
-- *Keeping `daily_limit` per group*, or moving it to `agency.jobs.daily_limit`
+- *Keeping `daily_limit` per group*, or moving it to `flowgency.jobs.daily_limit`
   as a machine-wide spend ceiling. Both rejected: resource spend is acceptable
   as long as the work gets done, and the pool is not expected to stay saturated.
 

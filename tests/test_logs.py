@@ -94,7 +94,7 @@ def test_logs_page_displays_local_modification_time(tmp_path, monkeypatch):
                 "schema_version": 1,
 
                 "flowgency": {
-                    "title": "Agency",
+                    "title": "Flowgency",
                     "default_team": "test",
                     "ai_backend": "claude-code",
                     "agent_library": str((tmp_path / "agent-library").resolve()),
@@ -156,7 +156,7 @@ def test_log_view_rejects_workspace_file_outside_team_logs(tmp_path, monkeypatch
             {
                 "schema_version": 1,
                 "flowgency": {
-                    "title": "Agency",
+                    "title": "Flowgency",
                     "default_team": "test",
                     "ai_backend": "claude-code",
                     "agent_library": str((tmp_path / "agent-library").resolve()),

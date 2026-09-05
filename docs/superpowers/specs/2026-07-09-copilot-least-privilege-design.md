@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-09
 **Status:** Approved (design phase)
-**Component:** `agency/integrations/agency/copilot.py`, `agency/config.py`,
-`agency/integrations/__init__.py`
+**Component:** `flowgency/integrations/flowgency/copilot.py`, `flowgency/config.py`,
+`flowgency/integrations/__init__.py`
 
 ## Problem
 
@@ -65,7 +65,7 @@ groups:
   sentinel:
     sandbox_root:                  # string OR list; empty/absent => --allow-all-paths
       - C:/Projects/msvc-digest    # first entry => cwd / relative-write anchor
-      - ~/.agency-cowork           # additional allowed root
+      - ~/.flowgency-cowork           # additional allowed root
     allowed_tools:                 # list; empty/absent => --allow-all-tools
       - shell
       - write
@@ -96,7 +96,7 @@ class SandboxSpec:
   `copilot.py` normalizes `None` to an empty spec.
 - The base-class `sandbox_root` type hint/docstring is updated to
   `SandboxSpec | None`.
-- The two call sites (`agency/dispatch/run.py`, `agency/app.py`) already pass
+- The two call sites (`flowgency/dispatch/run.py`, `flowgency/app.py`) already pass
   `get_sandbox_root(g)` straight through — unchanged.
 
 ## Unified command builder (`copilot.py`)
@@ -179,9 +179,9 @@ Full suite stays green.
 
 ## Scope
 
-- `agency/config.py` — `SandboxSpec` dataclass + `get_sandbox_root` returning it.
-- `agency/integrations/agency/copilot.py` — unified builder consuming the spec.
-- `agency/integrations/__init__.py` — `sandbox_root` type/docstring update.
+- `flowgency/config.py` — `SandboxSpec` dataclass + `get_sandbox_root` returning it.
+- `flowgency/integrations/flowgency/copilot.py` — unified builder consuming the spec.
+- `flowgency/integrations/__init__.py` — `sandbox_root` type/docstring update.
 - `tests/test_integration_sidecar.py` — updated + new cases; any test that
   built a bare `Path` root switches to `SandboxSpec`.
 - No changes to the other 11 integrations, `_template.py`, or the two call

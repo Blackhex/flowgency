@@ -81,7 +81,7 @@ class _LaunchIntegration:
         name: str = "copilot",
         display_name: str = "GitHub Copilot",
         *,
-        fallback_command: str = "copilot -C C:\\project -i \"prompt\" --name \"Agency setup\"",
+        fallback_command: str = "copilot -C C:\\project -i \"prompt\" --name \"Flowgency setup\"",
         error: Exception | None = None,
         fallback_error: Exception | None = None,
     ) -> None:
@@ -181,7 +181,7 @@ def test_run_server_reload_mode_uses_import_string_and_project_policy(
     assert events[4][0] == "supervisor"
     assert events[4][3] == ["socket"]
     assert events[5][0] == "run"
-    assert isinstance(events[5][1], app_mod._AgencyReloadFilter)
+    assert isinstance(events[5][1], app_mod._FlowgencyReloadFilter)
     assert events[5][1].root == tmp_path.resolve()
 
 
@@ -230,14 +230,14 @@ def test_reload_supervisor_rejects_future_artifacts_at_any_depth(tmp_path):
     assert not supervisor.watch_filter((tmp_path / "outside.py").resolve())
     assert not supervisor.watch_filter((root / "README.md").resolve())
 
-    external_group_log = tmp_path / "agency-data" / "groups" / "newsletter" / "logs" / "run.out"
+    external_group_log = tmp_path / "flowgency-data" / "groups" / "newsletter" / "logs" / "run.out"
     external_group_log.parent.mkdir(parents=True)
     external_group_log.write_text("probe", encoding="utf-8")
     assert not supervisor.watch_filter(external_group_log.resolve())
 
 
 def test_reload_filter_uses_directory_components_not_name_fragments(tmp_path):
-    reload_filter = app_mod._AgencyReloadFilter(tmp_path.resolve())
+    reload_filter = app_mod._FlowgencyReloadFilter(tmp_path.resolve())
 
     assert reload_filter(tmp_path / "flowgency" / "shared_config.py")
     assert reload_filter(tmp_path / "flowgency" / "venv_tools.py")
@@ -305,7 +305,7 @@ def test_run_server_reports_first_run_before_starting_uvicorn(
     assert not config_path.exists()
     output = capsys.readouterr().out
     assert (
-        "First run: open http://localhost:8602/setup to launch guided Agency setup."
+        "First run: open http://localhost:8602/setup to launch guided Flowgency setup."
         in output
     )
     assert "/admin/" not in output
@@ -380,16 +380,16 @@ def test_setup_launch_rejects_relative_data_root(tmp_path, monkeypatch):
     )
     response = TestClient(app_mod.app).post(
         "/setup/launch",
-        data={"data_root": "relative/Agency", "integration": "copilot"},
+        data={"data_root": "relative/Flowgency", "integration": "copilot"},
     )
 
     assert response.status_code == 200
-    assert "Agency data root must be an absolute path." in response.text
+    assert "Flowgency data root must be an absolute path." in response.text
 
 
 def test_setup_launch_rejects_unavailable_integration(tmp_path, monkeypatch):
     _configure_missing_config(tmp_path, monkeypatch)
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
     monkeypatch.setattr(
         "flowgency.web.routes.admin_teams.launchable_integrations",
@@ -408,7 +408,7 @@ def test_setup_launch_rejects_unavailable_integration(tmp_path, monkeypatch):
 
 def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     config_path = _configure_missing_config(tmp_path, monkeypatch)
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
     integration = _LaunchIntegration()
     monkeypatch.setattr(
@@ -485,7 +485,7 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
     tmp_path, monkeypatch
 ):
     _configure_missing_config(tmp_path, monkeypatch)
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
     integration = _LaunchIntegration(
         name="custom-launcher",
@@ -526,7 +526,7 @@ def test_setup_launch_uses_integration_owned_fallback_when_launch_fails(
 
 def test_setup_launch_creates_and_uses_missing_data_root(tmp_path, monkeypatch):
     config_path = _configure_missing_config(tmp_path, monkeypatch)
-    data_root = tmp_path / "new" / "Agency"
+    data_root = tmp_path / "new" / "Flowgency"
     integration = _LaunchIntegration()
     monkeypatch.setattr(
         "flowgency.web.routes.admin_teams.launchable_integrations",
@@ -552,7 +552,7 @@ def test_setup_launch_returns_to_form_when_launch_and_fallback_fail(
     tmp_path, monkeypatch
 ):
     _configure_missing_config(tmp_path, monkeypatch)
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     integration = _LaunchIntegration(
         error=IntegrationError("Bundled setup skill is unavailable."),
         fallback_error=IntegrationError("No valid fallback command."),

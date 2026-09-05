@@ -17,7 +17,7 @@ from flowgency.web.setup_flow import (
 
 
 def test_build_setup_prompt_supplies_guided_data_root_context(tmp_path: Path):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
     config_path = tmp_path / "config.yaml"
 
@@ -60,7 +60,7 @@ def test_build_setup_prompt_emits_v1_team_shape(tmp_path: Path):
 def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
     tmp_path: Path,
 ):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
 
     prompt = build_setup_prompt(
@@ -93,7 +93,7 @@ def test_build_setup_prompt_hands_context_aware_team_synthesis_to_skill(
 def test_build_setup_prompt_requires_semantic_profiles_and_themed_identities(
     tmp_path: Path,
 ):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
 
     prompt = build_setup_prompt(
@@ -118,7 +118,7 @@ def test_build_setup_prompt_requires_semantic_profiles_and_themed_identities(
 
 
 def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
     prompt = build_setup_prompt(
         data_root,
@@ -141,7 +141,7 @@ def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
 
 
 def test_build_setup_prompt_phases_team_and_storage_approvals(tmp_path: Path):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
     prompt = build_setup_prompt(
         data_root,
@@ -158,7 +158,7 @@ def test_build_setup_prompt_phases_team_and_storage_approvals(tmp_path: Path):
 def test_build_setup_prompt_storage_question_deferred_until_team_approval(
     tmp_path: Path,
 ):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
 
     prompt = build_setup_prompt(
@@ -175,7 +175,7 @@ def test_build_setup_prompt_storage_question_deferred_until_team_approval(
 
 
 def test_build_setup_prompt_survives_deleted_data_root(tmp_path: Path):
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
     resolved = data_root.resolve(strict=True)
     data_root.rmdir()
@@ -199,7 +199,8 @@ def test_build_setup_prompt_guided_marker_is_flowgency_data_root(tmp_path: Path)
     )
 
     assert f"Flowgency data root: {data_root.resolve()}." in prompt
-    assert "Agency data root:" not in prompt
+    _old_marker = "".join(("A", "gency")) + " data root:"
+    assert _old_marker not in prompt
 
 
 def test_build_setup_prompt_integration_sentence_is_complete(tmp_path: Path):
@@ -231,7 +232,7 @@ def test_status_is_invalid_for_validation_errors(tmp_path: Path, raw_config) -> 
 
 def test_status_is_invalid_for_yaml_parse_errors(tmp_path: Path) -> None:
     store = ConfigStore(tmp_path / "config.yaml")
-    store.path.write_text("agency: [\n", encoding="utf-8")
+    store.path.write_text("flowgency: [\n", encoding="utf-8")
 
     status = inspect_setup_status(store)
 

@@ -8,33 +8,33 @@ from flowgency.jobs.authority import JobStore
 
 
 def flowgency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
-    agency_raw = snapshot.raw.get("flowgency")
-    if not isinstance(agency_raw, Mapping):
-        agency_raw = {}
-    dispatch_raw = agency_raw.get("dispatch")
+    flowgency_raw = snapshot.raw.get("flowgency")
+    if not isinstance(flowgency_raw, Mapping):
+        flowgency_raw = {}
+    dispatch_raw = flowgency_raw.get("dispatch")
     if not isinstance(dispatch_raw, Mapping):
         dispatch_raw = {}
 
-    dismissed = agency_raw.get("tips_dismissed")
+    dismissed = flowgency_raw.get("tips_dismissed")
     if not isinstance(dismissed, list):
         dismissed = []
 
     resolved = snapshot.config.flowgency
     default_team = str(
-        agency_raw.get("default_team")
+        flowgency_raw.get("default_team")
         or resolved.default_team
         or next(iter(snapshot.config.teams), "")
     )
     return {
-        "title": str(agency_raw.get("title", resolved.title)),
+        "title": str(flowgency_raw.get("title", resolved.title)),
         "default_team": default_team,
-        "decided_by": str(agency_raw.get("decided_by", "admin")),
-        "ai_backend": str(agency_raw.get("ai_backend", resolved.ai_backend)),
-        "theme": str(agency_raw.get("theme", "")),
+        "decided_by": str(flowgency_raw.get("decided_by", "admin")),
+        "ai_backend": str(flowgency_raw.get("ai_backend", resolved.ai_backend)),
+        "theme": str(flowgency_raw.get("theme", "")),
         "dispatch_interval": int(
             dispatch_raw.get("interval", resolved.dispatch.interval)
         ),
-        "show_tips": agency_raw.get("show_tips", True) is not False,
+        "show_tips": flowgency_raw.get("show_tips", True) is not False,
         "tips_dismissed": [str(item) for item in dismissed if str(item)],
         "agent_library": str(resolved.agent_library or ""),
         "compilation_cache": str(resolved.compilation_cache or ""),

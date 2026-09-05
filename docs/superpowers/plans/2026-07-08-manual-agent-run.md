@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Edit only `agency/` — never edit the stale `build/lib/agency/` copy.
+- Edit only `flowgency/` — never edit the stale `build/lib/flowgency/` copy.
 - `integration.run(...)` takes **no `env=` argument**; the subprocess inherits the parent process environment. No task may add an `env=` override anywhere.
 - This feature adds no config keys.
 - One concurrent run per agent: a second run while one is active returns HTTP 409.
@@ -24,7 +24,7 @@
 ### Task 1: Promote dispatcher run core to a shared public helper
 
 **Files:**
-- Modify: `agency/dispatch/run.py` (rename `_run_agent` → `run_agent_prompt`; update its caller in `run_dispatch_cycle`)
+- Modify: `flowgency/dispatch/run.py` (rename `_run_agent` → `run_agent_prompt`; update its caller in `run_dispatch_cycle`)
 - Test: `tests/test_dispatch_run.py` (update references from `_run_agent` to `run_agent_prompt`)
 
 **Interfaces:**
@@ -42,7 +42,7 @@ Expected: FAIL with `ImportError` / `AttributeError` for `run_agent_prompt` (sym
 
 - [ ] **Step 3: Rename the function and update its caller**
 
-In `agency/dispatch/run.py`:
+In `flowgency/dispatch/run.py`:
 - Rename `def _run_agent(` to `def run_agent_prompt(` (keep the signature and body byte-for-byte otherwise).
 - In `run_dispatch_cycle`, change the call `_run_agent(...)` to `run_agent_prompt(...)` (same arguments).
 
@@ -54,7 +54,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/dispatch/run.py tests/test_dispatch_run.py
+git add flowgency/dispatch/run.py tests/test_dispatch_run.py
 git commit -m "refactor: expose run_agent_prompt as shared dispatch helper"
 ```
 
@@ -63,7 +63,7 @@ git commit -m "refactor: expose run_agent_prompt as shared dispatch helper"
 ### Task 2: Add the manual-run route
 
 **Files:**
-- Modify: `agency/app.py` (add `JSONResponse` import; import `run_agent_prompt`; add route)
+- Modify: `flowgency/app.py` (add `JSONResponse` import; import `run_agent_prompt`; add route)
 - Test: `tests/test_agent_run.py` (new)
 
 **Interfaces:**
@@ -79,7 +79,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from agency.app import app, CONFIG, GROUPS
+from flowgency.app import app, CONFIG, GROUPS
 
 
 def _setup_group(tmp_path: Path) -> Path:
@@ -108,8 +108,8 @@ def _setup_group(tmp_path: Path) -> Path:
 def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
     _setup_group(tmp_path)
     calls = []
-    monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: False)
-    monkeypatch.setattr("agency.app.run_agent_prompt", lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr("flowgency.app.is_agent_running", lambda *a, **k: False)
+    monkeypatch.setattr("flowgency.app.run_agent_prompt", lambda *a, **k: calls.append((a, k)))
     client = TestClient(app)
 
     resp = client.post("/test/agents/product/run", data={"prompt": "routine.md"})
@@ -124,7 +124,7 @@ def test_run_returns_202_and_schedules(tmp_path, monkeypatch):
 
 def test_run_unknown_prompt_404(tmp_path, monkeypatch):
     _setup_group(tmp_path)
-    monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: False)
+    monkeypatch.setattr("flowgency.app.is_agent_running", lambda *a, **k: False)
     client = TestClient(app)
 
     resp = client.post("/test/agents/product/run", data={"prompt": "nope.md"})
@@ -134,7 +134,7 @@ def test_run_unknown_prompt_404(tmp_path, monkeypatch):
 
 def test_run_path_traversal_400(tmp_path, monkeypatch):
     _setup_group(tmp_path)
-    monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: False)
+    monkeypatch.setattr("flowgency.app.is_agent_running", lambda *a, **k: False)
     client = TestClient(app)
 
     resp = client.post("/test/agents/product/run", data={"prompt": "../secret.md"})
@@ -144,7 +144,7 @@ def test_run_path_traversal_400(tmp_path, monkeypatch):
 
 def test_run_already_running_409(tmp_path, monkeypatch):
     _setup_group(tmp_path)
-    monkeypatch.setattr("agency.app.is_agent_running", lambda *a, **k: True)
+    monkeypatch.setattr("flowgency.app.is_agent_running", lambda *a, **k: True)
     client = TestClient(app)
 
     resp = client.post("/test/agents/product/run", data={"prompt": "routine.md"})
@@ -159,15 +159,15 @@ Expected: FAIL — 404/405 from a missing route (route not defined yet).
 
 - [ ] **Step 3: Add imports**
 
-In `agency/app.py`:
+In `flowgency/app.py`:
 - Add `JSONResponse` to the responses import, e.g.:
   `from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse`
-- Add near the other imports: `from agency.dispatch.run import run_agent_prompt`
+- Add near the other imports: `from flowgency.dispatch.run import run_agent_prompt`
 - Confirm `datetime` is imported (`from datetime import datetime`); add it if missing.
 
 - [ ] **Step 4: Add the route**
 
-Add to `agency/app.py` (near the other `/{group}/agents/...` routes):
+Add to `flowgency/app.py` (near the other `/{group}/agents/...` routes):
 
 ```python
 @app.post("/{group}/agents/{agent}/run")
@@ -226,7 +226,7 @@ Expected: PASS (4 passed).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/app.py tests/test_agent_run.py
+git add flowgency/app.py tests/test_agent_run.py
 git commit -m "feat: add manual agent run route"
 ```
 
@@ -235,7 +235,7 @@ git commit -m "feat: add manual agent run route"
 ### Task 3: Pass all group prompts to the agents template
 
 **Files:**
-- Modify: `agency/app.py` (the `agents_list` handler for `GET /{group}/agents`)
+- Modify: `flowgency/app.py` (the `agents_list` handler for `GET /{group}/agents`)
 - Test: `tests/test_agent_run.py` (add one assertion, verified after Task 4)
 
 **Interfaces:**
@@ -244,7 +244,7 @@ git commit -m "feat: add manual agent run route"
 
 - [ ] **Step 1: Add prompts to the context**
 
-In the `agents_list` handler in `agency/app.py`, compute `prompts = collect_prompts(g)` and add `"prompts": prompts` to the `TemplateResponse` context dict.
+In the `agents_list` handler in `flowgency/app.py`, compute `prompts = collect_prompts(g)` and add `"prompts": prompts` to the `TemplateResponse` context dict.
 
 - [ ] **Step 2: Run the existing suite to verify nothing breaks**
 
@@ -254,7 +254,7 @@ Expected: PASS (existing route tests unaffected; the rendered-prompt assertions 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add agency/app.py
+git add flowgency/app.py
 git commit -m "feat: pass group prompts to agents list"
 ```
 
@@ -263,7 +263,7 @@ git commit -m "feat: pass group prompts to agents list"
 ### Task 4: Render prompt list + Run interaction on agent cards
 
 **Files:**
-- Modify: `agency/templates/agents.html`
+- Modify: `flowgency/templates/agents.html`
 - Test: `tests/test_agent_run.py` (add assertions for the prompt list, detail link, and Run button)
 
 **Interfaces:**
@@ -294,7 +294,7 @@ Expected: FAIL — no `data-prompt=` attribute in the page.
 
 - [ ] **Step 3: Restructure the card and add the prompt list**
 
-In `agency/templates/agents.html`, for the regular-agent card:
+In `flowgency/templates/agents.html`, for the regular-agent card:
 - Change the outer `<a href=".../agents/{{ a.name }}">` wrapper into a `<div class="..." data-agent-card="{{ a.name }}">`.
 - Keep the avatar + name as a link to `/{{ group }}/agents/{{ a.name }}` inside the header.
 - Keep the status line, but give the status dot a hook `js-status-dot` and wrap the label text in `<span class="js-status-label">`. When `a.running`, render the emerald `animate-pulse` dot + "Running"; else the existing health dot + `relative_time`/`next_run`.
@@ -319,7 +319,7 @@ In `agency/templates/agents.html`, for the regular-agent card:
 
 - [ ] **Step 4: Add the run script**
 
-Add once near the end of `agency/templates/agents.html` (page-scoped):
+Add once near the end of `flowgency/templates/agents.html` (page-scoped):
 
 ```html
 <script>
@@ -362,7 +362,7 @@ Expected: PASS (all agent-run tests).
 
 - [ ] **Step 6: Manual verification**
 
-Start the app (`python -m agency.app`), open `/{group}/agents`:
+Start the app (`python -m flowgency.app`), open `/{group}/agents`:
 - Each card shows the prompt list; clicking a prompt name opens its detail page.
 - Clicking Run does not navigate; the card dot flips to pulsing "Running" and Run buttons disable.
 - Clicking Run again while running shows a "Busy" inline note (409).
@@ -370,7 +370,7 @@ Start the app (`python -m agency.app`), open `/{group}/agents`:
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/templates/agents.html tests/test_agent_run.py
+git add flowgency/templates/agents.html tests/test_agent_run.py
 git commit -m "feat: prompt list with run button on agent cards"
 ```
 
@@ -389,7 +389,7 @@ Expected: PASS (all tests green, including `tests/test_dispatch_run.py` and `tes
 
 - [ ] **Step 2: Confirm no environment override was introduced**
 
-Run: `git grep -n "env=" -- agency/dispatch agency/app.py agency/integrations`
+Run: `git grep -n "env=" -- flowgency/dispatch flowgency/app.py flowgency/integrations`
 Expected: no `env=` passed to `subprocess`/`integration.run` in the run path (environment is inherited).
 
 - [ ] **Step 3: Manual smoke of environment parity**

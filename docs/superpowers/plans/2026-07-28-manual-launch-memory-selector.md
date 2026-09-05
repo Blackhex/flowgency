@@ -21,15 +21,15 @@
 ## File Map
 
 - `tests/test_agent_run.py`: Prove both web launch modes emit typed memory overrides and retain routine-memory coverage.
-- `agency/app.py`: Convert validated form values into `MemorySelector` instances at the web boundary.
-- `agency/jobs/models.py`: Declare `JobRequest.memory_override` as `MemorySelector | None`.
+- `flowgency/app.py`: Convert validated form values into `MemorySelector` instances at the web boundary.
+- `flowgency/jobs/models.py`: Declare `JobRequest.memory_override` as `MemorySelector | None`.
 
 ### Task 1: Type Manual Launch Memory Overrides
 
 **Files:**
 - Modify: `tests/test_agent_run.py`
-- Modify: `agency/app.py`
-- Modify: `agency/jobs/models.py`
+- Modify: `flowgency/app.py`
+- Modify: `flowgency/jobs/models.py`
 
 **Interfaces:**
 - Consumes: POST form fields `mode`, `memory_scope`, and `memory_channel`; existing `MemorySelector(scope: MemoryScope, channel: str | None = None)`.
@@ -50,7 +50,7 @@ Expected: PASS. If it fails, record the pre-existing failure and stop before cha
 Add the model import in `tests/test_agent_run.py`:
 
 ```python
-from agency.configuration.models import MemorySelector
+from flowgency.configuration.models import MemorySelector
 ```
 
 Add this parameterized test near the other manual-run request tests:
@@ -86,7 +86,7 @@ def test_run_submits_typed_memory_override_for_manual_modes(
     _setup_group(tmp_path)
     calls = []
     monkeypatch.setattr(
-        "agency.app.submit_job_request",
+        "flowgency.app.submit_job_request",
         lambda request: calls.append(request) or SimpleNamespace(job_id="job-1"),
     )
     client = TestClient(app)
@@ -116,10 +116,10 @@ Expected: FAIL for both parameter cases because `memory_override` is a `dict`, n
 
 - [ ] **Step 4: Implement the typed producer contract**
 
-Import the selector in `agency/app.py`:
+Import the selector in `flowgency/app.py`:
 
 ```python
-from agency.configuration.models import MemorySelector
+from flowgency.configuration.models import MemorySelector
 ```
 
 Replace only the two successful override assignments in the manual launch route:
@@ -135,10 +135,10 @@ memory_override = MemorySelector(
 memory_override = MemorySelector(scope=memory_scope)
 ```
 
-Import and declare the selector type in `agency/jobs/models.py`:
+Import and declare the selector type in `flowgency/jobs/models.py`:
 
 ```python
-from agency.configuration.models import MemorySelector, PromptSelector
+from flowgency.configuration.models import MemorySelector, PromptSelector
 ```
 
 ```python
@@ -180,7 +180,7 @@ Expected: PASS with no repository-boundary or behavior regressions.
 - [ ] **Step 8: Commit the implementation**
 
 ```powershell
-git add agency/app.py agency/jobs/models.py tests/test_agent_run.py
+git add flowgency/app.py flowgency/jobs/models.py tests/test_agent_run.py
 git commit -m "fix(agents): type manual memory overrides"
 ```
 

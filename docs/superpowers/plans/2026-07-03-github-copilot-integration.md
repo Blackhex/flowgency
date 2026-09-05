@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a `copilot` integration so Agency can run/dispatch GitHub Copilot CLI agents and use Copilot as its own AI backbone.
+**Goal:** Add a `copilot` integration so Flowgency can run/dispatch GitHub Copilot CLI agents and use Copilot as its own AI backbone.
 
-**Architecture:** A new `CopilotIntegration(BaseIntegration)` class following the existing sidecar pattern (`codex.py`/`opencode.py`). Identity lives in `.github/copilot-instructions.md` (plain markdown) with display metadata in the `.agency-meta.yaml` sidecar. Detection keys off the `.github/` directory. Execution and the AI-backbone `prompt()` both shell out to `copilot -p "<text>" --autopilot --experimental`. The integration is registered in `integrations.yaml` and the default module list, and gets a UI badge color.
+**Architecture:** A new `CopilotIntegration(BaseIntegration)` class following the existing sidecar pattern (`codex.py`/`opencode.py`). Identity lives in `.github/copilot-instructions.md` (plain markdown) with display metadata in the `.flowgency-meta.yaml` sidecar. Detection keys off the `.github/` directory. Execution and the AI-backbone `prompt()` both shell out to `copilot -p "<text>" --autopilot --experimental`. The integration is registered in `integrations.yaml` and the default module list, and gets a UI badge color.
 
 **Tech Stack:** Python 3.11+, `subprocess`, pytest.
 
@@ -26,11 +26,11 @@
 ### Task 1: Create the CopilotIntegration class
 
 **Files:**
-- Create: `agency/integrations/agency/copilot.py`
+- Create: `flowgency/integrations/flowgency/copilot.py`
 - Test: `tests/test_integration_sidecar.py` (append `TestCopilot` class)
 
 **Interfaces:**
-- Consumes: `BaseIntegration`, `RunResult`, `AgentIdentity`, `IntegrationError`, `_register`, `read_sidecar`, `write_sidecar` from `agency.integrations`; helpers `_parse_sidecar_identity`, `_write_sidecar_identity`, `_resolve_cmd` inherited from `BaseIntegration`.
+- Consumes: `BaseIntegration`, `RunResult`, `AgentIdentity`, `IntegrationError`, `_register`, `read_sidecar`, `write_sidecar` from `flowgency.integrations`; helpers `_parse_sidecar_identity`, `_write_sidecar_identity`, `_resolve_cmd` inherited from `BaseIntegration`.
 - Produces: `CopilotIntegration` with `name="copilot"`, `identity_filename() -> ".github/copilot-instructions.md"`, `detect(agent_dir) -> bool`, `parse_identity`, `write_identity`, `run(agent_dir, prompt_file, timeout) -> RunResult`, `prompt(text, timeout) -> str`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -38,7 +38,7 @@
 Append to `tests/test_integration_sidecar.py`. First add the import near the top with the other integration imports:
 
 ```python
-from agency.integrations.agency.copilot import CopilotIntegration
+from flowgency.integrations.flowgency.copilot import CopilotIntegration
 ```
 
 Then append this test class at the end of the file:
@@ -77,7 +77,7 @@ class TestCopilot:
         gh = tmp_agent_dir / ".github"
         gh.mkdir()
         (gh / "copilot-instructions.md").write_text("# Agent\n")
-        (tmp_agent_dir / ".agency-meta.yaml").write_text(
+        (tmp_agent_dir / ".flowgency-meta.yaml").write_text(
             "display_name: Copilot Bot\ntitle: CB\nemoji: \"🐙\"\n"
         )
         identity = integration.parse_identity(tmp_agent_dir)
@@ -88,14 +88,14 @@ class TestCopilot:
         identity = AgentIdentity(display_name="New", title="T", emoji="🐙", body="# New body")
         integration.write_identity(tmp_agent_dir, identity)
         assert "# New body" in (tmp_agent_dir / ".github" / "copilot-instructions.md").read_text()
-        sidecar = (tmp_agent_dir / ".agency-meta.yaml").read_text()
+        sidecar = (tmp_agent_dir / ".flowgency-meta.yaml").read_text()
         assert "display_name: New" in sidecar
 
     def test_missing_file(self, integration, tmp_agent_dir):
         assert integration.parse_identity(tmp_agent_dir) is None
 
     def test_run_builds_command(self, integration, tmp_agent_dir, monkeypatch):
-        import agency.integrations.agency.copilot as mod
+        import flowgency.integrations.flowgency.copilot as mod
         captured = {}
 
         class FakeCompleted:
@@ -120,7 +120,7 @@ class TestCopilot:
         assert captured["cwd"] == str(tmp_agent_dir)
 
     def test_prompt_returns_stdout(self, integration, monkeypatch):
-        import agency.integrations.agency.copilot as mod
+        import flowgency.integrations.flowgency.copilot as mod
 
         class FakeCompleted:
             returncode = 0
@@ -142,11 +142,11 @@ class TestCopilot:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/test_integration_sidecar.py -k Copilot -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'agency.integrations.agency.copilot'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'flowgency.integrations.flowgency.copilot'`
 
 - [ ] **Step 3: Create the integration file**
 
-Create `agency/integrations/agency/copilot.py`:
+Create `flowgency/integrations/flowgency/copilot.py`:
 
 ```python
 """GitHub Copilot CLI integration."""
@@ -155,7 +155,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from agency.integrations import (
+from flowgency.integrations import (
     BaseIntegration, RunResult, AgentIdentity, IntegrationError, _register,
 )
 
@@ -236,7 +236,7 @@ Expected: PASS (10 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/integrations/agency/copilot.py tests/test_integration_sidecar.py
+git add flowgency/integrations/flowgency/copilot.py tests/test_integration_sidecar.py
 git commit -m "feat: add GitHub Copilot integration class"
 ```
 
@@ -245,8 +245,8 @@ git commit -m "feat: add GitHub Copilot integration class"
 ### Task 2: Register the integration
 
 **Files:**
-- Modify: `agency/integrations/__init__.py` (default module list in `load_integrations()`)
-- Modify: `agency/integrations/integrations.yaml`
+- Modify: `flowgency/integrations/__init__.py` (default module list in `load_integrations()`)
+- Modify: `flowgency/integrations/integrations.yaml`
 
 **Interfaces:**
 - Consumes: `CopilotIntegration` (registered on import via `_register`).
@@ -254,13 +254,13 @@ git commit -m "feat: add GitHub Copilot integration class"
 
 - [ ] **Step 1: Add to the default module list**
 
-In `agency/integrations/__init__.py`, find the default `modules` list inside `load_integrations()`:
+In `flowgency/integrations/__init__.py`, find the default `modules` list inside `load_integrations()`:
 
 ```python
         modules = [
-            "agency.claude_code", "agency.codex", "agency.gemini",
-            "agency.aider", "agency.goose", "agency.opencode", "agency.pi",
-            "agency.script", "agency.sdk",
+            "flowgency.claude_code", "flowgency.codex", "flowgency.gemini",
+            "flowgency.aider", "flowgency.goose", "flowgency.opencode", "flowgency.pi",
+            "flowgency.script", "flowgency.sdk",
         ]
 ```
 
@@ -268,31 +268,31 @@ Replace it with:
 
 ```python
         modules = [
-            "agency.claude_code", "agency.codex", "agency.gemini",
-            "agency.aider", "agency.goose", "agency.opencode", "agency.pi",
-            "agency.copilot", "agency.script", "agency.sdk",
+            "flowgency.claude_code", "flowgency.codex", "flowgency.gemini",
+            "flowgency.aider", "flowgency.goose", "flowgency.opencode", "flowgency.pi",
+            "flowgency.copilot", "flowgency.script", "flowgency.sdk",
         ]
 ```
 
 - [ ] **Step 2: Add to integrations.yaml**
 
-Open `agency/integrations/integrations.yaml`. Add `- agency.copilot` to the `integrations:` list (place it right before `- agency.script`). Example resulting list:
+Open `flowgency/integrations/integrations.yaml`. Add `- flowgency.copilot` to the `integrations:` list (place it right before `- flowgency.script`). Example resulting list:
 
 ```yaml
 integrations:
-- agency.claude_code
-- agency.codex
-- agency.gemini
-- agency.aider
-- agency.goose
-- agency.opencode
-- agency.pi
-- agency.copilot
-- agency.script
-- agency.sdk
+- flowgency.claude_code
+- flowgency.codex
+- flowgency.gemini
+- flowgency.aider
+- flowgency.goose
+- flowgency.opencode
+- flowgency.pi
+- flowgency.copilot
+- flowgency.script
+- flowgency.sdk
 ```
 
-> Note: match the existing file's exact formatting. If entries are quoted or ordered differently, insert `agency.copilot` consistently before `agency.script`.
+> Note: match the existing file's exact formatting. If entries are quoted or ordered differently, insert `flowgency.copilot` consistently before `flowgency.script`.
 
 - [ ] **Step 3: Verify registration and contract tests pass**
 
@@ -301,13 +301,13 @@ Expected: PASS — includes parametrized cases for `copilot`.
 
 Also verify it is registered:
 
-Run: `python -c "from agency.integrations import REGISTRY; print('copilot' in REGISTRY)"`
+Run: `python -c "from flowgency.integrations import REGISTRY; print('copilot' in REGISTRY)"`
 Expected: `True`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add agency/integrations/__init__.py agency/integrations/integrations.yaml
+git add flowgency/integrations/__init__.py flowgency/integrations/integrations.yaml
 git commit -m "feat: register GitHub Copilot integration"
 ```
 
@@ -316,7 +316,7 @@ git commit -m "feat: register GitHub Copilot integration"
 ### Task 3: Add UI badge color and docs
 
 **Files:**
-- Modify: `agency/app.py` (`integration_badge_filter`)
+- Modify: `flowgency/app.py` (`integration_badge_filter`)
 - Modify: `CLAUDE.md` (Shipped Integrations table)
 - Modify: `kb/integrations.md` (if it enumerates integrations)
 
@@ -326,7 +326,7 @@ git commit -m "feat: register GitHub Copilot integration"
 
 - [ ] **Step 1: Add badge color**
 
-In `agency/app.py`, find the `colors` dict inside `integration_badge_filter`:
+In `flowgency/app.py`, find the `colors` dict inside `integration_badge_filter`:
 
 ```python
     colors = {
@@ -375,7 +375,7 @@ Expected: PASS (all tests, including the new Copilot and contract cases).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py CLAUDE.md kb/integrations.md
+git add flowgency/app.py CLAUDE.md kb/integrations.md
 git commit -m "docs: document GitHub Copilot integration and add UI badge"
 ```
 

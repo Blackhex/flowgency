@@ -21,9 +21,9 @@
 
 ## File Structure
 
-- Modify `agency/app.py`: resolve latest stdout artifacts, preserve next-run rule identity, preserve prompt assignment rule indexes, and expose both records in agent card data.
-- Modify `agency/templates/agents.html`: render accessible last-run and next-run anchors inside the existing live status label.
-- Modify `agency/templates/prompts.html`: give editable schedule rows stable fragment IDs and visible target styling.
+- Modify `flowgency/app.py`: resolve latest stdout artifacts, preserve next-run rule identity, preserve prompt assignment rule indexes, and expose both records in agent card data.
+- Modify `flowgency/templates/agents.html`: render accessible last-run and next-run anchors inside the existing live status label.
+- Modify `flowgency/templates/prompts.html`: give editable schedule rows stable fragment IDs and visible target styling.
 - Modify `tests/test_agent_status.py`: cover pure stdout selection, next-run detail identity, tie ordering, compatibility, prompt rule indexes, and agent view-model wiring.
 - Modify `tests/test_agent_run.py`: cover rendered URLs, target IDs, fallbacks, historical activity, and running-state guards.
 
@@ -34,7 +34,7 @@ Design reference: `docs/superpowers/specs/2026-07-11-agent-card-run-schedule-lin
 ### Task 1: Resolve the Latest Stdout Artifact
 
 **Files:**
-- Modify: `agency/app.py:972-986`
+- Modify: `flowgency/app.py:972-986`
 - Test: `tests/test_agent_status.py:1-70`
 
 **Interfaces:**
@@ -43,10 +43,10 @@ Design reference: `docs/superpowers/specs/2026-07-11-agent-card-run-schedule-lin
 
 - [ ] **Step 1: Write failing tests for stdout selection**
 
-Replace the direct import from `agency.app` with this multiline import:
+Replace the direct import from `flowgency.app` with this multiline import:
 
 ```python
-from agency.app import (
+from flowgency.app import (
     compute_next_run,
     get_agent_last_run,
     is_agent_running,
@@ -99,11 +99,11 @@ Run:
 python -m pytest tests/test_agent_status.py -k "agent_last_run" -v
 ```
 
-Expected: collection fails because `get_agent_last_run` cannot yet be imported from `agency.app`.
+Expected: collection fails because `get_agent_last_run` cannot yet be imported from `flowgency.app`.
 
 - [ ] **Step 3: Implement the minimal latest-stdout helper**
 
-Add this function immediately before `get_agent_last_seen()` in `agency/app.py`:
+Add this function immediately before `get_agent_last_seen()` in `flowgency/app.py`:
 
 ```python
 def get_agent_last_run(g: dict, agent_name: str) -> dict | None:
@@ -141,7 +141,7 @@ Expected: both latest-stdout tests pass.
 - [ ] **Step 5: Commit the stdout resolver**
 
 ```bash
-git add agency/app.py tests/test_agent_status.py
+git add flowgency/app.py tests/test_agent_status.py
 git commit -m "feat(agents): resolve latest stdout log"
 ```
 
@@ -150,8 +150,8 @@ git commit -m "feat(agents): resolve latest stdout log"
 ### Task 2: Preserve Next-Run Rule Identity
 
 **Files:**
-- Modify: `agency/app.py:752-800`
-- Modify: `agency/app.py:985-1043`
+- Modify: `flowgency/app.py:752-800`
+- Modify: `flowgency/app.py:985-1043`
 - Test: `tests/test_agent_status.py:60-155`
 
 **Interfaces:**
@@ -162,10 +162,10 @@ git commit -m "feat(agents): resolve latest stdout log"
 
 - [ ] **Step 1: Write failing tests for winner identity, tie order, and prompt inversion**
 
-Update the `agency.app` import block to include the new detail helper:
+Update the `flowgency.app` import block to include the new detail helper:
 
 ```python
-from agency.app import (
+from flowgency.app import (
     compute_next_run,
     compute_next_run_detail,
     get_agent_last_run,
@@ -379,7 +379,7 @@ Expected: all tests in `tests/test_agent_status.py` pass, including the pre-exis
 - [ ] **Step 6: Commit next-run identity preservation**
 
 ```bash
-git add agency/app.py tests/test_agent_status.py
+git add flowgency/app.py tests/test_agent_status.py
 git commit -m "feat(agents): preserve next-run rule identity"
 ```
 
@@ -388,9 +388,9 @@ git commit -m "feat(agents): preserve next-run rule identity"
 ### Task 3: Render Run and Schedule Navigation
 
 **Files:**
-- Modify: `agency/app.py:1115-1188`
-- Modify: `agency/templates/agents.html:34-46`
-- Modify: `agency/templates/prompts.html:68-105`
+- Modify: `flowgency/app.py:1115-1188`
+- Modify: `flowgency/templates/agents.html:34-46`
+- Modify: `flowgency/templates/prompts.html:68-105`
 - Modify: `tests/test_agent_status.py:193-225`
 - Modify: `tests/test_agent_run.py:1-145`
 
@@ -624,7 +624,7 @@ In the `_subagents` directory loop, expose the same consistent fields even thoug
 
 - [ ] **Step 4: Render accessible card links inside the live status wrapper**
 
-Replace the regular-card status span in `agency/templates/agents.html` with this block. Do not change the collapsed subagent card block.
+Replace the regular-card status span in `flowgency/templates/agents.html` with this block. Do not change the collapsed subagent card block.
 
 ```html
       <span class="flex items-center gap-1.5">
@@ -663,7 +663,7 @@ The existing manual-run JavaScript still executes `label.textContent = "Running"
 
 - [ ] **Step 5: Add exact fragment targets to editable prompt rows**
 
-In the `elif a.type` branch of `agency/templates/prompts.html`, replace the opening assignment-row `<div>` with:
+In the `elif a.type` branch of `flowgency/templates/prompts.html`, replace the opening assignment-row `<div>` with:
 
 ```html
           <div id="schedule-{{ a.agent }}-{{ a.rule_index }}"
@@ -697,10 +697,10 @@ Expected: the suite completes with zero failures.
 Use the existing hot-reload server, or start it with:
 
 ```bash
-christag-agency serve --reload --host 127.0.0.1
+flowgency serve --reload --host 127.0.0.1
 ```
 
-Open `http://127.0.0.1:8500/christag-agency/agents` and verify:
+Open `http://127.0.0.1:8500/flowgency/agents` and verify:
 
 1. Hovering or focusing the last-run time reveals link styling; clicking it opens that agent's newest `.out` content in the existing log viewer.
 2. Returning to Agents and clicking the next-run time opens Agent Prompts at the matching editable row.
@@ -711,6 +711,6 @@ Open `http://127.0.0.1:8500/christag-agency/agents` and verify:
 - [ ] **Step 9: Commit the rendered navigation**
 
 ```bash
-git add agency/app.py agency/templates/agents.html agency/templates/prompts.html tests/test_agent_status.py tests/test_agent_run.py
+git add flowgency/app.py flowgency/templates/agents.html flowgency/templates/prompts.html tests/test_agent_status.py tests/test_agent_run.py
 git commit -m "feat(agents): link run status to logs and schedules"
 ```

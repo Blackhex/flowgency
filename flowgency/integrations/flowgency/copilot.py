@@ -150,8 +150,8 @@ class CopilotIntegration(BaseIntegration):
     # The probe runs on request paths, so it must not be able to stall one for
     # long. Reporting a version is a local read; seconds is already generous.
     _VERSION_PROBE_TIMEOUT = 5
-    # What the CLI is given, by name. Everything else in Agency's environment
-    # stays with Agency. Compared upper-cased: Windows folds the case of
+    # What the CLI is given, by name. Everything else in Flowgency's environment
+    # stays with Flowgency. Compared upper-cased: Windows folds the case of
     # environment names, so the same variable arrives spelled either way.
     _ENV_ALLOWLIST = frozenset(
         {
@@ -609,7 +609,7 @@ class CopilotIntegration(BaseIntegration):
     def _launch_environment(self, job_home: Path | None) -> dict[str, str]:
         """The environment the agent runs in: an allowlist, not an inheritance.
 
-        Agency's own environment may hold cloud keys, registry tokens and
+        Flowgency's own environment may hold cloud keys, registry tokens and
         anything else the operator happened to export. A permission model made
         of paths cannot express "and not that variable", so every agent used to
         see all of it regardless of its rules. Naming what the CLI needs is the
@@ -769,7 +769,7 @@ class CopilotIntegration(BaseIntegration):
         cmd = self.require_executable()
 
         policy = request.runtime_policy
-        # Only what the operator authored is rendered. Agency's generated
+        # Only what the operator authored is rendered. Flowgency's generated
         # launch-zone rules grant write on the outbox and memory, but Copilot's
         # allowlist is global: honouring them would hand the agent write on
         # every reachable path. They stay advisory until Copilot can scope a

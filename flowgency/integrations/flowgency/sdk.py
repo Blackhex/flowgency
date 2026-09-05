@@ -57,7 +57,7 @@ class SdkIntegration(BaseIntegration):
         return RunResult(
             exit_code=1,
             stdout="",
-            stderr="This agent is externally managed (sdk integration). Agency does not execute it.",
+            stderr="This agent is externally managed (sdk integration). Flowgency does not execute it.",
             duration_seconds=0.0,
         )
 

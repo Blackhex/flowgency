@@ -1,4 +1,4 @@
-"""Agency dispatch runner — called by OS-native timer."""
+"""Flowgency dispatch runner — called by OS-native timer."""
 
 import argparse
 import logging
@@ -246,7 +246,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Agency dispatch runner")
+    parser = argparse.ArgumentParser(description="Flowgency dispatch runner")
     parser.add_argument("--config", required=True, help="Path to config.yaml")
     args = parser.parse_args()
 

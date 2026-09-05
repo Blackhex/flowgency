@@ -4,19 +4,19 @@
 
 **Goal:** Replace the dashboard's elapsed-time agent health color with a four-state signal that distinguishes "never run" (gray) from a broken promise (red), where red means a failed job or a routine the dispatch runner did not fire on schedule.
 
-**Architecture:** Marker-filename construction and `every`-interval parsing move out of the dispatch runner into `agency/dispatch/schedule.py` so the runner and the dashboard cannot drift. A new `agency/health.py` owns the health model as pure functions over plain values. `agency/jobs/store.py` gains `latest_terminal_job`. `agency/app.py` wires both fleet builders to the new module, repairs `compute_next_run_detail`, and publishes three partitioned counters that `home.html` renders.
+**Architecture:** Marker-filename construction and `every`-interval parsing move out of the dispatch runner into `flowgency/dispatch/schedule.py` so the runner and the dashboard cannot drift. A new `flowgency/health.py` owns the health model as pure functions over plain values. `flowgency/jobs/store.py` gains `latest_terminal_job`. `flowgency/app.py` wires both fleet builders to the new module, repairs `compute_next_run_detail`, and publishes three partitioned counters that `home.html` renders.
 
 **Tech Stack:** Python 3, FastAPI, Jinja2, Pydantic, pytest, Tailwind utility classes in templates.
 
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-07-28-agent-health-signals-design.md`. Read it before Task 1.
-- Work inside the worktree `.worktrees/agent-health-signals` on branch `agent-health-signals`. Run every command from that directory. Never commit to `master` or to the main checkout at `C:/Projekty/christag-agency`.
-- The interpreter is `python` on `PATH`; this checkout has no `.venv`. Every `.venv/Scripts/python` below is to be read as `python`. Test command: `python -m pytest tests/ -q`. Single file: `python -m pytest tests/test_health.py -q`. Run from the worktree root so the local `agency` and `tests` packages resolve.
+- Work inside the worktree `.worktrees/agent-health-signals` on branch `agent-health-signals`. Run every command from that directory. Never commit to `master` or to the main checkout at `C:/Projekty/flowgency`.
+- The interpreter is `python` on `PATH`; this checkout has no `.venv`. Every `.venv/Scripts/python` below is to be read as `python`. Test command: `python -m pytest tests/ -q`. Single file: `python -m pytest tests/test_health.py -q`. Run from the worktree root so the local `flowgency` and `tests` packages resolve.
 - Health values are exactly the strings `"green"`, `"amber"`, `"gray"`, `"red"`. No other spellings.
 - Schedule states are exactly the strings `"overdue"` and `"due"`, or `None`.
 - Grace window is `dispatch.interval + 2` minutes; the default interval is `15`, so the default grace is 17 minutes.
-- Time is read through `agency.clock.now()`, never `datetime.now()` directly, so `AGENCY_FIXED_NOW` controls tests.
+- Time is read through `flowgency.clock.now()`, never `datetime.now()` directly, so `FLOWGENCY_FIXED_NOW` controls tests.
 - Every commit message follows Conventional Commits with an imperative, lowercase, period-free description of at most 72 characters including the prefix.
 - Do not stage or modify `config.yaml`, `config.yaml.lock`, or anything under `C:/Projekty/Agents/`.
 
@@ -25,8 +25,8 @@
 ### Task 1: Shared dispatch schedule primitives
 
 **Files:**
-- Create: `agency/dispatch/schedule.py`
-- Modify: `agency/dispatch/run.py` (remove `_marker_safe` and the `re` import, rewrite `check_every_rule` on the shared parser, use the marker helpers at the four marker sites)
+- Create: `flowgency/dispatch/schedule.py`
+- Modify: `flowgency/dispatch/run.py` (remove `_marker_safe` and the `re` import, rewrite `check_every_rule` on the shared parser, use the marker helpers at the four marker sites)
 - Test: `tests/test_dispatch_schedule.py`
 
 **Interfaces:**
@@ -49,7 +49,7 @@ from pathlib import Path
 
 import pytest
 
-from agency.dispatch.schedule import (
+from flowgency.dispatch.schedule import (
     at_marker_path,
     every_marker_path,
     marker_safe,
@@ -111,11 +111,11 @@ def test_marker_paths_sanitize_both_identifiers():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `.venv/Scripts/python -m pytest tests/test_dispatch_schedule.py -q`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.dispatch.schedule'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.dispatch.schedule'`
 
 - [ ] **Step 3: Write the module**
 
-Create `agency/dispatch/schedule.py`:
+Create `flowgency/dispatch/schedule.py`:
 
 ```python
 """Schedule primitives shared by the dispatch runner and the dashboard."""
@@ -165,10 +165,10 @@ Expected: PASS, 20 passed
 
 - [ ] **Step 5: Point the runner at the shared module**
 
-In `agency/dispatch/run.py`, delete the now-unused `import re` from the imports, and add below `from agency.configuration import resolve_group_paths`:
+In `flowgency/dispatch/run.py`, delete the now-unused `import re` from the imports, and add below `from flowgency.configuration import resolve_group_paths`:
 
 ```python
-from agency.dispatch.schedule import at_marker_path, every_marker_path, parse_every
+from flowgency.dispatch.schedule import at_marker_path, every_marker_path, parse_every
 ```
 
 Replace `check_every_rule` entirely:
@@ -285,7 +285,7 @@ Expected: PASS, all tests pass
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/dispatch/schedule.py agency/dispatch/run.py tests/test_dispatch_schedule.py
+git add flowgency/dispatch/schedule.py flowgency/dispatch/run.py tests/test_dispatch_schedule.py
 git commit -m "refactor(dispatch): extract shared schedule primitives"
 ```
 
@@ -294,7 +294,7 @@ git commit -m "refactor(dispatch): extract shared schedule primitives"
 ### Task 2: Newest terminal job lookup
 
 **Files:**
-- Modify: `agency/jobs/store.py` (add `TERMINAL_STATUSES`, `_iter_job_records`, `latest_terminal_job`; rewrite `active_jobs` to use the shared iterator)
+- Modify: `flowgency/jobs/store.py` (add `TERMINAL_STATUSES`, `_iter_job_records`, `latest_terminal_job`; rewrite `active_jobs` to use the shared iterator)
 - Test: `tests/test_job_store_terminal.py`
 
 **Interfaces:**
@@ -313,9 +313,9 @@ from pathlib import Path
 
 import pytest
 
-from agency.jobs.authority import JobStore
-from agency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from agency.jobs.store import latest_terminal_job, write_job
+from flowgency.jobs.authority import JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import latest_terminal_job, write_job
 
 
 def _spec(tmp_path: Path, job_id: str, agent_name: str, created_at: str) -> JobSpec:
@@ -429,9 +429,9 @@ def test_skips_unreadable_records(store, tmp_path):
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `.venv/Scripts/python -m pytest tests/test_job_store_terminal.py -q`
-Expected: FAIL with `ImportError: cannot import name 'latest_terminal_job' from 'agency.jobs.store'`
+Expected: FAIL with `ImportError: cannot import name 'latest_terminal_job' from 'flowgency.jobs.store'`
 
-- [ ] **Step 3: Implement in `agency/jobs/store.py`**
+- [ ] **Step 3: Implement in `flowgency/jobs/store.py`**
 
 Replace the whole `active_jobs` function at the end of the file:
 
@@ -524,7 +524,7 @@ Expected: PASS, all tests pass
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/jobs/store.py tests/test_job_store_terminal.py
+git add flowgency/jobs/store.py tests/test_job_store_terminal.py
 git commit -m "feat(jobs): add newest terminal job lookup"
 ```
 
@@ -533,7 +533,7 @@ git commit -m "feat(jobs): add newest terminal job lookup"
 ### Task 3: The health model
 
 **Files:**
-- Create: `agency/health.py`
+- Create: `flowgency/health.py`
 - Test: `tests/test_health.py`
 
 **Interfaces:**
@@ -553,7 +553,7 @@ Create `tests/test_health.py`:
 from datetime import datetime, timedelta
 import os
 
-from agency.health import (
+from flowgency.health import (
     RoutineSchedule,
     evaluate_agent_health,
     grace_window,
@@ -703,7 +703,7 @@ def test_routine_schedules_reads_mappings():
 
 
 def test_routine_schedules_reads_config_models():
-    from agency.configuration.models import Routine
+    from flowgency.configuration.models import Routine
 
     routine = Routine(
         id="r",
@@ -742,11 +742,11 @@ def test_health_is_green_otherwise():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `.venv/Scripts/python -m pytest tests/test_health.py -q`
-Expected: FAIL with `ModuleNotFoundError: No module named 'agency.health'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'flowgency.health'`
 
 - [ ] **Step 3: Write the module**
 
-Create `agency/health.py`:
+Create `flowgency/health.py`:
 
 ```python
 """Agent health signals derived from schedules and job outcomes."""
@@ -758,7 +758,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
-from agency.dispatch.schedule import at_marker_path, every_marker_path, parse_every
+from flowgency.dispatch.schedule import at_marker_path, every_marker_path, parse_every
 
 OVERDUE = "overdue"
 DUE = "due"
@@ -927,7 +927,7 @@ Expected: PASS, 24 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/health.py tests/test_health.py
+git add flowgency/health.py tests/test_health.py
 git commit -m "feat(health): add schedule-aware agent health model"
 ```
 
@@ -936,14 +936,14 @@ git commit -m "feat(health): add schedule-aware agent health model"
 ### Task 4: Publish the dispatch interval on the group runtime
 
 **Files:**
-- Modify: `agency/web/state.py` (add one key to `runtime_group`)
+- Modify: `flowgency/web/state.py` (add one key to `runtime_group`)
 - Test: `tests/test_config_normalization.py` (add one assertion)
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
 - Produces: `g["dispatch_interval"] -> int`, available to every consumer of a runtime group dictionary.
 
-**Background:** `runtime_group` builds the plain dictionary the web layer calls `g`. `snapshot.config.agency.dispatch.interval` is an `int` defaulting to `15`.
+**Background:** `runtime_group` builds the plain dictionary the web layer calls `g`. `snapshot.config.flowgency.dispatch.interval` is an `int` defaulting to `15`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -960,10 +960,10 @@ Expected: FAIL with `KeyError: 'dispatch_interval'`
 
 - [ ] **Step 3: Add the key**
 
-In `agency/web/state.py`, inside `runtime_group`, add the entry immediately after `"job_paths": job_store.paths(group_id),`:
+In `flowgency/web/state.py`, inside `runtime_group`, add the entry immediately after `"job_paths": job_store.paths(group_id),`:
 
 ```python
-        "dispatch_interval": snapshot.config.agency.dispatch.interval,
+        "dispatch_interval": snapshot.config.flowgency.dispatch.interval,
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -974,7 +974,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/web/state.py tests/test_config_normalization.py
+git add flowgency/web/state.py tests/test_config_normalization.py
 git commit -m "feat(web): expose the dispatch interval on runtime groups"
 ```
 
@@ -983,12 +983,12 @@ git commit -m "feat(web): expose the dispatch interval on runtime groups"
 ### Task 5: Wire both fleet builders to the health model
 
 **Files:**
-- Modify: `agency/app.py` (delete `agent_health_status`, add `_agent_health`, call it from `collect_agents_with_identity` and `build_dashboard_fleet`)
+- Modify: `flowgency/app.py` (delete `agent_health_status`, add `_agent_health`, call it from `collect_agents_with_identity` and `build_dashboard_fleet`)
 - Test: `tests/test_agent_health_fleet.py`
 
 **Interfaces:**
 - Consumes: `routine_schedules`, `schedule_state`, `evaluate_agent_health`, `grace_window` from Task 3; `latest_terminal_job` from Task 2; `g["dispatch_interval"]` from Task 4.
-- Produces: `_agent_health(g, agent_name, routines, last_seen) -> str` in `agency/app.py`, used by both builders. Both callers already hold `last_seen`, so the helper must not re-scan the log tree for it. The `health` key on every fleet entry now carries one of `"green"`, `"amber"`, `"gray"`, `"red"`.
+- Produces: `_agent_health(g, agent_name, routines, last_seen) -> str` in `flowgency/app.py`, used by both builders. Both callers already hold `last_seen`, so the helper must not re-scan the log tree for it. The `health` key on every fleet entry now carries one of `"green"`, `"amber"`, `"gray"`, `"red"`.
 
 **Background:** `collect_agents_with_identity` iterates `g["agents_full"]`, which holds `model_dump(mode="json")` mappings, so routines arrive as dicts. `build_dashboard_fleet` iterates `group.agents.values()` from the config snapshot, so routines arrive as `Routine` models. `routine_schedules` accepts both, so `_agent_health` takes whatever the caller has.
 
@@ -1004,8 +1004,8 @@ from unittest.mock import patch
 
 import pytest
 
-from agency import app as app_module
-from agency.jobs.authority import JobStore
+from flowgency import app as app_module
+from flowgency.jobs.authority import JobStore
 
 NOW = datetime(2026, 7, 28, 12, 0, 0)
 
@@ -1040,7 +1040,7 @@ def _group(tmp_path, *, routines, dispatch_enabled=True):
 def _health(tmp_path, *, routines, dispatch_enabled=True, now=NOW):
     group = _group(tmp_path, routines=routines, dispatch_enabled=dispatch_enabled)
     group["observations"].mkdir(parents=True, exist_ok=True)
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": now.isoformat()}):
         agents, _ = app_module.collect_agents_with_identity(group)
     return agents[0]["health"]
 
@@ -1103,18 +1103,18 @@ def test_an_agent_whose_last_run_is_ancient_is_still_green_without_a_schedule(tm
 Run: `.venv/Scripts/python -m pytest tests/test_agent_health_fleet.py -q`
 Expected: FAIL — `test_agent_that_never_ran_without_routines_is_gray` reports `assert 'red' == 'gray'`
 
-- [ ] **Step 3: Replace `agent_health_status` in `agency/app.py`**
+- [ ] **Step 3: Replace `agent_health_status` in `flowgency/app.py`**
 
-Add these imports next to the other `agency` imports at the top of the file:
+Add these imports next to the other `flowgency` imports at the top of the file:
 
 ```python
-from agency.health import (
+from flowgency.health import (
     evaluate_agent_health,
     grace_window,
     routine_schedules,
     schedule_state,
 )
-from agency.jobs.store import latest_terminal_job
+from flowgency.jobs.store import latest_terminal_job
 ```
 
 Delete this function:
@@ -1238,7 +1238,7 @@ Expected: PASS
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agency/app.py tests/test_agent_health_fleet.py tests/test_dashboard.py
+git add flowgency/app.py tests/test_agent_health_fleet.py tests/test_dashboard.py
 git commit -m "feat(dashboard): colour agents from schedules and outcomes"
 ```
 
@@ -1247,7 +1247,7 @@ git commit -m "feat(dashboard): colour agents from schedules and outcomes"
 ### Task 6: Repair the next-run computation
 
 **Files:**
-- Modify: `agency/app.py` (`compute_next_run_detail` reads routines from `g["agents_full"]` and uses the shared marker helper)
+- Modify: `flowgency/app.py` (`compute_next_run_detail` reads routines from `g["agents_full"]` and uses the shared marker helper)
 - Test: `tests/test_agent_status.py` (rewrite the `compute_next_run` and `compute_next_run_detail` cases against the current config shape)
 
 **Interfaces:**
@@ -1312,7 +1312,7 @@ def test_next_run_at_future(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     future = (fixed_now + timedelta(hours=2)).strftime("%H:%M")
     g = _group_with_routines(tmp_path, [{"id": "r", "at": future}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result is not None
     assert result.date() == fixed_now.date()
@@ -1323,7 +1323,7 @@ def test_next_run_at_past_rolls_to_tomorrow(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     past = (fixed_now - timedelta(hours=2)).strftime("%H:%M")
     g = _group_with_routines(tmp_path, [{"id": "r", "at": past}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result is not None
     assert result.date() == (fixed_now + timedelta(days=1)).date()
@@ -1359,7 +1359,7 @@ def test_next_run_returns_soonest(tmp_path):
     soon = (fixed_now + timedelta(minutes=30)).strftime("%H:%M")
     later = (fixed_now + timedelta(hours=5)).strftime("%H:%M")
     g = _group_with_routines(tmp_path, [{"id": "a", "at": later}, {"id": "b", "at": soon}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         result = compute_next_run(g, "product", ENABLED)
     assert result.strftime("%H:%M") == soon
 
@@ -1367,7 +1367,7 @@ def test_next_run_returns_soonest(tmp_path):
 def test_next_run_detail_identifies_winning_rule(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     g = _group_with_routines(tmp_path, [{"id": "later", "at": "17:00"}, {"id": "soon", "at": "12:30"}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         detail = compute_next_run_detail(g, "product", ENABLED)
         compatible_value = compute_next_run(g, "product", ENABLED)
     assert detail == {
@@ -1381,7 +1381,7 @@ def test_next_run_detail_identifies_winning_rule(tmp_path):
 def test_next_run_detail_breaks_ties_by_config_order(tmp_path):
     fixed_now = datetime(2026, 1, 15, 12, 0, 0)
     g = _group_with_routines(tmp_path, [{"id": "first", "at": "13:00"}, {"id": "second", "at": "13:00"}])
-    with patch.dict(os.environ, {"AGENCY_FIXED_NOW": fixed_now.isoformat()}):
+    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
         detail = compute_next_run_detail(g, "product", ENABLED)
     assert detail["routine_id"] == "first"
     assert detail["rule_index"] == 0
@@ -1411,7 +1411,7 @@ and add these two keys to the same dictionary so the health call has what it nee
 Run: `.venv/Scripts/python -m pytest tests/test_agent_status.py -q`
 Expected: FAIL — the next-run tests report `assert None is not None`, because routines are read from a mapping that no longer carries them
 
-- [ ] **Step 3: Rewrite `compute_next_run_detail` in `agency/app.py`**
+- [ ] **Step 3: Rewrite `compute_next_run_detail` in `flowgency/app.py`**
 
 Replace the whole function body between the docstring and the final `return`:
 
@@ -1537,10 +1537,10 @@ def compute_next_run_detail(
     return min(candidates, key=lambda candidate: candidate["when"], default=None)
 ```
 
-Add the shared helpers to the imports at the top of `agency/app.py`:
+Add the shared helpers to the imports at the top of `flowgency/app.py`:
 
 ```python
-from agency.dispatch.schedule import every_marker_path, parse_every
+from flowgency.dispatch.schedule import every_marker_path, parse_every
 ```
 
 `re` stays imported; it is still used elsewhere in the file.
@@ -1553,7 +1553,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add agency/app.py tests/test_agent_status.py
+git add flowgency/app.py tests/test_agent_status.py
 git commit -m "fix(dashboard): read next run from instance routines"
 ```
 
@@ -1562,8 +1562,8 @@ git commit -m "fix(dashboard): read next run from instance routines"
 ### Task 7: Partitioned fleet counters and gray rendering
 
 **Files:**
-- Modify: `agency/app.py` (dashboard route context, around the `fleet_healthy` entry)
-- Modify: `agency/templates/home.html:33-63`
+- Modify: `flowgency/app.py` (dashboard route context, around the `fleet_healthy` entry)
+- Modify: `flowgency/templates/home.html:33-63`
 - Test: `tests/test_dashboard.py` (add one test)
 
 **Interfaces:**
@@ -1597,7 +1597,7 @@ Expected: FAIL with `assert '1 never run' in ...`
 
 - [ ] **Step 3: Publish the counters**
 
-In `agency/app.py`, in the dashboard route's `TemplateResponse` context, replace:
+In `flowgency/app.py`, in the dashboard route's `TemplateResponse` context, replace:
 
 ```python
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
@@ -1613,7 +1613,7 @@ with:
         "fleet_running": sum(1 for a in agents if a.get("job_status_key") == "running"),
 ```
 
-- [ ] **Step 4: Render gray in `agency/templates/home.html`**
+- [ ] **Step 4: Render gray in `flowgency/templates/home.html`**
 
 Replace the background tint block:
 
@@ -1671,7 +1671,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add agency/app.py agency/templates/home.html tests/test_dashboard.py
+git add flowgency/app.py flowgency/templates/home.html tests/test_dashboard.py
 git commit -m "feat(dashboard): report never-run agents apart from failures"
 ```
 
@@ -1701,7 +1701,7 @@ The fleet bar colours each agent from its schedule and its last outcome.
 - **Gray** — no run on record. The agent has produced no log and no finished job.
 - **Green** — the agent has run, nothing is overdue, and the last job did not fail.
 - **Amber** — a routine is due. The expected time has passed but is still inside
-  the grace window of `agency.dispatch.interval` plus two minutes.
+  the grace window of `flowgency.dispatch.interval` plus two minutes.
 - **Red** — the last finished job failed, or an enabled routine is past its
   expected time by more than the grace window.
 
@@ -1720,7 +1720,7 @@ Expected: PASS, no failures and no errors
 
 - [ ] **Step 4: Verify the real dashboard**
 
-Run: `.venv/Scripts/python -m agency.app`
+Run: `.venv/Scripts/python -m flowgency.app`
 
 Open `http://127.0.0.1:8500/atreides/`. Confirm that Paul Atreides and Gurney Halleck render with gray dots, that the footer reads `5 agents · 3 healthy · 2 never run` with no `needs attention` segment, and that Thufir, Duncan, and Jessica stay green. Stop the server.
 

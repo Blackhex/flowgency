@@ -4,7 +4,7 @@
 
 **Goal:** Make malformed blueprint prompts report their own accurate diagnostic, degrade to the agents that reference them instead of blocking the dashboard, and stop a clean setup from producing them in the first place.
 
-**Architecture:** `validate_prompt_catalogs` stops masking structured errors and stops gating startup; it becomes a reporter whose results ride on `AgencyServices.prompt_issues`. Enforcement stays at the existing prompt-resolution call sites, with the two web route adapters degrading per agent. A new `christag-agency validate` command exposes the same issues to operators and to the setup skill, which gains the task-prompt template it never had plus an end-to-end test that runs its own templates through the real loaders.
+**Architecture:** `validate_prompt_catalogs` stops masking structured errors and stops gating startup; it becomes a reporter whose results ride on `FlowgencyServices.prompt_issues`. Enforcement stays at the existing prompt-resolution call sites, with the two web route adapters degrading per agent. A new `flowgency validate` command exposes the same issues to operators and to the setup skill, which gains the task-prompt template it never had plus an end-to-end test that runs its own templates through the real loaders.
 
 **Tech Stack:** Python 3, FastAPI, Jinja2, Pydantic, PyYAML, argparse, pytest.
 
@@ -14,7 +14,7 @@
 - Run tests with `.venv/Scripts/python -m pytest` from the worktree root. Running from another checkout resolves the wrong local `tests` package.
 - `config.yaml` with `schema_version: 4` stays the sole control-plane authority. No directory-shape loaders, no startup conversion, no native identity writers.
 - Blueprint source stays hand-authored. Do not add a writer, route, or generator that emits blueprint prompt files.
-- `skills/agency-setup/` and `.github/skills/agency-setup/` are the same directory on disk (`.github/skills/agency-setup` resolves to `skills/agency-setup`; `tests/test_agency_setup_skill.py::test_copilot_skill_discovery_resolves_to_canonical_source` asserts this). Edit the canonical path `skills/agency-setup/` only.
+- `skills/flowgency-setup/` and `.github/skills/flowgency-setup/` are the same directory on disk (`.github/skills/flowgency-setup` resolves to `skills/flowgency-setup`; `tests/test_flowgency_setup_skill.py::test_copilot_skill_discovery_resolves_to_canonical_source` asserts this). Edit the canonical path `skills/flowgency-setup/` only.
 - Never stage or modify `config.yaml`, `config.yaml.lock`, group-state directories, logs, or other untracked runtime data.
 - Commit after every task. Never use `--no-verify`.
 
@@ -23,16 +23,16 @@
 ## File Structure
 
 **Modified:**
-- `agency/prompts/catalog.py` — structured collision issue; uniform `ValidationFailed` collection; dedupe.
-- `agency/web/dependencies.py` — `AgencyServices.prompt_issues`; catalog issues no longer raise.
-- `agency/web/routes/agents.py` — `_launcher_prompts` degrades per agent instead of failing the roster.
-- `agency/web/routes/agent_detail.py` — `_prompts_context` degrades and surfaces issues.
-- `agency/templates/agent_detail_prompts.html` — render prompt issues.
-- `agency/templates/agents.html` — render prompt issues in the launcher.
-- `agency/cli.py` — `cmd_validate` and the `validate` subparser.
-- `skills/agency-setup/references/templates.md` — Standard Task Prompt template.
-- `skills/agency-setup/SKILL.md` — Phase 5 prompt validation and wording fix.
-- `tests/test_agency_setup_skill.py` — assertions for the new skill content.
+- `flowgency/prompts/catalog.py` — structured collision issue; uniform `ValidationFailed` collection; dedupe.
+- `flowgency/web/dependencies.py` — `FlowgencyServices.prompt_issues`; catalog issues no longer raise.
+- `flowgency/web/routes/agents.py` — `_launcher_prompts` degrades per agent instead of failing the roster.
+- `flowgency/web/routes/agent_detail.py` — `_prompts_context` degrades and surfaces issues.
+- `flowgency/templates/agent_detail_prompts.html` — render prompt issues.
+- `flowgency/templates/agents.html` — render prompt issues in the launcher.
+- `flowgency/cli.py` — `cmd_validate` and the `validate` subparser.
+- `skills/flowgency-setup/references/templates.md` — Standard Task Prompt template.
+- `skills/flowgency-setup/SKILL.md` — Phase 5 prompt validation and wording fix.
+- `tests/test_flowgency_setup_skill.py` — assertions for the new skill content.
 
 **Created:**
 - `tests/test_prompt_catalog.py` — catalog validator behavior.
@@ -45,11 +45,11 @@
 Removes the `except ValueError` clause that relabels every structured error, and gives the name-collision case a first-class `ValidationIssue`.
 
 **Files:**
-- Modify: `agency/prompts/catalog.py`
+- Modify: `flowgency/prompts/catalog.py`
 - Test: `tests/test_prompt_catalog.py` (create)
 
 **Interfaces:**
-- Consumes: `ValidationIssue`, `ValidationFailed` from `agency.configuration.issues`; `AssetValidationError` (subclass of `ValidationFailed`) raised by `agency.prompts.assets.parse_prompt_document`; `PromptNotFoundError` (subclass of `RuntimeError`) from `agency.prompts.store`.
+- Consumes: `ValidationIssue`, `ValidationFailed` from `flowgency.configuration.issues`; `AssetValidationError` (subclass of `ValidationFailed`) raised by `flowgency.prompts.assets.parse_prompt_document`; `PromptNotFoundError` (subclass of `RuntimeError`) from `flowgency.prompts.store`.
 - Produces: `validate_prompt_catalogs(snapshot, library, store) -> tuple[ValidationIssue, ...]`, unchanged signature, now never masking. `_validate_effective_catalog` raises `ValidationFailed` rather than bare `ValueError`.
 
 - [ ] **Step 1: Write the failing test**
@@ -63,9 +63,9 @@ from pathlib import Path
 
 import yaml
 
-from agency.blueprints import BlueprintLibrary
-from agency.configuration import ConfigStore
-from agency.prompts import PromptStore, validate_prompt_catalogs
+from flowgency.blueprints import BlueprintLibrary
+from flowgency.configuration import ConfigStore
+from flowgency.prompts import PromptStore, validate_prompt_catalogs
 
 
 VALID_PROMPT = "---\nname: diff-review\ndescription: Review the change set.\n---\n\nReview it.\n"
@@ -87,8 +87,8 @@ def _write_config(tmp_path: Path, agents: list[dict]) -> Path:
     group_root.mkdir(parents=True, exist_ok=True)
     raw = {
         "schema_version": 4,
-        "agency": {
-            "title": "Agency",
+        "flowgency": {
+            "title": "Flowgency",
             "default_group": "reviewers",
             "ai_backend": "copilot",
             "agent_library": str(tmp_path / "agent-library"),
@@ -197,10 +197,10 @@ Expected: `test_malformed_blueprint_prompt_keeps_its_own_message_and_hint` FAILS
 
 - [ ] **Step 3: Replace the collision raise with a structured failure**
 
-In `agency/prompts/catalog.py`, change the import line
+In `flowgency/prompts/catalog.py`, change the import line
 
 ```python
-from agency.configuration.issues import ValidationIssue
+from flowgency.configuration.issues import ValidationIssue
 ```
 
 to
@@ -208,7 +208,7 @@ to
 ```python
 from dataclasses import dataclass, replace
 
-from agency.configuration.issues import ValidationFailed, ValidationIssue
+from flowgency.configuration.issues import ValidationFailed, ValidationIssue
 ```
 
 (the file already imports `dataclass`; merge the names into the existing `from dataclasses import dataclass` line rather than duplicating it).
@@ -302,7 +302,7 @@ Expected: no new failures. Record any pre-existing failures as the baseline.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/prompts/catalog.py tests/test_prompt_catalog.py
+git add flowgency/prompts/catalog.py tests/test_prompt_catalog.py
 git commit -m "Preserve structured prompt asset issues in catalog validation"
 ```
 
@@ -313,12 +313,12 @@ git commit -m "Preserve structured prompt asset issues in catalog validation"
 Stops one malformed prompt file from taking the whole dashboard down to the setup page.
 
 **Files:**
-- Modify: `agency/web/dependencies.py`
+- Modify: `flowgency/web/dependencies.py`
 - Test: `tests/test_prompt_catalog.py`
 
 **Interfaces:**
 - Consumes: `validate_prompt_catalogs` from Task 1.
-- Produces: `AgencyServices.prompt_issues: tuple[ValidationIssue, ...]`, defaulting to `()`. Consumed by Tasks 3 and 4.
+- Produces: `FlowgencyServices.prompt_issues: tuple[ValidationIssue, ...]`, defaulting to `()`. Consumed by Tasks 3 and 4.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -326,7 +326,7 @@ Append to `tests/test_prompt_catalog.py`:
 
 ```python
 def test_build_services_reports_prompt_issues_without_failing_startup(tmp_path):
-    from agency.web.dependencies import build_services
+    from flowgency.web.dependencies import build_services
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -340,7 +340,7 @@ def test_build_services_reports_prompt_issues_without_failing_startup(tmp_path):
 
 
 def test_build_services_reports_no_prompt_issues_for_a_valid_library(tmp_path):
-    from agency.web.dependencies import build_services
+    from flowgency.web.dependencies import build_services
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", VALID_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -355,11 +355,11 @@ def test_build_services_reports_no_prompt_issues_for_a_valid_library(tmp_path):
 
 Run: `.venv/Scripts/python -m pytest tests/test_prompt_catalog.py -k build_services -v`
 
-Expected: both FAIL with `AttributeError: 'AgencyServices' object has no attribute 'prompt_issues'`, and the first also has a non-`None` `startup_error`.
+Expected: both FAIL with `AttributeError: 'FlowgencyServices' object has no attribute 'prompt_issues'`, and the first also has a non-`None` `startup_error`.
 
 - [ ] **Step 3: Add the field**
 
-In `agency/web/dependencies.py`, extend the dataclass:
+In `flowgency/web/dependencies.py`, extend the dataclass:
 
 ```python
     integrations: Mapping[str, BaseIntegration]
@@ -371,8 +371,8 @@ In `agency/web/dependencies.py`, extend the dataclass:
 Add the import next to the existing configuration imports:
 
 ```python
-from agency.configuration import ConfigStore, ValidationFailed
-from agency.configuration.issues import ValidationIssue
+from flowgency.configuration import ConfigStore, ValidationFailed
+from flowgency.configuration.issues import ValidationIssue
 ```
 
 - [ ] **Step 4: Stop raising and start reporting**
@@ -417,7 +417,7 @@ Expected: no new failures beyond the Task 1 baseline. If a test asserted that a 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/web/dependencies.py tests/test_prompt_catalog.py
+git add flowgency/web/dependencies.py tests/test_prompt_catalog.py
 git commit -m "Report prompt catalog issues without failing startup"
 ```
 
@@ -428,14 +428,14 @@ git commit -m "Report prompt catalog issues without failing startup"
 Keeps the roster and agent detail rendering when one agent's catalog cannot resolve, and shows the diagnostic where the operator is looking.
 
 **Files:**
-- Modify: `agency/web/routes/agents.py:160-176`
-- Modify: `agency/web/routes/agent_detail.py:490-530`
-- Modify: `agency/templates/agents.html:149`
-- Modify: `agency/templates/agent_detail_prompts.html:1-6`
+- Modify: `flowgency/web/routes/agents.py:160-176`
+- Modify: `flowgency/web/routes/agent_detail.py:490-530`
+- Modify: `flowgency/templates/agents.html:149`
+- Modify: `flowgency/templates/agent_detail_prompts.html:1-6`
 - Test: `tests/test_prompt_catalog.py`
 
 **Interfaces:**
-- Consumes: `AgencyServices.prompt_issues` from Task 2; `_issue_dicts(exc: ValidationFailed | tuple) -> list[dict[str, str]]` already defined at `agency/web/routes/agent_detail.py:109`, producing dicts with keys `code`, `field`, `message`, `hint`.
+- Consumes: `FlowgencyServices.prompt_issues` from Task 2; `_issue_dicts(exc: ValidationFailed | tuple) -> list[dict[str, str]]` already defined at `flowgency/web/routes/agent_detail.py:109`, producing dicts with keys `code`, `field`, `message`, `hint`.
 - Produces: template context key `prompt_issues` (a list of those dicts) on both the agent detail Prompts tab and each roster instance row.
 
 - [ ] **Step 1: Write the failing test**
@@ -446,7 +446,7 @@ Append to `tests/test_prompt_catalog.py`:
 def _client(monkeypatch, tmp_path, config_path):
     from fastapi.testclient import TestClient
 
-    from agency import app as app_mod
+    from flowgency import app as app_mod
 
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
@@ -491,11 +491,11 @@ Expected: the roster test FAILS with status 409; the detail test FAILS with a 50
 
 - [ ] **Step 3: Degrade the roster launcher**
 
-In `agency/web/routes/agents.py`, replace `_launcher_prompts` with:
+In `flowgency/web/routes/agents.py`, replace `_launcher_prompts` with:
 
 ```python
 def _launcher_prompts(
-    services: AgencyServices, snapshot, group_id: str, agent_id: str
+    services: FlowgencyServices, snapshot, group_id: str, agent_id: str
 ) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, str], ...]]:
     if services.prompt_service is None:
         raise HTTPException(status_code=409, detail="Prompt service unavailable")
@@ -544,7 +544,7 @@ and add one key to the `row.update({...})` mapping, next to `"has_saved_prompts"
 
 - [ ] **Step 4: Render the roster notice**
 
-In `agency/templates/agents.html`, immediately after the line
+In `flowgency/templates/agents.html`, immediately after the line
 
 ```html
         <section data-saved-panel {% if instance.default_mode != 'saved' %}hidden{% endif %} class="space-y-4">
@@ -569,7 +569,7 @@ insert:
 
 - [ ] **Step 5: Degrade the agent detail Prompts tab**
 
-In `agency/web/routes/agent_detail.py`, inside `_prompts_context`, replace
+In `flowgency/web/routes/agent_detail.py`, inside `_prompts_context`, replace
 
 ```python
     catalog = services.prompt_service.catalog(snapshot, group_id, agent_id)
@@ -594,7 +594,7 @@ and add `"prompt_issues": [],` to the mapping returned at the end of the functio
 
 - [ ] **Step 6: Render the detail notice**
 
-In `agency/templates/agent_detail_prompts.html`, insert after the closing `</div>` of the heading block (the one containing `<h2 class="text-lg font-semibold text-gray-900">Prompts</h2>`) and before `<div class="grid gap-4 lg:grid-cols-2">`:
+In `flowgency/templates/agent_detail_prompts.html`, insert after the closing `</div>` of the heading block (the one containing `<h2 class="text-lg font-semibold text-gray-900">Prompts</h2>`) and before `<div class="grid gap-4 lg:grid-cols-2">`:
 
 ```html
   {% if prompt_issues %}
@@ -626,7 +626,7 @@ Expected: no new failures. `tests/test_agent_roster.py` and `tests/test_agent_de
 - [ ] **Step 9: Commit**
 
 ```bash
-git add agency/web/routes/agents.py agency/web/routes/agent_detail.py agency/templates/agents.html agency/templates/agent_detail_prompts.html tests/test_prompt_catalog.py
+git add flowgency/web/routes/agents.py flowgency/web/routes/agent_detail.py flowgency/templates/agents.html flowgency/templates/agent_detail_prompts.html tests/test_prompt_catalog.py
 git commit -m "Degrade prompt catalog failures to the affected agent"
 ```
 
@@ -637,11 +637,11 @@ git commit -m "Degrade prompt catalog failures to the affected agent"
 Gives operators and the setup skill one mechanical check with a meaningful exit code.
 
 **Files:**
-- Modify: `agency/cli.py`
+- Modify: `flowgency/cli.py`
 - Test: `tests/test_prompt_catalog.py`
 
 **Interfaces:**
-- Consumes: `AgencyServices.prompt_issues` from Task 2; `_services(args) -> AgencyServices` at `agency/cli.py:121`, which already raises `CliFailure(ExitCode.VALIDATION, ...)` for fatal config errors; `CliFailure` at `agency/cli.py:87`; `ExitCode` from `agency.cli_output`.
+- Consumes: `FlowgencyServices.prompt_issues` from Task 2; `_services(args) -> FlowgencyServices` at `flowgency/cli.py:121`, which already raises `CliFailure(ExitCode.VALIDATION, ...)` for fatal config errors; `CliFailure` at `flowgency/cli.py:87`; `ExitCode` from `flowgency.cli_output`.
 - Produces: `cmd_validate(args: Namespace) -> int` and the `validate` subcommand. Exit code 0 when clean, 3 (`ExitCode.VALIDATION`) when any issue exists.
 
 - [ ] **Step 1: Write the failing test**
@@ -650,7 +650,7 @@ Append to `tests/test_prompt_catalog.py`:
 
 ```python
 def test_validate_command_reports_the_prompt_issue(tmp_path, capsys):
-    from agency import cli
+    from flowgency import cli
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", NO_FRONTMATTER_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -664,7 +664,7 @@ def test_validate_command_reports_the_prompt_issue(tmp_path, capsys):
 
 
 def test_validate_command_succeeds_for_a_valid_library(tmp_path, capsys):
-    from agency import cli
+    from flowgency import cli
 
     _write_blueprint(tmp_path / "agent-library", "reviewer", VALID_PROMPT)
     config_path = _write_config(tmp_path, [_agent("reviewer", "reviewer")])
@@ -684,7 +684,7 @@ Expected: both FAIL with exit code 2 (argparse usage error for the unknown `vali
 
 - [ ] **Step 3: Add the handler**
 
-In `agency/cli.py`, add above `def cmd_serve(args: Namespace) -> int:`:
+In `flowgency/cli.py`, add above `def cmd_serve(args: Namespace) -> int:`:
 
 ```python
 def cmd_validate(args: Namespace) -> int:
@@ -725,7 +725,7 @@ Expected: no new failures.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add agency/cli.py tests/test_prompt_catalog.py
+git add flowgency/cli.py tests/test_prompt_catalog.py
 git commit -m "Add a validate command for config and asset diagnostics"
 ```
 
@@ -736,17 +736,17 @@ git commit -m "Add a validate command for config and asset diagnostics"
 The prevention fix. Without this, a clean setup keeps producing frontmatter-less prompt files.
 
 **Files:**
-- Modify: `skills/agency-setup/references/templates.md`
-- Modify: `skills/agency-setup/SKILL.md`
-- Test: `tests/test_agency_setup_skill.py`
+- Modify: `skills/flowgency-setup/references/templates.md`
+- Modify: `skills/flowgency-setup/SKILL.md`
+- Test: `tests/test_flowgency_setup_skill.py`
 
 **Interfaces:**
-- Consumes: the prompt contract enforced by `agency/prompts/assets.py::parse_prompt_document`.
+- Consumes: the prompt contract enforced by `flowgency/prompts/assets.py::parse_prompt_document`.
 - Produces: a `## Standard Task Prompt` section in `references/templates.md` containing one fenced ` ```markdown ` block. Task 6 extracts that block by heading name.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_agency_setup_skill.py`:
+Append to `tests/test_flowgency_setup_skill.py`:
 
 ```python
 def test_templates_define_the_task_prompt_contract():
@@ -765,20 +765,20 @@ def test_templates_define_the_task_prompt_contract():
 
 def test_phase_five_validates_prompt_documents():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    assert "christag-agency validate --config" in skill
+    assert "flowgency validate --config" in skill
     assert "prompt document" in skill
     assert "routine skill," not in skill
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `.venv/Scripts/python -m pytest tests/test_agency_setup_skill.py -k "task_prompt_contract or phase_five" -v`
+Run: `.venv/Scripts/python -m pytest tests/test_flowgency_setup_skill.py -k "task_prompt_contract or phase_five" -v`
 
 Expected: both FAIL on the first assertion.
 
 - [ ] **Step 3: Add the template section**
 
-In `skills/agency-setup/references/templates.md`, replace the closing paragraph of the "Standard Agent Skill" section
+In `skills/flowgency-setup/references/templates.md`, replace the closing paragraph of the "Standard Agent Skill" section
 
 ```markdown
 Use standard `scripts/`, `references/`, and `assets/` subdirectories when needed. Task prompts live separately under `{agent_library}/{blueprint}/.agents/prompts/{prompt}.prompt.md`, and routines select a scoped prompt rather than a skill.
@@ -805,7 +805,7 @@ argument-hint: {OPTIONAL_ARGUMENT_SUMMARY}
 {TASK_INSTRUCTIONS}
 ```
 
-Agency rejects any prompt document that breaks this contract:
+Flowgency rejects any prompt document that breaks this contract:
 
 - The file lives at `.agents/prompts/{prompt}.prompt.md` under the blueprint root. No other location is accepted.
 - The YAML frontmatter opens with `---` on its own line and is terminated by `---` on its own line before the body.
@@ -819,7 +819,7 @@ Agency rejects any prompt document that breaks this contract:
 
 - [ ] **Step 4: Add Phase 5 validation**
 
-In `skills/agency-setup/SKILL.md`, in the `## 5. Verify And Schedule` section, replace
+In `skills/flowgency-setup/SKILL.md`, in the `## 5. Verify And Schedule` section, replace
 
 ```text
 Validate every blueprint and Agent Skill, config cross-reference, registered explicit integration, effective root union, complete tool override, routine skill, channel, workspace, group naming, and storage path.
@@ -831,7 +831,7 @@ with
 Validate every blueprint, Agent Skill, and prompt document, plus config cross-reference, registered explicit integration, effective root union, complete tool override, routine prompt selection, channel, workspace, group naming, and storage path. Confirm every prompt document against the Standard Task Prompt contract in `references/templates.md` before writing the config. After the config write and revision confirmation, run the mechanical check and stop on a non-zero exit:
 
 ```text
-christag-agency validate --config "{config_path}"
+flowgency validate --config "{config_path}"
 ```
 
 A non-zero exit means the created blueprint source is invalid. Report the printed issues and correct them; do not present setup as complete.
@@ -839,20 +839,20 @@ A non-zero exit means the created blueprint source is invalid. Report the printe
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `.venv/Scripts/python -m pytest tests/test_agency_setup_skill.py -v`
+Run: `.venv/Scripts/python -m pytest tests/test_flowgency_setup_skill.py -v`
 
 Expected: all pass. If `test_setup_writes_routines_directly_from_assignments` or another existing test asserted the old "routine skill," wording, update it to the new wording in the same commit.
 
 - [ ] **Step 6: Confirm the mirrored skill path is unchanged**
 
-Run: `.venv/Scripts/python -m pytest tests/test_agency_setup_skill.py::test_copilot_skill_discovery_resolves_to_canonical_source -v`
+Run: `.venv/Scripts/python -m pytest tests/test_flowgency_setup_skill.py::test_copilot_skill_discovery_resolves_to_canonical_source -v`
 
-Expected: PASS. `.github/skills/agency-setup` resolves to the same directory, so no second edit is needed.
+Expected: PASS. `.github/skills/flowgency-setup` resolves to the same directory, so no second edit is needed.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add skills/agency-setup/references/templates.md skills/agency-setup/SKILL.md tests/test_agency_setup_skill.py
+git add skills/flowgency-setup/references/templates.md skills/flowgency-setup/SKILL.md tests/test_flowgency_setup_skill.py
 git commit -m "Specify the task prompt contract in the setup skill"
 ```
 
@@ -866,7 +866,7 @@ Runs the skill's own templates through the real loaders, so template drift fails
 - Create: `tests/test_setup_skill_e2e.py`
 
 **Interfaces:**
-- Consumes: `## Blueprint AGENTS.md`, `## Standard Agent Skill`, and `## Standard Task Prompt` sections of `skills/agency-setup/references/templates.md` (Task 5); `build_services` and `AgencyServices.prompt_issues` (Task 2); the `validate` command (Task 4).
+- Consumes: `## Blueprint AGENTS.md`, `## Standard Agent Skill`, and `## Standard Task Prompt` sections of `skills/flowgency-setup/references/templates.md` (Task 5); `build_services` and `FlowgencyServices.prompt_issues` (Task 2); the `validate` command (Task 4).
 - Produces: nothing consumed by later tasks.
 
 - [ ] **Step 1: Write the failing test**
@@ -881,12 +881,12 @@ import re
 
 import yaml
 
-from agency import cli
-from agency.web.dependencies import build_services
+from flowgency import cli
+from flowgency.web.dependencies import build_services
 
 
 REPO_ROOT = Path(__file__).parents[1]
-TEMPLATES_PATH = REPO_ROOT / "skills" / "agency-setup" / "references" / "templates.md"
+TEMPLATES_PATH = REPO_ROOT / "skills" / "flowgency-setup" / "references" / "templates.md"
 
 SUBSTITUTIONS = {
     "{ROLE_NAME}": "Reviewer",
@@ -956,8 +956,8 @@ def _write_config(tmp_path: Path) -> Path:
     group_root.mkdir(parents=True, exist_ok=True)
     raw = {
         "schema_version": 4,
-        "agency": {
-            "title": "Agency",
+        "flowgency": {
+            "title": "Flowgency",
             "default_group": "reviewers",
             "ai_backend": "copilot",
             "agent_library": str(tmp_path / "agent-library"),
@@ -1038,8 +1038,8 @@ def test_validate_rejects_the_same_library_without_prompt_frontmatter(tmp_path, 
 
 
 def test_both_skill_copies_expose_identical_templates():
-    canonical = REPO_ROOT / "skills" / "agency-setup" / "references" / "templates.md"
-    discovery = REPO_ROOT / ".github" / "skills" / "agency-setup" / "references" / "templates.md"
+    canonical = REPO_ROOT / "skills" / "flowgency-setup" / "references" / "templates.md"
+    discovery = REPO_ROOT / ".github" / "skills" / "flowgency-setup" / "references" / "templates.md"
     assert discovery.read_text(encoding="utf-8") == canonical.read_text(encoding="utf-8")
 ```
 
@@ -1084,11 +1084,11 @@ A data fix outside the repository, performed last so the `validate` command from
 
 - [ ] **Step 1: Resolve the library root**
 
-Read `agency.agent_library` from the operator's `config.yaml` (do not modify that file). Confirm the four prompt files exist under it.
+Read `flowgency.agent_library` from the operator's `config.yaml` (do not modify that file). Confirm the four prompt files exist under it.
 
 - [ ] **Step 2: Confirm the current failure**
 
-Run: `.venv/Scripts/python -m agency.cli validate --config <config_path>`
+Run: `.venv/Scripts/python -m flowgency.cli validate --config <config_path>`
 
 Expected: exit code 3, with four `invalid-prompt-frontmatter` issues naming the four files.
 
@@ -1136,13 +1136,13 @@ Each file must end up as the frontmatter block, one blank line, then the origina
 
 - [ ] **Step 4: Confirm the repair**
 
-Run: `.venv/Scripts/python -m agency.cli validate --config <config_path>`
+Run: `.venv/Scripts/python -m flowgency.cli validate --config <config_path>`
 
 Expected: exit code 0 and `No validation issues found.`
 
 - [ ] **Step 5: Confirm the dashboard reaches its normal pages**
 
-Run: `.venv/Scripts/python -m agency.app`
+Run: `.venv/Scripts/python -m flowgency.app`
 
 Expected: the dashboard serves the group roster rather than redirecting to `/setup`, and the agent detail Prompts tab lists each repaired prompt with its description. Stop the server afterwards.
 

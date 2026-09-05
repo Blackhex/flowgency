@@ -69,7 +69,7 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     (tmp_path / "workspace" / "newsletter").mkdir(parents=True, exist_ok=True)
     (tmp_path / "groups" / "newsletter-state").mkdir(parents=True, exist_ok=True)
     (tmp_path / "repo-root").mkdir(parents=True, exist_ok=True)
-    raw["flowgency"]["title"] = "Agency"
+    raw["flowgency"]["title"] = "Flowgency"
     raw["flowgency"]["default_team"] = "newsletter"
     raw["flowgency"]["agent_library"] = str(library_root)
     raw["flowgency"]["compilation_cache"] = str(tmp_path / "compiled-agents")
@@ -223,12 +223,12 @@ def test_stale_team_create_returns_conflict_without_writing_team(
 
 def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
-    original = b"schema_version: 3\nagency:\n  title: Agency\ngroups: {}\n"
+    original = b"schema_version: 3\nflowgency:\n  title: Flowgency\ngroups: {}\n"
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     config_path.write_bytes(original)
     app_mod.refresh_services()
 
-    data_root = tmp_path / "Agency"
+    data_root = tmp_path / "Flowgency"
     data_root.mkdir()
     integration = _LauncherIntegration()
     monkeypatch.setattr(
@@ -254,7 +254,7 @@ def test_setup_launch_preserves_existing_bootstrap_config(monkeypatch, tmp_path)
 
 def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("schema_version: 3\nagency:\n  title: Agency\ngroups: {}\n", encoding="utf-8")
+    config_path.write_text("schema_version: 3\nflowgency:\n  title: Flowgency\ngroups: {}\n", encoding="utf-8")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     client = TestClient(app_mod.app)
@@ -272,7 +272,7 @@ def test_setup_page_includes_launcher_fields_for_existing_bootstrap_config(
     monkeypatch, tmp_path
 ):
     config_path = tmp_path / "config.yaml"
-    config_path.write_bytes(b"schema_version: 3\nagency:\n  title: Agency\ngroups: {}\n")
+    config_path.write_bytes(b"schema_version: 3\nflowgency:\n  title: Flowgency\ngroups: {}\n")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     client = TestClient(app_mod.app)
@@ -290,7 +290,7 @@ def test_setup_form_posts_only_launcher_inputs(
     monkeypatch, tmp_path
 ):
     config_path = tmp_path / "config.yaml"
-    config_path.write_bytes(b"schema_version: 3\nagency:\n  title: Agency\ngroups: {}\n")
+    config_path.write_bytes(b"schema_version: 3\nflowgency:\n  title: Flowgency\ngroups: {}\n")
     monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
     app_mod.refresh_services()
     client = TestClient(app_mod.app)

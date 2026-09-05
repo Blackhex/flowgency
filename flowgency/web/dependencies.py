@@ -51,11 +51,11 @@ def build_services(config_path: Path | None = None) -> FlowgencyServices:
         if issues:
             raise ValidationFailed(issues)
         initialize_storage_directories(snapshot.config)
-        agency = snapshot.config.flowgency
-        library_root = agency.agent_library
-        cache_root = agency.compilation_cache
-        memory_root = agency.memory_store
-        prompt_root = agency.prompt_store
+        flowgency = snapshot.config.flowgency
+        library_root = flowgency.agent_library
+        cache_root = flowgency.compilation_cache
+        memory_root = flowgency.memory_store
+        prompt_root = flowgency.prompt_store
         if library_root is None or cache_root is None or memory_root is None or prompt_root is None:
             raise ValueError("Flowgency services require agent_library, compilation_cache, memory_store, and prompt_store.")
         blueprint_library = BlueprintLibrary(Path(library_root))
