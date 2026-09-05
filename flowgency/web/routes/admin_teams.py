@@ -67,7 +67,7 @@ def _team_summary(key: str, tcfg) -> dict:
 
 def _base_admin_context(request: Request, snapshot=None) -> dict:
     teams = {}
-    title = "Agency"
+    title = "Flowgency"
     if snapshot is not None:
         teams = {
             key: tcfg.name

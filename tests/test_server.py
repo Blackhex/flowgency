@@ -814,4 +814,15 @@ def test_setup_page_renders_flowgency_title(tmp_path, monkeypatch):
     response = client.get("/setup", follow_redirects=True)
 
     assert response.status_code == 200
-    assert "Flowgency" in response.text
+    assert "<title>Setup \u2014 Flowgency</title>" in response.text
+    assert ">Flowgency<" in response.text
+
+
+def test_admin_context_fallback_title_without_snapshot():
+    from unittest.mock import MagicMock
+
+    from flowgency.web.routes.admin_teams import _base_admin_context
+
+    ctx = _base_admin_context(MagicMock(), snapshot=None)
+
+    assert ctx["flowgency_title"] == "Flowgency"

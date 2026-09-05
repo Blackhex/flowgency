@@ -9,7 +9,7 @@
     <div class="text-sm text-amber-800">Integration changes require a service restart to take effect.</div>
     <form method="POST" action="/admin/integrations/restart" class="inline">
       <button type="submit" class="px-3 py-1.5 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
-              onclick="return confirm('Restart the Agency service?')">
+              onclick="return confirm('Restart the Flowgency service?')">
         Restart Service
       </button>
     </form>
@@ -102,7 +102,7 @@
   <div class="mb-8">
     <h2 class="text-lg font-semibold text-gray-900 mb-3">Available to Register</h2>
     <div class="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400 text-sm">
-      No unregistered integrations found. Drop a <code>.py</code> file in a subdirectory of <code>agency/integrations/</code> to add one.
+      No unregistered integrations found. Drop a <code>.py</code> file in a subdirectory of <code>flowgency/integrations/</code> to add one.
     </div>
   </div>
   {% endif %}

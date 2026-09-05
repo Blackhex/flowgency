@@ -30,7 +30,7 @@
         <option value="{{ key }}" {% if key == ai_backend %}selected{% endif %}>{{ name }}</option>
         {% endfor %}
       </select>
-      <p class="mt-1 text-xs text-gray-400">The LLM integration Agency uses for its own AI features.</p>
+      <p class="mt-1 text-xs text-gray-400">The LLM integration Flowgency uses for its own AI features.</p>
     </div>
     {% endif %}
     {% if themes %}
@@ -42,7 +42,7 @@
         <option value="{{ key }}" {% if key == current_theme %}selected{% endif %}>{{ t.name }} — {{ t.description }}</option>
         {% endfor %}
       </select>
-      <p class="mt-1 text-xs text-gray-400">Color palette for the entire app. Themes are YAML files in <code class="text-xs">agency/themes/</code>.</p>
+      <p class="mt-1 text-xs text-gray-400">Color palette for the entire app. Themes are YAML files in <code class="text-xs">flowgency/themes/</code>.</p>
     </div>
     {% endif %}
     <div>
