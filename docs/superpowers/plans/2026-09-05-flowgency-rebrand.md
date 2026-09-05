@@ -28,7 +28,7 @@
 - Avoid the repository-prohibited prose tokens enforced by `tests/test_repository_boundaries.py` in every new tracked file.
 - Approved icon assets: `docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.{html,png}`.
 - Approved board assets: `docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-board.{html,png}`.
-- Python baseline: `2013 passed, 6 skipped` after installing this worktree editably.
+- Python baseline: `2013 passed, 6 skipped` — confirmed from the feature worktree root using the feature `.venv` interpreter with `pytest` and `httpx` installed; establish this baseline again before Task 1 if the venv is rebuilt. The baseline figure recorded in the initial ledger used the main checkout and global interpreter and was not from this worktree.
 - UI baseline: `104 passed, 2 skipped, 6 failed`; four failures are checkout-sensitive `agent-runtime` image diffs and two are pre-existing light-mode Dashboard contrast findings. Do not fold unrelated contrast changes into this branch.
 
 ## File Structure
@@ -1039,9 +1039,8 @@ Create `tools/render_brand_assets.mjs` with this structure:
 
 ```javascript
 import { chromium } from '@playwright/test';
-import { copyFile, readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 const root = process.cwd();
 const staticRoot = path.join(root, 'flowgency', 'static');
@@ -1055,6 +1054,14 @@ const outputs = [
   ['icon-512.png', 512, 1],
   ['icon-512-maskable.png', 512, 0.8],
 ];
+
+// Read and validate the canonical SVG before launching the browser.
+const sourceText = await readFile(source, 'utf-8');
+if (!sourceText.includes('id="flowgency-tree"')) {
+  throw new Error('canonical icon is missing the Flowgency tree group');
+}
+// Embed as a data URL so Chromium loads it without file-origin restrictions.
+const svgDataUrl = 'data:image/svg+xml;base64,' + Buffer.from(sourceText).toString('base64');
 
 const browser = await chromium.launch();
 try {
@@ -1072,27 +1079,38 @@ try {
         body { display: grid; place-items: center; background: #f3efe5; }
         img { width: ${imageSize}px; height: ${imageSize}px; }
       </style>
-      <img src="${pathToFileURL(source).href}" alt="">
+      <img id="icon" src="${svgDataUrl}" alt="">
     `);
-    await page.locator('img').waitFor({ state: 'visible' });
+    await page.locator('#icon').waitFor({ state: 'visible' });
+    // Verify the image decoded successfully before capturing.
+    const loaded = await page.locator('#icon').evaluate(img => img.complete && img.naturalWidth > 0);
+    if (!loaded) throw new Error(name + ': image failed to decode');
     await page.screenshot({ path: path.join(staticRoot, name) });
     await page.close();
   }
-  await copyFile(source, path.join(staticRoot, 'icon-maskable.svg'));
-  await copyFile(source, path.join(root, 'screenshots', 'logo.svg'));
-  await copyFile(source, path.join(root, 'screenshots', 'logo-light.svg'));
+  // Derive icon-maskable.svg by wrapping the canonical artwork in a background
+  // rectangle and scaling it into the central 80 % safe zone, matching the
+  // inset applied to the maskable PNG variants above.
+  const maskableInset = Math.round(512 * 0.1);
+  const artSize = 512 - maskableInset * 2;
+  const maskableSvg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">\n` +
+    `  <rect width="512" height="512" fill="#f3efe5"/>\n` +
+    `  <image href="${svgDataUrl}" x="${maskableInset}" y="${maskableInset}" ` +
+    `width="${artSize}" height="${artSize}"/>\n` +
+    `</svg>\n`;
+  await writeFile(path.join(staticRoot, 'icon-maskable.svg'), maskableSvg, 'utf-8');
+  // Logo copies use the full-bleed canonical mark without the maskable inset.
+  await writeFile(path.join(root, 'screenshots', 'logo.svg'), sourceText, 'utf-8');
+  await writeFile(path.join(root, 'screenshots', 'logo-light.svg'), sourceText, 'utf-8');
 } finally {
   await browser.close();
 }
-
-const sourceText = await readFile(source, 'utf-8');
-if (!sourceText.includes('id="flowgency-tree"')) {
-  throw new Error('canonical icon is missing the Flowgency tree group');
-}
 ```
 
-The maskable PNG page keeps a full bone background while scaling the tree into
-the central safe region.
+The maskable PNG variants scale the tree into the central 80 % safe zone via the
+`inset` / `imageSize` calculation above. The `icon-maskable.svg` derives the same
+safe-zone inset from the canonical artwork rather than copying the full-bleed icon.
 
 - [ ] **Step 5: Render icon derivatives and promote the approved board image**
 
@@ -1493,7 +1511,7 @@ Run:
 $smoke = Join-Path $env:TEMP 'flowgency-wheel-smoke'
 Remove-Item $smoke -Recurse -Force -ErrorAction SilentlyContinue
 python -m venv $smoke
-& "$smoke\Scripts\python.exe" -m pip install --no-deps (Get-ChildItem dist\flowgency-*.whl | Select-Object -First 1).FullName
+& "$smoke\Scripts\python.exe" -m pip install (Get-ChildItem dist\flowgency-*.whl | Select-Object -First 1).FullName
 Push-Location $env:TEMP
 try {
   & "$smoke\Scripts\python.exe" -c "import flowgency; import flowgency.cli"
