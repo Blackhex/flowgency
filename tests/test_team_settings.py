@@ -263,7 +263,7 @@ def test_setup_page_surfaces_structured_startup_diagnostics(monkeypatch, tmp_pat
 
     assert response.status_code == 200
     assert "Startup diagnostics" in response.text
-    assert "agency data root" in response.text.lower()
+    assert "flowgency data root" in response.text.lower()
     assert 'name="agent_library"' not in response.text
     assert 'name="workspace_config"' not in response.text
 

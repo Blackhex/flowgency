@@ -1,6 +1,6 @@
 name: Dispatch
 description: Navy + Amber — the operations center
-author: agency
+author: flowgency
 
 dark:
   # Surfaces
@@ -102,7 +102,7 @@ status:
   pending: { bg_dark: "rgba(245,158,11,0.15)", text_dark: "#f59e0b", bg_light: "#fef3c7", text_light: "#92400e" }
   error: { bg_dark: "rgba(239,68,68,0.15)", text_dark: "#f87171", bg_light: "#fee2e2", text_light: "#991b1b" }
 
-# Tailwind color scale (for agency-* utilities)
+# Tailwind color scale (for flowgency-* utilities)
 scale:
   50: "#f0eee6"
   100: "#e0ddd1"

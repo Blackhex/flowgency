@@ -446,7 +446,7 @@ def team_context(g: dict, observations: list[dict] | None = None, proposals: lis
         "teams": {
             key: value.name for key, value in snapshot.config.teams.items()
         },
-        "agency_title": agency.get("title", "Agency"),
+        "flowgency_title": agency.get("title", "Flowgency"),
         "admin_active": False,
         "workspaces": [
             workspace.model_dump(mode="json")
@@ -1309,16 +1309,16 @@ async def root(request: Request):
 async def setup_complete(request: Request, team: str):
     """Post-setup page — tells user to come back later."""
     team_display = team
-    agency_title = "Agency"
+    flowgency_title = "Flowgency"
     services = _services()
     if services.startup_error is None:
         snapshot = services.config_store.load()
-        agency_title = flowgency_settings(snapshot).get("title", "Agency")
+        flowgency_title = flowgency_settings(snapshot).get("title", "Flowgency")
         if team in snapshot.config.teams:
             team_display = snapshot.config.teams[team].name
     return templates.TemplateResponse(request, "setup_complete.html", {
         "request": request,
-        "agency_title": agency_title,
+        "flowgency_title": flowgency_title,
         "team": team,
         "team_name": team_display,
     })
@@ -1376,7 +1376,7 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
             "dispatch_enabled": dispatch_cfg.enabled,
         })
     return {
-        "agency_title": agency.get("title", "Agency"),
+        "flowgency_title": agency.get("title", "Flowgency"),
         "default_team": agency.get("default_team", ""),
         "team_summaries": team_summaries,
         "teams": {
@@ -1639,7 +1639,7 @@ async def admin_team_new(request: Request):
     snapshot = _load_snapshot()
     return templates.TemplateResponse(request, "admin_team_edit.html", {
         "request": request,
-        "agency_title": agency.get("title", "Agency"),
+        "flowgency_title": agency.get("title", "Flowgency"),
         "admin_active": True,
         "active": "admin",
         "admin_page": "teams",

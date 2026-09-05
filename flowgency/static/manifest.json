@@ -1,7 +1,7 @@
 {
-  "name": "Agency",
-  "short_name": "Agency",
-  "description": "Agent management dashboard",
+  "name": "Flowgency",
+  "short_name": "Flowgency",
+  "description": "Ticket-driven orchestration for teams of AI agents",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1e2a5e",

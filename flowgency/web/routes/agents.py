@@ -32,7 +32,7 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict:
         "team": team_id,
         "team_name": team_cfg.name,
         "teams": {key: value.name for key, value in snapshot.config.teams.items()},
-        "agency_title": snapshot.config.flowgency.title,
+        "flowgency_title": snapshot.config.flowgency.title,
         "admin_active": False,
         "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
         "workspaces_available": bool(team_cfg.workspaces),

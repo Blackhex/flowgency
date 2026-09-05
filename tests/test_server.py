@@ -323,14 +323,14 @@ def test_setup_get_renders_only_data_root_and_integration_fields(tmp_path, monke
     response = TestClient(app_mod.app).get("/setup")
 
     assert response.status_code == 200
-    assert "Agency data root" in response.text
+    assert "Flowgency data root" in response.text
     assert "Project folder" not in response.text
     assert 'name="data_root"' in response.text
     assert 'name="project_dir"' not in response.text
-    assert 'placeholder="C:\\Agency"' in response.text
+    assert 'placeholder="C:\\Flowgency"' in response.text
     assert 'id="browse-data-root"' in response.text
-    assert "Choose Agency data root" in response.text
-    assert "Agency data root selected." in response.text
+    assert "Choose Flowgency data root" in response.text
+    assert "Flowgency data root selected." in response.text
 
 
 def test_setup_get_redirects_to_dashboard_when_setup_is_ready(
@@ -545,7 +545,7 @@ def test_setup_launch_creates_and_uses_missing_data_root(tmp_path, monkeypatch):
     assert not config_path.exists()
     assert integration.requests[0].data_root == data_root.resolve(strict=True)
     assert "Waiting for setup to complete" in response.text
-    assert "Agency data root" in response.text
+    assert "Flowgency data root" in response.text
 
 
 def test_setup_launch_returns_to_form_when_launch_and_fallback_fail(
@@ -779,3 +779,39 @@ def test_build_services_validates_before_initializing_storage(
     assert not (tmp_path / "compiled-agents").exists()
     assert not (tmp_path / "memory").exists()
     assert not (tmp_path / "teams" / "newsletter").exists()
+
+
+def test_static_pwa_metadata_uses_flowgency():
+    import json
+
+    repo_root = Path(__file__).parents[1]
+    manifest = json.loads(
+        (repo_root / "flowgency" / "static" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    service_worker = (
+        repo_root / "flowgency" / "static" / "sw.js"
+    ).read_text(encoding="utf-8")
+    base_template = (
+        repo_root / "flowgency" / "templates" / "base.html"
+    ).read_text(encoding="utf-8")
+
+    assert manifest["name"] == "Flowgency"
+    assert manifest["short_name"] == "Flowgency"
+    assert manifest["description"] == (
+        "Ticket-driven orchestration for teams of AI agents"
+    )
+    assert "flowgency-app-shell" in service_worker
+    assert "flowgency_title" in base_template
+    assert "bg-flowgency-" in base_template
+
+
+def test_setup_page_renders_flowgency_title(tmp_path, monkeypatch):
+    _configure_missing_config(tmp_path, monkeypatch)
+    client = TestClient(app_mod.app)
+
+    response = client.get("/setup", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert "Flowgency" in response.text

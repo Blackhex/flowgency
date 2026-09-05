@@ -39,7 +39,7 @@ def _theme_css(request: Request) -> str:
 def _base_admin_context(request: Request, snapshot) -> dict[str, Any]:
     return {
         "request": request,
-        "agency_title": snapshot.config.flowgency.title,
+        "flowgency_title": snapshot.config.flowgency.title,
         "admin_active": True,
         "active": "admin",
         "admin_page": "memory-channels",

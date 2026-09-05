@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Setup — {{ agency_title }}</title>
+  <title>Setup — {{ flowgency_title }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -17,7 +17,7 @@
             mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
           },
           colors: {
-            agency: {
+            flowgency: {
               50: '#f0f4ff', 100: '#dbe4ff', 200: '#bac8ff',
               500: '#5c7cfa', 600: '#4263eb', 700: '#3b5bdb',
               800: '#364fc7', 900: '#1e2a5e', 950: '#141b3d',
@@ -28,34 +28,27 @@
     }
   </script>
 </head>
-<body class="h-full bg-agency-950 font-sans flex items-center justify-center p-4">
+<body class="h-full bg-flowgency-950 font-sans flex items-center justify-center p-4">
   <div class="w-full max-w-4xl">
     <div class="flex items-end justify-center gap-3 mb-8">
-      <div class="w-10 h-10 rounded-xl bg-agency-600 flex items-center justify-center">
-        <svg class="w-6 h-6" viewBox="0 0 80 80" fill="none">
-          <line x1="20" y1="60" x2="29" y2="42" stroke="white" stroke-width="3" opacity="0.4"/>
-          <line x1="29" y1="42" x2="40" y2="18" stroke="white" stroke-width="3" opacity="0.4"/>
-          <line x1="60" y1="60" x2="51" y2="42" stroke="white" stroke-width="3" opacity="0.4"/>
-          <line x1="51" y1="42" x2="40" y2="18" stroke="white" stroke-width="3" opacity="0.4"/>
-          <line x1="29" y1="42" x2="51" y2="42" stroke="white" stroke-width="3" opacity="0.4"/>
-          <circle cx="40" cy="18" r="7" fill="white"/>
-          <circle cx="29" cy="42" r="5.5" fill="white" opacity="0.8"/>
-          <circle cx="51" cy="42" r="5.5" fill="white" opacity="0.8"/>
-          <circle cx="20" cy="60" r="5.5" fill="white" opacity="0.6"/>
-          <circle cx="60" cy="60" r="5.5" fill="white" opacity="0.6"/>
-        </svg>
-      </div>
-      <span class="text-2xl font-bold text-white tracking-tight">{{ agency_title }}</span>
+      <img
+        src="/static/icon.svg"
+        alt=""
+        class="h-8 w-8 shrink-0"
+        width="32"
+        height="32"
+      >
+      <span class="text-2xl font-bold text-white tracking-tight">{{ flowgency_title }}</span>
     </div>
 
     <div class="bg-white rounded-2xl shadow-xl p-8 space-y-6">
       <div>
-        <h1 class="text-xl font-bold text-gray-900 mb-2">Agency setup</h1>
+        <h1 class="text-xl font-bold text-gray-900 mb-2">Flowgency setup</h1>
         <p class="text-sm text-gray-500">
           {% if waiting %}
-          Agency is waiting for your setup session to finish writing a complete configuration.
+          Flowgency is waiting for your setup session to finish writing a complete configuration.
           {% else %}
-          Pick the Agency data root and launch-capable integration, then continue setup in an interactive session.
+          Pick the Flowgency data root and launch-capable integration, then continue setup in an interactive session.
           {% endif %}
         </p>
       </div>
@@ -87,7 +80,7 @@
       <div class="space-y-5">
         <div class="grid gap-4 md:grid-cols-2">
           <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
-            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Agency data root</div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Flowgency data root</div>
             <div class="mt-1 font-mono text-sm text-gray-900 break-all">{{ data_root_value }}</div>
           </div>
           <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -96,9 +89,9 @@
           </div>
         </div>
 
-        <div class="rounded-xl border border-agency-200 bg-agency-50 p-4 space-y-2">
-          <div class="text-sm font-semibold text-agency-900">Waiting for setup to complete…</div>
-          <p id="status-message" class="text-sm text-agency-900">
+        <div class="rounded-xl border border-flowgency-200 bg-flowgency-50 p-4 space-y-2">
+          <div class="text-sm font-semibold text-flowgency-900">Waiting for setup to complete…</div>
+          <p id="status-message" class="text-sm text-flowgency-900">
             {% if status_message %}
             {{ status_message }}
             {% else %}
@@ -120,7 +113,7 @@
           <form method="POST" action="/setup/launch">
             <input type="hidden" name="data_root" value="{{ data_root_value }}">
             <input type="hidden" name="integration" value="{{ selected_integration }}">
-            <button type="submit" class="px-4 py-2.5 bg-agency-600 text-white text-sm font-semibold rounded-lg hover:bg-agency-700 transition-colors">
+            <button type="submit" class="px-4 py-2.5 bg-flowgency-600 text-white text-sm font-semibold rounded-lg hover:bg-flowgency-700 transition-colors">
               Relaunch {{ selected_integration_name }}
             </button>
           </form>
@@ -129,11 +122,11 @@
       {% else %}
       <form method="POST" action="/setup/launch" class="space-y-5">
         <div>
-          <label for="data_root" class="block text-sm font-medium text-gray-700 mb-1.5">Agency data root</label>
+          <label for="data_root" class="block text-sm font-medium text-gray-700 mb-1.5">Flowgency data root</label>
           <div class="flex flex-col gap-3 md:flex-row">
             <input name="data_root" id="data_root" autocomplete="off" value="{{ data_root_value }}"
-                   placeholder="C:\Agency"
-                   class="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-agency-500 focus:border-agency-500">
+                   placeholder="C:\Flowgency"
+                   class="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-flowgency-500 focus:border-flowgency-500">
             <button type="button" id="browse-data-root" class="px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
               Browse…
             </button>
@@ -144,7 +137,7 @@
         <div>
           <label for="integration" class="block text-sm font-medium text-gray-700 mb-1.5">Integration</label>
           <select name="integration" id="integration"
-                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-agency-500 focus:border-agency-500"
+                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-flowgency-500 focus:border-flowgency-500"
                   {% if not integrations %}disabled{% endif %}>
             {% for integration in integrations %}
             <option value="{{ integration.name }}" {% if integration.name == selected_integration %}selected{% endif %}>{{ integration.display_name }}</option>
@@ -156,7 +149,7 @@
         </div>
 
         <button type="submit"
-                class="w-full py-2.5 bg-agency-600 text-white text-sm font-semibold rounded-lg hover:bg-agency-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                class="w-full py-2.5 bg-flowgency-600 text-white text-sm font-semibold rounded-lg hover:bg-flowgency-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
                 {% if not integrations %}disabled{% endif %}>
           Continue in <span id="integration-name">{{ selected_integration_name or "integration" }}</span>
         </button>
@@ -169,7 +162,7 @@
     <div class="mx-auto mt-16 w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h2 id="directory-browser-title" class="text-lg font-bold text-gray-900">Choose Agency data root</h2>
+          <h2 id="directory-browser-title" class="text-lg font-bold text-gray-900">Choose Flowgency data root</h2>
           <p id="directory-current-path" class="mt-1 break-all font-mono text-xs text-gray-500"></p>
         </div>
         <button type="button" id="close-directory-browser" class="rounded-lg px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100">Close</button>
@@ -181,7 +174,7 @@
       <p id="directory-browser-feedback" class="mt-3 text-sm text-red-700" aria-live="polite"></p>
       <div id="directory-list" class="mt-3 max-h-80 overflow-y-auto rounded-xl border border-gray-200 p-2"></div>
       <div class="mt-4 flex justify-end">
-        <button type="button" id="choose-current-directory" disabled class="rounded-lg bg-agency-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-agency-700 disabled:cursor-not-allowed disabled:bg-gray-300">Choose this folder</button>
+        <button type="button" id="choose-current-directory" disabled class="rounded-lg bg-flowgency-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-flowgency-700 disabled:cursor-not-allowed disabled:bg-gray-300">Choose this folder</button>
       </div>
     </div>
   </div>
@@ -261,7 +254,7 @@
             for (const directory of payload.directories) {
               const button = document.createElement("button");
               button.type = "button";
-              button.className = "block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-800 hover:bg-agency-50";
+              button.className = "block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-800 hover:bg-flowgency-50";
               button.textContent = directory.name;
               button.addEventListener("click", () => loadDirectory(directory.path));
               directoryList.appendChild(button);
@@ -287,7 +280,7 @@
             return;
           }
           dataRootInput.value = currentDirectory;
-          browseFeedback.textContent = "Agency data root selected.";
+          browseFeedback.textContent = "Flowgency data root selected.";
           closeBrowser();
         });
         directoryBrowser.addEventListener("click", (event) => {

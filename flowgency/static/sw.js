@@ -1,5 +1,5 @@
-// Agency Service Worker — app-shell caching for PWA
-const CACHE_NAME = 'agency-app-shell';
+// Flowgency Service Worker — app-shell caching for PWA
+const CACHE_NAME = 'flowgency-app-shell';
 
 // Pre-cache the app shell (fonts, CSS framework)
 const APP_SHELL = [

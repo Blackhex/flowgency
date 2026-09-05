@@ -6,7 +6,7 @@
 {% block content %}
 {# ── Tip block (preserved) ── #}
 {% if show_tips and 'pipeline' not in tips_dismissed %}
-<div class="mb-4 p-3 bg-agency-50 dark:bg-agency-950/40 border border-agency-200 dark:border-agency-800 rounded-lg relative">
+<div class="mb-4 p-3 bg-flowgency-50 dark:bg-flowgency-950/40 border border-flowgency-200 dark:border-flowgency-800 rounded-lg relative">
   <div class="pr-10">
     <div class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-0.5">How the pipeline works</div>
     <div class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
@@ -16,7 +16,7 @@
     </div>
     <form method="POST" action="/tips/hide-all" class="inline">
       <input type="hidden" name="redirect" value="/{{ team }}/">
-      <button type="submit" class="text-sm text-agency-700 hover:text-agency-800 dark:text-agency-200 dark:hover:text-agency-100 mt-1">Hide all tips</button>
+      <button type="submit" class="text-sm text-flowgency-700 hover:text-flowgency-800 dark:text-flowgency-200 dark:hover:text-flowgency-100 mt-1">Hide all tips</button>
     </form>
   </div>
   <form method="POST" action="/tips/dismiss" class="absolute top-2 right-2">
@@ -226,9 +226,9 @@
       <div class="mt-1 font-mono text-xs text-gray-500 dark:text-gray-400">{{ h.last_line }}</div>
       {% endif %}
       <div class="mt-1.5 flex flex-wrap gap-3 text-sm">
-        <a href="{{ h.routines_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Open routine</a>
-        {% if h.job_href %}<a href="{{ h.job_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Last job log</a>{% endif %}
-        <a href="{{ h.run_href }}" class="text-agency-700 dark:text-agency-200 hover:underline">Run now</a>
+        <a href="{{ h.routines_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Open routine</a>
+        {% if h.job_href %}<a href="{{ h.job_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Last job log</a>{% endif %}
+        <a href="{{ h.run_href }}" class="text-flowgency-700 dark:text-flowgency-200 hover:underline">Run now</a>
       </div>
     </div>
     {% endfor %}
@@ -281,8 +281,8 @@
 
     {# ─ Footer links ─ #}
     <div class="flex gap-4 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-      <a href="/{{ team }}/observations" class="text-sm text-agency-700 dark:text-agency-200 hover:text-agency-800 dark:hover:text-white">View all observations &rarr;</a>
-      <a href="/{{ team }}/proposals" class="text-sm text-agency-700 dark:text-agency-200 hover:text-agency-800 dark:hover:text-white">View all proposals &rarr;</a>
+      <a href="/{{ team }}/observations" class="text-sm text-flowgency-700 dark:text-flowgency-200 hover:text-flowgency-800 dark:hover:text-white">View all observations &rarr;</a>
+      <a href="/{{ team }}/proposals" class="text-sm text-flowgency-700 dark:text-flowgency-200 hover:text-flowgency-800 dark:hover:text-white">View all proposals &rarr;</a>
     </div>
 
     {% else %}

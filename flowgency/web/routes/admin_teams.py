@@ -76,7 +76,7 @@ def _base_admin_context(request: Request, snapshot=None) -> dict:
         title = snapshot.config.flowgency.title
     return {
         "request": request,
-        "agency_title": title,
+        "flowgency_title": title,
         "admin_active": True,
         "active": "admin",
         "admin_page": "teams",
@@ -135,7 +135,7 @@ def _setup_response(
         "setup.html",
         {
             "request": request,
-            "agency_title": "Agency",
+            "flowgency_title": "Flowgency",
             "error": error,
             "issues": (
                 _diagnostic_issues(services) if status.state == "invalid" else []
