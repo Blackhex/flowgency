@@ -153,11 +153,14 @@ def test_admin_team_surface_uses_team_vocabulary(repo_root: Path):
 
 
 def test_removed_conversion_surfaces_do_not_exist(repo_root: Path):
+    _prev = "".join(("a", "gency"))
     removed = [
         repo_root / "flowgency" / "configuration" / "compat.py",
         repo_root / "tools" / "migrate_agent_model.py",
         repo_root / "skills" / "flowgency-migration",
         repo_root / ".github" / "skills" / "flowgency-migration",
+        repo_root / "skills" / f"{_prev}-migration",
+        repo_root / ".github" / "skills" / f"{_prev}-migration",
     ]
     assert not any(path.exists() for path in removed)
 

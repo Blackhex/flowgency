@@ -40,8 +40,8 @@ def test_active_documents_use_v1_team_control_plane():
 
 
 def test_active_docs_contain_no_superseded_brand_terms():
-    _term_flowgency = "a" + "gency"
-    _term_blackhex = "chris" + "tag"
+    previous_brand_term = "a" + "gency"
+    previous_owner_term = "chris" + "tag"
     hits = []
     all_paths = list(ACTIVE_PATHS) + [REPO_ROOT / ".vscode" / "tasks.json"]
     for path in all_paths:
@@ -49,7 +49,7 @@ def test_active_docs_contain_no_superseded_brand_terms():
             continue
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             cf = line.casefold()
-            if _term_flowgency in cf or _term_blackhex in cf:
+            if previous_brand_term in cf or previous_owner_term in cf:
                 rel = path.relative_to(REPO_ROOT)
                 hits.append(f"{rel}:{lineno}: {line.strip()}")
     assert not hits, "Superseded brand tokens still present:\n" + "\n".join(hits)
