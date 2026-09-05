@@ -64,9 +64,9 @@ test('team settings leads to the sole roster and inherited runtime', async ({ pa
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/newsletter\/agents\/advisor\/runtime$/);
   await expect(page.getByRole('heading', { name: 'Team default' })).toBeVisible();
-  const workspaceRule = page.getByText(/Rule:.*tests\/ui\/.runtime\/current\/workspaces\/newsletter/);
+  const workspaceRule = page.locator('li').filter({ hasText: /Rule:.*tests\/ui\/.runtime\/current\/workspaces\/newsletter/ });
   await expect(workspaceRule.first()).toBeVisible();
-  const editorialRule = page.getByText(/Rule:.*tests\/ui\/.runtime\/current\/teams\/newsletter\/editorial/);
+  const editorialRule = page.locator('li').filter({ hasText: /Rule:.*tests\/ui\/.runtime\/current\/teams\/newsletter\/editorial/ });
   await expect(editorialRule.first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/\.runtime\/run-\d+/);
   await expect(page.getByText('Timeout: 2400s', { exact: true })).toBeVisible();

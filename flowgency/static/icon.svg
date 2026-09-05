@@ -1,13 +1,30 @@
-<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="512" height="512" rx="76.8" fill="#1e2a5e"/>
-  <line x1="128" y1="384" x2="185.6" y2="268.8" stroke="white" stroke-width="12.8" opacity="0.4"/>
-  <line x1="185.6" y1="268.8" x2="256" y2="115.2" stroke="white" stroke-width="12.8" opacity="0.4"/>
-  <line x1="384" y1="384" x2="326.4" y2="268.8" stroke="white" stroke-width="12.8" opacity="0.4"/>
-  <line x1="326.4" y1="268.8" x2="256" y2="115.2" stroke="white" stroke-width="12.8" opacity="0.4"/>
-  <line x1="185.6" y1="268.8" x2="326.4" y2="268.8" stroke="white" stroke-width="12.8" opacity="0.4"/>
-  <circle cx="256" cy="115.2" r="44.8" fill="white"/>
-  <circle cx="185.6" cy="268.8" r="35.2" fill="white" opacity="0.8"/>
-  <circle cx="326.4" cy="268.8" r="35.2" fill="white" opacity="0.8"/>
-  <circle cx="128" cy="384" r="35.2" fill="white" opacity="0.6"/>
-  <circle cx="384" cy="384" r="35.2" fill="white" opacity="0.6"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#f3efe5"/>
+  <svg viewBox="-14 -8 490 468" x="0" y="0" width="512" height="512" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="cf-blue" x1=".1" y1="1" x2=".85" y2="0"><stop offset="0" stop-color="#263d7b"/><stop offset=".57" stop-color="#31549f"/><stop offset="1" stop-color="#4b6ab3"/></linearGradient>
+      <linearGradient id="cf-red" x1="0" y1=".75" x2="1" y2=".15"><stop offset="0" stop-color="#b84435"/><stop offset=".58" stop-color="#d5563f"/><stop offset="1" stop-color="#e57252"/></linearGradient>
+      <linearGradient id="cf-gold" x1="0" y1=".8" x2="1" y2=".1"><stop offset="0" stop-color="#b77b21"/><stop offset=".58" stop-color="#dda42f"/><stop offset="1" stop-color="#ebbd52"/></linearGradient>
+      <linearGradient id="cf-fruit" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#668d70"/><stop offset=".5" stop-color="#4f745d"/><stop offset="1" stop-color="#365846"/></linearGradient>
+      <filter id="cf-edge" x="-8%" y="-8%" width="116%" height="116%"><feTurbulence type="fractalNoise" baseFrequency=".008 .02" numOctaves="2" seed="71" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="1.2"/></filter>
+      <path id="cf-stem" d="M86 0C119 21 165 70 174 116c3 50-21 92-34 136-16 53-10 108 25 157 11 15 4 31-14 34-21 3-35-8-44-24-29-53-30-114-11-174 15-49 37-87 34-129C128 79 105 35 86 0Z"/>
+      <clipPath id="cf-stem-clip"><use href="#cf-stem"/></clipPath>
+      <path id="cf-leaf" d="M0-8C74-68 200-76 300-20C205 17 82 26 0 8Q-7 0 0-8Z"/>
+      <path id="cf-leaf-line" d="M0 0C95-25 195-38 282-23"/>
+    </defs>
+    <g id="flowgency-tree" filter="url(#cf-edge)">
+      <use href="#cf-stem" fill="url(#cf-blue)"/>
+      <path d="M100 19C123 42 151 80 153 116c2 47-20 91-35 133-18 54-11 115 18 174" fill="none" stroke="#172d64" stroke-width="4.5" stroke-linecap="round" opacity=".40" clip-path="url(#cf-stem-clip)"/>
+      <path d="M205 244C201 258 207 269 210 282" fill="none" stroke="#8f3b32" stroke-width="4.2" stroke-linecap="round"/>
+      <g transform="translate(159 116) rotate(-8) scale(.88)"><use href="#cf-leaf" fill="url(#cf-gold)"/><use href="#cf-leaf-line" fill="none" stroke="#986315" stroke-width="4.8" stroke-linecap="round" opacity=".36"/></g>
+      <g transform="translate(129 236) rotate(-8)"><use href="#cf-leaf" fill="url(#cf-red)"/><use href="#cf-leaf-line" fill="none" stroke="#9f352f" stroke-width="4.2" stroke-linecap="round" opacity=".38"/></g>
+      <g transform="translate(147 116) rotate(8) scale(-.30 .30)"><use href="#cf-leaf" fill="url(#cf-gold)"/><use href="#cf-leaf-line" fill="none" stroke="#986315" stroke-width="14" stroke-linecap="round" opacity=".36"/></g>
+      <g transform="translate(117 236) rotate(8) scale(-.43 .43)"><use href="#cf-leaf" fill="url(#cf-red)"/><use href="#cf-leaf-line" fill="none" stroke="#9f352f" stroke-width="9.8" stroke-linecap="round" opacity=".38"/></g>
+      <g transform="translate(210 307) rotate(5)">
+        <path d="M-28-20Q-28-26-22-26H22Q28-26 28-20V-11C18-9 18 9 28 11L28 20Q28 26 22 26H-22Q-28 26-28 20V11C-18 9-18-9-28-11Z" fill="url(#cf-fruit)"/>
+        <path d="M0-16V16" fill="none" stroke="#2c5340" stroke-width="3" stroke-linecap="round" stroke-dasharray="4 5" opacity=".72"/>
+        <path d="M-17-8H-7M-17 0H-9M-17 8H-12" fill="none" stroke="#dce9df" stroke-width="2.6" stroke-linecap="round" opacity=".78"/>
+      </g>
+    </g>
+  </svg>
 </svg>
