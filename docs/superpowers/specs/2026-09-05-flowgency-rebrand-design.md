@@ -152,6 +152,16 @@ formats from one source. Small-size variants may remove internal ticket marks
 or centerlines when necessary for legibility, but may not change the outer
 silhouette or branch arrangement.
 
+The `cf-fruit` linearGradient has exactly two color stops: `#668d70` at 0 %
+and `#365846` at 100 %. No midpoint stop may be added; the source HTML is
+authoritative for this constraint.
+
+The reference PNG at
+`docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.png`
+was recaptured once to align with the corrected source geometry and is now
+frozen. `tools/render_brand_assets.mjs` must not overwrite it on ordinary
+runs; re-capturing is an explicit user action only.
+
 The icon palette does not trigger a wholesale application-theme redesign.
 Existing theme values remain unchanged in this rebrand; only their branded
 identifier names change where required.

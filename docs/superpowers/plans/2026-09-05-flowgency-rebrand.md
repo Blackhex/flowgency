@@ -28,6 +28,8 @@
 - Avoid the repository-prohibited prose tokens enforced by `tests/test_repository_boundaries.py` in every new tracked file.
 - Approved icon assets: `docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.{html,png}`.
 - Approved board assets: `docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-board.{html,png}`.
+- The reference PNG at `docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.png` is frozen after a one-time uncrop recapture that matches the approved source geometry. `tools/render_brand_assets.mjs` must not overwrite it on ordinary runs; re-capturing is an explicit user action only.
+- The `cf-fruit` linearGradient in `flowgency/static/icon.svg` has exactly two stops: `#668d70` (start) and `#365846` (end). No midpoint stop (e.g. `#4f745d`) may be present; the source HTML is authoritative for this constraint.
 - Python baseline: `2013 passed, 6 skipped` — confirmed from the feature worktree root using the feature `.venv` interpreter with `pytest` and `httpx` installed; establish this baseline again before Task 1 if the venv is rebuilt. The baseline figure recorded in the initial ledger used the main checkout and global interpreter and was not from this worktree.
 - UI baseline: `104 passed, 2 skipped, 6 failed`; four failures are checkout-sensitive `agent-runtime` image diffs and two are pre-existing light-mode Dashboard contrast findings. Do not fold unrelated contrast changes into this branch.
 
@@ -56,12 +58,13 @@ From the feature worktree root:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e . pytest
+.\.venv\Scripts\python.exe -m pip install -e '.[test]'
 npm ci
 ```
 
-The directories are ignored. Re-run the editable install after Task 1 because
-the distribution and package names change.
+The `.[test]` extra installs `pytest`, `httpx`, and `Pillow` needed by the
+brand-asset pixel tests. The directories are ignored. Re-run the editable
+install after Task 1 because the distribution and package names change.
 
 ---
 
