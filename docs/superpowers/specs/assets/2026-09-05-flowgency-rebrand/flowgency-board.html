@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440, initial-scale=1">
+<title>Flowgency delivery workflow</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1440px; height: 850px; overflow: hidden; background: #f4f1e9; }
+  .shot-intro, .options { display: none; }
+  .shot-scroll { overflow: hidden !important; padding: 0 !important; }
+
+  .shot-intro { max-width: 860px; margin-bottom: 24px; }
+  .shot-scroll { overflow-x: auto; padding: 4px 4px 16px; }
+  .product-shot {
+    --ink: #17201d;
+    --muted: #69736f;
+    --line: #d8d8d0;
+    --paper: #f4f1e9;
+    --panel: #fffefa;
+    --nav: #1d2942;
+    --nav-soft: #293752;
+    --blue: #31549f;
+    --red: #d5563f;
+    --gold: #dda42f;
+    --green: #4f745d;
+    width: 1440px;
+    height: 850px;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    overflow: hidden;
+    border: 1px solid #c9cbc5;
+    border-radius: 6px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "DM Sans", sans-serif;
+    box-shadow: 0 22px 60px rgba(23,32,29,.16);
+  }
+
+  .shot-sidebar {
+    display: flex;
+    flex-direction: column;
+    background: var(--nav);
+    color: #dce2ed;
+  }
+  .shot-brand { height: 66px; padding: 15px 16px 11px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .shot-brand svg { width: 34px; height: 34px; flex: 0 0 auto; }
+  .shot-brand span { font-size: 18px; font-weight: 700; letter-spacing: 0; }
+  .team-switch { margin: 12px 12px 4px; height: 42px; padding: 0 11px; display: flex; align-items: center; justify-content: space-between; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; background: rgba(255,255,255,.04); color: #f5f7fa; font-size: 13px; font-weight: 600; }
+  .team-switch small { display: block; color: #8997ae; font-size: 9px; font-weight: 600; text-transform: uppercase; }
+  .nav-section { margin: 18px 13px 6px; color: #718099; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .shot-nav { display: grid; gap: 3px; padding: 0 9px; }
+  .shot-nav-item { height: 36px; padding: 0 10px; display: flex; align-items: center; gap: 9px; border-radius: 5px; color: #9eabc0; font-size: 13px; font-weight: 500; }
+  .shot-nav-item.active { background: #34425f; color: #fff; }
+  .shot-nav-item svg { width: 16px; height: 16px; flex: 0 0 auto; stroke-width: 1.8; }
+  .shot-nav-item .count { margin-left: auto; min-width: 20px; padding: 1px 6px; border-radius: 9px; background: rgba(255,255,255,.09); color: #b8c2d2; font-size: 10px; text-align: center; }
+  .sidebar-bottom { margin-top: auto; padding: 12px 9px 16px; border-top: 1px solid rgba(255,255,255,.07); }
+
+  .shot-main { min-width: 0; display: flex; flex-direction: column; }
+  .shot-topbar { height: 66px; padding: 0 22px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); background: rgba(255,254,250,.92); }
+  .shot-heading { min-width: 230px; }
+  .shot-heading .crumb { color: #7b827e; font-size: 10px; font-weight: 600; }
+  .shot-heading h1 { margin: 1px 0 0; font-size: 20px; line-height: 1.15; letter-spacing: 0; }
+  .workflow-picker { height: 34px; padding: 0 10px; display: flex; align-items: center; gap: 8px; border: 1px solid #d4d5cf; border-radius: 5px; background: #fff; color: #48514d; font-size: 11px; }
+  .workflow-picker strong { color: var(--ink); font-weight: 650; }
+  .agent-presence { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .agent-stack { display: flex; padding-left: 7px; }
+  .agent-stack .avatar { margin-left: -7px; border: 2px solid #fffefa; }
+  .presence-label { color: #5d6863; font-size: 10px; }
+  .tool-btn { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #d4d5cf; border-radius: 5px; background: #fff; color: #505955; }
+  .tool-btn svg { width: 15px; height: 15px; }
+  .new-ticket { height: 34px; padding: 0 12px; display: flex; align-items: center; gap: 7px; border: 0; border-radius: 5px; background: var(--green); color: #fff; font: 650 11px "DM Sans", sans-serif; }
+  .new-ticket svg { width: 14px; height: 14px; }
+
+  .active-strip { height: 54px; padding: 0 22px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); background: #ebe9e1; }
+  .strip-title { width: 88px; color: #707873; font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .agent-live { display: flex; align-items: center; gap: 7px; min-width: 130px; }
+  .agent-live .agent-text { line-height: 1.15; }
+  .agent-live strong { display: block; font-size: 10px; font-weight: 700; }
+  .agent-live span { color: #747d78; font-size: 9px; }
+  .live-dot { width: 5px; height: 5px; margin-left: -3px; align-self: flex-end; border: 1px solid #ebe9e1; border-radius: 50%; background: #3ebd85; }
+
+  .avatar { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; }
+  .avatar.scout { background: #31549f; }
+  .avatar.atlas { background: #7a5b38; }
+  .avatar.forge { background: #d5563f; }
+  .avatar.sentinel { background: #4f745d; }
+  .avatar.relay { background: #8b654d; }
+  .avatar.unassigned { background: #c9cdc9; color: #68716d; }
+
+  .board-area { min-height: 0; flex: 1; padding: 15px 18px 18px; overflow: hidden; }
+  .board-meta { height: 30px; display: flex; align-items: flex-start; justify-content: space-between; }
+  .board-meta p { margin: 0; color: #727a76; font-size: 10px; }
+  .board-meta .view-controls { display: flex; align-items: center; gap: 12px; color: #727a76; font-size: 10px; }
+  .view-controls strong { color: var(--ink); }
+
+  .board-grid { height: calc(100% - 30px); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 11px; }
+  .board-column { min-width: 0; display: flex; flex-direction: column; border-left: 1px solid #d7d6ce; }
+  .board-column:first-child { border-left: 0; }
+  .column-head { height: 48px; padding: 0 9px 9px 11px; display: flex; align-items: center; gap: 7px; border-bottom: 2px solid #d3d2ca; }
+  .column-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .column-head h2 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0; }
+  .column-count { color: #808783; font: 500 10px "JetBrains Mono", monospace; }
+  .wip { margin-left: auto; color: #8a908d; font-size: 8px; }
+  .column-cards { min-height: 0; padding: 10px 7px 0 10px; display: grid; align-content: start; gap: 8px; overflow: hidden; }
+
+  .ticket { position: relative; min-height: 128px; padding: 10px 10px 9px; border: 1px solid #d7d9d3; border-left-width: 3px; border-radius: 6px; background: var(--panel); box-shadow: 0 1px 2px rgba(23,32,29,.05); }
+  .ticket.high { border-left-color: var(--red); }
+  .ticket.medium { border-left-color: var(--gold); }
+  .ticket.low { border-left-color: var(--blue); }
+  .ticket.done { opacity: .78; background: #f8f7f2; }
+  .ticket-top { display: flex; align-items: center; gap: 6px; color: #727b76; font: 500 8px "JetBrains Mono", monospace; }
+  .priority { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; }
+  .priority.high { background: var(--red); }
+  .priority.medium { background: var(--gold); }
+  .priority.low { background: var(--blue); }
+  .ticket h3 { min-height: 35px; margin: 7px 0 7px; color: #222a27; font-size: 11px; font-weight: 650; line-height: 1.32; letter-spacing: 0; }
+  .tag-row { height: 20px; display: flex; gap: 4px; align-items: flex-start; }
+  .tag { padding: 2px 6px; border-radius: 3px; background: #ecece6; color: #626b67; font-size: 8px; font-weight: 600; }
+  .tag.backend { background: #e2e8f5; color: #31549f; }
+  .tag.risk { background: #f6dfda; color: #a74334; }
+  .tag.docs { background: #eee6d5; color: #7c622e; }
+  .tag.ops { background: #dfeae3; color: #416750; }
+  .ticket-agent { margin-top: 8px; padding-top: 7px; display: flex; align-items: center; gap: 6px; border-top: 1px solid #ecece6; }
+  .ticket-agent .avatar { width: 22px; height: 22px; font-size: 8px; }
+  .agent-name { min-width: 0; line-height: 1.1; }
+  .agent-name strong { display: block; font-size: 9px; }
+  .agent-name span { color: #7b837f; font-size: 8px; }
+  .run-state { margin-left: auto; display: flex; align-items: center; gap: 4px; color: #4d6c5d; font-size: 8px; font-weight: 600; }
+  .run-state .pulse { width: 5px; height: 5px; border-radius: 50%; background: #3ebd85; box-shadow: 0 0 0 3px rgba(62,189,133,.12); }
+  .run-state.review { color: #a66d17; }
+  .run-state.review .pulse { background: var(--gold); box-shadow: none; }
+  .run-state.complete { color: #60716a; }
+  .checkline { margin-top: 8px; height: 4px; border-radius: 2px; background: #e8e8e2; overflow: hidden; }
+  .checkline span { display: block; height: 100%; background: var(--green); }
+  .human-gate { margin-top: 7px; height: 22px; padding: 0 7px; display: flex; align-items: center; gap: 5px; border: 1px solid #e4c784; border-radius: 4px; background: #fff8e5; color: #845e16; font-size: 8px; font-weight: 650; }
+  .done-mark { margin-left: auto; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: #dfece4; color: #3c6d54; font-size: 10px; font-weight: 800; }
+
+  @media (max-width: 900px) { .shot-scroll { margin-left: -16px; margin-right: -16px; } }
+</style>
+</head>
+<body>
+
+<div class="shot-intro">
+  <div class="label">README product screenshot · synthetic data</div>
+  <h2>Flowgency’s ticket board as the primary workflow</h2>
+  <p class="subtitle">This is a prospective product screenshot for the README, using fictional agents, tickets, statuses, timestamps, and project names. Scroll horizontally if needed.</p>
+</div>
+
+<div class="shot-scroll">
+  <div class="product-shot" id="flowgency-board-shot">
+    <aside class="shot-sidebar">
+      <div class="shot-brand">
+        <svg viewBox="-14 -8 490 468" aria-hidden="true">
+          <defs><path id="brand-leaf" d="M0-8C74-68 200-76 300-20C205 17 82 26 0 8Q-7 0 0-8Z"/></defs>
+          <path d="M86 0C119 21 165 70 174 116c3 50-21 92-34 136-16 53-10 108 25 157 11 15 4 31-14 34-21 3-35-8-44-24-29-53-30-114-11-174 15-49 37-87 34-129C128 79 105 35 86 0Z" fill="#5d7fd1"/>
+          <g transform="translate(159 116) rotate(-8) scale(.88)"><use href="#brand-leaf" fill="#efbd42"/></g>
+          <g transform="translate(129 236) rotate(-8)"><use href="#brand-leaf" fill="#ef725a"/></g>
+          <g transform="translate(147 116) rotate(8) scale(-.30 .30)"><use href="#brand-leaf" fill="#efbd42"/></g>
+          <g transform="translate(117 236) rotate(8) scale(-.43 .43)"><use href="#brand-leaf" fill="#ef725a"/></g>
+        </svg>
+        <span>Flowgency</span>
+      </div>
+      <div class="team-switch">
+        <div><small>Team</small>Northstar Product</div>
+        <span>⌄</span>
+      </div>
+      <div class="nav-section">Work</div>
+      <div class="shot-nav">
+        <div class="shot-nav-item active"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="11" rx="1"/><rect x="17" y="4" width="4" height="7" rx="1"/></svg>Board<span class="count">9</span></div>
+        <div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6h16v12H4zM4 10h16M8 6v4"/></svg>Tickets</div>
+        <div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3 2-5 5-5s5 2 5 5M14 18c.3-2.2 1.6-3.5 3.7-3.5 2 0 3.3 1.3 3.3 3.5"/></svg>Agents<span class="count">5</span></div>
+        <div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h4c3 0 3-6 6-6M11 12c3 0 3 6 6 6"/></svg>Workflows</div>
+      </div>
+      <div class="nav-section">Operations</div>
+      <div class="shot-nav">
+        <div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>Jobs<span class="count">3</span></div>
+        <div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 17l5-5 4 3 7-8M16 7h4v4"/></svg>Activity</div>
+      </div>
+      <div class="nav-section">Knowledge</div>
+      <div class="shot-nav">
+        <div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg>Prompts</div>
+        <div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></svg>Memory</div>
+        <div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z"/></svg>Agent Library</div>
+      </div>
+      <div class="sidebar-bottom"><div class="shot-nav"><div class="shot-nav-item"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.7-1L14.5 3h-5l-.4 3.1a8 8 0 0 0-1.7 1L5 6.1 3 9.5 5.1 11a7 7 0 0 0 0 2L3 14.5 5 18l2.4-1a8 8 0 0 0 1.7 1l.4 3h5l.4-3a8 8 0 0 0 1.7-1l2.4 1 2-3.5-2.1-1.5a7 7 0 0 0 .1-1Z"/></svg>Settings</div></div></div>
+    </aside>
+
+    <section class="shot-main">
+      <header class="shot-topbar">
+        <div class="shot-heading"><div class="crumb">Northstar Product / Board</div><h1>Delivery workflow</h1></div>
+        <div class="workflow-picker"><span>Workflow</span><strong>Product delivery</strong><span>⌄</span></div>
+        <div class="agent-presence"><div class="agent-stack"><div class="avatar scout">SC</div><div class="avatar atlas">AT</div><div class="avatar forge">FG</div><div class="avatar sentinel">SE</div></div><span class="presence-label">4 active</span></div>
+        <button class="tool-btn" title="Search"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg></button>
+        <button class="tool-btn" title="Filter"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg></button>
+        <button class="new-ticket"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New ticket</button>
+      </header>
+
+      <div class="active-strip">
+        <div class="strip-title">Agent activity</div>
+        <div class="agent-live"><div class="avatar scout">SC</div><span class="live-dot"></span><div class="agent-text"><strong>Scout</strong><span>triaging FLW-137</span></div></div>
+        <div class="agent-live"><div class="avatar atlas">AT</div><span class="live-dot"></span><div class="agent-text"><strong>Atlas</strong><span>planning FLW-132</span></div></div>
+        <div class="agent-live"><div class="avatar forge">FG</div><span class="live-dot"></span><div class="agent-text"><strong>Forge</strong><span>running for 38m</span></div></div>
+        <div class="agent-live"><div class="avatar sentinel">SE</div><span class="live-dot"></span><div class="agent-text"><strong>Sentinel</strong><span>reviewing FLW-125</span></div></div>
+        <div class="agent-live"><div class="avatar relay">RE</div><div class="agent-text"><strong>Relay</strong><span>available</span></div></div>
+      </div>
+
+      <main class="board-area">
+        <div class="board-meta"><p>9 open tickets · 3 agents running · updated just now</p><div class="view-controls"><span>Group by <strong>State</strong></span><span>Sort <strong>Priority</strong></span></div></div>
+        <div class="board-grid">
+          <section class="board-column">
+            <div class="column-head"><span class="column-dot" style="background:#8d9691"></span><h2>Inbox</h2><span class="column-count">2</span></div>
+            <div class="column-cards">
+              <article class="ticket high"><div class="ticket-top">FLW-138<span class="priority high"></span></div><h3>Investigate checkout latency in the EU region</h3><div class="tag-row"><span class="tag risk">incident</span><span class="tag backend">backend</span></div><div class="ticket-agent"><div class="avatar unassigned">?</div><div class="agent-name"><strong>Unassigned</strong><span>awaiting triage</span></div></div></article>
+              <article class="ticket low"><div class="ticket-top">FLW-137<span class="priority low"></span></div><h3>Refresh onboarding examples for the Python SDK</h3><div class="tag-row"><span class="tag docs">docs</span></div><div class="ticket-agent"><div class="avatar scout">SC</div><div class="agent-name"><strong>Scout</strong><span>collecting context</span></div><div class="run-state"><span class="pulse"></span>triaging</div></div></article>
+            </div>
+          </section>
+
+          <section class="board-column">
+            <div class="column-head"><span class="column-dot" style="background:#31549f"></span><h2>Ready</h2><span class="column-count">2</span><span class="wip">WIP 2/4</span></div>
+            <div class="column-cards">
+              <article class="ticket medium"><div class="ticket-top">FLW-134<span class="priority medium"></span></div><h3>Add tenant-aware filters to audit exports</h3><div class="tag-row"><span class="tag backend">backend</span><span class="tag">export</span></div><div class="ticket-agent"><div class="avatar forge">FG</div><div class="agent-name"><strong>Forge</strong><span>next in queue</span></div></div></article>
+              <article class="ticket high"><div class="ticket-top">FLW-132<span class="priority high"></span></div><h3>Define rollback criteria for the cache migration</h3><div class="tag-row"><span class="tag risk">risk</span><span class="tag ops">operations</span></div><div class="ticket-agent"><div class="avatar atlas">AT</div><div class="agent-name"><strong>Atlas</strong><span>plan approved</span></div></div></article>
+            </div>
+          </section>
+
+          <section class="board-column">
+            <div class="column-head"><span class="column-dot" style="background:#d5563f"></span><h2>In progress</h2><span class="column-count">2</span><span class="wip">WIP 2/3</span></div>
+            <div class="column-cards">
+              <article class="ticket high"><div class="ticket-top">FLW-129<span class="priority high"></span></div><h3>Move audit events onto the durable queue</h3><div class="tag-row"><span class="tag backend">backend</span><span class="tag ops">durability</span></div><div class="ticket-agent"><div class="avatar forge">FG</div><div class="agent-name"><strong>Forge</strong><span>implementation</span></div><div class="run-state"><span class="pulse"></span>38m</div></div><div class="checkline"><span style="width:62%"></span></div></article>
+              <article class="ticket medium"><div class="ticket-top">FLW-131<span class="priority medium"></span></div><h3>Map recovery gaps in scheduled jobs</h3><div class="tag-row"><span class="tag ops">recovery</span><span class="tag">scheduler</span></div><div class="ticket-agent"><div class="avatar scout">SC</div><div class="agent-name"><strong>Scout</strong><span>analysis</span></div><div class="run-state"><span class="pulse"></span>12m</div></div><div class="checkline"><span style="width:35%"></span></div></article>
+            </div>
+          </section>
+
+          <section class="board-column">
+            <div class="column-head"><span class="column-dot" style="background:#dda42f"></span><h2>Review</h2><span class="column-count">2</span><span class="wip">WIP 2/3</span></div>
+            <div class="column-cards">
+              <article class="ticket high"><div class="ticket-top">FLW-125<span class="priority high"></span></div><h3>Verify token rotation across staging services</h3><div class="tag-row"><span class="tag risk">security</span><span class="tag ops">staging</span></div><div class="ticket-agent"><div class="avatar sentinel">SE</div><div class="agent-name"><strong>Sentinel</strong><span>3 of 4 checks</span></div><div class="run-state review"><span class="pulse"></span>review</div></div><div class="checkline"><span style="width:75%"></span></div></article>
+              <article class="ticket medium"><div class="ticket-top">FLW-124<span class="priority medium"></span></div><h3>Document the operator fallback procedure</h3><div class="tag-row"><span class="tag docs">docs</span><span class="tag ops">operations</span></div><div class="ticket-agent"><div class="avatar atlas">AT</div><div class="agent-name"><strong>Atlas</strong><span>handoff ready</span></div></div><div class="human-gate">◇ Human approval required</div></article>
+            </div>
+          </section>
+
+          <section class="board-column">
+            <div class="column-head"><span class="column-dot" style="background:#4f745d"></span><h2>Done</h2><span class="column-count">2</span></div>
+            <div class="column-cards">
+              <article class="ticket done low"><div class="ticket-top">FLW-118</div><h3>Ship retry telemetry to the operations dashboard</h3><div class="tag-row"><span class="tag ops">observability</span></div><div class="ticket-agent"><div class="avatar relay">RE</div><div class="agent-name"><strong>Relay</strong><span>completed 14:32</span></div><div class="done-mark">✓</div></div></article>
+              <article class="ticket done medium"><div class="ticket-top">FLW-117</div><h3>Tighten sandbox path validation for job launches</h3><div class="tag-row"><span class="tag risk">security</span><span class="tag backend">runtime</span></div><div class="ticket-agent"><div class="avatar sentinel">SE</div><div class="agent-name"><strong>Sentinel</strong><span>completed 11:08</span></div><div class="done-mark">✓</div></div></article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </section>
+  </div>
+</div>
+
+<div class="options" style="margin-top:18px">
+  <div class="option" data-choice="readme-board-approved" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Use this synthesized board screenshot</h3><p>Archive and embed this prospective Flowgency workflow view in the README and design spec.</p></div></div>
+  <div class="option" data-choice="readme-board-revise" onclick="toggleSelect(this)"><div class="letter">B</div><div class="content"><h3>Revise the screenshot</h3><p>Keep the board direction but change layout, content, density, or visual treatment.</p></div></div>
+</div>
+</body>
+</html>
