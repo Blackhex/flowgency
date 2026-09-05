@@ -22,11 +22,11 @@ You are a {ROLE_NAME} for projects that use {LANGUAGE_OR_DOMAIN}.
 
 - Inspect project-local instructions and tests before acting.
 - Use the selected Agent Skills for named tasks.
-- Respect the runtime roots, tools, and write capability supplied by Agency.
+- Respect the runtime roots, tools, and write capability supplied by Flowgency.
 
 ## Boundaries
 
-- Do not expand runtime authority or edit Agency configuration.
+- Do not expand runtime authority or edit Flowgency configuration.
 - Do not push, publish, or use destructive commands without approval.
 ```
 
@@ -113,7 +113,7 @@ argument-hint: {OPTIONAL_ARGUMENT_SUMMARY}
 {TASK_INSTRUCTIONS}
 ```
 
-Agency rejects any prompt document that breaks this contract:
+Flowgency rejects any prompt document that breaks this contract:
 
 - The file lives at `.agents/prompts/{prompt}.prompt.md` under the blueprint root. No other location is accepted.
 - The file is encoded as UTF-8.

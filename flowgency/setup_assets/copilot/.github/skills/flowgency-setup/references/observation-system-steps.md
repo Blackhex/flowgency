@@ -4,7 +4,7 @@ Use this reference when writing an observation-oriented Agent Skill in the globa
 
 ## Outcome
 
-The routine inspects its assigned domain, avoids duplicate observations, links related signals, and proposes action only when evidence converges. Agency supplies the configured team workspace, projected blueprint, selected skill, runtime policy, and semantic memory snapshot.
+The routine inspects its assigned domain, avoids duplicate observations, links related signals, and proposes action only when evidence converges. Flowgency supplies the configured team workspace, projected blueprint, selected skill, runtime policy, and semantic memory snapshot.
 
 ## Recommended steps
 
@@ -17,4 +17,4 @@ The routine inspects its assigned domain, avoids duplicate observations, links r
 
 ## Boundaries
 
-Blueprint instructions define reusable role behavior. Config defines identity, integration, capabilities, runtime policy, routines, and semantic memory selectors. The skill must not discover another instance from a native file, widen runtime authority, alter Agency configuration, or bypass durable job submission.
+Blueprint instructions define reusable role behavior. Config defines identity, integration, capabilities, runtime policy, routines, and semantic memory selectors. The skill must not discover another instance from a native file, widen runtime authority, alter Flowgency configuration, or bypass durable job submission.

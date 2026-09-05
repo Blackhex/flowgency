@@ -17,16 +17,16 @@ A 3-agent team for software projects: automated code review, security scanning, 
    cp -r examples/code-review-team /path/to/your/review-agents
    ```
 
-2. Add the team to your Agency `config.yaml`:
+2. Add the team to your Flowgency `config.yaml`:
    ```yaml
    schema_version: 1
    flowgency:
-     prompt_store: /path/to/agency/prompts
+     prompt_store: /path/to/flowgency/prompts
    teams:
      review:
        name: Code Review Team
        workspace_path: /path/to/your/project
-       path: /path/to/agency/teams/review
+       path: /path/to/flowgency/teams/review
        default_integration: claude-code
        agents:
        - name: reviewer
@@ -62,7 +62,7 @@ A 3-agent team for software projects: automated code review, security scanning, 
 
 4. Assign saved prompts and schedules under each instance's `routines` in `config.yaml`, and register any instance-private prompts you want to launch from the roster.
 
-5. Restart Agency and your new team appears in the sidebar.
+5. Restart Flowgency and your new team appears in the sidebar.
 
 ## Routine Schedule (Suggested)
 

@@ -17,16 +17,16 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
    cp -r examples/content-team /path/to/your/content-agents
    ```
 
-2. Add the team to your Agency `config.yaml`:
+2. Add the team to your Flowgency `config.yaml`:
    ```yaml
    schema_version: 1
    flowgency:
-     prompt_store: /path/to/agency/prompts
+     prompt_store: /path/to/flowgency/prompts
    teams:
      content:
        name: Content Team
        workspace_path: /path/to/your/project
-       path: /path/to/agency/teams/content
+       path: /path/to/flowgency/teams/content
        default_integration: claude-code  # or whichever tool you use
        agents:
        - name: writer
@@ -62,7 +62,7 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
 
 4. Assign saved prompts and schedules under each instance's `routines` in `config.yaml`, and register any instance-private prompts you want to launch from the roster.
 
-5. Restart Agency and your new team appears in the sidebar.
+5. Restart Flowgency and your new team appears in the sidebar.
 
 ## Routine Schedule (Suggested)
 

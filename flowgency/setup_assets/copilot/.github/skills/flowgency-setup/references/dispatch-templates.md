@@ -4,7 +4,7 @@ Launchers are convenience frontends for configured instances. They always use th
 
 ## Tmux Workspace Template
 
-Generate a launcher only when the team uses a tmux workspace. Each configured instance gets a labeled pane whose working directory is `{TEAM_WORKSPACE}`. Start the selected integration CLI normally; Agency supplies projected instructions during jobs.
+Generate a launcher only when the team uses a tmux workspace. Each configured instance gets a labeled pane whose working directory is `{TEAM_WORKSPACE}`. Start the selected integration CLI normally; Flowgency supplies projected instructions during jobs.
 
 ```bash
 #!/bin/sh

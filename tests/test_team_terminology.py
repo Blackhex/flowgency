@@ -10,30 +10,6 @@ import yaml
 
 REPO_ROOT = Path(__file__).parents[1]
 
-# Phrases that must not appear in any active operator document.
-# These are superseded product-name tokens; presence means a residual was not updated.
-_SUPERSEDED_BRAND_TERMS = (
-    "# Agency",
-    "title: Agency",
-    "Agency is a",
-    "Agency-owned",
-    "Agency never loads",
-    "Agency contributes",
-    "Agency links observations",
-    "Agency validates",
-    "Agency submits",
-    "Agency tracks",
-    "Agency runs on",
-    "Agency applies",
-    "Agency's",
-    "Agency manifest",
-    "agency.dispatch.interval",
-    "agency/integrations/integrations.yaml",
-    "[Agency Setup Skill]",
-    "starting Agency",
-    "Start Agency dashboard",
-)
-
 ACTIVE_PATHS = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "AGENTS.md",
@@ -62,11 +38,19 @@ def test_active_documents_use_v1_team_control_plane():
 
 
 def test_active_docs_contain_no_superseded_brand_terms():
-    doc_text = "\n".join(p.read_text(encoding="utf-8") for p in ACTIVE_PATHS)
-    tasks_text = (REPO_ROOT / ".vscode" / "tasks.json").read_text(encoding="utf-8")
-    assembled = doc_text + "\n" + tasks_text
-    found = [term for term in _SUPERSEDED_BRAND_TERMS if term in assembled]
-    assert not found, f"Superseded brand tokens still present: {found}"
+    _term_agency = "a" + "gency"
+    _term_christag = "chris" + "tag"
+    hits = []
+    all_paths = list(ACTIVE_PATHS) + [REPO_ROOT / ".vscode" / "tasks.json"]
+    for path in all_paths:
+        if not path.exists():
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            cf = line.casefold()
+            if _term_agency in cf or _term_christag in cf:
+                rel = path.relative_to(REPO_ROOT)
+                hits.append(f"{rel}:{lineno}: {line.strip()}")
+    assert not hits, "Superseded brand tokens still present:\n" + "\n".join(hits)
 
 
 def test_config_example_is_valid_schema_one(tmp_path: Path) -> None:
