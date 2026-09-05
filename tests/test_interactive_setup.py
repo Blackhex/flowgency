@@ -76,7 +76,7 @@ def test_copilot_launches_interactive_setup(monkeypatch: pytest.MonkeyPatch, tmp
         "-i",
         "Use the agency-setup skill.",
         "--name",
-        "Agency setup",
+        "Flowgency setup",
     )
     assert captured["cwd"] == tmp_path.resolve()
     assert result.fallback_command == integration.interactive_setup_fallback_command(
@@ -113,7 +113,7 @@ def test_copilot_builds_fallback_command_without_launch(
         f"'-C' '{tmp_path.resolve()}' "
         f"'--add-dir' '{copilot_discovery_root()}' "
         "'-i' 'Use the agency-setup skill.' "
-        "'--name' 'Agency setup'"
+        "'--name' 'Flowgency setup'"
     )
 
 
@@ -182,7 +182,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
         "-i",
         "Use the agency-setup skill.",
         "--name",
-        "Agency setup",
+        "Flowgency setup",
     )
     assert str(cmd_wrapper) not in captured["command"]
     assert all(
@@ -195,7 +195,7 @@ def test_copilot_launches_interactive_setup_via_powershell_for_npm_only_windows_
         f"'-C' '{project_dir.resolve()}' "
         f"'--add-dir' '{copilot_discovery_root()}' "
         "'-i' 'Use the agency-setup skill.' "
-        "'--name' 'Agency setup'"
+        "'--name' 'Flowgency setup'"
     )
 
 
@@ -530,13 +530,13 @@ def test_copilot_rejects_missing_packaged_setup_skill(monkeypatch, tmp_path):
         prompt="Use the agency-setup skill.",
     )
 
-    with pytest.raises(IntegrationError, match="reinstall christag-agency"):
+    with pytest.raises(IntegrationError, match="reinstall flowgency"):
         integration.interactive_setup_fallback_command(request)
 
 
 def test_copilot_rejects_shadowing_data_root_skill(monkeypatch, tmp_path):
     data_root = tmp_path / "Agency"
-    local_skill = data_root / ".github" / "skills" / "agency-setup"
+    local_skill = data_root / ".github" / "skills" / "flowgency-setup"
     local_skill.mkdir(parents=True)
     (local_skill / "SKILL.md").write_text("local\n", encoding="utf-8")
     monkeypatch.setattr(
@@ -585,7 +585,7 @@ def test_copilot_rejects_unreadable_packaged_setup_skill(monkeypatch, tmp_path):
         copilot_discovery_root()
         / ".github"
         / "skills"
-        / "agency-setup"
+        / "flowgency-setup"
         / "SKILL.md"
     )
     original_access = copilot_mod.os.access
@@ -602,5 +602,5 @@ def test_copilot_rejects_unreadable_packaged_setup_skill(monkeypatch, tmp_path):
         prompt="Use the agency-setup skill.",
     )
 
-    with pytest.raises(IntegrationError, match="reinstall christag-agency"):
+    with pytest.raises(IntegrationError, match="reinstall flowgency"):
         CopilotIntegration().interactive_setup_fallback_command(request)

@@ -57,7 +57,7 @@ def _active_documentation_paths() -> list[Path]:
         REPO_ROOT / "README.md",
         REPO_ROOT / "AGENTS.md",
         *sorted((REPO_ROOT / "kb").glob("*.md")),
-        *sorted((REPO_ROOT / "skills" / "agency-setup").rglob("*.md")),
+        *sorted((REPO_ROOT / "skills" / "flowgency-setup").rglob("*.md")),
     ]
 
 
@@ -239,7 +239,7 @@ def test_retired_templates_are_deleted_and_navigation_uses_current_surfaces():
 
 
 def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
-    skill = (REPO_ROOT / "skills" / "agency-setup" / "SKILL.md").read_text(encoding="utf-8")
+    skill = (REPO_ROOT / "skills" / "flowgency-setup" / "SKILL.md").read_text(encoding="utf-8")
     match = re.search(r"Use this canonical shape:\s*```yaml\n(?P<yaml>.*?)\n```", skill, re.DOTALL)
     assert match is not None
     yaml_text = match.group("yaml")
@@ -251,9 +251,9 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert config["memory"]["channels"]["project-strategy"]["display_name"] == "Project Strategy"
     team = config["teams"]["example"]
     assert team["workspace_path"] == "C:/Projects/example"
-    assert team["path"] == "C:/Agency/teams/example"
+    assert team["path"] == "C:/Flowgency/teams/example"
     skill_text = (
-        REPO_ROOT / "skills" / "agency-setup" / "SKILL.md"
+        REPO_ROOT / "skills" / "flowgency-setup" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "`workspace_path` points to the project workspace" in skill_text
     assert "`path` points to the Agency-owned team-state root" in skill_text

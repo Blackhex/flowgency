@@ -1,8 +1,8 @@
-# Agency Setup Skill
+# Flowgency Setup Skill
 
-The `agency-setup` skill owns the one authoritative canonical Agency config. Guided first-run setup supplies an approved Agency data root, authoritative config path, and supported AI integration; the guided conversation asks for the project workspace as its first question. Without guided context, the skill asks for the data root and then the workspace explicitly. The skill takes over team naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces. Generated native prompt files remain derived output.
+The `flowgency-setup` skill owns the one authoritative canonical Agency config. Guided first-run setup supplies an approved Agency data root, authoritative config path, and supported AI integration; the guided conversation asks for the project workspace as its first question. Without guided context, the skill asks for the data root and then the workspace explicitly. The skill takes over team naming, storage paths, blueprint source, explicit instances, routines, runtime policy, workspaces, memory, validation, and the one atomic config write. It accepts only the canonical config shape, creates the config when absent, and reports validation errors directly. It does not create runtime-native identities, physical agent directories, memory files, prompt schedules, or conversion surfaces. Generated native prompt files remain derived output.
 
-Every generated config uses `schema_version: 1` and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`. Each team has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned team root). The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `agency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`.
+Every generated config uses `schema_version: 1` and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store`. Each team has both `workspace_path` (the execution workspace and source repository) and `path` (the Agency-owned team root). The team root is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`; durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`.
 
 ## Agency Data Root
 
@@ -55,18 +55,18 @@ existing config, blueprint, and prompt fields are written after approval.
 
 ```text
 mkdir -p ~/.claude/skills
-ln -s /path/to/agency/skills/agency-setup ~/.claude/skills/agency-setup
+ln -s /path/to/flowgency/skills/flowgency-setup ~/.claude/skills/flowgency-setup
 ```
 
 ### GitHub Copilot
 
-The first-run launcher exposes the package-owned `agency-setup` skill to
+The first-run launcher exposes the package-owned `flowgency-setup` skill to
 Copilot automatically. A normal editable or wheel installation does not need a
 project-local junction or user-global skill installation.
 
 ## Run
 
-Invoke `agency-setup` after the first-run page launches it from the selected data root with the exact authoritative config path and supported AI integration. The skill uses that exact config path and selected integration unless the user explicitly approves another registered integration. If no config exists, it builds the complete candidate first and performs one revision-checked atomic write after approval and validation. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
+Invoke `flowgency-setup` after the first-run page launches it from the selected data root with the exact authoritative config path and supported AI integration. The skill uses that exact config path and selected integration unless the user explicitly approves another registered integration. If no config exists, it builds the complete candidate first and performs one revision-checked atomic write after approval and validation. If a candidate is invalid or superseded, report validation errors and stop; never invoke another skill or convert old layouts. The skill:
 
 1. In guided mode, receives the approved data root from the launcher and asks for the project workspace as the first question. In manual mode, asks for the data root first and then the project workspace.
 2. Performs read-only inspection of project instructions, architecture, source,
@@ -79,7 +79,7 @@ Invoke `agency-setup` after the first-run page launches it from the selected dat
    permissions, routines, cadence, memory, and assumptions.
 5. Derives `teams/<team-id>`, offers one optional grouped path override, and
    obtains the consolidated storage-path approval.
-6. Resolves exactly one canonical config with only the supported root sections (`agency`, `memory`, and `teams`) and requires `agency.agent_library`, `agency.compilation_cache`, `agency.memory_store`, and `agency.prompt_store`.
+6. Resolves exactly one canonical config with only the supported root sections (`flowgency`, `memory`, and `teams`) and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store`.
 7. Writes each approved blueprint with global `AGENTS.md` source. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, writes `.agents/skills/<skill>/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities.
 8. Registers explicit team-owned instances and every approved team workspace. Every instance pins a blueprint and integration; routines select scoped saved prompts and semantic memory selectors, and approved private prompts are registered for the instance when needed.
 9. Validates team naming, storage paths, integrations, cross-references, and revision safety, performs one atomic config write, reparses from disk, and optionally verifies the singleton dispatcher.
@@ -88,4 +88,4 @@ Invoke `agency-setup` after the first-run page launches it from the selected dat
 
 After setup, the Agents page lists the configured team instances. Agent Detail provides `Profile/Blueprint/Runtime/Routines/Prompts/Memory/Activity`; identity is the config display name, title, and emoji. Agent Library owns reusable instructions and Agent Skills. Memory Channels own named shared memory. Team Settings continues to manage defaults only.
 
-The skill reports the Agency data root, effective storage paths, blueprint keys, instance names, routines, memory scopes and channels, the authoritative config path, and scheduler status.
+The skill reports the Flowgency data root, effective storage paths, blueprint keys, instance names, routines, memory scopes and channels, the authoritative config path, and scheduler status.

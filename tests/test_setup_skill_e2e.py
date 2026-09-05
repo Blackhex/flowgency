@@ -10,7 +10,7 @@ from flowgency.web.dependencies import build_services
 
 
 REPO_ROOT = Path(__file__).parents[1]
-TEMPLATES_PATH = REPO_ROOT / "skills" / "agency-setup" / "references" / "templates.md"
+TEMPLATES_PATH = REPO_ROOT / "skills" / "flowgency-setup" / "references" / "templates.md"
 
 SUBSTITUTIONS = {
     "{ROLE_NAME}": "Reviewer",
@@ -168,6 +168,6 @@ def test_validate_rejects_the_same_library_without_prompt_frontmatter(tmp_path, 
 
 
 def test_both_skill_copies_expose_identical_templates():
-    canonical = REPO_ROOT / "skills" / "agency-setup" / "references" / "templates.md"
-    discovery = REPO_ROOT / ".github" / "skills" / "agency-setup" / "references" / "templates.md"
+    canonical = REPO_ROOT / "skills" / "flowgency-setup" / "references" / "templates.md"
+    discovery = REPO_ROOT / ".github" / "skills" / "flowgency-setup" / "references" / "templates.md"
     assert discovery.read_text(encoding="utf-8") == canonical.read_text(encoding="utf-8")

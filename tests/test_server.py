@@ -441,7 +441,7 @@ def test_setup_launch_does_not_write_config(tmp_path, monkeypatch):
     assert integration.requests[0].data_root == data_root.resolve()
     assert not hasattr(integration.requests[0], "project_dir")
     assert integration.requests[0].config_path == config_path.resolve()
-    assert "agency-setup" in integration.requests[0].prompt
+    assert "flowgency-setup" in integration.requests[0].prompt
     assert "Selected integration: copilot." in integration.requests[0].prompt
     assert (
         "carry inspected project facts and every approved setup answer forward"

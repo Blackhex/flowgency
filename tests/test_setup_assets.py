@@ -16,7 +16,7 @@ CANONICAL_SKILL_DIR = (
     / "copilot"
     / ".github"
     / "skills"
-    / "agency-setup"
+    / "flowgency-setup"
 )
 
 

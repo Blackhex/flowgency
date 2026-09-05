@@ -48,9 +48,9 @@ def test_build_setup_prompt_emits_v6_team_shape(tmp_path: Path):
     for phrase in (
         "first team project workspace",
         "team display name and stable team ID",
-        "agency.default_team",
+        "flowgency.default_team",
         "teams.<team-id>.path as <root>/teams/<team-id>",
-        "Configure schema_version: 6.",
+        "Configure schema_version: 1.",
     ):
         assert phrase in prompt
     assert "group.default_integration" not in prompt
@@ -127,10 +127,10 @@ def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
     )
 
     for phrase in (
-        "agency.agent_library as <root>/agent-library",
-        "agency.compilation_cache as <root>/compiled-agents",
-        "agency.memory_store as <root>/memory",
-        "agency.prompt_store as <root>/prompts",
+        "flowgency.agent_library as <root>/agent-library",
+        "flowgency.compilation_cache as <root>/compiled-agents",
+        "flowgency.memory_store as <root>/memory",
+        "flowgency.prompt_store as <root>/prompts",
         "teams.<team-id>.path as <root>/teams/<team-id>",
         "Customize the derived storage paths?",
         "review all five derived paths together",

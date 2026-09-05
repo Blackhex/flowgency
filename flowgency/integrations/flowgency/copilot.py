@@ -378,15 +378,15 @@ class CopilotIntegration(BaseIntegration):
 
     def _interactive_setup_discovery_root(self, data_root: Path) -> Path:
         root = copilot_discovery_root()
-        skill_root = root / ".github" / "skills" / "agency-setup"
+        skill_root = root / ".github" / "skills" / "flowgency-setup"
         skill_file = skill_root / "SKILL.md"
         try:
             resolved_root = root.resolve(strict=True)
             resolved_skill_root = skill_root.resolve(strict=True)
         except OSError as exc:
             raise IntegrationError(
-                "Bundled agency-setup skill is missing or unreadable; "
-                "reinstall christag-agency."
+                "Bundled flowgency-setup skill is missing or unreadable; "
+                "reinstall flowgency."
             ) from exc
         if (
             is_symlink_or_reparse(skill_file)
@@ -394,22 +394,22 @@ class CopilotIntegration(BaseIntegration):
             or not os.access(skill_file, os.R_OK)
         ):
             raise IntegrationError(
-                "Bundled agency-setup skill is missing or unreadable; "
-                "reinstall christag-agency."
+                "Bundled flowgency-setup skill is missing or unreadable; "
+                "reinstall flowgency."
             )
 
-        local_skill = data_root / ".github" / "skills" / "agency-setup"
+        local_skill = data_root / ".github" / "skills" / "flowgency-setup"
         if local_skill.exists() or is_symlink_or_reparse(local_skill):
             try:
                 local_resolved = local_skill.resolve(strict=True)
             except OSError as exc:
                 raise IntegrationError(
-                    "Agency data root contains a conflicting agency-setup skill at "
+                    "Flowgency data root contains a conflicting flowgency-setup skill at "
                     f"{local_skill}. Remove or rename it before launching setup."
                 ) from exc
             if local_resolved != resolved_skill_root:
                 raise IntegrationError(
-                    "Agency data root contains a conflicting agency-setup skill at "
+                    "Flowgency data root contains a conflicting flowgency-setup skill at "
                     f"{local_skill}. Remove or rename it before launching setup."
                 )
         return resolved_root
@@ -429,7 +429,7 @@ class CopilotIntegration(BaseIntegration):
             "-i",
             request.prompt,
             "--name",
-            "Agency setup",
+            "Flowgency setup",
         )
 
     def launch_interactive_setup(self, request: InteractiveSetupRequest) -> InteractiveSetupResult:

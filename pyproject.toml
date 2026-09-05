@@ -28,8 +28,8 @@ include = ["flowgency*"]
 [tool.setuptools.package-data]
 flowgency = ["templates/*.html", "static/*", "themes/*.yaml"]
 "flowgency.setup_assets" = [
-    "copilot/.github/skills/agency-setup/*.md",
-    "copilot/.github/skills/agency-setup/references/*.md",
+    "copilot/.github/skills/flowgency-setup/*.md",
+    "copilot/.github/skills/flowgency-setup/references/*.md",
 ]
 
 [tool.pytest.ini_options]

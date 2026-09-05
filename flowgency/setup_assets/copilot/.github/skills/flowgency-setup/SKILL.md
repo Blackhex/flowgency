@@ -1,6 +1,6 @@
 ---
-name: agency-setup
-description: Use when creating or registering a new Agency agent team for a codebase.
+name: flowgency-setup
+description: Use when creating or registering a new Flowgency agent team for a codebase.
 user_invocable: true
 ---
 
@@ -241,15 +241,15 @@ Use this canonical shape:
 ```yaml
 schema_version: 1
 flowgency:
-  title: Agency
+  title: Flowgency
   default_team: example
   ai_backend: copilot
   jobs:
     pool: 4
-  agent_library: C:/Agency/agent-library
-  compilation_cache: C:/Agency/compiled-agents
-  memory_store: C:/Agency/memory
-  prompt_store: C:/Agency/prompts
+  agent_library: C:/Flowgency/agent-library
+  compilation_cache: C:/Flowgency/compiled-agents
+  memory_store: C:/Flowgency/memory
+  prompt_store: C:/Flowgency/prompts
 memory:
   channels:
     project-strategy:
@@ -258,7 +258,7 @@ teams:
   example:
     name: Example
     workspace_path: C:/Projects/example
-    path: C:/Agency/teams/example
+    path: C:/Flowgency/teams/example
     default_integration: copilot
     runtime:
       timeout: 1800
@@ -335,7 +335,7 @@ Re-read the authoritative config revision and stop on drift. Write one complete 
 Then run the mechanical check and stop on a non-zero exit:
 
 ```text
-christag-agency validate --config "{config_path}"
+flowgency validate --config "{config_path}"
 ```
 
 A non-zero exit means the created blueprint source is invalid. Report the printed issues and correct them; do not present setup as complete.
@@ -343,8 +343,8 @@ A non-zero exit means the created blueprint source is invalid. Report the printe
 Then offer the singleton scheduler setup:
 
 ```text
-christag-agency dispatch install --config "{config_path}"
-christag-agency dispatch status --config "{config_path}"
+flowgency dispatch install --config "{config_path}"
+flowgency dispatch status --config "{config_path}"
 ```
 
 There must be exactly one Agency dashboard and one singleton scheduler; do not create a fallback project scheduler.

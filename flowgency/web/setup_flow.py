@@ -26,7 +26,7 @@ def build_setup_prompt(
     selected_integration: str,
 ) -> str:
     return (
-        "Use the agency-setup skill to configure Agency.\n"
+        "Use the flowgency-setup skill to configure Flowgency.\n"
         "Setup mode: guided-first-run.\n"
         f"Agency data root: {data_root.resolve()}.\n"
         f"Authoritative config: {config_path.resolve()}.\n"
@@ -53,11 +53,11 @@ def build_setup_prompt(
         "remains at the supplied path. "
         "Use the selected integration for the team default_integration and the initial "
         "agent instances unless the user explicitly approves a different registered "
-        "integration. By default derive agency.agent_library as <root>/agent-library, "
-        "agency.compilation_cache as <root>/compiled-agents, agency.memory_store as "
-        "<root>/memory, agency.prompt_store as <root>/prompts, and "
+        "By default derive flowgency.agent_library as <root>/agent-library, "
+        "flowgency.compilation_cache as <root>/compiled-agents, flowgency.memory_store as "
+        "<root>/memory, flowgency.prompt_store as <root>/prompts, and "
         "teams.<team-id>.path as <root>/teams/<team-id>. Configure "
-        "schema_version: 6. Set agency.default_team to the approved team ID. "
+        "schema_version: 1. Set flowgency.default_team to the approved team ID. "
         "Set each team workspace_path to its approved project "
         "execution workspace and path to a disjoint Agency-owned team root. Never "
         "create or reference a project-local shared directory. After one consolidated "

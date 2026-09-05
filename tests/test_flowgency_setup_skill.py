@@ -5,10 +5,10 @@ from flowgency.setup_assets import copilot_discovery_root
 
 REPO_ROOT = Path(__file__).parents[1]
 CANONICAL_SKILL_DIR = (
-    copilot_discovery_root() / ".github" / "skills" / "agency-setup"
+    copilot_discovery_root() / ".github" / "skills" / "flowgency-setup"
 )
-REPOSITORY_SKILL_DIR = REPO_ROOT / "skills" / "agency-setup"
-DISCOVERY_SKILL_DIR = REPO_ROOT / ".github" / "skills" / "agency-setup"
+REPOSITORY_SKILL_DIR = REPO_ROOT / "skills" / "flowgency-setup"
+DISCOVERY_SKILL_DIR = REPO_ROOT / ".github" / "skills" / "flowgency-setup"
 SKILL_PATH = CANONICAL_SKILL_DIR / "SKILL.md"
 DISPATCH_TEMPLATES_PATH = CANONICAL_SKILL_DIR / "references" / "dispatch-templates.md"
 SETUP_KB_PATH = REPO_ROOT / "kb" / "setup-skill.md"
@@ -18,9 +18,17 @@ README_PATH = REPO_ROOT / "README.md"
 
 def test_repository_skill_paths_resolve_to_package_owned_source():
     canonical = CANONICAL_SKILL_DIR.resolve(strict=True)
-
     assert REPOSITORY_SKILL_DIR.resolve(strict=True) == canonical
     assert DISCOVERY_SKILL_DIR.resolve(strict=True) == canonical
+
+
+def test_skill_frontmatter_and_content():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    assert "name: flowgency-setup" in skill
+    assert "schema_version: 1" in skill
+    assert "flowgency:" in skill
+    assert "FLOWGENCY_CONFIG" in skill
+    assert "flowgency validate" in skill
 
 
 def test_setup_creates_standard_global_agent_library_blueprints():
@@ -289,8 +297,8 @@ def test_setup_maintains_one_authoritative_canonical_config():
 
 def test_setup_uses_official_singleton_scheduler_cli():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    assert "christag-agency dispatch install --config" in skill
-    assert "christag-agency dispatch status --config" in skill
+    assert "flowgency dispatch install --config" in skill
+    assert "flowgency dispatch status --config" in skill
     assert "exactly one Agency dashboard" in skill
     assert "do not create a fallback project scheduler" in skill
 
@@ -357,14 +365,14 @@ def test_phase_five_orders_validate_after_config_write():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     section = skill.split("## 5. Verify And Schedule", 1)[1].split("\n## ", 1)[0]
     write = section.index("Write one complete configuration atomically.")
-    validate = section.index("christag-agency validate --config")
-    dispatch = section.index("christag-agency dispatch install")
+    validate = section.index("flowgency validate --config")
+    dispatch = section.index("flowgency dispatch install")
     assert write < validate < dispatch
 
 
 def test_phase_five_validates_prompt_documents():
     skill = SKILL_PATH.read_text(encoding="utf-8")
-    assert "christag-agency validate --config" in skill
+    assert "flowgency validate --config" in skill
     assert "prompt document" in skill
     assert "routine skill," not in skill
 
