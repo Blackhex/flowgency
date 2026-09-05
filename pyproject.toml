@@ -19,6 +19,13 @@ dependencies = [
     "tomli-w>=1,<2",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+    "httpx>=0.24",
+    "Pillow>=10",
+]
+
 [project.scripts]
 flowgency = "flowgency.cli:main"
 

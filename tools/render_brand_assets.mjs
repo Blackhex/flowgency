@@ -1,5 +1,5 @@
 import { chromium } from '@playwright/test';
-import { copyFile, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -62,11 +62,6 @@ try {
   await writeFile(path.join(root, 'screenshots', 'logo.svg'), sourceText, 'utf-8');
   await writeFile(path.join(root, 'screenshots', 'logo-light.svg'), sourceText, 'utf-8');
   console.log('wrote logo.svg and logo-light.svg');
-
-  // Regenerate authoritative reference PNG (512×512 uncropped, from production SVG)
-  const refDir = path.join(root, 'docs', 'superpowers', 'specs', 'assets', '2026-09-05-flowgency-rebrand');
-  await copyFile(path.join(staticRoot, 'icon-512.png'), path.join(refDir, 'flowgency-icon.png'));
-  console.log('updated reference flowgency-icon.png (512×512 uncropped)');
 } finally {
   await browser.close();
 }

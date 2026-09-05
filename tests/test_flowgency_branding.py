@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import struct
@@ -138,6 +139,34 @@ def test_reference_png_matches_approved_dimensions():
     assert _png_dimensions(ref) == (512, 512), "Reference PNG must be 512×512"
     bbox = _artwork_bbox(ref)
     assert bbox is not None, "Reference PNG must contain artwork"
+
+
+def test_production_icon_512_matches_frozen_reference():
+    """Renderer output must not drift from the frozen reference.
+
+    Fails if the SVG or renderer changed without a deliberate re-capture.
+    To re-capture after an intentional update, copy icon-512.png over
+    docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.png.
+    """
+    production = STATIC_ROOT / "icon-512.png"
+    reference = (
+        REPO_ROOT
+        / "docs"
+        / "superpowers"
+        / "specs"
+        / "assets"
+        / "2026-09-05-flowgency-rebrand"
+        / "flowgency-icon.png"
+    )
+    prod_hash = hashlib.sha256(production.read_bytes()).hexdigest()
+    ref_hash = hashlib.sha256(reference.read_bytes()).hexdigest()
+    assert prod_hash == ref_hash, (
+        f"icon-512.png ({prod_hash[:12]}…) has drifted from the frozen "
+        f"reference ({ref_hash[:12]}…). If the icon was intentionally "
+        "updated, re-capture: "
+        "Copy-Item flowgency/static/icon-512.png "
+        "docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.png"
+    )
 
 
 # ---------------------------------------------------------------------------
