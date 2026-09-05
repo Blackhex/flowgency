@@ -17,13 +17,13 @@ The policy is an allowlist, so it is switched on only when something is actually
 The boundary has real limits, and the job record names them rather than implying they are covered:
 
 - Built-in file edits are policed in-process and cooperatively. Only shell commands are contained by the operating system, and the shell backend is unavailable on this platform, so `shell` is never claimed as path-scopable.
-- Credentials carried in the environment are outside a path-based boundary entirely. The agent is given an explicit allowlist of environment variables rather than Agency's own environment, but anything on that list is visible to it.
+- Credentials carried in the environment are outside a path-based boundary entirely. The agent is given an explicit allowlist of environment variables rather than Flowgency's own environment, but anything on that list is visible to it.
 - `gitAuth` and `ghAuth` are granted only to an agent whose policy grants `write` on the workspace root itself, since a filesystem policy cannot stop a push: the write lands on the remote.
 - Where a rule cannot be expressed at all, the run says so on the job record instead of reporting the policy as applied.
 
 The other integrations do not enforce path rules. They declare `unrestricted` only, so `mode: restricted` is rejected before launch; narrow rules written under `unrestricted` are not enforced by them. `claude-code` and `codex` previously disabled their own CLI permission models on every run, which is the only enforcement those integrations have. They now do so only when the policy grants write somewhere. Where the flag is withheld those CLIs may prompt, and such a run may not complete unattended -- the alternative was to keep over-granting silently.
 
-`agency/integrations/integrations.yaml` controls which Python plugins are loadable. It is plugin discovery metadata, not team, instance, routine, identity, or memory configuration.
+`flowgency/integrations/integrations.yaml` controls which Python plugins are loadable. It is plugin discovery metadata, not team, instance, routine, identity, or memory configuration.
 
 ## Superseded layouts
 

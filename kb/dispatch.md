@@ -49,7 +49,7 @@ replays a backlog; it recovers at most the last missed occurrence.
 
 | Value | Meaning |
 |-------|---------|
-| `none` | No recovery. The occurrence fires only inside the ordinary grace window of `agency.dispatch.interval` plus two minutes. |
+| `none` | No recovery. The occurrence fires only inside the ordinary grace window of `flowgency.dispatch.interval` plus two minutes. |
 | `today` | Recover any occurrence on the current calendar date. This is the default when `catch_up` is absent. |
 | `always` | Recover any occurrence regardless of age. |
 | `30m`, `8h`, `7d`, … | Recover any occurrence within the specified duration. The grammar is the same as `every`. |
@@ -86,7 +86,7 @@ The fleet bar colours each agent from its schedule and its last outcome.
   failed job. A cancelled job is not a run and still leaves the agent gray.
 - **Green** — the agent has run, nothing is overdue, and the last job did not fail.
 - **Amber** — a routine is due. The expected time has passed but is still inside
-  the grace window of `agency.dispatch.interval` plus two minutes.
+  the grace window of `flowgency.dispatch.interval` plus two minutes.
 - **Red** — the newest executed job failed, or an enabled routine is past its
   expected time by more than the grace window.
 

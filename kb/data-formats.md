@@ -124,7 +124,7 @@ decision_note: Prioritise the pre-processing approach for simplicity.
 
 ### Execution Intent and `execution_status: skipped`
 
-Agency validates the executor and evaluates execution intent before creating a decision:
+Flowgency validates the executor and evaluates execution intent before creating a decision:
 
 | Condition | Result |
 |-----------|--------|
@@ -143,8 +143,8 @@ access; agents without these do not appear.
 
 When you answer a proposal's questions, you select which agent implements the decision
 from the executor dropdown (only agents with write permission are listed).
-Agency validates the executor and evaluates execution intent before creating the
-decision — see the table above. When a decision executes, Agency submits a durable job
+Flowgency validates the executor and evaluates execution intent before creating the
+decision — see the table above. When a decision executes, Flowgency submits a durable job
 for the executor with an immutable snapshot of the proposal body and your answers
 embedded in the prompt — the agent never needs to re-read the proposal or decision
 files. Failed executions can be retried from the decision detail page; retrying keeps
@@ -157,7 +157,7 @@ Observations and proposals with a `ttl_days` field are automatically archived wh
 
 ## Pipeline Relationships
 
-Agency tracks the full chain across the pipeline:
+Flowgency tracks the full chain across the pipeline:
 
 - An **observation** can link to a proposal via `linked_proposal`
 - A **proposal** links back to its source observations via `observations`

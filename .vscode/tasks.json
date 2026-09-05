@@ -99,7 +99,7 @@
         "127.0.0.1"
       ],
       "command": "flowgency",
-      "detail": "Start Agency dashboard on http://127.0.0.1:8500",
+      "detail": "Start Flowgency dashboard on http://127.0.0.1:8500",
       "group": "none",
       "isBackground": true,
       "label": "Dashboard/Serve",
@@ -126,7 +126,7 @@
         "127.0.0.1"
       ],
       "command": "flowgency",
-      "detail": "Start the Agency dashboard with hot-reload on http://127.0.0.1:8500",
+      "detail": "Start the Flowgency dashboard with hot-reload on http://127.0.0.1:8500",
       "group": "none",
       "hide": true,
       "isBackground": true,
@@ -163,7 +163,7 @@
         "Hidden/Open dashboard"
       ],
       "dependsOrder": "sequence",
-      "detail": "Start the Agency dashboard with hot-reload and open it internally on http://127.0.0.1:8500",
+      "detail": "Start the Flowgency dashboard with hot-reload and open it internally on http://127.0.0.1:8500",
       "group": "none",
       "label": "Dashboard/Serve hot-reload"
     },

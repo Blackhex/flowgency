@@ -15,7 +15,7 @@ for queue behaviour.
 
 ## Teams and instances
 
-A team owns its execution `workspace_path`, Agency-owned state `path`, runtime defaults, dispatch limits, workspaces, and explicit instances. `workspace_path` is the execution workspace and source repository; `path` is the Agency-owned team root. `default_integration` initializes new instances only. Every existing instance pins its own `blueprint` and `integration`.
+A team owns its execution `workspace_path`, Flowgency-owned state `path`, runtime defaults, dispatch limits, workspaces, and explicit instances. `workspace_path` is the execution workspace and source repository; `path` is the Flowgency-owned team root. `default_integration` initializes new instances only. Every existing instance pins its own `blueprint` and `integration`.
 
 Team runtime defaults include timeout and permission policy. A permission is a **tool acting on a path**; `runtime.permissions` holds a `mode` and a `rules` list. Each rule is `{path?, tools?}`: with a `path` it governs that path; without one it governs tools that do not act on a path. `tools` omitted means every tool the integration offers; `[]` means none; a list means exactly those tools. The rule with the longest matching path governs a given path. Instance rules are **additive** to team rules — the two lists are concatenated, never replaced; the same path in both unions its tools.
 

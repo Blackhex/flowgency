@@ -44,7 +44,7 @@ Run directly with `python -m flowgency.app`. For persistence, create a launchd a
 
 ## Platform Support
 
-Agency runs on any OS with Python 3.11+:
+Flowgency runs on any OS with Python 3.11+:
 
 - **Linux** — full support including systemd dispatch timers
 - **macOS** — full support including launchd dispatch timers

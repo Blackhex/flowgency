@@ -29,7 +29,7 @@ Runtime projectors compile blueprint and prompt source into disposable native la
 
 A team owns a project workspace, runtime defaults, dispatch limits, workspaces, and explicit instances. Team Settings changes defaults only. The Agents page owns the roster; Agent Detail exposes `Profile/Blueprint/Runtime/Routines/Prompts/Memory/Activity`.
 
-`workspace_path` is the execution workspace and source repository. `path` is the Agency-owned team root, which is automatically available to restricted agents. Agency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`; operation locks live in `<team.path>/locks`.
+`workspace_path` is the execution workspace and source repository. `path` is the Flowgency-owned team root, which is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`; operation locks live in `<team.path>/locks`.
 
 ### Routines, jobs, and memory
 
@@ -37,7 +37,7 @@ A routine selects one saved prompt, schedule, optional arguments, and optional s
 
 ### Pipeline
 
-Agency links observations to proposals, human decisions, durable execution jobs, and verification. Proposal execution requires an explicit instance whose integration supports execution and whose runtime permissions grant write access.
+Flowgency links observations to proposals, human decisions, durable execution jobs, and verification. Proposal execution requires an explicit instance whose integration supports execution and whose runtime permissions grant write access.
 
 ## Development reload
 
@@ -51,9 +51,9 @@ Reload watches application code, templates, static assets, themes, and control-p
 
 - Read [Configuration](configuration.md) for the current config schema.
 - Read [Directory Structure](directory-structure.md) before choosing global paths.
-- Use [Agency Setup Skill](setup-skill.md) to propose blueprints and explicit instances.
+- Use [Flowgency Setup Skill](setup-skill.md) to propose blueprints and explicit instances.
 - Use [Dispatch and Routines](dispatch.md) to install the singleton scheduler.
 
 ## Superseded layouts
 
-If an existing install depends on physical agent definitions, prompt schedules, or file-based memory, rewrite it into the current config shape before starting Agency.
+If an existing install depends on physical agent definitions, prompt schedules, or file-based memory, rewrite it into the current config shape before starting Flowgency.

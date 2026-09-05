@@ -81,13 +81,13 @@ description: Use when {CONCRETE_TRIGGER_CONDITION}.
 
 ## Steps
 
-1. Read the relevant project files and current semantic memory supplied by Agency.
+1. Read the relevant project files and current semantic memory supplied by Flowgency.
 2. Perform {TASK} with project-appropriate commands.
 3. Record observations and proposals by writing Markdown files into
-   `.agency/outbox/observations/` and `.agency/outbox/proposals/`, relative to
-   the working directory. Agency validates and files them after the run, and
+   `.flowgency/outbox/observations/` and `.flowgency/outbox/proposals/`, relative to
+   the working directory. Flowgency validates and files them after the run, and
    assigns the `agent`, `date`, and `status` fields and the file name itself.
-   Keep durable knowledge by editing the seeded files in `.agency/memory/`.
+   Keep durable knowledge by editing the seeded files in `.flowgency/memory/`.
 4. Update memory only with durable facts.
 
 ## Boundaries

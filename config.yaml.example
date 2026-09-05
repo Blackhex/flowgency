@@ -1,7 +1,7 @@
 schema_version: 1
 # Set FLOWGENCY_CONFIG to the path of this file to make it the authoritative config.
 flowgency:
-  title: Agency
+  title: Flowgency
   default_team: my-project
   ai_backend: copilot
   dispatch:

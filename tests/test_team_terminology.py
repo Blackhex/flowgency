@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 
@@ -8,6 +9,31 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).parents[1]
+
+# Phrases that must not appear in any active operator document.
+# These are superseded product-name tokens; presence means a residual was not updated.
+_SUPERSEDED_BRAND_TERMS = (
+    "# Agency",
+    "title: Agency",
+    "Agency is a",
+    "Agency-owned",
+    "Agency never loads",
+    "Agency contributes",
+    "Agency links observations",
+    "Agency validates",
+    "Agency submits",
+    "Agency tracks",
+    "Agency runs on",
+    "Agency applies",
+    "Agency's",
+    "Agency manifest",
+    "agency.dispatch.interval",
+    "agency/integrations/integrations.yaml",
+    "[Agency Setup Skill]",
+    "starting Agency",
+    "Start Agency dashboard",
+)
+
 ACTIVE_PATHS = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "AGENTS.md",
@@ -33,6 +59,41 @@ def test_active_documents_use_v1_team_control_plane():
     assert "capabilities:" not in text
     assert "  sandbox:" not in text
     assert "\nagency:\n" not in text, "YAML root key must be 'flowgency:', not 'agency:'"
+
+
+def test_active_docs_contain_no_superseded_brand_terms():
+    """Active operator docs must not contain superseded brand tokens.
+
+    examples/*/CLAUDE.md files are intentionally left untouched — they retain
+    'Agency-owned group root' as a domain term in example agent instructions.
+    """
+    excluded = {"CLAUDE.md"}
+    paths = [p for p in ACTIVE_PATHS if p.name not in excluded]
+    doc_text = "\n".join(p.read_text(encoding="utf-8") for p in paths)
+    tasks_text = (REPO_ROOT / ".vscode" / "tasks.json").read_text(encoding="utf-8")
+    assembled = doc_text + "\n" + tasks_text
+    found = [term for term in _SUPERSEDED_BRAND_TERMS if term in assembled]
+    assert not found, f"Superseded brand tokens still present: {found}"
+
+
+def test_config_example_is_valid_schema_one(tmp_path: Path) -> None:
+    """config.yaml.example must parse and validate as a schema-1 Flowgency config."""
+    from flowgency.configuration.models import validate_config
+
+    raw = yaml.safe_load(
+        (REPO_ROOT / "config.yaml.example").read_text(encoding="utf-8")
+    )
+    # Patch paths to tmp so the validator does not require real directories
+    fg = raw.setdefault("flowgency", {})
+    for key in ("agent_library", "compilation_cache", "memory_store", "prompt_store"):
+        fg[key] = str(tmp_path / key)
+    (tmp_path / "agent_library").mkdir()
+    for team in raw.get("teams", {}).values():
+        team["workspace_path"] = str(tmp_path / "workspace")
+        team["path"] = str(tmp_path / "team-state")
+    config_path = tmp_path / "config.yaml"
+    issues = validate_config(raw, config_path)
+    assert not issues, [i.message for i in issues]
 
 
 def test_setup_assets_use_team_domain_terms():
