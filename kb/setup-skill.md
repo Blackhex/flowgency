@@ -58,6 +58,14 @@ and before team approval. Approve the listed routines and schedules, request
 targeted changes, or explicitly choose manual-only operation. Mixed teams are
 valid; setup does not invent filler routines or widen permissions for them.
 
+After routine approval, setup separately confirms activation before its single
+config write. An existing singleton scheduler can pick up enabled routines as
+soon as that write completes. Declining activation keeps the approved routines
+but leaves dispatch disabled. A manual-only choice saves no routines for the
+new team and leaves dispatch disabled. Existing teams are not changed without
+explicit approval. Scheduler installation is offered only after activation
+approval and configuration verification, and requires installation consent.
+
 ## Install
 
 ### Claude Code on Linux
@@ -93,10 +101,22 @@ Invoke `flowgency-setup` after the first-run page launches it from the selected 
 6. Resolves exactly one canonical config with only the supported root sections (`flowgency`, `memory`, and `teams`) and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store`.
 7. Writes each approved blueprint with global `AGENTS.md` source. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, writes `.agents/skills/<skill>/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities.
 8. Registers explicit team-owned instances and every approved team workspace. Every instance pins a blueprint and integration; routines select scoped saved prompts and semantic memory selectors, and approved private prompts are registered for the instance when needed.
-9. Validates team naming, storage paths, integrations, cross-references, and revision safety, performs one atomic config write, reparses from disk, and optionally verifies the singleton dispatcher.
+9. Validates team naming, storage paths, integrations, cross-references, and
+   revision safety, performs one atomic config write, reparses from disk, and
+   compares saved routines and dispatch enablement with the approved choices.
+   Missing or mismatched data blocks completion without an unapproved repair
+   write. After validation, offers singleton scheduler installation only when
+   activation was approved and reports observed scheduler status independently.
 
 ## Result
 
 After setup, the Agents page lists the configured team instances. Agent Detail provides `Profile/Blueprint/Runtime/Routines/Prompts/Memory/Activity`; identity is the config display name, title, and emoji. Agent Library owns reusable instructions and Agent Skills. Memory Channels own named shared memory. Team Settings continues to manage defaults only.
+
+The result distinguishes Manual-only (no routines, dispatch disabled), Scheduled
+but inactive (routines saved, dispatch disabled), and Scheduled with dispatch
+enabled (routines saved, activation approved). Saved routine schedules are
+listed, and scheduler status is reported separately. Installation declined,
+failed, or unverified does not justify claiming automatic execution is ready;
+unknown status is reported as unknown without changing the saved config.
 
 The skill reports the Flowgency data root, effective storage paths, blueprint keys, instance names, routines, memory scopes and channels, the authoritative config path, and scheduler status.

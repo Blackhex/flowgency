@@ -78,7 +78,14 @@ a validated config from a guided conversation.
 
 ## Scheduling
 
-Install the singleton dispatcher to run routines on a platform timer:
+Setup proposes routines and schedules for approval. Schedule approval does not
+enable automatic execution: setup separately asks whether to enable dispatch
+before saving the configuration. You can keep approved routines inactive or
+choose manual-only operation.
+
+After approving activation, install the singleton dispatcher to run configured
+routines on a platform timer. Installing the scheduler does not create routines.
+Dispatch enablement and the scheduler's installed or running status are separate:
 
 ```text
 flowgency dispatch install --config C:/Flowgency/config.yaml

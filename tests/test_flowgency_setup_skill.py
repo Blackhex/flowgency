@@ -312,7 +312,9 @@ def test_setup_verification_protocol_orders_atomic_write_before_revision_check()
     revision = section.index(
         "Then parse the final config from disk and confirm it is still the revision just written."
     )
-    scheduler = section.index("Then offer the singleton scheduler setup:")
+    scheduler = section.index(
+        "Only when activation was approved, offer the singleton scheduler setup:"
+    )
 
     assert atomic < revision < scheduler
 
@@ -709,3 +711,70 @@ def test_setup_docs_explain_routine_proposals_and_manual_only_choice():
         normalized = " ".join(path.read_text(encoding="utf-8").split())
         assert "proposes useful routines and recommended schedules" in normalized, path
         assert "explicitly choose manual-only operation" in normalized, path
+
+
+def test_setup_separates_activation_from_schedule_approval_before_write():
+    normalized = " ".join(SKILL_PATH.read_text(encoding="utf-8").split())
+    approval = normalized.index("Obtain one consolidated team approval")
+    activation = normalized.index("Separately ask whether to enable automatic execution")
+    write = normalized.index("Write one complete configuration atomically.")
+    assert approval < activation < write
+    for phrase in (
+        "Schedule approval alone does not authorize activation",
+        "an already-running singleton scheduler can pick up enabled routines once configuration is saved",
+        "Manual-only: omit routines for the new team and set `dispatch.enabled: false`",
+        "Scheduled but inactive: save approved routines and set `dispatch.enabled: false`",
+        "Scheduled with dispatch enabled: save approved routines and set `dispatch.enabled: true`",
+        "Do not perform a second config write to activate initial schedules",
+    ):
+        assert phrase in normalized
+
+
+def test_setup_verifies_saved_routines_against_approved_choices():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    section = " ".join(skill.split("## 5. Verify And Schedule", 1)[1].split())
+    revision = section.index("Then parse the final config from disk")
+    compare = section.index("Compare the saved configuration with the approved in-session choices")
+    validate = section.index("flowgency validate --config")
+    install = section.index("flowgency dispatch install --config")
+    assert revision < compare < validate < install
+    for phrase in (
+        "owning instance, ID, scoped prompt reference, schedule, arguments, and memory selection",
+        "prompt documents exist and meet the Standard Task Prompt contract",
+        "dispatch enablement matches the activation decision",
+        "Stop on missing or mismatched approved data",
+        "Do not perform an unapproved repair write or delete approved source files",
+    ):
+        assert phrase in section
+
+
+def test_setup_gates_scheduler_installation_and_reports_status_separately():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    section = " ".join(skill.split("## 5. Verify And Schedule", 1)[1].split())
+    for phrase in (
+        "Only when activation was approved, offer the singleton scheduler setup:",
+        "Never install the scheduler solely because schedules were approved",
+        "If installation is declined, fails, or its status cannot be verified",
+        "do not silently change the saved config",
+        "Manual-only: no routines approved; dispatch disabled",
+        "Scheduled but inactive: routines saved; dispatch disabled",
+        "Scheduled with dispatch enabled: routines saved; activation approved",
+        "Report singleton scheduler status separately",
+        "not installed, confirmed status, installation failure, or unknown status",
+        "Dispatch enabled is not proof that the platform scheduler is installed or running",
+        "list the saved routine schedules",
+    ):
+        assert phrase in section
+
+
+def test_setup_docs_distinguish_schedules_activation_and_scheduler():
+    guide = " ".join(SETUP_KB_PATH.read_text(encoding="utf-8").split())
+    readme = " ".join(README_PATH.read_text(encoding="utf-8").split())
+    for phrase in (
+        "Manual-only", "Scheduled but inactive", "Scheduled with dispatch enabled",
+        "compares saved routines and dispatch enablement with the approved choices",
+        "scheduler status is reported separately",
+    ):
+        assert phrase in guide
+    assert "Schedule approval does not enable automatic execution" in readme
+    assert "Installing the scheduler does not create routines" in readme

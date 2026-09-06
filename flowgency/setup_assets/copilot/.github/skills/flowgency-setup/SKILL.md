@@ -226,6 +226,22 @@ detail belongs in one of those existing surfaces. Do not persist new `mission`,
 `rationale`, `ownership`, `handoffs`, or `coverage` keys. Keep team drafts,
 survivor choices, and the working context in this conversation only.
 
+After the team and its routines are approved, resolve activation before the
+single atomic config write. Schedule approval alone does not authorize
+activation. Separately ask whether to enable automatic execution for approved
+routines. Explain that an already-running singleton scheduler can pick up
+enabled routines once configuration is saved. For a manual-only team, leave
+dispatch disabled without asking to activate nonexistent routines.
+
+- Manual-only: omit routines for the new team and set `dispatch.enabled: false`.
+- Scheduled but inactive: save approved routines and set `dispatch.enabled: false`.
+- Scheduled with dispatch enabled: save approved routines and set `dispatch.enabled: true`.
+
+Retain this choice in conversation until building the complete candidate.
+Do not perform a second config write to activate initial schedules. Preserve
+unrelated teams and settings; these defaults do not authorize modifying an
+existing team's routines or activation state without explicit approval.
+
 Ask exactly once: `Customize the derived storage paths?` If declined, keep every derived path. Do not ask about individual storage paths in the default flow. If accepted, present all five storage paths in one grouped review and allow any of them to be replaced.
 
 Resolve every effective path before creation. Require that each missing effective path's nearest existing parent is a writable real directory that can safely create it, reject files, symlinks, and unsafe Windows reparse points, keep the global stores mutually disjoint, and keep every Flowgency-owned path disjoint from the project workspace. If validation fails, name the conflicting fields and resolved paths and return to the root choice or grouped review. Never choose a fallback location or project-local storage.
@@ -341,6 +357,13 @@ teams:
 
 Record each approved Phase 2 routine assignment under that instance's `routines`. A routine selects one scoped prompt, one schedule (`at`, `every`, or supported condition), optional arguments, and optional semantic memory. Keep optional cross-task Agent Skills separate from routine prompt selection. Never write prompt filenames or per-agent dispatch maps.
 
+For every approved routine, create its selected scoped prompt document using
+the Standard Task Prompt contract. Preserve its approved owning instance, ID,
+prompt scope and name, schedule values, optional arguments, and semantic memory
+selection. Apply the approved activation choice to the new team's dispatch
+setting. Do not encode schedules in blueprint instructions or native runtime
+files. Keep the candidate in memory until the single Section 5 config write.
+
 Write authority is expressed through the workspace path rule. For each new
 agent whose approved implementation responsibilities require write access,
 include `write` in the `tools` list on a rule whose `path` is the team's exact
@@ -359,6 +382,17 @@ Validate every blueprint, Agent Skill, and prompt document, plus config cross-re
 
 Re-read the authoritative config revision and stop on drift. Write one complete configuration atomically. Use Flowgency's revision-checked `ConfigStore.replace(expected_revision, complete_candidate)` for that single write; it initializes the approved cache, memory, durable-job, team, record, lock, and log directories. On revision drift, validation failure, or filesystem failure, stop without replacing the previous config and do not automatically remove approved directories or blueprint source. Then parse the final config from disk and confirm it is still the revision just written.
 
+Compare the saved configuration with the approved in-session choices. For each
+approved routine, verify its owning instance, ID, scoped prompt reference,
+schedule, arguments, and memory selection. Confirm that its selected prompt
+documents exist and meet the Standard Task Prompt contract and that dispatch
+enablement matches the activation decision. For manual-only operation, confirm
+that the new team has no routines and dispatch is disabled. Stop on missing or
+mismatched approved data and report the discrepancy without declaring setup
+complete. Do not perform an unapproved repair write or delete approved source
+files. Existing revision-drift, validation, and filesystem failure rules remain
+in force.
+
 Then run the mechanical check and stop on a non-zero exit:
 
 ```text
@@ -367,13 +401,31 @@ flowgency validate --config "{config_path}"
 
 A non-zero exit means the created blueprint source is invalid. Report the printed issues and correct them; do not present setup as complete.
 
-Then offer the singleton scheduler setup:
+Only when activation was approved, offer the singleton scheduler setup:
 
 ```text
 flowgency dispatch install --config "{config_path}"
 flowgency dispatch status --config "{config_path}"
 ```
 
+Never install the scheduler solely because schedules were approved. Obtain
+consent for installation before running the install command. If installation is
+declined, fails, or its status cannot be verified, report that separately and
+do not silently change the saved config or claim automatic execution is
+operational. Use the status command to report observed scheduler state; if it
+cannot be checked, report unknown status rather than assuming success.
+
 There must be exactly one Flowgency dashboard and one singleton scheduler; do not create a fallback project scheduler.
+
+State which scheduling result applies and list the saved routine schedules:
+
+- Manual-only: no routines approved; dispatch disabled.
+- Scheduled but inactive: routines saved; dispatch disabled.
+- Scheduled with dispatch enabled: routines saved; activation approved.
+
+Report singleton scheduler status separately: not installed, confirmed status,
+installation failure, or unknown status, according to observed command results.
+Dispatch enabled is not proof that the platform scheduler is installed or
+running.
 
 Report the Flowgency data root, effective storage paths, blueprint keys, instance IDs, routines, semantic memory scopes/channels, authoritative config path, and scheduler status.
