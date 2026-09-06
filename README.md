@@ -1,7 +1,5 @@
 # Flowgency
 
-![Flowgency tree mark](screenshots/logo.svg)
-
 **Ticket-driven orchestration for teams of AI agents.**
 
 See agents take work, move tickets through predefined workflows, and keep every

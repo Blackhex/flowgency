@@ -68,6 +68,12 @@ def test_production_svg_and_manifest_reference_flowgency_tree():
     manifest = json.loads((STATIC_ROOT / "manifest.json").read_text(encoding="utf-8"))
 
     assert root.attrib["viewBox"] == "0 0 512 512"
+    assert not any(
+        element.tag.endswith("rect")
+        and element.get("width") == "512"
+        and element.get("height") == "512"
+        for element in root
+    ), "The canonical logo background must be transparent"
     # Brand palette colours (source HTML authoritative)
     for color in ("#31549f", "#d5563f", "#dda42f", "#668d70", "#365846"):
         assert color in source.lower(), f"Expected brand colour {color} in icon.svg"
@@ -190,7 +196,7 @@ def test_readme_presents_ticket_driven_flowgency():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert readme.startswith("# Flowgency\n")
     assert "Ticket-driven orchestration for teams of AI agents." in readme
-    assert "screenshots/logo.svg" in readme
+    assert "screenshots/logo.svg" not in readme
     assert "screenshots/flowgency-board.png" in readme
     assert "https://github.com/Blackhex/flowgency" in readme
     assert "flowgency serve" in readme
