@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** Implementation verified — spec written, all-task reviews and whole-branch review approved (no Critical/Important); integration pending. Live server not yet restarted.
+
 **Goal:** Restore readable Copilot logs without allowing malformed events, historical JSONL, or embedded markup to stall or compromise the dashboard.
 
 **Architecture:** Share small, pure event-normalization helpers between the Copilot integration and log presentation. Add a bounded log-preview module that sanitizes Markdown and escapes raw output. Run the existing log route's synchronous work in a worker thread, preserving its URL, validation, and layout.
@@ -62,7 +64,7 @@ Tasks are sequential: Task 2 consumes Task 1's pure helpers; Task 3 consumes Tas
 - `line_count(value: object) -> int`: nonnegative integer metrics; malformed values contribute zero.
 - Preserve `_parse_jsonl_output_details(raw, root) -> tuple[str, list[FileChange], list[str]]` and its two-value wrapper.
 
-- [ ] **Step 1: Add failing synthetic tests in `tests/test_copilot_output.py`.**
+- [x] **Step 1: Add failing synthetic tests in `tests/test_copilot_output.py`.**
 
 ```python
 import json
@@ -146,7 +148,7 @@ def test_bad_telemetry_keeps_known_write_attempt(telemetry):
     assert [change.path for change in changes] == ["kept.txt"]
 ```
 
-- [ ] **Step 2: Run the red check.**
+- [x] **Step 2: Run the red check.**
 
 ```text
 python -m pytest tests/test_copilot_output.py -q
@@ -154,7 +156,7 @@ python -m pytest tests/test_copilot_output.py -q
 
 Expect string arguments and malformed events to return raw JSON or erase metadata. Confirm those assertion failures, not an unrelated import failure.
 
-- [ ] **Step 3: Add the pure normalization module and replace the parser body.**
+- [x] **Step 3: Add the pure normalization module and replace the parser body.**
 
 Contents of `copilot_output.py`:
 
@@ -280,7 +282,7 @@ Import these helpers in `copilot.py`. Replace `_parse_jsonl_output_details` with
 
 Keep `_relativize`'s existing defensive behavior, status precedence, wrapper, and raw fallback when no assistant messages exist. Do not change session parsing or usage reporting as unrelated cleanup.
 
-- [ ] **Step 4: Run the same focused test immediately, then extend both real integration-path fixtures.** In `test_run_emits_json_and_populates_changed_files` and `test_run_timeout_preserves_partial_output` in `tests/test_integration_sidecar.py`, replace only their write-start arguments mapping with `json.dumps({"path": str(tmp_agent_dir / "new.txt")})` and `json.dumps({"path": str(tmp_agent_dir / "partial.txt")})`, respectively. Insert this event before each fixture's valid assistant message:
+- [x] **Step 4: Run the same focused test immediately, then extend both real integration-path fixtures.** In `test_run_emits_json_and_populates_changed_files` and `test_run_timeout_preserves_partial_output` in `tests/test_integration_sidecar.py`, replace only their write-start arguments mapping with `json.dumps({"path": str(tmp_agent_dir / "new.txt")})` and `json.dumps({"path": str(tmp_agent_dir / "partial.txt")})`, respectively. Insert this event before each fixture's valid assistant message:
 
 ```python
 {"type": "assistant.message", "data": {"content": ["invalid-content"]}},
@@ -292,7 +294,7 @@ Their existing assertions must still verify readable output, metadata, timeout e
 python -m pytest tests/test_copilot_output.py tests/test_integration_sidecar.py -q
 ```
 
-- [ ] **Step 5: Review, check diagnostics and whitespace, and commit.**
+- [x] **Step 5: Review, check diagnostics and whitespace, and commit.**
 
 ```text
 git add flowgency/integrations/flowgency/copilot_output.py flowgency/integrations/flowgency/copilot.py tests/test_copilot_output.py tests/test_integration_sidecar.py
@@ -312,7 +314,7 @@ Review metadata retention as carefully as text: write attempts inform permission
 - `SOURCE_LIMIT = 4 * 1024 * 1024`, `DISPLAY_LIMIT = 64 * 1024`.
 - `content_html is None` means Jinja must escape `text`; otherwise the HTML has already been sanitized for a log-only allowlist.
 
-- [ ] **Step 1: Add failing presentation tests.** Contents of `tests/test_log_preview.py`:
+- [x] **Step 1: Add failing presentation tests.** Contents of `tests/test_log_preview.py`:
 
 ```python
 import io
@@ -436,7 +438,7 @@ def test_large_event_stream_passes_only_message_text_to_markdown(tmp_path, monke
     assert not preview.truncated
 ```
 
-- [ ] **Step 2: Run the red check and install the dependency.**
+- [x] **Step 2: Run the red check and install the dependency.**
 
 ```text
 python -m pytest tests/test_log_preview.py -q
@@ -450,7 +452,7 @@ python -m pip install "nh3>=0.2.18,<0.4"
 
 Use this targeted installation to avoid moving an existing editable installation away from the main checkout. The declared runtime dependency must be present in packaging too.
 
-- [ ] **Step 3: Implement `log_preview.py`.**
+- [x] **Step 3: Implement `log_preview.py`.**
 
 ```python
 from dataclasses import dataclass
@@ -538,7 +540,7 @@ def read_log_preview(path: Path) -> LogPreview:
 
 Do not enable the Markdown `meta` extension here: log text resembling frontmatter must not disappear from the displayed artifact. This does not change the global renderer. A source truncation with no complete event falls back to escaped raw preview, never Markdown.
 
-- [ ] **Step 4: Run the same tests, then the parser/presentation group.**
+- [x] **Step 4: Run the same tests, then the parser/presentation group.**
 
 ```text
 python -m pytest tests/test_log_preview.py -q
@@ -572,7 +574,7 @@ def test_plain_text_source_cut_inside_unicode_is_safe(tmp_path, monkeypatch):
     assert preview.truncated
 ```
 
-- [ ] **Step 5: Review sanitizer allowlist, bounds, and event detection; commit.**
+- [x] **Step 5: Review sanitizer allowlist, bounds, and event detection; commit.**
 
 ```text
 git add pyproject.toml flowgency/web/log_preview.py tests/test_log_preview.py
@@ -591,7 +593,7 @@ Review whether ordinary JSON code examples remain Markdown, whether malicious ma
 - `log_view` awaits `run_in_threadpool(_log_view_context, team, path)` and renders the existing template using `filename`, `raw`, `content_html`, and `truncated`.
 - No new route or config field; no browser-side parsing, job submission, or streaming.
 
-- [ ] **Step 1: Append route regression tests.** Add `asyncio`, `json`, `threading`, `httpx`, and `pytest` imports to `tests/test_logs.py` as needed; do not reformat the existing tests.
+- [x] **Step 1: Append route regression tests.** Add `asyncio`, `json`, `threading`, `httpx`, and `pytest` imports to `tests/test_logs.py` as needed; do not reformat the existing tests.
 
 ```python
 @pytest.fixture
@@ -665,7 +667,7 @@ def test_log_work_does_not_block_event_loop(preview_team, monkeypatch):
 
 These tests deliberately bypass production service setup for the new route slice, use no lifespan context, and retain the existing real-config traversal test unchanged. If the base template requires additional context fields, derive them from its existing inputs without invoking live services.
 
-- [ ] **Step 2: Run the red route slice.**
+- [x] **Step 2: Run the red route slice.**
 
 ```text
 python -m pytest tests/test_logs.py -q -k "log_route or log_work"
@@ -673,7 +675,7 @@ python -m pytest tests/test_logs.py -q -k "log_route or log_work"
 
 Expect recovery, injection, and concurrency failures; missing-file behavior may already pass. Do not use the real multi-megabyte log as a unit-test fixture.
 
-- [ ] **Step 3: Offload the route and update the template.** Add imports for `run_in_threadpool` from `starlette.concurrency` and `read_log_preview` from `flowgency.web.log_preview`. Replace only the existing log-view implementation with:
+- [x] **Step 3: Offload the route and update the template.** Add imports for `run_in_threadpool` from `starlette.concurrency` and `read_log_preview` from `flowgency.web.log_preview`. Replace only the existing log-view implementation with:
 
 ```python
 def _log_view_context(team: str, path: str) -> dict:
@@ -722,7 +724,7 @@ In `log_view.html`, keep existing layout and back link. Add `min-w-0` to the fil
 
 Only sanitized HTML is marked safe. Plain-text fallback is escaped by Jinja. Do not use `safe` on `raw` or add a JSON `<script>` blob.
 
-- [ ] **Step 4: Run focused checks immediately, then add UI coverage.**
+- [x] **Step 4: Run focused checks immediately, then add UI coverage.**
 
 ```text
 python -m pytest tests/test_logs.py -q
@@ -786,7 +788,7 @@ npm run test:ui -- tests/ui/log_view.spec.ts
 
 Do not recreate an existing venv unnecessarily; do not commit dependency-lock churn unless it is required for the new declared runtime dependency. The nh3 dependency must be installed in whichever interpreter runs the UI server.
 
-- [ ] **Step 5: Commit and review the integrated viewer.**
+- [x] **Step 5: Commit and review the integrated viewer.**
 
 ```text
 git add flowgency/app.py flowgency/templates/log_view.html tests/test_logs.py tests/ui/log_view.spec.ts
@@ -797,12 +799,12 @@ Review same-tab navigation, route path validation, test isolation, independent M
 
 ## Whole-Branch Verification And Handoff
 
-- [ ] Run `python -m pytest tests/ -q` from the active worktree. Record actual counts and failure causes; no baseline waivers are in effect for this branch.
-- [ ] Run `npm run test:ui -- tests/ui/log_view.spec.ts` and inspect each project's screenshots. Record UI test results, layout safety, and absence of log-origin resource requests. If environment setup is blocked, disclose the unverified gate; do not claim browser verification.
-- [ ] Record performance on the synthetic large-log test with `python -m pytest tests/test_log_preview.py -q --durations=5`. The structural assertion must prove raw telemetry is not handed to Markdown; wall-clock output is supplementary evidence.
-- [ ] Optionally replay the originally reported log through `read_log_preview` in a read-only diagnostic command, printing only byte counts, duration, and extraction success. Never copy its content into tracked fixtures or mutate it.
-- [ ] Request whole-branch review of the full merge-base-to-HEAD diff with task review evidence, test results, and the approved spec. Address actual regressions within the defined scope. Record remaining caveats honestly.
-- [ ] Mark completed plan steps as complete and record final verification in a documentation-only commit before integration. Do not claim the live server is updated until it has actually loaded the new code; do not restart it without permission.
+- [x] Run `python -m pytest tests/ -q` from the active worktree. Record actual counts and failure causes; no baseline waivers are in effect for this branch.
+- [x] Run `npm run test:ui -- tests/ui/log_view.spec.ts` and inspect each project's screenshots. Record UI test results, layout safety, and absence of log-origin resource requests. If environment setup is blocked, disclose the unverified gate; do not claim browser verification.
+- [x] Record performance on the synthetic large-log test with `python -m pytest tests/test_log_preview.py -q --durations=5`. The structural assertion must prove raw telemetry is not handed to Markdown; wall-clock output is supplementary evidence.
+- [x] Optionally replay the originally reported log through `read_log_preview` in a read-only diagnostic command, printing only byte counts, duration, and extraction success. Never copy its content into tracked fixtures or mutate it.
+- [x] Request whole-branch review of the full merge-base-to-HEAD diff with task review evidence, test results, and the approved spec. Address actual regressions within the defined scope. Record remaining caveats honestly.
+- [x] Mark completed plan steps as complete and record final verification in a documentation-only commit before integration. Do not claim the live server is updated until it has actually loaded the new code; do not restart it without permission.
 
 ## Integration Procedure
 
