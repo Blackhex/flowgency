@@ -12,6 +12,7 @@ dependencies = [
     "watchfiles>=0.20; sys_platform == 'win32'",
     "jinja2",
     "markdown",
+    "nh3>=0.2.18,<0.4",
     "pyyaml",
     "markupsafe",
     "python-multipart",
