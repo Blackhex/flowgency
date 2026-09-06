@@ -463,7 +463,6 @@ class CopilotIntegration(BaseIntegration):
     }
 
     @staticmethod
-    @staticmethod
     def _parse_jsonl_output_details(
         raw: str,
         root: "Path | None",
