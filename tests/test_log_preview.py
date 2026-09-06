@@ -117,3 +117,70 @@ def test_large_event_stream_passes_only_message_text_to_markdown(tmp_path, monke
     assert calls == ["# Finished"]
     assert "<h1>Finished</h1>" in preview.content_html
     assert not preview.truncated
+
+
+def test_multiple_assistant_messages_joined(tmp_path):
+    path = tmp_path / "multi.out"
+    path.write_text(
+        json.dumps({"type": "assistant.message", "data": {"content": "First"}}) + "\n" +
+        json.dumps({"type": "assistant.message", "data": {"content": "Second"}}),
+        encoding="utf-8",
+    )
+    preview = log_preview.read_log_preview(path)
+    assert "First" in preview.text
+    assert "Second" in preview.text
+
+
+def test_fenced_code_block_renders_as_pre_code(tmp_path):
+    path = tmp_path / "fence.out"
+    path.write_text(
+        json.dumps({"type": "assistant.message", "data": {"content": "```\nhello\n```"}}) + "\n",
+        encoding="utf-8",
+    )
+    html = log_preview.read_log_preview(path).content_html
+    assert "<pre>" in html
+    assert "<code>" in html
+
+
+def test_newline_within_paragraph_becomes_br(tmp_path):
+    path = tmp_path / "nl.out"
+    path.write_text(
+        json.dumps({"type": "assistant.message", "data": {"content": "line one\nline two"}}) + "\n",
+        encoding="utf-8",
+    )
+    html = log_preview.read_log_preview(path).content_html
+    assert "<br" in html
+
+
+def test_ftp_url_rejected_by_sanitizer(tmp_path):
+    path = tmp_path / "ftp.out"
+    path.write_text(
+        json.dumps({"type": "assistant.message", "data": {"content": "[get](ftp://files.example.org)"}}) + "\n",
+        encoding="utf-8",
+    )
+    html = log_preview.read_log_preview(path).content_html
+    assert "ftp://" not in html
+
+
+def test_missing_log_raises_for_route_to_map(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        log_preview.read_log_preview(tmp_path / "missing.out")
+
+
+def test_exact_limits_do_not_claim_truncation(tmp_path, monkeypatch):
+    path = tmp_path / "exact.err"
+    path.write_bytes(b"12345678")
+    monkeypatch.setattr(log_preview, "SOURCE_LIMIT", 8)
+    monkeypatch.setattr(log_preview, "DISPLAY_LIMIT", 8)
+    preview = log_preview.read_log_preview(path)
+    assert preview.text == "12345678"
+    assert not preview.truncated
+
+
+def test_plain_text_source_cut_inside_unicode_is_safe(tmp_path, monkeypatch):
+    path = tmp_path / "partial.err"
+    path.write_bytes(b"1234567" + "\u00e9".encode())
+    monkeypatch.setattr(log_preview, "SOURCE_LIMIT", 8)
+    preview = log_preview.read_log_preview(path)
+    assert preview.text == "1234567\ufffd"
+    assert preview.truncated
