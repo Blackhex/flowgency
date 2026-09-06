@@ -11,7 +11,10 @@
 ## Global Constraints
 
 - Future output is exactly `due in 1m`, `due in Nm`, `due in Nh`, or `due in Nd`.
-- A datetime at or before the current time remains `due now`.
+- A datetime at or before the current time, and any positive interval below
+    one second, remains `due now`.
+- A positive interval of at least one second but less than one minute becomes
+    `due in 1m`.
 - Durations use one coarse unit; hours and days discard smaller units.
 - Every surface using `relative_future` receives the new wording.
 - Only the dashboard's ordinary future schedule link changes to `text-gray-600 dark:text-gray-300`.
@@ -37,11 +40,19 @@
 Keep `test_relative_future_none` and replace the current due-now and future-specific tests in `tests/test_agent_status.py` with:
 
 ```python
-def test_relative_future_due_now(monkeypatch):
+@pytest.mark.parametrize(
+    "delta",
+    [
+        timedelta(minutes=-1),
+        timedelta(0),
+        timedelta(milliseconds=500),
+    ],
+)
+def test_relative_future_due_now(monkeypatch, delta):
     fixed_now = datetime(2026, 9, 6, 12, 0)
     monkeypatch.setenv("FLOWGENCY_FIXED_NOW", fixed_now.isoformat())
 
-    assert relative_future(fixed_now - timedelta(minutes=1)) == "due now"
+    assert relative_future(fixed_now + delta) == "due now"
 
 
 @pytest.mark.parametrize(

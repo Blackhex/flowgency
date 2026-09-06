@@ -38,15 +38,18 @@ schedule text. It will preserve the current coarse rounding and return:
 
 | Time relative to now | Text |
 | --- | --- |
-| At or before now | `due now` |
-| Positive and less than one minute | `due in 1m` |
+| At or before now, or positive under one second | `due now` |
+| At least one second and less than one minute | `due in 1m` |
 | Less than one hour | `due in Nm` |
 | Less than one day | `due in Nh` |
 | One day or more | `due in Nd` |
 
-Minute, hour, and day values remain single-unit, compact durations. Hours and
-days discard the smaller unit, matching the existing coarse presentation. The
-formatter no longer switches to `tomorrow HH:MM` or an absolute timestamp.
+Minute, hour, and day values remain single-unit, compact durations. Positive
+intervals below one second are truncated to zero seconds and still render as
+`due now`; one second through less than one minute renders as `due in 1m`.
+Hours and days discard the smaller unit, matching the existing coarse
+presentation. The formatter no longer switches to `tomorrow HH:MM` or an
+absolute timestamp.
 
 Because both the dashboard and the agent Routines tab consume this formatter,
 both surfaces receive the same wording without introducing a second template

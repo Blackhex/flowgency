@@ -311,11 +311,21 @@ def test_next_run_skips_disabled_routine(tmp_path):
 
 def test_relative_future_none():
     assert relative_future(None) == ""
-def test_relative_future_due_now(monkeypatch):
+
+
+@pytest.mark.parametrize(
+    "delta",
+    [
+        timedelta(minutes=-1),
+        timedelta(0),
+        timedelta(milliseconds=500),
+    ],
+)
+def test_relative_future_due_now(monkeypatch, delta):
     fixed_now = datetime(2026, 9, 6, 12, 0)
     monkeypatch.setenv("FLOWGENCY_FIXED_NOW", fixed_now.isoformat())
 
-    assert relative_future(fixed_now - timedelta(minutes=1)) == "due now"
+    assert relative_future(fixed_now + delta) == "due now"
 
 
 @pytest.mark.parametrize(
