@@ -77,7 +77,7 @@
         {% elif a.health_kind == 'due' %}
         <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-amber-600 dark:text-amber-300 hover:underline">due now</a>
         {% elif a.next_run %}
-        <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-sky-700 dark:text-sky-300 hover:underline">{{ a.next_run | relative_future }}</a>
+        <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-gray-600 dark:text-gray-300 hover:underline">{{ a.next_run | relative_future }}</a>
         {% else %}
         <a href="/{{ team }}/agents/{{ a.name }}/routines" class="text-sky-700 dark:text-sky-300 hover:underline">no schedule</a>
         {% endif %}

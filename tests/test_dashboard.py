@@ -573,6 +573,33 @@ def test_fleet_cards_render_both_timing_values(monkeypatch, tmp_path, raw_config
     assert "/newsletter/agents/advisor/routines" in response.text
 
 
+def test_future_schedule_link_matches_last_run_color(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    client, config_path, _ = _seed_dashboard_app(
+        monkeypatch,
+        tmp_path,
+        raw_config,
+    )
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
+    _write_yaml(config_path, raw)
+    app_mod.refresh_services()
+    app_mod.app.state.services = app_mod.build_services(config_path)
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-16T08:53:00")
+
+    response = client.get("/newsletter/")
+
+    assert response.status_code == 200
+    assert (
+        '<a href="/newsletter/agents/advisor/routines" '
+        'class="text-gray-600 dark:text-gray-300 hover:underline">'
+        "due in 7m</a>"
+    ) in response.text
+
+
 def test_running_dot_uses_health_sentence_as_title(monkeypatch, tmp_path, raw_config):
     client, config_path, team_root = _seed_dashboard_app(monkeypatch, tmp_path, raw_config)
     spec = _job_spec(team_root, config_path, status="running", job_id="job-running")
