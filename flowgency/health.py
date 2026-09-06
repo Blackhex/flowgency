@@ -301,7 +301,7 @@ def next_occurrence(
 
 
 def relative_future(dt: datetime | None) -> str:
-    """Format an upcoming datetime as '5m away', '2h away', 'tomorrow HH:MM', etc."""
+    """Format an upcoming datetime as a compact due-in duration."""
     if dt is None:
         return ""
     now = clock_now()
@@ -310,13 +310,11 @@ def relative_future(dt: datetime | None) -> str:
         return "due now"
     minutes = max(1, round(seconds / 60))
     if minutes < 60:
-        return f"{minutes}m away"
+        return f"due in {minutes}m"
     hours = minutes // 60
     if hours < 24:
-        return f"{hours}h away"
-    if dt.date() == (now + timedelta(days=1)).date():
-        return f"tomorrow {dt.strftime('%H:%M')}"
-    return dt.strftime("%Y-%m-%d %H:%M")
+        return f"due in {hours}h"
+    return f"due in {hours // 24}d"
 
 
 def _field(source: object, name: str):

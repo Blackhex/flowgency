@@ -878,12 +878,18 @@ def test_routines_get_disabled_routine_shows_dash_for_next_due(monkeypatch, tmp_
     assert "—" in response.text
 
 
-def test_routines_get_fired_routine_shows_timestamp_and_next_occurrence(monkeypatch, tmp_path, raw_config):
-    """A routine whose marker file exists shows a timestamp and a relative next-due time."""
+def test_routines_get_fired_routine_shows_timestamp_and_next_occurrence(
+    monkeypatch,
+    tmp_path,
+    raw_config,
+):
+    """A fired routine shows its timestamp and compact relative next due time."""
     import os
     from datetime import datetime
     from flowgency.dispatch.schedule import every_marker_path
 
+    fixed_now = datetime(2026, 9, 6, 10, 0)
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", fixed_now.isoformat())
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
@@ -894,25 +900,26 @@ def test_routines_get_fired_routine_shows_timestamp_and_next_occurrence(monkeypa
             "schedule": {"every": "6h"},
         }
     )
-    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False),
+        encoding="utf-8",
+    )
     app_mod.refresh_services()
 
     logs_root = tmp_path / "groups" / "newsletter" / "logs"
     marker = every_marker_path(logs_root, "advisor", "hourly-check")
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch()
-    # set mtime to now so next occurrence is 6h from now
-    stamp = datetime.now().timestamp()
+    stamp = fixed_now.timestamp()
     os.utime(marker, (stamp, stamp))
 
     response = client.get("/newsletter/agents/advisor/routines")
 
     assert response.status_code == 200
     assert "hourly-check" in response.text
-    assert "on schedule" not in response.text
-    # a relative future string should appear (e.g. "6h away" or "5h away" etc.)
-    assert "away" in response.text or "due now" in response.text
-    assert datetime.now().strftime("%Y-%m-%d") in response.text
+    assert "due in 6h" in response.text
+    assert "away" not in response.text
+    assert fixed_now.strftime("%Y-%m-%d") in response.text
 
 
 def test_routines_dispatch_disabled_shows_dispatch_disabled(monkeypatch, tmp_path, raw_config):

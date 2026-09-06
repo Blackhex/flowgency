@@ -311,33 +311,31 @@ def test_next_run_skips_disabled_routine(tmp_path):
 
 def test_relative_future_none():
     assert relative_future(None) == ""
+def test_relative_future_due_now(monkeypatch):
+    fixed_now = datetime(2026, 9, 6, 12, 0)
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", fixed_now.isoformat())
+
+    assert relative_future(fixed_now - timedelta(minutes=1)) == "due now"
 
 
-def test_relative_future_due_now():
-    assert relative_future(datetime.now() - timedelta(minutes=1)) == "due now"
+@pytest.mark.parametrize(
+    ("delta", "expected"),
+    [
+        (timedelta(seconds=30), "due in 1m"),
+        (timedelta(minutes=7), "due in 7m"),
+        (timedelta(hours=2, minutes=1), "due in 2h"),
+        (timedelta(days=7, hours=4), "due in 7d"),
+    ],
+)
+def test_relative_future_uses_compact_due_in_durations(
+    monkeypatch,
+    delta,
+    expected,
+):
+    fixed_now = datetime(2026, 9, 6, 12, 0)
+    monkeypatch.setenv("FLOWGENCY_FIXED_NOW", fixed_now.isoformat())
 
-
-def test_relative_future_minutes():
-    assert relative_future(datetime.now() + timedelta(minutes=5)) == "5m away"
-
-
-def test_relative_future_hours():
-    fixed_now = datetime(2026, 7, 11, 23, 30)
-
-    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
-        assert relative_future(fixed_now + timedelta(hours=2, minutes=1)) == "2h away"
-
-
-def test_relative_future_tomorrow():
-    fixed_now = datetime(2026, 7, 11, 12, 0)
-    dt = fixed_now + timedelta(days=1)
-
-    with patch.dict(os.environ, {"FLOWGENCY_FIXED_NOW": fixed_now.isoformat()}):
-        assert relative_future(dt) == f"tomorrow {dt.strftime('%H:%M')}"
-
-
-def test_relative_future_under_a_minute():
-    assert relative_future(datetime.now() + timedelta(seconds=30)) == "1m away"
+    assert relative_future(fixed_now + delta) == expected
 
 
 def test_collect_agents_includes_running_and_next_run(tmp_path):
