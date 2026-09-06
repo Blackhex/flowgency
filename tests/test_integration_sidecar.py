@@ -968,11 +968,12 @@ class TestCopilot:
         jsonl = "\n".join(json.dumps(l) for l in [
             {"type": "tool.execution_start",
              "data": {"toolCallId": "t1", "toolName": "create",
-                      "arguments": {"path": str(tmp_agent_dir / "new.txt")}}},
+                      "arguments": json.dumps({"path": str(tmp_agent_dir / "new.txt")})}},
             {"type": "tool.execution_complete",
              "data": {"toolCallId": "t1", "success": True,
                       "toolTelemetry": {"properties": {"command": "create"},
                                         "metrics": {"linesAdded": 3, "linesRemoved": 0}}}},
+            {"type": "assistant.message", "data": {"content": ["invalid-content"]}},
             {"type": "assistant.message", "data": {"content": "Created new.txt"}},
         ])
 
@@ -1024,8 +1025,12 @@ class TestCopilot:
                     "data": {
                         "toolCallId": "t1",
                         "toolName": "create",
-                        "arguments": {"path": str(tmp_agent_dir / "partial.txt")},
+                        "arguments": json.dumps({"path": str(tmp_agent_dir / "partial.txt")}),
                     },
+                },
+                {
+                    "type": "assistant.message",
+                    "data": {"content": ["invalid-content"]},
                 },
                 {
                     "type": "assistant.message",

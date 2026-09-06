@@ -16,6 +16,13 @@ from flowgency.blueprints.projectors import get_projector
 from flowgency.configuration import is_symlink_or_reparse
 from flowgency.fs.atomic import atomic_write_text
 from flowgency.setup_assets import copilot_discovery_root
+from flowgency.integrations.flowgency.copilot_output import (
+    argument_object,
+    assistant_message,
+    event_objects,
+    line_count,
+    object_fields,
+)
 from flowgency.integrations import (
     AgentIdentity,
     BaseIntegration,
@@ -456,108 +463,77 @@ class CopilotIntegration(BaseIntegration):
     }
 
     @staticmethod
+    @staticmethod
     def _parse_jsonl_output_details(
         raw: str,
         root: "Path | None",
     ) -> "tuple[str, list[FileChange], list[str]]":
-        """Parse Copilot --output-format json (JSONL) into text, changes, attempts.
-
-        Reconstructs human-readable text from assistant messages and extracts
-        per-file changes from native file-edit tool calls. Records normalized
-        write-attempt paths for native write tools that reached
-        tool.execution_start, even when completion later fails. Any structural
-        problem falls back to (raw, [], []); a run must never break on parsing.
-        """
-        try:
-            tool_names: dict[str, str] = {}
-            tool_paths: dict[str, str] = {}
-            # path -> {"status": str, "added": int, "removed": int}
-            files: dict[str, dict] = {}
-            texts: list[str] = []
-            write_attempts: list[str] = []
-            seen_attempts: set[str] = set()
-            saw_json = False
-
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line:
+        """Recover messages and metadata without discarding valid earlier events."""
+        tool_names: dict[str, str] = {}
+        tool_paths: dict[str, str] = {}
+        files: dict[str, dict] = {}
+        texts: list[str] = []
+        write_attempts: list[str] = []
+        seen_attempts: set[str] = set()
+        for obj in event_objects(raw):
+            content = assistant_message(obj)
+            if content is not None:
+                texts.append(content)
+            data = object_fields(obj.get("data"))
+            event_type = obj["type"]
+            call_id = data.get("toolCallId")
+            if not isinstance(call_id, str):
+                call_id = None
+            if event_type == "tool.execution_start":
+                tool_name = data.get("toolName")
+                if not call_id or not isinstance(tool_name, str):
                     continue
-                try:
-                    obj = json.loads(line)
-                except (ValueError, TypeError):
+                tool_names[call_id] = tool_name
+                path = argument_object(data.get("arguments")).get("path")
+                if not isinstance(path, str) or not path:
                     continue
-                saw_json = True
-                etype = obj.get("type")
-                data = obj.get("data") or {}
-
-                if etype == "tool.execution_start":
-                    tcid = data.get("toolCallId")
-                    tool_name = data.get("toolName", "")
-                    if tcid:
-                        tool_names[tcid] = tool_name
-                        path = (data.get("arguments") or {}).get("path")
-                        if path:
-                            tool_paths[tcid] = path
-                            if tool_name in CopilotIntegration._WRITE_TOOLS:
-                                rel = CopilotIntegration._relativize(path, root)
-                                if rel not in seen_attempts:
-                                    seen_attempts.add(rel)
-                                    write_attempts.append(rel)
-                elif etype == "tool.execution_complete":
-                    tcid = data.get("toolCallId")
-                    telemetry = data.get("toolTelemetry") or {}
-                    props = telemetry.get("properties") or {}
-                    metrics = telemetry.get("metrics") or {}
-                    command = props.get("command") or tool_names.get(tcid, "")
-                    if command not in CopilotIntegration._WRITE_TOOLS:
-                        continue
-                    if data.get("success") is False:
-                        continue
-                    path = tool_paths.get(tcid)
-                    if not path:
-                        continue
-                    rel = CopilotIntegration._relativize(path, root)
-                    entry = files.setdefault(rel, {"status": None, "added": 0, "removed": 0})
-                    entry["added"] += int(metrics.get("linesAdded") or 0)
-                    entry["removed"] += int(metrics.get("linesRemoved") or 0)
-                    new_status = CopilotIntegration._STATUS_BY_COMMAND.get(command, "modified")
-                    # "added" wins (a file created this run stays added); then
-                    # "deleted"; otherwise "modified".
-                    if entry["status"] is None:
-                        entry["status"] = new_status
-                    elif entry["status"] != "added" and new_status == "added":
-                        entry["status"] = "added"
-                    elif entry["status"] == "modified" and new_status == "deleted":
-                        entry["status"] = "deleted"
-                elif etype == "assistant.message":
-                    content = data.get("content")
-                    if content:
-                        texts.append(content)
-                elif etype == "result":
-                    # Fallback source for file list if no per-tool edits parsed.
-                    usage = obj.get("usage") or data.get("usage") or {}
-                    code_changes = usage.get("codeChanges") or {}
-                    for p in code_changes.get("filesModified") or []:
-                        rel = CopilotIntegration._relativize(p, root)
-                        if rel not in files:
-                            files[rel] = {"status": "modified", "added": 0, "removed": 0}
-
-            if not saw_json:
-                return raw, [], []
-
-            changes = [
-                FileChange(
-                    path=path,
-                    status=info["status"] or "modified",
-                    lines_added=info["added"],
-                    lines_removed=info["removed"],
-                )
-                for path, info in files.items()
-            ]
-            text = "\n".join(texts) if texts else raw
-            return text, changes, write_attempts
-        except Exception:
-            return raw, [], []
+                tool_paths[call_id] = path
+                if tool_name in CopilotIntegration._WRITE_TOOLS:
+                    relative = CopilotIntegration._relativize(path, root)
+                    if relative not in seen_attempts:
+                        seen_attempts.add(relative)
+                        write_attempts.append(relative)
+            elif event_type == "tool.execution_complete":
+                telemetry = object_fields(data.get("toolTelemetry"))
+                properties = object_fields(telemetry.get("properties"))
+                metrics = object_fields(telemetry.get("metrics"))
+                command = properties.get("command")
+                if not isinstance(command, str) or not command:
+                    command = tool_names.get(call_id, "")
+                if command not in CopilotIntegration._WRITE_TOOLS or data.get("success") is False:
+                    continue
+                path = tool_paths.get(call_id)
+                if not path:
+                    continue
+                relative = CopilotIntegration._relativize(path, root)
+                entry = files.setdefault(relative, {"status": None, "added": 0, "removed": 0})
+                entry["added"] += line_count(metrics.get("linesAdded"))
+                entry["removed"] += line_count(metrics.get("linesRemoved"))
+                status = CopilotIntegration._STATUS_BY_COMMAND.get(command, "modified")
+                if entry["status"] is None or (entry["status"] != "added" and status == "added"):
+                    entry["status"] = status
+                elif entry["status"] == "modified" and status == "deleted":
+                    entry["status"] = "deleted"
+            elif event_type == "result":
+                usage = object_fields(obj.get("usage")) or object_fields(data.get("usage"))
+                modified = object_fields(usage.get("codeChanges")).get("filesModified")
+                if not isinstance(modified, list):
+                    continue
+                for path in modified:
+                    if isinstance(path, str) and path:
+                        relative = CopilotIntegration._relativize(path, root)
+                        files.setdefault(relative, {"status": "modified", "added": 0, "removed": 0})
+        changes = [
+            FileChange(path=path, status=info["status"] or "modified",
+                       lines_added=info["added"], lines_removed=info["removed"])
+            for path, info in files.items()
+        ]
+        return "\n".join(texts) if texts else raw, changes, write_attempts
 
     @staticmethod
     def _parse_jsonl_output(raw: str, root: "Path | None") -> "tuple[str, list[FileChange]]":
