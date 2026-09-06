@@ -8,6 +8,32 @@
 
 **Tech Stack:** Python 3.11+, FastAPI, Pydantic, Jinja2, PyYAML, setuptools, PowerShell, Node.js, Playwright, pytest
 
+## Completion Evidence (2026-09-06)
+
+- Implementation tasks 1-8 are committed, including the namespace, schema,
+    operational identities, setup discovery, UI branding, assets, and naming gate.
+- Restored the feature worktree after the physical checkout moved; no runtime
+    configuration was modified.
+- Fixed the remaining checkout-dependent runtime preview snapshot and verified
+    two identical captures in each of the four UI projects before updating it.
+- Applied the user-approved Dashboard contrast amendment. All accessibility
+    rules remain enabled; dark-theme snapshots remain unchanged.
+- Final feature Python suite: **2039 passed, 6 skipped**, with one dependency
+    deprecation warning.
+- Final feature UI suite: **110 passed, 2 skipped**, with no failures.
+- Built the final wheel and verified the Flowgency namespace and packaged setup
+    skill. A clean non-editable installation passed executable and module help
+    checks outside the repository; previous package and executable names are absent.
+- Whole-branch production review compared source against master after factoring
+    out mechanical brand substitutions. Remaining changes are the approved schema
+    reset, brand assets/copy, and contrast correction; no additional job, permission,
+    memory, prompt, or dispatch behavior changes were found.
+- Production icon matches the frozen reference; desktop/mobile UI snapshots and
+    layout checks pass. Naming and repository boundary gates pass without exclusions.
+- Remote master is unchanged and is an ancestor of the feature tip. Integration
+    follows Task 9: fast-forward, rerun both complete suites on master, push both
+    branches, remove the feature worktree, and restore the surviving editable install.
+
 ## Global Constraints
 
 - Work only in the existing `feat/flowgency-rebrand` branch and `.worktrees/flowgency-rebrand` worktree until integration.
