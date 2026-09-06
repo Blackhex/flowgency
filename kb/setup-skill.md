@@ -34,7 +34,7 @@ drafts exactly that many complete operating profiles.
 Each profile combines identity, mission, distinct responsibilities, handoffs,
 project and prior-answer rationale, integration and workspace use, permissions,
 routines and prompts, supported schedules, memory or channels, and explicit
-assumptions. Optional operating choices may be `None proposed`. A clear team
+assumptions. Optional emoji, memory, and channels may be `None proposed`. A clear team
 theme may shape display identities; otherwise setup uses functional names.
 Agents may share a broad role or blueprint only when their responsibilities and
 operating profiles remain materially distinct. Write access follows approved
@@ -48,6 +48,15 @@ project, team, priorities, and current coverage gaps. Setup shows coverage,
 overlaps, handoffs, permissions, cadence, memory, and assumptions before final
 team approval. The rationale and coverage summary remain conversational; only
 existing config, blueprint, and prompt fields are written after approval.
+
+Setup proposes useful routines and recommended schedules in the first complete
+team draft, grounded in the inspected project and each agent's responsibilities.
+Cadences are recommendations, not assumed project practices. Agents without
+useful recurring work may remain manual-only with an explanation. When evidence
+is insufficient, setup asks one focused cadence question after the first draft
+and before team approval. Approve the listed routines and schedules, request
+targeted changes, or explicitly choose manual-only operation. Mixed teams are
+valid; setup does not invent filler routines or widen permissions for them.
 
 ## Install
 
@@ -73,10 +82,12 @@ Invoke `flowgency-setup` after the first-run page launches it from the selected 
    tests, deployment, and available integrations, then summarizes project facts
    and asks one priorities question only when evidence is sparse.
 3. Approves the team name and stable ID, asks for the initial count, and drafts
-   exactly that many complete operating profiles for consolidated review.
+   exactly that many complete operating profiles with routine proposals and
+   recommended schedules for consolidated review.
 4. Accepts targeted edits or a revised count, preserves selected full survivor
-   profiles, resynthesizes remaining slots, and approves team coverage,
-   permissions, routines, cadence, memory, and assumptions.
+   profiles, resynthesizes remaining slots, and obtains an explicit choice to
+   approve the listed routines and schedules or operate manually, together with
+   approval of team coverage, permissions, memory, and assumptions.
 5. Derives `teams/<team-id>`, offers one optional grouped path override, and
    obtains the consolidated storage-path approval.
 6. Resolves exactly one canonical config with only the supported root sections (`flowgency`, `memory`, and `teams`) and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store`.

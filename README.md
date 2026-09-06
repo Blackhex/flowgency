@@ -44,9 +44,11 @@ the one authoritative config file.
 Start Flowgency, choose the Flowgency data root and supported AI integration, complete the flowgency-setup conversation, and return to the dashboard automatically.
 Users may enter home syntax such as `~/Flowgency`; setup expands it to the
 user's home directory before deriving canonical paths. The guided conversation asks
-for the project workspace as its first question, then names your team, proposes
-agent blueprints and instances, and writes one validated `config.yaml` with no
-individual storage-path questions.
+for the project workspace as its first question, then names your team and
+proposes agent blueprints and instances. Setup proposes useful routines and
+recommended schedules; approve them, request changes, or explicitly choose
+manual-only operation. It writes one validated `config.yaml` with no individual
+storage-path questions.
 
 ## Configuration
 

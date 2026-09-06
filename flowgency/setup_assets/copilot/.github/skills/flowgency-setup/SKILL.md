@@ -89,9 +89,10 @@ approved.
 Do not ask the user to select candidate roles or profiles during team and count
 collection. Once the team name, ID, and count are approved, present the first
 complete team draft before asking any other question. Do not ask about storage
-paths, routines, schedules, memory, or channels until after one consolidated
-team approval. The first draft contains complete operating profiles, not a
-role-selection form.
+paths, memory, or channels until after one consolidated team approval. The first
+draft contains complete operating profiles, not a role-selection form. Routine
+and schedule clarification belongs after the first complete draft and before
+consolidated team approval.
 
 Generate the first complete team draft with exactly that many profiles. The
 draft must contain exactly the approved initial count. Synthesize it from inspected project facts,
@@ -120,8 +121,8 @@ coverage summary:
 - selected integration and intended workspace use
 - proposed runtime permissions on exact paths;
   write rationale where write access is present
-- routine tasks and prompt purposes, or explicit absence
-- schedules where a recurring cadence is supported, or explicit absence
+- routine tasks and prompt purposes, or a justified manual-only role
+- recommended schedules and their rationale, or a justified manual-only role
 - memory scopes and shared channels where continuity requires them,
   or explicit absence
 - remaining assumptions or none
@@ -129,9 +130,22 @@ coverage summary:
 
 The rationale names which inspected project characteristics and prior answers
 justify the profile; a generic statement that an agent helps with the project is
-not sufficient. `None proposed` is valid for optional emoji, routines,
-schedules, memory, and channels. Do not invent recurring work, cadence, or
-shared memory merely to populate the profile.
+not sufficient. `None proposed` is valid for optional emoji, memory, and channels.
+Do not invent shared memory merely to populate the profile.
+
+Propose useful recurring work in the first complete team draft from inspected
+project facts and the profile's responsibilities. Each proposed routine names
+its task, prompt purpose, recommended schedule, and rationale. Label each
+suggested cadence as a recommendation, not an existing project practice. An
+agent with no useful recurring role may remain manual-only with a short
+explanation. Keep every task within the proposed permissions and ownership
+boundaries. Do not add filler routines or expand permissions to accommodate a
+routine.
+
+If the inspected evidence is insufficient to propose useful recurring work,
+ask one focused question about desired recurring checks or operating cadence
+after the first complete draft and before consolidated team approval.
+Incorporate the answer into the draft instead of silently omitting scheduling.
 
 Before presenting the team-decision form, verify that the number of complete
 profiles equals the approved count and every required semantic category is
@@ -169,6 +183,19 @@ uncovered needs and explicit assumptions; every write-enabled agent and exact
 writable path; routine cadence and memory or channel relationships; and the
 current exact agent count and preserved survivors. Allow targeted edits without
 forcing agent-by-agent approval.
+
+The consolidated team review must explicitly offer these choices:
+
+- Approve the proposed team, including its listed routines and schedules.
+- Request targeted changes to profiles, routines, or schedules.
+- Choose manual-only operation for the team.
+
+Manual-only operation must be an explicit user choice, not an inference from
+missing proposals. Mixed teams with scheduled and manual-only agents are valid.
+A generic team approval without a visible scheduling decision is insufficient.
+Preserve the existing survivor rules for approved routines and schedules. If a
+manual-only choice would change a protected survivor, obtain explicit approval
+to release or edit that survivor rather than silently removing its routines.
 
 The user may accept the first draft, edit profiles, or replace the agent count.
 When the count changes, ask which existing profiles must survive unchanged. If

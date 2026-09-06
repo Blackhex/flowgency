@@ -651,3 +651,61 @@ def test_docs_clarify_execution_agent_blocks_not_skips():
     # Prohibited: obsolete skip row implying missing executor creates a skipped decision
     assert "No writable `execution_agent` is available | `skipped`" not in data_formats, \
         "data-formats.md must not contain the inaccurate obsolete skip table row"
+
+
+def test_setup_proposes_routines_with_recommended_cadences():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    team = skill.split("## 2. Synthesize And Approve The Team", 1)[1].split(
+        "\n## 3.", 1
+    )[0]
+    normalized = " ".join(team.split())
+    for phrase in (
+        "Propose useful recurring work in the first complete team draft",
+        "task, prompt purpose, recommended schedule, and rationale",
+        "Label each suggested cadence as a recommendation, not an existing project practice",
+        "An agent with no useful recurring role may remain manual-only with a short explanation",
+        "Do not add filler routines or expand permissions to accommodate a routine",
+    ):
+        assert phrase in normalized
+    assert "`None proposed` is valid for optional emoji, routines" not in normalized
+
+
+def test_setup_allows_schedule_clarification_between_draft_and_approval():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    team = skill.split("## 2. Synthesize And Approve The Team", 1)[1].split(
+        "\n## 3.", 1
+    )[0]
+    normalized = " ".join(team.split())
+    draft = normalized.index("Generate the first complete team draft")
+    clarify = normalized.index(
+        "ask one focused question about desired recurring checks or operating cadence"
+    )
+    choice = normalized.index("Approve the proposed team, including its listed routines and schedules")
+    assert draft < clarify < choice
+    assert "after the first complete draft and before consolidated team approval" in normalized
+    assert "Do not ask about storage paths, routines, schedules" not in normalized
+    assert "Do not ask about storage paths, memory, or channels until after one consolidated team approval" in normalized
+
+
+def test_setup_requires_explicit_manual_only_choice():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    team = skill.split("## 2. Synthesize And Approve The Team", 1)[1].split(
+        "\n## 3.", 1
+    )[0]
+    normalized = " ".join(team.split())
+    for phrase in (
+        "Approve the proposed team, including its listed routines and schedules",
+        "Request targeted changes to profiles, routines, or schedules",
+        "Choose manual-only operation for the team",
+        "Manual-only operation must be an explicit user choice",
+        "Mixed teams with scheduled and manual-only agents are valid",
+        "A generic team approval without a visible scheduling decision is insufficient",
+    ):
+        assert phrase in normalized
+
+
+def test_setup_docs_explain_routine_proposals_and_manual_only_choice():
+    for path in (SETUP_KB_PATH, README_PATH):
+        normalized = " ".join(path.read_text(encoding="utf-8").split())
+        assert "proposes useful routines and recommended schedules" in normalized, path
+        assert "explicitly choose manual-only operation" in normalized, path
