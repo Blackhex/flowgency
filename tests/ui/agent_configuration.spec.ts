@@ -77,13 +77,21 @@ test('team settings leads to the sole roster and inherited runtime', async ({ pa
   await expect(page.getByRole('heading', { name: 'Effective preview' })).toBeVisible();
   const agentRulesField = page.locator('textarea[name="permission_rules_yaml"]');
   await expect(agentRulesField).toHaveValue(/teams[\\/]newsletter[\\/]editorial/);
+  const teamRulesPreview = page.getByRole('heading', { name: 'Team default' }).locator('..').locator('pre');
+  await expect(teamRulesPreview).toContainText(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]workspaces[\\/]newsletter/);
+  await teamRulesPreview.locator('../..').locator(':scope > div').evaluateAll((elements) => {
+    for (const element of elements as HTMLElement[]) {
+      element.style.minWidth = '0';
+    }
+  });
+  await pinToSingleLine(teamRulesPreview);
   await pinToSingleLine(workspaceRule);
   await pinToSingleLine(editorialRule);
   await assertNoLayoutIssues(page);
   // Permission rule paths are absolute and vary per checkout, so compare them as text only.
   await expect(page).toHaveScreenshot('agent-runtime.png', {
     fullPage: true,
-    mask: [workspaceRule, editorialRule, agentRulesField],
+    mask: [workspaceRule, editorialRule, agentRulesField, teamRulesPreview],
   });
   await assertNoConsoleErrors(page);
 });
