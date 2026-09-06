@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSON
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
+from starlette.concurrency import run_in_threadpool
 
 import uvicorn
 from uvicorn.supervisors.watchfilesreload import WatchFilesReload
@@ -62,6 +63,7 @@ from flowgency.records.frontmatter import extract_display_title, parse_frontmatt
 import json as json_module
 from flowgency.workspaces import REGISTRY as WORKSPACE_REGISTRY
 from flowgency.web import FlowgencyServices, build_services, get_services
+from flowgency.web.log_preview import read_log_preview
 from flowgency.web.state import flowgency_settings, runtime_team
 from flowgency.web.routes import (
     admin_teams_router,
@@ -2432,25 +2434,30 @@ async def logs_list(request: Request, team: str):
     })
 
 
+def _log_view_context(team: str, path: str) -> dict:
+    group = get_team(team)
+    file_path = Path(path)
+    logs_dir = Path(group["logs"]).resolve()
+    validate_file_access(file_path, logs_dir)
+    try:
+        preview = read_log_preview(file_path)
+    except FileNotFoundError:
+        raise HTTPException(404, "Log not found")
+    return {
+        **team_context(group),
+        "filename": file_path.name,
+        "content_html": preview.content_html,
+        "raw": preview.text,
+        "truncated": preview.truncated,
+    }
+
+
 @app.get("/{team}/logs/view", response_class=HTMLResponse)
 async def log_view(request: Request, team: str, path: str):
-    """View a log file."""
-    g = get_team(team)
-    fpath = Path(path)
-    logs_dir = Path(g["logs"]).resolve()
-    validate_file_access(fpath, logs_dir)
-    if not fpath.exists():
-        raise HTTPException(404, "Log not found")
-
-    raw = fpath.read_text()
-    content_html = render_md(raw) if fpath.suffix == ".out" else f"<pre class='whitespace-pre-wrap text-sm text-red-700'>{raw}</pre>"
-
+    context = await run_in_threadpool(_log_view_context, team, path)
     return templates.TemplateResponse(request, "log_view.html", {
         "request": request,
-        **team_context(g),
-        "filename": fpath.name,
-        "content_html": content_html,
-        "raw": raw,
+        **context,
     })
 
 

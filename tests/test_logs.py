@@ -1,8 +1,13 @@
+import asyncio
+import json
 import os
+import threading
 import yaml
 from datetime import datetime
 from pathlib import Path
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 import flowgency.app as app_mod
@@ -193,3 +198,72 @@ def test_log_view_rejects_workspace_file_outside_team_logs(tmp_path, monkeypatch
 
     assert allowed.status_code == 200
     assert denied.status_code == 403
+
+
+@pytest.fixture
+def preview_team(tmp_path, monkeypatch):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    group = {"key": "test", "name": "Test", "logs": logs}
+    monkeypatch.setattr(app_mod, "get_team", lambda team: group)
+    monkeypatch.setattr(app_mod, "team_context", lambda group: {
+        "team": "test", "team_name": "Test", "teams": {"test": "Test"},
+        "flowgency_title": "Flowgency", "workspaces": [], "workspaces_available": False,
+        "nav_open_observations": 0, "nav_actionable": 0, "nav_actionable_proposals": 0,
+        "nav_agent_count": 0, "nav_running_decisions": 0, "show_tips": False,
+        "tips_dismissed": [], "theme_css": "",
+    })
+    return logs
+
+
+def test_log_route_recovers_historical_json(preview_team):
+    path = preview_team / "historic.out"
+    path.write_text(json.dumps({"type": "assistant.message", "data": {"content": "## Readable\n\n**Restored**"}}), encoding="utf-8")
+    before = path.read_bytes()
+    response = TestClient(app_mod.app).get("/test/logs/view", params={"path": str(path)})
+    assert response.status_code == 200
+    assert "<h2>Readable</h2>" in response.text
+    assert "<strong>Restored</strong>" in response.text
+    assert '"type": "assistant.message"' not in response.text
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("suffix", [".out", ".err"])
+def test_log_route_does_not_inject_markup(preview_team, suffix):
+    path = preview_team / f"malicious{suffix}"
+    path.write_text('<img src="/log-resource" onerror="window.logExecuted=1">', encoding="utf-8")
+    response = TestClient(app_mod.app).get("/test/logs/view", params={"path": str(path)})
+    assert response.status_code == 200
+    assert '<img src="/log-resource"' not in response.text
+
+
+def test_log_route_missing_file_is_404(preview_team):
+    response = TestClient(app_mod.app).get("/test/logs/view", params={"path": str(preview_team / "missing.out")})
+    assert response.status_code == 404
+
+
+def test_log_work_does_not_block_event_loop(preview_team, monkeypatch):
+    path = preview_team / "slow.out"
+    path.write_text("Readable", encoding="utf-8")
+    entered = threading.Event()
+    released = threading.Event()
+    get_team = app_mod.get_team
+    def blocked_team(team):
+        entered.set()
+        if not released.wait(2):
+            raise AssertionError("Log processing blocked the event loop")
+        return get_team(team)
+    monkeypatch.setattr(app_mod, "get_team", blocked_team)
+    async def check():
+        transport = httpx.ASGITransport(app=app_mod.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            pending = asyncio.create_task(client.get("/test/logs/view", params={"path": str(path)}))
+            try:
+                assert await asyncio.to_thread(entered.wait, 2)
+                response = await asyncio.wait_for(client.get("/static/manifest.json"), 1)
+                assert response.status_code == 200
+                assert not pending.done()
+            finally:
+                released.set()
+                await pending
+    asyncio.run(check())
