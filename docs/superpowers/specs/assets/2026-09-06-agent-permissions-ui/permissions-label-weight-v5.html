@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowgency Permissions - Consistent Field Labels</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root { color-scheme:dark; --bg:#111827; --line:#384457; --text:#e2e8f0; --muted:#b0bdce; --accent:#a5b4fc; --green:#86dfb1; }
+* { box-sizing:border-box; letter-spacing:0; }
+body { margin:0; font:14px/1.5 'DM Sans',sans-serif; background:var(--bg); color:var(--text); }
+h1,h2,h3,p { margin:0; } h1 { font-size:24px; } h2 { font-size:18px; } h3 { font-size:14px; }
+button,input,select,summary { font:inherit; color:inherit; }
+button,input,select { border:1px solid var(--line); border-radius:6px; background:#101826; min-height:36px; padding:7px 10px; }
+button,summary { cursor:pointer; } button:disabled { cursor:default; }
+input,select { min-width:0; max-width:100%; } input[type=checkbox] { min-height:0; margin:0; accent-color:#818cf8; width:16px; height:16px; flex-shrink:0; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+a { color:var(--accent); text-underline-offset:3px; } .muted { color:var(--muted); } .mono { font:12px/1.5 'JetBrains Mono',monospace; overflow-wrap:anywhere; }
+.design-bar { background:#24262b; border-bottom:1px solid #53565c; padding:18px 28px; } .design-bar p { color:#c4c8d2; margin-top:5px; font-size:13px; }
+.shell { display:grid; grid-template-columns:196px minmax(0,1fr); min-height:850px; }
+.sidebar { padding:24px 18px; background:#151d2c; border-right:1px solid var(--line); } .brand { font-size:22px; font-weight:700; margin-bottom:28px; } .sidebar p { padding:9px 10px; color:var(--muted); } .sidebar .active { background:#2b334b; color:#d1d8ff; border-radius:6px; }
+main { width:100%; max-width:1370px; padding:24px 32px 40px; margin:0 auto; }
+.back { color:var(--accent); margin-bottom:14px; } .identity { padding-bottom:18px; }
+.tabs { display:flex; flex-wrap:wrap; gap:4px; border-bottom:1px solid var(--line); margin-bottom:22px; } .tabs span { padding:10px 12px; color:var(--muted); } .tabs .current { color:#c7d2fe; border-bottom:2px solid var(--accent); }
+.heading { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px; } .write-status { color:var(--green); font-size:12px; }
+.mode { display:flex; flex-wrap:wrap; align-items:center; gap:24px; padding:16px 0 22px; border-top:1px solid var(--line); } .mode label { display:grid; gap:6px; min-width:225px; }
+.layout { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(270px,1fr); gap:28px; } .layout>* { min-width:0; }
+.section-title { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+.rule { border:1px solid var(--line); border-radius:6px; background:#182233; padding:16px; margin-bottom:14px; }
+.field { display:grid; gap:6px; margin-bottom:12px; }
+.tools { display:flex; gap:16px; flex-wrap:wrap; margin:10px 0 16px; } .tools label { display:inline-flex; align-items:center; gap:6px; overflow-wrap:anywhere; max-width:100%; }
+.custom { display:flex; gap:8px; align-items:center; } .custom input { flex:1; width:100%; }
+.icon { display:inline-grid; place-items:center; width:34px; min-height:34px; flex-shrink:0; padding:5px; } .icon svg { width:16px; height:16px; }
+.add-menu { position:relative; }
+.add-menu summary { display:flex; align-items:center; gap:7px; list-style:none; border:1px solid var(--line); border-radius:6px; background:#101826; padding:7px 10px; min-height:36px; }
+.add-menu summary::-webkit-details-marker { display:none; } .add-menu svg { width:15px; height:15px; }
+.menu-items { position:absolute; right:0; top:calc(100% + 6px); z-index:3; width:180px; border:1px solid #60708a; border-radius:6px; padding:5px; background:#202c3e; box-shadow:0 8px 20px #0006; }
+.menu-items button { display:flex; align-items:center; gap:8px; width:100%; text-align:left; border:0; background:transparent; }
+.effective { border-left:1px solid var(--line); padding-left:24px; } .effective h3 { margin-bottom:12px; }
+.effective-row { border-bottom:1px solid var(--line); padding:12px 0; } .effective-row>p { margin-bottom:8px; }
+.grant { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; margin:6px 0; } .grant .tool { color:var(--green); } .grant a,.grant .source { font-size:12px; }
+.blocked { color:#f5cc83; } .footer { border-top:1px solid var(--line); margin-top:24px; padding-top:16px; display:flex; justify-content:flex-end; gap:12px; } .primary { background:#4f46e5; border-color:#818cf8; color:white; }
+.rule-status { color:var(--muted); font-size:12px; margin-top:8px; min-height:18px; }
+@media(max-width:1100px) { .layout { grid-template-columns:minmax(0,1fr); } .effective { padding:18px 0 0; border-left:0; border-top:1px solid var(--line); } .shell { grid-template-columns:156px minmax(0,1fr); } main { padding:24px; } }
+@media(max-width:650px) { .sidebar { display:none; } .shell { display:block; } main { padding:20px 16px; } .design-bar { padding:16px; } .tabs span { padding:8px; } .footer { flex-wrap:wrap; } }
+</style>
+</head>
+<body>
+<header class="design-bar"><h2>Layout A / Consistent field labels</h2><p>Workspace access uses matching Path and Tools labels. No-path tools has no repeated Tools label.</p><p>Design mockup only. Rule creation and saving are disabled; tool selection and the illustrative preview are interactive. The available-tool catalog is not yet decided.</p></header>
+<div class="shell">
+<aside class="sidebar"><div class="brand">Flowgency</div><p>Dashboard</p><p class="active">Agents</p><p>Observations</p><p>Proposals</p><p>Decisions</p><p>Jobs</p><p>Logs</p></aside>
+<main>
+<div class="back">Back to agents</div>
+<header class="identity"><h1>Core Engineer</h1><p class="muted">Flowgency / core-engineer</p></header>
+<nav class="tabs" aria-label="Agent tabs"><span>Profile</span><span>Blueprint</span><span>Runtime</span><span class="current">Permissions</span><span>Routines</span><span>Prompts</span><span>Memory</span><span>Activity</span></nav>
+<div class="heading"><h2>Permissions</h2><span class="write-status" id="write-status">Workspace-root write: granted</span></div>
+<div class="mode"><label>Permission mode<select aria-label="Permission mode" id="mode"><option value="inherit">Inherit from team</option><option value="restricted">Restricted</option><option value="unrestricted">Unrestricted</option></select></label><p class="muted">Effective: <strong id="effective-mode">Restricted</strong> <a id="mode-source" href="http://localhost:8500/admin/teams/flowgency/edit" target="_blank" rel="noopener">Team settings</a></p></div>
+<div class="layout">
+<section aria-label="Agent rules">
+<div class="section-title"><h3>Agent rules</h3><details class="add-menu"><summary><i data-lucide="plus"></i>Add rule<i data-lucide="chevron-down"></i></summary><div class="menu-items"><button disabled><i data-lucide="folder"></i>Path rule</button><button disabled><i data-lucide="wrench"></i>No-path rule</button></div></details></div>
+<article class="rule" id="workspace-rule">
+<div class="section-title"><h3>Workspace access</h3><button class="icon" disabled title="Remove rule" aria-label="Remove workspace rule"><i data-lucide="trash-2"></i></button></div>
+<label class="field">Path<input class="mono" aria-label="Workspace path" value="C:/Projekty/Flowgency" readonly></label>
+<div id="workspace-tools-label">Tools</div>
+<div class="tools" id="workspace-tools" role="group" aria-labelledby="workspace-tools-label"><label><input type="checkbox" value="read">read</label><label><input type="checkbox" value="search">search</label><label><input type="checkbox" value="write" checked>write</label><label><input type="checkbox" value="shell">shell</label></div>
+<div class="custom"><input class="mono" id="custom-tool" aria-label="Custom tool name" placeholder="Custom tool name"><button class="icon" id="add-tool" title="Add custom tool" aria-label="Add custom tool"><i data-lucide="plus"></i></button></div>
+<p class="rule-status" id="rule-status">1 tool selected</p>
+</article>
+<article class="rule" id="no-path-rule">
+<div class="section-title"><h3>No-path tools</h3><button class="icon" disabled title="Remove rule" aria-label="Remove no-path rule"><i data-lucide="trash-2"></i></button></div>
+<div class="tools" role="group" aria-label="No-path tools"><label><input type="checkbox" value="custom_tool" checked id="no-path-tool">custom_tool</label></div>
+</article>
+</section>
+<section class="effective" aria-label="Effective access">
+<h3>Effective access <span class="muted">/ Draft</span></h3>
+<div class="effective-row"><p class="mono">C:/Projekty/Flowgency</p><div id="effective-tools"></div></div>
+<div class="effective-row"><p>No-path tools</p><div class="grant"><span class="tool mono" id="no-path-result">custom_tool</span><span class="source muted">Agent</span></div></div>
+<div class="effective-row"><p>Paths without a matching rule</p><div class="grant"><span class="blocked" id="unmatched">No access</span><span class="source muted" id="unmatched-mode">Restricted mode</span></div></div>
+<div class="effective-row"><p class="muted">Configured policy</p><span class="muted">Actual enforcement depends on the integration.</span></div>
+</section>
+</div>
+<footer class="footer"><button id="discard">Discard changes</button><button class="primary" disabled>Save permissions</button></footer>
+</main>
+</div>
+<script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<script>
+if (window.lucide) lucide.createIcons();
+const toolContainer = document.getElementById('workspace-tools');
+function updatePreview() {
+  const selected = Array.from(toolContainer.querySelectorAll('input:checked'), input => input.value);
+  const effectiveTools = Array.from(new Set(['read', 'search', ...selected]));
+  const result = document.getElementById('effective-tools');
+  result.replaceChildren();
+  for (const tool of effectiveTools) {
+    const row = document.createElement('div'); row.className = 'grant';
+    const name = document.createElement('span'); name.className = 'tool mono'; name.textContent = tool; row.append(name);
+    const source = document.createElement('span'); source.className = 'source muted';
+    if (['read', 'search'].includes(tool)) {
+      const link = document.createElement('a'); link.href = 'http://localhost:8500/admin/teams/flowgency/edit'; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Team'; source.append(link);
+      if (selected.includes(tool)) source.append(' + Agent');
+    } else source.textContent = 'Agent';
+    row.append(source); result.append(row);
+  }
+  document.getElementById('rule-status').textContent = selected.length ? `${selected.length} tool${selected.length === 1 ? '' : 's'} selected` : 'No tools selected';
+  document.getElementById('write-status').textContent = `Workspace-root write: ${selected.includes('write') ? 'granted' : 'not granted'}`;
+  const mode = document.getElementById('mode').value;
+  document.getElementById('effective-mode').textContent = mode === 'unrestricted' ? 'Unrestricted' : 'Restricted';
+  document.getElementById('mode-source').hidden = mode !== 'inherit';
+  document.getElementById('unmatched').textContent = mode === 'unrestricted' ? 'All tools' : 'No access';
+  document.getElementById('unmatched-mode').textContent = mode === 'unrestricted' ? 'Unrestricted mode' : 'Restricted mode';
+  document.getElementById('no-path-result').textContent = document.getElementById('no-path-tool').checked ? 'custom_tool' : 'No tools';
+}
+document.getElementById('add-tool').addEventListener('click', () => {
+  const input = document.getElementById('custom-tool'); const name = input.value.trim();
+  if (!name) return;
+  const existing = Array.from(toolContainer.querySelectorAll('input')).find(checkbox => checkbox.value === name);
+  if (existing) existing.checked = true;
+  else { const label = document.createElement('label'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = name; checkbox.checked = true; label.append(checkbox, document.createTextNode(name)); toolContainer.append(label); }
+  input.value = ''; updatePreview();
+});
+document.getElementById('discard').addEventListener('click', () => {
+  Array.from(toolContainer.querySelectorAll('input')).forEach(checkbox => { if (!['read','search','write','shell'].includes(checkbox.value)) checkbox.parentElement.remove(); else checkbox.checked = checkbox.value === 'write'; });
+  document.getElementById('mode').value = 'inherit'; document.getElementById('no-path-tool').checked = true; document.getElementById('custom-tool').value = ''; updatePreview();
+});
+document.addEventListener('change', updatePreview);
+document.addEventListener('keydown', event => { if (event.key === 'Escape') document.querySelector('.add-menu').open = false; });
+updatePreview();
+</script>
+</body>
+</html>

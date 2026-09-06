@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowgency Permissions - Layout Options</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root { color-scheme: dark; --bg: #111827; --panel: #182233; --line: #384457; --text: #e2e8f0; --muted: #b0bdce; --accent: #a5b4fc; --green: #86dfb1; }
+* { box-sizing: border-box; letter-spacing: 0; }
+body { margin: 0; font: 14px/1.5 'DM Sans', sans-serif; background: var(--bg); color: var(--text); }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+button, input, select { border: 1px solid var(--line); border-radius: 6px; background: #101826; min-height: 36px; padding: 7px 10px; }
+input, select { max-width: 100%; min-width: 0; }
+input[type=checkbox] { min-height: 0; accent-color: #818cf8; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 24px; } h2 { font-size: 18px; } h3 { font-size: 14px; }
+.muted { color: var(--muted); } .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; overflow-wrap: anywhere; }
+.design-bar { background: #24262b; border-bottom: 1px solid #53565c; padding: 20px max(20px, calc((100% - 1240px) / 2)); }
+.eyebrow { color: #c2c5cd; font-size: 12px; margin-bottom: 4px; }
+.choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0 10px; }
+.choice { text-align: left; padding: 12px 14px; background: #303239; border-color: #5c5e68; min-height: 88px; }
+.choice strong, .choice span { display: block; }
+.choice span { color: #c4c8d2; font-size: 12px; margin-top: 4px; }
+.choice[aria-pressed=true] { border-color: #b1b8ff; box-shadow: inset 0 0 0 1px #b1b8ff; background: #343747; }
+.tradeoff { min-height: 24px; font-size: 13px; color: #d4d7e0; }
+.shell { display: grid; grid-template-columns: 196px minmax(0, 1fr); min-height: 740px; }
+.sidebar { border-right: 1px solid var(--line); background: #151d2c; padding: 24px 18px; }
+.brand { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 30px; }
+.sidebar p { padding: 9px 10px; color: var(--muted); }
+.sidebar .active { background: #2b334b; color: #d1d8ff; border-radius: 6px; }
+main { width: 100%; max-width: 1370px; margin: auto; padding: 24px 32px 40px; }
+.back { color: var(--accent); margin-bottom: 16px; }
+.identity { padding-bottom: 18px; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+.tabs span { padding: 10px 12px; color: var(--muted); }
+.tabs .current { color: #c7d2fe; border-bottom: 2px solid #a5b4fc; }
+.heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+.tag { font-size: 12px; color: var(--green); }
+.mode { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; padding: 16px 0 20px; border-top: 1px solid var(--line); }
+.mode label { display: grid; gap: 6px; min-width: 225px; }
+.mode p { padding-top: 23px; }
+.layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(270px, 1fr); gap: 28px; }
+.layout > * { min-width: 0; }
+.layout.stacked, .layout.unified { grid-template-columns: minmax(0, 1fr); }
+.section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.rule { padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: #182233; margin-bottom: 12px; }
+.rule-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.icon { width: 34px; min-height: 34px; padding: 5px; display: inline-grid; place-items: center; }
+.icon svg { width: 16px; height: 16px; }
+.field { display: grid; gap: 6px; margin: 12px 0; }
+.field-row { display: grid; grid-template-columns: 155px minmax(0, 1fr); gap: 12px; }
+.tools { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
+.tools label { display: inline-flex; align-items: center; gap: 6px; }
+.summary-line { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+summary { cursor: pointer; }
+.readonly { font-size: 11px; color: #c3cad8; border: 1px solid #526078; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+.inherited { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 18px; }
+.inherited p { margin: 10px 0 4px; }
+.effective { border-left: 1px solid var(--line); padding-left: 24px; }
+.effective h3 { margin-bottom: 12px; }
+.effective-row { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.effective-row .muted { margin: 4px 0; font-size: 12px; }
+.access { color: var(--green); font-size: 13px; }
+.blocked { color: #f5cc83; font-size: 13px; }
+.stacked .effective, .unified .effective { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 18px; }
+.stacked .effective-list, .unified .effective-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.footer { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; display: flex; gap: 12px; justify-content: flex-end; }
+.primary { background: #4f46e5; border-color: #818cf8; color: white; }
+.unified .inherited { display: none; }
+.rule-table { margin: 0 0 16px; width: 100%; border-collapse: collapse; table-layout: fixed; }
+.rule-table th, .rule-table td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.rule-table th { font-size: 12px; color: var(--muted); }
+.rule-table th:first-child { width: 42%; }
+.rule-table tr.selected { background: #28334b; }
+.rule-table td { font-size: 12px; }
+.note { font-size: 12px; color: #c4c8d2; }
+[hidden] { display: none !important; }
+@media(max-width:1100px) { .layout { grid-template-columns: minmax(0, 1fr); } .effective { border-left: 0; border-top: 1px solid var(--line); padding: 18px 0 0; } .shell { grid-template-columns: 156px minmax(0, 1fr); } main { padding: 24px; } }
+@media(max-width:650px) { .choices { grid-template-columns: minmax(0, 1fr); gap: 8px; } .choice { min-height: 64px; } .sidebar { display: none; } .shell { display: block; } main { padding: 20px 16px; } .field-row { grid-template-columns: minmax(0, 1fr); gap: 0; } .tabs span { padding: 8px; } .stacked .effective-list, .unified .effective-list { grid-template-columns: minmax(0, 1fr); gap: 0; } .mode p { padding-top: 0; } .footer { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<header class="design-bar">
+  <p class="eyebrow">DESIGN EXPLORATION / AGENT PERMISSIONS</p>
+  <h2>Which layout makes permissions easiest to understand?</h2>
+  <div class="choices">
+    <button class="choice option" data-choice="a" aria-pressed="true" onclick="chooseLayout('a', this)"><strong>A. Editor + result <small>(recommended)</small></strong><span>Agent rules on the left; effective access on the right.</span></button>
+    <button class="choice option" data-choice="b" aria-pressed="false" onclick="chooseLayout('b', this)"><strong>B. Single-column sections</strong><span>Agent rules, inheritance, then the effective result.</span></button>
+    <button class="choice option" data-choice="c" aria-pressed="false" onclick="chooseLayout('c', this)"><strong>C. Unified rule table</strong><span>Inherited and agent rules together, with an editor below.</span></button>
+  </div>
+  <p id="tradeoff" class="tradeoff">A keeps the result visible while editing. Narrow screens stack the two columns.</p>
+  <p class="note">Layout mockup with illustrative data. Controls are not connected to configuration; nothing is saved.</p>
+</header>
+<div class="shell">
+  <aside class="sidebar"><div class="brand">Flowgency</div><p>Dashboard</p><p class="active">Agents</p><p>Observations</p><p>Proposals</p><p>Decisions</p><p>Jobs</p><p>Logs</p></aside>
+  <main>
+    <div class="back">Back to agents</div>
+    <header class="identity"><h1>Core Engineer</h1><p class="muted">Flowgency / core-engineer</p></header>
+    <nav class="tabs" aria-label="Agent tabs"><span>Profile</span><span>Blueprint</span><span>Runtime</span><span class="current">Permissions</span><span>Routines</span><span>Prompts</span><span>Memory</span><span>Activity</span></nav>
+    <div class="heading"><h2>Permissions</h2><span class="tag">Workspace-root write: granted</span></div>
+    <div class="mode"><label>Permission mode<select aria-label="Permission mode"><option selected>Inherit from team</option><option>Restricted</option><option>Unrestricted</option></select></label><p class="muted">Effective: <strong>Restricted</strong> <span class="readonly">Team</span></p></div>
+    <div class="layout" id="layout">
+      <section>
+        <div class="section-title"><h3 id="editor-title">Agent rules</h3><button disabled title="Available in the final editor">+ Add rule</button></div>
+        <table class="rule-table" id="unified-table" hidden>
+          <thead><tr><th>Target</th><th>Tools</th><th>Source</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">C:/Projekty/Flowgency</td><td>read, search</td><td>Team / read-only</td></tr>
+            <tr class="selected"><td class="mono">C:/Projekty/Flowgency</td><td>write</td><td>Agent / selected</td></tr>
+            <tr><td>No path</td><td>Custom tool</td><td>Agent</td></tr>
+          </tbody>
+        </table>
+        <article class="rule">
+          <div class="rule-head"><h3>Workspace access</h3><button class="icon" disabled title="Remove rule" aria-label="Remove workspace rule"><i data-lucide="trash-2"></i></button></div>
+          <div class="field-row"><label class="field">Target<select aria-label="Rule target"><option>Path</option><option>No path</option></select></label><label class="field">Path<input class="mono" aria-label="Rule path" value="C:/Projekty/Flowgency"></label></div>
+          <label class="field">Tool access<select aria-label="Tool access"><option>Selected tools</option><option>All tools</option><option>No tools</option></select></label>
+          <div class="tools"><label><input type="checkbox">read</label><label><input type="checkbox">search</label><label><input type="checkbox" checked>write</label></div>
+          <label class="field">Additional tool names<input class="mono" aria-label="Additional tool names" placeholder="Custom tool name"></label>
+        </article>
+        <article class="rule"><details><summary>No-path tools <span class="muted">/ Custom tool</span></summary><label class="field">Target<select aria-label="Second rule target"><option>No path</option><option>Path</option></select></label><label class="field">Tool access<select aria-label="Second rule tool access"><option>Selected tools</option><option>All tools</option><option>No tools</option></select></label><label class="field">Additional tool names<input class="mono" value="custom_tool" aria-label="No-path custom tool"></label></details></article>
+        <section class="inherited"><div class="section-title"><h3>Inherited from team</h3><span class="readonly">Read-only</span></div><p class="mono">C:/Projekty/Flowgency</p><span class="muted">read, search</span></section>
+      </section>
+      <section class="effective">
+        <h3>Effective access</h3>
+        <div class="effective-list">
+          <div class="effective-row"><p class="mono">C:/Projekty/Flowgency</p><p class="muted">Team + agent</p><p class="access">read, search, write</p></div>
+          <div class="effective-row"><p>No-path tools</p><p class="muted">Agent</p><p class="access mono">custom_tool</p></div>
+          <div class="effective-row"><p>Paths without a matching rule</p><p class="muted">Restricted mode</p><p class="blocked">No access</p></div>
+        </div>
+        <div class="effective-row"><span class="muted">Enforcement: integration-dependent</span></div>
+      </section>
+    </div>
+    <footer class="footer"><button disabled>Discard changes</button><button class="primary" disabled>Save permissions</button></footer>
+  </main>
+</div>
+<script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<script>
+if (window.lucide) lucide.createIcons();
+function chooseLayout(choice, button) {
+  document.querySelectorAll('.choice').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+  document.getElementById('layout').className = 'layout' + (choice === 'b' ? ' stacked' : choice === 'c' ? ' unified' : '');
+  document.getElementById('unified-table').hidden = choice !== 'c';
+  document.getElementById('editor-title').textContent = choice === 'c' ? 'Permission rules' : 'Agent rules';
+  document.getElementById('tradeoff').textContent = {
+    a: 'A keeps the result visible while editing. Narrow screens stack the two columns.',
+    b: 'B gives every rule more room and follows a simple reading order, but the result sits farther below the editor.',
+    c: 'C makes rule ownership easy to scan in one table, but selecting a row adds a step and can blur inherited versus editable rules.'
+  }[choice];
+  if (typeof toggleSelect === 'function') toggleSelect(button);
+}
+</script>
+</body>
+</html>
