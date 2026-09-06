@@ -54,6 +54,28 @@
 
 ## Execution Preconditions
 
+### Approved Completion Amendment (2026-09-06)
+
+The user approved the specification's narrow Dashboard contrast exception.
+Before Task 9 integration:
+
+1. Fix the remaining checkout-dependent Team default rule preview in the
+    runtime screenshot test; verify repeated captures before replacing its four
+    baselines.
+2. In `flowgency/templates/home.html`, darken light-theme fleet metadata and
+    schedule links, and give queue panels and badges explicit light-theme
+    colors. Preserve layout and every existing dark-theme color.
+3. Run the Dashboard accessibility test in all four projects, then update only
+    affected light-theme Dashboard snapshots and rerun focused checks.
+4. Run the complete Python and UI suites, inspect and smoke-test the wheel,
+    review the branch, then follow Task 9's integration and cleanup sequence.
+
+This supersedes the instruction to stop for the two known contrast failures:
+fix them without suppressing accessibility rules or adding skips. The approved
+icon and board references remain unchanged at
+`docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-icon.{html,png}`
+and `docs/superpowers/specs/assets/2026-09-05-flowgency-rebrand/flowgency-board.{html,png}`.
+
 From the feature worktree root:
 
 ```powershell
