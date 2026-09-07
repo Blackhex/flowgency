@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flowgency Routines - Unified Summary</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root { color-scheme:dark; --bg:#111827; --surface:#182233; --border:#384457; --text:#e2e8f0; --muted:#b0bdce; --accent:#a5b4fc; --green:#86dfb1; }
+* { box-sizing:border-box; letter-spacing:0; }
+body { margin:0; font:14px/1.5 'DM Sans',sans-serif; background:var(--bg); color:var(--text); }
+h1,h2,h3,p { margin:0; } h1 { font-size:24px; } h2 { font-size:18px; } h3 { font-size:14px; }
+button,input,select,summary { font:inherit; color:inherit; }
+button,input,select { border:1px solid var(--border); border-radius:6px; background:#101826; min-height:36px; padding:7px 10px; }
+button,summary { cursor:pointer; } button:disabled { cursor:default; opacity:.65; }
+input,select { min-width:0; max-width:100%; } input[type=checkbox] { min-height:0; margin:0; width:16px; height:16px; accent-color:#818cf8; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.muted { color:var(--muted); } .mono { font-family:'JetBrains Mono',monospace; font-size:12px; overflow-wrap:anywhere; }
+.design { background:#24262b; padding:18px 28px; border-bottom:1px solid #53565c; } .design p { color:#c4c8d2; font-size:13px; margin-top:6px; }
+.choices { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:14px 0 10px; }
+.choice { background:#303239; text-align:left; padding:12px; min-height:80px; } .choice strong,.choice span { display:block; } .choice span { font-size:12px; color:#c4c8d2; margin-top:4px; }
+.choice[aria-pressed=true] { border-color:#b1b8ff; box-shadow:inset 0 0 0 1px #b1b8ff; }
+.shell { display:grid; grid-template-columns:185px minmax(0,1fr); min-height:900px; }
+.sidebar { padding:24px 18px; border-right:1px solid var(--border); background:#151d2c; } .brand { font-size:22px; font-weight:700; margin-bottom:28px; } .sidebar p { padding:9px 10px; color:var(--muted); } .sidebar .active { background:#2b334b; color:#d1d8ff; border-radius:6px; }
+main { width:100%; max-width:1370px; margin:0 auto; padding:24px 32px 40px; }
+.back { color:var(--accent); margin-bottom:14px; } .identity { padding-bottom:18px; }
+.tabs { display:flex; flex-wrap:wrap; gap:4px; border-bottom:1px solid var(--border); margin-bottom:24px; } .tabs span { padding:10px 12px; color:var(--muted); } .tabs .current { color:#c7d2fe; border-bottom:2px solid var(--accent); }
+.heading,.row-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+.button-content { display:inline-flex; align-items:center; gap:7px; } svg { width:16px; height:16px; flex-shrink:0; }
+.layout { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(270px,1fr); gap:28px; } .layout>* { min-width:0; }
+.routine { border:1px solid var(--border); border-radius:6px; padding:16px; background:var(--surface); margin-bottom:14px; }
+.row-title { display:flex; align-items:center; gap:12px; min-width:0; } .ordinal { color:var(--muted); font-size:12px; }
+.actions { display:flex; gap:6px; align-items:center; } .icon { display:inline-grid; place-items:center; width:34px; height:34px; padding:5px; }
+.enabled { display:inline-flex; align-items:center; gap:7px; margin-right:8px; }
+.field { display:grid; gap:6px; margin-bottom:14px; font-weight:400; } .field input,.field select { width:100%; }
+.fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 16px; } .fields>* { min-width:0; }
+.schedule-controls { display:flex; gap:8px; align-items:center; min-width:0; } .schedule-controls>input { width:85px; } .schedule-controls>select { flex:1; }
+.segments { display:flex; margin-bottom:10px; } .segments label { flex:1; display:flex; justify-content:center; align-items:center; gap:7px; border:1px solid var(--border); padding:6px 8px; min-height:36px; background:#101826; } .segments label:first-child { border-radius:6px 0 0 6px; } .segments label:last-child { border-radius:0 6px 6px 0; border-left:0; }
+.segments input { min-height:0; margin:0; accent-color:#818cf8; }
+.arguments { display:flex; gap:8px; margin:7px 0; } .arguments input { flex:1; width:100%; }
+.optional { border-top:1px solid var(--border); padding-top:12px; margin-top:4px; } .optional summary { margin-bottom:12px; color:var(--text); }
+.summary { padding-left:24px; border-left:1px solid var(--border); } .summary h3 { margin-bottom:14px; }
+.summary-row { padding:14px 0; border-bottom:1px solid var(--border); } .summary-row p { margin-bottom:5px; } .summary-name { color:#f1f5f9; font-weight:600; }
+.facts { display:grid; grid-template-columns:90px minmax(0,1fr); gap:5px 12px; margin:10px 0 0; } .facts dt { color:var(--muted); } .facts dd { margin:0; overflow-wrap:anywhere; }
+.running { color:var(--green); font-size:12px; } .recorded { border-top:1px solid var(--border); margin-top:18px; padding-top:16px; }
+.recorded dl { margin-bottom:14px; } .inline-recorded { display:none; margin-top:14px; border-top:1px solid var(--border); padding-top:10px; font-size:12px; color:var(--muted); gap:20px; flex-wrap:wrap; }
+.compact { display:flex; justify-content:space-between; align-items:center; gap:12px; } .compact p { margin-top:3px; } .selection-list { display:none; }
+.footer { display:flex; justify-content:flex-end; gap:12px; padding-top:16px; border-top:1px solid var(--border); margin-top:24px; } .primary { background:#4f46e5; border-color:#818cf8; color:white; }
+.layout.inline { grid-template-columns:minmax(0,1fr); } .inline .summary { display:none; } .inline .inline-recorded { display:flex; }
+.layout.master-detail { grid-template-columns:260px minmax(0,1fr); } .master-detail .selection-list { display:block; grid-column:1; grid-row:1; border-right:1px solid var(--border); padding-right:18px; } .master-detail .editors { grid-column:2; } .master-detail .summary { grid-column:2; border-left:0; padding-left:0; border-top:1px solid var(--border); padding-top:18px; } .master-detail .secondary { display:none; }
+.selection-list button { display:block; text-align:left; width:100%; padding:12px; margin-bottom:8px; } .selection-list .selected { border-color:var(--accent); background:#2b334b; } .selection-list span { display:block; font-size:12px; color:var(--muted); margin-top:4px; }
+[hidden] { display:none !important; }
+.rename-warning { margin:0 0 14px; padding:10px 12px; border-left:3px solid #e9bd75; color:#f5d59e; background:#302c26; font-size:12px; overflow-wrap:anywhere; }
+.routine-draft-note { font-size:12px; color:#e9bd75; margin-top:6px; }
+.routine-state { font-size:12px; font-weight:500; line-height:18px; min-height:18px; color:var(--muted); }
+.routine-state[data-enabled="true"] { color:var(--green); }
+.saved-label { color:var(--muted); font-size:11px; font-weight:400; margin-left:6px; }
+@media(max-width:1100px) { .layout { grid-template-columns:minmax(0,1fr); } .summary { border-left:0; padding:18px 0 0; border-top:1px solid var(--border); } .shell { grid-template-columns:155px minmax(0,1fr); } main { padding:24px; } }
+@media(max-width:650px) { .shell { display:block; } .sidebar { display:none; } main { padding:20px 16px; } .design { padding:16px; } .choices { grid-template-columns:minmax(0,1fr); gap:8px; } .choice { min-height:64px; } .fields { grid-template-columns:minmax(0,1fr); } .tabs span { padding:8px; } .layout.master-detail { grid-template-columns:minmax(0,1fr); } .master-detail .selection-list { grid-row:auto; grid-column:auto; border:0; padding:0; } .master-detail .editors,.master-detail .summary { grid-column:auto; } .actions { flex-wrap:wrap; } }
+</style>
+</head>
+<body>
+<header class="design">
+<h2>Routines / Unified summary</h2>
+<p>Enabled and disabled routines use the same detail layout. Saved schedule fields sit inside each summary.</p>
+<p>Design mockup with illustrative data. Add, remove, reorder, and save actions are disabled; field edits and Discard work locally. Nothing is saved or launched.</p>
+</header>
+<div class="shell">
+<aside class="sidebar"><div class="brand">Flowgency</div><p>Dashboard</p><p class="active">Agents</p><p>Observations</p><p>Proposals</p><p>Decisions</p><p>Jobs</p><p>Logs</p></aside>
+<main>
+<div class="back">Back to agents</div>
+<header class="identity"><h1>Core Engineer</h1><p class="muted">Flowgency / core-engineer</p></header>
+<nav class="tabs" aria-label="Agent tabs"><span>Profile</span><span>Blueprint</span><span>Runtime</span><span>Permissions</span><span class="current">Routines</span><span>Prompts</span><span>Memory</span><span>Activity</span></nav>
+<div class="heading"><h2>Routines</h2><button class="button-content" disabled><i data-lucide="plus"></i>Add routine</button></div>
+<div class="layout" id="layout">
+<nav class="selection-list" aria-label="Routine selection"><button class="selected" disabled>architecture-boundary-audit<span>Every 7 days / Enabled</span></button><button disabled>release-review<span>Daily at 09:00 / Disabled</span></button></nav>
+<section class="editors" aria-label="Routine editor">
+<article class="routine">
+<div class="row-head"><div class="row-title"><span class="ordinal">01</span></div><div class="actions"><label class="enabled"><input id="enabled" type="checkbox" checked>Enabled</label><button class="icon" disabled title="Move up" aria-label="Move routine up"><i data-lucide="arrow-up"></i></button><button class="icon" disabled title="Move down" aria-label="Move routine down"><i data-lucide="arrow-down"></i></button><button class="icon" disabled title="Remove routine" aria-label="Remove routine"><i data-lucide="trash-2"></i></button></div></div>
+<label class="field">ID<input class="mono" id="routine-id" value="architecture-boundary-audit" aria-describedby="rename-warning"></label>
+<p class="rename-warning" id="rename-warning" role="status" hidden>Changing this ID creates a different routine identity. Existing schedule markers and routine memory remain under <span class="mono">architecture-boundary-audit</span>; they are not migrated.</p>
+<label class="field">Prompt<select id="prompt"><optgroup label="Blueprint"><option value="blueprint:architecture-boundary-audit">architecture-boundary-audit</option><option value="blueprint:release-review">release-review</option></optgroup><optgroup label="Instance"><option value="instance:local-review">local-review</option></optgroup></select></label>
+<div class="fields">
+<div><span>Schedule</span><div class="segments" role="group" aria-label="Schedule"><label><input type="radio" name="schedule" value="every" checked>Interval</label><label><input type="radio" name="schedule" value="at">Daily</label></div><div class="schedule-controls" id="interval"><input id="amount" type="number" min="1" value="7" aria-label="Interval amount"><select id="unit" aria-label="Interval unit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days" selected>Days</option></select></div><label class="field" id="daily" hidden><input id="time" type="time" value="09:00" aria-label="Daily time"></label></div>
+<label class="field">Memory<select id="memory"><option value="inherit">Inherit from agent</option><option value="run">Run</option><option value="routine" selected>Routine</option><option value="agent">Agent</option><option value="team">Team</option><option value="channel">Channel</option></select><select id="channel" aria-label="Memory channel" hidden><option>brand-strategy</option><option>support</option></select></label>
+</div>
+<details class="optional" open><summary>Arguments &amp; recovery</summary>
+<label for="argument">Arguments</label><div class="arguments"><input class="mono" id="argument" value="--brief" aria-label="Argument 1"><button class="icon" disabled title="Remove argument" aria-label="Remove argument"><i data-lucide="x"></i></button></div><button class="button-content" disabled><i data-lucide="plus"></i>Add argument</button>
+<label class="field" style="margin-top:16px">Missed runs<select id="recovery"><option value="default" selected>Default (today)</option><option value="none">No recovery</option><option value="today">Today</option><option value="always">Any age</option><option value="duration">Within a duration</option></select></label><div class="schedule-controls" id="recovery-duration" hidden><input type="number" id="recovery-amount" value="48" min="1" aria-label="Recovery amount"><select id="recovery-unit" aria-label="Recovery unit"><option>Minutes</option><option selected>Hours</option><option>Days</option></select></div>
+</details>
+</article>
+<article class="routine secondary">
+<div class="row-head"><div class="row-title"><span class="ordinal">02</span></div><div class="actions"><label class="enabled"><input id="release-enabled" type="checkbox">Enabled</label><button class="icon" disabled title="Move up" aria-label="Move release-review up"><i data-lucide="arrow-up"></i></button><button class="icon" disabled title="Move down" aria-label="Move release-review down"><i data-lucide="arrow-down"></i></button><button class="icon" disabled title="Remove routine" aria-label="Remove release-review"><i data-lucide="trash-2"></i></button></div></div>
+<label class="field">ID<input class="mono" id="release-id" value="release-review" aria-describedby="release-rename-warning"></label>
+<p class="rename-warning" id="release-rename-warning" role="status" hidden>Changing this ID creates a different routine identity. Existing schedule markers and routine memory remain under <span class="mono">release-review</span>; they are not migrated.</p>
+<label class="field">Prompt<select id="release-prompt"><optgroup label="Blueprint"><option value="blueprint:architecture-boundary-audit">architecture-boundary-audit</option><option value="blueprint:release-review" selected>release-review</option></optgroup><optgroup label="Instance"><option value="instance:local-review">local-review</option></optgroup></select></label>
+<div class="fields">
+<div><span>Schedule</span><div class="segments" role="group" aria-label="Release schedule"><label><input type="radio" name="release-schedule" value="every">Interval</label><label><input type="radio" name="release-schedule" value="at" checked>Daily</label></div><div class="schedule-controls" id="release-interval" hidden><input id="release-amount" type="number" min="1" value="7" aria-label="Release interval amount"><select id="release-unit" aria-label="Release interval unit"><option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days" selected>Days</option></select></div><label class="field" id="release-daily"><input id="release-time" type="time" value="09:00" aria-label="Release daily time"></label></div>
+<label class="field">Memory<select id="release-memory"><option value="inherit">Inherit from agent</option><option value="run">Run</option><option value="routine" selected>Routine</option><option value="agent">Agent</option><option value="team">Team</option><option value="channel">Channel</option></select><select id="release-channel" aria-label="Release memory channel" hidden><option>brand-strategy</option><option>support</option></select></label>
+</div>
+<details class="optional" open><summary>Arguments &amp; recovery</summary>
+<label for="release-argument">Arguments</label><div class="arguments"><input class="mono" id="release-argument" value="" aria-label="Release argument 1"><button class="icon" disabled title="Remove argument" aria-label="Remove release argument"><i data-lucide="x"></i></button></div><button class="button-content" disabled><i data-lucide="plus"></i>Add argument</button>
+<label class="field" style="margin-top:16px">Missed runs<select id="release-recovery"><option value="default" selected>Default (today)</option><option value="none">No recovery</option><option value="today">Today</option><option value="always">Any age</option><option value="duration">Within a duration</option></select></label><div class="schedule-controls" id="release-recovery-duration" hidden><input type="number" id="release-recovery-amount" value="48" min="1" aria-label="Release recovery amount"><select id="release-recovery-unit" aria-label="Release recovery unit"><option>Minutes</option><option selected>Hours</option><option>Days</option></select></div>
+</details>
+</article>
+</section>
+<aside class="summary" aria-label="Routine summary">
+<h3>Summary <span class="muted">/ Draft</span></h3>
+<section class="summary-row" id="audit-summary"><p class="summary-name mono" id="summary-id">architecture-boundary-audit</p><p class="routine-state" data-enabled="true" id="summary-enabled">Enabled</p><dl class="facts"><dt>Prompt</dt><dd class="mono" id="summary-prompt">architecture-boundary-audit / Blueprint</dd><dt>Schedule</dt><dd id="summary-schedule">Every 7 days</dd><dt>Memory</dt><dd id="summary-memory">Routine</dd><dt>Arguments</dt><dd class="mono" id="summary-arguments">--brief</dd><dt>Recovery</dt><dd id="summary-recovery">Today (default)</dd><dt>Last fired</dt><dd data-saved-status>Not yet <span class="saved-label">Saved</span></dd><dt>Next due</dt><dd data-saved-status>No marker <span class="saved-label">Saved</span></dd></dl><p class="routine-draft-note" id="audit-saved-note" hidden>Saved status belongs to <span class="mono">architecture-boundary-audit</span>.</p></section>
+<section class="summary-row" id="release-summary"><p class="summary-name mono" id="release-summary-id">release-review</p><p class="routine-state" data-enabled="false" id="release-summary-enabled">Disabled</p><dl class="facts"><dt>Prompt</dt><dd class="mono" id="release-summary-prompt">release-review / Blueprint</dd><dt>Schedule</dt><dd id="release-summary-schedule">Daily at 09:00</dd><dt>Memory</dt><dd id="release-summary-memory">Routine</dd><dt>Arguments</dt><dd class="mono" id="release-summary-arguments">None</dd><dt>Recovery</dt><dd id="release-summary-recovery">Today (default)</dd><dt>Last fired</dt><dd data-saved-status>Not yet <span class="saved-label">Saved</span></dd><dt>Next due</dt><dd data-saved-status>Disabled <span class="saved-label">Saved</span></dd></dl><p class="routine-draft-note" id="release-saved-note" hidden>Saved status belongs to <span class="mono">release-review</span>.</p></section>
+</aside>
+</div>
+<footer class="footer"><button id="discard">Discard changes</button><button class="primary" disabled>Save routines</button></footer>
+</main>
+</div>
+<script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<script>
+if (window.lucide) lucide.createIcons();
+function update() {
+  const routineId=document.getElementById('routine-id').value;
+  const renamed=routineId!=='architecture-boundary-audit';
+  document.getElementById('rename-warning').hidden=!renamed;
+  document.getElementById('audit-saved-note').hidden=!renamed;
+  document.querySelector('.summary-name').textContent=routineId||'Untitled routine';
+  const daily=document.querySelector('input[name=schedule]:checked').value==='at';
+  document.getElementById('interval').hidden=daily;
+  document.getElementById('daily').hidden=!daily;
+  const memory=document.getElementById('memory').value;
+  document.getElementById('channel').hidden=memory!=='channel';
+  const recovery=document.getElementById('recovery').value;
+  document.getElementById('recovery-duration').hidden=recovery!=='duration';
+  document.getElementById('summary-enabled').textContent=document.getElementById('enabled').checked?'Enabled':'Disabled';
+  document.getElementById('summary-enabled').dataset.enabled=String(document.getElementById('enabled').checked);
+  const prompt=document.getElementById('prompt').value.split(':');
+  document.getElementById('summary-prompt').textContent=prompt[1]+' / '+(prompt[0]==='blueprint'?'Blueprint':'Instance');
+  document.getElementById('summary-schedule').textContent=daily?'Daily at '+document.getElementById('time').value:'Every '+document.getElementById('amount').value+' '+document.getElementById('unit').value;
+  document.getElementById('summary-memory').textContent=memory==='inherit'?'Agent default':memory==='channel'?'Channel: '+document.getElementById('channel').value:memory.charAt(0).toUpperCase()+memory.slice(1);
+  document.getElementById('summary-arguments').textContent=document.getElementById('argument').value||'None';
+  document.getElementById('summary-recovery').textContent=recovery==='duration'?'Within '+document.getElementById('recovery-amount').value+' '+document.getElementById('recovery-unit').value.toLowerCase():{default:'Today (default)',none:'No recovery',today:'Today',always:'Any age'}[recovery];
+  updateRelease();
+}
+function updateRelease() {
+  const routineId=document.getElementById('release-id').value;
+  const renamed=routineId!=='release-review';
+  document.getElementById('release-rename-warning').hidden=!renamed;
+  document.getElementById('release-saved-note').hidden=!renamed;
+  document.getElementById('release-summary-id').textContent=routineId||'Untitled routine';
+  const enabled=document.getElementById('release-enabled').checked;
+  document.getElementById('release-summary-enabled').textContent=enabled?'Enabled':'Disabled';
+  document.getElementById('release-summary-enabled').dataset.enabled=String(enabled);
+  const daily=document.querySelector('input[name=release-schedule]:checked').value==='at';
+  document.getElementById('release-interval').hidden=daily;
+  document.getElementById('release-daily').hidden=!daily;
+  const prompt=document.getElementById('release-prompt').value.split(':');
+  document.getElementById('release-summary-prompt').textContent=prompt[1]+' / '+(prompt[0]==='blueprint'?'Blueprint':'Instance');
+  document.getElementById('release-summary-schedule').textContent=daily?'Daily at '+document.getElementById('release-time').value:'Every '+document.getElementById('release-amount').value+' '+document.getElementById('release-unit').value;
+  const memory=document.getElementById('release-memory').value;
+  document.getElementById('release-channel').hidden=memory!=='channel';
+  document.getElementById('release-summary-memory').textContent=memory==='inherit'?'Agent default':memory==='channel'?'Channel: '+document.getElementById('release-channel').value:memory.charAt(0).toUpperCase()+memory.slice(1);
+  document.getElementById('release-summary-arguments').textContent=document.getElementById('release-argument').value||'None';
+  const recovery=document.getElementById('release-recovery').value;
+  document.getElementById('release-recovery-duration').hidden=recovery!=='duration';
+  document.getElementById('release-summary-recovery').textContent=recovery==='duration'?'Within '+document.getElementById('release-recovery-amount').value+' '+document.getElementById('release-recovery-unit').value.toLowerCase():{default:'Today (default)',none:'No recovery',today:'Today',always:'Any age'}[recovery];
+}
+document.addEventListener('input',update);
+document.addEventListener('change',update);
+document.getElementById('discard').addEventListener('click',()=>{
+  document.getElementById('routine-id').value='architecture-boundary-audit';
+  document.getElementById('enabled').checked=true;
+  document.querySelector('input[name=schedule][value=every]').checked=true;
+  document.querySelector('input[name=release-schedule][value=at]').checked=true;
+  document.getElementById('release-enabled').checked=false;
+  for(const [key,value] of Object.entries({id:'release-review',prompt:'blueprint:release-review',amount:'7',unit:'days',time:'09:00',memory:'routine',channel:'brand-strategy',argument:'',recovery:'default','recovery-amount':'48','recovery-unit':'Hours'})) document.getElementById('release-'+key).value=value;
+  for(const [key,value] of Object.entries({prompt:'blueprint:architecture-boundary-audit',amount:'7',unit:'days',time:'09:00',memory:'routine',channel:'brand-strategy',argument:'--brief',recovery:'default','recovery-amount':'48','recovery-unit':'Hours'})) document.getElementById(key).value=value;
+  update();
+});
+update();
+</script>
+</body>
+</html>
