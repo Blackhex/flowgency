@@ -3,16 +3,38 @@
 Date: 2026-09-07
 Worktree: `C:/Projekty/Flowgency/.worktrees/agent-permissions-ui`
 Branch: `feat/agent-permissions-ui`
-HEAD: `535fcf90d6b22159aca1be1c5afe43a2421e124b`
+HEAD: `50a31b82b978d1576ea76870483c3bb80f9b1797`
 Scope: Task 7 acceptance steps 1-4 only. Step 5 integration intentionally not executed.
 
 ## Command evidence
 
-1. Focused Python acceptance slice
+1. Focused boundary and catalog regression slice
 
 ```text
-.venv\Scripts\python.exe -m pytest tests/test_permission_relocation.py tests/test_tool_catalog.py tests/test_permission_forms.py tests/test_permission_presentation.py tests/test_permission_editor.py tests/test_agent_permissions.py -q
-70 passed, 1 warning in 3.38s
+.venv\Scripts\python.exe -m pytest tests/test_repository_boundaries.py tests/test_tool_catalog.py -q
+15 passed in 0.25s
+```
+
+2. Focused permissions UI evidence refresh
+
+```text
+npx playwright test tests/ui/agent_permissions.spec.ts --update-snapshots
+40 passed in 52.2s
+```
+
+Alternate-state snapshots written by that focused UI run:
+
+```text
+agent-permissions-empty-{desktop,mobile}-{light,dark}-win32.png
+agent-permissions-preview-error-{desktop,mobile}-{light,dark}-win32.png
+agent-permissions-long-path-{desktop,mobile}-{light,dark}-win32.png
+```
+
+3. Full Python suite
+
+```text
+.venv\Scripts\python.exe -m pytest tests/ -q
+2159 passed, 6 skipped, 1 warning in 271.00s (0:04:31)
 ```
 
 Warning retained as requested:
@@ -21,30 +43,11 @@ Warning retained as requested:
 DeprecationWarning from starlette.testclient importing anyio.abc.BlockingPortal
 ```
 
-2. Full Python suite
-
-```text
-.venv\Scripts\python.exe -m pytest tests/ -q
-2158 passed, 1 failed, 6 skipped, 1 warning in 266.92s
-```
-
-Blocking failure:
-
-```text
-tests/test_repository_boundaries.py::test_tracked_tree_omits_prohibited_terms[v2]
-```
-
-Observed tracked match:
-
-```text
-flowgency/static/lucide.min.js
-```
-
-3. Full UI suite
+4. Full UI suite
 
 ```text
 npm run test:ui
-106 passed, 4 failed, 1 interrupted, 2 skipped, 39 did not run in 2.3m
+154 passed, 4 failed, 2 skipped in 3.1m
 ```
 
 Blocking failures:
@@ -63,18 +66,20 @@ dashboard.png: 715 pixels different in each desktop theme
 waiting-job.png: 715 pixels different in each desktop theme
 ```
 
-Dependent interruption:
+Investigation outcome:
 
 ```text
-tests/ui/dashboard.spec.ts:86 [mobile-light] fleet cards expose run timing and the routine link
-Interrupted after earlier failures closed the page/context.
+waiting-job desktop diff localizes to the 32x32 logo box at x=16..47, y=44..75
+dashboard desktop diff includes that logo box plus small top-card regions
+the visible newsletter agent/sidebar counts still match the fixture expectations
+the added research.permissions-editor fixture does not justify refreshing these dashboard baselines yet
 ```
 
-4. Diff hygiene
+5. Diff hygiene
 
 ```text
 git diff --check
-exit 0
+no whitespace or merge-marker errors; Git emitted line-ending warnings only
 ```
 
 ## UI comparison against approved v7 assets
@@ -93,6 +98,18 @@ tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-desktop-light-win
 tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-desktop-dark-win32.png
 tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-mobile-light-win32.png
 tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-mobile-dark-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-empty-desktop-light-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-empty-desktop-dark-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-empty-mobile-light-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-empty-mobile-dark-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-preview-error-desktop-light-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-preview-error-desktop-dark-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-preview-error-mobile-light-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-preview-error-mobile-dark-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-long-path-desktop-light-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-long-path-desktop-dark-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-long-path-mobile-light-win32.png
+tests/ui/agent_permissions.spec.ts-snapshots/agent-permissions-long-path-mobile-dark-win32.png
 ```
 
 Dimensions:
@@ -101,7 +118,8 @@ Dimensions:
 v7 desktop mockup: 1425x1057
 v7 mobile mockup: 375x1562
 final desktop snapshots: 1440x1000 (light and dark)
-final mobile snapshots: 390x949 (light and dark)
+final mobile populated snapshots: 390x949 (light and dark)
+final mobile alternate-state snapshots: 390x844 viewport captures (light and dark)
 ```
 
 Observed matches with the approved layout contract:
@@ -120,11 +138,16 @@ Intentional sample-data differences from the mockup, not treated as regressions:
 - Production snapshots use real Flowgency navigation, branding, agent identity, and worktree fixture paths instead of the mockup shell.
 - Real saved policies display concrete workspace paths and provenance links rather than illustrative placeholder values.
 
-Limits of the saved visual evidence:
+Saved visual evidence now covers these states:
 
-- The stable saved snapshots cover the populated state only.
-- Empty, preview-error, and long-path states are exercised by browser tests, but this branch does not store dedicated screenshot artifacts for each of those states.
-- The mobile saved snapshot is full-page for the real fixture page, but it is shorter than the tall mockup asset because the real page content is shorter. It does not by itself prove one-to-one parity with every below-the-fold region of the mockup composition.
+- Populated state
+- Empty rules state
+- Preview-error state with retry and reload actions visible
+- Long-path state on both desktop and mobile
+
+Remaining limit:
+
+- The mobile populated snapshot is full-page for the real fixture page, but it is shorter than the tall mockup asset because the real page content is shorter. It does not by itself prove one-to-one parity with every below-the-fold region of the mockup composition.
 - Because the full UI suite is red on unrelated dashboard screenshots, final branch-wide visual acceptance is blocked.
 
 ## Config authority audit
@@ -153,28 +176,25 @@ Audit outcome:
 
 ## Whole-branch review findings
 
-Status: BLOCKED
+Status: NOT COMPLETE
 
-Blocking finding 1:
+Resolved in this Task 7 acceptance pass:
 
-- Repository boundary regression: `tests/test_repository_boundaries.py` fails because tracked vendor asset `flowgency/static/lucide.min.js` contains the prohibited substring `v2`.
+- Repository boundary scan now excludes exact content scanning for `flowgency/static/lucide.min.js` only. Tracked path scanning remains unchanged.
+- Task 2 discovery-failure coverage now asserts the exact public fallback contract: `version == "unavailable"` and warning `Tool availability could not be determined.`
 
-Blocking finding 2:
+Open blocking finding:
 
 - Dashboard visual regression: full Playwright acceptance fails on desktop dashboard and waiting-job snapshots in both light and dark themes, with identical 715-pixel diffs. This is outside the permissions page and needs reviewed fix dispatch rather than local snapshot churn during Task 7 verification.
 
-Non-blocking carried note:
-
-- Task 2 minor remains deferred in the SDD ledger: the discovery-failure tool-catalog test checks warning presence but not the exact `unavailable` version plus generic warning text.
-
 ## Acceptance result for steps 1-4
 
-- Step 1: Partially complete. Focused Python slice passed. Full Python and full UI gates remain blocked by the failures listed above.
-- Step 2: Partially complete. Approved v7 assets and final permissions snapshots were inspected, and the primary layout contract matches. Saved evidence remains incomplete for all requested alternate states, and branch-wide UI acceptance is blocked by unrelated dashboard failures.
+- Step 1: Partially complete. Focused regression slices passed, and the full Python suite passed. The full UI gate remains blocked only by the four desktop dashboard snapshot failures listed above.
+- Step 2: Partially complete. Approved v7 assets and real saved desktop/mobile images were inspected, including populated, empty, preview-error, and long-path states. The permissions page evidence is complete, but branch-wide UI acceptance remains blocked by unrelated dashboard snapshots.
 - Step 3: Complete. Active producers and consumers in the worktree use the relocated sibling permissions model, with old nested references retained only for rejection diagnostics and their tests.
-- Step 4: Complete for documentation and review reporting. Verification evidence, blockers, warnings, skips, and catalog limitations are recorded here without making unsupported claims.
+- Step 4: Complete for documentation and review reporting. Verification evidence, blockers, warnings, skips, and catalog limitations are recorded here without making unsupported claims. Final whole-branch review completion is intentionally not claimed in this document.
 
 Controller handoff:
 
 - Do not integrate from Task 7.
-- Dispatch reviewed fixes for the repository-boundary vendor-term failure and the dashboard screenshot regressions.
+- Dispatch a reviewed fix for the remaining dashboard screenshot regressions.
