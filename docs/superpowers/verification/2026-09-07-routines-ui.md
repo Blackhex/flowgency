@@ -5,8 +5,17 @@ Worktree: `C:/Projekty/Flowgency/.worktrees/routines-ui`
 Branch: `feat/routines-ui`
 Task 5 implementation source revision: `c4100fa`
 Final green UI test-and-snapshot repair revision: `d2a5d57`
+Final fix-wave source revision: `e3094b6`
 Earlier documentation-only revisions in this evidence trail: `69bac9c`, `a8ef960`
-Scope: Task 5 UI gate investigation and repair only. Step 5 integration was not executed. Controller final review remains pending.
+Scope: Task 5 UI gate investigation and repair plus the final routines save/fallback correction wave. Step 5 integration was not executed. Controller final review remains pending.
+
+## Final fix-wave changes made here
+
+- Guarded the routines save path when `blueprint_library` or `prompt_store` is unavailable so the page returns a recoverable `503`, retains the submitted draft, and does not attempt any config write.
+- Corrected fallback summary rendering so unsupported saved schedule/recovery warnings remain only while the controlling draft fields still match the unsupported baseline. Once the operator edits those controls to supported values, failed saves now show the current corrected draft summary instead of the stale raw warning text.
+- Removed the visible instructional paragraph from the routines heading to match the approved visual contract.
+- Added route regressions covering save-time unavailable services, corrected unsupported daily/interval schedules with unrelated validation failures, unchanged unsupported fallback summaries, retained inputs, and no-write behavior.
+- Refreshed only the corresponding routines screenshots whose diffs were justified by the removed heading paragraph.
 
 ## Task 5 changes made here
 
@@ -16,6 +25,22 @@ Scope: Task 5 UI gate investigation and repair only. Step 5 integration was not 
 - No application templates, runtime behavior, scheduler logic, or configuration-model code was edited in this repair pass.
 
 ## Command evidence
+
+0. Final routines-focused regression and acceptance checks for the fix wave at `e3094b6`:
+
+```text
+.venv/Scripts/python.exe -m pytest tests/test_agent_routines.py -q
+31 passed, 1 warning in 4.69s
+
+.venv/Scripts/python.exe -m pytest tests/test_routine_editor.py tests/test_routine_presentation.py tests/test_agent_routines.py -q
+46 passed, 1 warning in 7.17s
+```
+
+Retained warning in the focused runs:
+
+```text
+DeprecationWarning from starlette.testclient importing anyio.abc.BlockingPortal
+```
 
 1. Prior Python evidence retained from the Task 5 implementation pass because this repair changed only Playwright specs and snapshots:
 
@@ -33,18 +58,32 @@ Retained warning:
 DeprecationWarning from starlette.testclient importing anyio.abc.BlockingPortal
 ```
 
-2. Focused screenshot validation after adding the targeted masks and runtime-value assertions:
+2. Final full Python suite for the fix wave at `e3094b6`:
+
+```text
+.venv/Scripts/python.exe -m pytest tests/ -q
+2222 passed, 6 skipped, 1 warning in 279.13s (0:04:39)
+```
+
+3. Earlier focused screenshot validation after adding the targeted masks and runtime-value assertions:
 
 ```text
 npx playwright test tests/ui/agent_permissions.spec.ts tests/ui/agent_routines.spec.ts --project=desktop-light --project=desktop-dark --project=mobile-light --project=mobile-dark --grep "permissions editor layout remains stable|empty permissions state remains stable|preview failure retains a custom tool draft and retry preview recovers the summary|long path permissions state remains stable|empty routines state renders without overflow" --update-snapshots
 20 passed in 30.0s
 ```
 
-3. Full UI suite from the active worktree after the targeted repair:
+4. Final routines screenshot refreshes justified by diff review after removing the prohibited instructional paragraph:
+
+```text
+npx playwright test tests/ui/agent_routines.spec.ts --grep "routines layout remains stable for enabled and disabled rows|empty routines state renders without overflow|failed preview preserves the edited ID and retry recovers|long text state wraps without clipping" --update-snapshots
+16 passed in 30.2s
+```
+
+5. Final full UI suite from the active worktree after the fix wave and corresponding snapshot refreshes:
 
 ```text
 npm run test:ui
-214 passed, 2 skipped in 4.1m
+214 passed, 2 skipped in 4.4m
 ```
 
 Observed nonfatal fixture-server log line during the focused and full UI runs:
@@ -53,7 +92,7 @@ Observed nonfatal fixture-server log line during the focused and full UI runs:
 Failed to project terminal job job-failed to its decision: 'decision_path'
 ```
 
-4. Diff hygiene after the acceptance run:
+6. Diff hygiene after the acceptance run:
 
 ```text
 git diff --check
@@ -164,13 +203,15 @@ Explicit limitation from the inspected artifacts:
 
 - The full suite still does not persist a dedicated final rename-state screenshot artifact. Rename-state conformance remains covered by the approved rename asset plus the passing browser assertions in `tests/ui/agent_routines.spec.ts`.
 
+- The fix wave removed visible heading copy to satisfy the approved visual contract, so the corresponding routines populated, empty, preview-error, and long-text snapshots were refreshed across the affected desktop and mobile projects after direct diff review.
+
 ## Final UI gate result
 
-The repaired UI gate is green:
+The repaired UI gate is green for the final fix wave at `e3094b6`:
 
 ```text
 npm run test:ui
-214 passed, 2 skipped in 4.1m
+214 passed, 2 skipped in 4.4m
 ```
 
 The two skipped tests are unchanged pre-existing skips. No routines or permissions UI failures remain after the targeted masking repair.
@@ -189,8 +230,9 @@ The full Python suite evidence from the earlier Task 5 pass still covers the beh
 ## Review status
 
 - Task 5 UI gate investigation: complete.
-- Python gate: previously passed and unchanged by this test-only repair.
-- UI gate: passed after targeted masking and limited snapshot refresh.
+- Final routines save/fallback fix wave: complete at `e3094b6`.
+- Python gate: passed, including the final full-suite rerun at `e3094b6`.
+- UI gate: passed after targeted masking, the limited Task 5 snapshot repair, and the corresponding routines snapshot refresh required by the visual-contract fix.
 - Whole-branch approval is still intentionally withheld. This document is verification evidence only; controller final review remains pending.
 
 ## Handoff
