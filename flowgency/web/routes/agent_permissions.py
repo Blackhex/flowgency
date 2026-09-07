@@ -120,6 +120,9 @@ def _rule_rows(draft: PermissionDraft, choices: tuple[tuple[str, ...], ...], unb
         rows.append(
             {
                 "row_id": row_id,
+                "remove_id": f"{row_id}-remove",
+                "custom_tool_id": f"{row_id}-custom-tool",
+                "add_custom_tool_id": f"{row_id}-add-custom-tool",
                 "index": index,
                 "source_index": "" if rule.source_index is None else str(rule.source_index),
                 "target": rule.target,
@@ -156,6 +159,15 @@ def _failure_json(
         },
         status_code=status_code,
     )
+
+
+def _fallback_draft_version(decoded: Any) -> int:
+    if not isinstance(decoded, dict):
+        return 0
+    value = decoded.get("draft_version")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 def render_permissions_page(
@@ -249,13 +261,13 @@ async def permissions_preview(
             status_code=422,
         )
 
-    draft_version = int(decoded.get("draft_version", 0)) if isinstance(decoded, dict) else 0
+    draft_version = _fallback_draft_version(decoded)
     try:
         submitted = EditorRequest.model_validate(decoded)
         snapshot = services.config_store.load()
         _, instance = _get_snapshot_instance(snapshot, team, agent)
         catalog = get_tool_catalog(get_integration(instance.integration))
-        if catalog.warning and not catalog.complete:
+        if catalog.version == "unavailable":
             return _failure_json(
                 submitted.draft_version,
                 "preview-unavailable",

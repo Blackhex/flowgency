@@ -41,7 +41,7 @@
                 <div>
                   <p class="text-xs font-medium uppercase tracking-wide text-gray-500">{% if row.source_index %}Saved rule {{ row.index + 1 }}{% else %}Draft rule {{ row.index + 1 }}{% endif %}</p>
                 </div>
-                <button type="button" class="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600">Remove</button>
+                <button id="{{ row.remove_id }}" type="button" class="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-600">Remove</button>
               </div>
 
               {% if row.target == 'path' %}
@@ -67,8 +67,8 @@
                   {% endfor %}
                 </div>
                 <div class="flex flex-wrap items-center gap-3">
-                  <input type="text" data-custom-tool class="min-w-[220px] flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" placeholder="Add custom tool name">
-                  <button type="button" data-add-custom-tool class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700">Add custom tool</button>
+                  <input id="{{ row.custom_tool_id }}" type="text" data-custom-tool class="min-w-[220px] flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" placeholder="Add custom tool name">
+                  <button id="{{ row.add_custom_tool_id }}" type="button" data-add-custom-tool class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700">Add custom tool</button>
                 </div>
               </div>
             </article>

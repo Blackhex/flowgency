@@ -1,68 +1,59 @@
-<div class="space-y-4 text-sm text-gray-700">
-  <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-    <div class="flex items-center justify-between gap-3">
-      <p class="font-medium text-gray-900">{{ 'Draft preview' if is_draft else 'Saved permissions' }}</p>
-      <span class="rounded-full bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700">{{ summary.mode }}</span>
-    </div>
-    <p class="mt-2 text-xs text-gray-500">
-      Mode source:
-      {% if summary.mode_source == 'team' %}
-      <a href="{{ summary.team_settings_href }}" target="_blank" rel="noopener" class="text-indigo-600 hover:text-indigo-800">Team settings</a>
-      {% else %}
-      Agent override
-      {% endif %}
-    </p>
-  </div>
-
+<div class="space-y-3 text-sm text-gray-700">
+  <p class="text-xs text-gray-500">{{ 'Draft preview' if is_draft else 'Saved permissions' }}</p>
   {% for scope in summary.scopes %}
-  <section class="rounded-lg border border-gray-200 px-4 py-3">
-    <h4 class="font-medium text-gray-900">{{ scope.path if scope.path else 'All paths' }}</h4>
-    {% if scope.all_tools_sources %}
-    <p class="mt-2 font-medium text-gray-900">All tools, including future tools</p>
-    <p class="mt-1 text-xs text-gray-500">
-      Sources:
-      {% for source in scope.all_tools_sources %}
-        {% if not loop.first %}, {% endif %}
-        {% if source == 'team' %}
-        <a href="{{ summary.team_settings_href }}" target="_blank" rel="noopener" class="text-indigo-600 hover:text-indigo-800">Team</a>
-        {% else %}
-        Agent
-        {% endif %}
-      {% endfor %}
-    </p>
-    {% else %}
-    <ul class="mt-2 space-y-2">
-      {% for grant in scope.grants %}
-      <li>
-        <p class="font-medium text-gray-900">{{ grant.name }}</p>
-        <p class="text-xs text-gray-500">
-          Sources:
-          {% for source in grant.sources %}
-            {% if not loop.first %}, {% endif %}
-            {% if source == 'team' %}
-            <a href="{{ summary.team_settings_href }}" target="_blank" rel="noopener" class="text-indigo-600 hover:text-indigo-800">Team</a>
-            {% else %}
-            Agent
-            {% endif %}
-          {% endfor %}
-        </p>
-      </li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-  </section>
+  <div class="flex items-start justify-between gap-4 border-b border-gray-100 pb-3 last:border-b-0 last:pb-0">
+    <p class="font-medium text-gray-900">{{ scope.path if scope.path else 'No-path tools' }}</p>
+    <div class="space-y-1 text-right">
+      {% if scope.all_tools_sources %}
+      <p class="font-medium text-gray-900">All tools, including future tools</p>
+      <p class="text-xs text-gray-500">
+        Sources:
+        {% for source in scope.all_tools_sources %}
+          {% if not loop.first %}, {% endif %}
+          {% if source == 'team' %}
+          <a href="{{ summary.team_settings_href }}" target="_blank" rel="noopener" class="text-indigo-600 hover:text-indigo-800">Team</a>
+          {% else %}
+          Agent
+          {% endif %}
+        {% endfor %}
+      </p>
+      {% elif scope.grants %}
+        {% for grant in scope.grants %}
+        <div>
+          <p class="font-medium text-gray-900">{{ grant.name }}</p>
+          <p class="text-xs text-gray-500">
+            Sources:
+            {% for source in grant.sources %}
+              {% if not loop.first %}, {% endif %}
+              {% if source == 'team' %}
+              <a href="{{ summary.team_settings_href }}" target="_blank" rel="noopener" class="text-indigo-600 hover:text-indigo-800">Team</a>
+              {% else %}
+              Agent
+              {% endif %}
+            {% endfor %}
+          </p>
+        </div>
+        {% endfor %}
+      {% else %}
+      <p class="font-medium text-gray-900">No tools</p>
+      {% endif %}
+    </div>
+  </div>
   {% endfor %}
 
-  <section class="rounded-lg border border-dashed border-gray-300 px-4 py-3">
-    <h4 class="font-medium text-gray-900">Paths without a matching rule</h4>
-    <p class="mt-2 font-medium text-gray-900">{{ 'No access' if summary.mode == 'restricted' else 'All tools' }}</p>
-    <p class="mt-1 text-xs text-gray-500">
-      Mode source:
-      {% if summary.mode_source == 'team' %}
-      <a href="{{ summary.team_settings_href }}" target="_blank" rel="noopener" class="text-indigo-600 hover:text-indigo-800">Team</a>
-      {% else %}
-      Agent
-      {% endif %}
-    </p>
-  </section>
+  <div class="flex items-start justify-between gap-4 border-t border-gray-200 pt-3">
+    <p class="font-medium text-gray-900">Paths without a matching rule</p>
+    <div class="space-y-1 text-right">
+      <p class="font-medium text-gray-900">{{ 'No access' if summary.mode == 'restricted' else 'All tools' }}</p>
+      <p class="text-xs text-gray-500">
+        {{ summary.mode | capitalize }}
+        ({% if summary.mode_source == 'team' %}<a href="{{ summary.team_settings_href }}" target="_blank" rel="noopener" class="text-indigo-600 hover:text-indigo-800">Team</a>{% else %}Agent{% endif %})
+      </p>
+    </div>
+  </div>
+
+  <div class="flex items-start justify-between gap-4 pt-1 text-xs text-gray-500">
+    <p>Configured policy</p>
+    <p class="text-right">Actual enforcement depends on the integration.</p>
+  </div>
 </div>

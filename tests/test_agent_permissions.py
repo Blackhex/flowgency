@@ -91,6 +91,44 @@ def test_permissions_preview_updates_summary_without_writing(monkeypatch, tmp_pa
     assert config_path.read_bytes() == before
 
 
+def test_permissions_preview_allows_default_incomplete_copilot_catalog(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    page = client.get("/newsletter/agents/advisor/permissions")
+    payload = initial_payload(page.text)["draft"]
+    payload["draft_version"] = 7
+
+    response = client.post(
+        "/newsletter/agents/advisor/permissions/preview",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["draft_version"] == 7
+    assert body["issues"] == []
+    assert body["summary_html"] is not None
+    assert "Configured policy" in body["summary_html"]
+    assert "Actual enforcement depends on the integration." in body["summary_html"]
+
+
+def test_permissions_preview_rejects_malformed_draft_version_with_422(monkeypatch, tmp_path, raw_config):
+    _pin_catalog(monkeypatch)
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    payload = initial_payload(client.get("/newsletter/agents/advisor/permissions").text)["draft"]
+    payload["draft_version"] = "bad"
+
+    response = client.post(
+        "/newsletter/agents/advisor/permissions/preview",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "invalid-request"
+    assert body["summary_html"] is None
+    assert any(issue["field"] == "draft_version" for issue in body["issues"])
+
+
 def test_permissions_save_updates_agent_policy_and_redirects(monkeypatch, tmp_path, raw_config):
     _pin_catalog(monkeypatch)
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
@@ -218,6 +256,31 @@ def test_permissions_page_keeps_unsupported_saved_policy_editable(monkeypatch, t
     assert initial["baseline"]["draft"]["rules"][0]["path"].replace("\\", "/").endswith("Research/additional")
 
 
+def test_permissions_page_renders_no_path_scope_as_no_path_tools(monkeypatch, tmp_path, raw_config):
+    _pin_catalog(monkeypatch)
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0]["permissions"] = {
+        "rules": [
+            {"tools": []},
+        ],
+    }
+    config_path.write_text(
+        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    app_mod.refresh_services()
+
+    response = client.get("/newsletter/agents/advisor/permissions")
+
+    assert response.status_code == 200
+    assert "No-path tools" in response.text
+    assert "All paths" not in response.text
+    assert "No tools" in response.text
+    assert "Configured policy" in response.text
+    assert "Actual enforcement depends on the integration." in response.text
+
+
 def test_permissions_initial_payload_escapes_custom_values(monkeypatch, tmp_path, raw_config):
     _pin_catalog(monkeypatch)
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
@@ -247,8 +310,17 @@ def test_permissions_initial_payload_escapes_custom_values(monkeypatch, tmp_path
     assert '<script>alert("x")</script>' in initial["draft"]["draft"]["rules"][0]["selected"]
 
 
-def test_permissions_preview_returns_preview_unavailable_when_catalog_is_transient(monkeypatch, tmp_path, raw_config):
-    _pin_catalog(monkeypatch, _catalog(warning="Tool availability could not be determined.", complete=False))
+def test_permissions_preview_returns_preview_unavailable_when_catalog_is_unavailable(monkeypatch, tmp_path, raw_config):
+    _pin_catalog(
+        monkeypatch,
+        ToolCatalog(
+            integration="copilot",
+            version="unavailable",
+            complete=False,
+            warning="Tool availability could not be determined.",
+            tools=(),
+        ),
+    )
     client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
     payload = initial_payload(client.get("/newsletter/agents/advisor/permissions").text)["draft"]
     payload["draft_version"] = 9
