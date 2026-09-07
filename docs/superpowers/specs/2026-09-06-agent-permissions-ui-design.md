@@ -2,17 +2,20 @@
 
 Date: 2026-09-06
 
+Updated: 2026-09-07 (agent permissions moved alongside runtime at user request).
+
 Status: Design and visual direction approved in conversation; written specification awaiting user review.
 
 ## Goal and scope
 
 Give each configured agent one dedicated **Permissions** tab with a fully structured editor and an effective-policy summary. Operators must not need YAML or knowledge of its optional fields to define permissions.
 
-Keep the existing permission configuration schema, policy resolution, validation, and enforcement semantics. The user approved one supporting addition: read-only available-tool metadata supplied by integrations. This is not an integration settings editor or a change to what integrations enforce.
+Keep the existing permission rule structure, policy resolution semantics, validation constraints, and enforcement semantics. At the user's request, move agent `runtime.permissions` to agent `permissions`, alongside `runtime`. This is an intentional configuration-model change; team permissions remain under team `runtime.permissions` because team configuration is out of scope. The user also approved read-only available-tool metadata supplied by integrations. This is not an integration settings editor or a change to what integrations enforce.
 
 In scope:
 
 - Agent permission rules and the existing agent-level mode override.
+- Relocation of agent permissions alongside runtime, including the corresponding model, reader, writer, validation, example, and test updates.
 - All existing rule shapes: path-bearing and pathless, explicit tool names, unbounded tools, and empty tool lists.
 - Read-only effective access with per-tool provenance and team settings links.
 - Removal of the misleading Profile write checkbox and permission editing/preview from Runtime.
@@ -22,7 +25,7 @@ Out of scope:
 
 - Team permission editing or changes to Team Settings.
 - Integration selection/configuration, CLI permission enforcement, or new tool capabilities.
-- New permission semantics, a schema migration, deny rules, or startup conversion.
+- New permission semantics, deny rules, automatic configuration migration, or startup conversion. The explicitly requested agent-field relocation is in scope.
 - Changes to agent blueprints, prompts, routines, memory, dispatch, jobs, or decision execution.
 - A YAML editor or advanced schema-oriented mode.
 
@@ -81,7 +84,27 @@ Use the same catalog snapshot for display, preview, and save mapping. Resolve it
 
 ### Automatic configuration mapping
 
-The configuration remains `runtime.permissions` with `mode` and `rules`; each rule still has optional `path` and `tools`.
+Agent configuration uses `permissions` alongside `runtime`; `permissions` retains `mode` and `rules`, and each rule retains optional `path` and `tools`. Agent `runtime` contains the timeout setting, not permissions:
+
+```yaml
+agents:
+	- name: core-engineer
+		blueprint: core-engineer
+		integration: copilot
+		runtime:
+			timeout: 1800
+		permissions:
+			mode: restricted
+			rules:
+				- path: .
+					tools: [read, search, write]
+```
+
+Omitting agent `permissions.mode` continues to inherit team `runtime.permissions.mode`. Agent `permissions.rules` remains additive to team `runtime.permissions.rules`; same-path tools are still unioned. Relative paths still resolve against the team workspace. Omitting agent `permissions` means inherited mode and no additional rules; omitting agent `runtime` means inherited timeout.
+
+Update agent permission consumers and writers consistently, including path resolution, effective-policy construction, instance/compilation inputs, setup-generated configuration, and validation diagnostics. This is a structural relocation, not a policy change. Do not put a second canonical permissions block inside runtime or use an old-field fallback that can hide conflicting configuration.
+
+Reject legacy agent `runtime.permissions` with an actionable diagnostic identifying the agent and directing the operator to move the block to sibling `permissions`, leaving runtime settings untouched. If both locations are present, reject the configuration rather than choosing, unioning, or overwriting one. In particular, the existing permissive runtime extras handling must not silently accept and ignore an old permissions block. Do not rewrite the user's live configuration or add startup conversion as part of this feature. Existing configurations need an explicit operator edit before use with the relocated agent field. Team `runtime.permissions` remains valid and unchanged.
 
 | UI state | Existing configuration representation |
 | --- | --- |
@@ -99,7 +122,7 @@ No-op fidelity takes precedence over normalization. If a rule's tool selection i
 
 For a changed tool selection, apply the table above. Empty selections must map to an empty list even if the catalog contains zero entries. Never silently discard an existing unbounded grant or normalize it into a finite list just by opening and saving the page.
 
-An omitted/null tools field is an unbounded grant, including future integration tools. Show that fact in the effective summary; do not reintroduce a schema selector. When a complete catalog is available, show all corresponding checkboxes checked. Where the catalog is incomplete, preserve existing unbounded rules unchanged; an explicit checkbox edit can narrow the rule to the selected finite list, visibly reflected in the draft preview. Creating or restoring an unbounded grant requires a complete catalog. If that cannot be provided for an integration, report the limitation rather than claiming full all-tools editing support or broadening a finite grant. This is an implementation acceptance constraint, not authorization to change the permission model or add an All tools control.
+An omitted/null tools field is an unbounded grant, including future integration tools. Show that fact in the effective summary; do not reintroduce a schema selector. When a complete catalog is available, show all corresponding checkboxes checked. Where the catalog is incomplete, preserve existing unbounded rules unchanged; an explicit checkbox edit can narrow the rule to the selected finite list, visibly reflected in the draft preview. Creating or restoring an unbounded grant requires a complete catalog. If that cannot be provided for an integration, report the limitation rather than claiming full all-tools editing support or broadening a finite grant. This is an implementation acceptance constraint, not authorization for further permission-model changes beyond the agent-field relocation or for adding an All tools control.
 
 ## Effective summary
 
@@ -124,7 +147,7 @@ Suggested ownership, without prescribing unnecessary framework changes:
 1. Integration tool catalog: read-only tool descriptions and completeness, independent of policy enforcement.
 2. Permission form adapter: decode structured fields, preserve original rule shape, map changed selections, and produce field-addressable validation errors.
 3. Permission preview presenter: invoke the existing resolver on an in-memory candidate and annotate provenance for the summary.
-4. Permission configuration patch: change only the selected instance's permissions using the existing revision-checked store.
+4. Permission configuration patch: change only the selected instance's sibling `permissions` block using the existing revision-checked store; never write agent `runtime.permissions`.
 5. Agent Permissions routes/template/client script: rendering, editing, asynchronous preview sequencing, and save/discard states.
 
 Expose GET and POST at `/{team}/agents/{agent}/permissions`, plus a read-only POST preview endpoint beneath that route. POST here describes the request method, not a persistence operation: preview only operates on an in-memory candidate and never writes configuration. Use structured form/JSON parsing, not an editable YAML payload.
@@ -154,6 +177,8 @@ Use focused tests while implementing and run the complete suite before review an
 
 Required focused coverage:
 
+- Agent sibling `permissions` accepted, legacy nested agent permissions and both-location conflicts rejected with relocation guidance, team nested permissions unchanged, and no automatic live-config rewrites.
+- Equivalent effective policy, mode inheritance, relative path resolution, and eligibility before and after an explicit agent-field relocation; configuration producers emit only the new agent location.
 - Dedicated tab navigation; removal of the Profile checkbox and Runtime permission surfaces; continued identity and timeout editing without permission changes.
 - All three Mode values, including clearing an override without losing rules or other runtime fields.
 - Absolute and relative paths, pathless entries, empty tools, empty rule lists, arbitrary custom names, repeated paths, and duplicate no-path entries.
