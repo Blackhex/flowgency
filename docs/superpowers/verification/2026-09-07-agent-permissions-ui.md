@@ -3,7 +3,9 @@
 Date: 2026-09-07
 Worktree: `C:/Projekty/Flowgency/.worktrees/agent-permissions-ui`
 Branch: `feat/agent-permissions-ui`
-Baseline HEAD: `b24e514`
+Source revision for focused boundary/catalog evidence, permissions snapshot refresh, and the full Python suite: `50a31b82b978d1576ea76870483c3bb80f9b1797`
+Source revision for the dashboard snapshot refresh, focused dashboard verification, and the final full UI suite: `f1699cfeb53aa1073bd11884de34917984daa74c`
+Documentation-only verification commits: `b24e514f91a640493346094d496a4819b50b53f8`, `4d115a20461626ca27998c7cbebea9de5b4b18cf`
 Scope: Task 7 acceptance steps 1-4 only. Step 5 integration intentionally not executed.
 
 ## Command evidence
@@ -32,6 +34,8 @@ agent-permissions-long-path-{desktop,mobile}-{light,dark}-win32.png
 
 3. Full Python suite
 
+Recorded against source revision `50a31b82b978d1576ea76870483c3bb80f9b1797`, then written into this verification record by the later docs-only commit `b24e514f91a640493346094d496a4819b50b53f8`.
+
 ```text
 .venv\Scripts\python.exe -m pytest tests/ -q
 2159 passed, 6 skipped, 1 warning in 271.00s (0:04:31)
@@ -45,6 +49,8 @@ DeprecationWarning from starlette.testclient importing anyio.abc.BlockingPortal
 
 4. Focused dashboard investigation and refresh
 
+The logo-history investigation compared the tested branch state through `f1699cfeb53aa1073bd11884de34917984daa74c`, and the refreshed dashboard evidence below was recorded afterward in the docs-only commit `4d115a20461626ca27998c7cbebea9de5b4b18cf`.
+
 ```text
 npm run test:ui -- tests/ui/dashboard.spec.ts
 12 passed in 13.4s
@@ -53,8 +59,8 @@ npm run test:ui -- tests/ui/dashboard.spec.ts
 Investigation evidence:
 
 ```text
-git diff 6559632..HEAD -- flowgency/static flowgency/templates/base.html tests/ui/server.py tests/ui/fixtures/config.yaml tests/ui/dashboard.spec.ts
-Only tests/ui/fixtures/config.yaml changed in this range; no branch-local edit touched the shared logo asset, base template, fixture server, or dashboard spec.
+git diff 6559632..f1699cf -- flowgency/static flowgency/templates/base.html tests/ui/server.py tests/ui/fixtures/config.yaml tests/ui/dashboard.spec.ts
+Only tests/ui/fixtures/config.yaml changed in this range; no branch-local edit through f1699cf touched the shared logo asset, base template, fixture server, or dashboard spec.
 
 git show 5c84809 -- flowgency/static/icon.svg
 Removed the light background rect from flowgency/static/icon.svg.
@@ -77,6 +83,8 @@ failed-job.png: 715 pixels different in each desktop theme once waiting-job no l
 Reviewed actual/expected/diff artifacts showed the visible drift in the shared sidebar logo box: expected snapshots still had the white square backing, while current renders used the transparent post-5c84809 icon on the dark sidebar. No unintended content or layout regression was visible in the dashboard cards or job detail bodies.
 
 5. Full UI suite
+
+Recorded against source revision `f1699cfeb53aa1073bd11884de34917984daa74c` after the dashboard logo snapshot refresh, then written into this verification record by the later docs-only commit `4d115a20461626ca27998c7cbebea9de5b4b18cf`.
 
 ```text
 npm run test:ui
