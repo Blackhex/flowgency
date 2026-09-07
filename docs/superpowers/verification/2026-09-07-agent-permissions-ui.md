@@ -5,8 +5,9 @@ Worktree: `C:/Projekty/Flowgency/.worktrees/agent-permissions-ui`
 Branch: `feat/agent-permissions-ui`
 Source revision for focused boundary/catalog evidence, permissions snapshot refresh, and the full Python suite: `50a31b82b978d1576ea76870483c3bb80f9b1797`
 Source revision for the dashboard snapshot refresh, focused dashboard verification, and the final full UI suite: `f1699cfeb53aa1073bd11884de34917984daa74c`
+Source revision for the exact-match permissions fix wave and final full-suite reruns: `f2814f7a7071c9c982832d44942ad4aafc800533`
 Documentation-only verification commits: `b24e514f91a640493346094d496a4819b50b53f8`, `4d115a20461626ca27998c7cbebea9de5b4b18cf`
-Scope: Task 7 acceptance steps 1-4 only. Step 5 integration intentionally not executed.
+Scope: Task 7 acceptance steps 1-4 plus the final exact-match serializer fix-wave verification. Step 5 integration intentionally not executed.
 
 ## Command evidence
 
@@ -97,6 +98,32 @@ npm run test:ui
 git diff --check
 no whitespace or merge-marker errors; Git emitted line-ending warnings only
 ```
+
+7. Final full Python suite after the exact-match permissions fix wave
+
+Recorded against source revision `f2814f7a7071c9c982832d44942ad4aafc800533`.
+
+```text
+.venv\Scripts\python.exe -m pytest tests/ -q
+2163 passed, 6 skipped, 1 warning in 281.58s (0:04:41)
+```
+
+Warning retained as requested:
+
+```text
+DeprecationWarning from starlette.testclient importing anyio.abc.BlockingPortal
+```
+
+8. Final full UI suite after the exact-match permissions fix wave
+
+Recorded against source revision `f2814f7a7071c9c982832d44942ad4aafc800533`.
+
+```text
+npm run test:ui
+158 passed, 2 skipped (3.9m)
+```
+
+The first uncaptured full UI invocation in this fix wave was interrupted and is not treated as acceptance evidence. The captured rerun above is the clean final result.
 
 ## UI comparison against approved v7 assets
 
@@ -192,6 +219,11 @@ Audit outcome:
 ## Whole-branch review findings
 
 Status: COMPLETE FOR TASK 7 STEPS 1-4
+
+Final fix-wave note:
+
+- The exact-match serializer correction for complete catalogs is verified at `f2814f7a7071c9c982832d44942ad4aafc800533` by the clean full Python and full UI reruns above.
+- This record does not claim the final whole-branch review is approved; it only records the fix-wave evidence for controller re-review.
 
 Resolved in this Task 7 acceptance pass:
 
