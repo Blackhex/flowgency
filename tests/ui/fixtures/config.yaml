@@ -105,4 +105,15 @@ teams:
           timeout: 900
         default_memory:
           scope: agent
+        routines:
+          - id: research-digest
+            prompt:
+              scope: blueprint
+              name: publish-draft
+            enabled: false
+            arguments: [--fixtures]
+            schedule:
+              every: "2h"
+            memory:
+              scope: routine
     workspaces: []
