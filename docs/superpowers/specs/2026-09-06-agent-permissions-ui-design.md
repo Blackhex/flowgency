@@ -4,7 +4,7 @@ Date: 2026-09-06
 
 Updated: 2026-09-07 (team and agent permissions moved alongside runtime at user request).
 
-Status: Design and visual direction approved in conversation; written specification awaiting user review.
+Status: Design, later amendments, and written specification approved in conversation.
 
 ## Goal and scope
 

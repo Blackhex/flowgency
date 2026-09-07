@@ -77,7 +77,7 @@ Tasks 1 and 2 are independently reviewable, but use the listed sequence to avoid
 - Produces: old nested-key error `code="relocated-permissions"`, `field=f"{scope}.runtime.permissions"`, with guidance to move to `f"{scope}.permissions"`.
 - Preserves: resolver signatures, rule semantics, accepted schema version, timeout defaults, and existing Team Settings HTTP form fields.
 
-- [ ] **Step 1: Pin the structural regression before changing fixtures.** Create the test file with this test; `raw_config` is the existing conftest fixture. Add the four parameterized cases for team-only old key, agent-only old key, team both locations, and agent both locations using the same fixture.
+- [x] **Step 1: Pin the structural regression before changing fixtures.** Create the test file with this test; `raw_config` is the existing conftest fixture. Add the four parameterized cases for team-only old key, agent-only old key, team both locations, and agent both locations using the same fixture.
 
 ```python
 from copy import deepcopy
@@ -124,9 +124,9 @@ def test_nested_policy_never_silently_ignored(raw_config, tmp_path, level, also_
     assert any(issue.code == "relocated-permissions" for issue in caught.value.issues)
 ```
 
-- [ ] **Step 2: Run the new tests and observe assertion failures.** Run `python -m pytest tests/test_permission_relocation.py -q`. The current parser ignores sibling permissions and accepts the old nested location, so the new assertions must fail for those reasons, not a missing import or broken test fixture.
+- [x] **Step 2: Run the new tests and observe assertion failures.** Run `python -m pytest tests/test_permission_relocation.py -q`. The current parser ignores sibling permissions and accepts the old nested location, so the new assertions must fail for those reasons, not a missing import or broken test fixture.
 
-- [ ] **Step 3: Relocate the model and reject the old keys.** Remove the `permissions` member from both runtime classes and add it to both owner classes with the same default factory. Add the guard to both runtime validation functions; do not remove the existing superseded-key guards. Change their old corrective hint from `runtime.permissions` to `permissions`.
+- [x] **Step 3: Relocate the model and reject the old keys.** Remove the `permissions` member from both runtime classes and add it to both owner classes with the same default factory. Add the guard to both runtime validation functions; do not remove the existing superseded-key guards. Change their old corrective hint from `runtime.permissions` to `permissions`.
 
 ```python
 def _reject_nested_permissions(runtime: Any, scope: str) -> list[ValidationIssue]:
@@ -143,7 +143,7 @@ def _reject_nested_permissions(runtime: Any, scope: str) -> list[ValidationIssue
 
 `_resolve_permission_paths` should receive the owner dictionary, not its runtime dictionary. Rename its local `runtime_entry` parameter to `owner_entry`, keeping the same logic for `owner_entry["permissions"]`. In `_prepare_for_model`, pass `resolved_team` and `agent_entry`; do not manufacture an explicit `mode` where it was omitted. Update resolver reads to `team.permissions` and `agent.permissions`, including `"mode" in agent.permissions.model_fields_set` for inheritance.
 
-- [ ] **Step 4: Move raw writers in the same task.** `create_team_state` creates sibling blocks. `patch_team_settings_state` writes `team.setdefault("permissions", {})`; preserve `runtime["timeout"]`. Until Task 5 removes the old agent Runtime rule form, its existing save handler and `patch_agent_runtime` must write sibling agent permissions, so this intermediate commit is functional rather than emitting rejected configuration.
+- [x] **Step 4: Move raw writers in the same task.** `create_team_state` creates sibling blocks. `patch_team_settings_state` writes `team.setdefault("permissions", {})`; preserve `runtime["timeout"]`. Until Task 5 removes the old agent Runtime rule form, its existing save handler and `patch_agent_runtime` must write sibling agent permissions, so this intermediate commit is functional rather than emitting rejected configuration.
 
 ```python
 "runtime": {"timeout": patch.runtime_timeout},
@@ -155,7 +155,7 @@ def _reject_nested_permissions(runtime: Any, scope: str) -> list[ValidationIssue
 
 Update `admin_teams._team_settings_response` to `permissions = team_cfg.permissions`; update `_runtime_context` and `_apply_runtime_patch` in agent detail. Update permission path and integration validation diagnostics to `permissions.mode` / `permissions.rules`. Do not edit CLI enforcement switches or integration sandbox algorithms.
 
-- [ ] **Step 5: Update active configuration fixtures and producers structurally.** Search tracked active files from the worktree with `rg -n 'runtime\.permissions|"permissions"|permissions:' flowgency tests examples kb config.yaml.example README.md AGENTS.md .github/skills`. For each owner dictionary/YAML block containing nested permissions, move that block up one level; do not perform a blind string replacement of all `runtime` references. Keep deliberately old-shape rejection tests old. Update expected diagnostics and model attribute reads. Inspect `flowgency/instances.py` and instance/cache digest tests: model dumps may relocate automatically, but effective permission content must remain represented in compilation identity.
+- [x] **Step 5: Update active configuration fixtures and producers structurally.** Search tracked active files from the worktree with `rg -n 'runtime\.permissions|"permissions"|permissions:' flowgency tests examples kb config.yaml.example README.md AGENTS.md .github/skills`. For each owner dictionary/YAML block containing nested permissions, move that block up one level; do not perform a blind string replacement of all `runtime` references. Keep deliberately old-shape rejection tests old. Update expected diagnostics and model attribute reads. Inspect `flowgency/instances.py` and instance/cache digest tests: model dumps may relocate automatically, but effective permission content must remain represented in compilation identity.
 
 The allowable fixture-only transformation is:
 
@@ -170,9 +170,9 @@ for team in raw["teams"].values():
 
 Use this as an editing recipe, not a runtime loader, autouse test fixture, or committed compatibility helper. Check diffs so every active example uses the new shape and negative tests still prove rejection. Update active documentation to explain manual relocation at both levels and no fallback; preserve historic design documents.
 
-- [ ] **Step 6: Prove the task and its compatibility boundary.** Run `python -m pytest tests/test_permission_relocation.py tests/test_config_normalization.py tests/test_config_patches.py tests/test_effective_policy.py tests/test_executor_eligibility.py tests/test_agent_detail.py -q`, then `python -m pytest tests/ -q`. Require green results including existing team settings, setup, clone/move, cache, job, and CLI tests. Assert fixtures retain timeout and unrelated owner data; runtime readers must not create directories at rule target paths.
+- [x] **Step 6: Prove the task and its compatibility boundary.** Run `python -m pytest tests/test_permission_relocation.py tests/test_config_normalization.py tests/test_config_patches.py tests/test_effective_policy.py tests/test_executor_eligibility.py tests/test_agent_detail.py -q`, then `python -m pytest tests/ -q`. Require green results including existing team settings, setup, clone/move, cache, job, and CLI tests. Assert fixtures retain timeout and unrelated owner data; runtime readers must not create directories at rule target paths.
 
-- [ ] **Step 7: Review and commit the coherent relocation.** Inspect `git diff --check` and `git diff --stat`; stage only the files changed for this task using explicit path lists from that diff. Commit `refactor(config)!: lift team and agent permissions` with body/footer explaining old nested fields are rejected and `BREAKING CHANGE: move runtime.permissions to permissions on teams and agents`. Complete a task review before starting the catalog work.
+- [x] **Step 7: Review and commit the coherent relocation.** Inspect `git diff --check` and `git diff --stat`; stage only the files changed for this task using explicit path lists from that diff. Commit `refactor(config)!: lift team and agent permissions` with body/footer explaining old nested fields are rejected and `BREAKING CHANGE: move runtime.permissions to permissions on teams and agents`. Complete a task review before starting the catalog work.
 
 ### Task 2: Add a Truthful Read-Only Tool Catalog
 
@@ -185,7 +185,7 @@ Use this as an editing recipe, not a runtime loader, autouse test fixture, or co
 - Produces: `ToolDescriptor`, `ToolCatalog`, `catalog_id(catalog: ToolCatalog) -> str`, `available_names(catalog: ToolCatalog, target: RuleTarget) -> tuple[str, ...]`, and `get_tool_catalog(integration: BaseIntegration) -> ToolCatalog` in `tool_catalog.py`.
 - Produces: `BaseIntegration.permission_tool_catalog() -> ToolCatalog`; default is incomplete/unknown, not complete/empty.
 
-- [ ] **Step 1: Write metadata tests with a closed fake catalog.** Define the public immutable types below and use them in tests before implementation. `targets=()` means applicability is unknown, so offer the name on either rule type without claiming path enforcement. `version` identifies the vocabulary evidence; completeness is global to the integration, not completeness of a filtered subset.
+- [x] **Step 1: Write metadata tests with a closed fake catalog.** Define the public immutable types below and use them in tests before implementation. `targets=()` means applicability is unknown, so offer the name on either rule type without claiming path enforcement. `version` identifies the vocabulary evidence; completeness is global to the integration, not completeness of a filtered subset.
 
 ```python
 from dataclasses import dataclass
@@ -232,9 +232,9 @@ def test_detection_failure_is_not_empty_success(monkeypatch):
     assert catalog.warning
 ```
 
-- [ ] **Step 2: Run `python -m pytest tests/test_tool_catalog.py -q` and confirm missing catalog API failures.** Keep production capability detection unmodified.
+- [x] **Step 2: Run `python -m pytest tests/test_tool_catalog.py -q` and confirm missing catalog API failures.** Keep production capability detection unmodified.
 
-- [ ] **Step 3: Implement the small catalog contract.** Hash a canonical JSON object containing integration, version, ordered `(name, targets)` pairs, and completeness; exclude the human warning string. Validate descriptor identifiers are nonempty strings, names unique, and target values from the literal set; bad metadata follows the incomplete failure path. `get_tool_catalog` catches discovery failures and returns `ToolCatalog(integration.name, "unavailable", warning="Tool availability could not be determined.")` without exposing raw exception text. Use `TYPE_CHECKING` for the BaseIntegration import to avoid a circular import.
+- [x] **Step 3: Implement the small catalog contract.** Hash a canonical JSON object containing integration, version, ordered `(name, targets)` pairs, and completeness; exclude the human warning string. Validate descriptor identifiers are nonempty strings, names unique, and target values from the literal set; bad metadata follows the incomplete failure path. `get_tool_catalog` catches discovery failures and returns `ToolCatalog(integration.name, "unavailable", warning="Tool availability could not be determined.")` without exposing raw exception text. Use `TYPE_CHECKING` for the BaseIntegration import to avoid a circular import.
 
 ```python
 import hashlib
@@ -268,9 +268,9 @@ def permission_tool_catalog(self) -> ToolCatalog:
 
 Other integrations retain the honest unknown fallback and configured/custom names remain editable. Do not invent a complete native CLI catalog without evidence, silently map actual CLI names onto new permission categories, or install/run external agents to discover tools.
 
-- [ ] **Step 4: Test the completeness acceptance boundary.** Add tests for invalid duplicate metadata, unknown target applicability, identity changes, filtered target lists, and `complete=True` on an empty fake catalog (must never map to all tools). Record in `kb/contributing-integrations.md` that a provider may mark complete only for a demonstrably closed vocabulary including extension tools; version changes require a new identity. Known catalogs may be partial, so creating/restoring an unbounded grant remains unavailable for those providers, exactly as the spec's safety fallback requires. Make this limitation explicit in completion evidence; do not claim complete YAML expressiveness for an incomplete provider. Request a design revision rather than adding an All tools toggle if full unbounded editing is later required without a complete provider.
+- [x] **Step 4: Test the completeness acceptance boundary.** Add tests for invalid duplicate metadata, unknown target applicability, identity changes, filtered target lists, and `complete=True` on an empty fake catalog (must never map to all tools). Record in `kb/contributing-integrations.md` that a provider may mark complete only for a demonstrably closed vocabulary including extension tools; version changes require a new identity. Known catalogs may be partial, so creating/restoring an unbounded grant remains unavailable for those providers, exactly as the spec's safety fallback requires. Make this limitation explicit in completion evidence; do not claim complete YAML expressiveness for an incomplete provider. Request a design revision rather than adding an All tools toggle if full unbounded editing is later required without a complete provider.
 
-- [ ] **Step 5: Run `python -m pytest tests/test_tool_catalog.py tests/test_capability_detection.py tests/test_copilot_capability_detection.py -q`, review, and commit.** Commit `feat(permissions): expose read-only tool catalogs`. Runtime capability detection and enforcement must produce the same results as before.
+- [x] **Step 5: Run `python -m pytest tests/test_tool_catalog.py tests/test_capability_detection.py tests/test_copilot_capability_detection.py -q`, review, and commit.** Commit `feat(permissions): expose read-only tool catalogs`. Runtime capability detection and enforcement must produce the same results as before.
 
 ### Task 3: Map Structured Drafts Without Losing Grants
 
@@ -282,7 +282,7 @@ Other integrations retain the honest unknown fallback and configured/custom name
 - Produces: `RuleDraft`, `PermissionDraft`, `PermissionForm`, `PermissionFormError`; `build_form(agent_raw: dict[str, Any], catalog: ToolCatalog) -> PermissionForm`; `serialize_permissions(agent_raw: dict[str, Any], draft: PermissionDraft, catalog: ToolCatalog) -> dict[str, Any] | None`.
 - `None` from serialization means the entire original permissions block was absent and still is; an empty dictionary is a present block and must not be treated as absence.
 
-- [ ] **Step 1: Define the wire contract and failing round-trip tests.** Use Pydantic with strict validation and `extra="forbid"`, not YAML or unvalidated dictionaries from the browser. `source_index` is an optional index into server-loaded raw rules; new rules have `None`. It is not a permission grant or a trusted original rule payload. `mode="inherit"` is a UI value, never written to config.
+- [x] **Step 1: Define the wire contract and failing round-trip tests.** Use Pydantic with strict validation and `extra="forbid"`, not YAML or unvalidated dictionaries from the browser. `source_index` is an optional index into server-loaded raw rules; new rules have `None`. It is not a permission grant or a trusted original rule payload. `mode="inherit"` is a UI value, never written to config.
 
 ```python
 from dataclasses import dataclass
@@ -341,9 +341,9 @@ def test_path_only_edit_never_unbounds_explicit_tools():
     assert serialize_permissions(agent, draft, catalog)["rules"] == [{"path": "docs", "tools": ["read"]}]
 ```
 
-- [ ] **Step 2: Run `python -m pytest tests/test_permission_forms.py -q` to establish the red case.** Add tests for absent permissions, absent rules, explicit empty rules, duplicate path entries, and null path/tool fields in the original raw configuration.
+- [x] **Step 2: Run `python -m pytest tests/test_permission_forms.py -q` to establish the red case.** Add tests for absent permissions, absent rules, explicit empty rules, duplicate path entries, and null path/tool fields in the original raw configuration.
 
-- [ ] **Step 3: Implement deterministic form initialization.** Choices for each rule are ordered catalog names applicable to that target followed by original configured custom names in their original order; do not suppress configured names excluded by metadata. For an unbounded rule check every displayed choice, but keep the unbounded flag for the summary and preserve the raw source server-side. For finite rules check only their names. A no-path original with `path: null` initializes as no-path but round-trips its original key until the target is explicitly changed. Build form values from raw rules, not resolved Pydantic path values.
+- [x] **Step 3: Implement deterministic form initialization.** Choices for each rule are ordered catalog names applicable to that target followed by original configured custom names in their original order; do not suppress configured names excluded by metadata. For an unbounded rule check every displayed choice, but keep the unbounded flag for the summary and preserve the raw source server-side. For finite rules check only their names. A no-path original with `path: null` initializes as no-path but round-trips its original key until the target is explicitly changed. Build form values from raw rules, not resolved Pydantic path values.
 
 ```python
 def selected_for_rule(rule: dict[str, Any], choices: tuple[str, ...]) -> list[str]:
@@ -353,7 +353,7 @@ def selected_for_rule(rule: dict[str, Any], choices: tuple[str, ...]) -> list[st
 
 Define `selected_for_rule` inside `forms.py` and test it via `build_form`. Preserve original duplicate tool entries/order for unchanged selections by returning the original raw tools representation, not by writing the deduplicated display list.
 
-- [ ] **Step 4: Implement serialization with shape-preserving comparison first.** Validate each original index is nonnegative, in bounds, unique, and in increasing order for surviving original rows; append new rows without reordering the original ones. Validate no-path drafts have `path is None`; path drafts have a nonblank path but preserve its authored nonblank text. Validate selected values are unique, nonempty strings. Do not constrain them to a hard-coded vocabulary. Build error fields such as `rules.2.path` and `rules.2.selected` with `ValidationIssue`, raising `PermissionFormError`.
+- [x] **Step 4: Implement serialization with shape-preserving comparison first.** Validate each original index is nonnegative, in bounds, unique, and in increasing order for surviving original rows; append new rows without reordering the original ones. Validate no-path drafts have `path is None`; path drafts have a nonblank path but preserve its authored nonblank text. Validate selected values are unique, nonempty strings. Do not constrain them to a hard-coded vocabulary. Build error fields such as `rules.2.path` and `rules.2.selected` with `ValidationIssue`, raising `PermissionFormError`.
 
 For each surviving original row compare selected-name sets against `build_form(...).draft.rules[source_index].selected`. If unchanged, copy the original `tools` key exactly (including absence/null/duplicates/order); a path edit affects only `path`. If the entire form returns to baseline, return a deepcopy of the original block or `None`, so absent mode/rules stay absent. Only then apply new/changed selection mapping:
 
@@ -369,7 +369,7 @@ def encode_selection(selected: list[str], catalog: ToolCatalog) -> dict[str, Any
 
 Define `encode_selection` in `forms.py`; use the whole catalog rather than the target-filtered choices because omitted `tools` denotes every integration tool. Omit `tools` only when the selected names exactly equal a complete nonempty whole catalog. If the selection also contains configured or newly added custom names, keep the full explicit list so the save does not silently widen the rule to future tools or discard authored names. A changed no-path rule omits `path`; unchanged null path keeps its null shape. Mode inherit removes only `mode`; explicit overrides set it. Never touch `runtime`, identity, or team data.
 
-- [ ] **Step 5: Add selection and invalid-input matrix tests.** Use this direct test plus parameterized cases for exact-all/subset/empty; complete-catalog-plus-custom; empty complete catalog; incomplete catalog; preserving an unbounded original under incomplete metadata; clearing such an original to an explicit empty list when it had visible choices; custom names; removing one of repeated rules; duplicate/out-of-range indices; blank path; no-path with path; and semantic no-op after toggling back.
+- [x] **Step 5: Add selection and invalid-input matrix tests.** Use this direct test plus parameterized cases for exact-all/subset/empty; complete-catalog-plus-custom; empty complete catalog; incomplete catalog; preserving an unbounded original under incomplete metadata; clearing such an original to an explicit empty list when it had visible choices; custom names; removing one of repeated rules; duplicate/out-of-range indices; blank path; no-path with path; and semantic no-op after toggling back.
 
 ```python
 from flowgency.permissions.forms import PermissionDraft, RuleDraft
@@ -383,7 +383,7 @@ def test_new_full_selection_respects_catalog_completeness(complete, expected):
 
 An incomplete empty catalog cannot distinguish a no-op unbounded source from clearing zero displayed choices: preserve the original and show the metadata limitation, rather than erasing its grant. Removing the rule and adding an empty rule remains explicit and supported. This test must prove the limitation is safe rather than inventing a hidden schema control.
 
-- [ ] **Step 6: Run the forms tests, review for raw mutation/grant widening, and commit.** Run `python -m pytest tests/test_permission_forms.py tests/test_tool_catalog.py -q`. Commit `feat(permissions): map structured rule drafts`.
+- [x] **Step 6: Run the forms tests, review for raw mutation/grant widening, and commit.** Run `python -m pytest tests/test_permission_forms.py tests/test_tool_catalog.py -q`. Commit `feat(permissions): map structured rule drafts`.
 
 ### Task 4: Build Effective Presentation and Atomic Editor Service
 
@@ -414,7 +414,7 @@ class CatalogConflictError(ValueError):
     pass
 ```
 
-- [ ] **Step 1: Add read-only summary tests using new sibling fixtures.** Construct a valid parsed config with team workspace read/search and agent workspace write plus a nested read/search-only rule. Override only the test integration's declared/runtime capabilities via monkeypatch to allow test policies; do not loosen production validation. Assert exact grants and source attribution, pathless separation, unbounded source attribution, mode inheritance versus override, and unchanged config bytes.
+- [x] **Step 1: Add read-only summary tests using new sibling fixtures.** Construct a valid parsed config with team workspace read/search and agent workspace write plus a nested read/search-only rule. Override only the test integration's declared/runtime capabilities via monkeypatch to allow test policies; do not loosen production validation. Assert exact grants and source attribution, pathless separation, unbounded source attribution, mode inheritance versus override, and unchanged config bytes.
 
 ```python
 def test_summary_sources_follow_same_path_union(raw_config, tmp_path, monkeypatch):
@@ -437,7 +437,7 @@ def test_summary_sources_follow_same_path_union(raw_config, tmp_path, monkeypatc
     assert [(grant.name, grant.sources) for grant in summary.scopes[0].grants] == [("read", ("team",)), ("write", ("agent",))]
 ```
 
-- [ ] **Step 2: Run `python -m pytest tests/test_permission_presentation.py -q` and implement the presenter.** Call `resolve_effective_policy` once, then walk its resolved rules. For provenance compare exact canonical paths to the owner's resolved rules, using `os.path.normcase(str(path.resolve(strict=False)))` on Windows and exact strings otherwise; use `None` as the pathless key. Do not attribute a parent path's tools to a more-specific child rule. For each finite effective tool collect sources that declare that tool or have tools omitted/null at this exact path; for an unbounded result store only sources that supplied an unbounded rule in `all_tools_sources`. The summary cannot be successfully built when the resolver rejects a policy.
+- [x] **Step 2: Run `python -m pytest tests/test_permission_presentation.py -q` and implement the presenter.** Call `resolve_effective_policy` once, then walk its resolved rules. For provenance compare exact canonical paths to the owner's resolved rules, using `os.path.normcase(str(path.resolve(strict=False)))` on Windows and exact strings otherwise; use `None` as the pathless key. Do not attribute a parent path's tools to a more-specific child rule. For each finite effective tool collect sources that declare that tool or have tools omitted/null at this exact path; for an unbounded result store only sources that supplied an unbounded rule in `all_tools_sources`. The summary cannot be successfully built when the resolver rejects a policy.
 
 ```python
 policy = resolve_effective_policy(config, team_id, agent_id)
@@ -449,7 +449,7 @@ workspace_write = grants_write_on(policy.rules, team.workspace_path)
 
 Construct `PermissionSummary` with those values, canonical forward-slash display paths, and the actual team settings URL. The fallback row is derived from `policy.mode`; no extra configured path or duplicate mode beside the selector. Unbounded scopes render as unbounded, not a fabricated list of all known/future tools.
 
-- [ ] **Step 3: Write persistence and preview tests around ConfigStore.** Use `ConfigStore.create(raw_config)` on the relocated conftest fixture, choose its existing builder agent, and monkeypatch `BaseIntegration.permission_tool_catalog` to a deterministic incomplete test catalog. Test no-op and changed mode/rules, saving only the target agent, conflict, catalog drift, unsupported mode, outside-lock byte changes, and validation exceptions leaving the file byte-identical. Test preview with directory initialization functions patched to raise so any write attempt fails the test.
+- [x] **Step 3: Write persistence and preview tests around ConfigStore.** Use `ConfigStore.create(raw_config)` on the relocated conftest fixture, choose its existing builder agent, and monkeypatch `BaseIntegration.permission_tool_catalog` to a deterministic incomplete test catalog. Test no-op and changed mode/rules, saving only the target agent, conflict, catalog drift, unsupported mode, outside-lock byte changes, and validation exceptions leaving the file byte-identical. Test preview with directory initialization functions patched to raise so any write attempt fails the test.
 
 ```python
 def test_preview_does_not_write(raw_config, config_paths, monkeypatch):
@@ -469,7 +469,7 @@ def test_preview_does_not_write(raw_config, config_paths, monkeypatch):
     assert store.path.read_bytes() == before
 ```
 
-- [ ] **Step 4: Implement shared preparation and locked save.** `load_editor` obtains the instance integration, calls `get_tool_catalog`, builds the form from its raw entry, and presents the saved policy. If current integration capabilities reject the saved policy, return that editable form with `summary=None` and the caught `ValidationFailed.issues`, not a broken GET. `prepare_permissions` checks the request revision and catalog hash, creates a deepcopy of snapshot raw, finds the agent by `name`, serializes permissions, removes/sets only that block, parses the candidate with `snapshot.path`, runs the presenter, and returns a `PreparedPermissions`. Invalid preparation raises instead of returning a success with no summary. It never calls ConfigStore create/replace, directory initialization, or job submission.
+- [x] **Step 4: Implement shared preparation and locked save.** `load_editor` obtains the instance integration, calls `get_tool_catalog`, builds the form from its raw entry, and presents the saved policy. If current integration capabilities reject the saved policy, return that editable form with `summary=None` and the caught `ValidationFailed.issues`, not a broken GET. `prepare_permissions` checks the request revision and catalog hash, creates a deepcopy of snapshot raw, finds the agent by `name`, serializes permissions, removes/sets only that block, parses the candidate with `snapshot.path`, runs the presenter, and returns a `PreparedPermissions`. Invalid preparation raises instead of returning a success with no summary. It never calls ConfigStore create/replace, directory initialization, or job submission.
 
 For Save, use `store.patch(request.revision, patcher)` so baseline comparison and validation execute under the existing lock. The callback constructs a ConfigSnapshot from the raw dictionary already loaded by the store (do not call `store.load` while holding its lock), discovers the current catalog, and invokes the same preparation. Preserve all unchanged top-level and agent values:
 
@@ -492,9 +492,9 @@ def save_permissions(store: ConfigStore, team_id: str, agent_id: str, request: E
 
 Import the already defined `ConfigSnapshot`, `ConfigStore`, `EditorRequest`, `get_tool_catalog`, `get_integration`, `parse_config`, `deepcopy`, and `Any` in `editor.py`. Return field-addressable errors through existing `ValidationFailed` / new form exceptions. The current revision plus server-loaded raw rule indices is the authoritative baseline; no client-submitted original rule payload, session cache, or token database is needed.
 
-- [ ] **Step 5: Prove concurrent writers cannot lose changes.** Reuse `tests._lock_helpers.hold_exclusive_lock` and neighboring ConfigStore concurrency tests. Submit two edits with one revision; exactly one succeeds and the second conflicts. Team permission edits after a page load conflict rather than being overwritten by the stale agent draft. Verify all unrelated runtime/prompts/routines/identity blocks match their pre-save values.
+- [x] **Step 5: Prove concurrent writers cannot lose changes.** Reuse `tests._lock_helpers.hold_exclusive_lock` and neighboring ConfigStore concurrency tests. Submit two edits with one revision; exactly one succeeds and the second conflicts. Team permission edits after a page load conflict rather than being overwritten by the stale agent draft. Verify all unrelated runtime/prompts/routines/identity blocks match their pre-save values.
 
-- [ ] **Step 6: Run `python -m pytest tests/test_permission_presentation.py tests/test_permission_editor.py tests/test_config_store.py tests/test_executor_eligibility.py -q`, review, and commit.** Commit `feat(permissions): preview and save agent policies`. Do not start route work until pure mapping, policy attribution, and locked save tests pass.
+- [x] **Step 6: Run `python -m pytest tests/test_permission_presentation.py tests/test_permission_editor.py tests/test_config_store.py tests/test_executor_eligibility.py -q`, review, and commit.** Commit `feat(permissions): preview and save agent policies`. Do not start route work until pure mapping, policy attribution, and locked save tests pass.
 
 ### Task 5: Add the Permissions Page and HTTP Contracts
 
@@ -510,7 +510,7 @@ Import the already defined `ConfigSnapshot`, `ConfigStore`, `EditorRequest`, `ge
 - Error codes/status: malformed transport 422, form/policy validation 422, config revision conflict 409 (`config-conflict`), catalog conflict 409 (`catalog-conflict`), unavailable transient preview 503 (`preview-unavailable`), unknown team/agent 404.
 - Save request: normal POST form field `payload`, containing one serialized `EditorRequest`; success is 303 to the canonical Permissions URL. Typed but invalid user fields return the same page with draft retained and the corresponding error status. Invalid transport JSON returns 422 without executing a patch.
 
-- [ ] **Step 1: Add GET/preview/save ownership tests.** Reuse `_seed_app` from `tests/test_agent_detail.py` after Task 1's fixture relocation and `_revision`. Seed/test catalog independently using monkeypatch when an exact list is needed; never make production catalog completeness true for tests. Add this first regression:
+- [x] **Step 1: Add GET/preview/save ownership tests.** Reuse `_seed_app` from `tests/test_agent_detail.py` after Task 1's fixture relocation and `_revision`. Seed/test catalog independently using monkeypatch when an exact list is needed; never make production catalog completeness true for tests. Add this first regression:
 
 ```python
 from tests.test_agent_detail import _seed_app
@@ -532,9 +532,9 @@ def test_permissions_owns_the_agent_editor(monkeypatch, tmp_path, raw_config):
 
 Add a fixture-local helper `initial_payload(html: str) -> dict` in this test file to locate `<script id="permissions-initial" type="application/json">` with `re.search`, then use `json.loads` (test extraction only). For POST tests copy its `draft`, edit a rule, and send `data={"payload": json.dumps(payload)}`. Test conflict by saving another config revision first, assert HTTP 409 and draft value still present in the initialization script, while file bytes remain at the new revision.
 
-- [ ] **Step 2: Run `python -m pytest tests/test_agent_permissions.py -q` and confirm the new route is missing.** Keep other routes working while adding registration.
+- [x] **Step 2: Run `python -m pytest tests/test_agent_permissions.py -q` and confirm the new route is missing.** Keep other routes working while adding registration.
 
-- [ ] **Step 3: Wire the route module and use one page snapshot.** Export/register `agent_permissions_router` in `flowgency/web/routes/__init__.py` and `flowgency/app.py`. Add `"permissions": "Permissions"` immediately after runtime in `_TAB_LABELS`. Extend `_detail_context` with keyword `snapshot: ConfigSnapshot | None = None`, loading only when not supplied; new routes pass the same snapshot used for form/preview so the header revision cannot drift. This is a narrow parameter addition, not a general context rewrite.
+- [x] **Step 3: Wire the route module and use one page snapshot.** Export/register `agent_permissions_router` in `flowgency/web/routes/__init__.py` and `flowgency/app.py`. Add `"permissions": "Permissions"` immediately after runtime in `_TAB_LABELS`. Extend `_detail_context` with keyword `snapshot: ConfigSnapshot | None = None`, loading only when not supplied; new routes pass the same snapshot used for form/preview so the header revision cannot drift. This is a narrow parameter addition, not a general context rewrite.
 
 Define `render_permissions_page(request, services, snapshot, team: str, agent: str, *, submitted: EditorRequest | None = None, issues: tuple[ValidationIssue, ...] = (), conflict: bool = False, status_code: int = 200)` in the new route module. Build the saved form with `load_editor`; on errors use `submitted.draft` as the editable draft and the saved form as baseline. On conflicts keep the submitted old revision in the draft and disable resubmission until reload; never relabel it with a current revision. Merge custom names from the submitted draft into display choices without changing the authoritative catalog. Include any load-time policy errors when `summary is None`.
 
@@ -548,7 +548,7 @@ async def permissions_page(request: Request, team: str, agent: str, services: Fl
 
 Define `issue_dicts(issues: tuple[ValidationIssue, ...]) -> list[dict[str, str]]` using dataclass fields and map `corrective_hint` to `hint` for the existing banner convention. For Pydantic errors map `loc` to dot-separated fields and use a non-reflective message; do not return unescaped input snippets.
 
-- [ ] **Step 4: Implement preview and save using the service, not raw config mutation.** Preview parses `EditorRequest.model_validate(await request.json())`, loads current snapshot, verifies agent existence, loads the catalog through the pinned integration, and calls `prepare_permissions`. Render `agent_permissions_summary.html` through `request.app.state.templates.env.get_template(...).render(summary=prepared.summary, is_draft=True)` with the template environment's autoescaping. Return the exact success/error contracts above. Use a catch for expected configuration/form/catalog errors; unexpected errors remain server errors logged without returning internal exception text.
+- [x] **Step 4: Implement preview and save using the service, not raw config mutation.** Preview parses `EditorRequest.model_validate(await request.json())`, loads current snapshot, verifies agent existence, loads the catalog through the pinned integration, and calls `prepare_permissions`. Render `agent_permissions_summary.html` through `request.app.state.templates.env.get_template(...).render(summary=prepared.summary, is_draft=True)` with the template environment's autoescaping. Return the exact success/error contracts above. Use a catch for expected configuration/form/catalog errors; unexpected errors remain server errors logged without returning internal exception text.
 
 ```python
 @router.post("/{team}/agents/{agent}/permissions", response_class=HTMLResponse)
@@ -562,7 +562,7 @@ async def permissions_save(request: Request, team: str, agent: str, services: Fl
 
 Wrap the shown happy path: malformed JSON/Pydantic input -> 422; `ConfigConflictError` -> retained-draft page 409 with conflict flag; `CatalogConflictError` -> retained-draft page 409 requiring refreshed catalog; `ValidationFailed` -> retained-draft page 422. Unknown agent is 404, not a 500 from a missing raw index. No save happens until the service transaction passes.
 
-- [ ] **Step 5: Render the approved controls and escaped initial data.** Use a page-scoped root `#permission-editor`, a form `#permissions-form` with hidden `payload`, `#mode`, `[data-rule-list]`, and `#permission-summary`. Embed initial data with Jinja `tojson`, never Python repr or `|safe` on tool/path strings. A rule uses `[data-rule-row]`, `data-source-index`, `[data-rule-path]` when path-bearing, `[data-tool-name]` checkboxes, `[data-custom-tool]`, and `[data-add-custom-tool]`. Label/remove IDs must be unique even for repeated paths. Include named `<template>` blocks for path and no-path rows; they are markup sources for Task 6, not visible duplicate editors.
+- [x] **Step 5: Render the approved controls and escaped initial data.** Use a page-scoped root `#permission-editor`, a form `#permissions-form` with hidden `payload`, `#mode`, `[data-rule-list]`, and `#permission-summary`. Embed initial data with Jinja `tojson`, never Python repr or `|safe` on tool/path strings. A rule uses `[data-rule-row]`, `data-source-index`, `[data-rule-path]` when path-bearing, `[data-tool-name]` checkboxes, `[data-custom-tool]`, and `[data-add-custom-tool]`. Label/remove IDs must be unique even for repeated paths. Include named `<template>` blocks for path and no-path rows; they are markup sources for Task 6, not visible duplicate editors.
 
 ```html
 <label for="mode">Mode</label>
@@ -577,11 +577,11 @@ Wrap the shown happy path: malformed JSON/Pydantic input -> 422; `ConfigConflict
 
 Summary template: each path/no-path `EffectiveScope` gets a heading, then finite grants with their exact sources; an unbounded scope gets **All tools, including future tools** and its unbounded grant sources. The fallback row is **Paths without a matching rule**, **No access** or **All tools**, and mode with Team link/Agent source. Use team URLs already built by the presenter. Keep the configured/enforced distinction. The workspace-root status sits in the approved page heading and is updated from server `workspace_write`, not inferred from checkbox state. With `summary=None`, show **Preview unavailable** and the validation issues; do not show a success badge.
 
-- [ ] **Step 6: Remove competing writers and update tests.** Remove Profile `can_write` field and associated misleading copy. Runtime retains timeout inheritance and integration display but no permission rules/summary. Remove `rules` from `AgentRuntimePatch` and its update branches once its call sites and tests use the dedicated permission service. The old Runtime POST rejects the presence of `permission_rules_yaml` with HTTP 409 and a link/message directing the user to Permissions; retain submitted timeout text but make no write in that request. Timeout-only POST and Profile POST continue preserving sibling permissions.
+- [x] **Step 6: Remove competing writers and update tests.** Remove Profile `can_write` field and associated misleading copy. Runtime retains timeout inheritance and integration display but no permission rules/summary. Remove `rules` from `AgentRuntimePatch` and its update branches once its call sites and tests use the dedicated permission service. The old Runtime POST rejects the presence of `permission_rules_yaml` with HTTP 409 and a link/message directing the user to Permissions; retain submitted timeout text but make no write in that request. Timeout-only POST and Profile POST continue preserving sibling permissions.
 
 Update `tests/test_agent_detail.py` so former runtime policy tests move to the new permission tests instead of being deleted without equivalent coverage. Update tab expectations to actual ordering including the new tab, preserving all preexisting tabs. `_runtime_context` becomes timeout/integration-only; it must not call policy resolution just to render a timeout form.
 
-- [ ] **Step 7: Run `python -m pytest tests/test_agent_permissions.py tests/test_agent_detail.py tests/test_admin_org_sandbox.py tests/test_config_patches.py -q`, review, and commit.** Include XSS values in custom names, paths, and validation messages, byte-preserving failed saves, preview no-write tests, unsupported policy GET/editability, and missing revision/catalog tests. Commit `feat(permissions): add dedicated agent settings tab`.
+- [x] **Step 7: Run `python -m pytest tests/test_agent_permissions.py tests/test_agent_detail.py tests/test_admin_org_sandbox.py tests/test_config_patches.py -q`, review, and commit.** Include XSS values in custom names, paths, and validation messages, byte-preserving failed saves, preview no-write tests, unsupported policy GET/editability, and missing revision/catalog tests. Commit `feat(permissions): add dedicated agent settings tab`.
 
 ### Task 6: Complete the Structured Browser Editor
 
@@ -595,7 +595,7 @@ Update `tests/test_agent_detail.py` so former runtime policy tests move to the n
 - Produces: in-browser `collectDraft()`, `renderDraft(draft)`, `schedulePreview()`, `requestPreview(version)`, `applyIssues(issues)`, `setSummaryPending()`, `setSummaryUnavailable()`, `setDirtyState()`, all file-local functions in one initialization closure. No global policy engine or app-wide state manager.
 - Mutation contract: edits stay local until Save; newest draft version owns the summary; discarded/navigated drafts invalidate pending requests.
 
-- [ ] **Step 1: Write the first browser test.** Add the new Permissions page to the existing WCAG list and all-tab keyboard test. Preserve and update Runtime screenshot assertions so they still test timeout/integration and absence of permission editing.
+- [x] **Step 1: Write the first browser test.** Add the new Permissions page to the existing WCAG list and all-tab keyboard test. Preserve and update Runtime screenshot assertions so they still test timeout/integration and absence of permission editing.
 
 ```typescript
 import { expect, test } from '@playwright/test';
@@ -627,9 +627,9 @@ test('structured rules discard without persisting', async ({ page }) => {
 });
 ```
 
-- [ ] **Step 2: Prepare existing UI tooling and run the red test.** From the active worktree run `python -m venv .venv`, `.venv/Scripts/python.exe -m pip install -e ".[test]"`, `npm install`, and `npm exec playwright install chromium` if this worktree lacks those dependencies. Set `$env:PLAYWRIGHT_SKIP_BROWSER_GC = '1'` in PowerShell before browser installation so installing a matching browser does not garbage-collect other checkouts' browser caches. Do not use a live config or the user's running dashboard. Run `npm run test:ui -- tests/ui/agent_permissions.spec.ts --project=desktop-dark`; the new rule interaction must fail before implementation.
+- [x] **Step 2: Prepare existing UI tooling and run the red test.** From the active worktree run `python -m venv .venv`, `.venv/Scripts/python.exe -m pip install -e ".[test]"`, `npm install`, and `npm exec playwright install chromium` if this worktree lacks those dependencies. Set `$env:PLAYWRIGHT_SKIP_BROWSER_GC = '1'` in PowerShell before browser installation so installing a matching browser does not garbage-collect other checkouts' browser caches. Do not use a live config or the user's running dashboard. Run `npm run test:ui -- tests/ui/agent_permissions.spec.ts --project=desktop-dark`; the new rule interaction must fail before implementation.
 
-- [ ] **Step 3: Add the pinned icon asset and page-scoped styling.** Run `npm install --save-dev --save-exact lucide@0.468.0`; copy `node_modules/lucide/dist/umd/lucide.min.js` into `flowgency/static/lucide.min.js` preserving its upstream notice. Load the local bundle only on the Permissions page. This is the library/version used in the mockup; do not add a second icon library or manually draw its glyphs. Keep the dependency lock as generated metadata. Add `plus`, `trash-2`, `chevron-down`, `folder`, and `wrench` icon bindings, accessible button names and hover titles.
+- [x] **Step 3: Add the pinned icon asset and page-scoped styling.** Run `npm install --save-dev --save-exact lucide@0.468.0`; copy `node_modules/lucide/dist/umd/lucide.min.js` into `flowgency/static/lucide.min.js` preserving its upstream notice. Load the local bundle only on the Permissions page. This is the library/version used in the mockup; do not add a second icon library or manually draw its glyphs. Keep the dependency lock as generated metadata. Add `plus`, `trash-2`, `chevron-down`, `folder`, and `wrench` icon bindings, accessible button names and hover titles.
 
 Scope CSS below `#permission-editor`; use existing light/dark CSS conventions. Preserve the v7 hierarchy and spacing, with these layout rules:
 
@@ -653,7 +653,7 @@ Scope CSS below `#permission-editor`; use existing light/dark CSS conventions. P
 
 Set border/background/text colors from current app light/dark conventions, not the mockup's dark-only global CSS. Keep 14px Path/Tools labels consistent; no negative letter spacing or viewport-scaled fonts. Summary border moves from left to top in stacked mode. Do not add decorative sections/cards or inherited-rules panels.
 
-- [ ] **Step 4: Implement local rule editing and safe DOM updates.** Parse `#permissions-initial` once, keep immutable baseline copies using `structuredClone`, and maintain stable local row IDs for labels/errors independent of `source_index`. Instantiate row templates, fill values via DOM properties, and add custom tool text with `textContent`/`createTextNode`. `collectDraft` reads Mode, surviving original indices, target, raw path, and checked names. It emits Task 3's wire shape only. Do not serialize omitted/all flags or calculate final permission rules in JS.
+- [x] **Step 4: Implement local rule editing and safe DOM updates.** Parse `#permissions-initial` once, keep immutable baseline copies using `structuredClone`, and maintain stable local row IDs for labels/errors independent of `source_index`. Instantiate row templates, fill values via DOM properties, and add custom tool text with `textContent`/`createTextNode`. `collectDraft` reads Mode, surviving original indices, target, raw path, and checked names. It emits Task 3's wire shape only. Do not serialize omitted/all flags or calculate final permission rules in JS.
 
 ```javascript
 function collectDraft() {
@@ -671,7 +671,7 @@ function collectDraft() {
 
 Define `root` as `document.getElementById('permission-editor')` inside the initialization closure. For new rows `source_index=null`, initial selections empty. Show full provider choices for the target plus configured/custom choices; do not mark absent selections inherited or disable editing because the team also grants a tool. A custom name already present selects its checkbox, not duplicates it. Add a no-path custom entry control even though the static sample shows only one configured tool. On remove, restore focus to the neighboring row's remove control or Add rule. Discard rebuilds the baseline, clears custom draft-only choices/errors, resets Mode, invalidates requests, and restores the saved summary. In a revision conflict, Discard explicitly reloads the current page rather than falsely treating old data as current.
 
-- [ ] **Step 5: Implement draft-versioned preview.** On each input/change/add/remove increment `draftVersion`, mark summary pending immediately, disable Save, abort the old request, and debounce 250ms. Never retain a success badge during invalid/pending preview. Only render HTML supplied by this same-origin server's autoescaped summary template; tool/path/user strings must not be interpolated into local `innerHTML`.
+- [x] **Step 5: Implement draft-versioned preview.** On each input/change/add/remove increment `draftVersion`, mark summary pending immediately, disable Save, abort the old request, and debounce 250ms. Never retain a success badge during invalid/pending preview. Only render HTML supplied by this same-origin server's autoescaped summary template; tool/path/user strings must not be interpolated into local `innerHTML`.
 
 ```javascript
 let draftVersion = initial.draft.draft_version;
@@ -713,7 +713,7 @@ async function requestPreview(version) {
 
 Implement the referenced local helpers: `setSummaryPending` sets `aria-busy=true`, hides prior content/status and shows **Updating preview**; `setSummaryUnavailable` clears busy, removes success status, shows **Preview unavailable** and a **Retry preview** command without losing fields; `applyIssues` attaches safe field text to unique row inputs with `aria-invalid`/`aria-describedby` and shows nonfield errors in an alert; `setDirtyState` compares collected draft to the original normalized display draft and disables Save unless dirty, not conflicted/submitting, and `validVersion === draftVersion`. Initial saved valid state permits display, not a dirty Save. A failed request must remain visibly failed, not spin forever. For `catalog-conflict` retain the draft and request explicit reload/review of current metadata; never silently adopt a new catalog hash and submit the same all-selected inference.
 
-- [ ] **Step 6: Complete Save, navigation protection, and keyboard behavior.** Submit a native POST only after the latest preview is valid: populate hidden `payload` from the current revision/catalog/version and `collectDraft`, set a submitting flag, disable duplicate submission, and allow the existing form POST/303 redirect. This does not bypass server-side revalidation. On error HTML, initialize with the submitted draft and noncurrent summary instead of treating it as saved.
+- [x] **Step 6: Complete Save, navigation protection, and keyboard behavior.** Submit a native POST only after the latest preview is valid: populate hidden `payload` from the current revision/catalog/version and `collectDraft`, set a submitting flag, disable duplicate submission, and allow the existing form POST/303 redirect. This does not bypass server-side revalidation. On error HTML, initialize with the submitted draft and noncurrent summary instead of treating it as saved.
 
 Bind `input` for text/path edits as well as `change` for Mode/checkboxes; do not wait for blur to invalidate a preview. Store `validatedDraft` as a serialized copy of the collected draft whenever a preview succeeds. Verify it again during submit to cover programmatic/autofill edits that did not dispatch an input event. Introduce `let validatedDraft = null` beside `validVersion`; set it to the exact serialized request draft after a current successful response, and clear it when invalidating that version.
 
@@ -734,7 +734,7 @@ window.addEventListener('beforeunload', event => {
 
 Define `form`, `conflict`, `submitting`, and `dirty` in the initialization closure; update `dirty` from `setDirtyState`. Use a real button with `aria-expanded`, `aria-controls`, and menu items for Add rule. Opening focuses first item; arrow keys move, Escape closes and returns focus, choosing a type appends its rule and focuses Path/custom-tool as appropriate. Enter in custom-tool entry adds its name instead of submitting the entire form. Team links open a separate tab with `rel="noopener"`. No keyboard shortcut help copy is added to the page.
 
-- [ ] **Step 7: Add behavioral browser regressions with controlled preview responses.** Delay the first preview response using Playwright `page.route` and a Promise resolved by the test, not sleeps; send a second draft and release the first afterwards. Assert that the displayed preview corresponds only to the second draft. Return 422/409/503 in separate tests and assert retained inputs, unavailable summary, disabled Save, and working retry/reload flows. Use real preview/save endpoints for round-trip tests in addition to mocks.
+- [x] **Step 7: Add behavioral browser regressions with controlled preview responses.** Delay the first preview response using Playwright `page.route` and a Promise resolved by the test, not sleeps; send a second draft and release the first afterwards. Assert that the displayed preview corresponds only to the second draft. Return 422/409/503 in separate tests and assert retained inputs, unavailable summary, disabled Save, and working retry/reload flows. Use real preview/save endpoints for round-trip tests in addition to mocks.
 
 ```typescript
 test('preview failure retains a custom tool draft', async ({ page }) => {
@@ -755,7 +755,7 @@ test('preview failure retains a custom tool draft', async ({ page }) => {
 
 Make browser-save tests self-cleaning: at test start read `#permissions-initial` with `JSON.parse(await locator.textContent())`, retain the original draft, and use `try/finally`. In cleanup GET a fresh Permissions page, use its current revision/catalog ID, mark every restored row `source_index=null` if rule deletion/reordering made the original indices invalid, and POST through the real endpoint. For exact omitted/null restoration tests, use the Python service fixtures instead, because recreating an unbounded rule requires a complete catalog. Restrict shared real-browser mutations to Mode and finite tool rules already representable with that provider, restoring original raw shape through a dedicated disposable fixture agent where needed. Prefer adding one `permissions-editor` fixture agent under the unrestricted research team with explicit finite rules and no routines; update roster counts deliberately rather than using advisor's unbounded fixtures for destructive tests. Do not make test order affect saved policy. Do not normalize away legitimate overflow with `pinToSingleLine` in new Permissions tests; long paths/custom names must fit through the implemented CSS.
 
-- [ ] **Step 8: Run the new file in all four projects, then accessibility and existing agent configuration tests.** Run `npm run test:ui -- tests/ui/agent_permissions.spec.ts`, then `npm run test:ui -- tests/ui/accessibility.spec.ts tests/ui/agent_configuration.spec.ts`. Update only expected snapshots affected by new navigation and removed Runtime fields; inspect every changed image. Run `python -m pytest tests/test_agent_permissions.py -q` after frontend edits. Review and commit `feat(permissions): build structured rule editor`.
+- [x] **Step 8: Run the new file in all four projects, then accessibility and existing agent configuration tests.** Run `npm run test:ui -- tests/ui/agent_permissions.spec.ts`, then `npm run test:ui -- tests/ui/accessibility.spec.ts tests/ui/agent_configuration.spec.ts`. Update only expected snapshots affected by new navigation and removed Runtime fields; inspect every changed image. Run `python -m pytest tests/test_agent_permissions.py -q` after frontend edits. Review and commit `feat(permissions): build structured rule editor`.
 
 ### Task 7: Verify the Complete Workflow and Integrate
 
@@ -768,7 +768,7 @@ Make browser-save tests self-cleaning: at test start read `#permissions-initial`
 - Consumes: all completed task contracts and the v7 HTML/PNG visual contract.
 - Produces: verified branch ready for the repository's preauthorized fast-forward workflow; no new application abstraction.
 
-- [ ] **Step 1: Exercise real saved configuration and failure paths.** Run the focused Python suite and all browser tests. Use real GET -> edit -> preview -> POST -> 303 -> GET paths for subset, empty, complete fake catalog, inherited mode, explicit override, relative path, no-path custom tools, duplicate scopes, remove, discard, unsupported mode, and revision conflicts. Fake complete catalog tests prove serialization logic; they do not constitute evidence that real Copilot's catalog is complete. Keep the explicit incomplete-catalog limitation in the verification record.
+- [x] **Step 1: Exercise real saved configuration and failure paths.** Run the focused Python suite and all browser tests. Use real GET -> edit -> preview -> POST -> 303 -> GET paths for subset, empty, complete fake catalog, inherited mode, explicit override, relative path, no-path custom tools, duplicate scopes, remove, discard, unsupported mode, and revision conflicts. Fake complete catalog tests prove serialization logic; they do not constitute evidence that real Copilot's catalog is complete. Keep the explicit incomplete-catalog limitation in the verification record.
 
 ```text
 python -m pytest tests/test_permission_relocation.py tests/test_tool_catalog.py tests/test_permission_forms.py tests/test_permission_presentation.py tests/test_permission_editor.py tests/test_agent_permissions.py -q
@@ -777,11 +777,11 @@ npm run test:ui
 git diff --check
 ```
 
-- [ ] **Step 2: Compare actual UI with the approved assets.** Run the existing deterministic fixture server via Playwright; capture desktop `1440x1000` and mobile `390x844` in light and dark projects. Check the application region against v7 for column ratio/order, labels, normal Path/Tools weight, no Target selectors, no separate inherited panel, Mode source in summary, tool provenance links, workspace write status, and action placement. Inspect real saved image files; integrated browser screenshots can be cropped under zoom. Verify PNG dimensions cover the document content (native scrollbars may reduce content width). Capture nonempty/empty/error/long-path states; inspect keyboard menu/focus and asset loading. Document intentional sample-data differences, not layout excuses.
+- [x] **Step 2: Compare actual UI with the approved assets.** Run the existing deterministic fixture server via Playwright; capture desktop `1440x1000` and mobile `390x844` in light and dark projects. Check the application region against v7 for column ratio/order, labels, normal Path/Tools weight, no Target selectors, no separate inherited panel, Mode source in summary, tool provenance links, workspace write status, and action placement. Inspect real saved image files; integrated browser screenshots can be cropped under zoom. Verify PNG dimensions cover the document content (native scrollbars may reduce content width). Capture nonempty/empty/error/long-path states; inspect keyboard menu/focus and asset loading. Document intentional sample-data differences, not layout excuses.
 
-- [ ] **Step 3: Audit config authority and active documentation.** Search active sources/tests/docs with `rg -n 'runtime\.permissions' flowgency tests kb README.md AGENTS.md config.yaml.example .github/skills examples`. Every remaining occurrence must be an old nested-location rejection guard/test, an explicit manual relocation example, or a Python field unrelated to canonical owner configuration. Check setup output, instance clones/moves, config patches, and generated projections use new model fields. Do not rewrite immutable historical job specs merely because canonical config fields moved. The full job/runtime regression suite establishes unchanged execution behavior.
+- [x] **Step 3: Audit config authority and active documentation.** Search active sources/tests/docs with `rg -n 'runtime\.permissions' flowgency tests kb README.md AGENTS.md config.yaml.example .github/skills examples`. Every remaining occurrence must be an old nested-location rejection guard/test, an explicit manual relocation example, or a Python field unrelated to canonical owner configuration. Check setup output, instance clones/moves, config patches, and generated projections use new model fields. Do not rewrite immutable historical job specs merely because canonical config fields moved. The full job/runtime regression suite establishes unchanged execution behavior.
 
-- [ ] **Step 4: Record and review evidence.** Write the verification file with exact passing/failing command counts, catalog completeness evidence, screenshots, and any residual integration-dependent enforcement limitations. No unsupported claim of universal all-tools editing. Perform per-spec coverage review plus a whole-branch bug/security review, including grant widening, concurrent writes, reflected markup, and lost unrelated data. Fix relevant findings through failing regression tests and rerun the affected checks. Commit tests and docs by their respective Conventional Commit types rather than combining an unrelated cleanup.
+- [x] **Step 4: Record and review evidence.** Write the verification file with exact passing/failing command counts, catalog completeness evidence, screenshots, and any residual integration-dependent enforcement limitations. No unsupported claim of universal all-tools editing. Perform per-spec coverage review plus a whole-branch bug/security review, including grant widening, concurrent writes, reflected markup, and lost unrelated data. Fix relevant findings through failing regression tests and rerun the affected checks. Commit tests and docs by their respective Conventional Commit types rather than combining an unrelated cleanup.
 
 - [ ] **Step 5: Integrate only after implementation review and green tests.** Use the repository's preauthorized workflow; do not ask for merge-vs-PR choices. Check main checkout status and its tip. If master advanced, rebase this feature onto master, rerun the full suite and meaningful UI gates in the worktree, and review any conflict resolutions. Preserve main-checkout user edits with a named stash only if needed, restoring them afterwards; never include them in feature commits.
 

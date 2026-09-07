@@ -3,9 +3,10 @@
 Date: 2026-09-07
 Worktree: `C:/Projekty/Flowgency/.worktrees/agent-permissions-ui`
 Branch: `feat/agent-permissions-ui`
+Reviewed implementation revision: `92aca46`
 Source revision for focused boundary/catalog evidence, permissions snapshot refresh, and the full Python suite: `50a31b82b978d1576ea76870483c3bb80f9b1797`
 Source revision for the dashboard snapshot refresh, focused dashboard verification, and the final full UI suite: `f1699cfeb53aa1073bd11884de34917984daa74c`
-Source revision for the exact-match permissions fix wave and final full-suite reruns: `f2814f7a7071c9c982832d44942ad4aafc800533`
+Exact test evidence source for the final review approval and final full-suite reruns: `f2814f7a7071c9c982832d44942ad4aafc800533`
 Documentation-only verification commits: `b24e514f91a640493346094d496a4819b50b53f8`, `4d115a20461626ca27998c7cbebea9de5b4b18cf`
 Scope: Task 7 acceptance steps 1-4 plus the final exact-match serializer fix-wave verification. Step 5 integration intentionally not executed.
 
@@ -206,7 +207,8 @@ Audit outcome:
 - Active model and policy consumers read `team.permissions` and `agent.permissions` in `flowgency/configuration/effective.py`, `flowgency/configuration/paths.py`, and `flowgency/integrations/__init__.py`.
 - Remaining `runtime.permissions` strings in tracked worktree sources are limited to the explicit relocation rejection message in `flowgency/configuration/models.py` and the matching assertion in `tests/test_permission_relocation.py`.
 - No evidence found that the feature branch still writes canonical owner configuration through the old nested runtime location.
-- No production or live config files outside the feature worktree were edited during this verification.
+- Existing operator configuration is unchanged by this feature; nested permissions blocks still require a manual move to sibling `permissions` blocks.
+- No production or live config files outside the feature worktree were edited during this verification or approval update.
 
 ## Tool catalog truthfulness
 
@@ -218,12 +220,12 @@ Audit outcome:
 
 ## Whole-branch review findings
 
-Status: COMPLETE FOR TASK 7 STEPS 1-4
+Status: APPROVED at `92aca46` for Task 7 steps 1-4 using the exact test evidence recorded from `f2814f7a7071c9c982832d44942ad4aafc800533`. Step 5 integration remains pending.
 
 Final fix-wave note:
 
 - The exact-match serializer correction for complete catalogs is verified at `f2814f7a7071c9c982832d44942ad4aafc800533` by the clean full Python and full UI reruns above.
-- This record does not claim the final whole-branch review is approved; it only records the fix-wave evidence for controller re-review.
+- The final review approval relies on that recorded evidence; no additional suites were rerun for this documentation-only update.
 
 Resolved in this Task 7 acceptance pass:
 
@@ -239,7 +241,7 @@ Resolved review finding:
 - Step 1: Complete. Focused regression slices passed, the full Python suite passed, the focused dashboard suite passed after the evidence-backed baseline refresh, and the full UI gate passed.
 - Step 2: Complete. Approved v7 assets and real saved desktop/mobile images were inspected, including populated, empty, preview-error, and long-path states. Branch-wide UI acceptance now passes after the desktop dashboard/job baselines were refreshed to the intentional shared logo asset.
 - Step 3: Complete. Active producers and consumers in the worktree use the relocated sibling permissions model, with old nested references retained only for rejection diagnostics and their tests.
-- Step 4: Complete for documentation and review reporting. Verification evidence, blockers, warnings, skips, and catalog limitations are recorded here without making unsupported claims. Final whole-branch review completion is intentionally not claimed in this document.
+- Step 4: Complete for documentation and review reporting. Verification evidence, blockers, warnings, skips, catalog limitations, approval source revision, unchanged live-config scope, and the manual sibling-relocation requirement are recorded here without unsupported claims.
 
 Controller handoff:
 
