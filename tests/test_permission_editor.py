@@ -257,7 +257,7 @@ def test_save_permissions_keeps_explicit_list_when_complete_catalog_selection_in
 
     catalog = ToolCatalog(
         "claude-code",
-        "fixture-v2",
+        "fixture-two",
         (
             ToolDescriptor("read"),
             ToolDescriptor("write"),
