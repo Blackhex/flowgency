@@ -42,6 +42,11 @@ from flowgency.jobs.authority import JobStore
 from flowgency.memory import MemoryConflictError, resolve_memory_selector
 from flowgency.prompts import PromptConflictError, PromptNotFoundError
 from flowgency.prompts.catalog import effective_prompt_catalog
+from flowgency.routines.presentation import (
+    marker_stamp as _present_marker_stamp,
+    next_due_text as _present_next_due_text,
+    routine_status as _present_routine_status,
+)
 from flowgency.web.dependencies import FlowgencyServices, get_services
 
 
@@ -588,67 +593,22 @@ def _blueprint_context(services: FlowgencyServices, snapshot, team_id: str, agen
 
 
 def _routine_status(snapshot, team_id: str, instance) -> list[dict[str, Any]]:
-    """Pair each configured routine with what actually fired."""
-    team_cfg = snapshot.config.teams[team_id]
-    logs_root = resolve_team_paths(team_cfg).logs
-    now = clock_now()
-    grace = grace_window(int(snapshot.config.flowgency.dispatch.interval))
-    dispatch_enabled = team_cfg.dispatch.enabled
-    rows = []
-    for schedule in routine_schedules(instance.routines):
-        if schedule.conditional:
-            spec = "conditional"
-        elif schedule.at:
-            spec = f"at {schedule.at}"
-        elif schedule.every:
-            spec = f"every {schedule.every}"
-        else:
-            spec = "no schedule"
-        rows.append(
-            {
-                "routine_id": schedule.routine_id,
-                "enabled": schedule.enabled,
-                "schedule": spec,
-                "last_fired": _marker_stamp(
-                    last_fired_at(
-                        schedule,
-                        logs_root=logs_root,
-                        agent_name=instance.name,
-                        now=now,
-                    )
-                ),
-                "next_due": _next_due_text(
-                    schedule, logs_root, instance.name, now, grace, dispatch_enabled
-                ),
-            }
-        )
-    return rows
+    return _present_routine_status(snapshot, team_id, instance)
 
 
 def _marker_stamp(fired_at) -> str:
-    if fired_at is None:
-        return "never"
-    return fired_at.strftime("%Y-%m-%d %H:%M")
+    return _present_marker_stamp(fired_at)
 
 
 def _next_due_text(schedule, logs_root, agent_name, now, grace, dispatch_enabled=True) -> str:
-    if not dispatch_enabled:
-        return "dispatch disabled"
-    if schedule.conditional or not schedule.enabled:
-        return "—"
-    lateness = schedule_lateness(
-        (schedule,),
-        logs_root=logs_root,
-        agent_name=agent_name,
-        now=now,
-        grace=grace,
+    return _present_next_due_text(
+        schedule,
+        logs_root,
+        agent_name,
+        now,
+        grace,
+        dispatch_enabled,
     )
-    if lateness is None:
-        nxt = next_occurrence(schedule, logs_root=logs_root, agent_name=agent_name, now=now)
-        return relative_future(nxt)
-    if lateness.state == "overdue":
-        return f"overdue {elapsed_coarse(now - lateness.due_at)}"
-    return "due now"
 
 
 def _routines_context(services: FlowgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
