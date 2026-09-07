@@ -116,7 +116,7 @@ Omitting agent `permissions.mode` continues to inherit team `permissions.mode`. 
 
 Update team and agent permission consumers and writers consistently, including path resolution, effective-policy construction, instance/compilation inputs, team creation/settings persistence, setup-generated configuration, and validation diagnostics. This is a structural relocation, not a policy change. Do not put a second canonical permissions block inside either runtime block or use an old-field fallback that can hide conflicting configuration.
 
-Reject legacy team or agent `runtime.permissions` with an actionable diagnostic identifying the affected team or agent and directing the operator to move that block to sibling `permissions`, leaving runtime settings untouched. If both locations are present at either level, reject the configuration rather than choosing, unioning, or overwriting one. In particular, the existing permissive runtime extras handling must not silently accept and ignore an old permissions block at either level. Do not rewrite the user's live configuration or add startup conversion as part of this feature. Existing configurations need an explicit operator edit before use with the relocated team and agent fields.
+Reject old nested team or agent `runtime.permissions` with an actionable diagnostic identifying the affected team or agent and directing the operator to move that block to sibling `permissions`, leaving runtime settings untouched. If both locations are present at either level, reject the configuration rather than choosing, unioning, or overwriting one. In particular, the existing permissive runtime extras handling must not silently accept and ignore an old permissions block at either level. Do not rewrite the user's live configuration or add startup conversion as part of this feature. Existing configurations need an explicit operator edit before use with the relocated team and agent fields.
 
 | UI state | Existing configuration representation |
 | --- | --- |
@@ -172,7 +172,7 @@ On edits, debounce preview requests and associate every request with a monotonic
 
 On Save, compare the expected revision under the existing lock, load the matching baseline, apply only the agent permissions patch to raw configuration, validate the full candidate and effective policy, and replace atomically. Also verify the catalog identity used for all-tools inference. Return the existing POST/303-redirect flow on success, refresh services, and render the newly saved policy.
 
-Do not let the old Runtime POST remain a second permission writer. Keep timeout submissions working; reject legacy permission-rule fields with an actionable error rather than silently applying or discarding them. Removing fields from the Runtime form must never erase configured permissions. The Profile identity POST must likewise leave permissions untouched.
+Do not let the old Runtime POST remain a second permission writer. Keep timeout submissions working; reject old permission-rule fields with an actionable error rather than silently applying or discarding them. Removing fields from the Runtime form must never erase configured permissions. The Profile identity POST must likewise leave permissions untouched.
 
 ## Error and interaction behavior
 
@@ -191,7 +191,7 @@ Use focused tests while implementing and run the complete suite before review an
 
 Required focused coverage:
 
-- Team and agent sibling `permissions` accepted; legacy nested permissions and both-location conflicts rejected with relocation guidance at either level; no automatic live-config rewrites.
+- Team and agent sibling `permissions` accepted; old nested permissions and both-location conflicts rejected with relocation guidance at either level; no automatic live-config rewrites.
 - Equivalent effective policy, mode inheritance, relative path resolution, and eligibility before and after explicit team and agent field relocations; configuration producers emit only the new locations.
 - Existing Team Settings and team creation read/write sibling team permissions while preserving timeout, agent configuration, and unrelated data; no team UI redesign or changed defaults.
 - Dedicated tab navigation; removal of the Profile checkbox and Runtime permission surfaces; continued identity and timeout editing without permission changes.
@@ -233,9 +233,9 @@ The following sources and renders preserve the conversation's visual decisions. 
 
 ### Checkbox-only editor and summary-only inheritance
 
-[HTML source](assets/2026-09-06-agent-permissions-ui/permissions-checkboxes-v2.html)
+[HTML source](assets/2026-09-06-agent-permissions-ui/permissions-checkboxes-revision-2.html)
 
-![Checkbox-only revision](assets/2026-09-06-agent-permissions-ui/permissions-checkboxes-v2.png)
+![Checkbox-only revision](assets/2026-09-06-agent-permissions-ui/permissions-checkboxes-revision-2.png)
 
 ### Rule type chosen at creation
 

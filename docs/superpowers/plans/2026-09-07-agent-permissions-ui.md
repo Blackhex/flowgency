@@ -21,7 +21,7 @@
 - "A YAML editor or advanced schema-oriented mode" remains out of scope for the agent UI. Existing Team Settings controls are not redesigned.
 - Copy is **Permissions**, **Mode**, **Rules**, **Effective access**, **Add rule**, **Path rule**, **No-path rule**, **Workspace access**, **No-path tools**, **Path**, **Tools**, **Discard changes**, **Save permissions**. No visible Tools label inside a no-path rule; no Target selector inside either rule type.
 - Keep configuration defaults: team timeout `1800`, team mode `unrestricted`, no team rules; omitted agent values inherit. Preserve exact-path workspace write eligibility, same-path unions, and longest-matching-path resolution.
-- `schema_version: 1` remains the accepted version for this planned change; explicitly reject the relocated legacy keys instead of accepting dual authority. No implicit field migration or live config edit is authorized.
+- `schema_version: 1` remains the accepted version for this planned change; explicitly reject the relocated old nested keys instead of accepting dual authority. No implicit field migration or live config edit is authorized.
 - Run all implementation commands from `C:/Projekty/Flowgency/.worktrees/agent-permissions-ui` on `feat/agent-permissions-ui`, never from the main checkout. Preserve unrelated edits and runtime files.
 - Baseline at `6559632`: `python -m pytest tests/ -q` yielded **2092 passed, 6 skipped**. Re-establish it at execution start if the branch or environment changed. Baseline results do not verify the implementation.
 - Finish each task's red/green test cycle and review before dependent tasks. Use Conventional Commits, maximum 72-character subjects. This plan is committed separately from all implementation.
@@ -74,7 +74,7 @@ Tasks 1 and 2 are independently reviewable, but use the listed sequence to avoid
 **Interfaces:**
 - Consumes: `parse_config(raw: dict[str, Any], config_path: Path)`, `resolve_effective_policy(config, team_id, agent_id, *, timeout_override=None, integration=None)`, and existing ConfigStore patch functions.
 - Produces: `TeamConfig.permissions: RuntimePermissions` and `AgentInstance.permissions: RuntimePermissions`; both runtime models retain `timeout` only among defined fields. Retain the existing `RuntimePermissions` Python name to avoid an unrelated public rename.
-- Produces: legacy-key error `code="relocated-permissions"`, `field=f"{scope}.runtime.permissions"`, with guidance to move to `f"{scope}.permissions"`.
+- Produces: old nested-key error `code="relocated-permissions"`, `field=f"{scope}.runtime.permissions"`, with guidance to move to `f"{scope}.permissions"`.
 - Preserves: resolver signatures, rule semantics, accepted schema version, timeout defaults, and existing Team Settings HTTP form fields.
 
 - [ ] **Step 1: Pin the structural regression before changing fixtures.** Create the test file with this test; `raw_config` is the existing conftest fixture. Add the four parameterized cases for team-only old key, agent-only old key, team both locations, and agent both locations using the same fixture.
@@ -124,7 +124,7 @@ def test_nested_policy_never_silently_ignored(raw_config, tmp_path, level, also_
     assert any(issue.code == "relocated-permissions" for issue in caught.value.issues)
 ```
 
-- [ ] **Step 2: Run the new tests and observe assertion failures.** Run `python -m pytest tests/test_permission_relocation.py -q`. The current parser ignores sibling permissions and accepts legacy nesting, so the new assertions must fail for those reasons, not a missing import or broken test fixture.
+- [ ] **Step 2: Run the new tests and observe assertion failures.** Run `python -m pytest tests/test_permission_relocation.py -q`. The current parser ignores sibling permissions and accepts the old nested location, so the new assertions must fail for those reasons, not a missing import or broken test fixture.
 
 - [ ] **Step 3: Relocate the model and reject the old keys.** Remove the `permissions` member from both runtime classes and add it to both owner classes with the same default factory. Add the guard to both runtime validation functions; do not remove the existing superseded-key guards. Change their old corrective hint from `runtime.permissions` to `permissions`.
 
@@ -779,7 +779,7 @@ git diff --check
 
 - [ ] **Step 2: Compare actual UI with the approved assets.** Run the existing deterministic fixture server via Playwright; capture desktop `1440x1000` and mobile `390x844` in light and dark projects. Check the application region against v7 for column ratio/order, labels, normal Path/Tools weight, no Target selectors, no separate inherited panel, Mode source in summary, tool provenance links, workspace write status, and action placement. Inspect real saved image files; integrated browser screenshots can be cropped under zoom. Verify PNG dimensions cover the document content (native scrollbars may reduce content width). Capture nonempty/empty/error/long-path states; inspect keyboard menu/focus and asset loading. Document intentional sample-data differences, not layout excuses.
 
-- [ ] **Step 3: Audit config authority and active documentation.** Search active sources/tests/docs with `rg -n 'runtime\.permissions' flowgency tests kb README.md AGENTS.md config.yaml.example .github/skills examples`. Every remaining occurrence must be a legacy rejection guard/test, an explicit manual relocation example, or a Python field unrelated to canonical owner configuration. Check setup output, instance clones/moves, config patches, and generated projections use new model fields. Do not rewrite immutable historical job specs merely because canonical config fields moved. The full job/runtime regression suite establishes unchanged execution behavior.
+- [ ] **Step 3: Audit config authority and active documentation.** Search active sources/tests/docs with `rg -n 'runtime\.permissions' flowgency tests kb README.md AGENTS.md config.yaml.example .github/skills examples`. Every remaining occurrence must be an old nested-location rejection guard/test, an explicit manual relocation example, or a Python field unrelated to canonical owner configuration. Check setup output, instance clones/moves, config patches, and generated projections use new model fields. Do not rewrite immutable historical job specs merely because canonical config fields moved. The full job/runtime regression suite establishes unchanged execution behavior.
 
 - [ ] **Step 4: Record and review evidence.** Write the verification file with exact passing/failing command counts, catalog completeness evidence, screenshots, and any residual integration-dependent enforcement limitations. No unsupported claim of universal all-tools editing. Perform per-spec coverage review plus a whole-branch bug/security review, including grant widening, concurrent writes, reflected markup, and lost unrelated data. Fix relevant findings through failing regression tests and rerun the affected checks. Commit tests and docs by their respective Conventional Commit types rather than combining an unrelated cleanup.
 
@@ -797,7 +797,7 @@ Run `python -m pytest tests/ -q` from fast-forwarded master, not the feature wor
 
 | Specification requirement | Task and check |
 | --- | --- |
-| Team/agent sibling policy, legacy/both-location rejection | Task 1 relocation tests and full regression suite |
+| Team/agent sibling policy, old nested/both-location rejection | Task 1 relocation tests and full regression suite |
 | Team Settings persistence unchanged visually | Tasks 1 and 7, existing team/config UI tests |
 | No schema migration/live config mutation | Task 1 guards; Task 7 authority audit |
 | Catalog truth, targets, incompleteness/version | Task 2 metadata tests; Task 3 mapping; Task 4 catalog conflict |
