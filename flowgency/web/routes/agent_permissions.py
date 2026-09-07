@@ -135,12 +135,12 @@ def _rule_rows(draft: PermissionDraft, choices: tuple[tuple[str, ...], ...], unb
     return rows
 
 
-def _render_summary_html(request: Request, summary, *, is_draft: bool) -> str:
+def _render_summary_html(request: Request, summary, *, summary_label: str) -> str:
     if summary is None:
         return ""
     return request.app.state.templates.env.get_template(
         "agent_permissions_summary.html"
-    ).render(summary=summary, is_draft=is_draft)
+    ).render(summary=summary, summary_label=summary_label)
 
 
 def _failure_json(
@@ -192,7 +192,9 @@ def render_permissions_page(
     display_choices = _merged_choices(prepared.form, current_draft.draft, prepared.catalog)
     display_unbounded = _merged_unbounded(prepared.form, current_draft.draft)
     permission_rows = _rule_rows(current_draft.draft, display_choices, display_unbounded)
-    summary_html = _render_summary_html(request, prepared.summary, is_draft=False)
+    saved_summary_html = _render_summary_html(request, prepared.summary, summary_label="Saved permissions")
+    summary_label = "Current saved permissions" if submitted is not None or page_issues or conflict else "Saved permissions"
+    summary_html = _render_summary_html(request, prepared.summary, summary_label=summary_label)
     permissions_initial = {
         "baseline": baseline.model_dump(mode="json"),
         "draft": current_draft.model_dump(mode="json"),
@@ -202,6 +204,7 @@ def render_permissions_page(
         "catalog_id": current_catalog_id,
         "preview_url": f"/{team}/agents/{agent}/permissions/preview",
         "save_url": f"/{team}/agents/{agent}/permissions",
+        "saved_summary_html": saved_summary_html,
         "conflict": conflict,
         "issues": issue_dicts(page_issues),
     }
@@ -320,7 +323,7 @@ async def permissions_preview(
         logger.exception("Unexpected permissions preview failure", extra={"team": team, "agent": agent})
         raise
 
-    summary_html = _render_summary_html(request, prepared.summary, is_draft=True)
+    summary_html = _render_summary_html(request, prepared.summary, summary_label="Draft preview")
     return JSONResponse(
         {
             "draft_version": submitted.draft_version,

@@ -25,7 +25,7 @@
   const discardButton = root.querySelector('[data-discard-button]');
   const workspaceWrite = root.querySelector('[data-workspace-write]');
   const payloadInput = form.elements.payload;
-  const savedSummaryHtml = summaryBody.innerHTML;
+  const savedSummaryHtml = initial.saved_summary_html ?? summaryBody.innerHTML;
   const savedWorkspaceWrite = workspaceWrite.textContent;
 
   let rowCounter = 0;
@@ -75,6 +75,19 @@
     };
   }
 
+  function normalizeEditorState(state) {
+    return {
+      mode: state.mode,
+      rules: state.rules.map((rule) => ({
+        source_index: rule.source_index,
+        target: rule.target,
+        path: rule.target === 'path' ? rule.path : null,
+        selected: [...rule.selected],
+        pending_custom: rule.pending_custom,
+      })),
+    };
+  }
+
   function wireToDisplay(draft) {
     return {
       mode: draft.mode,
@@ -90,7 +103,17 @@
   }
 
   const baselineDraft = structuredClone(initial.baseline.draft);
-  const baselineSerialized = JSON.stringify(normalizeDraft(baselineDraft));
+  const baselineDraftSerialized = JSON.stringify(normalizeDraft(baselineDraft));
+  const baselineEditorSerialized = JSON.stringify(normalizeEditorState({
+    mode: baselineDraft.mode,
+    rules: baselineDraft.rules.map((rule) => ({
+      source_index: rule.source_index === undefined ? null : rule.source_index,
+      target: rule.target,
+      path: rule.target === 'path' ? (rule.path ?? '') : null,
+      selected: [...rule.selected],
+      pending_custom: '',
+    })),
+  }));
   let displayDraft = wireToDisplay(initial.draft.draft);
 
   function createToolChoice(row, name, checked) {
@@ -221,6 +244,34 @@
     };
   }
 
+  function collectEditorState() {
+    return normalizeEditorState({
+      mode: modeSelect.value,
+      rules: [...root.querySelectorAll('[data-rule-row]')].map((row) => ({
+        source_index: row.dataset.sourceIndex === '' ? null : Number(row.dataset.sourceIndex),
+        target: row.dataset.target,
+        path: row.dataset.target === 'path' ? row.querySelector('[data-rule-path]').value : null,
+        selected: [...row.querySelectorAll('[data-tool-name]:checked')].map((input) => input.dataset.toolName),
+        pending_custom: row.querySelector('[data-custom-tool]')?.value ?? '',
+      })),
+    });
+  }
+
+  function pendingCustomIssues() {
+    return [...list.querySelectorAll('[data-rule-row]')].flatMap((row, index) => {
+      const value = row.querySelector('[data-custom-tool]')?.value ?? '';
+      if (value === '') {
+        return [];
+      }
+      return [{
+        code: 'pending-custom-tool',
+        field: `rules.${index}.selected`,
+        message: 'Add or clear the pending custom tool before saving.',
+        hint: 'Use Add custom tool to include it, or clear the field.',
+      }];
+    });
+  }
+
   function setSummaryState(message, tone, options = {}) {
     summaryBody.setAttribute('aria-busy', options.busy ? 'true' : 'false');
     summaryStatus.textContent = message;
@@ -238,6 +289,10 @@
 
   function setSummaryUnavailable() {
     setSummaryState('Preview unavailable', 'error', { busy: false, hideSummary: true, retry: true, reload: conflict });
+  }
+
+  function setSummaryPendingInput() {
+    setSummaryState('Add or clear the pending custom tool before saving.', 'warning', { busy: false, hideSummary: true, retry: false, reload: conflict });
   }
 
   function setSummaryStale() {
@@ -350,8 +405,9 @@
   }
 
   function setDirtyState() {
-    dirty = JSON.stringify(collectDraft()) !== baselineSerialized;
-    saveButton.disabled = !dirty || conflict || submitting || validVersion !== draftVersion;
+    const hasPendingCustomInput = pendingCustomIssues().length > 0;
+    dirty = JSON.stringify(collectEditorState()) !== baselineEditorSerialized;
+    saveButton.disabled = !dirty || conflict || submitting || validVersion !== draftVersion || hasPendingCustomInput;
     root.dataset.dirty = dirty ? 'true' : 'false';
   }
 
@@ -387,6 +443,17 @@
   }
 
   async function requestPreview(version) {
+    const localIssues = pendingCustomIssues();
+    if (localIssues.length > 0) {
+      if (version !== draftVersion) {
+        return;
+      }
+      controller = null;
+      applyIssues(localIssues);
+      setSummaryPendingInput();
+      setDirtyState();
+      return;
+    }
     const draft = collectDraft();
     const serializedDraft = JSON.stringify(draft);
     const activeController = new AbortController();
@@ -509,7 +576,8 @@
   refreshIcons();
 
   const currentDraftSerialized = JSON.stringify(collectDraft());
-  if (!conflict && currentDraftSerialized === baselineSerialized && initial.issues.length === 0 && summaryBody.textContent.trim() !== 'Preview unavailable') {
+  const currentEditorSerialized = JSON.stringify(collectEditorState());
+  if (!conflict && currentDraftSerialized === baselineDraftSerialized && currentEditorSerialized === baselineEditorSerialized && initial.issues.length === 0 && summaryBody.textContent.trim() !== 'Preview unavailable') {
     validVersion = draftVersion;
     validatedDraft = currentDraftSerialized;
     setSummaryCurrent();
@@ -621,6 +689,10 @@
   list.addEventListener('input', (event) => {
     if (event.target.matches('[data-rule-path]')) {
       setRuleStatus(event.target.closest('[data-rule-row]'));
+      schedulePreview();
+      return;
+    }
+    if (event.target.matches('[data-custom-tool]')) {
       schedulePreview();
     }
   });

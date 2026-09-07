@@ -178,6 +178,7 @@ def test_permissions_save_conflict_retains_submitted_draft(monkeypatch, tmp_path
     assert initial["draft"]["revision"] == stale_revision
     assert initial["draft"]["draft"]["rules"][0]["path"] == str(tmp_path / "stale-draft")
     assert initial["conflict"] is True
+    assert "Current saved permissions" in response.text
     assert config_path.read_bytes() == after
 
 
@@ -199,6 +200,25 @@ def test_permissions_save_rejects_catalog_drift_with_retained_draft(monkeypatch,
     assert initial["draft"]["catalog_id"] == "0" * 64
     assert initial["draft"]["draft"]["rules"][0]["path"] == str(tmp_path / "catalog-stale")
     assert initial["conflict"] is True
+
+
+def test_permissions_save_validation_error_marks_summary_as_noncurrent(monkeypatch, tmp_path, raw_config):
+    _pin_catalog(monkeypatch)
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+    payload = initial_payload(client.get("/newsletter/agents/advisor/permissions").text)["draft"]
+    payload["draft_version"] = 5
+    payload["draft"]["rules"][0]["path"] = ""
+
+    response = client.post(
+        "/newsletter/agents/advisor/permissions",
+        data={"payload": json.dumps(payload)},
+    )
+
+    assert response.status_code == 422
+    initial = initial_payload(response.text)
+    assert initial["draft"]["draft"]["rules"][0]["path"] == ""
+    assert "Path rules must include a nonblank path." in response.text
+    assert "Current saved permissions" in response.text
 
 
 def test_permissions_preview_rejects_missing_revision_and_catalog(monkeypatch, tmp_path, raw_config):

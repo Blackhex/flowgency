@@ -224,6 +224,34 @@ test('preview failure retains a custom tool draft and retry preview recovers the
   await assertNoConsoleErrors(page);
 });
 
+test('pending custom tool text blocks save until it is added or cleared', async ({ page }) => {
+  await page.goto(advisorPath);
+
+  const row = page.locator('[data-rule-row]').first();
+  const customInput = row.locator('[data-custom-tool]');
+  await customInput.fill('pending_only_tool');
+
+  await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeDisabled();
+  await expect(row.getByRole('checkbox', { name: 'pending_only_tool', exact: true })).toHaveCount(0);
+  await expect(row.getByText('Add or clear the pending custom tool before saving.', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-summary-status]')).toHaveText('Add or clear the pending custom tool before saving.');
+
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await expect(customInput).toHaveValue('');
+  await expect(row.getByText('Add or clear the pending custom tool before saving.', { exact: true })).toHaveCount(0);
+
+  await customInput.fill('added_tool');
+  await row.getByRole('button', { name: 'Add custom tool', exact: true }).click();
+  await expect(row.getByRole('checkbox', { name: 'added_tool', exact: true })).toBeChecked();
+
+  await customInput.fill('leave_me_pending');
+  const closeDialog = page.waitForEvent('dialog');
+  await page.close({ runBeforeUnload: true });
+  const dialog = await closeDialog;
+  expect(dialog.type()).toBe('beforeunload');
+  await dialog.dismiss();
+});
+
 test('preview conflict retains the draft, disables save, and reload restores the live page', async ({ page }) => {
   await page.goto(advisorPath);
 

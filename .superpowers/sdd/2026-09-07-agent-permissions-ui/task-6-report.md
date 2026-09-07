@@ -99,7 +99,7 @@ Inspected new Permissions snapshots on disk:
 Inspection notes:
 
 - Desktop snapshots show the intended two-column editor/summary layout, explicit workspace-write status pill, structured rule card layout, and stable light/dark theming.
-- Mobile snapshots show the intended stacked layout with the summary above the editor controls and no overflow collapse from long paths.
+- Mobile snapshots show the intended stacked layout with the editor first and the summary second, with no overflow collapse from long paths.
 
 Inspected regenerated adjacent configuration snapshots on disk:
 
@@ -138,9 +138,11 @@ Inspection notes:
 - `flowgency/templates/agent_permissions_summary.html`
 - `flowgency/static/agent-permissions.css`
 - `flowgency/static/agent-permissions.js`
+- `flowgency/web/routes/agent_permissions.py`
 - `flowgency/static/lucide.min.js`
 - `package.json`
 - `package-lock.json`
+- `tests/test_agent_permissions.py`
 - `tests/ui/agent_permissions.spec.ts`
 - `tests/ui/accessibility.spec.ts`
 - `tests/ui/agent_configuration.spec.ts`
@@ -160,3 +162,41 @@ Inspection notes:
 
 - I did not rerun the full Python suite for Task 6. Verification covered the requested browser suites and the focused Python permissions gate only.
 - The final permissions snapshots needed one last focused refresh after a small 58-pixel desktop drift surfaced on a clean rerun. The final non-snapshot rerun of the dedicated permissions suite passed after that refresh.
+
+## Round 1 Fixes
+
+- Save-conflict and validation-error HTML now render the visible summary as `Current saved permissions` while preserving the clean `Saved permissions` HTML in the hidden baseline payload that Discard restores.
+- Pending custom-tool text now participates in dirty tracking immediately, blocks Save until it is explicitly added or cleared, invalidates preview locally instead of silently disappearing, and remains covered by discard and beforeunload protection.
+- Added focused server regressions in `tests/test_agent_permissions.py` and a browser regression in `tests/ui/agent_permissions.spec.ts` for those paths.
+
+## Round 1 Verification
+
+Focused red/green checks during the fix:
+
+```text
+.venv/Scripts/python.exe -m pytest tests/test_agent_permissions.py -q -k "noncurrent or conflict_retains_submitted_draft"
+2 passed, 12 deselected, 1 warning in 1.20s
+
+npm run test:ui -- tests/ui/agent_permissions.spec.ts --project=desktop-dark --grep "pending custom tool text blocks save until it is added or cleared"
+1 passed (3.2s)
+```
+
+Requested scoped verification after the fix:
+
+```text
+npm run test:ui -- tests/ui/agent_permissions.spec.ts
+32 passed (45.5s)
+
+.venv/Scripts/python.exe -m pytest tests/test_agent_permissions.py -q
+14 passed, 1 warning in 2.48s
+```
+
+Warning characterization:
+
+```text
+Source: .venv/Lib/site-packages/starlette/testclient.py:45
+Type: DeprecationWarning
+Message: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+Assessment: third-party Starlette test-client compatibility warning, not introduced by this permissions fix.
+Action: recorded precisely only; not suppressed globally and no unrelated dependency upgrade was made.
+```
