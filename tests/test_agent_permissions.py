@@ -150,6 +150,45 @@ def test_permissions_save_updates_agent_policy_and_redirects(monkeypatch, tmp_pa
     assert saved["teams"]["newsletter"]["agents"][0]["permissions"]["rules"][0]["path"] == str(save_path)
 
 
+def test_permissions_save_new_no_path_rule_with_custom_name_keeps_explicit_tools(monkeypatch, tmp_path, raw_config):
+    catalog = _pin_catalog(
+        monkeypatch,
+        ToolCatalog(
+            integration="copilot",
+            version="test-catalog-complete",
+            complete=True,
+            tools=(
+                ToolDescriptor("read"),
+                ToolDescriptor("write"),
+            ),
+        ),
+    )
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    payload = initial_payload(client.get("/newsletter/agents/advisor/permissions").text)["draft"]
+    payload["draft_version"] = 6
+    payload["catalog_id"] = catalog_id(catalog)
+    payload["draft"]["rules"] = [
+        {
+            "source_index": None,
+            "target": "no_path",
+            "path": None,
+            "selected": ["read", "write", "custom"],
+        }
+    ]
+
+    response = client.post(
+        "/newsletter/agents/advisor/permissions",
+        data={"payload": json.dumps(payload)},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["teams"]["newsletter"]["agents"][0]["permissions"] == {
+        "rules": [{"tools": ["read", "write", "custom"]}]
+    }
+
+
 def test_permissions_save_conflict_retains_submitted_draft(monkeypatch, tmp_path, raw_config):
     _pin_catalog(monkeypatch)
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)

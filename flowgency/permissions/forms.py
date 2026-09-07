@@ -47,7 +47,7 @@ def encode_selection(selected: list[str], catalog: ToolCatalog) -> dict[str, Any
     if not selected:
         return {"tools": []}
     whole_catalog = {tool.name for tool in catalog.tools}
-    if catalog.complete and whole_catalog and whole_catalog <= set(selected):
+    if catalog.complete and whole_catalog and set(selected) == whole_catalog:
         return {}
     return {"tools": list(selected)}
 

@@ -248,6 +248,45 @@ def test_save_permissions_updates_only_target_agent_policy(raw_config, config_pa
     assert updated.raw["teams"]["newsletter"]["workspaces"] == raw["teams"]["newsletter"]["workspaces"]
 
 
+def test_save_permissions_keeps_explicit_list_when_complete_catalog_selection_includes_custom_name(
+    raw_config, config_paths, monkeypatch
+):
+    from flowgency.integrations import BaseIntegration
+    from flowgency.integrations.tool_catalog import ToolCatalog, ToolDescriptor, catalog_id
+    from flowgency.permissions.editor import EditorRequest, load_editor, save_permissions
+
+    catalog = ToolCatalog(
+        "claude-code",
+        "fixture-v2",
+        (
+            ToolDescriptor("read"),
+            ToolDescriptor("write"),
+        ),
+        True,
+    )
+    monkeypatch.setattr(BaseIntegration, "permission_tool_catalog", lambda self: catalog)
+    raw = deepcopy(raw_config)
+    raw["teams"]["newsletter"]["agents"][0]["permissions"] = {
+        "rules": [{"path": ".", "tools": ["read", "custom"]}]
+    }
+    store, snapshot = _seed_store(config_paths, raw)
+    loaded = load_editor(snapshot, "newsletter", "builder")
+    draft = loaded.form.draft.model_copy(deep=True)
+    draft.rules[0].selected = ["read", "write", "custom"]
+    request = EditorRequest(
+        revision=snapshot.revision,
+        catalog_id=catalog_id(catalog),
+        draft_version=6,
+        draft=draft,
+    )
+
+    updated = save_permissions(store, "newsletter", "builder", request)
+
+    assert updated.raw["teams"]["newsletter"]["agents"][0]["permissions"] == {
+        "rules": [{"path": ".", "tools": ["read", "write", "custom"]}]
+    }
+
+
 def test_save_permissions_rejects_stale_revision(raw_config, config_paths, monkeypatch):
     from flowgency.configuration.store import ConfigConflictError
     from flowgency.integrations import BaseIntegration

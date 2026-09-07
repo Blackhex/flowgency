@@ -100,6 +100,18 @@ def test_path_only_edit_never_unbounds_explicit_tools():
     ]
 
 
+def test_changed_existing_rule_with_complete_catalog_and_custom_name_stays_explicit():
+    catalog = _catalog(ToolDescriptor("read"), ToolDescriptor("write"), complete=True)
+    agent = {"permissions": {"rules": [{"path": "docs", "tools": ["read", "custom"]}]}}
+
+    draft = build_form(agent, catalog).draft
+    draft.rules[0].selected = ["read", "write", "custom"]
+
+    assert serialize_permissions(agent, draft, catalog) == {
+        "rules": [{"path": "docs", "tools": ["read", "write", "custom"]}]
+    }
+
+
 @pytest.mark.parametrize(
     ("complete", "expected"),
     [
@@ -115,6 +127,18 @@ def test_new_full_selection_respects_catalog_completeness(complete, expected):
     )
 
     assert serialize_permissions({}, draft, catalog) == {"rules": [expected]}
+
+
+def test_new_full_selection_with_custom_name_stays_explicit_when_catalog_is_complete():
+    catalog = _catalog(ToolDescriptor("read"), ToolDescriptor("write"), complete=True)
+    draft = PermissionDraft(
+        mode="inherit",
+        rules=[RuleDraft(target="no_path", selected=["read", "write", "custom"])],
+    )
+
+    assert serialize_permissions({}, draft, catalog) == {
+        "rules": [{"tools": ["read", "write", "custom"]}]
+    }
 
 
 def test_incomplete_empty_catalog_preserves_existing_unbounded_rule_when_no_choices_exist():
