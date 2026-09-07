@@ -3,12 +3,14 @@
 Date: 2026-09-07
 Worktree: `C:/Projekty/Flowgency/.worktrees/routines-ui`
 Branch: `feat/routines-ui`
-Reviewed implementation revision: `69bac9c`
+Task 5 implementation source revision: `c4100fa`
+Final green UI test-and-snapshot repair revision: `d2a5d57`
+Earlier documentation-only revisions in this evidence trail: `69bac9c`, `a8ef960`
 Scope: Task 5 UI gate investigation and repair only. Step 5 integration was not executed. Controller final review remains pending.
 
 ## Task 5 changes made here
 
-- Investigated the six residual screenshot failures reported from the Task 5 UI gate and separated fixture-driven text drift from genuine layout regressions.
+- Investigated the nine screenshot failures reported from the Task 5 UI gate and separated fixture-driven text drift from genuine layout regressions.
 - Added screenshot-test assertions that verify the live permissions and routines pages still render the correct runtime-derived paths and config revision format before masking those variable text regions.
 - Narrowed screenshot masking to only the unstable absolute-path and config-revision text, then refreshed only the affected baselines.
 - No application templates, runtime behavior, scheduler logic, or configuration-model code was edited in this repair pass.
@@ -60,7 +62,7 @@ no output
 
 ## Investigation evidence
 
-The initial failing state from `69bac9c` reproduced nine screenshot failures:
+The initial failing state from the Task 5 implementation source `c4100fa`, first written up in `69bac9c`, reproduced nine screenshot failures:
 
 ```text
 tests/ui/agent_permissions.spec.ts :: permissions editor layout remains stable (desktop-light)
@@ -142,6 +144,7 @@ tests/ui/agent_routines.spec.ts-snapshots/agent-routines-preview-error-desktop-l
 tests/ui/agent_routines.spec.ts-snapshots/agent-routines-preview-error-desktop-dark-win32.png
 tests/ui/agent_routines.spec.ts-snapshots/agent-routines-preview-error-mobile-light-win32.png
 tests/ui/agent_routines.spec.ts-snapshots/agent-routines-preview-error-mobile-dark-win32.png
+tests/ui/agent_routines.spec.ts-snapshots/agent-routines-empty-desktop-light-win32.png
 tests/ui/agent_routines.spec.ts-snapshots/agent-routines-empty-desktop-dark-win32.png
 tests/ui/agent_routines.spec.ts-snapshots/agent-routines-empty-mobile-light-win32.png
 tests/ui/agent_routines.spec.ts-snapshots/agent-routines-empty-mobile-dark-win32.png
