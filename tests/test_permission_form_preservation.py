@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
+import re
 
 import yaml
 from fastapi.testclient import TestClient
@@ -23,6 +25,16 @@ def _write_yaml(path: Path, raw: dict) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def _initial_payload(html: str) -> dict:
+    match = re.search(
+        r'<script id="permissions-initial" type="application/json">(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    assert match is not None
+    return json.loads(match.group(1))
 
 
 def _make_team_client(monkeypatch, tmp_path, raw_config):
@@ -217,26 +229,16 @@ def test_agent_runtime_timeout_only_preserves_rules(tmp_path, monkeypatch, raw_c
     assert saved["teams"]["newsletter"]["agents"][0]["permissions"] == before_rules
 
 
-def test_agent_runtime_form_round_trips_rules(tmp_path, monkeypatch, raw_config):
-    """Submitting rules through the form round-trips them unchanged."""
+def test_agent_permissions_form_round_trips_rules(tmp_path, monkeypatch, raw_config):
+    """Submitting rules through the dedicated editor round-trips them unchanged."""
     client, config_path = _make_agent_client(monkeypatch, tmp_path, raw_config)
     before = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     before_rules = before["teams"]["newsletter"]["agents"][0]["permissions"]["rules"]
-    from flowgency.configuration import ConfigStore
-    rev = ConfigStore(config_path).load().revision
-    extra = tmp_path / "extra"
-    rules_yaml = yaml.safe_dump(
-        [{"path": str(extra), "tools": ["read", "search"]}],
-        default_flow_style=False, sort_keys=False,
-    ).strip()
+    payload = _initial_payload(client.get("/newsletter/agents/advisor/permissions").text)["draft"]
 
     response = client.post(
-        "/newsletter/agents/advisor/runtime",
-        data={
-            "revision": rev,
-            "timeout": "1200",
-            "permission_rules_yaml": rules_yaml,
-        },
+        "/newsletter/agents/advisor/permissions",
+        data={"payload": json.dumps(payload)},
         follow_redirects=False,
     )
 
@@ -433,86 +435,3 @@ def test_team_patch_empty_tuple_clears_rules(tmp_path, raw_config):
     assert saved["rules"] == []
 
 
-def test_agent_patch_none_leaves_rules_alone(tmp_path, raw_config):
-    """AgentRuntimePatch with rules=None preserves existing agent rules."""
-    raw = deepcopy(raw_config)
-    workspace = tmp_path / "workspace"
-    workspace.mkdir(parents=True, exist_ok=True)
-    extra = tmp_path / "extra"
-    extra.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["flowgency"]["default_team"] = "grp"
-    raw["flowgency"]["agent_library"] = str(tmp_path / "lib")
-    raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
-    raw["flowgency"]["memory_store"] = str(tmp_path / "mem")
-    raw["teams"] = {
-        "grp": {
-            "name": "Grp",
-            "workspace_path": str(workspace),
-            "path": str(tmp_path / "groups" / "grp-state"),
-            "default_integration": "copilot",
-            "runtime": {"timeout": 1800},
-            "permissions": {"mode": "restricted", "rules": [{"path": str(workspace), "tools": ["read"]}]},
-            "agents": [
-                {
-                    "name": "bot",
-                    "blueprint": "advisor",
-                    "integration": "copilot",
-                    "runtime": {"timeout": 900},
-                    "permissions": {"rules": [{"path": str(extra), "tools": ["read", "write"]}]},
-                }
-            ],
-        }
-    }
-    config_path = _write_yaml(tmp_path / "config.yaml", raw)
-
-    from copy import deepcopy as dc
-    from flowgency.web.routes.agent_detail import _apply_runtime_patch
-    raw_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-
-    _apply_runtime_patch(raw_data, "grp", "bot", AgentRuntimePatch(timeout=1801, rules=None))
-
-    agent_runtime = raw_data["teams"]["grp"]["agents"][0]["runtime"]
-    assert agent_runtime["timeout"] == 1801
-    assert raw_data["teams"]["grp"]["agents"][0]["permissions"]["rules"] == [{"path": str(extra), "tools": ["read", "write"]}]
-
-
-def test_agent_patch_empty_tuple_clears_rules(tmp_path, raw_config):
-    """AgentRuntimePatch with rules=() explicitly sets rules to empty."""
-    raw = deepcopy(raw_config)
-    workspace = tmp_path / "workspace"
-    workspace.mkdir(parents=True, exist_ok=True)
-    extra = tmp_path / "extra"
-    extra.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "groups" / "grp-state").mkdir(parents=True, exist_ok=True)
-    raw["flowgency"]["default_team"] = "grp"
-    raw["flowgency"]["agent_library"] = str(tmp_path / "lib")
-    raw["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
-    raw["flowgency"]["memory_store"] = str(tmp_path / "mem")
-    raw["teams"] = {
-        "grp": {
-            "name": "Grp",
-            "workspace_path": str(workspace),
-            "path": str(tmp_path / "groups" / "grp-state"),
-            "default_integration": "copilot",
-            "runtime": {"timeout": 1800},
-            "permissions": {"mode": "restricted", "rules": [{"path": str(workspace), "tools": ["read"]}]},
-            "agents": [
-                {
-                    "name": "bot",
-                    "blueprint": "advisor",
-                    "integration": "copilot",
-                    "runtime": {"timeout": 900},
-                    "permissions": {"rules": [{"path": str(extra), "tools": ["read", "write"]}]},
-                }
-            ],
-        }
-    }
-    config_path = _write_yaml(tmp_path / "config.yaml", raw)
-
-    from flowgency.web.routes.agent_detail import _apply_runtime_patch
-    raw_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-
-    _apply_runtime_patch(raw_data, "grp", "bot", AgentRuntimePatch(timeout=900, rules=()))
-
-    assert raw_data["teams"]["grp"]["agents"][0]["permissions"]["rules"] == []

@@ -1,9 +1,9 @@
 <section class="space-y-5">
   <div>
     <h2 class="text-lg font-semibold text-gray-900">Runtime</h2>
-    <p class="text-sm text-gray-500">The integration is pinned by the agent record. Team defaults stay separate from agent overrides and the effective preview.</p>
+    <p class="text-sm text-gray-500">The integration is pinned by the agent record. Timeout inheritance stays here; permissions are edited on the dedicated Permissions tab.</p>
   </div>
-  <div class="grid gap-6 lg:grid-cols-3 text-sm text-gray-700">
+  <div class="grid gap-6 lg:grid-cols-2 text-sm text-gray-700">
     <div class="space-y-2">
       <h3 class="font-semibold text-gray-900">Pinned integration</h3>
       <p>{{ integration_display_name }}</p>
@@ -12,29 +12,7 @@
     <div class="space-y-2">
       <h3 class="font-semibold text-gray-900">Team default</h3>
       <p>Timeout: {{ team_timeout }}s</p>
-      <p>Mode: {{ team_permission_mode }}</p>
-      {% if team_rules %}
-      <p>Rules:</p>
-      <pre class="font-mono text-xs bg-gray-100 rounded p-2 whitespace-pre-wrap">{{ team_rules }}</pre>
-      {% else %}
-      <p>Rules: (none)</p>
-      {% endif %}
-    </div>
-    <div class="space-y-2">
-      <h3 class="font-semibold text-gray-900">Effective preview</h3>
-      {% if effective %}
-      <p>Timeout: {{ effective.timeout }}s</p>
-      <p>Mode: {{ effective.mode }}</p>
-      <ul class="space-y-1">
-        {% for root in effective_root_rows %}
-        <li>{{ root.source }}: <span class="font-mono break-all">{{ root.path }}</span></li>
-        {% else %}
-        <li>No explicit roots</li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <p>Effective preview unavailable until the runtime issues are resolved.</p>
-      {% endif %}
+      <p>Permissions: <a href="/{{ team }}/agents/{{ agent }}/permissions" class="text-indigo-600 hover:text-indigo-800">Open Permissions</a></p>
     </div>
   </div>
   <form method="post" action="/{{ team }}/agents/{{ agent }}/runtime" class="space-y-4 border-t border-gray-200 pt-4">
@@ -45,11 +23,14 @@
         <input type="text" name="timeout" value="{{ agent_timeout }}" placeholder="inherit" class="w-full rounded-lg border border-gray-300 px-3 py-2">
       </label>
     </div>
-    <label class="block text-sm text-gray-700">
-      <span class="mb-1 block font-medium">Agent permission rules (additive to team)</span>
-      <textarea name="permission_rules_yaml" rows="6" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ agent_rules_yaml }}</textarea>
-      <p class="mt-1 text-xs text-gray-500">YAML list of rules. Each rule: path (absolute or relative to workspace), tools (list, omit for all). Instance rules are additive; same path unions tools.</p>
-    </label>
+    {% if permission_move_message %}
+    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      {{ permission_move_message }}
+      {% if permission_editor_href %}
+      <a href="{{ permission_editor_href }}" class="font-medium text-amber-900 underline">Open Permissions</a>
+      {% endif %}
+    </div>
+    {% endif %}
     <div class="flex justify-end">
       <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save runtime</button>
     </div>

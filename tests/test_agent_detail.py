@@ -180,6 +180,7 @@ def test_agent_detail_tabs_have_stable_urls(monkeypatch, tmp_path, raw_config):
         ("profile", "Profile"),
         ("blueprint", "Blueprint"),
         ("runtime", "Runtime"),
+        ("permissions", "Permissions"),
         ("prompts", "Prompts"),
         ("routines", "Routines"),
         ("memory", "Memory"),
@@ -190,7 +191,7 @@ def test_agent_detail_tabs_have_stable_urls(monkeypatch, tmp_path, raw_config):
         assert f'aria-current="page">{label}' in response.text
 
 
-def test_profile_tab_uses_config_identity_and_capability(monkeypatch, tmp_path, raw_config):
+def test_profile_tab_uses_config_identity_fields(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     revision = _revision(config_path)
 
@@ -199,58 +200,31 @@ def test_profile_tab_uses_config_identity_and_capability(monkeypatch, tmp_path, 
     assert response.status_code == 200
     assert "Advisor" in response.text
     assert "Blueprint Librarian" in response.text
-    assert "Write capability" in response.text
     assert revision in response.text
     assert "Headshot" not in response.text
     assert "Subagent" not in response.text
 
 
-def test_runtime_tab_renders_team_default_timeout_and_mode(monkeypatch, tmp_path, raw_config):
+def test_runtime_tab_renders_team_default_timeout_and_permissions_link(monkeypatch, tmp_path, raw_config):
     client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents/advisor/runtime")
 
     assert response.status_code == 200
     assert "Timeout: 2400s" in response.text
-    assert "Mode: restricted" in response.text
+    assert "/newsletter/agents/advisor/permissions" in response.text
+    assert "permission_rules_yaml" not in response.text
 
 
-def test_runtime_tab_separates_inherited_and_additive_roots(monkeypatch, tmp_path, raw_config):
+def test_runtime_tab_keeps_timeout_editor_only(monkeypatch, tmp_path, raw_config):
     client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
 
     response = client.get("/newsletter/agents/advisor/runtime")
 
     assert response.status_code == 200
-    assert "Team default" in response.text
-    # Effective preview shows rules as "Rule" source labels
-    assert "Rule" in response.text
-    assert "Research/editorial" in response.text.replace("\\", "/")
-    assert "Research/additional" in response.text.replace("\\", "/")
-
-
-def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch, tmp_path, raw_config):
-    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    default_root = str((tmp_path / "Research" / "editorial").resolve())
-    additional_root = str((tmp_path / "Research" / "additional").resolve())
-    # Add a duplicate rule path that appears in both group and agent (uniform tools)
-    raw["teams"]["newsletter"]["agents"][0]["permissions"]["rules"] = [
-        {"path": default_root, "tools": ["read", "shell", "write"]},
-        {"path": additional_root, "tools": ["read", "shell", "write"]},
-    ]
-    config_path.write_text(
-        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
-    app_mod.refresh_services()
-
-    response = client.get("/newsletter/agents/advisor/runtime")
-
-    assert response.status_code == 200
-    body = response.text.replace("\\", "/")
-    # The effective preview dedups the same path (group + agent merged)
-    assert body.count(f"Rule: <span class=\"font-mono break-all\">{default_root.replace(chr(92), '/')}</span>") == 1
-    assert f"Rule: <span class=\"font-mono break-all\">{additional_root.replace(chr(92), '/')}</span>" in body
+    assert 'name="timeout"' in response.text
+    assert ">Mode<" not in response.text
+    assert "permission_rules_yaml" not in response.text
 
 
 def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, raw_config):
@@ -436,7 +410,6 @@ def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path
             "display_name": "Senior Advisor",
             "title": "Runtime Curator",
             "emoji": ":D",
-            "can_write": "true",
         },
         follow_redirects=False,
     )
@@ -467,29 +440,25 @@ def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_pa
     assert runtime["timeout"] == 1801
 
 
-def test_runtime_post_surfaces_unsupported_capability_issue(monkeypatch, tmp_path, raw_config):
-    """Switching to an integration that can't enforce the mode returns 409."""
+def test_runtime_post_rejects_previous_permission_rules_field(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
-    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    # script integration only supports unrestricted; group mode is restricted
-    raw["teams"]["newsletter"]["agents"][0]["integration"] = "script"
-    config_path.write_text(
-        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
-    app_mod.refresh_services()
+    before = config_path.read_bytes()
     revision = _revision(config_path)
 
     response = client.post(
         "/newsletter/agents/advisor/runtime",
         data={
             "revision": revision,
-            "timeout": "",
+            "timeout": "1801",
+            "permission_rules_yaml": "[]",
         },
     )
 
     assert response.status_code == 409
-    assert "cannot enforce permission mode" in response.text
+    assert "Permission rules moved to the dedicated Permissions tab." in response.text
+    assert "/newsletter/agents/advisor/permissions" in response.text
+    assert 'value="1801"' in response.text
+    assert config_path.read_bytes() == before
 
 
 def test_routines_post_replaces_ordered_list(monkeypatch, tmp_path, raw_config):

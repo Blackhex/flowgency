@@ -69,7 +69,6 @@ class AgentProfilePatch:
 @dataclass(frozen=True)
 class AgentRuntimePatch:
     timeout: int | None
-    rules: tuple[dict[str, Any], ...] | None = None
 
 
 def _teams(raw: dict[str, Any]) -> dict[str, Any]:
@@ -311,12 +310,6 @@ def patch_agent_runtime(
             _clear_known_keys(runtime, ("timeout",))
         else:
             runtime["timeout"] = patch.timeout
-
-        if patch.rules is not None:
-            permissions = agent.setdefault("permissions", {})
-            if not isinstance(permissions, dict):
-                raise TypeError(f"teams.{team_id}.agents.{agent_id}.permissions must be a mapping")
-            permissions["rules"] = list(deepcopy(patch.rules))
 
     return store.patch(expected_revision, apply)
 

@@ -70,6 +70,7 @@ from flowgency.web.routes import (
     admin_library_router,
     admin_memory_router,
     agent_detail_router,
+    agent_permissions_router,
     agents_router,
     jobs_router,
 )
@@ -951,6 +952,7 @@ app.include_router(admin_teams_router)
 app.include_router(admin_library_router)
 app.include_router(admin_memory_router)
 app.include_router(agents_router)
+app.include_router(agent_permissions_router)
 app.include_router(agent_detail_router)
 app.include_router(jobs_router)
 

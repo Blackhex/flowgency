@@ -15,14 +15,15 @@ from flowgency.configuration import (
     AgentProfilePatch,
     AgentRuntimePatch,
     ConfigConflictError,
+    ConfigSnapshot,
     ResolvedTeamPaths,
     ValidationFailed,
     parse_config,
+    patch_agent_runtime,
     patch_agent_profile,
     replace_agent_routines,
     resolve_team_paths,
 )
-from flowgency.configuration.effective import resolve_effective_policy
 from flowgency.configuration.models import MemorySelector
 from flowgency.permissions.eligibility import may_execute_decisions
 from flowgency.dispatch.schedule import parse_catch_up
@@ -50,6 +51,7 @@ _TAB_LABELS = {
     "profile": "Profile",
     "blueprint": "Blueprint",
     "runtime": "Runtime",
+    "permissions": "Permissions",
     "prompts": "Prompts",
     "routines": "Routines",
     "memory": "Memory",
@@ -303,27 +305,6 @@ def _split_lines(text: str) -> tuple[str, ...]:
     return tuple(line.strip() for line in str(text or "").splitlines() if line.strip())
 
 
-def _apply_runtime_patch(raw: dict[str, Any], team_id: str, agent_id: str, patch: AgentRuntimePatch) -> None:
-    teams = raw.setdefault("teams", {})
-    team_cfg = teams[team_id]
-    agents = team_cfg.setdefault("agents", [])
-    target = None
-    for entry in agents:
-        if isinstance(entry, dict) and entry.get("name") == agent_id:
-            target = entry
-            break
-    if target is None:
-        raise KeyError(agent_id)
-    runtime = target.setdefault("runtime", {})
-    if patch.timeout is None:
-        runtime.pop("timeout", None)
-    else:
-        runtime["timeout"] = patch.timeout
-    if patch.rules is not None:
-        permissions = target.setdefault("permissions", {})
-        permissions["rules"] = list(patch.rules)
-
-
 def _patch_default_memory(raw: dict[str, Any], team_id: str, agent_id: str, selector: MemorySelector | None) -> None:
     target = None
     for entry in raw["teams"][team_id].setdefault("agents", []):
@@ -554,58 +535,11 @@ def _prompts_context(
 def _runtime_context(snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
     team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     integration = get_integration(instance.integration)
-    issues: list[dict[str, str]] = []
-    effective = None
-    effective_root_rows: list[dict[str, str]] = []
-    try:
-        effective = resolve_effective_policy(snapshot.config, team_id, agent_id)
-        for index, rule in enumerate(effective.rules):
-            if rule.path is None:
-                continue
-            resolved = rule.path.resolve(strict=False)
-            effective_root_rows.append(
-                {
-                    "path": str(resolved).replace("\\", "/"),
-                    "source": "Rule",
-                }
-            )
-    except ValidationFailed as exc:
-        issues = _issue_dicts(exc)
-
-    team_rules = team_cfg.permissions.rules
-    agent_rules = instance.permissions.rules
-    team_rule_lines = []
-    for rule in team_rules:
-        path_str = str(rule.path).replace("\\", "/") if rule.path else "(pathless)"
-        tools_str = ", ".join(rule.tools) if rule.tools is not None else "(all)"
-        team_rule_lines.append(f"{path_str}: {tools_str}")
-    agent_rules_dicts = [
-        {
-            k: v
-            for k, v in (
-                ("path", str(rule.path).replace("\\", "/") if rule.path else None),
-                ("tools", list(rule.tools) if rule.tools is not None else None),
-            )
-            if v is not None
-        }
-        for rule in agent_rules
-    ]
-    agent_rules_yaml = (
-        yaml.safe_dump(agent_rules_dicts, default_flow_style=False, sort_keys=False).strip()
-        if agent_rules_dicts else ""
-    )
-
     return {
         "integration_name": instance.integration,
         "integration_display_name": integration.display_name,
         "team_timeout": team_cfg.runtime.timeout,
-        "team_permission_mode": team_cfg.permissions.mode,
-        "team_rules": "\n".join(team_rule_lines),
         "agent_timeout": instance.runtime.timeout if "timeout" in instance.runtime.model_fields_set else "",
-        "agent_rules_yaml": agent_rules_yaml,
-        "effective": effective,
-        "effective_root_rows": effective_root_rows,
-        "issues": issues,
         "capabilities": integration.runtime_capabilities,
         "projector_capabilities": getattr(integration.projector, "capabilities", None),
     }
@@ -767,13 +701,14 @@ def _detail_context(
     agent_id: str,
     tab: str,
     *,
+    snapshot: ConfigSnapshot | None = None,
     status_code: int = 200,
     issues: list[dict[str, str]] | None = None,
     banner: str = "",
     memory_conflict: dict[str, str] | None = None,
     overrides: dict[str, Any] | None = None,
 ):
-    snapshot = services.config_store.load()
+    snapshot = snapshot or services.config_store.load()
     team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     handler_issues = issues or []
     context: dict[str, Any] = {
@@ -804,7 +739,6 @@ def _detail_context(
                     "display_name": instance.identity.display_name,
                     "title": instance.identity.title,
                     "emoji": instance.identity.emoji,
-                    "can_write": may_execute_decisions(snapshot.config, team_id, agent_id),
                 }
             }
         )
@@ -893,37 +827,30 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
     form = await request.form()
     revision = str(form.get("revision", "")).strip()
     timeout_text = str(form.get("timeout", "")).strip()
-    raw_rules_yaml = form.get("permission_rules_yaml")
-    rules: tuple[dict[str, Any], ...] | None = None
-    if raw_rules_yaml is not None:
-        rules_text = str(raw_rules_yaml).strip()
-        if rules_text:
-            try:
-                parsed_rules = yaml.safe_load(rules_text)
-                if not isinstance(parsed_rules, list):
-                    raise TypeError
-                rules = tuple(parsed_rules)
-            except (yaml.YAMLError, TypeError):
-                return _detail_context(
-                    request, services, team, agent, "runtime",
-                    status_code=409,
-                    banner="Permission rules must be valid YAML (a list of mappings).",
-                )
-        else:
-            rules = ()
-    patch = AgentRuntimePatch(
-        timeout=int(timeout_text) if timeout_text else None,
-        rules=rules,
-    )
+    if "permission_rules_yaml" in form:
+        return _detail_context(
+            request,
+            services,
+            team,
+            agent,
+            "runtime",
+            status_code=409,
+            overrides={
+                "agent_timeout": timeout_text,
+                "permission_editor_href": f"/{team}/agents/{agent}/permissions",
+                "permission_move_message": "Permission rules moved to the dedicated Permissions tab.",
+            },
+        )
     try:
         if not revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
-        current = services.config_store.load()
-        raw = deepcopy(current.raw)
-        _apply_runtime_patch(raw, team, agent, patch)
-        parsed = parse_config(raw, current.path).resolved
-        resolve_effective_policy(parsed, team, agent)
-        services.config_store.replace(revision, raw)
+        patch_agent_runtime(
+            services.config_store,
+            revision,
+            team,
+            agent,
+            AgentRuntimePatch(timeout=int(timeout_text) if timeout_text else None),
+        )
     except ValueError as exc:
         issues = (
             [
@@ -942,11 +869,38 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
                 }
             ]
         )
-        return _detail_context(request, services, team, agent, "runtime", status_code=409, issues=issues)
+        return _detail_context(
+            request,
+            services,
+            team,
+            agent,
+            "runtime",
+            status_code=409,
+            issues=issues,
+            overrides={"agent_timeout": timeout_text},
+        )
     except ValidationFailed as exc:
-        return _detail_context(request, services, team, agent, "runtime", status_code=409, issues=_issue_dicts(exc))
+        return _detail_context(
+            request,
+            services,
+            team,
+            agent,
+            "runtime",
+            status_code=409,
+            issues=_issue_dicts(exc),
+            overrides={"agent_timeout": timeout_text},
+        )
     except ConfigConflictError as exc:
-        return _detail_context(request, services, team, agent, "runtime", status_code=409, banner=str(exc))
+        return _detail_context(
+            request,
+            services,
+            team,
+            agent,
+            "runtime",
+            status_code=409,
+            banner=str(exc),
+            overrides={"agent_timeout": timeout_text},
+        )
     request.app.state.refresh_services()
     return RedirectResponse(f"/{team}/agents/{agent}/runtime", status_code=303)
 
