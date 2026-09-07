@@ -62,27 +62,40 @@ def _save_with_external_write(
     )
     setattr(BaseIntegration, "permission_tool_catalog", lambda self: catalog)
     request = EditorRequest.model_validate(request_payload)
+    injected_bytes: bytes | None = None
 
     try:
         original_patch = store.patch
 
         def patch_with_external_write(expected_revision, patcher):
             def wrapped(raw):
+                nonlocal injected_bytes
                 patcher(raw)
                 path.write_text(
                     path.read_text(encoding="utf-8") + "\n",
                     encoding="utf-8",
                 )
+                injected_bytes = path.read_bytes()
 
             return original_patch(expected_revision, wrapped)
 
         store.patch = patch_with_external_write  # type: ignore[method-assign]
         save_permissions(store, team_id, agent_id, request)
     except ConfigConflictError as exc:
-        queue.put(str(exc))
+        queue.put(
+            {
+                "error": str(exc),
+                "external_bytes": injected_bytes,
+            }
+        )
         return
 
-    queue.put("missing-conflict")
+    queue.put(
+        {
+            "error": "missing-conflict",
+            "external_bytes": injected_bytes,
+        }
+    )
 
 
 def test_preview_does_not_write(raw_config, config_paths, monkeypatch):
@@ -335,8 +348,12 @@ def test_save_permissions_detects_external_uncoordinated_write(
     process.join(5)
 
     assert process.exitcode == 0
-    assert queue.get(timeout=1) == "config.yaml changed outside the Flowgency lock"
-    assert store.path.read_bytes() != before
+    result = queue.get(timeout=1)
+
+    assert result["error"] == "config.yaml changed outside the Flowgency lock"
+    assert result["external_bytes"] is not None
+    assert result["external_bytes"] != before
+    assert store.path.read_bytes() == result["external_bytes"]
 
 
 def test_concurrent_same_revision_saves_conflict_instead_of_losing_changes(
