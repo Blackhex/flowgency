@@ -3,26 +3,24 @@
 Date: 2026-09-07
 Worktree: `C:/Projekty/Flowgency/.worktrees/routines-ui`
 Branch: `feat/routines-ui`
-Reviewed implementation revision: `c4100fa`
-Scope: Task 5 steps 1-4 only. Step 5 integration was not executed. Controller final review remains pending.
+Reviewed implementation revision: `69bac9c`
+Scope: Task 5 UI gate investigation and repair only. Step 5 integration was not executed. Controller final review remains pending.
 
 ## Task 5 changes made here
 
-- Added the narrow operator workflow note to `kb/dispatch.md` for the Routines tab: ordered editing, Save/Discard behavior, grouped Blueprint and Instance prompt choices, the saved-status timing caveat, and the ID-change warning that schedule markers and routine-scoped memory are not moved.
-- Added this verification record only. No schema, runtime, scheduler, or configuration-model code was edited in this Task 5 pass.
+- Investigated the six residual screenshot failures reported from the Task 5 UI gate and separated fixture-driven text drift from genuine layout regressions.
+- Added screenshot-test assertions that verify the live permissions and routines pages still render the correct runtime-derived paths and config revision format before masking those variable text regions.
+- Narrowed screenshot masking to only the unstable absolute-path and config-revision text, then refreshed only the affected baselines.
+- No application templates, runtime behavior, scheduler logic, or configuration-model code was edited in this repair pass.
 
 ## Command evidence
 
-1. Staged-doc boundary check after the `kb/dispatch.md` edit:
+1. Prior Python evidence retained from the Task 5 implementation pass because this repair changed only Playwright specs and snapshots:
 
 ```text
 .venv/Scripts/python.exe -m pytest tests/test_repository_boundaries.py tests/test_team_terminology.py -q
 10 passed in 0.28s
-```
 
-2. Full Python suite from the active worktree:
-
-```text
 .venv/Scripts/python.exe -m pytest tests/ -q
 2218 passed, 6 skipped, 1 warning in 278.04s (0:04:38)
 ```
@@ -33,21 +31,36 @@ Retained warning:
 DeprecationWarning from starlette.testclient importing anyio.abc.BlockingPortal
 ```
 
-3. Full UI suite from the active worktree:
+2. Focused screenshot validation after adding the targeted masks and runtime-value assertions:
+
+```text
+npx playwright test tests/ui/agent_permissions.spec.ts tests/ui/agent_routines.spec.ts --project=desktop-light --project=desktop-dark --project=mobile-light --project=mobile-dark --grep "permissions editor layout remains stable|empty permissions state remains stable|preview failure retains a custom tool draft and retry preview recovers the summary|long path permissions state remains stable|empty routines state renders without overflow" --update-snapshots
+20 passed in 30.0s
+```
+
+3. Full UI suite from the active worktree after the targeted repair:
 
 ```text
 npm run test:ui
-run status: interrupted
+214 passed, 2 skipped in 4.1m
 ```
 
-Observed nonfatal fixture-server log line during the UI run:
+Observed nonfatal fixture-server log line during the focused and full UI runs:
 
 ```text
 Failed to project terminal job job-failed to its decision: 'decision_path'
 ```
 
-Playwright recorded nine failing screenshot artifacts in `test-results/.last-run.json`.
-The failing screenshot cases were:
+4. Diff hygiene after the acceptance run:
+
+```text
+git diff --check
+no output
+```
+
+## Investigation evidence
+
+The initial failing state from `69bac9c` reproduced nine screenshot failures:
 
 ```text
 tests/ui/agent_permissions.spec.ts :: permissions editor layout remains stable (desktop-light)
@@ -61,7 +74,7 @@ tests/ui/agent_permissions.spec.ts :: long path permissions state remains stable
 tests/ui/agent_routines.spec.ts :: empty routines state renders without overflow (desktop-light)
 ```
 
-Artifacts inspected from disk:
+Artifacts inspected from disk during the investigation:
 
 ```text
 test-results/agent_permissions-permissions-editor-layout-remains-stable-desktop-light/agent-permissions-diff.png
@@ -75,12 +88,33 @@ test-results/agent_permissions-long-path-permissions-state-remains-stable-deskto
 test-results/agent_routines-empty-routines-state-renders-without-overflow-desktop-light/agent-routines-empty-diff.png
 ```
 
-4. Diff hygiene after the acceptance run:
+## Root cause
 
-```text
-git diff --check
-no output
-```
+The failing screenshots were not caused by a layout or behavior regression in the rendered pages.
+
+Verified evidence:
+
+- The routines empty-state diff isolated to the footer text `Config revision: ...`.
+- The permissions diffs isolated to three text regions only: the footer config revision, the editor path input, and the rendered effective-access paths in the summary column.
+- The page structure, controls, spacing, empty-state copy, and save/preview behavior matched between expected and actual images.
+- `tests/ui/agent_permissions.spec.ts` originally introduced the permissions baselines in commit `50a31b8` without masking any runtime-derived path or revision text.
+- The fixture config changed later in commit `bbc934b` when the routines feature added the `research-digest` routine under the `research.permissions-editor` fixture agent in `tests/ui/fixtures/config.yaml`.
+- The UI test server writes the runtime config by loading that fixture YAML, replacing `__RUNTIME__`, and serializing it with `yaml.safe_dump(sort_keys=False)` before the app computes `config_revision` as `sha256(payload)`.
+- Recomputing that exact server-side payload hash showed that the current fixture serializes to revision `1df4fd6a80b776c282a4654ae3c4f7b92dcdaf3cfd222b59fa49fd531b095f64`, which matches the rendered footer observed in the failing artifacts.
+
+Conclusion:
+
+- The routines fixture addition changed the canonical config payload and therefore the rendered config revision string.
+- The same runtime checkout path also changed the absolute path lengths rendered in the permissions editor and summary.
+- Those values are genuinely variable test-fixture output, not user-visible regressions to the permissions or routines UI.
+
+## Repair applied
+
+- Added explicit Playwright assertions that the permissions editor still shows the agent rule path suffix under `tests/ui/.runtime/current/teams/newsletter/editorial` and that the effective-access summary still includes the team workspace path under `tests/ui/.runtime/current/workspaces/newsletter`.
+- Added explicit Playwright assertions that the routines empty state still renders a valid 64-hex config revision string.
+- Kept screenshots behavior-scoped by masking only the variable absolute-path and config-revision text nodes.
+- Pinned the masked footer text width inside the tests so the mask rectangle itself does not drift by a few pixels between runs.
+- Refreshed exactly 16 justified baselines: 12 permissions screenshots and 4 routines-empty screenshots. No other snapshots were refreshed.
 
 ## Visual comparison
 
@@ -125,32 +159,22 @@ Observed matches against the approved routines assets and Task 5 acceptance targ
 
 Explicit limitation from the inspected artifacts:
 
-- The full suite did not produce a persisted passing rename-state screenshot artifact. Rename-state conformance was checked through the normative rename asset plus the passing browser assertions in `tests/ui/agent_routines.spec.ts`, not through a saved final image file.
+- The full suite still does not persist a dedicated final rename-state screenshot artifact. Rename-state conformance remains covered by the approved rename asset plus the passing browser assertions in `tests/ui/agent_routines.spec.ts`.
 
-## Acceptance gaps found
+## Final UI gate result
 
-1. The full UI gate is not green, so Task 5 cannot be marked fully accepted.
+The repaired UI gate is green:
 
-2. The one routines-area screenshot failure is limited to the empty desktop-light baseline.
+```text
+npm run test:ui
+214 passed, 2 skipped in 4.1m
+```
 
-Observed cause from the inspected expected, actual, and diff files:
-
-- The page structure, empty-state layout, and controls match.
-- The visible diff is the rendered config revision string near the bottom of the page.
-- Expected baseline shows revision `3c22c700...`; actual render shows revision `1df4fd6a...`.
-- No broader routines layout regression was visible in the inspected empty-state artifact.
-
-3. The other eight UI failures are in `tests/ui/agent_permissions.spec.ts`, outside the routines task code that this pass was allowed to modify.
-
-Observed cause from the inspected permissions diff artifacts:
-
-- The dominant differences are path- and revision-heavy text regions in desktop screenshots.
-- No permissions code or baselines were changed in this Task 5 pass.
-- Per the task instruction, these unrelated app or baseline issues were not fixed here and are reported for controller review.
+The two skipped tests are unchanged pre-existing skips. No routines or permissions UI failures remain after the targeted masking repair.
 
 ## Preservation and boundary evidence
 
-The full Python suite covered the explicit boundary requirements the task asked to call out:
+The full Python suite evidence from the earlier Task 5 pass still covers the behavior boundaries that this UI repair did not change:
 
 - Unsupported saved timing remains preserved unless edited: `tests/test_routine_forms.py` covers unsupported interval `3600`, unsupported daily time `9am`, and unsupported recovery `later`, plus correction back to supported values.
 - Rename and reorder preserve saved provenance: `tests/ui/agent_routines.spec.ts` covers renamed IDs, reorder, and the saved-status origin note.
@@ -158,14 +182,16 @@ The full Python suite covered the explicit boundary requirements the task asked 
 - Save does not mutate saved schedule markers or routine memory files: `tests/test_routine_editor.py` includes `test_save_does_not_mutate_saved_history_or_memory_files`.
 - Preview and save use the disposable UI fixture configuration, not live config: the Playwright run used `tests/ui/server.py` and `tests/ui/fixtures/config.yaml` via the configured fixture web server.
 
+
 ## Review status
 
-- Task 5 Step 1: complete.
-- Task 5 Step 2: Python gate passed; UI gate failed with nine screenshot artifacts.
-- Task 5 Step 3: populated desktop/mobile and supporting routines screenshots were inspected against the four approved assets; the full rename-state artifact is still missing as a persisted final screenshot.
-- Task 5 Step 4: this evidence record is complete, but whole-branch approval is intentionally withheld because the full UI gate is not green and controller final review remains pending.
+- Task 5 UI gate investigation: complete.
+- Python gate: previously passed and unchanged by this test-only repair.
+- UI gate: passed after targeted masking and limited snapshot refresh.
+- Whole-branch approval is still intentionally withheld. This document is verification evidence only; controller final review remains pending.
 
 ## Handoff
 
 - Do not integrate from this Task 5 pass.
-- Do not update baselines blindly. The routines empty-state failure appears to be revision-text drift; the permissions failures are outside this task and need separate review before any snapshot refresh.
+- Do not refresh additional baselines beyond the 16 files justified here.
+- No live `config.yaml`, main workspace files, or scratch reports were staged or required for this repair.
