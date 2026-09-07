@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from multiprocessing import Process, Queue
 import threading
 
 import pytest
@@ -31,6 +32,57 @@ def _seed_store(config_paths, raw_config, *, integration: str = "claude-code"):
     store = ConfigStore(config_paths["config_path"])
     snapshot = store.create(raw)
     return store, snapshot
+
+
+def _save_with_external_write(
+    path_str: str,
+    team_id: str,
+    agent_id: str,
+    request_payload: dict,
+    queue: Queue,
+) -> None:
+    from pathlib import Path
+
+    from flowgency.configuration.store import ConfigConflictError, ConfigStore
+    from flowgency.integrations import BaseIntegration
+    from flowgency.integrations.tool_catalog import ToolCatalog, ToolDescriptor
+    from flowgency.permissions.editor import EditorRequest, save_permissions
+
+    path = Path(path_str)
+    store = ConfigStore(path)
+    catalog = ToolCatalog(
+        "claude-code",
+        "fixture-v1",
+        (
+            ToolDescriptor("read"),
+            ToolDescriptor("search"),
+            ToolDescriptor("write"),
+        ),
+        False,
+    )
+    setattr(BaseIntegration, "permission_tool_catalog", lambda self: catalog)
+    request = EditorRequest.model_validate(request_payload)
+
+    try:
+        original_patch = store.patch
+
+        def patch_with_external_write(expected_revision, patcher):
+            def wrapped(raw):
+                patcher(raw)
+                path.write_text(
+                    path.read_text(encoding="utf-8") + "\n",
+                    encoding="utf-8",
+                )
+
+            return original_patch(expected_revision, wrapped)
+
+        store.patch = patch_with_external_write  # type: ignore[method-assign]
+        save_permissions(store, team_id, agent_id, request)
+    except ConfigConflictError as exc:
+        queue.put(str(exc))
+        return
+
+    queue.put("missing-conflict")
 
 
 def test_preview_does_not_write(raw_config, config_paths, monkeypatch):
@@ -139,7 +191,23 @@ def test_save_permissions_updates_only_target_agent_policy(raw_config, config_pa
 
     catalog = _catalog()
     monkeypatch.setattr(BaseIntegration, "permission_tool_catalog", lambda self: catalog)
-    store, snapshot = _seed_store(config_paths, raw_config)
+    raw = deepcopy(raw_config)
+    team = raw["teams"]["newsletter"]
+    team["runtime"] = {"timeout": 900}
+    team["dispatch"] = {"enabled": True}
+    agent = team["agents"][0]
+    agent["identity"] = {"display_name": "Builder", "title": "Executor"}
+    agent["runtime"] = {"timeout": 1200}
+    agent["prompts"] = ["builder-brief"]
+    agent["routines"] = [
+        {
+            "id": "daily-review",
+            "prompt": {"scope": "blueprint", "name": "daily-review"},
+            "schedule": {"at": "09:00"},
+            "memory": {"scope": "routine"},
+        }
+    ]
+    store, snapshot = _seed_store(config_paths, raw)
     loaded = load_editor(snapshot, "newsletter", "builder")
     draft = loaded.form.draft.model_copy(deep=True)
     draft.mode = "unrestricted"
@@ -157,10 +225,14 @@ def test_save_permissions_updates_only_target_agent_policy(raw_config, config_pa
 
     agent = updated.raw["teams"]["newsletter"]["agents"][0]
     assert agent["permissions"] == {"mode": "unrestricted", "rules": [{"tools": ["read"]}]}
-    assert agent["blueprint"] == raw_config["teams"]["newsletter"]["agents"][0]["blueprint"]
-    assert agent["prompts"] == raw_config["teams"]["newsletter"]["agents"][0]["prompts"]
-    assert agent["routines"] == raw_config["teams"]["newsletter"]["agents"][0]["routines"]
-    assert updated.raw["teams"]["newsletter"]["workspaces"] == raw_config["teams"]["newsletter"]["workspaces"]
+    assert agent["blueprint"] == raw["teams"]["newsletter"]["agents"][0]["blueprint"]
+    assert agent["identity"] == raw["teams"]["newsletter"]["agents"][0]["identity"]
+    assert agent["runtime"] == raw["teams"]["newsletter"]["agents"][0]["runtime"]
+    assert agent["prompts"] == raw["teams"]["newsletter"]["agents"][0]["prompts"]
+    assert agent["routines"] == raw["teams"]["newsletter"]["agents"][0]["routines"]
+    assert updated.raw["teams"]["newsletter"]["runtime"] == raw["teams"]["newsletter"]["runtime"]
+    assert updated.raw["teams"]["newsletter"]["dispatch"] == raw["teams"]["newsletter"]["dispatch"]
+    assert updated.raw["teams"]["newsletter"]["workspaces"] == raw["teams"]["newsletter"]["workspaces"]
 
 
 def test_save_permissions_rejects_stale_revision(raw_config, config_paths, monkeypatch):
@@ -221,6 +293,50 @@ def test_save_permissions_validation_failure_leaves_file_unchanged(
         save_permissions(store, "newsletter", "builder", request)
 
     assert store.path.read_bytes() == before
+
+
+def test_save_permissions_detects_external_uncoordinated_write(
+    raw_config, config_paths, monkeypatch
+):
+    from flowgency.integrations import BaseIntegration
+    from flowgency.integrations.tool_catalog import catalog_id
+    from flowgency.permissions.forms import RuleDraft
+    from flowgency.permissions.editor import EditorRequest, load_editor
+
+    catalog = _catalog()
+    monkeypatch.setattr(BaseIntegration, "permission_tool_catalog", lambda self: catalog)
+    store, snapshot = _seed_store(config_paths, raw_config)
+    loaded = load_editor(snapshot, "newsletter", "builder")
+    draft = loaded.form.draft.model_copy(deep=True)
+    draft.mode = "unrestricted"
+    draft.rules = [
+        RuleDraft(source_index=None, target="no_path", path=None, selected=["read"])
+    ]
+    request = EditorRequest(
+        revision=snapshot.revision,
+        catalog_id=catalog_id(catalog),
+        draft_version=2,
+        draft=draft,
+    )
+    before = store.path.read_bytes()
+    queue: Queue[str] = Queue()
+    process = Process(
+        target=_save_with_external_write,
+        args=(
+            str(store.path),
+            "newsletter",
+            "builder",
+            request.model_dump(mode="python"),
+            queue,
+        ),
+    )
+
+    process.start()
+    process.join(5)
+
+    assert process.exitcode == 0
+    assert queue.get(timeout=1) == "config.yaml changed outside the Flowgency lock"
+    assert store.path.read_bytes() != before
 
 
 def test_concurrent_same_revision_saves_conflict_instead_of_losing_changes(
