@@ -1,9 +1,11 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
 
 const advisorPath = '/newsletter/agents/advisor/permissions';
 const fixturePath = '/research/agents/permissions-editor/permissions';
+const runtimeWorkspaceText = 'tests/ui/.runtime/current/workspaces/newsletter';
+const runtimeEditorialSuffix = /tests\/ui\/\.runtime\/current\/teams\/newsletter\/editorial$/;
 const longRulePath = 'workspace/teams/newsletter/' + [
   'editorial',
   'north-america',
@@ -33,6 +35,35 @@ type InitialPayload = {
     };
   };
 };
+
+function permissionFooter(page: Page) {
+  return page.locator('.permission-footer-copy');
+}
+
+async function pinMaskedTextWidth(locator: Locator, width: string) {
+  await locator.evaluateAll((elements, maskWidth) => {
+    for (const element of elements as HTMLElement[]) {
+      element.style.display = 'inline-block';
+      element.style.width = maskWidth;
+      element.style.whiteSpace = 'nowrap';
+      element.style.overflow = 'hidden';
+    }
+  }, width);
+}
+
+function permissionVariableTextMasks(
+  page: Page,
+  options: { includeRulePathInputs?: boolean } = {},
+) {
+  const masks = [
+    permissionFooter(page),
+    page.locator('#permission-summary .permission-summary-scope > p').filter({ hasText: '.runtime/current/' }),
+  ];
+  if (options.includeRulePathInputs ?? true) {
+    masks.push(page.locator('[data-rule-path]'));
+  }
+  return masks;
+}
 
 function parseInitialPayload(html: string): InitialPayload {
   const match = html.match(/<script id="permissions-initial" type="application\/json">([\s\S]*?)<\/script>/);
@@ -81,8 +112,16 @@ test.beforeEach(async ({ page }, testInfo) => {
 test('permissions editor layout remains stable', async ({ page }) => {
   await page.goto(advisorPath);
   await expect(page.getByRole('heading', { name: 'Permissions', exact: true })).toBeVisible();
+  await expect(page.locator('[data-rule-path]').first()).toHaveValue(runtimeEditorialSuffix);
+  await expect(page.locator('#permission-summary')).toContainText(runtimeWorkspaceText);
+  await expect(page.locator('#permission-summary')).toContainText('tests/ui/.runtime/current/teams/newsletter/editorial');
+  await expect(permissionFooter(page)).toHaveText(/Config revision: [0-9a-f]{64}/);
+  await pinMaskedTextWidth(permissionFooter(page), '44rem');
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-permissions.png', { fullPage: true });
+  await expect(page).toHaveScreenshot('agent-permissions.png', {
+    fullPage: true,
+    mask: permissionVariableTextMasks(page),
+  });
   await assertNoConsoleErrors(page);
 });
 
@@ -94,8 +133,14 @@ test('empty permissions state remains stable', async ({ page }) => {
 
   await expect(page.getByText('No agent-specific rules yet.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeEnabled();
+  await expect(page.locator('#permission-summary')).toContainText(runtimeWorkspaceText);
+  await expect(permissionFooter(page)).toHaveText(/Config revision: [0-9a-f]{64}/);
+  await pinMaskedTextWidth(permissionFooter(page), '44rem');
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-permissions-empty.png', { fullPage: true });
+  await expect(page).toHaveScreenshot('agent-permissions-empty.png', {
+    fullPage: true,
+    mask: permissionVariableTextMasks(page, { includeRulePathInputs: false }),
+  });
   await assertNoConsoleErrors(page);
 });
 
@@ -242,8 +287,14 @@ test('preview failure retains a custom tool draft and retry preview recovers the
   await expect(page.getByText('Preview unavailable', { exact: true })).toBeVisible();
   await expect(row.getByRole('checkbox', { name: 'keep_this_tool', exact: true })).toBeChecked();
   await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeDisabled();
+  await expect(row.locator('[data-rule-path]')).toHaveValue(runtimeEditorialSuffix);
+  await expect(permissionFooter(page)).toHaveText(/Config revision: [0-9a-f]{64}/);
+  await pinMaskedTextWidth(permissionFooter(page), '44rem');
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-permissions-preview-error.png', { fullPage: true });
+  await expect(page).toHaveScreenshot('agent-permissions-preview-error.png', {
+    fullPage: true,
+    mask: permissionVariableTextMasks(page),
+  });
 
   await page.getByRole('button', { name: 'Retry preview', exact: true }).click();
   await expect(page.locator('#permission-summary')).toContainText('retry-preview-ok');
@@ -259,9 +310,15 @@ test('long path permissions state remains stable', async ({ page }) => {
 
   await expect(pathField).toHaveValue(longRulePath);
   await expect(page.locator('#permission-summary')).toContainText('allowed-zone');
+  await expect(page.locator('#permission-summary')).toContainText(runtimeWorkspaceText);
+  await expect(permissionFooter(page)).toHaveText(/Config revision: [0-9a-f]{64}/);
   await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeEnabled();
+  await pinMaskedTextWidth(permissionFooter(page), '44rem');
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-permissions-long-path.png', { fullPage: true });
+  await expect(page).toHaveScreenshot('agent-permissions-long-path.png', {
+    fullPage: true,
+    mask: permissionVariableTextMasks(page, { includeRulePathInputs: false }),
+  });
   await assertNoConsoleErrors(page);
 });
 

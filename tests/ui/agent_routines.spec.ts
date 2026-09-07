@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { rename } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -30,6 +30,21 @@ type InitialPayload = {
     };
   };
 };
+
+function routinesFooter(page: Page) {
+  return page.locator('.routine-actions > .text-xs.text-gray-500');
+}
+
+async function pinMaskedTextWidth(locator: Locator, width: string) {
+  await locator.evaluateAll((elements, maskWidth) => {
+    for (const element of elements as HTMLElement[]) {
+      element.style.display = 'inline-block';
+      element.style.width = maskWidth;
+      element.style.whiteSpace = 'nowrap';
+      element.style.overflow = 'hidden';
+    }
+  }, width);
+}
 
 async function pageInitialPayload(page: Page): Promise<InitialPayload> {
   return JSON.parse(await page.locator('#routines-initial').textContent() ?? '{}') as InitialPayload;
@@ -140,8 +155,13 @@ test('empty routines state renders without overflow', async ({ page }) => {
   await expect(page.locator('[data-empty-routines]')).toBeVisible();
   await expect(page.locator('.routine-empty-summary')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save routines', exact: true })).toBeEnabled();
+  await expect(routinesFooter(page)).toHaveText(/Config revision: [0-9a-f]{64}/);
+  await pinMaskedTextWidth(routinesFooter(page), '44rem');
   await assertNoLayoutIssues(page);
-  await expect(page).toHaveScreenshot('agent-routines-empty.png', { fullPage: true });
+  await expect(page).toHaveScreenshot('agent-routines-empty.png', {
+    fullPage: true,
+    mask: [routinesFooter(page)],
+  });
   await assertNoConsoleErrors(page);
 });
 
