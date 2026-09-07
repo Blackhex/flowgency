@@ -45,11 +45,11 @@
         </div>
         <div>
           <dt class="font-semibold text-gray-900">Last fired</dt>
-          <dd data-saved-last>{{ row.saved_last if row.saved_last else 'Saved value unavailable' }}</dd>
+          <dd data-saved-last>{{ row.saved_last if row.saved_last else ('Not saved' if row.is_new else 'Saved value unavailable') }}</dd>
         </div>
         <div>
           <dt class="font-semibold text-gray-900">Next due</dt>
-          <dd data-saved-next>{{ row.saved_next if row.saved_next else 'Saved value unavailable' }}</dd>
+          <dd data-saved-next>{{ row.saved_next if row.saved_next else ('Not saved' if row.is_new else 'Saved value unavailable') }}</dd>
         </div>
       </dl>
     </section>
