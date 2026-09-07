@@ -211,10 +211,15 @@ def _validate_draft(
             issues.append(_issue(path_field, "Path rules must include a nonblank path."))
 
         selected_field = f"{field_prefix}.selected"
-        if len(set(rule.selected)) != len(rule.selected):
-            issues.append(_issue(selected_field, "Selected tool names must be unique."))
-        elif any(name == "" for name in rule.selected):
-            issues.append(_issue(selected_field, "Selected tool names must be non-empty strings."))
+        seen_names: set[str] = set()
+        for name in rule.selected:
+            if not isinstance(name, str) or name == "":
+                issues.append(_issue(selected_field, "Selected tool names must be non-empty strings."))
+                break
+            if name in seen_names:
+                issues.append(_issue(selected_field, "Selected tool names must be unique."))
+                break
+            seen_names.add(name)
 
     return issues
 

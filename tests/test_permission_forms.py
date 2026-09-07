@@ -239,6 +239,29 @@ def test_serialize_permissions_rejects_invalid_drafts(agent, draft, field):
     assert [issue.field for issue in excinfo.value.issues] == [field]
 
 
+@pytest.mark.parametrize(
+    "selected",
+    [
+        [1],
+        [None],
+        [["read"]],
+        [{"name": "read"}],
+        ["read", "read"],
+    ],
+)
+def test_serialize_permissions_rejects_mutated_invalid_selected_entries(selected):
+    catalog = _catalog(ToolDescriptor("read"))
+    agent = {"permissions": {"rules": [{"tools": ["read"]}]}}
+    draft = build_form(agent, catalog).draft
+
+    draft.rules[0].selected = selected
+
+    with pytest.raises(PermissionFormError) as excinfo:
+        serialize_permissions(agent, draft, catalog)
+
+    assert [issue.field for issue in excinfo.value.issues] == ["rules.0.selected"]
+
+
 def test_round_trip_back_to_baseline_restores_the_original_block_shape():
     catalog = _catalog(ToolDescriptor("read"), complete=False)
     agent = {"permissions": {"rules": [{"path": None, "tools": None}]}}
