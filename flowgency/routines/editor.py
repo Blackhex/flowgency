@@ -90,12 +90,15 @@ def prepare_routines(
 
 def save_routines(
     store: ConfigStore,
-    library: BlueprintLibrary,
-    prompts: PromptStore,
+    library: BlueprintLibrary | None,
+    prompts: PromptStore | None,
     team_id: str,
     agent_id: str,
     request: RoutinesRequest,
 ) -> ConfigSnapshot:
+    if library is None or prompts is None:
+        raise OSError("Routine dependencies are unavailable")
+
     def apply(raw: dict[str, Any]) -> None:
         snapshot = ConfigSnapshot(
             store.path,

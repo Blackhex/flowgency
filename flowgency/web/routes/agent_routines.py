@@ -268,15 +268,59 @@ def _warning_map(warnings: tuple[ValidationIssue, ...]) -> dict[tuple[int, str],
     return mapped
 
 
+def _draft_routine_for_source(draft: RoutinesDraft, source_index: int) -> RoutineDraft | None:
+    for routine in draft.routines:
+        if routine.source_index == source_index:
+            return routine
+    return None
+
+
+def _warning_is_unchanged(
+    routine: RoutineDraft,
+    baseline: RoutineDraft | None,
+    field: str,
+) -> bool:
+    if baseline is None:
+        return False
+    if field == "schedule":
+        return routine.schedule == baseline.schedule
+    if field == "recovery":
+        return routine.recovery == baseline.recovery
+    return True
+
+
+def _display_warnings(
+    current: RoutinesDraft,
+    baseline: RoutinesDraft,
+    warnings: tuple[ValidationIssue, ...],
+) -> tuple[ValidationIssue, ...]:
+    visible: list[ValidationIssue] = []
+    for issue in warnings:
+        parts = issue.field.split(".")
+        if len(parts) < 3 or parts[0] != "routines" or not parts[1].isdigit():
+            visible.append(issue)
+            continue
+        source_index = int(parts[1])
+        if source_index >= len(baseline.routines):
+            continue
+        routine = _draft_routine_for_source(current, source_index)
+        if routine is None:
+            continue
+        if _warning_is_unchanged(routine, baseline.routines[source_index], parts[2]):
+            visible.append(issue)
+    return tuple(visible)
+
+
 def _schedule_summary_text(
     routine: RoutineDraft,
+    baseline: RoutineDraft | None,
     source_index: int | None,
     raw_routines: list[dict[str, Any]],
     warnings: dict[tuple[int, str], str],
 ) -> str:
     if source_index is not None:
         warning = warnings.get((source_index, "schedule"))
-        if warning:
+        if warning and _warning_is_unchanged(routine, baseline, "schedule"):
             raw_schedule = raw_routines[source_index].get("schedule") if source_index < len(raw_routines) and isinstance(raw_routines[source_index], dict) else {}
             if isinstance(raw_schedule, dict) and raw_schedule.get("at") is not None:
                 return f"{raw_schedule['at']} ({warning})"
@@ -320,13 +364,14 @@ def _memory_summary_text(agent_default: MemorySelector | None, draft: MemoryDraf
 
 def _recovery_summary_text(
     routine: RoutineDraft,
+    baseline: RoutineDraft | None,
     source_index: int | None,
     raw_routines: list[dict[str, Any]],
     warnings: dict[tuple[int, str], str],
 ) -> str:
     if source_index is not None:
         warning = warnings.get((source_index, "recovery"))
-        if warning:
+        if warning and _warning_is_unchanged(routine, baseline, "recovery"):
             raw_schedule = raw_routines[source_index].get("schedule") if source_index < len(raw_routines) and isinstance(raw_routines[source_index], dict) else {}
             if isinstance(raw_schedule, dict) and raw_schedule.get("catch_up") is not None:
                 return f"{raw_schedule['catch_up']} ({warning})"
@@ -345,6 +390,7 @@ def _fallback_summaries(
     team: str,
     agent: str,
     draft: RoutinesDraft,
+    baseline: RoutinesDraft,
     choices: RoutineChoices,
     raw_routines: list[dict[str, Any]],
     warnings: tuple[ValidationIssue, ...],
@@ -353,6 +399,7 @@ def _fallback_summaries(
     warning_lookup = _warning_map(warnings)
     rows: list[RoutineSummary] = []
     for routine in draft.routines:
+        baseline_routine = baseline.routines[routine.source_index] if routine.source_index is not None and routine.source_index < len(baseline.routines) else None
         rows.append(
             RoutineSummary(
                 key=routine.key,
@@ -361,10 +408,10 @@ def _fallback_summaries(
                 enabled=routine.enabled,
                 prompt_scope=routine.prompt_scope,
                 prompt_name=routine.prompt_name,
-                schedule=_schedule_summary_text(routine, routine.source_index, raw_routines, warning_lookup),
+                schedule=_schedule_summary_text(routine, baseline_routine, routine.source_index, raw_routines, warning_lookup),
                 memory=_memory_summary_text(agent_cfg.default_memory, routine.memory, choices),
                 arguments=tuple(routine.arguments),
-                recovery=_recovery_summary_text(routine, routine.source_index, raw_routines, warning_lookup),
+                recovery=_recovery_summary_text(routine, baseline_routine, routine.source_index, raw_routines, warning_lookup),
             )
         )
     return tuple(rows)
@@ -410,7 +457,7 @@ def render_routines_page(
     page_issues = tuple([*issues, *choice_issues])
 
     summary_rows: tuple[RoutineSummary, ...]
-    display_warnings = baseline_warnings
+    display_warnings = _display_warnings(current.draft, baseline.draft, baseline_warnings)
     if submitted is None and not page_issues:
         prepared = prepare_routines(snapshot, team, agent, current, choices)
         summary_rows = summarize(prepared, team, agent, current.draft)
@@ -421,9 +468,10 @@ def render_routines_page(
             team,
             agent,
             current.draft,
+            baseline.draft,
             choices,
             raw_routines,
-            baseline_warnings,
+            display_warnings,
         )
 
     saved_rows = () if conflict else saved_status(snapshot, team, agent)
@@ -645,6 +693,24 @@ async def routines_save(
     submitted: RoutinesRequest | None = None
     try:
         submitted = RoutinesRequest.model_validate(decoded)
+        if services.blueprint_library is None or services.prompt_store is None:
+            return render_routines_page(
+                request,
+                services,
+                snapshot,
+                team,
+                agent,
+                submitted=submitted,
+                issues=(
+                    _issue(
+                        "routines-unavailable",
+                        "prompt",
+                        "Routine prompt catalog is temporarily unavailable.",
+                        "Reload and try again once prompt metadata is available.",
+                    ),
+                ),
+                status_code=503,
+            )
         save_routines(
             services.config_store,
             services.blueprint_library,

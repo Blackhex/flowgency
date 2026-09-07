@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 import os
 import re
@@ -788,3 +789,136 @@ def test_routines_save_preserves_unsupported_loaded_time_when_edit_is_unrelated(
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert saved["teams"]["newsletter"]["agents"][0]["routines"][0]["schedule"] == {"at": "9am"}
     assert saved["teams"]["newsletter"]["agents"][0]["routines"][0]["enabled"] is False
+
+
+def test_routines_save_unavailable_services_returns_recoverable_503_and_retains_draft(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    initial = initial_payload(client.get("/newsletter/agents/advisor/routines").text)
+    payload = draft_payload(initial)
+    payload["draft"]["routines"][0]["id"] = "daily-review-retained"
+    before = config_path.read_bytes()
+    app_mod.app.state.services = replace(
+        app_mod.app.state.services,
+        blueprint_library=None,
+        prompt_store=None,
+    )
+
+    response = client.post(
+        "/newsletter/agents/advisor/routines",
+        data={"payload": json.dumps(payload)},
+    )
+
+    assert response.status_code == 503
+    retained = initial_payload(response.text)
+    assert retained["draft"]["draft"]["routines"][0]["id"] == "daily-review-retained"
+    assert any(issue["code"] == "routines-unavailable" for issue in retained["issues"])
+    assert "AttributeError" not in response.text
+    assert config_path.read_bytes() == before
+
+
+def test_routines_save_uses_corrected_daily_summary_when_unsupported_saved_values_were_edited(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0]["routines"][0]["schedule"] = {
+        "at": "9am",
+        "catch_up": "always",
+    }
+    write_config(config_path, raw)
+    initial = initial_payload(client.get("/newsletter/agents/advisor/routines").text)
+    payload = draft_payload(initial)
+    payload["draft"]["routines"][0]["schedule"] = {
+        "mode": "at",
+        "amount": "",
+        "unit": "d",
+        "time": "09:15",
+    }
+    payload["draft"]["routines"][0]["recovery"] = {
+        "mode": "duration",
+        "amount": "4",
+        "unit": "h",
+    }
+    payload["draft"]["routines"][0]["id"] = ""
+    before = config_path.read_bytes()
+
+    response = client.post(
+        "/newsletter/agents/advisor/routines",
+        data={"payload": json.dumps(payload)},
+    )
+
+    assert response.status_code == 422
+    retained = initial_payload(response.text)
+    assert retained["draft"]["draft"]["routines"][0]["schedule"]["time"] == "09:15"
+    assert retained["draft"]["draft"]["routines"][0]["recovery"] == {
+        "mode": "duration",
+        "amount": "4",
+        "unit": "h",
+    }
+    assert retained["summary_rows"][0]["schedule"] == "at 09:15"
+    assert retained["summary_rows"][0]["recovery"] == "4h"
+    assert any(issue["field"] == "routines.0.id" for issue in retained["issues"])
+    assert config_path.read_bytes() == before
+
+
+def test_routines_save_uses_corrected_interval_summary_when_unsupported_saved_values_were_edited(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0]["routines"][0]["schedule"] = {
+        "every": "3600",
+        "catch_up": "always",
+    }
+    write_config(config_path, raw)
+    initial = initial_payload(client.get("/newsletter/agents/advisor/routines").text)
+    payload = draft_payload(initial)
+    payload["draft"]["routines"][0]["schedule"] = {
+        "mode": "every",
+        "amount": "6",
+        "unit": "h",
+        "time": "",
+    }
+    payload["draft"]["routines"][0]["recovery"] = {
+        "mode": "none",
+        "amount": "",
+        "unit": "h",
+    }
+    payload["draft"]["routines"][0]["prompt_name"] = "unknown"
+    before = config_path.read_bytes()
+
+    response = client.post(
+        "/newsletter/agents/advisor/routines",
+        data={"payload": json.dumps(payload)},
+    )
+
+    assert response.status_code == 422
+    retained = initial_payload(response.text)
+    assert retained["draft"]["draft"]["routines"][0]["schedule"]["amount"] == "6"
+    assert retained["draft"]["draft"]["routines"][0]["recovery"]["mode"] == "none"
+    assert retained["summary_rows"][0]["schedule"] == "every 6h"
+    assert retained["summary_rows"][0]["recovery"] == "none"
+    assert any(issue["field"] == "routines.0.prompt" for issue in retained["issues"])
+    assert config_path.read_bytes() == before
+
+
+def test_routines_save_keeps_unsupported_saved_summary_when_schedule_controls_are_unchanged(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0]["routines"][0]["schedule"] = {
+        "every": "3600",
+        "catch_up": "always",
+    }
+    write_config(config_path, raw)
+    initial = initial_payload(client.get("/newsletter/agents/advisor/routines").text)
+    payload = draft_payload(initial)
+    payload["draft"]["routines"][0]["prompt_name"] = "unknown"
+    before = config_path.read_bytes()
+
+    response = client.post(
+        "/newsletter/agents/advisor/routines",
+        data={"payload": json.dumps(payload)},
+    )
+
+    assert response.status_code == 422
+    retained = initial_payload(response.text)
+    assert retained["summary_rows"][0]["schedule"] == "3600 (Unsupported saved interval: 3600)"
+    assert retained["summary_rows"][0]["recovery"] == "always"
+    assert any(issue["field"] == "routines.0.prompt" for issue in retained["issues"])
+    assert config_path.read_bytes() == before
