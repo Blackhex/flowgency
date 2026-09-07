@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from multiprocessing import Event, Process, Queue
 import os
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from flowgency import app as app_mod
 from flowgency.configuration import ConfigConflictError, ConfigStore, ValidationFailed
 from flowgency.dispatch.schedule import at_marker_path
 from flowgency.memory import resolve_memory_selector
+from flowgency.prompts import PromptNotFoundError
 from flowgency.routines.editor import (
     RoutinesRequest,
     find_agent,
@@ -19,6 +21,7 @@ from flowgency.routines.editor import (
     save_routines,
 )
 from flowgency.routines.forms import MemoryDraft, RoutineDraft, build_form
+from tests._lock_helpers import hold_exclusive_lock
 from tests.test_agent_detail import _seed_app
 
 
@@ -41,6 +44,40 @@ def _memory_tree(root: Path) -> dict[str, bytes]:
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in sorted(p for p in root.rglob("*") if p.is_file())
     }
+
+
+def _save_routines_in_process(
+    config_path_str: str,
+    request_payload: dict,
+    ready: Event,
+    queue: Queue,
+) -> None:
+    ready.set()
+
+    from pathlib import Path
+
+    from flowgency import app as app_mod
+    from flowgency.configuration import ConfigConflictError, ConfigStore
+    from flowgency.routines.editor import RoutinesRequest, save_routines
+
+    config_path = Path(config_path_str)
+    services = app_mod.build_services(config_path)
+    store = ConfigStore(config_path)
+    request = RoutinesRequest.model_validate(request_payload)
+    try:
+        saved = save_routines(
+            store,
+            services.blueprint_library,
+            services.prompt_store,
+            "newsletter",
+            "advisor",
+            request,
+        )
+    except ConfigConflictError as exc:
+        queue.put(("conflict", str(exc)))
+        return
+
+    queue.put(("success", saved.raw))
 
 
 def test_preview_preserves_config_bytes(monkeypatch, tmp_path, raw_config):
@@ -264,6 +301,71 @@ def test_stale_revision_cannot_overwrite_other_settings(monkeypatch, tmp_path, r
     assert config_path.read_bytes() == current_bytes
 
 
+def test_same_revision_save_requests_allow_one_winner_and_one_conflict(
+    monkeypatch, tmp_path, raw_config
+):
+    _, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    store = ConfigStore(config_path)
+    snapshot = store.load()
+    first = _request(snapshot)
+    second = _request(snapshot)
+    first.draft.routines[0].id = "daily-review-first"
+    second.draft.routines[0].id = "daily-review-second"
+
+    expected_first = deepcopy(snapshot.raw)
+    expected_first["teams"]["newsletter"]["agents"][0]["routines"][0]["id"] = "daily-review-first"
+    expected_second = deepcopy(snapshot.raw)
+    expected_second["teams"]["newsletter"]["agents"][0]["routines"][0]["id"] = "daily-review-second"
+
+    acquired = Event()
+    release = Event()
+    ready_first = Event()
+    ready_second = Event()
+    queue: Queue = Queue()
+    lock_holder = Process(
+        target=hold_exclusive_lock,
+        args=(str(store.lock_path), acquired, release, 30),
+    )
+    first_process = Process(
+        target=_save_routines_in_process,
+        args=(str(config_path), first.model_dump(mode="python"), ready_first, queue),
+    )
+    second_process = Process(
+        target=_save_routines_in_process,
+        args=(str(config_path), second.model_dump(mode="python"), ready_second, queue),
+    )
+    lock_holder.start()
+    assert acquired.wait(15)
+    first_process.start()
+    second_process.start()
+    assert ready_first.wait(15)
+    assert ready_second.wait(15)
+
+    try:
+        release.set()
+        results = [queue.get(timeout=15) for _ in range(2)]
+    finally:
+        release.set()
+        lock_holder.join(15)
+        first_process.join(15)
+        second_process.join(15)
+        for process in (lock_holder, first_process, second_process):
+            if process.is_alive():
+                process.terminate()
+                process.join(15)
+            assert not process.is_alive()
+            assert process.exitcode == 0
+
+    statuses = [status for status, _payload in results]
+    assert sorted(statuses) == ["conflict", "success"]
+    assert [payload for status, payload in results if status == "conflict"] == [
+        "config.yaml changed; reload before saving"
+    ]
+    winner = [payload for status, payload in results if status == "success"]
+    assert winner in ([expected_first], [expected_second])
+    assert store.load().raw == winner[0]
+
+
 def test_outside_lock_conflict_preserves_exact_external_bytes(monkeypatch, tmp_path, raw_config):
     _, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     services = app_mod.app.state.services
@@ -321,7 +423,7 @@ def test_save_revalidates_current_prompt_availability(monkeypatch, tmp_path, raw
     before = config_path.read_bytes()
     prompt_path.rename(prompt_path.with_name("local-triage-renamed.prompt.md"))
 
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(PromptNotFoundError, match=r"prompt not found: .*local-triage\.prompt\.md"):
         save_routines(
             store,
             services.blueprint_library,
@@ -331,7 +433,6 @@ def test_save_revalidates_current_prompt_availability(monkeypatch, tmp_path, raw
             request,
         )
 
-    assert "local-triage" in str(caught.value)
     assert config_path.read_bytes() == before
 
 
