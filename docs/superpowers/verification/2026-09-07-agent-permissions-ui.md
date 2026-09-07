@@ -3,7 +3,7 @@
 Date: 2026-09-07
 Worktree: `C:/Projekty/Flowgency/.worktrees/agent-permissions-ui`
 Branch: `feat/agent-permissions-ui`
-HEAD: `50a31b82b978d1576ea76870483c3bb80f9b1797`
+Baseline HEAD: `b24e514`
 Scope: Task 7 acceptance steps 1-4 only. Step 5 integration intentionally not executed.
 
 ## Command evidence
@@ -43,39 +43,47 @@ Warning retained as requested:
 DeprecationWarning from starlette.testclient importing anyio.abc.BlockingPortal
 ```
 
-4. Full UI suite
+4. Focused dashboard investigation and refresh
 
 ```text
-npm run test:ui
-154 passed, 4 failed, 2 skipped in 3.1m
+npm run test:ui -- tests/ui/dashboard.spec.ts
+12 passed in 13.4s
 ```
 
-Blocking failures:
+Investigation evidence:
 
 ```text
-tests/ui/dashboard.spec.ts:34 [desktop-light] dashboard reports selected group pipeline and durable job semantics
-tests/ui/dashboard.spec.ts:50 [desktop-light] jobs expose waiting, failed artifact, diagnostics hash, and empty state
-tests/ui/dashboard.spec.ts:34 [desktop-dark] dashboard reports selected group pipeline and durable job semantics
-tests/ui/dashboard.spec.ts:50 [desktop-dark] jobs expose waiting, failed artifact, diagnostics hash, and empty state
+git diff 6559632..HEAD -- flowgency/static flowgency/templates/base.html tests/ui/server.py tests/ui/fixtures/config.yaml tests/ui/dashboard.spec.ts
+Only tests/ui/fixtures/config.yaml changed in this range; no branch-local edit touched the shared logo asset, base template, fixture server, or dashboard spec.
+
+git show 5c84809 -- flowgency/static/icon.svg
+Removed the light background rect from flowgency/static/icon.svg.
+
+git show 6e0444b -- tests/ui/dashboard.spec.ts-snapshots/*desktop*.png
+The previous desktop dashboard snapshot refresh predates 5c84809 and encoded the older white-backed logo.
+
+fixture server check
+GET /static/icon.svg == flowgency/static/icon.svg (served text matched tracked file exactly)
 ```
 
-Observed screenshot regression details:
+Observed screenshot drift during the investigation:
 
 ```text
 dashboard.png: 715 pixels different in each desktop theme
 waiting-job.png: 715 pixels different in each desktop theme
+failed-job.png: 715 pixels different in each desktop theme once waiting-job no longer aborted the test first
 ```
 
-Investigation outcome:
+Reviewed actual/expected/diff artifacts showed the visible drift in the shared sidebar logo box: expected snapshots still had the white square backing, while current renders used the transparent post-5c84809 icon on the dark sidebar. No unintended content or layout regression was visible in the dashboard cards or job detail bodies.
+
+5. Full UI suite
 
 ```text
-waiting-job desktop diff localizes to the 32x32 logo box at x=16..47, y=44..75
-dashboard desktop diff includes that logo box plus small top-card regions
-the visible newsletter agent/sidebar counts still match the fixture expectations
-the added research.permissions-editor fixture does not justify refreshing these dashboard baselines yet
+npm run test:ui
+158 passed, 2 skipped in 2.9m
 ```
 
-5. Diff hygiene
+6. Diff hygiene
 
 ```text
 git diff --check
@@ -148,7 +156,6 @@ Saved visual evidence now covers these states:
 Remaining limit:
 
 - The mobile populated snapshot is full-page for the real fixture page, but it is shorter than the tall mockup asset because the real page content is shorter. It does not by itself prove one-to-one parity with every below-the-fold region of the mockup composition.
-- Because the full UI suite is red on unrelated dashboard screenshots, final branch-wide visual acceptance is blocked.
 
 ## Config authority audit
 
@@ -176,25 +183,25 @@ Audit outcome:
 
 ## Whole-branch review findings
 
-Status: NOT COMPLETE
+Status: COMPLETE FOR TASK 7 STEPS 1-4
 
 Resolved in this Task 7 acceptance pass:
 
 - Repository boundary scan now excludes exact content scanning for `flowgency/static/lucide.min.js` only. Tracked path scanning remains unchanged.
 - Task 2 discovery-failure coverage now asserts the exact public fallback contract: `version == "unavailable"` and warning `Tool availability could not be determined.`
 
-Open blocking finding:
+Resolved review finding:
 
-- Dashboard visual regression: full Playwright acceptance fails on desktop dashboard and waiting-job snapshots in both light and dark themes, with identical 715-pixel diffs. This is outside the permissions page and needs reviewed fix dispatch rather than local snapshot churn during Task 7 verification.
+- Desktop dashboard, waiting-job, and failed-job snapshots were stale relative to the later intentional transparent logo asset. Refreshing the six affected desktop baselines removed the remaining UI failures without changing production code.
 
 ## Acceptance result for steps 1-4
 
-- Step 1: Partially complete. Focused regression slices passed, and the full Python suite passed. The full UI gate remains blocked only by the four desktop dashboard snapshot failures listed above.
-- Step 2: Partially complete. Approved v7 assets and real saved desktop/mobile images were inspected, including populated, empty, preview-error, and long-path states. The permissions page evidence is complete, but branch-wide UI acceptance remains blocked by unrelated dashboard snapshots.
+- Step 1: Complete. Focused regression slices passed, the full Python suite passed, the focused dashboard suite passed after the evidence-backed baseline refresh, and the full UI gate passed.
+- Step 2: Complete. Approved v7 assets and real saved desktop/mobile images were inspected, including populated, empty, preview-error, and long-path states. Branch-wide UI acceptance now passes after the desktop dashboard/job baselines were refreshed to the intentional shared logo asset.
 - Step 3: Complete. Active producers and consumers in the worktree use the relocated sibling permissions model, with old nested references retained only for rejection diagnostics and their tests.
 - Step 4: Complete for documentation and review reporting. Verification evidence, blockers, warnings, skips, and catalog limitations are recorded here without making unsupported claims. Final whole-branch review completion is intentionally not claimed in this document.
 
 Controller handoff:
 
 - Do not integrate from Task 7.
-- Dispatch a reviewed fix for the remaining dashboard screenshot regressions.
+- If a follow-up review is needed, scope it to the six refreshed desktop dashboard/job baselines and the branding-history evidence above.
