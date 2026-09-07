@@ -38,8 +38,10 @@ def test_detection_failure_is_not_empty_success(monkeypatch):
 
     catalog = get_tool_catalog(integration)
 
+    assert catalog.version == "unavailable"
+    assert catalog.tools == ()
     assert not catalog.complete
-    assert catalog.warning
+    assert catalog.warning == "Tool availability could not be determined."
 
 
 def test_invalid_duplicate_metadata_follows_the_incomplete_failure_path(monkeypatch):
