@@ -43,4 +43,17 @@ def test_nested_policy_never_silently_ignored(raw_config, tmp_path, level, also_
         owner["permissions"] = {"mode": "unrestricted"}
     with pytest.raises(ValidationFailed) as caught:
         parse_config(raw, tmp_path / "config.yaml")
-    assert any(issue.code == "relocated-permissions" for issue in caught.value.issues)
+    expected_scope = "teams.newsletter" if level == "team" else "teams.newsletter.agents.advisor"
+    expected_field = f"{expected_scope}.runtime.permissions"
+    expected_hint = (
+        f"Move {expected_scope}.runtime.permissions to {expected_scope}.permissions; "
+        "keep timeout in runtime."
+    )
+
+    assert any(
+        issue.code == "relocated-permissions"
+        and issue.scope == expected_scope
+        and issue.field == expected_field
+        and issue.corrective_hint == expected_hint
+        for issue in caught.value.issues
+    )
