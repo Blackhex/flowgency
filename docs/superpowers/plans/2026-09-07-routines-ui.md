@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Specification: `docs/superpowers/specs/2026-09-07-routines-ui-design.md`, approved by the user's instruction to proceed with planning.
+- Specification: `docs/superpowers/specs/2026-09-07-routines-ui-design.md`, approved by the user's execution request.
 - "This is a configuration UI change only. Keep the canonical configuration model, scheduled execution behavior, permission policy, and current scheduling/memory semantics."
 - "No Run now action, configuration migration, new schedule grammar, or runtime data migration is included."
 - "The existing `routines` list remains the canonical ordered configuration. There are no new persisted editor IDs, fields, defaults, schedules, or display-only names."
@@ -81,7 +81,7 @@ Do not extract an app-wide generic editor framework. Reuse small established uti
 - `None` serialization means routines was absent and remains absent, distinct from explicit `[]`.
 - `RoutineForm.warnings` reports unsupported but unchanged loaded timing fields; blocking edited-value errors raise `RoutineFormError`. Warnings do not masquerade as a successfully parsed schedule.
 
-- [ ] **Step 1: Write the initial lossless/reorder regressions.** Put these in the new test file. They must fail because the new adapter is missing, before implementation. Tests using Pydantic model mutation should also exercise serialization validation, not assume construction alone is sufficient.
+- [x] **Step 1: Write the initial lossless/reorder regressions.** Put these in the new test file. They must fail because the new adapter is missing, before implementation. Tests using Pydantic model mutation should also exercise serialization validation, not assume construction alone is sufficient.
 
 ```python
 from copy import deepcopy
@@ -112,9 +112,9 @@ def test_absent_list_stays_absent():
     assert serialize_routines({"routines": []}, build_form({"routines": []}).draft) == []
 ```
 
-- [ ] **Step 2: Run `python -m pytest tests/test_routine_forms.py -q` and record the expected missing-module failure.** Do not change the existing routine endpoint yet.
+- [x] **Step 2: Run `python -m pytest tests/test_routine_forms.py -q` and record the expected missing-module failure.** Do not change the existing routine endpoint yet.
 
-- [ ] **Step 3: Define the wire and form models in `forms.py`.** Blank strings are representable drafts, not valid persisted settings. Keep semantic validation in serialization so invalid field values can render back to the user. Use a local row key for browser/error association and a separate optional original index for authoritative raw lookup.
+- [x] **Step 3: Define the wire and form models in `forms.py`.** Blank strings are representable drafts, not valid persisted settings. Keep semantic validation in serialization so invalid field values can render back to the user. Use a local row key for browser/error association and a separate optional original index for authoritative raw lookup.
 
 ```python
 from dataclasses import dataclass
@@ -166,7 +166,7 @@ class RoutineFormError(ValidationFailed):
 
 `build_form` creates `key="saved-<index>"` for loaded rows. New browser rows use `new-<counter>`; validate nonempty unique keys of bounded length, but never interpret a key as a filesystem path or persisted ID. Use `source_index` only after integer/not-bool/range/uniqueness checks; allow any permutation. No client original-row dictionary is accepted.
 
-- [ ] **Step 4: Decode supported timing without discarding the original.** For representable intervals use the existing `parse_every` grammar, retaining original numeric digits for display or a normalized UI amount with baseline comparison before serialization. Daily decoding uses `last_at_occurrence` with a fixed reference datetime for parsing and canonical `%H:%M` display; do not invoke a browser timezone conversion. Catch-up uses `parse_catch_up` and the same duration units.
+- [x] **Step 4: Decode supported timing without discarding the original.** For representable intervals use the existing `parse_every` grammar, retaining original numeric digits for display or a normalized UI amount with baseline comparison before serialization. Daily decoding uses `last_at_occurrence` with a fixed reference datetime for parsing and canonical `%H:%M` display; do not invoke a browser timezone conversion. Catch-up uses `parse_catch_up` and the same duration units.
 
 For an unsupported loaded timing string (for example `every: "3600"`, already present in the current UI fixture), set its mode correctly but amount/time blank and return a plain-string warning message that includes the raw value, safely escaped, with no additional shared warning field or type. The original saved raw configuration remains authoritative server-side. Do not place an unrepresentable raw string into a time input that silently normalizes it to empty and then overwrite configuration. Compare draft schedule controls with the server-generated baseline: unchanged unsupported controls preserve the raw schedule; an actual edit must pass the supported parser. A custom editor diagnostic is nonblocking for an untouched unsupported saved value, while invalid edited values block Save.
 
@@ -184,7 +184,7 @@ def test_unsupported_loaded_interval_survives_unrelated_edit():
     assert result[0]["enabled"] is False
 ```
 
-- [ ] **Step 5: Serialize only changed fields onto copies of original rows.** Start each surviving row from `deepcopy(original[source_index])`, each new row from an empty dictionary. Compare each known field independently to the generated baseline, not a wholesale model dump. Preserve omitted/default/null fields, explicit argument whitespace/order, accepted extra routine data, and schedule subfield presence when that field is unchanged. Changing schedule mode removes the previous at/every key but preserves an unchanged catch_up; changing recovery leaves timing untouched. Changing a non-channel memory scope clears channel only within the edited selector. Removing a routine removes only its list entry.
+- [x] **Step 5: Serialize only changed fields onto copies of original rows.** Start each surviving row from `deepcopy(original[source_index])`, each new row from an empty dictionary. Compare each known field independently to the generated baseline, not a wholesale model dump. Preserve omitted/default/null fields, explicit argument whitespace/order, accepted extra routine data, and schedule subfield presence when that field is unchanged. Changing schedule mode removes the previous at/every key but preserves an unchanged catch_up; changing recovery leaves timing untouched. Changing a non-channel memory scope clears channel only within the edited selector. Removing a routine removes only its list entry.
 
 ```python
 def preserve_or_replace(target, original, field, before, after, encoded):
@@ -200,7 +200,7 @@ This optional local helper illustrates field comparison; define/import `deepcopy
 
 Validate IDs using the existing domain rules through candidate `parse_config` in Task 2; locally require nonblank unique IDs for field messages. Arguments must be nonempty strings for new/edited argument lists; do not `strip()` their actual saved contents, shell-split, or silently drop blanks. Reject duplicate/out-of-range/noninteger source indices and unexpected transport fields. Revalidate mutated model values with `RoutinesDraft.model_validate(draft.model_dump())` before any set/hash-based operations, then convert type errors into field-addressable issues.
 
-- [ ] **Step 6: Extend the regression matrix and run it.** Cover each of omitted/present arguments, enabled, memory, catch_up; repeated edit/discard-to-baseline; raw whitespace/digit formatting; reorder/rename extension preservation; same ID twice; same source index twice; malformed source index; new routines; clearing all rows; changed prompt scope; custom recovery; non-channel memory; unsupported timing unchanged versus corrected; blank new schedule; mutated argument values.
+- [x] **Step 6: Extend the regression matrix and run it.** Cover each of omitted/present arguments, enabled, memory, catch_up; repeated edit/discard-to-baseline; raw whitespace/digit formatting; reorder/rename extension preservation; same ID twice; same source index twice; malformed source index; new routines; clearing all rows; changed prompt scope; custom recovery; non-channel memory; unsupported timing unchanged versus corrected; blank new schedule; mutated argument values.
 
 ```python
 import pytest
@@ -246,7 +246,7 @@ class RoutinesRequest(BaseModel):
     draft: RoutinesDraft
 ```
 
-- [ ] **Step 1: Add pure preparation tests using the existing app fixture.** Reuse `_seed_app` in `tests/test_agent_detail.py` and `app_mod.app.state.services` for real prompt files. `load_choices` must call `effective_prompt_catalog`, not return an empty success on unavailable library/store. No prompt body digest mechanism is needed: saved routines reference scope/name, not immutable prompt source; validate current availability on every prepare/save.
+- [x] **Step 1: Add pure preparation tests using the existing app fixture.** Reuse `_seed_app` in `tests/test_agent_detail.py` and `app_mod.app.state.services` for real prompt files. `load_choices` must call `effective_prompt_catalog`, not return an empty success on unavailable library/store. No prompt body digest mechanism is needed: saved routines reference scope/name, not immutable prompt source; validate current availability on every prepare/save.
 
 ```python
 from flowgency import app as app_mod
@@ -269,7 +269,7 @@ def test_preview_preserves_config_bytes(monkeypatch, tmp_path, raw_config):
     assert config_path.read_bytes() == before
 ```
 
-- [ ] **Step 2: Run `python -m pytest tests/test_routine_editor.py -q` and implement shared validation.** Check requested revision before interpreting source indices. Apply `serialize_routines` to a deepcopy of the selected agent; remove routines only if the adapter returns None. Parse the complete candidate with `parse_config`; validate scoped prompts against choices and memory channels against candidate config. Empty catalog is valid if no selected routine requires a prompt; unavailable/invalid catalog is not an empty catalog. Use `ValidationIssue` for row fields, preserving actionable messages.
+- [x] **Step 2: Run `python -m pytest tests/test_routine_editor.py -q` and implement shared validation.** Check requested revision before interpreting source indices. Apply `serialize_routines` to a deepcopy of the selected agent; remove routines only if the adapter returns None. Parse the complete candidate with `parse_config`; validate scoped prompts against choices and memory channels against candidate config. Empty catalog is valid if no selected routine requires a prompt; unavailable/invalid catalog is not an empty catalog. Use `ValidationIssue` for row fields, preserving actionable messages.
 
 ```python
 if request.revision != snapshot.revision:
@@ -286,7 +286,7 @@ config = parse_config(candidate, snapshot.path).resolved
 
 Define `find_agent(raw, team_id, agent_id) -> dict[str, Any]` in `editor.py`: look up team and list entry by name, raise KeyError when absent. Never call ConfigStore.replace/create or a filesystem initializer during preparation. Add tests that monkeypatch `initialize_storage_directories`, job submission, and memory allocation to fail if preview reaches them. All routine indices/errors are tied to submitted order; transport local keys let browser map those indices to the correct row.
 
-- [ ] **Step 3: Save through one ConfigStore patch callback.** The callback runs with config revision checked under the existing lock. Build the current ConfigSnapshot from the raw dictionary already supplied to the callback, load current choices, prepare/validate, and replace only selected agent routines. Do not call `store.load` while holding its lock. Do not recursively call `replace_agent_routines` inside `store.patch`.
+- [x] **Step 3: Save through one ConfigStore patch callback.** The callback runs with config revision checked under the existing lock. Build the current ConfigSnapshot from the raw dictionary already supplied to the callback, load current choices, prepare/validate, and replace only selected agent routines. Do not call `store.load` while holding its lock. Do not recursively call `replace_agent_routines` inside `store.patch`.
 
 ```python
 def save_routines(store, library, prompts, team_id, agent_id, request):
@@ -305,13 +305,13 @@ def save_routines(store, library, prompts, team_id, agent_id, request):
 
 Import/annotate the named existing types and helpers. This narrowly specialized transaction shares the existing store, not a new persistence framework. Prompt file availability is checked during save; it is not a distributed transaction locking the entire external prompt library, and no new file-lock hierarchy is introduced.
 
-- [ ] **Step 4: Extract saved-status computation without changing semantics.** Move `_routine_status`, `_marker_stamp`, `_next_due_text` from agent detail to presentation, retaining the underlying calls (`routine_schedules`, `last_fired_at`, `schedule_lateness`, `next_occurrence`, `grace_window`, clock functions, formatting). Keep a narrow delegate at the old helper while current tests/imports require it. `saved_status` enumerates the original configured routines and assigns source indices from that original order, not draft order or draft IDs.
+- [x] **Step 4: Extract saved-status computation without changing semantics.** Move `_routine_status`, `_marker_stamp`, `_next_due_text` from agent detail to presentation, retaining the underlying calls (`routine_schedules`, `last_fired_at`, `schedule_lateness`, `next_occurrence`, `grace_window`, clock functions, formatting). Keep a narrow delegate at the old helper while current tests/imports require it. `saved_status` enumerates the original configured routines and assigns source indices from that original order, not draft order or draft IDs.
 
 The server GET emits a frozen saved-status snapshot to the browser. Preview responds with draft summaries only; the browser reattaches the original saved snapshot by `source_index` for display. Saved status is read-only display data, never used for config validation or accepted back as authority. A post-conflict error page cannot map stale source indices onto current saved rows: hide their status as unavailable until explicit reload, rather than showing another routine's history.
 
 `summarize` uses candidate routines for draft details and the original request's keys/source indices for identity. It does not call saved-status functions with draft IDs. Use `select_effective_memory(None, candidate_routine.memory, candidate_agent.default_memory)` for displayed memory; append Agent default provenance only for actual inheritance. Default recovery is today. Unsupported preserved timing shows the authored string and a warning, not a fabricated due date. Arguments remain distinct tuple entries in the view model.
 
-- [ ] **Step 5: Add the transaction and provenance matrix.** Test save/no-op/reorder and unrelated-data deep equality; two requests sharing a revision yield one success/one conflict; outside-lock changes preserve exactly the external writer's bytes after the conflict. Reuse `tests/_lock_helpers.py` and existing ConfigStore tests rather than sleeps. Delete/rename fixture prompt between load and save to prove current availability validation; add a duplicate prompt name across scopes and require existing catalog error. Test run fallback when agent default is omitted.
+- [x] **Step 5: Add the transaction and provenance matrix.** Test save/no-op/reorder and unrelated-data deep equality; two requests sharing a revision yield one success/one conflict; outside-lock changes preserve exactly the external writer's bytes after the conflict. Reuse `tests/_lock_helpers.py` and existing ConfigStore tests rather than sleeps. Delete/rename fixture prompt between load and save to prove current availability validation; add a duplicate prompt name across scopes and require existing catalog error. Test run fallback when agent default is omitted.
 
 ```python
 def test_stale_revision_cannot_overwrite_other_settings(monkeypatch, tmp_path, raw_config):
@@ -330,7 +330,7 @@ def test_stale_revision_cannot_overwrite_other_settings(monkeypatch, tmp_path, r
 
 Import pytest, ConfigConflictError and save_routines in the test file. For provenance, seed two routines with distinct marker timestamps, reorder/rename draft, assert SavedRoutineStatus retains original index/ID/time; new row has `source_index=None` and no original history. Snapshot marker and memory files before/after saving renamed/removed routine and assert identical contents and paths. Do not create/delete memory just to render summaries.
 
-- [ ] **Step 6: Run `python -m pytest tests/test_routine_editor.py tests/test_routine_presentation.py tests/test_routine_forms.py tests/test_config_store.py tests/test_dispatch_schedule.py -q`, review, and commit.** Commit `feat(routines): validate drafts and preserve saved status` after green tests. Keep warnings for preserved unsupported schedule data separate from blocking form errors.
+- [x] **Step 6: Run `python -m pytest tests/test_routine_editor.py tests/test_routine_presentation.py tests/test_routine_forms.py tests/test_config_store.py tests/test_dispatch_schedule.py -q`, review, and commit.** Commit `feat(routines): validate drafts and preserve saved status` after green tests. Keep warnings for preserved unsupported schedule data separate from blocking form errors.
 
 ### Task 3: Replace the Raw Routine Form with Dedicated Routes and Markup
 
@@ -344,7 +344,7 @@ Import pytest, ConfigConflictError and save_routines in the test file. For prove
 - Initial JSON script `#routines-initial`: `{baseline: RoutinesRequest, draft: RoutinesRequest, choices: RoutineChoices, saved_status: SavedRoutineStatus[], original_ids: string[], warnings: Issue[], issues: Issue[], conflict: boolean, preview_url: string, save_url: string, summary_rows: RoutineSummary[]}`. On initial GET, saved status and original_ids come from the same config snapshot. On error after revision conflict these two fields are empty to avoid mismapping stale indices; submitted draft keeps the old revision and is never silently rebased.
 - Markup root `#routine-editor`, form `#routines-form`, list `[data-routine-list]`; rows `[data-routine-row]` with `data-key`, `data-source-index`; summary `#routine-summary`; row-specific field/error IDs use local keys, not mutable routine IDs.
 
-- [ ] **Step 1: Add failing route ownership and transport tests.** Use the existing `_seed_app` fixture helper. Parse initialization JSON in test code with a narrowly scoped regex and `json.loads`; app code must use structured form/JSON parsing.
+- [x] **Step 1: Add failing route ownership and transport tests.** Use the existing `_seed_app` fixture helper. Parse initialization JSON in test code with a narrowly scoped regex and `json.loads`; app code must use structured form/JSON parsing.
 
 ```python
 import json
@@ -375,9 +375,9 @@ def test_old_raw_form_cannot_clear_the_list(monkeypatch, tmp_path, raw_config):
         assert config_path.read_bytes() == before
 ```
 
-- [ ] **Step 2: Run `python -m pytest tests/test_agent_routines.py -q` to establish red.** The old page lacks structured initialization and still accepts raw list payloads.
+- [x] **Step 2: Run `python -m pytest tests/test_agent_routines.py -q` to establish red.** The old page lacks structured initialization and still accepts raw list payloads.
 
-- [ ] **Step 3: Add dedicated routes and retain invalid drafts.** Register/export `agent_routines_router` next to `agent_permissions_router`. Move the existing routine GET/POST ownership out of agent_detail so route registration order cannot select the old handler. Remove `_parse_routines_payload` and obsolete `_routines_context` after their usages are replaced; keep `_available_prompts` for any remaining other callers. `_detail_context` receives a supplied snapshot and routine overrides, with no routine-specific automatic reload that overwrites them.
+- [x] **Step 3: Add dedicated routes and retain invalid drafts.** Register/export `agent_routines_router` next to `agent_permissions_router`. Move the existing routine GET/POST ownership out of agent_detail so route registration order cannot select the old handler. Remove `_parse_routines_payload` and obsolete `_routines_context` after their usages are replaced; keep `_available_prompts` for any remaining other callers. `_detail_context` receives a supplied snapshot and routine overrides, with no routine-specific automatic reload that overwrites them.
 
 Implement `render_routines_page(request, services, snapshot, team, agent, *, submitted=None, issues=(), conflict=False, status_code=200)` in the new route module. On GET use `build_form` from raw agent data and `load_choices`; catch unavailable dependencies so an editable/retained form and diagnostic can still render. On typed semantic errors use submitted draft rows and their order. On transport shape errors return a clean 422 without attempting to infer or save a list. Error HTML must not present current saved summaries as validation success for the submitted draft.
 
@@ -399,7 +399,7 @@ Wrap that happy path with the explicit error contracts above. Convert malformed 
 
 Preview validates the request before extracting `draft_version`; echo it only when it is a nonnegative integer (exclude bool), otherwise use 0. Never call `int()` on unvalidated arbitrary JSON. Load one snapshot, load choices, prepare, summarize, return dataclasses via structured JSON encoding. Include preserved schedule warnings without falsely treating them as blocking or creating a due-time prediction. It performs no file writes and returns no saved-status values computed from the draft.
 
-- [ ] **Step 4: Render the exact approved controls with stable identifiers.** Use row templates for new routines and arguments, but show every saved row fully regardless of Enabled. Label and ID inputs remain normal weight. Reuse the current local Lucide asset with plus, trash-2, arrow-up/down, and x. Scope radio names to each local row key; do not allow toggling one routine's schedule to change another's radio group.
+- [x] **Step 4: Render the exact approved controls with stable identifiers.** Use row templates for new routines and arguments, but show every saved row fully regardless of Enabled. Label and ID inputs remain normal weight. Reuse the current local Lucide asset with plus, trash-2, arrow-up/down, and x. Scope radio names to each local row key; do not allow toggling one routine's schedule to change another's radio group.
 
 ```html
 <section id="routine-editor">
@@ -426,11 +426,11 @@ This is the structural skeleton: server-render saved rows and initial summary in
 
 The summary partial renders draft fields with escaping, then `[data-saved-last]` and `[data-saved-next]` values with Saved labels, attached through source index. Both states have Prompt, Schedule, Memory, Arguments, Recovery, Last fired, Next due. On renamed saved rows show the original-ID note; on new rows show **Not saved** status without claiming a saved lookup. Do not add a generic Routine header or separate Schedule status panel. Do not display unsupported timing as an empty schedule or invented valid default.
 
-- [ ] **Step 5: Port existing endpoint regression coverage to structured payloads.** Update routine-specific tests in `tests/test_agent_detail.py` or move them into `test_agent_routines.py`; retain the real behavioral assertions for ordered list replacement, disabled state, catch_up retention/rejection, prompt scopes, unknown scope/name, and duplicate IDs. Assert optional enabled is not manufactured when its baseline was omitted; do not preserve old default-expansion bugs as test requirements.
+- [x] **Step 5: Port existing endpoint regression coverage to structured payloads.** Update routine-specific tests in `tests/test_agent_detail.py` or move them into `test_agent_routines.py`; retain the real behavioral assertions for ordered list replacement, disabled state, catch_up retention/rejection, prompt scopes, unknown scope/name, and duplicate IDs. Assert optional enabled is not manufactured when its baseline was omitted; do not preserve old default-expansion bugs as test requirements.
 
 Add GET -> initial -> reorder/rename -> preview -> POST -> 303 -> GET tests. On a revision conflict assert original draft IDs/order/argument contents remain in the response, current saved data is not relabeled under stale indices, and disk equals the newer external payload. Add invalid time/amount, nonstring version, missing payload, duplicate key/index, XSS in ID/argument/extra field values, prompt/channel deletion after load, and disabled-invalid-row tests. A blank ID remains visible and fixable rather than removing the row.
 
-- [ ] **Step 6: Run `python -m pytest tests/test_agent_routines.py tests/test_agent_detail.py tests/test_routine_editor.py tests/test_routine_presentation.py -q`, review, and commit.** Commit `feat(routines): replace raw list configuration form`. Browser behavior and final style are the next task; no silent auto-save or launch action is added here.
+- [x] **Step 6: Run `python -m pytest tests/test_agent_routines.py tests/test_agent_detail.py tests/test_routine_editor.py tests/test_routine_presentation.py -q`, review, and commit.** Commit `feat(routines): replace raw list configuration form`. Browser behavior and final style are the next task; no silent auto-save or launch action is added here.
 
 ### Task 4: Build the Interactive Editor and Approved Layout
 
@@ -441,7 +441,7 @@ Add GET -> initial -> reorder/rename -> preview -> POST -> 303 -> GET tests. On 
 - Produces file-local controller functions `collectDraft()`, `renderRows(draft)`, `renderSummary(rows)`, `markChanged()`, `requestPreview(version, draft)`, `showIssues(issues)`, `discardDraft()`. No global routine engine.
 - Local state contains baseline and mutable draft, original saved status/IDs, inactive schedule inputs, disclosure/focus state, dirty flag, pending argument strings, draft version, validated draft serialization, abort controller, and submitting/conflict flags. Nothing editor-only is persisted.
 
-- [ ] **Step 1: Write red browser tests for the selected layout and reorder/rename behavior.** Reuse `assertNoLayoutIssues`, console gates, and existing four-project light/dark viewport settings. Add Routines to existing tab/accessibility checks without removing other pages.
+- [x] **Step 1: Write red browser tests for the selected layout and reorder/rename behavior.** Reuse `assertNoLayoutIssues`, console gates, and existing four-project light/dark viewport settings. Add Routines to existing tab/accessibility checks without removing other pages.
 
 ```typescript
 import { expect, test } from '@playwright/test';
@@ -474,9 +474,9 @@ test('renaming and reordering preserve saved provenance', async ({ page }) => {
 });
 ```
 
-- [ ] **Step 2: Prepare and run the red UI gate.** If absent, create local `.venv` with `python -m venv .venv` and install `.[test]`; run `npm ci` with the existing lock. Set `$env:PLAYWRIGHT_SKIP_BROWSER_GC = '1'` before `npm exec playwright install chromium` if a matching browser is missing. Do not reinstall or update dependencies speculatively. Run `npm run test:ui -- tests/ui/agent_routines.spec.ts --project=desktop-dark` and record the missing-interaction failure. Use the configured disposable test server, never port 8500 live configuration.
+- [x] **Step 2: Prepare and run the red UI gate.** If absent, create local `.venv` with `python -m venv .venv` and install `.[test]`; run `npm ci` with the existing lock. Set `$env:PLAYWRIGHT_SKIP_BROWSER_GC = '1'` before `npm exec playwright install chromium` if a matching browser is missing. Do not reinstall or update dependencies speculatively. Run `npm run test:ui -- tests/ui/agent_routines.spec.ts --project=desktop-dark` and record the missing-interaction failure. Use the configured disposable test server, never port 8500 live configuration.
 
-- [ ] **Step 3: Implement local editing with stable keys.** Parse initial JSON once, clone baseline state, then render all rows. Add starts a new blank-ID row with no prompt selected, enabled true, no arguments, blank interval amount/days, default recovery, and inherited memory; these are draft defaults, not persisted until valid. Focus its ID. Reorder the local array and DOM by key, preserving inactive fields, pending text, and disclosure state; update ordinal and move boundaries. Remove only local row data and move focus to the nearest row or Add routine. Never use ID as DOM identity.
+- [x] **Step 3: Implement local editing with stable keys.** Parse initial JSON once, clone baseline state, then render all rows. Add starts a new blank-ID row with no prompt selected, enabled true, no arguments, blank interval amount/days, default recovery, and inherited memory; these are draft defaults, not persisted until valid. Focus its ID. Reorder the local array and DOM by key, preserving inactive fields, pending text, and disclosure state; update ordinal and move boundaries. Remove only local row data and move focus to the nearest row or Add routine. Never use ID as DOM identity.
 
 `collectDraft()` must read current DOM input values and synchronize them into the local row model before returning active transport fields; reading only cached input-event state misses programmatic/autofill changes. Preserve source identity from the row model, not editable inputs. Flush current input values before a reorder/rerender so a focused field cannot lose its latest text. This also makes the later submit-time serialization comparison meaningful when an input event did not fire.
 
@@ -497,7 +497,7 @@ function moveRoutine(key, direction) {
 
 Define `focusRoutineAction(key, direction)` locally to focus the requested enabled move button or the other move/remove button if it became disabled at the boundary. Before renderRows capture active field and selection range and restore focus by stable key/field; avoid resetting the active input's cursor on each keystroke. Simpler keyed DOM moves are acceptable instead of full rerenders.
 
-- [ ] **Step 4: Implement conditional fields and identical state styling.** Radio groups unique per row reveal Interval amount/unit or Daily time. Memory Channel and duration recovery reveal their respective fields. Inactive values remain in local state but `collectDraft` emits inactive fields at a fixed neutral value, so editing an inactive field cannot accidentally change serialization/no-op comparison. On switching back restore the locally cached values. No Target selector, YAML toggle, Run now, or per-row Save is introduced.
+- [x] **Step 4: Implement conditional fields and identical state styling.** Radio groups unique per row reveal Interval amount/unit or Daily time. Memory Channel and duration recovery reveal their respective fields. Inactive values remain in local state but `collectDraft` emits inactive fields at a fixed neutral value, so editing an inactive field cannot accidentally change serialization/no-op comparison. On switching back restore the locally cached values. No Target selector, YAML toggle, Run now, or per-row Save is introduced.
 
 Rename warnings compare current ID with `initial.original_ids[source_index]`, not another row's current ID. Show no warning for new rows, and clear it on rename-back or discard. Enabled checkbox never disables/collapses the rest of the row. In summaries use the same `.routine-state` styles for both words; only text and color differ.
 
@@ -522,7 +522,7 @@ Rename warnings compare current ID with `initial.original_ids[source_index]`, no
 
 Complete CSS using existing app light/dark border/background conventions, green/red light-theme contrast, 34px icon actions, label spacing and summary separators matching the final asset. Use normal font size rather than viewport scaling; no global tag styling that affects other tabs. Keep both full editors and summaries visible for disabled examples. On small screens inputs and actions wrap without overflow and editor precedes summary. Load existing local Lucide and initialize icons for new rows; do not add another icon dependency.
 
-- [ ] **Step 5: Implement preview sequencing and saved-status slots.** On every input/change/add/remove/move immediately increment version, mark preview pending, clear valid state, and disable Save. Debounce 250ms and abort previous fetch, but also compare version to ignore responses already in flight. Capture the exact submitted draft before fetch; only that snapshot can become `validatedDraft`.
+- [x] **Step 5: Implement preview sequencing and saved-status slots.** On every input/change/add/remove/move immediately increment version, mark preview pending, clear valid state, and disable Save. Debounce 250ms and abort previous fetch, but also compare version to ignore responses already in flight. Capture the exact submitted draft before fetch; only that snapshot can become `validatedDraft`.
 
 ```javascript
 let version = initial.draft.draft_version;
@@ -566,7 +566,7 @@ Define referenced file-local helpers: `showPending` sets summary busy/pending an
 
 For saved source keys present in a valid initial snapshot, retain original status even after local toggle/rename/reorder. For new rows show Not saved. After a conflict where original saved status was not available, display unavailable rather than attaching the current server row at that index. Draft summary rows must follow current order and provide identical fields for both states.
 
-- [ ] **Step 6: Finish submit/discard/error recovery and keyboard behavior.** Save's native POST handler collects the current draft, compares its JSON with validatedDraft and validates version before populating hidden payload; if different, prevent submission and preview again. Set submitting to avoid duplicate saves and suppress unload warning only for the intentional valid POST. No-preview bypass is relied on for security; server validation always runs. Discard cancels timer/request, increments version, rebuilds baseline order/values/summary, clears rename/errors/new rows, and restores focus; if conflicted, explicitly reload current data with a user-confirmed discard.
+- [x] **Step 6: Finish submit/discard/error recovery and keyboard behavior.** Save's native POST handler collects the current draft, compares its JSON with validatedDraft and validates version before populating hidden payload; if different, prevent submission and preview again. Set submitting to avoid duplicate saves and suppress unload warning only for the intentional valid POST. No-preview bypass is relied on for security; server validation always runs. Discard cancels timer/request, increments version, rebuilds baseline order/values/summary, clears rename/errors/new rows, and restores focus; if conflicted, explicitly reload current data with a user-confirmed discard.
 
 ```javascript
 form.addEventListener('submit', event => {
@@ -589,7 +589,7 @@ window.addEventListener('beforeunload', event => {
 
 Define form, dirty, submitting and conflict in the controller closure. Add button tooltips/accessible names, per-input error associations and live alerts; automatically open Arguments & recovery for errors inside. On HTTP error reload, use submitted draft, retain stale revision, and do not label saved summary as valid draft. Never send stored original fields or saved marker data to authorize changes.
 
-- [ ] **Step 7: Expand browser tests to exact acceptance cases.** Add finite deterministic routines to the existing research fixture agent only for these tests if needed; do not add a new fleet agent unless unavoidable. Do not alter its permission policy or launch routines. Keep existing advisor tests read-only or discard-only. Use a dedicated test fixture with explicit fields for real save tests, snapshot its original routines and restore using a fresh revision in finally. Do not copy restoration logic that reuses invalid old source indices after deleting rows; recreate explicit fixture rows as new indices for restoration, and cover exact optional-field no-op fidelity separately in Python.
+- [x] **Step 7: Expand browser tests to exact acceptance cases.** Add finite deterministic routines to the existing research fixture agent only for these tests if needed; do not add a new fleet agent unless unavoidable. Do not alter its permission policy or launch routines. Keep existing advisor tests read-only or discard-only. Use a dedicated test fixture with explicit fields for real save tests, snapshot its original routines and restore using a fresh revision in finally. Do not copy restoration logic that reuses invalid old source indices after deleting rows; recreate explicit fixture rows as new indices for restoration, and cover exact optional-field no-op fidelity separately in Python.
 
 Tests: all state colors/typography/detail parity; add/delete/move first/last; argument ordering and spaces; radio-group independence; memory channel visibility; every recovery mode; rename warnings/provenance; disabled edits; missing prompt option retention; pending blank argument disables save; discard while preview in flight; malformed/422/409/503 responses; real save/reload; beforeunload accept/cancel; valid preview followed by programmatic value change cannot submit unnoticed.
 
@@ -612,7 +612,7 @@ test('failed preview preserves the edited ID', async ({ page }) => {
 
 For out-of-order tests use a held Promise in `page.route`, let a second response complete, then release the first and assert its values never replace the second. Do not use sleeps or disable application validation to make tests pass. Assert saved status text stays exactly fixed during draft changes, not merely that a Saved label exists.
 
-- [ ] **Step 8: Run all four UI projects and adjacent gates, inspect screenshots, then commit.** Commands: `npm run test:ui -- tests/ui/agent_routines.spec.ts`, `npm run test:ui -- tests/ui/accessibility.spec.ts tests/ui/agent_configuration.spec.ts`, and `python -m pytest tests/test_agent_routines.py -q`. Store new screenshot baselines for populated enabled/disabled, empty, rename/error, and long-text states in `tests/ui/agent_routines.spec.ts-snapshots/`. Inspect actual PNGs against normative design assets; do not hide overflow by modifying test element styles. Refresh only screenshots whose legitimate content changed and document why. Commit `feat(routines): build structured list editor` after review.
+- [x] **Step 8: Run all four UI projects and adjacent gates, inspect screenshots, then commit.** Commands: `npm run test:ui -- tests/ui/agent_routines.spec.ts`, `npm run test:ui -- tests/ui/accessibility.spec.ts tests/ui/agent_configuration.spec.ts`, and `python -m pytest tests/test_agent_routines.py -q`. Store new screenshot baselines for populated enabled/disabled, empty, rename/error, and long-text states in `tests/ui/agent_routines.spec.ts-snapshots/`. Inspect actual PNGs against normative design assets; do not hide overflow by modifying test element styles. Refresh only screenshots whose legitimate content changed and document why. Commit `feat(routines): build structured list editor` after review.
 
 ### Task 5: Acceptance, Documentation, and Integration
 
@@ -620,7 +620,7 @@ For out-of-order tests use a held Promise in `page.route`, let a second response
 
 **Interfaces:** Consumes all prior contracts and the four normative asset paths; produces verified implementation evidence and a branch ready for the repository's preauthorized integration workflow.
 
-- [ ] **Step 1: Document the operator workflow without changing runtime guidance.** Add to `kb/dispatch.md` that Agent -> Routines owns ordered structured configuration with explicit Save/Discard, grouped scoped prompts, enabled state and original-ID warning. Explain that Saved Last fired/Next due does not predict unsaved changes and changing IDs does not move memory/markers. Retain existing scheduler/recovery semantics and command examples.
+- [x] **Step 1: Document the operator workflow without changing runtime guidance.** Add to `kb/dispatch.md` that Agent -> Routines owns ordered structured configuration with explicit Save/Discard, grouped scoped prompts, enabled state and original-ID warning. Explain that Saved Last fired/Next due does not predict unsaved changes and changing IDs does not move memory/markers. Retain existing scheduler/recovery semantics and command examples.
 
 ```markdown
 ## Configure Routines
@@ -632,11 +632,11 @@ markers or routine-scoped memory. Saved Last fired and Next due values describe
 the saved routine, not a prediction for an unsaved schedule.
 ```
 
-- [ ] **Step 2: Run full acceptance from the active worktree.** Run `python -m pytest tests/ -q` and `npm run test:ui` to completion. The UI gate uses the existing four viewport/theme projects and its disposable configuration; do not use live config. Run `git diff --check` and the repository boundary tests after staging new documentation/assets, since tracked-file checks read the index. Do not suppress unrelated third-party warnings; identify/document them without unrequested dependency churn.
+- [x] **Step 2: Run full acceptance from the active worktree.** Run `python -m pytest tests/ -q` and `npm run test:ui` to completion. The UI gate uses the existing four viewport/theme projects and its disposable configuration; do not use live config. Run `git diff --check` and the repository boundary tests after staging new documentation/assets, since tracked-file checks read the index. Do not suppress unrelated third-party warnings; identify/document them without unrequested dependency churn.
 
-- [ ] **Step 3: Compare actual UI and test failure boundaries.** Verify final asset layout, green/red consistent text, full disabled details, integrated Saved fields, no redundant headings/panels, readable long values, and editor-before-summary on mobile. Inspect screenshots from disk, ensuring full document coverage rather than cropped browser screenshots. Capture and inspect empty, invalid, rename, reordered, disabled, missing-prompt and unsupported-saved-timing states. Assert no save/preview/rename operation touches marker or memory files and no tests accidentally change main-checkout config.
+- [x] **Step 3: Compare actual UI and test failure boundaries.** Verify final asset layout, green/red consistent text, full disabled details, integrated Saved fields, no redundant headings/panels, readable long values, and editor-before-summary on mobile. Inspect screenshots from disk, ensuring full document coverage rather than cropped browser screenshots. Capture and inspect empty, invalid, rename, reordered, disabled, missing-prompt and unsupported-saved-timing states. Assert no save/preview/rename operation touches marker or memory files and no tests accidentally change main-checkout config.
 
-- [ ] **Step 4: Record exact evidence and perform final review.** Write the verification document with tested code commits, exact commands/results/skips/warnings, scope of visual comparison, saved-data preservation tests, and real limitations. Separate historical baseline from implementation test results. Complete per-task review and a whole-branch review; fix concrete defects with regression tests and scoped re-review. Do not label the final review approved until it actually is. Commit documentation separately with `docs(routines): record configuration ui verification`.
+- [x] **Step 4: Record exact evidence and perform final review.** Write the verification document with tested code commits, exact commands/results/skips/warnings, scope of visual comparison, saved-data preservation tests, and real limitations. Separate historical baseline from implementation test results. Complete per-task review and a whole-branch review; fix concrete defects with regression tests and scoped re-review. Do not label the final review approved until it actually is. Commit documentation separately with `docs(routines): record configuration ui verification`.
 
 - [ ] **Step 5: Integrate only after review and green gates.** Follow AGENTS.md: check main checkout/branch tips, preserve unrelated main edits with a named stash only if needed, and rebase this feature onto master only if master advanced, rerunning the full suite/UI gates after any rebase. Fast-forward master, rerun the complete Python suite from master, push master and the feature branch, then remove this feature worktree and prune it. Keep the feature branch. Do not ask for merge-vs-PR options; integration is preauthorized. Do not remove a worktree or claim publication if a required test or push fails.
 

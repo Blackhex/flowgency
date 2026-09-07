@@ -2,7 +2,7 @@
 
 Date: 2026-09-07
 
-Status: Behavior and final visual revision approved in conversation; written specification awaiting user review.
+Status: Behavior, final visual revision, and written specification approved in conversation; implementation proceeded on the user's execution request.
 
 ## Goal and Scope
 
@@ -220,4 +220,4 @@ These source/render pairs preserve approved intermediate decisions. The final re
 
 ## Review Gate
 
-This deliverable contains documentation and archived visual assets only. Obtain user review of this written specification before invoking writing-plans. The implementation plan must restate the final HTML and PNG paths and be committed separately before implementation starts.
+This deliverable contains documentation and archived visual assets only. The user approved this written specification by requesting execution. The implementation plan restated the final HTML and PNG paths and was committed separately before implementation started.

@@ -7,7 +7,7 @@ Task 5 implementation source revision: `c4100fa`
 Final green UI test-and-snapshot repair revision: `d2a5d57`
 Final fix-wave source revision: `e3094b6`
 Earlier documentation-only revisions in this evidence trail: `69bac9c`, `a8ef960`
-Scope: Task 5 UI gate investigation and repair plus the final routines save/fallback correction wave. Step 5 integration was not executed. Controller final review remains pending.
+Scope: Task 5 UI gate investigation and repair plus the final routines save/fallback correction wave. Step 5 integration was not executed. Controller final review completed with one deferred display-only residual.
 
 ## Final fix-wave changes made here
 
@@ -15,7 +15,7 @@ Scope: Task 5 UI gate investigation and repair plus the final routines save/fall
 - Corrected fallback summary rendering so unsupported saved schedule/recovery warnings remain only while the controlling draft fields still match the unsupported baseline. Once the operator edits those controls to supported values, failed saves now show the current corrected draft summary instead of the stale raw warning text.
 - Removed the visible instructional paragraph from the routines heading to match the approved visual contract.
 - Added route regressions covering save-time unavailable services, corrected unsupported daily/interval schedules with unrelated validation failures, unchanged unsupported fallback summaries, retained inputs, and no-write behavior.
-- Refreshed only the corresponding routines screenshots whose diffs were justified by the removed heading paragraph.
+- Refreshed the 14 corresponding routines screenshots whose diffs were justified by the removed heading paragraph.
 
 ## Task 5 changes made here
 
@@ -155,7 +155,7 @@ Conclusion:
 - Added explicit Playwright assertions that the routines empty state still renders a valid 64-hex config revision string.
 - Kept screenshots behavior-scoped by masking only the variable absolute-path and config-revision text nodes.
 - Pinned the masked footer text width inside the tests so the mask rectangle itself does not drift by a few pixels between runs.
-- Refreshed exactly 16 justified baselines: 12 permissions screenshots and 4 routines-empty screenshots. No other snapshots were refreshed.
+- In the earlier Task 5 masked-baseline wave, refreshed exactly 16 justified baselines: 12 permissions screenshots and 4 routines-empty screenshots.
 
 ## Visual comparison
 
@@ -203,7 +203,7 @@ Explicit limitation from the inspected artifacts:
 
 - The full suite still does not persist a dedicated final rename-state screenshot artifact. Rename-state conformance remains covered by the approved rename asset plus the passing browser assertions in `tests/ui/agent_routines.spec.ts`.
 
-- The fix wave removed visible heading copy to satisfy the approved visual contract, so the corresponding routines populated, empty, preview-error, and long-text snapshots were refreshed across the affected desktop and mobile projects after direct diff review.
+- The final fix wave removed visible heading copy to satisfy the approved visual contract, so 14 routines populated, empty, preview-error, and long-text snapshots were refreshed across the affected desktop and mobile projects after direct diff review.
 
 ## Final UI gate result
 
@@ -233,10 +233,10 @@ The full Python suite evidence from the earlier Task 5 pass still covers the beh
 - Final routines save/fallback fix wave: complete at `e3094b6`.
 - Python gate: passed, including the final full-suite rerun at `e3094b6`.
 - UI gate: passed after targeted masking, the limited Task 5 snapshot repair, and the corresponding routines snapshot refresh required by the visual-contract fix.
-- Whole-branch approval is still intentionally withheld. This document is verification evidence only; controller final review remains pending.
+- Whole-branch final review: complete. The original findings were addressed, and one genuine duplicate `routines-unavailable` display issue remains deferred as non-load-bearing. This document is verification evidence, not spotless approval.
 
 ## Handoff
 
-- Do not integrate from this Task 5 pass.
-- Do not refresh additional baselines beyond the 16 files justified here.
+- Integration was not executed from this Task 5 pass; perform it only as the separate preauthorized step.
+- Do not refresh additional baselines beyond the recorded 16-file masked-baseline wave and 14-file heading-removal wave.
 - No live `config.yaml`, main workspace files, or scratch reports were staged or required for this repair.
