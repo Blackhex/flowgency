@@ -14,7 +14,7 @@ async function pinToSingleLine(locator: Locator) {
   });
 }
 
-const tabs = ['Profile', 'Blueprint', 'Runtime', 'Routines', 'Prompts', 'Memory', 'Activity'];
+const tabs = ['Profile', 'Blueprint', 'Runtime', 'Permissions', 'Routines', 'Prompts', 'Memory', 'Activity'];
 
 test.beforeEach(async ({ page }, testInfo) => {
   installConsoleErrorGate(page);
@@ -64,34 +64,19 @@ test('team settings leads to the sole roster and inherited runtime', async ({ pa
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/newsletter\/agents\/advisor\/runtime$/);
   await expect(page.getByRole('heading', { name: 'Team default' })).toBeVisible();
-  const workspaceRule = page.locator('li').filter({ hasText: /Rule:.*tests\/ui\/.runtime\/current\/workspaces\/newsletter/ });
-  await expect(workspaceRule.first()).toBeVisible();
-  const editorialRule = page.locator('li').filter({ hasText: /Rule:.*tests\/ui\/.runtime\/current\/teams\/newsletter\/editorial/ });
-  await expect(editorialRule.first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText(/\.runtime\/run-\d+/);
   await expect(page.getByText('Timeout: 2400s', { exact: true })).toBeVisible();
-  await expect(page.getByText('Timeout: 1200s', { exact: true })).toBeVisible();
-  await expect(page.getByText('Mode: restricted', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('Copilot');
   await expect(page.getByRole('heading', { name: 'Pinned integration' }).locator('..')).toContainText('copilot');
-  await expect(page.getByRole('heading', { name: 'Effective preview' })).toBeVisible();
-  const agentRulesField = page.locator('textarea[name="permission_rules_yaml"]');
-  await expect(agentRulesField).toHaveValue(/teams[\\/]newsletter[\\/]editorial/);
-  const teamRulesPreview = page.getByRole('heading', { name: 'Team default' }).locator('..').locator('pre');
-  await expect(teamRulesPreview).toContainText(/tests[\\/]ui[\\/]\.runtime[\\/]current[\\/]workspaces[\\/]newsletter/);
-  await teamRulesPreview.locator('../..').locator(':scope > div').evaluateAll((elements) => {
-    for (const element of elements as HTMLElement[]) {
-      element.style.minWidth = '0';
-    }
-  });
-  await pinToSingleLine(teamRulesPreview);
-  await pinToSingleLine(workspaceRule);
-  await pinToSingleLine(editorialRule);
+  await expect(page.getByRole('link', { name: 'Open Permissions' }).first()).toHaveAttribute('href', '/newsletter/agents/advisor/permissions');
+  const timeoutField = page.locator('input[name="timeout"]');
+  await expect(timeoutField).toHaveValue('1200');
+  await expect(page.locator('body')).not.toContainText('permission_rules_yaml');
+  await expect(page.locator('body')).not.toContainText('Effective preview');
+  await expect(page.locator('body')).not.toContainText(/^Mode$/m);
   await assertNoLayoutIssues(page);
-  // Permission rule paths are absolute and vary per checkout, so compare them as text only.
   await expect(page).toHaveScreenshot('agent-runtime.png', {
     fullPage: true,
-    mask: [workspaceRule, editorialRule, agentRulesField, teamRulesPreview],
   });
   await assertNoConsoleErrors(page);
 });

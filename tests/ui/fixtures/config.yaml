@@ -85,5 +85,24 @@ teams:
     workspace_path: __RUNTIME__/workspaces/research
     path: __RUNTIME__/groups/research
     default_integration: copilot
-    agents: []
+    permissions:
+      mode: unrestricted
+      rules: []
+    agents:
+      - name: permissions-editor
+        blueprint: builder
+        integration: copilot
+        identity:
+          display_name: Permissions Editor
+          title: Fixture Agent
+          emoji: P
+        permissions:
+          mode: restricted
+          rules:
+            - path: __RUNTIME__/workspaces/research
+              tools: [read, search]
+        runtime:
+          timeout: 900
+        default_memory:
+          scope: agent
     workspaces: []

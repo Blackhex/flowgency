@@ -1,0 +1,435 @@
+#permission-editor .permission-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#permission-editor .permission-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(270px, 1fr);
+  gap: 28px;
+}
+
+#permission-editor .permission-columns > * {
+  min-width: 0;
+}
+
+#permission-editor .permission-panel,
+#permission-editor .permission-rule {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+#permission-editor .permission-panel {
+  padding: 16px;
+}
+
+#permission-editor .permission-rule {
+  padding: 16px;
+}
+
+#permission-editor .permission-section-title,
+#permission-editor .permission-rule-header,
+#permission-editor .permission-summary-header,
+#permission-editor .permission-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#permission-editor .permission-rule-header {
+  align-items: flex-start;
+}
+
+#permission-editor .permission-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #111827;
+}
+
+#permission-editor .permission-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+#permission-editor .permission-tools label {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+  color: #1f2937;
+}
+
+#permission-editor .permission-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+#permission-editor .permission-icon svg,
+#permission-editor .permission-button svg,
+#permission-editor .permission-menu-item svg {
+  width: 16px;
+  height: 16px;
+}
+
+#permission-editor input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+#permission-editor .permission-text,
+#permission-editor .permission-select {
+  min-height: 40px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 9px 12px;
+  color: #111827;
+}
+
+#permission-editor .permission-text.font-mono {
+  font-size: 0.875rem;
+}
+
+#permission-editor .permission-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 12px;
+  color: #374151;
+}
+
+#permission-editor .permission-button:hover:not(:disabled),
+#permission-editor .permission-icon-button:hover:not(:disabled),
+#permission-editor .permission-menu-item:hover,
+#permission-editor .permission-link-button:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+#permission-editor .permission-button:disabled,
+#permission-editor .permission-icon-button:disabled,
+#permission-editor .permission-link-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+#permission-editor .permission-button:focus-visible,
+#permission-editor .permission-icon-button:focus-visible,
+#permission-editor .permission-link-button:focus-visible,
+#permission-editor .permission-text:focus-visible,
+#permission-editor .permission-select:focus-visible,
+#permission-editor .permission-menu-item:focus-visible,
+#permission-editor .permission-tools input:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+#permission-editor .permission-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #4b5563;
+}
+
+#permission-editor .permission-primary {
+  border-color: #4f46e5;
+  background: #4f46e5;
+  color: #ffffff;
+}
+
+#permission-editor .permission-primary:hover:not(:disabled) {
+  background: #4338ca;
+}
+
+#permission-editor .permission-menu-wrap {
+  position: relative;
+}
+
+#permission-editor .permission-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 184px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 6px;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.16);
+}
+
+#permission-editor .permission-menu[hidden] {
+  display: none;
+}
+
+#permission-editor .permission-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+  color: #1f2937;
+}
+
+#permission-editor .permission-rule-copy {
+  margin-bottom: 12px;
+  color: #475569;
+}
+
+#permission-editor .permission-field,
+#permission-editor .permission-custom-row {
+  margin-top: 12px;
+}
+
+#permission-editor .permission-custom-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#permission-editor .permission-custom-row > * {
+  min-width: 0;
+}
+
+#permission-editor .permission-custom-row .permission-text {
+  flex: 1 1 220px;
+}
+
+#permission-editor .permission-rule-status {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+#permission-editor .permission-summary-panel {
+  border-left: 1px solid #e5e7eb;
+  padding-left: 24px;
+}
+
+#permission-editor .permission-summary-body[hidden] {
+  display: none;
+}
+
+#permission-editor .permission-summary-status,
+#permission-editor .permission-alert,
+#permission-editor .permission-inline-error {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 0.875rem;
+}
+
+#permission-editor .permission-summary-status[data-tone="pending"] {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+#permission-editor .permission-summary-status[data-tone="warning"] {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+#permission-editor .permission-summary-status[data-tone="error"],
+#permission-editor .permission-alert,
+#permission-editor .permission-inline-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+#permission-editor .permission-alert[hidden],
+#permission-editor .permission-inline-error[hidden],
+#permission-editor .permission-summary-status[hidden],
+#permission-editor .permission-summary-actions[hidden],
+#permission-editor .permission-empty[hidden] {
+  display: none;
+}
+
+#permission-editor .permission-inline-error {
+  margin-top: 8px;
+  padding: 8px 10px;
+}
+
+#permission-editor .permission-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#permission-editor .permission-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 6px 12px;
+  color: #374151;
+}
+
+#permission-editor .permission-footer {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 16px;
+}
+
+#permission-editor .permission-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  padding: 16px;
+  color: #64748b;
+}
+
+#permission-editor input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #6366f1;
+}
+
+.dark #permission-editor .permission-panel,
+.dark #permission-editor .permission-rule,
+.dark #permission-editor .permission-menu,
+.dark #permission-editor .permission-button,
+.dark #permission-editor .permission-icon-button,
+.dark #permission-editor .permission-link-button,
+.dark #permission-editor .permission-text,
+.dark #permission-editor .permission-select {
+  border-color: #475569;
+  background: #162033;
+}
+
+.dark #permission-editor .permission-label,
+.dark #permission-editor .permission-tools label,
+.dark #permission-editor .permission-rule-title,
+.dark #permission-editor .permission-section-heading,
+.dark #permission-editor .permission-text,
+.dark #permission-editor .permission-select {
+  color: #f1f5f9;
+}
+
+.dark #permission-editor .permission-rule-copy,
+.dark #permission-editor .permission-rule-status,
+.dark #permission-editor .permission-empty,
+.dark #permission-editor .permission-footer-copy {
+  color: #94a3b8;
+}
+
+.dark #permission-editor .permission-button,
+.dark #permission-editor .permission-icon-button,
+.dark #permission-editor .permission-link-button,
+.dark #permission-editor .permission-menu-item {
+  color: #cbd5e1;
+}
+
+.dark #permission-editor .permission-button:hover:not(:disabled),
+.dark #permission-editor .permission-icon-button:hover:not(:disabled),
+.dark #permission-editor .permission-link-button:hover:not(:disabled),
+.dark #permission-editor .permission-menu-item:hover {
+  background: #1e293b;
+}
+
+.dark #permission-editor .permission-primary {
+  border-color: #6366f1;
+  background: #6366f1;
+  color: #ffffff;
+}
+
+.dark #permission-editor .permission-primary:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.dark #permission-editor .permission-summary-panel,
+.dark #permission-editor .permission-footer {
+  border-color: #334155;
+}
+
+.dark #permission-editor .permission-empty {
+  border-color: #475569;
+}
+
+.dark #permission-editor .permission-summary-status[data-tone="pending"] {
+  border-color: rgba(99, 102, 241, 0.45);
+  background: rgba(99, 102, 241, 0.14);
+  color: #c7d2fe;
+}
+
+.dark #permission-editor .permission-summary-status[data-tone="warning"] {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+}
+
+.dark #permission-editor .permission-summary-status[data-tone="error"],
+.dark #permission-editor .permission-alert,
+.dark #permission-editor .permission-inline-error {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+}
+
+@media (max-width: 1100px) {
+  #permission-editor .permission-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #permission-editor .permission-summary-panel {
+    border-left: 0;
+    border-top: 1px solid #e5e7eb;
+    padding-left: 0;
+    padding-top: 20px;
+  }
+
+  .dark #permission-editor .permission-summary-panel {
+    border-top-color: #334155;
+  }
+}
+
+@media (max-width: 720px) {
+  #permission-editor .permission-heading,
+  #permission-editor .permission-section-title,
+  #permission-editor .permission-summary-header,
+  #permission-editor .permission-footer {
+    align-items: stretch;
+  }
+
+  #permission-editor .permission-button,
+  #permission-editor .permission-link-button {
+    width: 100%;
+  }
+
+  #permission-editor .permission-menu {
+    left: 0;
+    right: auto;
+    width: min(100%, 240px);
+  }
+}

@@ -9,6 +9,7 @@ const pages = [
   { name: 'Agent Profile', path: '/newsletter/agents/advisor/profile', identity: ['tab', 'Profile'] },
   { name: 'Agent Blueprint', path: '/newsletter/agents/advisor/blueprint', identity: ['tab', 'Blueprint'] },
   { name: 'Agent Runtime', path: '/newsletter/agents/advisor/runtime', identity: ['tab', 'Runtime'] },
+  { name: 'Agent Permissions', path: '/newsletter/agents/advisor/permissions', identity: ['tab', 'Permissions'] },
   { name: 'Agent Routines', path: '/newsletter/agents/advisor/routines', identity: ['tab', 'Routines'] },
   { name: 'Agent Prompts', path: '/newsletter/agents/advisor/prompts', identity: ['tab', 'Prompts'] },
   { name: 'Agent Memory', path: '/newsletter/agents/advisor/memory', identity: ['tab', 'Memory'] },
