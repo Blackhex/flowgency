@@ -166,7 +166,7 @@ def _team_settings_response(
 ):
     team_cfg = snapshot.config.teams[team_id]
     runtime = team_cfg.runtime
-    permissions = runtime.permissions
+    permissions = team_cfg.permissions
     dispatch = team_cfg.dispatch
     values = form_values or {}
 

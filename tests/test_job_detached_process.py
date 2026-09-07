@@ -85,10 +85,8 @@ def test_detached_worker_survives_submitter_exit(tmp_path):
         "teams": {"test": apply_team_paths({
             "name": "Test",
             "default_integration": "script",
-            "runtime": {
-                "timeout": 1800,
-                "permissions": {"mode": "unrestricted"},
-            },
+            "runtime": {"timeout": 1800},
+            "permissions": {"mode": "unrestricted"},
             "agents": [{
                 "name": "product",
                 "blueprint": "product-blueprint",

@@ -76,7 +76,7 @@ def test_current_defaults_are_explicit(raw_config, config_paths):
     assert parsed.resolved.flowgency.default_team == "newsletter"
     team = parsed.teams["newsletter"]
     assert team.runtime.timeout == 1800
-    assert team.runtime.permissions.mode == "unrestricted"
+    assert team.permissions.mode == "unrestricted"
     assert team.dispatch.enabled is False
 
 
@@ -532,31 +532,34 @@ def test_validates_team_sandbox_semantics(raw_config, config_paths):
 def test_accepts_restricted_team_permissions(raw_config, config_paths):
     from flowgency.configuration.models import parse_config, validate_config
 
-    raw_config["teams"]["newsletter"]["runtime"] = {
-        "permissions": {"mode": "restricted", "rules": [{"tools": ["read"]}]}
+    raw_config["teams"]["newsletter"]["runtime"] = {}
+    raw_config["teams"]["newsletter"]["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"tools": ["read"]}],
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
     assert not any(issue.code == "invalid-field-shape" for issue in issues)
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    assert parsed.teams["newsletter"].runtime.permissions.mode == "restricted"
-    assert parsed.teams["newsletter"].runtime.permissions.rules[0].tools == ("read",)
+    assert parsed.teams["newsletter"].permissions.mode == "restricted"
+    assert parsed.teams["newsletter"].permissions.rules[0].tools == ("read",)
 
 
 def test_accepts_agent_permission_rules(raw_config, config_paths):
     from flowgency.configuration.models import parse_config, validate_config
 
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
-    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {
-        "permissions": {"rules": [{"path": ws, "tools": ["read", "write"]}]}
+    raw_config["teams"]["newsletter"]["agents"][0]["runtime"] = {}
+    raw_config["teams"]["newsletter"]["agents"][0]["permissions"] = {
+        "rules": [{"path": ws, "tools": ["read", "write"]}]
     }
 
     issues = validate_config(raw_config, config_paths["config_path"])
     assert not any(issue.code == "invalid-field-shape" for issue in issues)
 
     parsed = parse_config(raw_config, config_paths["config_path"])
-    rule = parsed.teams["newsletter"].agents["builder"].runtime.permissions.rules[0]
+    rule = parsed.teams["newsletter"].agents["builder"].permissions.rules[0]
     assert rule.tools == ("read", "write")
 
 

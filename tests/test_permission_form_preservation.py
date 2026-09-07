@@ -44,14 +44,12 @@ def _make_team_client(monkeypatch, tmp_path, raw_config):
             "workspace_path": str(workspace),
             "path": str(tmp_path / "groups" / "grp-state"),
             "default_integration": "copilot",
-            "runtime": {
-                "timeout": 1800,
-                "permissions": {
-                    "mode": "restricted",
-                    "rules": [
-                        {"path": str(src), "tools": ["read", "search"]},
-                    ],
-                },
+            "runtime": {"timeout": 1800},
+            "permissions": {
+                "mode": "restricted",
+                "rules": [
+                    {"path": str(src), "tools": ["read", "search"]},
+                ],
             },
             "agents": [],
             "workspaces": [],
@@ -103,14 +101,12 @@ def _make_agent_client(monkeypatch, tmp_path, raw_config):
     raw["teams"]["newsletter"]["path"] = str(team_root)
     raw["teams"]["newsletter"]["workspace_path"] = str(workspace)
     raw["teams"]["newsletter"]["default_integration"] = "copilot"
-    raw["teams"]["newsletter"]["runtime"] = {
-        "timeout": 2400,
-        "permissions": {
-            "mode": "restricted",
-            "rules": [
-                {"path": str(workspace), "tools": ["read", "search"]},
-            ],
-        },
+    raw["teams"]["newsletter"]["runtime"] = {"timeout": 2400}
+    raw["teams"]["newsletter"]["permissions"] = {
+        "mode": "restricted",
+        "rules": [
+            {"path": str(workspace), "tools": ["read", "search"]},
+        ],
     }
     raw["teams"]["newsletter"]["agents"] = [
         {
@@ -118,13 +114,11 @@ def _make_agent_client(monkeypatch, tmp_path, raw_config):
             "blueprint": "advisor",
             "integration": "copilot",
             "identity": {"display_name": "Advisor", "title": "Test", "emoji": ""},
-            "runtime": {
-                "timeout": 1200,
-                "permissions": {
-                    "rules": [
-                        {"path": str(extra), "tools": ["read", "search"]},
-                    ],
-                },
+            "runtime": {"timeout": 1200},
+            "permissions": {
+                "rules": [
+                    {"path": str(extra), "tools": ["read", "search"]},
+                ],
             },
         }
     ]
@@ -140,7 +134,7 @@ def _make_agent_client(monkeypatch, tmp_path, raw_config):
 def test_team_save_unrelated_field_preserves_rules(tmp_path, monkeypatch, raw_config):
     """Editing only the team name must not touch permission mode or rules."""
     client, store = _make_team_client(monkeypatch, tmp_path, raw_config)
-    before = deepcopy(store.load().raw["teams"]["grp"]["runtime"]["permissions"])
+    before = deepcopy(store.load().raw["teams"]["grp"]["permissions"])
     revision = store.load().revision
 
     response = client.post(
@@ -159,14 +153,14 @@ def test_team_save_unrelated_field_preserves_rules(tmp_path, monkeypatch, raw_co
     )
 
     assert response.status_code == 303
-    after = store.load().raw["teams"]["grp"]["runtime"]["permissions"]
+    after = store.load().raw["teams"]["grp"]["permissions"]
     assert after == before
 
 
 def test_team_save_with_form_fields_preserves_rules(tmp_path, monkeypatch, raw_config):
     """Posting the form including permission fields round-trips rules."""
     client, store = _make_team_client(monkeypatch, tmp_path, raw_config)
-    before = deepcopy(store.load().raw["teams"]["grp"]["runtime"]["permissions"])
+    before = deepcopy(store.load().raw["teams"]["grp"]["permissions"])
     revision = store.load().revision
     src = tmp_path / "workspace" / "src"
     rules_yaml = yaml.safe_dump(
@@ -191,7 +185,7 @@ def test_team_save_with_form_fields_preserves_rules(tmp_path, monkeypatch, raw_c
     )
 
     assert response.status_code == 303
-    after = store.load().raw["teams"]["grp"]["runtime"]["permissions"]
+    after = store.load().raw["teams"]["grp"]["permissions"]
     assert after == before
 
 
@@ -202,7 +196,7 @@ def test_agent_runtime_timeout_only_preserves_rules(tmp_path, monkeypatch, raw_c
     """Changing only timeout must not destroy the instance's permission rules."""
     client, config_path = _make_agent_client(monkeypatch, tmp_path, raw_config)
     before = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    before_rules = deepcopy(before["teams"]["newsletter"]["agents"][0]["runtime"]["permissions"])
+    before_rules = deepcopy(before["teams"]["newsletter"]["agents"][0]["permissions"])
     revision = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     from flowgency.configuration import ConfigStore
     rev = ConfigStore(config_path).load().revision
@@ -220,14 +214,14 @@ def test_agent_runtime_timeout_only_preserves_rules(tmp_path, monkeypatch, raw_c
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     runtime = saved["teams"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1801
-    assert runtime["permissions"] == before_rules
+    assert saved["teams"]["newsletter"]["agents"][0]["permissions"] == before_rules
 
 
 def test_agent_runtime_form_round_trips_rules(tmp_path, monkeypatch, raw_config):
     """Submitting rules through the form round-trips them unchanged."""
     client, config_path = _make_agent_client(monkeypatch, tmp_path, raw_config)
     before = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    before_rules = before["teams"]["newsletter"]["agents"][0]["runtime"]["permissions"]["rules"]
+    before_rules = before["teams"]["newsletter"]["agents"][0]["permissions"]["rules"]
     from flowgency.configuration import ConfigStore
     rev = ConfigStore(config_path).load().revision
     extra = tmp_path / "extra"
@@ -248,8 +242,7 @@ def test_agent_runtime_form_round_trips_rules(tmp_path, monkeypatch, raw_config)
 
     assert response.status_code == 303
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    runtime = saved["teams"]["newsletter"]["agents"][0]["runtime"]
-    assert runtime["permissions"]["rules"] == before_rules
+    assert saved["teams"]["newsletter"]["agents"][0]["permissions"]["rules"] == before_rules
 
 
 # ---------- N3: Group create form persists what the operator typed ----------
@@ -283,7 +276,7 @@ def test_team_create_persists_typed_permission_rules(tmp_path, monkeypatch, raw_
     )
 
     assert response.status_code == 303
-    permissions = store.load().raw["teams"]["fresh"]["runtime"]["permissions"]
+    permissions = store.load().raw["teams"]["fresh"]["permissions"]
     assert permissions["mode"] == "restricted"
     assert permissions["rules"] == [
         {"path": str(new_workspace / "src"), "tools": ["read", "search"]}
@@ -338,7 +331,7 @@ def test_team_create_without_permission_fields_is_unrestricted(tmp_path, monkeyp
     )
 
     assert response.status_code == 303
-    permissions = store.load().raw["teams"]["fresh"]["runtime"]["permissions"]
+    permissions = store.load().raw["teams"]["fresh"]["permissions"]
     assert permissions["mode"] == "unrestricted"
     assert permissions["rules"] == []
 
@@ -363,12 +356,10 @@ def test_team_patch_none_leaves_rules_alone(tmp_path, raw_config):
             "workspace_path": str(workspace),
             "path": str(tmp_path / "groups" / "grp-state"),
             "default_integration": "copilot",
-            "runtime": {
-                "timeout": 1800,
-                "permissions": {
-                    "mode": "restricted",
-                    "rules": [{"path": str(workspace), "tools": ["read"]}],
-                },
+            "runtime": {"timeout": 1800},
+            "permissions": {
+                "mode": "restricted",
+                "rules": [{"path": str(workspace), "tools": ["read"]}],
             },
             "agents": [],
         }
@@ -390,7 +381,7 @@ def test_team_patch_none_leaves_rules_alone(tmp_path, raw_config):
         ),
     )
 
-    saved = store.load().raw["teams"]["grp"]["runtime"]["permissions"]
+    saved = store.load().raw["teams"]["grp"]["permissions"]
     assert saved["mode"] == "restricted"
     assert saved["rules"] == [{"path": str(workspace), "tools": ["read"]}]
 
@@ -412,12 +403,10 @@ def test_team_patch_empty_tuple_clears_rules(tmp_path, raw_config):
             "workspace_path": str(workspace),
             "path": str(tmp_path / "groups" / "grp-state"),
             "default_integration": "copilot",
-            "runtime": {
-                "timeout": 1800,
-                "permissions": {
-                    "mode": "restricted",
-                    "rules": [{"path": str(workspace), "tools": ["read"]}],
-                },
+            "runtime": {"timeout": 1800},
+            "permissions": {
+                "mode": "restricted",
+                "rules": [{"path": str(workspace), "tools": ["read"]}],
             },
             "agents": [],
         }
@@ -439,7 +428,7 @@ def test_team_patch_empty_tuple_clears_rules(tmp_path, raw_config):
         ),
     )
 
-    saved = store.load().raw["teams"]["grp"]["runtime"]["permissions"]
+    saved = store.load().raw["teams"]["grp"]["permissions"]
     assert saved["mode"] == "unrestricted"
     assert saved["rules"] == []
 
@@ -462,19 +451,15 @@ def test_agent_patch_none_leaves_rules_alone(tmp_path, raw_config):
             "workspace_path": str(workspace),
             "path": str(tmp_path / "groups" / "grp-state"),
             "default_integration": "copilot",
-            "runtime": {
-                "timeout": 1800,
-                "permissions": {"mode": "restricted", "rules": [{"path": str(workspace), "tools": ["read"]}]},
-            },
+            "runtime": {"timeout": 1800},
+            "permissions": {"mode": "restricted", "rules": [{"path": str(workspace), "tools": ["read"]}]},
             "agents": [
                 {
                     "name": "bot",
                     "blueprint": "advisor",
                     "integration": "copilot",
-                    "runtime": {
-                        "timeout": 900,
-                        "permissions": {"rules": [{"path": str(extra), "tools": ["read", "write"]}]},
-                    },
+                    "runtime": {"timeout": 900},
+                    "permissions": {"rules": [{"path": str(extra), "tools": ["read", "write"]}]},
                 }
             ],
         }
@@ -489,7 +474,7 @@ def test_agent_patch_none_leaves_rules_alone(tmp_path, raw_config):
 
     agent_runtime = raw_data["teams"]["grp"]["agents"][0]["runtime"]
     assert agent_runtime["timeout"] == 1801
-    assert agent_runtime["permissions"]["rules"] == [{"path": str(extra), "tools": ["read", "write"]}]
+    assert raw_data["teams"]["grp"]["agents"][0]["permissions"]["rules"] == [{"path": str(extra), "tools": ["read", "write"]}]
 
 
 def test_agent_patch_empty_tuple_clears_rules(tmp_path, raw_config):
@@ -510,19 +495,15 @@ def test_agent_patch_empty_tuple_clears_rules(tmp_path, raw_config):
             "workspace_path": str(workspace),
             "path": str(tmp_path / "groups" / "grp-state"),
             "default_integration": "copilot",
-            "runtime": {
-                "timeout": 1800,
-                "permissions": {"mode": "restricted", "rules": [{"path": str(workspace), "tools": ["read"]}]},
-            },
+            "runtime": {"timeout": 1800},
+            "permissions": {"mode": "restricted", "rules": [{"path": str(workspace), "tools": ["read"]}]},
             "agents": [
                 {
                     "name": "bot",
                     "blueprint": "advisor",
                     "integration": "copilot",
-                    "runtime": {
-                        "timeout": 900,
-                        "permissions": {"rules": [{"path": str(extra), "tools": ["read", "write"]}]},
-                    },
+                    "runtime": {"timeout": 900},
+                    "permissions": {"rules": [{"path": str(extra), "tools": ["read", "write"]}]},
                 }
             ],
         }
@@ -534,5 +515,4 @@ def test_agent_patch_empty_tuple_clears_rules(tmp_path, raw_config):
 
     _apply_runtime_patch(raw_data, "grp", "bot", AgentRuntimePatch(timeout=900, rules=()))
 
-    agent_runtime = raw_data["teams"]["grp"]["agents"][0]["runtime"]
-    assert agent_runtime["permissions"]["rules"] == []
+    assert raw_data["teams"]["grp"]["agents"][0]["permissions"]["rules"] == []

@@ -33,11 +33,10 @@ def _resolved_config(tmp_path: Path, raw_config: dict):
     team = raw["teams"]["newsletter"]
     team["workspace_path"] = str(workspace)
     team["path"] = str(tmp_path / "groups" / "newsletter")
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [{"path": str(restricted), "tools": ["read"]}],
-        }
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"path": str(restricted), "tools": ["read"]}],
     }
     return raw, parse_config(raw, tmp_path / "config.yaml").resolved
 
@@ -93,7 +92,7 @@ def test_missing_or_non_directory_team_workspace_path_fails_closed(tmp_path, raw
 
 def test_missing_restricted_root_fails_closed(tmp_path, raw_config):
     raw, _ = _resolved_config(tmp_path, raw_config)
-    raw["teams"]["newsletter"]["runtime"]["permissions"]["rules"] = [
+    raw["teams"]["newsletter"]["permissions"]["rules"] = [
         {"path": str(tmp_path / "missing-root"), "tools": ["read"]}
     ]
     config = parse_config(raw, tmp_path / "config.yaml").resolved

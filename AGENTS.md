@@ -41,13 +41,13 @@ teams:
     workspace_path: C:/Projects/newsletter
     path: C:/Flowgency/teams/newsletter
     default_integration: copilot
+    permissions:
+      mode: restricted
+      rules:
+        - path: C:/Projects/newsletter
+          tools: [read, search]
     runtime:
       timeout: 1800
-      permissions:
-        mode: restricted
-        rules:
-          - path: C:/Projects/newsletter
-            tools: [read, search]
     dispatch:
       enabled: true
     agents:
@@ -57,13 +57,13 @@ teams:
         identity:
           display_name: Advisor
           title: Editorial Advisor
-        runtime:
-          permissions:
-            rules:
-              - path: C:/Projects/newsletter
-                tools: [read, search, write]
-              - path: C:/Research/editorial
-                tools: [read, search]
+        permissions:
+          rules:
+            - path: C:/Projects/newsletter
+              tools: [read, search, write]
+            - path: C:/Research/editorial
+              tools: [read, search]
+        runtime: {}
         default_memory:
           scope: agent
         routines:

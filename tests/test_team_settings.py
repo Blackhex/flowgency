@@ -81,14 +81,12 @@ def _make_client(monkeypatch, tmp_path, raw_config):
     raw["teams"]["newsletter"]["path"] = str(
         tmp_path / "groups" / "newsletter-state"
     )
-    raw["teams"]["newsletter"]["runtime"] = {
-        "timeout": 2400,
-        "permissions": {
-            "mode": "restricted",
-            "rules": [
-                {"path": str(tmp_path / "repo-root"), "tools": ["shell"]},
-            ],
-        },
+    raw["teams"]["newsletter"]["runtime"] = {"timeout": 2400}
+    raw["teams"]["newsletter"]["permissions"] = {
+        "mode": "restricted",
+        "rules": [
+            {"path": str(tmp_path / "repo-root"), "tools": ["shell"]},
+        ],
     }
     raw["teams"]["newsletter"]["dispatch"] = {"enabled": True}
     for agent in raw["teams"]["newsletter"].get("agents", []):

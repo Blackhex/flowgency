@@ -303,13 +303,13 @@ teams:
     workspace_path: C:/Projects/example
     path: C:/Flowgency/teams/example
     default_integration: copilot
+    permissions:
+      mode: restricted
+      rules:
+        - path: C:/Projects/example
+          tools: [read, search]
     runtime:
       timeout: 1800
-      permissions:
-        mode: restricted
-        rules:
-          - path: C:/Projects/example
-            tools: [read, search]
     dispatch:
       enabled: true
     agents:
@@ -319,11 +319,11 @@ teams:
         identity:
           display_name: Builder
           title: Implementation Lead
-        runtime:
-          permissions:
-            rules:
-              - path: C:/Projects/example
-                tools: [read, search, write]
+        permissions:
+          rules:
+            - path: C:/Projects/example
+              tools: [read, search, write]
+        runtime: {}
         default_memory:
           scope: agent
         routines:

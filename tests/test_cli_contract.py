@@ -61,10 +61,8 @@ def cli_config(tmp_path):
             "newsletter": apply_team_paths({
                 "name": "Newsletter",
                 "default_integration": "script",
-                "runtime": {
-                    "timeout": 321,
-                    "permissions": {"mode": "unrestricted"},
-                },
+                "runtime": {"timeout": 321},
+                "permissions": {"mode": "unrestricted"},
                 "agents": [
                     {
                         "name": "builder",

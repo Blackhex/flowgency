@@ -32,30 +32,27 @@ A 3-agent team for software projects: automated code review, security scanning, 
        - name: reviewer
          blueprint: reviewer
          integration: claude-code
-         runtime:
-           permissions:
-             mode: restricted
-             rules:
-               - path: /path/to/your/project
-                 tools: [read, search]
+         permissions:
+           mode: restricted
+           rules:
+             - path: /path/to/your/project
+               tools: [read, search]
        - name: security
          blueprint: security
          integration: claude-code
-         runtime:
-           permissions:
-             mode: restricted
-             rules:
-               - path: /path/to/your/project
-                 tools: [read, search]
+         permissions:
+           mode: restricted
+           rules:
+             - path: /path/to/your/project
+               tools: [read, search]
        - name: docs
          blueprint: docs
          integration: claude-code
-         runtime:
-           permissions:
-             mode: restricted
-             rules:
-               - path: /path/to/your/project
-                 tools: [read, search]
+         permissions:
+           mode: restricted
+           rules:
+             - path: /path/to/your/project
+               tools: [read, search]
    ```
 
 3. Edit each agent's `CLAUDE.md` to reference your project's specific tech stack, coding conventions, and security requirements.

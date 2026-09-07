@@ -167,12 +167,12 @@ def create_team_state(
             "workspace_path": patch.workspace_path,
             "path": patch.path,
             "default_integration": patch.default_integration,
+            "permissions": {
+                "mode": patch.permission_mode,
+                "rules": list(deepcopy(patch.permission_rules)),
+            },
             "runtime": {
                 "timeout": patch.runtime_timeout,
-                "permissions": {
-                    "mode": patch.permission_mode,
-                    "rules": list(deepcopy(patch.permission_rules)),
-                },
             },
             "dispatch": {
                 "enabled": patch.dispatch_enabled,
@@ -233,10 +233,10 @@ def patch_team_settings_state(
             raise TypeError(f"teams.{team_id}.runtime must be a mapping")
         runtime["timeout"] = patch.runtime_timeout
 
-        permissions = runtime.setdefault("permissions", {})
+        permissions = team.setdefault("permissions", {})
         if not isinstance(permissions, dict):
             raise TypeError(
-                f"teams.{team_id}.runtime.permissions must be a mapping"
+                f"teams.{team_id}.permissions must be a mapping"
             )
         if patch.permission_mode is not None:
             permissions["mode"] = patch.permission_mode
@@ -313,9 +313,9 @@ def patch_agent_runtime(
             runtime["timeout"] = patch.timeout
 
         if patch.rules is not None:
-            permissions = runtime.setdefault("permissions", {})
+            permissions = agent.setdefault("permissions", {})
             if not isinstance(permissions, dict):
-                raise TypeError(f"teams.{team_id}.agents.{agent_id}.runtime.permissions must be a mapping")
+                raise TypeError(f"teams.{team_id}.agents.{agent_id}.permissions must be a mapping")
             permissions["rules"] = list(deepcopy(patch.rules))
 
     return store.patch(expected_revision, apply)

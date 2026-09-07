@@ -76,14 +76,12 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
     raw["teams"]["newsletter"]["name"] = "Newsletter"
     raw["teams"]["newsletter"]["path"] = str(team_root)
     raw["teams"]["newsletter"]["default_integration"] = "copilot"
-    raw["teams"]["newsletter"]["runtime"] = {
-        "timeout": 2400,
-        "permissions": {
-            "mode": "restricted",
-            "rules": [
-                {"path": str((tmp_path / "Research" / "editorial").resolve()), "tools": ["read", "shell", "write"]},
-            ],
-        },
+    raw["teams"]["newsletter"]["runtime"] = {"timeout": 2400}
+    raw["teams"]["newsletter"]["permissions"] = {
+        "mode": "restricted",
+        "rules": [
+            {"path": str((tmp_path / "Research" / "editorial").resolve()), "tools": ["read", "shell", "write"]},
+        ],
     }
     raw["teams"]["newsletter"]["agents"] = [
         {
@@ -95,14 +93,12 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
                 "title": "Blueprint Librarian",
                 "emoji": ":)",
             },
-            "runtime": {
-                "timeout": 1200,
-                "permissions": {
-                    "rules": [
-                        {"path": str((tmp_path / "Research" / "additional").resolve()), "tools": ["read", "shell", "write"]},
-                        {"path": str(raw_config["teams"]["newsletter"]["workspace_path"]), "tools": ["read", "shell", "write"]},
-                    ],
-                },
+            "runtime": {"timeout": 1200},
+            "permissions": {
+                "rules": [
+                    {"path": str((tmp_path / "Research" / "additional").resolve()), "tools": ["read", "shell", "write"]},
+                    {"path": str(raw_config["teams"]["newsletter"]["workspace_path"]), "tools": ["read", "shell", "write"]},
+                ],
             },
             "default_memory": {"scope": "agent"},
             "routines": [
@@ -238,7 +234,7 @@ def test_runtime_tab_deduplicates_effective_roots_and_labels_sources(monkeypatch
     default_root = str((tmp_path / "Research" / "editorial").resolve())
     additional_root = str((tmp_path / "Research" / "additional").resolve())
     # Add a duplicate rule path that appears in both group and agent (uniform tools)
-    raw["teams"]["newsletter"]["agents"][0]["runtime"]["permissions"]["rules"] = [
+    raw["teams"]["newsletter"]["agents"][0]["permissions"]["rules"] = [
         {"path": default_root, "tools": ["read", "shell", "write"]},
         {"path": additional_root, "tools": ["read", "shell", "write"]},
     ]

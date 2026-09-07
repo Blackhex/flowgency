@@ -54,12 +54,11 @@ def raw_config(config_paths):
                 "workspace_path": str(config_paths["workspace_path"]),
                 "path": str(config_paths["team_path"]),
                 "default_integration": "claude-code",
-                "runtime": {
-                    "permissions": {
-                        "mode": "unrestricted",
-                        "rules": [{"tools": None}],
-                    },
+                "permissions": {
+                    "mode": "unrestricted",
+                    "rules": [{"tools": None}],
                 },
+                "runtime": {},
                 "agents": [
                     {
                         "name": "builder",

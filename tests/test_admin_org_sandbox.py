@@ -97,14 +97,16 @@ def test_admin_org_save_persists_permission_mode(tmp_path, monkeypatch, raw_conf
 
     assert response.status_code == 303
     saved = store.load().raw
-    assert saved["teams"]["grp"]["runtime"]["permissions"]["mode"] == "restricted"
+    assert saved["teams"]["grp"]["permissions"]["mode"] == "restricted"
 
 
 def test_admin_org_save_sets_unrestricted_by_default(tmp_path, monkeypatch, raw_config):
     client, store = _make_client(monkeypatch, tmp_path, raw_config)
     snapshot = store.load()
-    snapshot.raw["teams"]["grp"]["runtime"] = {
-        "permissions": {"mode": "restricted", "rules": [{"path": "/old/root"}]}
+    snapshot.raw["teams"]["grp"]["runtime"] = {}
+    snapshot.raw["teams"]["grp"]["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"path": "/old/root"}],
     }
     snapshot.path.write_text(yaml.safe_dump(snapshot.raw, sort_keys=False), encoding="utf-8")
     revision = store.load().revision
@@ -127,7 +129,7 @@ def test_admin_org_save_sets_unrestricted_by_default(tmp_path, monkeypatch, raw_
 
     assert response.status_code == 303
     saved = store.load().raw
-    assert saved["teams"]["grp"]["runtime"]["permissions"]["mode"] == "unrestricted"
+    assert saved["teams"]["grp"]["permissions"]["mode"] == "unrestricted"
 
 
 def test_admin_org_create_sets_restricted_when_roots_given(tmp_path, monkeypatch, raw_config):
@@ -153,8 +155,8 @@ def test_admin_org_create_sets_restricted_when_roots_given(tmp_path, monkeypatch
 
     assert response.status_code == 303
     saved = store.load().raw
-    assert saved["teams"]["new"]["runtime"]["permissions"]["mode"] == "restricted"
-    paths = [r.get("path") for r in saved["teams"]["new"]["runtime"]["permissions"]["rules"]]
+    assert saved["teams"]["new"]["permissions"]["mode"] == "restricted"
+    paths = [r.get("path") for r in saved["teams"]["new"]["permissions"]["rules"]]
     assert str(tmp_path / "repo") in paths
 
 
@@ -180,7 +182,7 @@ def test_admin_org_create_sets_unrestricted_when_no_roots(tmp_path, monkeypatch,
 
     assert response.status_code == 303
     saved = store.load().raw
-    assert saved["teams"]["new"]["runtime"]["permissions"]["mode"] == "unrestricted"
+    assert saved["teams"]["new"]["permissions"]["mode"] == "unrestricted"
 
 
 def test_admin_org_create_multiline_roots(tmp_path, monkeypatch, raw_config):
@@ -210,7 +212,7 @@ def test_admin_org_create_multiline_roots(tmp_path, monkeypatch, raw_config):
 
     assert response.status_code == 303
     saved = store.load().raw
-    rules = saved["teams"]["new"]["runtime"]["permissions"]["rules"]
+    rules = saved["teams"]["new"]["permissions"]["rules"]
     paths = [r.get("path") for r in rules]
     assert str(tmp_path / "repo") in paths
     assert str(tmp_path / "cowork") in paths
@@ -223,8 +225,8 @@ def test_admin_org_save_preserves_extension_keys(tmp_path, monkeypatch, raw_conf
     snapshot.raw["teams"]["grp"]["runtime"] = {
         "timeout": 1200,
         "runtime_extension": {"preserve": True},
-        "permissions": {"mode": "unrestricted", "rules": []},
     }
+    snapshot.raw["teams"]["grp"]["permissions"] = {"mode": "unrestricted", "rules": []}
     snapshot.raw["teams"]["grp"]["dispatch"] = {"enabled": False}
     snapshot.raw["teams"]["grp"]["workspaces"] = [
         {
@@ -381,8 +383,8 @@ def test_admin_org_create_calls_one_patch_and_persists_full_team_state(
     assert saved["path"] == str(tmp_path / "new-agents")
     assert saved["default_integration"] == "claude-code"
     assert saved["dispatch"] == {"enabled": False}
-    assert saved["runtime"]["permissions"]["mode"] == "restricted"
-    rules = saved["runtime"]["permissions"]["rules"]
+    assert saved["permissions"]["mode"] == "restricted"
+    rules = saved["permissions"]["rules"]
     paths = [r["path"] for r in rules]
     assert str(tmp_path / "repo") in paths
     assert str(tmp_path / "cowork") in paths

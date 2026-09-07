@@ -150,7 +150,8 @@ def _setup_decision_team(tmp_path, monkeypatch, *, explicit_executor=True):
             "name": "engineer",
             "integration": "script",
             "integration_config": {"command": "echo ok"},
-            "runtime": {"permissions": {"rules": [{"path": str(team_dir), "tools": ["read", "search", "write"]}]}},
+            "runtime": {},
+            "permissions": {"rules": [{"path": str(team_dir), "tools": ["read", "search", "write"]}]},
         },
         {"name": "sdk-agent", "integration": "sdk"},
     ]
@@ -187,11 +188,11 @@ def _setup_decision_team(tmp_path, monkeypatch, *, explicit_executor=True):
         "      - name: engineer\n"
         "        blueprint: engineer-blueprint\n"
         "        integration: script\n"
-        "        runtime:\n"
-        "          permissions:\n"
-        "            rules:\n"
-        f"              - path: {team_dir.as_posix()}\n"
-        "                tools: [read, search, write]\n"
+        "        permissions:\n"
+        "          rules:\n"
+        f"            - path: {team_dir.as_posix()}\n"
+        "              tools: [read, search, write]\n"
+        "        runtime: {}\n"
         "      - name: sdk-agent\n"
         "        blueprint: sdk-blueprint\n"
         "        integration: sdk\n",

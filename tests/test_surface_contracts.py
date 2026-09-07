@@ -261,10 +261,10 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     assert "`workspace_path` points to the project workspace" in skill_text
     assert "`path` points to the Flowgency-owned team-state root" in skill_text
     assert "agents" not in team["dispatch"]
-    assert team["runtime"]["permissions"]["rules"]
+    assert team["permissions"]["rules"]
     assert all({"name", "blueprint", "integration"} <= set(instance) for instance in team["agents"])
     builder = next(instance for instance in team["agents"] if instance["name"] == "builder")
-    assert "rules" in builder["runtime"]["permissions"]
+    assert "rules" in builder["permissions"]
     selectors = [routine["memory"] for routine in builder["routines"]]
     assert {selector["scope"] for selector in selectors} == {"routine", "channel"}
     assert next(selector for selector in selectors if selector["scope"] == "channel")["channel"] == "project-strategy"
@@ -289,11 +289,11 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     config["flowgency"]["memory_store"] = str(tmp_path / "memory")
     config["teams"]["example"]["workspace_path"] = str(workspace)
     config["teams"]["example"]["path"] = str(team_state)
-    config["teams"]["example"]["runtime"]["permissions"]["rules"] = [
+    config["teams"]["example"]["permissions"]["rules"] = [
         {"path": str(workspace), "tools": ["read", "search"]}
     ]
     builder = next(a for a in config["teams"]["example"]["agents"] if a["name"] == "builder")
-    builder["runtime"]["permissions"]["rules"] = [
+    builder["permissions"]["rules"] = [
         {"path": str(workspace), "tools": ["read", "search", "write"]}
     ]
     config_path = tmp_path / "config.yaml"

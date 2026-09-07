@@ -44,11 +44,9 @@ def _resolve_timeout(team: TeamConfig, agent: AgentInstance, timeout_override: i
 
 
 def _resolve_mode(team: TeamConfig, agent: AgentInstance) -> PermissionMode:
-    if "permissions" in agent.runtime.model_fields_set and (
-        "mode" in agent.runtime.permissions.model_fields_set
-    ):
-        return agent.runtime.permissions.mode
-    return team.runtime.permissions.mode
+    if "mode" in agent.permissions.model_fields_set:
+        return agent.permissions.mode
+    return team.permissions.mode
 
 
 def _resolve_rule_path(rule_path: Path, workspace: Path) -> Path:
@@ -67,7 +65,7 @@ def _merge_rules(
     index: dict[str | None, int] = {}
     workspace = team.workspace_path
 
-    for source in (team.runtime.permissions.rules, agent.runtime.permissions.rules):
+    for source in (team.permissions.rules, agent.permissions.rules):
         for rule in source:
             resolved_path = None if rule.path is None else _resolve_rule_path(Path(rule.path), workspace)
             key = None if resolved_path is None else _platform_path_key(resolved_path)

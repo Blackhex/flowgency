@@ -75,15 +75,15 @@ def _config_with_rules(
 ):
     raw = deepcopy(raw_config)
     team = raw["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": mode,
-            "rules": team_rules or [],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": mode,
+        "rules": team_rules or [],
     }
     agent = team["agents"][0]
     if agent_rules is not None:
-        agent["runtime"] = {"permissions": {"rules": agent_rules}}
+        agent["runtime"] = {}
+        agent["permissions"] = {"rules": agent_rules}
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return ConfigStore(path).load().config

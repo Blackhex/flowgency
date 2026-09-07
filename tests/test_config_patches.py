@@ -152,8 +152,8 @@ def test_patch_team_settings_preserves_unowned_team_fields(config_store):
     snapshot.raw["teams"]["newsletter"]["ui_extension"] = {"theme": "sunset"}
     snapshot.raw["teams"]["newsletter"]["runtime"] = {
         "timeout": 2400,
-        "permissions": {"mode": "unrestricted"},
     }
+    snapshot.raw["teams"]["newsletter"]["permissions"] = {"mode": "unrestricted"}
     snapshot.path.write_text(
         yaml.safe_dump(snapshot.raw, sort_keys=False),
         encoding="utf-8",
@@ -202,10 +202,10 @@ def test_patch_team_settings_state_preserves_extension_keys(config_store):
     snapshot.raw["teams"]["newsletter"]["runtime"] = {
         "timeout": 1200,
         "runtime_extension": {"preserve": True},
-        "permissions": {
-            "mode": "restricted",
-            "rules": [{"path": "shared-root", "tools": ["shell"]}],
-        },
+    }
+    snapshot.raw["teams"]["newsletter"]["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"path": "shared-root", "tools": ["shell"]}],
     }
     snapshot.raw["teams"]["newsletter"]["dispatch"] = {
         "enabled": False,
@@ -383,10 +383,10 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
     agent = snapshot.raw["teams"]["newsletter"]["agents"][0]
     agent["runtime"] = {
         "timeout": 900,
-        "permissions": {
-            "rules": [{"path": "/shared-root", "tools": ["shell"]}],
-        },
         "runtime_extension": {"preserve": True},
+    }
+    agent["permissions"] = {
+        "rules": [{"path": "/shared-root", "tools": ["shell"]}],
     }
     snapshot.path.write_text(
         yaml.safe_dump(snapshot.raw, sort_keys=False),
@@ -413,7 +413,7 @@ def test_patch_agent_runtime_preserves_extension_keys(config_store):
 
     runtime = updated.raw["teams"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1200
-    assert runtime["permissions"]["rules"] == [
+    assert updated.raw["teams"]["newsletter"]["agents"][0]["permissions"]["rules"] == [
         {"path": str(workspace_root / "editorial"), "tools": ["read", "write"]},
         {"path": str(workspace_root / "assets"), "tools": ["read"]},
     ]
@@ -430,10 +430,10 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
     agent = snapshot.raw["teams"]["newsletter"]["agents"][0]
     agent["runtime"] = {
         "timeout": 2400,
-        "permissions": {
-            "rules": [{"path": "/old", "tools": ["shell"]}],
-        },
         "runtime_extension": {"preserve": True},
+    }
+    agent["permissions"] = {
+        "rules": [{"path": "/old", "tools": ["shell"]}],
     }
     snapshot.path.write_text(
         yaml.safe_dump(snapshot.raw, sort_keys=False),
@@ -454,5 +454,5 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
 
     runtime = updated.raw["teams"]["newsletter"]["agents"][0]["runtime"]
     assert "timeout" not in runtime
-    assert runtime.get("permissions", {}).get("rules") == []
+    assert updated.raw["teams"]["newsletter"]["agents"][0].get("permissions", {}).get("rules") == []
     assert runtime["runtime_extension"] == {"preserve": True}

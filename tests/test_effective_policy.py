@@ -39,13 +39,12 @@ _INTEGRATION = _PermissiveIntegration()
 def test_team_rules_are_present_in_effective_policy(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [
-                {"path": ws, "tools": ["read", "search"]},
-            ],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [
+            {"path": ws, "tools": ["read", "search"]},
+        ],
     }
     team["agents"][0]["integration"] = "copilot"
 
@@ -62,22 +61,20 @@ def test_team_rules_are_present_in_effective_policy(raw_config, config_paths):
 def test_agent_rules_are_additive_to_team(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [
-                {"path": ws, "tools": ["read"]},
-            ],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [
+            {"path": ws, "tools": ["read"]},
+        ],
     }
     agent = team["agents"][0]
     agent["integration"] = "copilot"
-    agent["runtime"] = {
-        "permissions": {
-            "rules": [
-                {"path": ws, "tools": ["write"]},
-            ],
-        },
+    agent["runtime"] = {}
+    agent["permissions"] = {
+        "rules": [
+            {"path": ws, "tools": ["write"]},
+        ],
     }
 
     parsed = parse_config(raw_config, config_paths["config_path"])
@@ -95,22 +92,20 @@ def test_distinct_paths_remain_separate_rules(raw_config, config_paths):
     other = str(config_paths["config_dir"] / "other")
     (config_paths["config_dir"] / "other").mkdir(exist_ok=True)
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [
-                {"path": ws, "tools": ["read"]},
-            ],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [
+            {"path": ws, "tools": ["read"]},
+        ],
     }
     agent = team["agents"][0]
     agent["integration"] = "copilot"
-    agent["runtime"] = {
-        "permissions": {
-            "rules": [
-                {"path": other, "tools": ["write"]},
-            ],
-        },
+    agent["runtime"] = {}
+    agent["permissions"] = {
+        "rules": [
+            {"path": other, "tools": ["write"]},
+        ],
     }
 
     parsed = parse_config(raw_config, config_paths["config_path"])
@@ -123,9 +118,8 @@ def test_distinct_paths_remain_separate_rules(raw_config, config_paths):
 
 def test_unrestricted_policy_has_empty_rules_by_default(raw_config, config_paths):
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {"mode": "unrestricted"},
-    }
+    team["runtime"] = {}
+    team["permissions"] = {"mode": "unrestricted"}
     team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
@@ -139,7 +133,8 @@ def test_unrestricted_policy_has_empty_rules_by_default(raw_config, config_paths
 
 def test_timeout_override_precedence_is_job_then_agent_then_team(raw_config, config_paths):
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {"timeout": 900, "permissions": {"mode": "unrestricted"}}
+    team["runtime"] = {"timeout": 900}
+    team["permissions"] = {"mode": "unrestricted"}
     agent = team["agents"][0]
     agent["integration"] = "copilot"
     agent["runtime"] = {"timeout": 1200}
@@ -160,7 +155,8 @@ def test_timeout_override_precedence_is_job_then_agent_then_team(raw_config, con
 
 def test_mode_inherits_from_team_when_agent_omits(raw_config, config_paths):
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {"permissions": {"mode": "restricted"}}
+    team["runtime"] = {}
+    team["permissions"] = {"mode": "restricted"}
     team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
@@ -173,10 +169,12 @@ def test_mode_inherits_from_team_when_agent_omits(raw_config, config_paths):
 
 def test_agent_mode_overrides_team(raw_config, config_paths):
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {"permissions": {"mode": "restricted"}}
+    team["runtime"] = {}
+    team["permissions"] = {"mode": "restricted"}
     agent = team["agents"][0]
     agent["integration"] = "copilot"
-    agent["runtime"] = {"permissions": {"mode": "unrestricted"}}
+    agent["runtime"] = {}
+    agent["permissions"] = {"mode": "unrestricted"}
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     policy = resolve_effective_policy(
@@ -188,17 +186,15 @@ def test_agent_mode_overrides_team(raw_config, config_paths):
 
 def test_pathless_rule_tools_union(raw_config, config_paths):
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [{"tools": ["read"]}],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"tools": ["read"]}],
     }
     agent = team["agents"][0]
     agent["integration"] = "copilot"
-    agent["runtime"] = {
-        "permissions": {"rules": [{"tools": ["write"]}]},
-    }
+    agent["runtime"] = {}
+    agent["permissions"] = {"rules": [{"tools": ["write"]}]}
 
     parsed = parse_config(raw_config, config_paths["config_path"])
     policy = resolve_effective_policy(
@@ -234,7 +230,8 @@ def test_unsupported_mode_raises_validation_failed(raw_config, config_paths):
             raise NotImplementedError
 
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {"permissions": {"mode": "restricted"}}
+    team["runtime"] = {}
+    team["permissions"] = {"mode": "restricted"}
     team["agents"][0]["integration"] = "copilot"
 
     parsed = parse_config(raw_config, config_paths["config_path"])
@@ -251,11 +248,10 @@ def test_relative_rule_path_resolves_against_team_workspace(raw_config, config_p
     """M4: relative rule paths must resolve against workspace_path, not CWD."""
     ws = raw_config["teams"]["newsletter"]["workspace_path"]
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [{"path": "subdir", "tools": ["read"]}],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"path": "subdir", "tools": ["read"]}],
     }
     team["agents"][0]["integration"] = "copilot"
 
@@ -272,11 +268,10 @@ def test_relative_rule_path_resolves_against_team_workspace(raw_config, config_p
 def test_relative_rule_path_is_stable_across_cwd_changes(raw_config, config_paths, monkeypatch, tmp_path):
     """M4: the resolved path must not change when the process CWD changes."""
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [{"path": "src", "tools": ["read"]}],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"path": "src", "tools": ["read"]}],
     }
     team["agents"][0]["integration"] = "copilot"
 
@@ -300,11 +295,10 @@ def test_relative_rule_path_is_stable_across_cwd_changes(raw_config, config_path
 def test_absolute_rule_path_is_unchanged(raw_config, config_paths):
     ws = str(raw_config["teams"]["newsletter"]["workspace_path"])
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [{"path": ws, "tools": ["read"]}],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"path": ws, "tools": ["read"]}],
     }
     team["agents"][0]["integration"] = "copilot"
 

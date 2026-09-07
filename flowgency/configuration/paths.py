@@ -328,10 +328,10 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
 
     for team_id, team in config.teams.items():
         scope = f"teams.{team_id}"
-        for index, rule in enumerate(team.runtime.permissions.rules):
+        for index, rule in enumerate(team.permissions.rules):
             if rule.path is None:
                 continue
-            field = f"runtime.permissions.rules[{index}].path"
+            field = f"permissions.rules[{index}].path"
             issues.extend(
                 _validate_existing_directory(
                     rule.path,
@@ -358,10 +358,10 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
                     )
         for agent_id, agent in team.agents.items():
             agent_scope = f"{scope}.agents.{agent_id}"
-            for index, rule in enumerate(agent.runtime.permissions.rules):
+            for index, rule in enumerate(agent.permissions.rules):
                 if rule.path is None:
                     continue
-                field = f"runtime.permissions.rules[{index}].path"
+                field = f"permissions.rules[{index}].path"
                 issues.extend(
                     _validate_existing_directory(
                         rule.path,

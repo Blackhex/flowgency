@@ -74,7 +74,6 @@ class RuntimePermissions(BaseModel):
 class AgentRuntime(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     timeout: int = 1800
-    permissions: RuntimePermissions = Field(default_factory=RuntimePermissions)
 
 
 class AgentIdentity(BaseModel):
@@ -115,6 +114,7 @@ class AgentInstance(BaseModel):
     integration_config: dict[str, Any] = Field(default_factory=dict)
     identity: AgentIdentity = Field(default_factory=AgentIdentity)
     runtime: AgentRuntime = Field(default_factory=AgentRuntime)
+    permissions: RuntimePermissions = Field(default_factory=RuntimePermissions)
     default_memory: MemorySelector | None = None
     prompts: tuple[str, ...] = ()
     routines: tuple[Routine, ...] = ()
@@ -135,7 +135,6 @@ class WorkspaceConfig(BaseModel):
 class TeamRuntime(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     timeout: int = 1800
-    permissions: RuntimePermissions = Field(default_factory=RuntimePermissions)
 
 
 class TeamConfig(BaseModel):
@@ -145,6 +144,7 @@ class TeamConfig(BaseModel):
     path: Path
     default_integration: str
     runtime: TeamRuntime = Field(default_factory=TeamRuntime)
+    permissions: RuntimePermissions = Field(default_factory=RuntimePermissions)
     dispatch: TeamDispatch = Field(default_factory=TeamDispatch)
     agents: dict[str, AgentInstance] = Field(default_factory=dict)
     workspaces: tuple[WorkspaceConfig, ...] = ()
@@ -510,6 +510,23 @@ def _validate_blueprint(agent: Any, scope: str) -> ValidationIssue | None:
 _SUPERSEDED_V4_RUNTIME_KEYS = ("sandbox", "tools")
 
 
+def _reject_nested_permissions(runtime: Any, scope: str) -> list[ValidationIssue]:
+    if not _is_mapping(runtime) or "permissions" not in runtime:
+        return []
+    return [
+        _build_issue(
+            code="relocated-permissions",
+            scope=scope,
+            field=f"{scope}.runtime.permissions",
+            message="Permissions belong alongside runtime, not inside it.",
+            hint=(
+                f"Move {scope}.runtime.permissions to {scope}.permissions; "
+                "keep timeout in runtime."
+            ),
+        )
+    ]
+
+
 def _reject_superseded_keys(
     mapping: dict[str, Any],
     scope: str,
@@ -529,7 +546,7 @@ def _reject_superseded_keys(
                         f"recognised in version 1."
                     ),
                     hint=(
-                        "Remove the key and use runtime.permissions instead."
+                        "Remove the key and use permissions instead."
                     ),
                 )
             )
@@ -541,6 +558,7 @@ def _validate_team_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     if not _is_mapping(runtime):
         return issues
     issues.extend(_reject_superseded_keys(runtime, scope, f"{scope}.runtime"))
+    issues.extend(_reject_nested_permissions(runtime, scope))
     return issues
 
 
@@ -549,6 +567,7 @@ def _validate_agent_runtime(runtime: Any, scope: str) -> list[ValidationIssue]:
     if not _is_mapping(runtime):
         return issues
     issues.extend(_reject_superseded_keys(runtime, scope, f"{scope}.runtime"))
+    issues.extend(_reject_nested_permissions(runtime, scope))
     return issues
 
 
@@ -853,9 +872,9 @@ def _prepare_runtime(runtime: Any, base_path: Path | None) -> dict[str, Any]:
     return runtime_entry
 
 
-def _resolve_permission_paths(runtime_entry: dict[str, Any], workspace_path: Path) -> None:
+def _resolve_permission_paths(owner_entry: dict[str, Any], workspace_path: Path) -> None:
     """Resolve relative rule paths in permissions against workspace_path."""
-    permissions = runtime_entry.get("permissions")
+    permissions = owner_entry.get("permissions")
     if not _is_mapping(permissions):
         return
     permissions = dict(permissions)
@@ -869,7 +888,7 @@ def _resolve_permission_paths(runtime_entry: dict[str, Any], workspace_path: Pat
             rule["path"] = _path_from_config(rule["path"], workspace_path)
         resolved_rules.append(rule)
     permissions["rules"] = resolved_rules
-    runtime_entry["permissions"] = permissions
+    owner_entry["permissions"] = permissions
 
 
 def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]:
@@ -905,7 +924,7 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
         resolved_team["runtime"] = _prepare_runtime(
             resolved_team.get("runtime") or {}, workspace_root
         )
-        _resolve_permission_paths(resolved_team["runtime"], Path(workspace_path) if workspace_path else config_dir)
+        _resolve_permission_paths(resolved_team, Path(workspace_path) if workspace_path else config_dir)
         agents = {}
         for agent in resolved_team.get("agents") or []:
             if not isinstance(agent, dict):
@@ -917,7 +936,7 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
             agent_entry["runtime"] = _prepare_runtime(
                 agent_entry.get("runtime") or {}, workspace_root
             )
-            _resolve_permission_paths(agent_entry["runtime"], Path(workspace_path) if workspace_path else config_dir)
+            _resolve_permission_paths(agent_entry, Path(workspace_path) if workspace_path else config_dir)
             if agent_entry.get("prompts") is not None:
                 agent_entry["prompts"] = tuple(agent_entry.get("prompts") or ())
             if agent_entry.get("routines") is not None:

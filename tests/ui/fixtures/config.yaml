@@ -17,12 +17,12 @@ teams:
     workspace_path: __RUNTIME__/workspaces/newsletter
     path: __RUNTIME__/teams/newsletter
     default_integration: copilot
+    permissions:
+      mode: restricted
+      rules:
+        - path: __RUNTIME__/workspaces/newsletter
     runtime:
       timeout: 2400
-      permissions:
-        mode: restricted
-        rules:
-          - path: __RUNTIME__/workspaces/newsletter
     agents:
       - name: advisor
         blueprint: advisor
@@ -33,11 +33,11 @@ teams:
           emoji: A
         prompts:
           - local-triage
+        permissions:
+          rules:
+            - path: __RUNTIME__/teams/newsletter/editorial
         runtime:
           timeout: 1200
-          permissions:
-            rules:
-              - path: __RUNTIME__/teams/newsletter/editorial
         default_memory:
           scope: channel
           channel: brand-strategy

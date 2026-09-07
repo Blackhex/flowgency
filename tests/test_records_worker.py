@@ -30,20 +30,18 @@ def test_only_writable_agents_are_returned(raw_config, config_paths):
                 "name": "paul",
                 "blueprint": "builder-blueprint",
                 "integration": "claude-code",
-                "runtime": {
-                    "permissions": {
-                        "rules": [{"path": ws, "tools": ["read", "write"]}],
-                    },
+                "runtime": {},
+                "permissions": {
+                    "rules": [{"path": ws, "tools": ["read", "write"]}],
                 },
             },
             {
                 "name": "gurney",
                 "blueprint": "builder-blueprint",
                 "integration": "claude-code",
-                "runtime": {
-                    "permissions": {
-                        "rules": [{"path": ws, "tools": ["read"]}],
-                    },
+                "runtime": {},
+                "permissions": {
+                    "rules": [{"path": ws, "tools": ["read"]}],
                 },
             },
         ],

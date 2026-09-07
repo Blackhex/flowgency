@@ -467,11 +467,10 @@ def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
     from flowgency.configuration import ValidationFailed, parse_config
 
     team = raw_config["teams"]["newsletter"]
-    team["runtime"] = {
-        "permissions": {
-            "mode": "restricted",
-            "rules": [{"path": "C:/repo", "tools": ["read"]}],
-        },
+    team["runtime"] = {}
+    team["permissions"] = {
+        "mode": "restricted",
+        "rules": [{"path": "C:/repo", "tools": ["read"]}],
     }
     agent = team["agents"][0]
     agent["name"] = "builder"
@@ -489,6 +488,6 @@ def test_integration_rejects_policy_it_cannot_enforce(raw_config, config_paths):
         "integrations.claude-code",
     ]
     assert [issue.field for issue in excinfo.value.issues] == [
-        "runtime.permissions.mode",
+        "permissions.mode",
     ]
 

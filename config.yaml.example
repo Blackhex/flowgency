@@ -24,13 +24,13 @@ teams:
     workspace_path: C:/Projects/my-project
     path: C:/Flowgency/teams/my-project
     default_integration: copilot
+    permissions:
+      mode: restricted
+      rules:
+        - path: C:/Projects/my-project
+          tools: [read, search]
     runtime:
       timeout: 1800
-      permissions:
-        mode: restricted
-        rules:
-          - path: C:/Projects/my-project
-            tools: [read, search]
     dispatch:
       enabled: true
     agents:
@@ -40,13 +40,13 @@ teams:
         identity:
           display_name: Builder
           title: Implementation Lead
-        runtime:
-          permissions:
-            rules:
-              - path: C:/Projects/my-project
-                tools: [read, search, write]
-              - path: C:/Research/my-project
-                tools: [read, search]
+        permissions:
+          rules:
+            - path: C:/Projects/my-project
+              tools: [read, search, write]
+            - path: C:/Research/my-project
+              tools: [read, search]
+        runtime: {}
         default_memory:
           scope: agent
         routines:

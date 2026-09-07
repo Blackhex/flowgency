@@ -163,16 +163,18 @@ def test_launch_zones_cannot_be_widened_by_configuration(tmp_path: Path):
 def _config(tmp_path: Path, raw_config, *, team_rules, agent_rules):
     raw = deepcopy(raw_config)
     raw["schema_version"] = 1
-    raw["teams"]["newsletter"]["runtime"] = {
-        "permissions": {"mode": "restricted", "rules": team_rules}
+    raw["teams"]["newsletter"]["runtime"] = {}
+    raw["teams"]["newsletter"]["permissions"] = {
+        "mode": "restricted",
+        "rules": team_rules,
     }
     # agents is a list in raw_config; strip any stale capability/sandbox keys
     agent = raw["teams"]["newsletter"]["agents"][0]
     agent.pop("capabilities", None)
     # Use copilot so that restricted mode is accepted by the integration validator.
     agent["integration"] = "copilot"
-    agent_runtime = {"permissions": {"rules": agent_rules}}
-    agent["runtime"] = agent_runtime
+    agent["runtime"] = {}
+    agent["permissions"] = {"rules": agent_rules}
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return ConfigStore(path).load().config

@@ -334,24 +334,24 @@ def test_resolve_job_request_uses_routine_prompt_and_clears_skill_fields(tmp_pat
         "    workspace_path: workspaces/newsletter\n"
         "    path: agents/newsletter\n"
         "    default_integration: copilot\n"
+        "    permissions:\n"
+        "      mode: restricted\n"
+        "      rules:\n"
+        "        - path: repo\n"
+        "          tools: [read, search, write]\n"
         "    runtime:\n"
         "      timeout: 1800\n"
-        "      permissions:\n"
-        "        mode: restricted\n"
-        "        rules:\n"
-        "          - path: repo\n"
-        "            tools: [read, search, write]\n"
         "    agents:\n"
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
         "        integration: copilot\n"
-        "        runtime:\n"
-        "          permissions:\n"
-        "            rules:\n"
-        "              - path: .\n"
-        "                tools: [read, search, write]\n"
+        "        permissions:\n"
+        "          rules:\n"
+        "            - path: .\n"
+        "              tools: [read, search, write]\n"
         "        integration_config:\n"
         "          command: echo ok\n"
+        "        runtime: {}\n"
         "        default_memory:\n"
         "          scope: agent\n"
         "        routines:\n"
@@ -479,19 +479,24 @@ def _write_config(tmp_path: Path, *, timeout: int = 1800, command: str = "echo o
         "    workspace_path: workspaces/newsletter\n"
         "    path: agents/newsletter\n"
         "    default_integration: copilot\n"
+        "    permissions:\n"
+        "      mode: restricted\n"
+        "      rules:\n"
+        "        - tools: [read, search, write]\n"
+        "        - path: repo\n"
+        "          tools: [read, search, write]\n"
         f"    runtime:\n      timeout: {timeout}\n"
-        "      permissions:\n        mode: restricted\n        rules:\n          - tools: [read, search, write]\n          - path: repo\n            tools: [read, search, write]\n"
         "    agents:\n"
         "      - name: builder\n"
         "        blueprint: builder-blueprint\n"
         "        integration: copilot\n"
-        "        runtime:\n"
-        "          permissions:\n"
-        "            rules:\n"
-        "              - path: .\n"
-        "                tools: [read, search, write]\n"
+        "        permissions:\n"
+        "          rules:\n"
+        "            - path: .\n"
+        "              tools: [read, search, write]\n"
         "        integration_config:\n"
         f"          command: {command}\n"
+        "        runtime: {}\n"
         "        default_memory:\n          scope: agent\n"
         "        routines:\n"
         "          - id: daily-review\n"
@@ -1220,15 +1225,13 @@ def _pool_config(tmp_path, *, pool=1):
                 "workspace_path": str(workspace),
                 "path": str(team_dir),
                 "default_integration": "copilot",
-                "runtime": {
-                    "timeout": 1800,
-                    "permissions": {
-                        "mode": "restricted",
-                        "rules": [
-                            {"tools": ["read", "search", "write"]},
-                            {"path": str(workspace / "repo"), "tools": ["read", "search", "write"]},
-                        ],
-                    },
+                "runtime": {"timeout": 1800},
+                "permissions": {
+                    "mode": "restricted",
+                    "rules": [
+                        {"tools": ["read", "search", "write"]},
+                        {"path": str(workspace / "repo"), "tools": ["read", "search", "write"]},
+                    ],
                 },
                 "agents": [
                     {
@@ -1236,12 +1239,11 @@ def _pool_config(tmp_path, *, pool=1):
                         "blueprint": "builder-blueprint",
                         "integration": "copilot",
                         "integration_config": {"command": "echo ok"},
-                        "runtime": {
-                            "permissions": {
-                                "rules": [
-                                    {"path": str(workspace), "tools": ["read", "search", "write"]},
-                                ],
-                            },
+                        "runtime": {},
+                        "permissions": {
+                            "rules": [
+                                {"path": str(workspace), "tools": ["read", "search", "write"]},
+                            ],
                         },
                         "default_memory": {"scope": "agent"},
                         "routines": [

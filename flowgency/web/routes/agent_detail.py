@@ -320,7 +320,7 @@ def _apply_runtime_patch(raw: dict[str, Any], team_id: str, agent_id: str, patch
     else:
         runtime["timeout"] = patch.timeout
     if patch.rules is not None:
-        permissions = runtime.setdefault("permissions", {})
+        permissions = target.setdefault("permissions", {})
         permissions["rules"] = list(patch.rules)
 
 
@@ -572,8 +572,8 @@ def _runtime_context(snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
     except ValidationFailed as exc:
         issues = _issue_dicts(exc)
 
-    team_rules = team_cfg.runtime.permissions.rules
-    agent_rules = instance.runtime.permissions.rules
+    team_rules = team_cfg.permissions.rules
+    agent_rules = instance.permissions.rules
     team_rule_lines = []
     for rule in team_rules:
         path_str = str(rule.path).replace("\\", "/") if rule.path else "(pathless)"
@@ -599,7 +599,7 @@ def _runtime_context(snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
         "integration_name": instance.integration,
         "integration_display_name": integration.display_name,
         "team_timeout": team_cfg.runtime.timeout,
-        "team_permission_mode": team_cfg.runtime.permissions.mode,
+        "team_permission_mode": team_cfg.permissions.mode,
         "team_rules": "\n".join(team_rule_lines),
         "agent_timeout": instance.runtime.timeout if "timeout" in instance.runtime.model_fields_set else "",
         "agent_rules_yaml": agent_rules_yaml,

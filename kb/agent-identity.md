@@ -14,12 +14,11 @@ An instance belongs to exactly one team. Its config record owns stable `name`, `
     display_name: Advisor
     title: Editorial Advisor
     emoji: "A"
-  runtime:
-    permissions:
-      mode: restricted
-      rules:
-        - path: editorial
-          tools: [read, search]
+  permissions:
+    mode: restricted
+    rules:
+      - path: editorial
+        tools: [read, search]
   default_memory:
     scope: agent
 ```

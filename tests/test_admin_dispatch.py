@@ -66,14 +66,12 @@ def _configure_admin(tmp_path: Path, monkeypatch, scheduler_status):
             "test": apply_team_paths({
                 "name": "Test Agents",
                 "default_integration": "copilot",
-                "runtime": {
-                    "timeout": 1800,
-                    "permissions": {
-                        "mode": "restricted",
-                        "rules": [
-                            {"path": str(paths.workspace_root), "tools": ["shell"]},
-                        ],
-                    },
+                "runtime": {"timeout": 1800},
+                "permissions": {
+                    "mode": "restricted",
+                    "rules": [
+                        {"path": str(paths.workspace_root), "tools": ["shell"]},
+                    ],
                 },
                 "agents": [
                     {

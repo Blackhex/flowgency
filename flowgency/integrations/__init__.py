@@ -226,7 +226,7 @@ class BaseIntegration:
                 ValidationIssue(
                     code="unsupported-permission-mode",
                     scope=f"integrations.{self.name}",
-                    field="runtime.permissions.mode",
+                    field="permissions.mode",
                     message=(
                         f"Integration '{self.name}' cannot enforce permission "
                         f"mode '{policy.mode}'."
@@ -246,7 +246,7 @@ class BaseIntegration:
                 ValidationIssue(
                     code="unsupported-tool-scoping",
                     scope=f"integrations.{self.name}",
-                    field="runtime.permissions.rules",
+                    field="permissions.rules",
                     message=(
                         f"Integration '{self.name}' cannot vary "
                         f"{names} between paths. The "
