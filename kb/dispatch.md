@@ -35,6 +35,17 @@ flowgency dispatch install --config C:/Flowgency/config.yaml
 flowgency dispatch status --config C:/Flowgency/config.yaml
 ```
 
+## Configure Routines
+
+Open an agent's Routines tab to edit its ordered routine list. Save routines
+applies the list together; Discard changes restores the loaded values.
+Routines keep the same editable fields whether they are enabled or disabled,
+and grouped prompt choices come from the saved Blueprint and Instance prompt
+catalogs for that agent. Changing an existing ID changes routine identity
+without moving its schedule markers or routine-scoped memory. Saved Last fired
+and Next due values describe the saved routine, not a prediction for an
+unsaved schedule.
+
 ## Recovery
 
 When the dispatch runner starts a cycle, it checks whether any routine missed an
