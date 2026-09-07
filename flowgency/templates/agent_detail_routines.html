@@ -1,59 +1,202 @@
-<section class="space-y-5">
-  <div>
-    <h2 class="text-lg font-semibold text-gray-900">Routines</h2>
-    <p class="text-sm text-gray-500">Replace the full ordered routine list. Every routine must declare prompt.scope and prompt.name from the scoped prompt catalog.</p>
-  </div>
-  <div class="grid gap-4 md:grid-cols-2 text-sm text-gray-700">
+<section id="routine-editor" class="space-y-6">
+  <div class="routine-heading flex flex-wrap items-center justify-between gap-3">
     <div>
-      <h3 class="font-semibold text-gray-900">Shared from blueprint</h3>
-      <ul class="mt-2 flex flex-wrap gap-2">
-        {% for prompt in available_shared_prompts %}
-        <li class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">blueprint:{{ prompt }}</li>
-        {% else %}
-        <li class="text-gray-500">No shared prompts found.</li>
-        {% endfor %}
-      </ul>
+      <h2 class="text-lg font-semibold text-gray-900">Routines</h2>
+      <p class="text-sm text-gray-500">Edit the saved routine list without mutating the config until the save transaction succeeds.</p>
     </div>
-    <div>
-      <h3 class="font-semibold text-gray-900">Private to this instance</h3>
-      <ul class="mt-2 flex flex-wrap gap-2">
-        {% for prompt in available_private_prompts %}
-        <li class="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">instance:{{ prompt }}</li>
-        {% else %}
-        <li class="text-gray-500">No private prompts found.</li>
+    <button type="button" data-add-routine class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+      <i data-lucide="plus"></i>
+      <span>Add routine</span>
+    </button>
+  </div>
+
+  <form id="routines-form" method="post" action="{{ routines_initial.save_url }}" class="space-y-6">
+    <input type="hidden" name="payload" value="">
+    <div class="routine-columns grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+      <div data-routine-list class="space-y-5">
+        {% for row in routine_rows %}
+        <article class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm" data-routine-row data-key="{{ row.key }}" data-source-index="{{ row.source_index }}">
+          <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 class="text-base font-semibold text-gray-900">{{ row.title }}</h3>
+              <p class="text-xs text-gray-500">Local key: {{ row.key }}</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" data-move-up aria-label="Move {{ row.title }} up" class="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50">
+                <i data-lucide="arrow-up"></i>
+              </button>
+              <button type="button" data-move-down aria-label="Move {{ row.title }} down" class="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50">
+                <i data-lucide="arrow-down"></i>
+              </button>
+              <button type="button" data-remove-routine aria-label="Remove {{ row.title }}" class="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50">
+                <i data-lucide="trash-2"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="space-y-1">
+              <label for="{{ row.id_input_id }}" class="text-sm text-gray-700">Routine ID</label>
+              <input id="{{ row.id_input_id }}" type="text" value="{{ row.routine.id }}" data-field="id" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+              <p id="{{ row.field_error_prefix }}-id-error" data-field-error="id" class="text-xs text-red-700" hidden></p>
+            </div>
+            <div class="space-y-1">
+              <label for="{{ row.prompt_input_id }}" class="text-sm text-gray-700">Prompt</label>
+              <select id="{{ row.prompt_input_id }}" data-field="prompt" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                {% for option in row.prompt_options %}
+                <option value="{{ option.scope }}:{{ option.name }}" {% if option.selected %}selected{% endif %}>{{ option.label }}{% if option.missing %} (missing){% endif %}</option>
+                {% endfor %}
+              </select>
+              <p id="{{ row.field_error_prefix }}-prompt-error" data-field-error="prompt" class="text-xs text-red-700" hidden></p>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <label for="{{ row.enabled_input_id }}" class="inline-flex items-center gap-2 text-sm text-gray-700">
+              <input id="{{ row.enabled_input_id }}" type="checkbox" {% if row.routine.enabled %}checked{% endif %} data-field="enabled" class="rounded border-gray-300">
+              <span>Enabled</span>
+            </label>
+          </div>
+
+          <div class="mt-4 grid gap-4 lg:grid-cols-2">
+            <section class="space-y-3 rounded-lg border border-gray-200 p-3">
+              <h4 class="text-sm font-semibold text-gray-900">Schedule</h4>
+              <div class="flex flex-wrap gap-4">
+                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input type="radio" name="{{ row.schedule_mode_name }}" value="every" {% if row.routine.schedule.mode == 'every' %}checked{% endif %} data-field="schedule.mode">
+                  <span>Every</span>
+                </label>
+                <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input type="radio" name="{{ row.schedule_mode_name }}" value="at" {% if row.routine.schedule.mode == 'at' %}checked{% endif %} data-field="schedule.mode">
+                  <span>At</span>
+                </label>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <div class="space-y-1">
+                  <label for="{{ row.schedule_amount_id }}" class="text-sm text-gray-700">Interval amount</label>
+                  <input id="{{ row.schedule_amount_id }}" type="text" value="{{ row.routine.schedule.amount }}" data-field="schedule.amount" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                </div>
+                <div class="space-y-1">
+                  <label for="{{ row.schedule_unit_id }}" class="text-sm text-gray-700">Unit</label>
+                  <select id="{{ row.schedule_unit_id }}" data-field="schedule.unit" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                    <option value="m" {% if row.routine.schedule.unit == 'm' %}selected{% endif %}>Minutes</option>
+                    <option value="h" {% if row.routine.schedule.unit == 'h' %}selected{% endif %}>Hours</option>
+                    <option value="d" {% if row.routine.schedule.unit == 'd' %}selected{% endif %}>Days</option>
+                  </select>
+                </div>
+              </div>
+              <div class="space-y-1">
+                <label for="{{ row.schedule_time_id }}" class="text-sm text-gray-700">Time</label>
+                <input id="{{ row.schedule_time_id }}" type="text" value="{{ row.routine.schedule.time }}" data-field="schedule.time" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+              </div>
+              <p id="{{ row.field_error_prefix }}-schedule-error" data-field-error="schedule" class="text-xs text-red-700" hidden></p>
+            </section>
+
+            <section class="space-y-3 rounded-lg border border-gray-200 p-3">
+              <h4 class="text-sm font-semibold text-gray-900">Memory and recovery</h4>
+              <div class="space-y-1">
+                <label for="{{ row.memory_scope_id }}" class="text-sm text-gray-700">Memory scope</label>
+                <select id="{{ row.memory_scope_id }}" data-field="memory.scope" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                  <option value="inherit" {% if row.routine.memory.scope == 'inherit' %}selected{% endif %}>Inherit</option>
+                  <option value="run" {% if row.routine.memory.scope == 'run' %}selected{% endif %}>Run</option>
+                  <option value="routine" {% if row.routine.memory.scope == 'routine' %}selected{% endif %}>Routine</option>
+                  <option value="agent" {% if row.routine.memory.scope == 'agent' %}selected{% endif %}>Agent</option>
+                  <option value="team" {% if row.routine.memory.scope == 'team' %}selected{% endif %}>Team</option>
+                  <option value="channel" {% if row.routine.memory.scope == 'channel' %}selected{% endif %}>Channel</option>
+                </select>
+              </div>
+              <div class="space-y-1">
+                <label for="{{ row.memory_channel_id }}" class="text-sm text-gray-700">Memory channel</label>
+                <select id="{{ row.memory_channel_id }}" data-field="memory.channel" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                  <option value=""></option>
+                  {% for option in row.channel_options %}
+                  <option value="{{ option.key }}" {% if option.selected %}selected{% endif %}>{{ option.label }}{% if option.missing %} (missing){% endif %}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <div class="space-y-1">
+                  <label for="{{ row.recovery_mode_id }}" class="text-sm text-gray-700">Recovery mode</label>
+                  <select id="{{ row.recovery_mode_id }}" data-field="recovery.mode" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                    <option value="default" {% if row.routine.recovery.mode == 'default' %}selected{% endif %}>Default</option>
+                    <option value="none" {% if row.routine.recovery.mode == 'none' %}selected{% endif %}>None</option>
+                    <option value="today" {% if row.routine.recovery.mode == 'today' %}selected{% endif %}>Today</option>
+                    <option value="always" {% if row.routine.recovery.mode == 'always' %}selected{% endif %}>Always</option>
+                    <option value="duration" {% if row.routine.recovery.mode == 'duration' %}selected{% endif %}>Duration</option>
+                  </select>
+                </div>
+                <div class="space-y-1">
+                  <label for="{{ row.recovery_unit_id }}" class="text-sm text-gray-700">Recovery unit</label>
+                  <select id="{{ row.recovery_unit_id }}" data-field="recovery.unit" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                    <option value="m" {% if row.routine.recovery.unit == 'm' %}selected{% endif %}>Minutes</option>
+                    <option value="h" {% if row.routine.recovery.unit == 'h' %}selected{% endif %}>Hours</option>
+                    <option value="d" {% if row.routine.recovery.unit == 'd' %}selected{% endif %}>Days</option>
+                  </select>
+                </div>
+              </div>
+              <div class="space-y-1">
+                <label for="{{ row.recovery_amount_id }}" class="text-sm text-gray-700">Recovery amount</label>
+                <input id="{{ row.recovery_amount_id }}" type="text" value="{{ row.routine.recovery.amount }}" data-field="recovery.amount" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+              </div>
+              <p id="{{ row.field_error_prefix }}-memory-error" data-field-error="memory" class="text-xs text-red-700" hidden></p>
+              <p id="{{ row.field_error_prefix }}-recovery-error" data-field-error="recovery" class="text-xs text-red-700" hidden></p>
+            </section>
+          </div>
+
+          <section class="mt-4 space-y-3 rounded-lg border border-gray-200 p-3">
+            <div class="flex items-center justify-between gap-3">
+              <h4 class="text-sm font-semibold text-gray-900">Arguments</h4>
+              <button type="button" data-add-argument aria-label="Add argument to {{ row.title }}" class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                <i data-lucide="plus"></i>
+                <span>Add argument</span>
+              </button>
+            </div>
+            <div data-argument-list class="space-y-2">
+              {% for argument in row.arguments %}
+              <div class="flex items-center gap-2" data-argument-row>
+                <label for="{{ argument.input_id }}" class="sr-only">Argument {{ loop.index }}</label>
+                <input id="{{ argument.input_id }}" type="text" value="{{ argument.value }}" data-argument-value class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                <button type="button" data-remove-argument aria-label="Remove argument {{ loop.index }} from {{ row.title }}" class="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50">
+                  <i data-lucide="x"></i>
+                </button>
+              </div>
+              {% endfor %}
+            </div>
+            <p id="{{ row.field_error_prefix }}-arguments-error" data-field-error="arguments" class="text-xs text-red-700" hidden></p>
+          </section>
+
+          <p id="{{ row.row_error_id }}" data-row-error class="mt-4 text-xs text-red-700" hidden></p>
+        </article>
         {% endfor %}
-      </ul>
+      </div>
+
+      <aside id="routine-summary" aria-label="Routine summary" aria-live="polite" class="space-y-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+        {% include "agent_routines_summary.html" %}
+      </aside>
     </div>
-  </div>
-  {% if routine_status %}
-  <div class="border-t border-gray-200 pt-4">
-    <h3 class="font-semibold text-gray-900">Schedule status</h3>
-    <table class="mt-2 w-full text-left text-sm text-gray-700">
-      <thead class="text-xs uppercase tracking-wider text-gray-500">
-        <tr><th class="py-1">Routine</th><th class="py-1">Schedule</th><th class="py-1">Last fired</th><th class="py-1">Next due</th></tr>
-      </thead>
-      <tbody>
-        {% for r in routine_status %}
-        <tr class="border-t border-gray-100">
-          <td class="py-1 font-mono text-xs {% if not r.enabled %}line-through text-gray-400{% endif %}">{{ r.routine_id }}</td>
-          <td class="py-1 font-mono text-xs">{{ r.schedule }}</td>
-          <td class="py-1 font-mono text-xs">{{ r.last_fired }}</td>
-          <td class="py-1 font-mono text-xs">{{ r.next_due }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-  <form method="post" action="/{{ team }}/agents/{{ agent }}/routines" class="space-y-4 border-t border-gray-200 pt-4">
-    <input type="hidden" name="revision" value="{{ config_revision }}">
-    <label class="block text-sm text-gray-700">
-      <span class="mb-1 block font-medium">Ordered routine list</span>
-      <textarea name="routines_json" rows="18" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs">{{ routines_yaml }}</textarea>
-    </label>
-    <p class="text-xs text-gray-500">Use YAML or JSON. Each entry supports id, prompt {scope,name}, enabled, arguments, one schedule rule (at or every), and an optional memory selector.</p>
-    <div class="flex justify-end">
-      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Save routines</button>
+
+    <div class="routine-actions flex items-center justify-between gap-3 border-t border-gray-200 pt-4">
+      <div class="text-xs text-gray-500">Config revision: {{ config_revision }}</div>
+      <div class="flex gap-3">
+        <button type="button" data-discard-routines class="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Discard changes</button>
+        <button type="submit" data-save-routines class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700" {% if routine_conflict %}disabled{% endif %}>Save routines</button>
+      </div>
     </div>
   </form>
+
+  <template id="routine-row-template">
+    <article class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm" data-routine-row data-key="" data-source-index=""></article>
+  </template>
+
+  <template id="routine-argument-template">
+    <div class="flex items-center gap-2" data-argument-row>
+      <input type="text" value="" data-argument-value class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+      <button type="button" data-remove-argument class="rounded-lg border border-gray-300 p-2 text-gray-600 hover:bg-gray-50" aria-label="Remove argument">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+  </template>
+
+  <script id="routines-initial" type="application/json">{{ routines_initial | tojson }}</script>
+  <script src="/static/lucide.min.js"></script>
 </section>

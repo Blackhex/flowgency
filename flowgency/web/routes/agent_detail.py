@@ -21,12 +21,10 @@ from flowgency.configuration import (
     parse_config,
     patch_agent_runtime,
     patch_agent_profile,
-    replace_agent_routines,
     resolve_team_paths,
 )
 from flowgency.configuration.models import MemorySelector
 from flowgency.permissions.eligibility import may_execute_decisions
-from flowgency.dispatch.schedule import parse_catch_up
 from flowgency.fs import ResourceBusyError
 from flowgency.health import (
     elapsed_coarse,
@@ -42,11 +40,6 @@ from flowgency.jobs.authority import JobStore
 from flowgency.memory import MemoryConflictError, resolve_memory_selector
 from flowgency.prompts import PromptConflictError, PromptNotFoundError
 from flowgency.prompts.catalog import effective_prompt_catalog
-from flowgency.routines.presentation import (
-    marker_stamp as _present_marker_stamp,
-    next_due_text as _present_next_due_text,
-    routine_status as _present_routine_status,
-)
 from flowgency.web.dependencies import FlowgencyServices, get_services
 
 
@@ -375,91 +368,6 @@ def _parse_memory_selector_from_form(form, channels) -> MemorySelector | None:
     return selector
 
 
-def _parse_routines_payload(form, available_prompts: frozenset[tuple[str, str]]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    raw = str(form.get("routines_json", "")).strip()
-    if not raw:
-        return [], []
-    try:
-        decoded = yaml.safe_load(raw)
-    except yaml.YAMLError:
-        return [], [{"field": "routines_json", "message": "Routines payload must be valid YAML or JSON.", "hint": "Submit a list of routine mappings."}]
-    if not isinstance(decoded, list):
-        return [], [{"field": "routines_json", "message": "Routines payload must be a list.", "hint": "Submit an ordered list of routine mappings."}]
-    issues: list[dict[str, str]] = []
-    routines: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for index, item in enumerate(decoded):
-        field_prefix = f"routines[{index}]"
-        if not isinstance(item, dict):
-            issues.append({"field": field_prefix, "message": "Routine entry must be a mapping.", "hint": "Provide id, prompt, schedule, and optional arguments."})
-            continue
-        routine_id = str(item.get("id", "")).strip()
-        prompt = item.get("prompt")
-        prompt_scope = ""
-        prompt_name = ""
-        if not isinstance(prompt, dict):
-            issues.append({"field": f"{field_prefix}.prompt", "message": "Routine prompt selector must be a mapping with scope and name.", "hint": "Use prompt: {scope: blueprint|instance, name: <slug>}."})
-        else:
-            prompt_scope = str(prompt.get("scope", "")).strip()
-            prompt_name = str(prompt.get("name", "")).strip()
-            if set(prompt.keys()) != {"scope", "name"} or not prompt_scope or not prompt_name:
-                issues.append({"field": f"{field_prefix}.prompt", "message": "Routine prompt selector must include only scope and name.", "hint": "Use prompt: {scope: blueprint|instance, name: <slug>}."})
-        if not routine_id:
-            issues.append({"field": f"{field_prefix}.id", "message": "Routine id is required.", "hint": "Provide a stable routine slug."})
-        if routine_id in seen_ids:
-            issues.append({"field": f"{field_prefix}.id", "message": f"Duplicate routine id: {routine_id}", "hint": "Keep each routine id unique within the agent."})
-        seen_ids.add(routine_id)
-        if (prompt_scope, prompt_name) not in available_prompts:
-            issues.append({"field": f"{field_prefix}.prompt", "message": "Routine prompt must be selected from the effective prompt catalog.", "hint": "Choose one of the available blueprint or instance prompts."})
-        arguments = item.get("arguments", [])
-        if not isinstance(arguments, list) or any(not isinstance(arg, str) or not arg.strip() for arg in arguments):
-            issues.append({"field": f"{field_prefix}.arguments", "message": "Routine arguments must be an ordered list of non-empty strings.", "hint": "Provide each argument as its own string."})
-            arguments = []
-        enabled = item.get("enabled", True)
-        if not isinstance(enabled, bool):
-            issues.append({"field": f"{field_prefix}.enabled", "message": "Routine enabled must be true or false.", "hint": "Use a YAML boolean."})
-            enabled = True
-        schedule = item.get("schedule") or {}
-        if not isinstance(schedule, dict):
-            issues.append({"field": f"{field_prefix}.schedule", "message": "Schedule must be a mapping with exactly one of at or every.", "hint": "Set either at or every."})
-            schedule = {}
-        has_at = bool(str(schedule.get("at", "")).strip())
-        has_every = bool(str(schedule.get("every", "")).strip())
-        if has_at == has_every:
-            issues.append({"field": f"{field_prefix}.schedule", "message": "Schedule must define exactly one of at or every.", "hint": "Set one schedule mode only."})
-        schedule_payload: dict[str, str] = {}
-        if has_at:
-            schedule_payload["at"] = str(schedule.get("at", "")).strip()
-        elif has_every:
-            schedule_payload["every"] = str(schedule.get("every", "")).strip()
-        catch_up = str(schedule.get("catch_up", "")).strip()
-        if catch_up:
-            if parse_catch_up(catch_up) is None:
-                issues.append({"field": f"{field_prefix}.schedule.catch_up", "message": "Recovery bound must be none, today, always, or a duration.", "hint": "Use none, today, always, or a duration such as 48h."})
-            else:
-                schedule_payload["catch_up"] = catch_up
-        memory = item.get("memory")
-        memory_payload = None
-        if memory is not None:
-            if not isinstance(memory, dict) or not str(memory.get("scope", "")).strip():
-                issues.append({"field": f"{field_prefix}.memory", "message": "Memory selector must be a mapping with a scope.", "hint": "Use run, routine, agent, team, or channel."})
-            else:
-                memory_payload = {"scope": str(memory.get("scope", "")).strip()}
-                if memory_payload["scope"] == "channel" and str(memory.get("channel", "")).strip():
-                    memory_payload["channel"] = str(memory.get("channel", "")).strip()
-        routines.append(
-            {
-                "id": routine_id,
-                "prompt": {"scope": prompt_scope, "name": prompt_name},
-                "enabled": enabled,
-                "arguments": [arg.strip() for arg in arguments if isinstance(arg, str) and arg.strip()],
-                "schedule": schedule_payload,
-                **({"memory": memory_payload} if memory_payload is not None else {}),
-            }
-        )
-    return routines, issues
-
-
 def _available_prompts(
     services: FlowgencyServices, snapshot, team_id: str, agent_id: str
 ) -> tuple[tuple[tuple[str, str], ...], list[dict[str, str]]]:
@@ -592,47 +500,6 @@ def _blueprint_context(services: FlowgencyServices, snapshot, team_id: str, agen
     }
 
 
-def _routine_status(snapshot, team_id: str, instance) -> list[dict[str, Any]]:
-    return _present_routine_status(snapshot, team_id, instance)
-
-
-def _marker_stamp(fired_at) -> str:
-    return _present_marker_stamp(fired_at)
-
-
-def _next_due_text(schedule, logs_root, agent_name, now, grace, dispatch_enabled=True) -> str:
-    return _present_next_due_text(
-        schedule,
-        logs_root,
-        agent_name,
-        now,
-        grace,
-        dispatch_enabled,
-    )
-
-
-def _routines_context(services: FlowgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
-    _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
-    routines_yaml = yaml.safe_dump(
-        [routine.model_dump(mode="json", exclude_none=True) for routine in instance.routines],
-        sort_keys=False,
-        allow_unicode=True,
-    ).strip()
-    prompt_options, issues = _available_prompts(services, snapshot, team_id, agent_id)
-    shared = sorted(name for scope, name in prompt_options if scope == "blueprint")
-    private = sorted(name for scope, name in prompt_options if scope == "instance")
-    result: dict[str, Any] = {
-        "available_shared_prompts": tuple(shared),
-        "available_private_prompts": tuple(private),
-        "routines_yaml": routines_yaml,
-        "supports_enabled": True,
-        "routine_status": _routine_status(snapshot, team_id, instance),
-    }
-    if issues:
-        result["issues"] = issues
-    return result
-
-
 def _memory_context(snapshot, services: FlowgencyServices, team_id: str, agent_id: str) -> dict[str, Any]:
     _, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     memory_snapshot = _resolve_tab_memory(snapshot, services, team_id, agent_id, instance.default_memory)
@@ -708,8 +575,6 @@ def _detail_context(
         context.update(_runtime_context(snapshot, team_id, agent_id))
     elif tab == "prompts":
         context.update(_prompts_context(services, snapshot, team_id, agent_id))
-    elif tab == "routines":
-        context.update(_routines_context(services, snapshot, team_id, agent_id))
     elif tab == "memory":
         context.update(_memory_context(snapshot, services, team_id, agent_id))
     elif tab == "activity":
@@ -1059,36 +924,6 @@ async def agent_detail_prompts_delete(
         )
     request.app.state.refresh_services()
     return RedirectResponse(f"/{team}/agents/{agent}/prompts", status_code=303)
-
-
-@router.get("/{team}/agents/{agent}/routines", response_class=HTMLResponse)
-async def agent_detail_routines(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    return _detail_context(request, services, team, agent, "routines")
-
-
-@router.post("/{team}/agents/{agent}/routines", response_class=HTMLResponse)
-async def agent_detail_routines_save(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
-    form = await request.form()
-    revision = str(form.get("revision", "")).strip()
-    snapshot = services.config_store.load()
-    _, instance = _get_snapshot_instance(snapshot, team, agent)
-    prompt_options, catalog_issues = _available_prompts(services, snapshot, team, agent)
-    routines, parse_issues = _parse_routines_payload(form, frozenset(prompt_options))
-    parse_issues = catalog_issues + parse_issues
-    shared = tuple(sorted(name for scope, name in prompt_options if scope == "blueprint"))
-    private = tuple(sorted(name for scope, name in prompt_options if scope == "instance"))
-    if parse_issues:
-        return _detail_context(request, services, team, agent, "routines", status_code=409, issues=parse_issues, overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
-    try:
-        if not revision:
-            raise ConfigConflictError("config.yaml changed; reload before saving")
-        replace_agent_routines(services.config_store, revision, team, agent, routines)
-    except ValidationFailed as exc:
-        return _detail_context(request, services, team, agent, "routines", status_code=409, issues=_issue_dicts(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
-    except ConfigConflictError as exc:
-        return _detail_context(request, services, team, agent, "routines", status_code=409, banner=str(exc), overrides={"routines_yaml": str(form.get("routines_json", "")).strip(), "available_shared_prompts": shared, "available_private_prompts": private, "supports_enabled": True})
-    request.app.state.refresh_services()
-    return RedirectResponse(f"/{team}/agents/{agent}/routines", status_code=303)
 
 
 @router.get("/{team}/agents/{agent}/memory", response_class=HTMLResponse)

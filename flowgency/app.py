@@ -71,6 +71,7 @@ from flowgency.web.routes import (
     admin_memory_router,
     agent_detail_router,
     agent_permissions_router,
+    agent_routines_router,
     agents_router,
     jobs_router,
 )
@@ -953,6 +954,7 @@ app.include_router(admin_library_router)
 app.include_router(admin_memory_router)
 app.include_router(agents_router)
 app.include_router(agent_permissions_router)
+app.include_router(agent_routines_router)
 app.include_router(agent_detail_router)
 app.include_router(jobs_router)
 
