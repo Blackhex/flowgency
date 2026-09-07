@@ -179,7 +179,7 @@
 
   function memoryLabel(row) {
     if (row.memoryScope === 'inherit') {
-      return 'Channel: Brand Strategy (Agent default)';
+      return initial.inherited_memory_label || 'Inherit from agent';
     }
     if (row.memoryScope === 'channel') {
       const channels = new Map(initial.choices.channels || []);

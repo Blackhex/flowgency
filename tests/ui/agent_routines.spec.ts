@@ -1,9 +1,14 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { rename } from 'node:fs/promises';
+import path from 'node:path';
 
 import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
 
 const pagePath = '/newsletter/agents/advisor/routines';
 const fixturePath = '/research/agents/permissions-editor/routines';
+const runtimeRoot = path.resolve(__dirname, '.runtime', 'current');
+const advisorPromptPath = path.join(runtimeRoot, 'prompts', 'newsletter', 'advisor', 'local-triage.prompt.md');
+const advisorPromptBackupPath = `${advisorPromptPath}.bak`;
 
 type InitialPayload = {
   draft: {
@@ -321,4 +326,183 @@ test('real save round trip restores the research fixture routines', async ({ pag
   }
 
   await assertNoConsoleErrors(page);
+});
+
+test('inherited memory uses the actual agent default and missing prompts stay selected across rerenders', async ({ page }) => {
+  await page.route('**/research/agents/permissions-editor/routines/preview', async () => {
+    await new Promise(() => {});
+  });
+
+  await page.goto(fixturePath);
+  await page.getByRole('button', { name: 'Add routine', exact: true }).click();
+
+  const newSummaryRow = page.locator('#routine-summary [data-summary-row]').last();
+  await expect(newSummaryRow.locator('[data-summary-memory]')).toHaveText('Agent memory (Agent default)');
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await page.unroute('**/research/agents/permissions-editor/routines/preview');
+
+  await rename(advisorPromptPath, advisorPromptBackupPath);
+  try {
+    await page.goto(pagePath);
+    const missingPromptRow = page.locator('[data-routine-row]').nth(1);
+    const prompt = missingPromptRow.locator('[data-field="prompt"]');
+
+    await expect(prompt).toHaveValue('instance:local-triage');
+    await expect(prompt.locator('option:checked')).toHaveText('local-triage (missing)');
+
+    await missingPromptRow.getByRole('button', { name: 'Add argument', exact: true }).click();
+    await expect(prompt).toHaveValue('instance:local-triage');
+    await expect(prompt.locator('option:checked')).toHaveText('local-triage (missing)');
+
+    await missingPromptRow.locator('[data-argument-row]').last().locator('[data-argument-value]').fill('--kept-missing');
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  } finally {
+    await rename(advisorPromptBackupPath, advisorPromptPath);
+  }
+
+  await assertNoConsoleErrors(page);
+});
+
+test('preview failures preserve draft values and keep save disabled for malformed, validation, and conflict responses', async ({ page }) => {
+  await page.goto(pagePath);
+  await page.evaluate(() => {
+    const realFetch = window.fetch.bind(window);
+    let previewCount = 0;
+    window.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (!url.endsWith('/routines/preview')) {
+        return realFetch(input, init);
+      }
+      previewCount += 1;
+      const request = JSON.parse(String(init?.body ?? '{}'));
+      if (previewCount === 1) {
+        return new Response('{', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (previewCount === 2) {
+        return new Response(JSON.stringify({
+          draft_version: request.draft_version,
+          code: 'validation-failed',
+          issues: [{ code: 'invalid-id', field: 'routines.0.id', message: 'Server-side validation failed.', hint: 'Choose another ID.' }],
+        }), {
+          status: 422,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        draft_version: request.draft_version,
+        code: 'config-conflict',
+        issues: [{ code: 'config-conflict', field: 'revision', message: 'Configuration changed while this draft was open.', hint: 'Reload before previewing routines again.' }],
+      }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+  });
+  const first = page.locator('[data-routine-row]').first().locator('[data-field="id"]');
+
+  await first.fill('keep-malformed');
+  await expect(page.locator('[data-summary-status]')).toHaveText('Preview unavailable');
+  await expect(first).toHaveValue('keep-malformed');
+  await expect(page.getByRole('button', { name: 'Save routines', exact: true })).toBeDisabled();
+
+  await first.fill('keep-validation');
+  await expect(page.locator('[data-summary-status]')).toHaveText('Correct the highlighted fields.');
+  await expect(first).toHaveValue('keep-validation');
+  await expect(page.getByText('Server-side validation failed.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save routines', exact: true })).toBeDisabled();
+
+  await first.fill('keep-conflict');
+  await expect(page.locator('[data-summary-status]')).toHaveText('Reload before saving routines again.');
+  await expect(first).toHaveValue('keep-conflict');
+  await expect(page.getByRole('button', { name: 'Reload page', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save routines', exact: true })).toBeDisabled();
+  await assertNoConsoleErrors(page);
+});
+
+test('discard ignores in-flight preview results and every recovery mode renders the expected summary', async ({ page }) => {
+  let releaseFirstPreview: (() => void) | null = null;
+  await page.route('**/newsletter/agents/advisor/routines/preview', async (route) => {
+    const request = route.request().postDataJSON();
+    if (releaseFirstPreview === null) {
+      await new Promise<void>((resolve) => {
+        releaseFirstPreview = resolve;
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          draft_version: request.draft_version,
+          revision: request.revision,
+          rows: request.draft.routines.map((row: InitialPayload['draft']['draft']['routines'][number], index: number) => ({
+            key: row.key,
+            source_index: row.source_index,
+            id: index === 0 ? 'late-preview-value' : row.id,
+            enabled: row.enabled,
+            prompt_scope: row.prompt_scope,
+            prompt_name: row.prompt_name,
+            schedule: row.schedule.mode === 'at' ? `at ${row.schedule.time}` : `every ${row.schedule.amount}${row.schedule.unit}`,
+            memory: 'Agent memory',
+            arguments: row.arguments,
+            recovery: row.recovery.mode,
+          })),
+          warnings: [],
+        }),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.goto(pagePath);
+  const firstRow = page.locator('[data-routine-row]').first();
+  const firstId = firstRow.locator('[data-field="id"]');
+  const originalId = await firstId.inputValue();
+
+  await firstId.fill('staged-before-discard');
+  await expect(page.locator('#routine-summary [data-summary-row]').first()).toContainText('staged-before-discard');
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  releaseFirstPreview?.();
+
+  await expect(firstId).toHaveValue(originalId);
+  await expect(page.locator('#routine-summary [data-summary-row]').first()).toContainText(originalId);
+  await expect(page.getByText('late-preview-value', { exact: true })).toHaveCount(0);
+
+  await page.unroute('**/newsletter/agents/advisor/routines/preview');
+
+  const summaryRecovery = page.locator('#routine-summary [data-summary-row]').first().locator('[data-summary-recovery]');
+  await firstRow.locator('[data-field="recovery.mode"]').selectOption('none');
+  await expect(summaryRecovery).toHaveText('none');
+
+  await firstRow.locator('[data-field="recovery.mode"]').selectOption('today');
+  await expect(summaryRecovery).toHaveText('today');
+
+  await firstRow.locator('[data-field="recovery.mode"]').selectOption('always');
+  await expect(summaryRecovery).toHaveText('always');
+
+  await firstRow.locator('[data-field="recovery.mode"]').selectOption('duration');
+  await firstRow.locator('[data-field="recovery.amount"]').fill('48');
+  await expect(summaryRecovery).toHaveText('48h');
+
+  await firstRow.locator('[data-field="recovery.mode"]').selectOption('default');
+  await expect(summaryRecovery).toHaveText('today');
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await assertNoConsoleErrors(page);
+});
+
+test('beforeunload accept closes the page', async ({ page }) => {
+  await page.goto(pagePath);
+  await page.locator('[data-routine-row]').first().locator('[data-field="id"]').fill('accept-beforeunload');
+
+  const dialogPromise = page.waitForEvent('dialog');
+  const closedPromise = page.waitForEvent('close');
+  const closePromise = page.close({ runBeforeUnload: true });
+  const dialog = await dialogPromise;
+  expect(dialog.type()).toBe('beforeunload');
+  await dialog.accept();
+  await closePromise;
+  await closedPromise;
+  expect(page.isClosed()).toBe(true);
 });

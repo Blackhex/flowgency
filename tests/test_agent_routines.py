@@ -60,6 +60,29 @@ def test_routines_uses_structured_form(monkeypatch, tmp_path, raw_config):
     assert 'data-routine-list' in response.text
 
 
+def test_routines_initial_payload_exposes_non_channel_inherited_memory_label(monkeypatch, tmp_path, raw_config):
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/agents/advisor/routines")
+
+    assert response.status_code == 200
+    initial = initial_payload(response.text)
+    assert initial["inherited_memory_label"] == "Agent memory (Agent default)"
+
+
+def test_routines_initial_payload_uses_run_memory_when_agent_default_is_omitted(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0].pop("default_memory", None)
+    write_config(config_path, raw)
+
+    response = client.get("/newsletter/agents/advisor/routines")
+
+    assert response.status_code == 200
+    initial = initial_payload(response.text)
+    assert initial["inherited_memory_label"] == "Run memory"
+
+
 def test_old_raw_form_cannot_clear_the_list(monkeypatch, tmp_path, raw_config):
     client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
     before = config_path.read_bytes()

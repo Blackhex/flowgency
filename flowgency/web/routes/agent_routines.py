@@ -435,6 +435,11 @@ def render_routines_page(
             "prompts": [list(item) for item in choices.prompts],
             "channels": [list(item) for item in choices.channels],
         },
+        "inherited_memory_label": _memory_summary_text(
+            snapshot.config.teams[team].agents[agent].default_memory,
+            MemoryDraft(scope="inherit"),
+            choices,
+        ),
         "saved_status": [asdict(row) for row in saved_rows],
         "original_ids": original_ids,
         "warnings": issue_dicts(display_warnings),
