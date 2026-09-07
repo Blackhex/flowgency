@@ -4,6 +4,18 @@ import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } 
 
 const advisorPath = '/newsletter/agents/advisor/permissions';
 const fixturePath = '/research/agents/permissions-editor/permissions';
+const longRulePath = 'workspace/teams/newsletter/' + [
+  'editorial',
+  'north-america',
+  'q4-launch',
+  'draft-reviews',
+  'compliance-handoff',
+  'final-approvals',
+  'copyedits',
+  'handoff',
+  'archive',
+  'allowed-zone',
+].join('/');
 
 type InitialPayload = {
   draft: {
@@ -71,6 +83,19 @@ test('permissions editor layout remains stable', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Permissions', exact: true })).toBeVisible();
   await assertNoLayoutIssues(page);
   await expect(page).toHaveScreenshot('agent-permissions.png', { fullPage: true });
+  await assertNoConsoleErrors(page);
+});
+
+test('empty permissions state remains stable', async ({ page }) => {
+  await page.goto(advisorPath);
+
+  const firstRow = page.locator('[data-rule-row]').first();
+  await firstRow.locator('[data-remove-rule]').click();
+
+  await expect(page.getByText('No agent-specific rules yet.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeEnabled();
+  await assertNoLayoutIssues(page);
+  await expect(page).toHaveScreenshot('agent-permissions-empty.png', { fullPage: true });
   await assertNoConsoleErrors(page);
 });
 
@@ -217,10 +242,26 @@ test('preview failure retains a custom tool draft and retry preview recovers the
   await expect(page.getByText('Preview unavailable', { exact: true })).toBeVisible();
   await expect(row.getByRole('checkbox', { name: 'keep_this_tool', exact: true })).toBeChecked();
   await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeDisabled();
+  await assertNoLayoutIssues(page);
+  await expect(page).toHaveScreenshot('agent-permissions-preview-error.png', { fullPage: true });
 
   await page.getByRole('button', { name: 'Retry preview', exact: true }).click();
   await expect(page.locator('#permission-summary')).toContainText('retry-preview-ok');
   await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeEnabled();
+  await assertNoConsoleErrors(page);
+});
+
+test('long path permissions state remains stable', async ({ page }) => {
+  await page.goto(advisorPath);
+
+  const pathField = page.locator('[data-rule-path]').first();
+  await pathField.fill(longRulePath);
+
+  await expect(pathField).toHaveValue(longRulePath);
+  await expect(page.locator('#permission-summary')).toContainText('allowed-zone');
+  await expect(page.getByRole('button', { name: 'Save permissions', exact: true })).toBeEnabled();
+  await assertNoLayoutIssues(page);
+  await expect(page).toHaveScreenshot('agent-permissions-long-path.png', { fullPage: true });
   await assertNoConsoleErrors(page);
 });
 
