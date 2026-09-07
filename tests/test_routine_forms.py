@@ -104,6 +104,29 @@ def test_unsupported_loaded_interval_survives_unrelated_edit():
     assert result[0]["enabled"] is False
 
 
+def test_unsupported_loaded_daily_time_survives_unrelated_edit():
+    raw = {
+        "routines": [
+            {
+                "id": "audit",
+                "prompt": {"scope": "blueprint", "name": "review"},
+                "schedule": {"at": "9am"},
+            }
+        ]
+    }
+
+    form = build_form(raw)
+
+    assert form.warnings
+    assert form.draft.routines[0].schedule == ScheduleDraft(mode="at", time="")
+
+    form.draft.routines[0].enabled = False
+    result = serialize_routines(raw, form.draft)
+
+    assert result[0]["schedule"] == {"at": "9am"}
+    assert result[0]["enabled"] is False
+
+
 def test_duplicate_source_index_is_rejected():
     raw = {
         "routines": [
@@ -242,6 +265,29 @@ def test_recovery_round_trips_and_duration_edits_only_touch_catch_up():
             "schedule": {"at": "09:00", "catch_up": "24h", "note": "keep"},
         }
     ]
+
+
+def test_unsupported_loaded_recovery_survives_unrelated_edit():
+    raw = {
+        "routines": [
+            {
+                "id": "audit",
+                "prompt": {"scope": "blueprint", "name": "review"},
+                "schedule": {"at": "09:00", "catch_up": "later", "note": "keep"},
+            }
+        ]
+    }
+
+    form = build_form(raw)
+
+    assert form.warnings
+    assert form.draft.routines[0].recovery == RecoveryDraft(mode="duration", amount="", unit="h")
+
+    form.draft.routines[0].enabled = False
+    result = serialize_routines(raw, form.draft)
+
+    assert result[0]["schedule"] == {"at": "09:00", "catch_up": "later", "note": "keep"}
+    assert result[0]["enabled"] is False
 
 
 def test_round_trip_back_to_baseline_restores_original_schedule_shape():
@@ -383,6 +429,56 @@ def test_unsupported_loaded_interval_can_be_corrected_to_supported_value():
             "id": "audit",
             "prompt": {"scope": "blueprint", "name": "review"},
             "schedule": {"every": "60m"},
+        }
+    ]
+
+
+def test_unsupported_loaded_daily_time_can_be_corrected_to_supported_value():
+    raw = {
+        "routines": [
+            {
+                "id": "audit",
+                "prompt": {"scope": "blueprint", "name": "review"},
+                "schedule": {"at": "9am"},
+            }
+        ]
+    }
+
+    form = build_form(raw)
+    assert form.draft.routines[0].schedule.time == ""
+
+    form.draft.routines[0].schedule.time = "09:00"
+
+    assert serialize_routines(raw, form.draft) == [
+        {
+            "id": "audit",
+            "prompt": {"scope": "blueprint", "name": "review"},
+            "schedule": {"at": "09:00"},
+        }
+    ]
+
+
+def test_unsupported_loaded_recovery_can_be_corrected_to_supported_value():
+    raw = {
+        "routines": [
+            {
+                "id": "audit",
+                "prompt": {"scope": "blueprint", "name": "review"},
+                "schedule": {"at": "09:00", "catch_up": "later", "note": "keep"},
+            }
+        ]
+    }
+
+    form = build_form(raw)
+    assert form.draft.routines[0].recovery.amount == ""
+
+    form.draft.routines[0].recovery.amount = "24"
+
+    assert serialize_routines(raw, form.draft) == [
+        {
+            "id": "audit",
+            "prompt": {"scope": "blueprint", "name": "review"},
+            "schedule": {"at": "09:00", "catch_up": "24h", "note": "keep"},
         }
     ]
 
