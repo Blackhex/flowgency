@@ -44,6 +44,7 @@ from flowgency.integrations.models import (
     ResolvedPermissionRule,
     RuntimeCapabilities,
 )
+from flowgency.integrations.tool_catalog import ToolCatalog, ToolDescriptor
 
 
 logger = logging.getLogger(__name__)
@@ -204,6 +205,15 @@ class CopilotIntegration(BaseIntegration):
             "TERM",
         }
     )
+
+    def permission_tool_catalog(self) -> ToolCatalog:
+        return ToolCatalog(
+            integration=self.name,
+            version="flowgency-permission-names-v1",
+            tools=tuple(ToolDescriptor(name) for name in ("read", "search", "write")),
+            complete=False,
+            warning="Additional integration tools may exist.",
+        )
 
     def identity_filename(self) -> str:
         return "AGENTS.md"

@@ -100,6 +100,16 @@ class BaseIntegration:
     def invalidate_capability_cache(self) -> None:
         self._capability_cache = None
 
+    def permission_tool_catalog(self) -> "ToolCatalog":
+        from flowgency.integrations.tool_catalog import ToolCatalog
+
+        return ToolCatalog(
+            integration=self.name,
+            version="unknown",
+            complete=False,
+            warning="Tool list is incomplete.",
+        )
+
     @property
     def runtime_capabilities(self) -> RuntimeCapabilities:
         declared = self.declared_runtime_capabilities
