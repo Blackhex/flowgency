@@ -16,6 +16,9 @@ COORDINATION_PATHS = (
     ":(exclude)docs/superpowers/plans/2026-08-01-*.md",
     ":(exclude)docs/superpowers/specs/2026-07-18-first-run-setup-launcher-design.md",
 )
+CONTENT_SCAN_EXCLUSIONS = (
+    ":(exclude)flowgency/static/lucide.min.js",
+)
 
 
 @pytest.fixture
@@ -26,7 +29,16 @@ def repo_root() -> Path:
 @pytest.mark.parametrize("term", PROHIBITED_TERMS)
 def test_tracked_tree_omits_prohibited_terms(repo_root: Path, term: str):
     completed = subprocess.run(
-        ["git", "grep", "-Iil", term, "--", ".", *COORDINATION_PATHS],
+        [
+            "git",
+            "grep",
+            "-Iil",
+            term,
+            "--",
+            ".",
+            *COORDINATION_PATHS,
+            *CONTENT_SCAN_EXCLUSIONS,
+        ],
         cwd=repo_root,
         capture_output=True,
         text=True,
