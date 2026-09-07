@@ -126,13 +126,13 @@ Reject old nested team or agent `runtime.permissions` with an actionable diagnos
 | No-path rule | Omit `path` |
 | No checked tools | `tools: []` |
 | A subset of tools checked | Explicit `tools` list |
-| All tools checked against a complete, nonempty catalog | Omit `tools` |
+| Exact complete, nonempty catalog checked with no extra names | Omit `tools` |
 | All displayed tools checked against an incomplete catalog | Explicit list, never infer an unbounded grant |
 | Deleted rule | Remove that rule entry |
 
 No-op fidelity takes precedence over normalization. If a rule's tool selection is unchanged, preserve its original explicit list or omitted/null representation even when all visible boxes are checked. A path-only edit must not broaden its tool grant. Keep the original raw rule representation on the server, not solely in client-supplied hidden data. Returning a draft to its original state is a no-op. Preserve unchanged field spelling/order and values as supported by the current store; this is structured-data preservation, not a requirement to preserve byte-for-byte YAML formatting.
 
-For a changed tool selection, apply the table above. Empty selections must map to an empty list even if the catalog contains zero entries. Never silently discard an existing unbounded grant or normalize it into a finite list just by opening and saving the page.
+For a changed tool selection, apply the table above. Empty selections must map to an empty list even if the catalog contains zero entries. A changed selection omits `tools` only when the selected names exactly equal the complete nonempty catalog; if selected custom names remain alongside every catalog name, preserve the full explicit list. Never silently discard an existing unbounded grant or normalize it into a finite list just by opening and saving the page.
 
 An omitted/null tools field is an unbounded grant, including future integration tools. Show that fact in the effective summary; do not reintroduce a schema selector. When a complete catalog is available, show all corresponding checkboxes checked. Where the catalog is incomplete, preserve existing unbounded rules unchanged; an explicit checkbox edit can narrow the rule to the selected finite list, visibly reflected in the draft preview. Creating or restoring an unbounded grant requires a complete catalog. If that cannot be provided for an integration, report the limitation rather than claiming full all-tools editing support or broadening a finite grant. This is an implementation acceptance constraint, not authorization for further permission-model changes beyond the team and agent field relocations or for adding an All tools control.
 

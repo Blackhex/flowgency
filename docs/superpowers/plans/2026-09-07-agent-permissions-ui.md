@@ -362,14 +362,14 @@ def encode_selection(selected: list[str], catalog: ToolCatalog) -> dict[str, Any
     if not selected:
         return {"tools": []}
     whole_catalog = {tool.name for tool in catalog.tools}
-    if catalog.complete and whole_catalog and whole_catalog <= set(selected):
+    if catalog.complete and whole_catalog and set(selected) == whole_catalog:
         return {}
     return {"tools": list(selected)}
 ```
 
-Define `encode_selection` in `forms.py`; use the whole catalog rather than the target-filtered choices because omitted `tools` denotes every integration tool. Newly added custom names remain explicit unless the selected set already covers a complete nonempty whole catalog. A changed no-path rule omits `path`; unchanged null path keeps its null shape. Mode inherit removes only `mode`; explicit overrides set it. Never touch `runtime`, identity, or team data.
+Define `encode_selection` in `forms.py`; use the whole catalog rather than the target-filtered choices because omitted `tools` denotes every integration tool. Omit `tools` only when the selected names exactly equal a complete nonempty whole catalog. If the selection also contains configured or newly added custom names, keep the full explicit list so the save does not silently widen the rule to future tools or discard authored names. A changed no-path rule omits `path`; unchanged null path keeps its null shape. Mode inherit removes only `mode`; explicit overrides set it. Never touch `runtime`, identity, or team data.
 
-- [ ] **Step 5: Add selection and invalid-input matrix tests.** Use this direct test plus parameterized cases for all/subset/empty; empty complete catalog; incomplete catalog; preserving an unbounded original under incomplete metadata; clearing such an original to an explicit empty list when it had visible choices; custom names; removing one of repeated rules; duplicate/out-of-range indices; blank path; no-path with path; and semantic no-op after toggling back.
+- [ ] **Step 5: Add selection and invalid-input matrix tests.** Use this direct test plus parameterized cases for exact-all/subset/empty; complete-catalog-plus-custom; empty complete catalog; incomplete catalog; preserving an unbounded original under incomplete metadata; clearing such an original to an explicit empty list when it had visible choices; custom names; removing one of repeated rules; duplicate/out-of-range indices; blank path; no-path with path; and semantic no-op after toggling back.
 
 ```python
 from flowgency.permissions.forms import PermissionDraft, RuleDraft
