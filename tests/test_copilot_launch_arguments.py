@@ -19,6 +19,7 @@ from flowgency.integrations.models import (
     ResolvedPermissionRule,
     TicketToolLaunch,
 )
+from flowgency.jobs.processes import RuntimeProcessLifecycle
 
 
 class _FakeCompleted:
@@ -295,13 +296,27 @@ def test_ticket_server_grant_does_not_add_workspace_write(tmp_path, monkeypatch,
     prompt.write_text("do the thing", encoding="utf-8")
     captured: dict[str, list[str]] = {}
 
-    def fake_run(args, **kwargs):
-        captured["args"] = list(args)
-        return _FakeCompleted()
+    def fake_supervised(argv, *, cwd, env, timeout, lifecycle):
+        captured["args"] = list(argv)
+        from flowgency.jobs.processes import CompletedRuntimeProcess, ProcessStopEvidence
+
+        return CompletedRuntimeProcess(
+            exit_code=0,
+            stdout='{"type":"message","content":"ok"}\n',
+            stderr="",
+            duration_seconds=0.01,
+            process_stop_evidence=ProcessStopEvidence(
+                job_id="job-1",
+                generation="gen-1",
+                confirmed=True,
+                reason="exited",
+            ),
+        )
 
     import flowgency.integrations.flowgency.copilot as copilot_mod
 
-    monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(copilot_mod, "run_supervised", fake_supervised)
+    monkeypatch.setattr(copilot_mod.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket launch with lifecycle must not use subprocess.run")))
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
     monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
     monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "shared-home"))
@@ -324,6 +339,7 @@ def test_ticket_server_grant_does_not_add_workspace_write(tmp_path, monkeypatch,
                     "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
                     "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
                 },
+                lifecycle=RuntimeProcessLifecycle(job_id="job-1", generation="gen-1"),
             ),
         )
     )

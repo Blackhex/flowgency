@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-import ctypes
 import os
 import signal
 import subprocess
-import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -89,14 +87,37 @@ def read_process_identity(pid: int) -> RuntimeProcessIdentity | None:
             created_at=times["CreationTime"].isoformat(),
         )
 
+    created_at, status = _read_posix_process_created_at(pid)
+    if status != "ok" or created_at is None:
+        return None
+    return RuntimeProcessIdentity(pid=pid, created_at=created_at)
+
+
+def _parse_proc_stat_created_at(text: str) -> str | None:
+    line = text.strip()
+    closing = line.rfind(")")
+    if closing <= 0:
+        return None
+    fields = line[closing + 1 :].strip().split()
+    if len(fields) < 20:
+        return None
+    return fields[19]
+
+
+def _read_posix_process_created_at(pid: int) -> tuple[str | None, Literal["ok", "exited", "unknown"]]:
     stat_path = Path(f"/proc/{pid}/stat")
     try:
-        fields = stat_path.read_text(encoding="utf-8").split()
+        text = stat_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None, "exited"
+    except PermissionError:
+        return None, "unknown"
     except OSError:
-        return None
-    if len(fields) < 22:
-        return None
-    return RuntimeProcessIdentity(pid=pid, created_at=fields[21])
+        return None, "unknown"
+    created_at = _parse_proc_stat_created_at(text)
+    if created_at is None:
+        return None, "unknown"
+    return created_at, "ok"
 
 
 def process_identity_matches(identity: RuntimeProcessIdentity) -> bool | None:
@@ -121,7 +142,7 @@ def process_identity_state(identity: RuntimeProcessIdentity) -> ProcessIdentityS
                 identity.pid,
             )
         except Exception:
-            return "exited"
+            return "unknown"
         try:
             times = win32process.GetProcessTimes(handle)
             if identity.created_at is not None and times["CreationTime"].isoformat() != identity.created_at:
@@ -133,17 +154,19 @@ def process_identity_state(identity: RuntimeProcessIdentity) -> ProcessIdentityS
         finally:
             handle.Close()
 
-    current = read_process_identity(identity.pid)
-    if current is None:
+    created_at, status = _read_posix_process_created_at(identity.pid)
+    if status == "exited":
         return "exited"
-    if identity.created_at is not None and current.created_at != identity.created_at:
+    if status != "ok" or created_at is None:
+        return "unknown"
+    if identity.created_at is not None and created_at != identity.created_at:
         return "reused"
     try:
         os.kill(identity.pid, 0)
     except ProcessLookupError:
         return "exited"
     except PermissionError:
-        return "alive"
+        return "unknown"
     except OSError:
         return "unknown"
     return "alive"
@@ -226,6 +249,18 @@ def _group_exited(group_id: int) -> bool | None:
     return False
 
 
+def _group_exit_status(group_id: int, deadline: float) -> Literal["empty", "active", "unknown"]:
+    while True:
+        exited = _group_exited(group_id)
+        if exited is True:
+            return "empty"
+        if exited is None:
+            return "unknown"
+        if _remaining_seconds(deadline) <= 0:
+            return "active"
+        time.sleep(0.02)
+
+
 def _run_supervised_posix(
     argv: list[str] | tuple[str, ...],
     *,
@@ -262,38 +297,38 @@ def _run_supervised_posix(
         )
 
     identity = read_process_identity(process.pid)
+    stdout_chunks: list[bytes] = []
+    stderr_chunks: list[bytes] = []
+    stdout_thread = threading.Thread(target=_reader, args=(process.stdout, stdout_chunks))
+    stderr_thread = threading.Thread(target=_reader, args=(process.stderr, stderr_chunks))
+    stdout_thread.start()
+    stderr_thread.start()
     deadline = start + timeout
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
-        exit_code = process.returncode
-        while _remaining_seconds(deadline) > 0:
-            exited = _group_exited(process.pid)
-            if exited is True:
-                return CompletedRuntimeProcess(
-                    exit_code=exit_code,
-                    stdout=stdout.decode("utf-8", errors="replace"),
-                    stderr=stderr.decode("utf-8", errors="replace"),
-                    duration_seconds=time.monotonic() - start,
-                    process_stop_evidence=_evidence(
-                        lifecycle,
-                        confirmed=True,
-                        reason="exited",
-                    ),
-                    outcome="exited",
-                    root_identity=identity,
-                )
-            if exited is None:
-                break
-            time.sleep(0.02)
+        exit_code = process.wait(timeout=timeout)
+        group_status = _group_exit_status(process.pid, deadline)
+        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=deadline)
+        if group_status == "empty" and readers_done and identity is not None:
+            confirmed = True
+            reason = "exited"
+        elif group_status == "unknown" or identity is None:
+            confirmed = False
+            reason = "group-state-unavailable"
+        elif group_status == "active":
+            confirmed = False
+            reason = "descendants-still-running"
+        else:
+            confirmed = False
+            reason = "io-drain-incomplete"
         return CompletedRuntimeProcess(
             exit_code=exit_code,
-            stdout=stdout.decode("utf-8", errors="replace"),
-            stderr=stderr.decode("utf-8", errors="replace"),
+            stdout=_decode(stdout_chunks),
+            stderr=_decode(stderr_chunks),
             duration_seconds=time.monotonic() - start,
             process_stop_evidence=_evidence(
                 lifecycle,
-                confirmed=False,
-                reason="descendants-still-running",
+                confirmed=confirmed,
+                reason=reason,
             ),
             outcome="exited",
             root_identity=identity,
@@ -301,17 +336,32 @@ def _run_supervised_posix(
     except subprocess.TimeoutExpired:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
-        stdout, stderr = process.communicate()
-        confirmed = _group_exited(process.pid) is True
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5)
+        wait_deadline = time.monotonic() + 5
+        group_status = _group_exit_status(process.pid, wait_deadline)
+        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
+        if group_status == "empty" and readers_done and identity is not None:
+            confirmed = True
+            reason = "timeout"
+        elif group_status == "unknown" or identity is None:
+            confirmed = False
+            reason = "group-state-unavailable"
+        elif group_status == "active":
+            confirmed = False
+            reason = "descendants-still-running"
+        else:
+            confirmed = False
+            reason = "io-drain-incomplete"
         return CompletedRuntimeProcess(
             exit_code=124,
-            stdout=stdout.decode("utf-8", errors="replace"),
-            stderr=stderr.decode("utf-8", errors="replace"),
+            stdout=_decode(stdout_chunks),
+            stderr=_decode(stderr_chunks),
             duration_seconds=time.monotonic() - start,
             process_stop_evidence=_evidence(
                 lifecycle,
                 confirmed=confirmed,
-                reason="timeout" if confirmed else "timeout-unconfirmed",
+                reason=reason,
             ),
             outcome="timeout",
             root_identity=identity,
@@ -336,190 +386,37 @@ def _wait_for_job_exit(job_handle, deadline: float) -> bool:
     return _job_active_processes(job_handle) == 0
 
 
+def _job_exit_status(job_handle, deadline: float) -> Literal["empty", "active", "unknown"]:
+    last_active = False
+    while True:
+        try:
+            active = _job_active_processes(job_handle)
+        except Exception:
+            return "unknown"
+        if active == 0:
+            return "empty"
+        last_active = True
+        if _remaining_seconds(deadline) <= 0:
+            return "active"
+        time.sleep(0.02)
+
+
+def _join_reader_threads(*threads, deadline: float) -> bool:
+    all_done = True
+    for thread in threads:
+        if thread is None:
+            continue
+        thread.join(timeout=_remaining_seconds(deadline))
+        if thread.is_alive():
+            all_done = False
+    return all_done
+
+
 def _open_pipe_reader(read_handle):
     import msvcrt
 
     fd = msvcrt.open_osfhandle(int(read_handle.Detach()), os.O_RDONLY)
     return os.fdopen(fd, "rb", closefd=True)
-
-
-def _windows_tree_identities(root_pid: int) -> tuple[RuntimeProcessIdentity, ...]:
-    kernel32 = ctypes.windll.kernel32
-
-    class PROCESSENTRY32W(ctypes.Structure):
-        _fields_ = [
-            ("dwSize", ctypes.c_ulong),
-            ("cntUsage", ctypes.c_ulong),
-            ("th32ProcessID", ctypes.c_ulong),
-            ("th32DefaultHeapID", ctypes.c_void_p),
-            ("th32ModuleID", ctypes.c_ulong),
-            ("cntThreads", ctypes.c_ulong),
-            ("th32ParentProcessID", ctypes.c_ulong),
-            ("pcPriClassBase", ctypes.c_long),
-            ("dwFlags", ctypes.c_ulong),
-            ("szExeFile", ctypes.c_wchar * 260),
-        ]
-
-    TH32CS_SNAPPROCESS = 0x00000002
-    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    if snapshot == INVALID_HANDLE_VALUE:
-        return ()
-    try:
-        entry = PROCESSENTRY32W()
-        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
-        table: dict[int, int] = {}
-        if kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
-            while True:
-                table[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
-                if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
-                    break
-    finally:
-        kernel32.CloseHandle(snapshot)
-
-    seen = {root_pid}
-    queue = [root_pid]
-    while queue:
-        parent = queue.pop(0)
-        children = [pid for pid, ppid in table.items() if ppid == parent and pid not in seen]
-        seen.update(children)
-        queue.extend(children)
-    identities: list[RuntimeProcessIdentity] = []
-    for pid in sorted(seen):
-        identity = read_process_identity(pid)
-        if identity is not None:
-            identities.append(identity)
-    return tuple(identities)
-
-
-def _terminate_windows_identity(identity: RuntimeProcessIdentity, exit_code: int) -> None:
-    import win32api
-    import win32con
-    import win32process
-
-    if process_identity_state(identity) != "alive":
-        return
-    handle = win32api.OpenProcess(
-        win32con.PROCESS_TERMINATE | win32con.PROCESS_QUERY_LIMITED_INFORMATION,
-        False,
-        identity.pid,
-    )
-    try:
-        times = win32process.GetProcessTimes(handle)
-        if identity.created_at is not None and times["CreationTime"].isoformat() != identity.created_at:
-            return
-        win32process.TerminateProcess(handle, exit_code)
-    finally:
-        handle.Close()
-
-
-def _wait_for_windows_identities_exit(
-    identities: tuple[RuntimeProcessIdentity, ...],
-    deadline: float,
-) -> bool:
-    while _remaining_seconds(deadline) > 0:
-        states = [process_identity_state(identity) for identity in identities]
-        if not any(state == "alive" for state in states):
-            return True
-        time.sleep(0.02)
-    states = [process_identity_state(identity) for identity in identities]
-    return not any(state == "alive" for state in states)
-
-
-def _terminate_windows_tree(root_pid: int, *, exit_code: int) -> tuple[RuntimeProcessIdentity, ...]:
-    identities = _windows_tree_identities(root_pid)
-    for identity in reversed(identities):
-        with contextlib.suppress(Exception):
-            _terminate_windows_identity(identity, exit_code)
-    return identities
-
-
-def _taskkill_windows_tree(*identities: RuntimeProcessIdentity) -> None:
-    seen: set[tuple[int, str | None]] = set()
-    for identity in identities:
-        key = (identity.pid, identity.created_at)
-        if key in seen:
-            continue
-        seen.add(key)
-        if process_identity_state(identity) != "alive":
-            continue
-        subprocess.run(
-            ["taskkill", "/PID", str(identity.pid), "/T", "/F"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            check=False,
-        )
-
-
-def _watch_owner_and_kill_tree(owner_pid: int, root_pid: int, root_created_at: str, stop_file: str) -> int:
-    stop_path = Path(stop_file)
-    owner_identity = read_process_identity(owner_pid)
-    root_identity = RuntimeProcessIdentity(pid=root_pid, created_at=root_created_at)
-    observed: dict[tuple[int, str | None], RuntimeProcessIdentity] = {
-        (root_identity.pid, root_identity.created_at): root_identity,
-    }
-    while True:
-        if stop_path.exists():
-            return 0
-        for identity in _windows_tree_identities(root_pid):
-            observed.setdefault((identity.pid, identity.created_at), identity)
-        if owner_identity is None or process_identity_state(owner_identity) != "alive":
-            identities = tuple(dict.fromkeys((*observed.values(), *_windows_tree_identities(root_pid))))
-            _taskkill_windows_tree(root_identity, *identities)
-            for identity in reversed(identities):
-                with contextlib.suppress(Exception):
-                    _terminate_windows_identity(identity, 125)
-            if root_identity not in identities and process_identity_state(root_identity) == "alive":
-                with contextlib.suppress(Exception):
-                    _terminate_windows_identity(root_identity, 125)
-            _wait_for_windows_identities_exit(
-                tuple(dict.fromkeys((root_identity, *identities))),
-                time.monotonic() + 5,
-            )
-            return 0
-        time.sleep(0.05)
-
-
-def _track_windows_tree(
-    root_pid: int,
-    observed: dict[tuple[int, str | None], RuntimeProcessIdentity],
-    stop_event: threading.Event,
-) -> None:
-    while not stop_event.is_set():
-        for identity in _windows_tree_identities(root_pid):
-            observed.setdefault((identity.pid, identity.created_at), identity)
-        time.sleep(0.02)
-
-
-def _start_windows_owner_watchdog(
-    *,
-    owner_pid: int,
-    root_identity: RuntimeProcessIdentity,
-    stop_file: Path,
-) -> subprocess.Popen[str]:
-    return subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            (
-                "from flowgency.jobs.processes import _watch_owner_and_kill_tree; "
-                "raise SystemExit(_watch_owner_and_kill_tree(int(__import__('sys').argv[1]), "
-                "int(__import__('sys').argv[2]), __import__('sys').argv[3], __import__('sys').argv[4]))"
-            ),
-            str(owner_pid),
-            str(root_identity.pid),
-            root_identity.created_at or "",
-            str(stop_file),
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        close_fds=True,
-        text=True,
-    )
 
 
 def _run_supervised_windows(
@@ -547,20 +444,15 @@ def _run_supervised_windows(
     thread_handle = None
     stdout_write = None
     stderr_write = None
+    stdout_reader = None
+    stderr_reader = None
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
     stdout_thread = None
     stderr_thread = None
     identity = None
-    observed_identities: dict[tuple[int, str | None], RuntimeProcessIdentity] = {}
-    watchdog_process = None
-    watchdog_stop = cwd / ".flowgency-process-watchdog.stop"
-    tracker_stop = threading.Event()
-    tracker_thread = None
 
     try:
-        with contextlib.suppress(OSError):
-            watchdog_stop.unlink()
         security = win32security.SECURITY_ATTRIBUTES()
         security.bInheritHandle = 1
 
@@ -626,8 +518,6 @@ def _run_supervised_windows(
                 )
 
         identity = read_process_identity(pid)
-        if identity is not None:
-            observed_identities[(identity.pid, identity.created_at)] = identity
         try:
             win32job.AssignProcessToJobObject(job_handle, process_handle)
         except pywintypes.error as error:
@@ -654,19 +544,6 @@ def _run_supervised_windows(
         stdout_thread.start()
         stderr_thread.start()
 
-        if identity is not None:
-            watchdog_process = _start_windows_owner_watchdog(
-                owner_pid=os.getpid(),
-                root_identity=identity,
-                stop_file=watchdog_stop,
-            )
-            tracker_thread = threading.Thread(
-                target=_track_windows_tree,
-                args=(pid, observed_identities, tracker_stop),
-                daemon=True,
-            )
-            tracker_thread.start()
-
         win32process.ResumeThread(thread_handle)
         win32api.CloseHandle(stdout_write)
         win32api.CloseHandle(stderr_write)
@@ -674,23 +551,23 @@ def _run_supervised_windows(
         stderr_write = None
 
         if win32event.WaitForSingleObject(process_handle, _remaining_millis(deadline)) == win32con.WAIT_TIMEOUT:
-            for tracked in _windows_tree_identities(pid):
-                observed_identities.setdefault((tracked.pid, tracked.created_at), tracked)
             win32job.TerminateJobObject(job_handle, 124)
-            if identity is not None:
-                _taskkill_windows_tree(identity, *tuple(observed_identities.values()))
-            for tracked in _terminate_windows_tree(pid, exit_code=124):
-                observed_identities.setdefault((tracked.pid, tracked.created_at), tracked)
             win32event.WaitForSingleObject(process_handle, 5000)
-            _wait_for_job_exit(job_handle, time.monotonic() + 5)
-            if stdout_thread is not None:
-                stdout_thread.join(timeout=5)
-            if stderr_thread is not None:
-                stderr_thread.join(timeout=5)
-            confirmed = _wait_for_windows_identities_exit(
-                tuple(observed_identities.values()),
-                time.monotonic() + 5,
-            )
+            wait_deadline = time.monotonic() + 5
+            job_status = _job_exit_status(job_handle, wait_deadline)
+            readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
+            if job_status == "empty" and readers_done:
+                confirmed = True
+                reason = "timeout"
+            elif job_status == "unknown":
+                confirmed = False
+                reason = "job-accounting-unavailable"
+            elif job_status == "active":
+                confirmed = False
+                reason = "job-active-processes"
+            else:
+                confirmed = False
+                reason = "io-drain-incomplete"
             return CompletedRuntimeProcess(
                 exit_code=124,
                 stdout=_decode(stdout_chunks),
@@ -699,85 +576,60 @@ def _run_supervised_windows(
                 process_stop_evidence=_evidence(
                     lifecycle,
                     confirmed=confirmed,
-                    reason="timeout" if confirmed else "timeout-unconfirmed",
+                    reason=reason,
                 ),
                 outcome="timeout",
                 root_identity=identity,
             )
 
         exit_code = win32process.GetExitCodeProcess(process_handle)
-        while _remaining_seconds(deadline) > 0:
-            for tracked in _windows_tree_identities(pid):
-                observed_identities.setdefault((tracked.pid, tracked.created_at), tracked)
-            readers_done = (
-                stdout_thread is not None
-                and stderr_thread is not None
-                and not stdout_thread.is_alive()
-                and not stderr_thread.is_alive()
-            )
-            if readers_done and _wait_for_windows_identities_exit(tuple(observed_identities.values()), time.monotonic() + 0.1):
-                return CompletedRuntimeProcess(
-                    exit_code=exit_code,
-                    stdout=_decode(stdout_chunks),
-                    stderr=_decode(stderr_chunks),
-                    duration_seconds=time.monotonic() - start,
-                    process_stop_evidence=_evidence(
-                        lifecycle,
-                        confirmed=True,
-                        reason="exited",
-                    ),
-                    outcome="exited",
-                    root_identity=identity,
-                )
-            time.sleep(0.02)
-
-        for tracked in _windows_tree_identities(pid):
-            observed_identities.setdefault((tracked.pid, tracked.created_at), tracked)
-        win32job.TerminateJobObject(job_handle, 124)
-        if identity is not None:
-            _taskkill_windows_tree(identity, *tuple(observed_identities.values()))
-        for tracked in _terminate_windows_tree(pid, exit_code=124):
-            observed_identities.setdefault((tracked.pid, tracked.created_at), tracked)
-        win32event.WaitForSingleObject(process_handle, 5000)
-        _wait_for_job_exit(job_handle, time.monotonic() + 5)
-        if stdout_thread is not None:
-            stdout_thread.join(timeout=5)
-        if stderr_thread is not None:
-            stderr_thread.join(timeout=5)
-        confirmed = _wait_for_windows_identities_exit(
-            tuple(observed_identities.values()),
-            time.monotonic() + 5,
-        )
+        job_status = _job_exit_status(job_handle, deadline)
+        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=deadline)
+        if job_status == "empty" and readers_done:
+            confirmed = True
+            reason = "exited"
+            outcome = "exited"
+            result_exit_code = exit_code
+        else:
+            confirmed = False
+            if job_status == "unknown":
+                reason = "job-accounting-unavailable"
+                outcome = "exited"
+                result_exit_code = exit_code
+            elif job_status == "active":
+                reason = "job-active-processes"
+                outcome = "exited"
+                result_exit_code = exit_code
+            else:
+                reason = "io-drain-incomplete"
+                outcome = "exited"
+                result_exit_code = exit_code
         return CompletedRuntimeProcess(
-            exit_code=124,
+            exit_code=result_exit_code,
             stdout=_decode(stdout_chunks),
             stderr=_decode(stderr_chunks),
             duration_seconds=time.monotonic() - start,
             process_stop_evidence=_evidence(
                 lifecycle,
                 confirmed=confirmed,
-                reason="timeout" if confirmed else "timeout-unconfirmed",
+                reason=reason,
             ),
-            outcome="timeout",
+            outcome=outcome,
             root_identity=identity,
         )
     finally:
-        with contextlib.suppress(OSError):
-            watchdog_stop.write_text("stop", encoding="utf-8")
-        tracker_stop.set()
-        if tracker_thread is not None:
-            tracker_thread.join(timeout=2)
-        if watchdog_process is not None:
-            with contextlib.suppress(Exception):
-                watchdog_process.wait(timeout=5)
-        with contextlib.suppress(OSError):
-            watchdog_stop.unlink()
         if stdout_write is not None:
             with contextlib.suppress(Exception):
                 win32api.CloseHandle(stdout_write)
         if stderr_write is not None:
             with contextlib.suppress(Exception):
                 win32api.CloseHandle(stderr_write)
+        if stdout_reader is not None and stdout_thread is None:
+            with contextlib.suppress(Exception):
+                stdout_reader.close()
+        if stderr_reader is not None and stderr_thread is None:
+            with contextlib.suppress(Exception):
+                stderr_reader.close()
         if thread_handle is not None:
             with contextlib.suppress(Exception):
                 win32api.CloseHandle(thread_handle)
@@ -787,14 +639,3 @@ def _run_supervised_windows(
         if job_handle is not None:
             with contextlib.suppress(Exception):
                 win32api.CloseHandle(job_handle)
-
-
-if __name__ == "__main__" and len(sys.argv) == 5:
-    raise SystemExit(
-        _watch_owner_and_kill_tree(
-            int(sys.argv[1]),
-            int(sys.argv[2]),
-            sys.argv[3],
-            sys.argv[4],
-        )
-    )

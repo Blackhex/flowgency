@@ -17,7 +17,6 @@ from flowgency.blueprints.projectors import get_projector
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.artifacts import JobArtifact
 from flowgency.jobs.execution import execute_job
-from flowgency.jobs.processes import ProcessStopEvidence
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
 from flowgency.jobs.store import cancel_job
 from flowgency.jobs.reconciliation import worker_alive
@@ -29,7 +28,6 @@ from flowgency.configuration.models import MemorySelector
 from flowgency.blueprints.cache import active_pins, pin_artifact
 from flowgency.fs.locks import exclusive_lock
 from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
-from tests._ticket_helpers import make_ticket_job_environment
 
 
 def _authority(spec: JobSpec):
@@ -277,67 +275,6 @@ def test_execute_job_waits_for_memory_before_starting_run(tmp_path, monkeypatch)
         "status": "running",
     }
     assert read_job(fixture.job_path).status == "complete"
-
-
-def test_execute_ticket_job_passes_supervision_lifecycle_and_cleans_pending_run(
-    tmp_path,
-    raw_config,
-    monkeypatch,
-):
-    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
-    ticket = env.create_assigned("builder")
-    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
-    authority = env.jobs.authority_for_handle(handle)
-    seen = {}
-
-    class Integration:
-        supports_execution = True
-        name = "fake"
-
-        def run(self, request: IntegrationRunRequest):
-            assert request.ticket_tools is not None
-            assert request.ticket_tools.lifecycle is not None
-            seen["server_name"] = request.ticket_tools.server_name
-            seen["command"] = request.ticket_tools.command
-            seen["args"] = request.ticket_tools.args
-            seen["lifecycle_job_id"] = request.ticket_tools.lifecycle.job_id
-            seen["lifecycle_generation"] = request.ticket_tools.lifecycle.generation
-            return RunResult(
-                0,
-                "done",
-                "",
-                0.1,
-                process_stop_evidence=ProcessStopEvidence(
-                    job_id=request.ticket_tools.lifecycle.job_id,
-                    generation=request.ticket_tools.lifecycle.generation,
-                    confirmed=True,
-                    reason="exited",
-                ),
-            )
-
-    monkeypatch.setattr(
-        "flowgency.jobs.execution.resolve_job_context",
-        lambda ignored: SimpleNamespace(
-            workspace_root=env.root_a,
-            integration=Integration(),
-            timeout=30,
-            sandbox_root=None,
-            team_root=Path(env.store.path).parent,
-            runtime_policy=EffectiveRuntimePolicy(timeout=30),
-        ),
-    )
-
-    result = execute_job(authority)
-    current = env.read(ticket.ref).record
-
-    assert result.status == "complete"
-    assert seen["server_name"] == "flowgency-tickets"
-    assert seen["args"] == ("-m", "flowgency.tickets.mcp_server")
-    assert seen["lifecycle_job_id"] == handle.job_id
-    assert seen["lifecycle_generation"]
-    assert current.pending_run is None
-    assert current.active_run is None
-    assert current.assignee == "builder"
 
 
 def test_execute_job_cancellation_while_waiting_terminalizes_without_run(tmp_path, monkeypatch):
@@ -644,7 +581,7 @@ def test_v3_job_payload_with_skill_is_rejected_by_from_dict(tmp_path):
     _, spec = queued_job(tmp_path)
     payload = spec.to_dict()
     payload["skill"] = "daily-review"
-    with pytest.raises(ValueError, match="schema v5 jobs must not set skill"):
+    with pytest.raises(ValueError, match="durable jobs must not set skill"):
         JobSpec.from_dict(payload)
 
 

@@ -11,7 +11,6 @@ from types import SimpleNamespace
 import yaml
 
 from flowgency.blueprints.cache import release_pin
-from flowgency.configuration.store import ConfigStore
 from flowgency.configuration.models import MemorySelector
 from flowgency.permissions.zones import ZONE_INSTRUCTIONS
 from flowgency.configuration.store import load_config_snapshot
@@ -21,7 +20,6 @@ from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
 )
-from flowgency.integrations.ticket_tools import build_ticket_tool_launch
 from flowgency.memory.models import ResolvedMemory
 from flowgency.prompts.projection import project_prompt_snapshots
 from flowgency.memory.publication import (
@@ -38,10 +36,6 @@ from flowgency.memory.store import (
 from flowgency.records.ingest import ingest_records
 from flowgency.records.outbox import copy_outbox_memory_to_stage, create_outbox
 from flowgency.records.validation import validate_outbox, writable_agent_names
-from flowgency.tickets.broker import TicketBroker
-from flowgency.tickets.service import TicketService
-from flowgency.tickets.storages.registry import resolve_storage
-from flowgency.workflows.library import WorkflowLibrary
 
 from .atomic import atomic_write_text
 from .authority import JobAuthorityError, JobAuthorityRef, JobStore
@@ -49,14 +43,12 @@ from .artifacts import JobArtifact, retain_failed_stage, retain_rejected_records
 from .changes import capture_base_sha, capture_git_changes
 from .launch_view import create_launch_view
 from .models import JobRecord
-from .processes import ProcessStopEvidence, RuntimeProcessLifecycle
 from .store import (
     InvalidJobTransition,
     read_job,
     transition_job,
     write_job,
 )
-from .tickets import TicketJobCoordinator
 
 logger = logging.getLogger(__name__)
 
@@ -387,8 +379,6 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
     started = None
     launch_view = None
     final = record
-    ticket_coordinator = None
-    ticket_lifecycle = None
     try:
         store.read(authority)
         spec = record.spec
@@ -489,65 +479,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     enforce_validation=True,
                     memory_working_dir=outbox.memory,
                 )
-                try:
-                    if spec.ticket_target is not None:
-                        config_store = ConfigStore(Path(spec.config_path))
-                        snapshot = config_store.load()
-                        workflow_root = snapshot.config.flowgency.workflow_library
-                        if workflow_root is None:
-                            raise ValueError("Ticket workflow library is unavailable")
-                        service = TicketService(
-                            config_store=config_store,
-                            library=WorkflowLibrary(Path(workflow_root)),
-                            storage_factory=resolve_storage,
-                            validate_agent_context=lambda actor: None,
-                            clock=lambda: datetime.now(timezone.utc),
-                        )
-                        ticket_coordinator = TicketJobCoordinator(
-                            service=service,
-                            job_store=store,
-                            config_store=config_store,
-                            submitter=lambda _request: (_ for _ in ()).throw(
-                                RuntimeError("ticket submission is unavailable during execution")
-                            ),
-                        )
-                        service.validate_agent_context = ticket_coordinator.registry.validate_context
-                        ticket_coordinator.preflight(store.read(authority))
-                        with TicketBroker(service, ticket_coordinator.registry, authority=authority) as broker:
-                            endpoint = broker.endpoint
-                            assert endpoint is not None
-                            ticket_lifecycle = RuntimeProcessLifecycle(
-                                job_id=endpoint.grant.context.job_id,
-                                generation=endpoint.grant.context.session_id,
-                            )
-                            request = replace(
-                                request,
-                                ticket_tools=replace(
-                                    build_ticket_tool_launch(endpoint),
-                                    lifecycle=ticket_lifecycle,
-                                ),
-                            )
-                            result = integration.run(request)
-                    else:
-                        result = integration.run(request)
-                except Exception:
-                    if ticket_coordinator is not None:
-                        stopped = ProcessStopEvidence(
-                            job_id=spec.job_id,
-                            generation="" if ticket_lifecycle is None else ticket_lifecycle.generation,
-                            confirmed=False,
-                            reason="unknown",
-                        )
-                        ticket_coordinator.cleanup(authority, stopped)
-                    raise
-                if ticket_coordinator is not None:
-                    stopped = result.process_stop_evidence or ProcessStopEvidence(
-                        job_id=spec.job_id,
-                        generation="" if ticket_lifecycle is None else ticket_lifecycle.generation,
-                        confirmed=False,
-                        reason="unknown",
-                    )
-                    ticket_coordinator.cleanup(authority, stopped)
+                result = integration.run(request)
                 policy_note = _unenforced_policy_note(result)
                 stdout_path.write_text(result.stdout, encoding="utf-8")
                 persisted_stderr_path = None

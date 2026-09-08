@@ -889,6 +889,10 @@ class CopilotIntegration(BaseIntegration):
                 cmd_args += ["--allow-tool", t]
 
         if request.ticket_tools is not None:
+            if request.ticket_tools.lifecycle is None:
+                raise IntegrationError(
+                    "Ticket-enabled Copilot launches require a trusted lifecycle for supervised containment."
+                )
             ticket_config_path = write_copilot_ticket_config(
                 request.ticket_tools,
                 request.launch_dir / "ticket-tools.mcp.json",
