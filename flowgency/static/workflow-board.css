@@ -1,4 +1,5 @@
-:root {
+.workflow-board-page,
+.workflow-ticket-page {
   --workflow-bg: #f4f7fb;
   --workflow-surface: #ffffff;
   --workflow-surface-muted: #eef2f8;
@@ -12,7 +13,7 @@
   --workflow-accent-border: #557fd8;
   --workflow-accent-soft: #dbe7ff;
   --workflow-idle: #5d6f86;
-  --workflow-working: #1d9a7e;
+  --workflow-working: #156c59;
   --workflow-queued: #cb9d3b;
   --workflow-pane: #fcfdff;
   --workflow-shadow: 0 14px 32px rgb(15 23 42 / 0.08);
@@ -47,17 +48,30 @@
 
 .workflow-board-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
   align-items: center;
   gap: 0.75rem 1rem;
-  padding: 0.75rem 1rem;
+  min-height: 49px;
+  padding: 0.35rem 1rem;
   border-bottom: 1px solid var(--workflow-border);
+}
+
+.workflow-board-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.workflow-board-title {
+  min-width: 0;
 }
 
 .workflow-board-title h1 {
   margin: 0;
   font-size: 1.1rem;
-  line-height: 1.25;
+  line-height: 1.2;
   font-weight: 700;
   color: var(--workflow-heading);
 }
@@ -65,17 +79,19 @@
 .workflow-board-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.85rem;
-  margin-top: 0.3rem;
+  gap: 0.9rem;
+  margin-top: 0;
   color: var(--workflow-muted);
   font-size: 0.78rem;
 }
 
 .workflow-board-filters {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(11rem, 14rem) minmax(8.75rem, 10rem);
   align-items: center;
   gap: 0.75rem;
   justify-content: flex-end;
+  margin: 0;
 }
 
 .workflow-board-filters input,
@@ -109,7 +125,8 @@
 
 .workflow-search-field {
   position: relative;
-  width: min(100%, 14rem);
+  width: 100%;
+  min-width: 0;
 }
 
 .workflow-search-field svg {
@@ -127,7 +144,7 @@
 }
 
 .workflow-board-filters select {
-  width: 10rem;
+  width: 100%;
   padding: 0.5rem 0.75rem;
   min-height: 2rem;
 }
@@ -138,7 +155,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 2.4rem;
+  min-height: 2rem;
   padding: 0.5rem 0.9rem;
   border-radius: 0.375rem;
   border: 1px solid var(--workflow-accent-border);
@@ -157,8 +174,8 @@
 
 .workflow-board-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 25.25rem;
-  min-height: calc(100vh - 8.2rem);
+  grid-template-columns: minmax(0, 1fr) 24rem;
+  min-height: calc(100vh - 7rem);
 }
 
 .workflow-board-wrap {
@@ -372,7 +389,34 @@
 }
 
 .workflow-ticket-title-block {
-  padding: 1.2rem 1.35rem 0;
+  padding: 1rem 1rem 0;
+}
+
+.workflow-ticket-title-block h2 {
+  margin-top: 0;
+  font-size: 1.125rem;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--workflow-heading);
+}
+
+.workflow-ticket-overview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.workflow-ticket-overview-head h3 {
+  margin-bottom: 0;
+}
+
+.workflow-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
 }
 
 .workflow-ticket-inspector-page .workflow-ticket-title-block,
@@ -399,8 +443,14 @@
 .workflow-ticket-assignment,
 .workflow-ticket-panel {
   margin-top: 1.15rem;
-  padding: 1rem 1.35rem 0;
+  padding: 1rem 1rem 0;
   border-top: 1px solid var(--workflow-border);
+}
+
+.workflow-assignment-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(5.25rem, auto);
+  align-items: center;
 }
 
 .workflow-assignment-row select,
@@ -469,7 +519,7 @@
 .workflow-ticket-tabs {
   justify-content: flex-start;
   margin-top: 1.2rem;
-  padding: 0 1.35rem;
+  padding: 0 1rem;
   border-bottom: 1px solid var(--workflow-border);
 }
 
@@ -675,19 +725,31 @@
 }
 
 @media (max-width: 720px) {
-  .workflow-board-toolbar,
-  .workflow-board-filters,
-  .workflow-assignment-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .workflow-board-toolbar {
-    display: block;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.7rem 0.9rem;
   }
 
-  .workflow-board-title {
-    margin-bottom: 0.85rem;
+  .workflow-board-heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .workflow-board-filters {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: minmax(0, 1fr) minmax(8.25rem, 9.5rem);
+  }
+
+  #workflow-new-ticket {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    align-self: start;
   }
 
   .workflow-search-field,
@@ -705,6 +767,15 @@
   .workflow-ticket-assignment,
   .workflow-ticket-tabs,
   .workflow-ticket-panel {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .workflow-ticket-inspector-page .workflow-ticket-pane-heading,
+  .workflow-ticket-inspector-page .workflow-ticket-title-block,
+  .workflow-ticket-inspector-page .workflow-ticket-assignment,
+  .workflow-ticket-inspector-page .workflow-ticket-tabs,
+  .workflow-ticket-inspector-page .workflow-ticket-panel {
     padding-left: 1rem;
     padding-right: 1rem;
   }

@@ -15,6 +15,7 @@
       this.inputDraft = { values: {}, baseValues: {}, dirty: new Set(), baseVersion: null };
       this.selectedTab = 'overview';
       this.lastActionError = null;
+      this.editingOverview = false;
       this.searchTimer = 0;
       this.pollTimer = 0;
       this.etags = { board: null, detail: null };
@@ -27,6 +28,7 @@
       this.restoreDraft();
       this.selectTab(this.selectedTab);
       this.renderAssignment();
+      this.applyEditingState(true);
       this.scheduleRefresh();
     }
 
@@ -43,8 +45,13 @@
       this.assigneeSelect = document.getElementById('ticket-assignee');
       this.ticketState = document.querySelector('[data-ticket-state]');
       this.runStatus = document.querySelector('[data-ticket-run-status]');
+      this.runStatusLabel = document.querySelector('[data-ticket-run-status-label]');
       this.saveInputsButton = document.getElementById('ticket-save-inputs');
       this.runButton = document.getElementById('ticket-run-button');
+      this.titleHeading = document.querySelector('.workflow-ticket-title-block h2');
+      this.editToggle = document.getElementById('ticket-edit-toggle');
+      this.editRegion = document.querySelector('[data-ticket-edit]');
+      this.readDescription = document.querySelector('[data-ticket-description-read]');
     }
 
     bindEvents() {
@@ -312,6 +319,7 @@
       this.selectTab(pageState.selectedTab || 'overview');
       this.renderAssignment();
       this.renderActionError();
+      this.applyEditingState(false);
       this.restoreFocus(pageState.focus);
       if (historyMode === 'push') {
         window.history.pushState({}, '', nextUrl);
@@ -408,7 +416,7 @@
           throw new TicketActionError(this.issuePayload('refresh-failed', 'The workflow board could not be refreshed.'));
         }
         this.etags[etagKey] = response.headers.get('etag');
-        await this.loadPage(window.location.href, 'replace', false);
+        await this.loadPage(window.location.href, 'replace', true);
       } catch (error) {
         if (error?.name === 'AbortError') {
           return;
@@ -455,6 +463,27 @@
       }
       if (target.closest('#workflow-close-ticket-dialog, #workflow-cancel-ticket-dialog') && this.ticketDialog) {
         this.ticketDialog.close();
+        return;
+      }
+      if (target.closest('#ticket-edit-toggle')) {
+        event.preventDefault();
+        this.setEditing(!this.editingOverview);
+        return;
+      }
+      if (target.closest('#ticket-edit-cancel')) {
+        event.preventDefault();
+        this.cancelEdit();
+        return;
+      }
+      if (target.closest('#ticket-edit-save')) {
+        event.preventDefault();
+        try {
+          await this.saveInputs();
+          this.editingOverview = false;
+          await this.loadPage(window.location.href, 'replace', true);
+        } catch (error) {
+          this.reportActionError(error);
+        }
         return;
       }
       if (target.closest('#ticket-save-inputs')) {
@@ -803,6 +832,9 @@
       if (this.ticketState) {
         this.ticketState.textContent = current.state_name;
       }
+      if (this.titleHeading) {
+        this.titleHeading.textContent = current.title || '';
+      }
       const titleInput = document.getElementById('ticket-title');
       if (titleInput && !this.inputDraft.dirty.has('title')) {
         titleInput.value = current.title || '';
@@ -831,13 +863,55 @@
         } else {
           this.runStatus.classList.add('is-idle');
         }
-        const textNode = Array.from(this.runStatus.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
-        if (textNode) {
-          textNode.textContent = ` ${label}`;
-        } else {
-          this.runStatus.appendChild(document.createTextNode(` ${label}`));
+        if (this.runStatusLabel) {
+          this.runStatusLabel.textContent = label;
         }
       }
+    }
+
+    setEditing(open, { focus = true } = {}) {
+      this.editingOverview = Boolean(open) && Boolean(this.currentTicket());
+      if (this.editRegion) {
+        this.editRegion.hidden = !this.editingOverview;
+      }
+      if (this.readDescription) {
+        this.readDescription.hidden = this.editingOverview;
+      }
+      if (this.editToggle) {
+        this.editToggle.setAttribute('aria-expanded', this.editingOverview ? 'true' : 'false');
+      }
+      if (this.editingOverview && focus) {
+        const titleInput = document.getElementById('ticket-title');
+        if (titleInput instanceof HTMLElement) {
+          titleInput.focus();
+        }
+      }
+    }
+
+    applyEditingState(readFromDom = false) {
+      if (!this.currentTicket() || !this.editRegion) {
+        this.editingOverview = false;
+        return;
+      }
+      if (readFromDom) {
+        this.editingOverview = !this.editRegion.hidden;
+      }
+      this.setEditing(this.editingOverview, { focus: false });
+    }
+
+    cancelEdit() {
+      for (const key of ['title', 'description']) {
+        if (Object.prototype.hasOwnProperty.call(this.inputDraft.baseValues, key)) {
+          this.inputDraft.values[key] = this.inputDraft.baseValues[key];
+        }
+        this.inputDraft.dirty.delete(key);
+      }
+      const ticketId = this.currentTicketId();
+      if (ticketId) {
+        this.ticketDrafts.set(ticketId, this.cloneDraft(this.inputDraft));
+      }
+      this.restoreDraft();
+      this.setEditing(false);
     }
 
     selectTab(name) {

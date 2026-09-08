@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
 import { assertNoLayoutIssues, assertNoConsoleErrors, installConsoleErrorGate } from './layout';
@@ -16,17 +16,32 @@ function operationId(label: string): string {
   return `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-test.beforeEach(async ({ page }, testInfo) => {
+async function resetUiRuntime(request: APIRequestContext): Promise<void> {
+  const response = await request.post('/__ui/reset');
+  expect(response.status()).toBe(204);
+}
+
+test.beforeEach(async ({ page, request }, testInfo) => {
+  await resetUiRuntime(request);
   installConsoleErrorGate(page);
   await page.addInitScript((theme) => {
     if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
   }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
 });
 
+test.afterEach(async ({ page, request }) => {
+  await page.close();
+  await resetUiRuntime(request);
+});
+
 test('board page exposes approved toolbar and inspector controls', async ({ page }) => {
   await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
 
   await expect(page.getByRole('heading', { name: 'Delivery' })).toBeVisible();
+  await expect(page.getByText('8 tickets', { exact: true })).toBeVisible();
+  await expect(page.getByText('2 working', { exact: true })).toBeVisible();
+  await expect(page.getByText('FG-101', { exact: true })).toBeVisible();
+  await expect(page.getByText('FG-108', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Search tickets', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'New ticket', exact: true })).toBeVisible();
   await expect(page.getByLabel('Assigned agent', { exact: true })).toBeVisible();
@@ -151,23 +166,113 @@ test('assignee filter applies without a manual form submit', async ({ page }) =>
   await expect(page.getByText('Validate stale transition handling', { exact: true })).toHaveCount(0);
 });
 
+test('new ticket dialog creates a backlog ticket from the live board', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery');
+
+  await page.getByRole('button', { name: 'New ticket', exact: true }).click();
+  await page.getByLabel('Title', { exact: true }).fill('Capture typed workflow values');
+  await page.getByLabel('Description', { exact: true }).fill('Keep boolean false and numeric zero visible without coercion.');
+  await page.getByRole('button', { name: 'Create ticket', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Capture typed workflow values', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Assigned agent', { exact: true })).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
+
+  const createdUrl = new URL(page.url());
+  const ticketId = createdUrl.searchParams.get('ticket') ?? createdUrl.pathname.split('/').at(-1) ?? '';
+  expect(ticketId).toBeTruthy();
+
+  const detail = await request.get(`/newsletter/workflows/delivery/tickets/${ticketId}/snapshot`);
+  expect(detail.ok()).toBeTruthy();
+  const payload = await detail.json() as DetailSnapshot & {
+    ticket: DetailSnapshot['ticket'] & {
+      state_id: string;
+      title: string;
+      description: string;
+      pending_run_job_id: string | null;
+    };
+  };
+  expect(payload.ticket.title).toBe('Capture typed workflow values');
+  expect(payload.ticket.description).toBe('Keep boolean false and numeric zero visible without coercion.');
+  expect(payload.ticket.state_id).toBe('backlog');
+  expect(payload.ticket.pending_run_job_id).toBeNull();
+});
+
+test('save failures stay visible without dropping the dirty draft', async ({ context, page }) => {
+  await context.route('**/tickets/fixture-review/update', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 'storage-unavailable',
+        issues: [
+          {
+            code: 'storage-unavailable',
+            field: 'payload',
+            message: 'Ticket service unavailable.',
+            hint: 'Retry after restoring the ticket storage provider.',
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Keep this visible after the failed save');
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).click();
+
+  await expect(page.locator('#workflow-action-errors')).toContainText('Ticket service unavailable.');
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Keep this visible after the failed save');
+});
+
+test('overview opens in read mode with one run status and rendered description', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  await expect(page.locator('[data-ticket-run-status]')).toHaveText('No active run');
+  await expect(page.locator('[data-ticket-description-read]')).toBeVisible();
+  await expect(page.locator('[data-ticket-description-read] p')).toContainText('Reject transitions when the ticket revision');
+  await expect(page.locator('[data-ticket-edit]')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Edit ticket', exact: true })).toBeVisible();
+
+  await assertNoConsoleErrors(page);
+});
+
 test('description edits save through the overview controls', async ({ page, request }) => {
   await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
 
+  await page.getByRole('button', { name: 'Edit ticket', exact: true }).click();
   const saved = page.waitForResponse(
     (response) =>
       response.url().includes('/tickets/fixture-review/update') &&
       response.request().method() === 'POST',
   );
   await page.locator('#ticket-description').fill('Updated description from the browser');
-  await page.getByRole('button', { name: 'Save inputs', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await saved;
 
   const detail = (await (
     await request.get('/newsletter/workflows/delivery/tickets/fixture-review/snapshot')
   ).json()) as DetailSnapshot & { ticket: DetailSnapshot['ticket'] & { description: string } };
   expect(detail.ticket.description).toBe('Updated description from the browser');
-  await expect(page.locator('#ticket-description')).toHaveValue('Updated description from the browser');
+  await expect(page.locator('[data-ticket-edit]')).toBeHidden();
+  await expect(page.locator('[data-ticket-description-read]')).toContainText('Updated description from the browser');
+});
+
+test('cancelling the edit form restores confirmed title and description', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  await page.getByRole('button', { name: 'Edit ticket', exact: true }).click();
+  await page.locator('#ticket-title').fill('Temporary title that must not persist');
+  await page.locator('#ticket-description').fill('Temporary description that must not persist');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+  await expect(page.locator('[data-ticket-edit]')).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Validate stale transition handling' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Edit ticket', exact: true }).click();
+  await expect(page.locator('#ticket-title')).toHaveValue('Validate stale transition handling');
+  await expect(page.locator('#ticket-description')).toHaveValue(/Reject transitions when the ticket revision/);
 });
 
 test('board selection keeps ticket drafts across card navigation and browser history', async ({ page }) => {
@@ -286,15 +391,44 @@ test('desktop board and mobile ticket detail keep keyboard access and stable scr
   await expect(page.getByRole('tab', { name: 'Requirements' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('tab', { name: 'Requirements' })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+  await assertNoLayoutIssues(page);
   if (!testInfo.project.name.startsWith('mobile')) {
+    await expect(page).toHaveScreenshot('workflow-board-overview.png', { fullPage: true });
+  } else {
+    await page.goto('/newsletter/workflows/delivery');
+    await expect(page).toHaveURL(/\/newsletter\/workflows\/delivery$/);
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
     await assertNoLayoutIssues(page);
-    await expect(page).toHaveScreenshot('workflow-board-inspector.png', { fullPage: true });
+    await expect(page).toHaveScreenshot('workflow-board-mobile.png', { fullPage: true });
+    await page.goto('/newsletter/workflows/delivery/tickets/fixture-review');
+    await expect(page.getByRole('button', { name: 'Back to board', exact: true })).toBeVisible();
   }
-  await page.getByRole('link', { name: 'Expand', exact: true }).click();
-  await expect(page).toHaveURL(/\/newsletter\/workflows\/delivery\/tickets\/fixture-review$/);
-  await expect(page.getByRole('button', { name: 'Back to board', exact: true })).toBeVisible();
+  if (!testInfo.project.name.startsWith('mobile')) {
+    await page.getByRole('link', { name: 'Expand', exact: true }).click();
+    await expect(page).toHaveURL(/\/newsletter\/workflows\/delivery\/tickets\/fixture-review$/);
+    await expect(page.getByRole('button', { name: 'Back to board', exact: true })).toBeVisible();
+  }
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+  await assertNoLayoutIssues(page);
+  if (!testInfo.project.name.startsWith('mobile')) {
+    await expect(page).toHaveScreenshot('workflow-ticket-desktop.png', { fullPage: true });
+  }
   if (testInfo.project.name.startsWith('mobile')) {
-    await assertNoLayoutIssues(page);
     await expect(page).toHaveScreenshot('workflow-ticket-mobile.png', { fullPage: true });
   }
   await page.getByRole('button', { name: 'Back to board', exact: true }).click();

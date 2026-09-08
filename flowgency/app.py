@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import markdown
+import nh3
 import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
@@ -482,6 +483,29 @@ def render_md(text: str) -> Markup:
     return Markup(md.convert(text))
 
 
+_ticket_md = markdown.Markdown(extensions=["tables", "fenced_code", "nl2br"])
+_TICKET_MD_TAGS = {
+    "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "blockquote", "pre", "code", "strong", "em",
+    "del", "a", "table", "thead", "tbody", "tr", "th", "td",
+}
+
+
+def render_ticket_markdown(text: str | None) -> Markup:
+    """Render sanitized Markdown for user-supplied ticket content."""
+    _ticket_md.reset()
+    converted = _ticket_md.convert(text or "")
+    cleaned = nh3.clean(
+        converted,
+        tags=_TICKET_MD_TAGS,
+        attributes={"a": {"href", "title"}, "code": {"class"}},
+        clean_content_tags={"script", "style", "iframe", "object", "embed", "form"},
+        url_schemes={"http", "https", "mailto"},
+        link_rel="noopener noreferrer",
+    )
+    return Markup(cleaned)
+
+
 def validate_file_access(fpath: Path, base_path: Path, allowed_roots: list[Path] | None = None) -> None:
     """Validate file is within base_path or any allowed root. Raises HTTPException(403) if not."""
     resolved = fpath.resolve()
@@ -756,6 +780,7 @@ def agent_badge(agent: str) -> Markup:
 templates.env.filters["status_badge"] = status_badge
 templates.env.filters["agent_badge"] = agent_badge
 templates.env.filters["render_md"] = render_md
+templates.env.filters["ticket_markdown"] = render_ticket_markdown
 
 
 # ── Agent Helpers ─────────────────────────────────────────────────────────────

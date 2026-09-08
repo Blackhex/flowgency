@@ -25,7 +25,7 @@ from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBindin
 from flowgency.jobs.store import transition_job, write_job
 from flowgency.memory import MemoryStore, resolve_memory_selector
 from flowgency.prompts import PromptStore
-from flowgency.tickets.models import StorageBinding, TicketEvent, TicketOperation, TicketRecord, TicketRef
+from flowgency.tickets.models import ActiveTicketRun, StorageBinding, TicketEvent, TicketOperation, TicketRecord, TicketRef
 from flowgency.tickets.storages.local import LocalTicketStorage
 
 
@@ -34,6 +34,7 @@ RUNTIME_PARENT = Path(__file__).resolve().parent / ".runtime"
 RUNTIME_ROOT = RUNTIME_PARENT / "current"
 FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.yaml"
 FIXED_NOW = "2026-07-16T12:00:00+00:00"
+UI_RESET_PATH = "/__ui/reset"
 
 
 def _ui_sitecustomize(runtime: Path) -> Path:
@@ -121,6 +122,8 @@ def _ui_submit_job_request(request, launcher=None) -> JobHandle:
 def _install_ui_test_runtime() -> None:
     import flowgency.jobs.submission as submission_module
     import flowgency.web.dependencies as web_dependencies
+    from fastapi import Response
+    from flowgency.app import app
     from tests._ticket_helpers import TicketRuntimeIntegration
 
     class UITicketRuntimeIntegration(TicketRuntimeIntegration):
@@ -131,10 +134,30 @@ def _install_ui_test_runtime() -> None:
     submission_module.submit_job_request = _ui_submit_job_request
     web_dependencies.submit_job_request = _ui_submit_job_request
 
+    if getattr(app.state, "ui_reset_route_installed", False):
+        return
+
+    @app.post(UI_RESET_PATH, include_in_schema=False)
+    async def reset_ui_runtime() -> Response:
+        runtime_root = Path(os.environ["FLOWGENCY_UI_RUNTIME"])
+        _reset_runtime_state(runtime_root)
+        return Response(status_code=204)
+
+    app.state.ui_reset_route_installed = True
+
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _clear_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    for child in path.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
 
 
 def _set_mtime(path: Path, value: str) -> None:
@@ -203,6 +226,7 @@ def _ticket_record(
     description: str,
     state_id: str,
     assignee: str | None = None,
+    active_run: ActiveTicketRun | None = None,
     field_values: dict | None = None,
     events: tuple[TicketEvent, ...] | None = None,
 ) -> TicketRecord:
@@ -222,7 +246,7 @@ def _ticket_record(
         description=description,
         state_id=state_id,
         assignee=assignee,
-        active_run=None,
+        active_run=active_run,
         field_values=dict(field_values or {}),
         field_provenance={},
         revision=1,
@@ -315,16 +339,26 @@ def _seed_ticket_workflows(runtime: Path, config: dict) -> None:
         team_id="newsletter",
         workflow_id="research-workflow",
     )
+    (delivery_root / "newsletter" / "delivery" / "tickets").mkdir(parents=True, exist_ok=True)
+    (research_root / "newsletter" / "research-workflow" / "tickets").mkdir(parents=True, exist_ok=True)
+    _write(delivery_root / "newsletter" / "delivery" / "tickets" / ".sequence", "100")
+    _write(research_root / "newsletter" / "research-workflow" / "tickets" / ".sequence", "200")
+
+    active_run = ActiveTicketRun(
+        job_id="fixture-active-job",
+        session_id="fixture-active-session",
+        started_at=datetime.fromisoformat(FIXED_NOW),
+    )
 
     delivery_rows = (
         _ticket_record(delivery_binding, ticket_id="fixture-backlog-1", number=101, title="Define reusable workflow blueprints", description="Represent states, transition contracts, and qualitative criteria in reusable workflow sources.", state_id="backlog"),
         _ticket_record(delivery_binding, ticket_id="fixture-backlog-2", number=102, title="Document ticket storage provider capabilities", description="Describe the persistence guarantees every ticket storage integration must provide.", state_id="backlog", assignee="researcher"),
-        _ticket_record(delivery_binding, ticket_id="fixture-active-1", number=103, title="Implement atomic ticket assignment", description="Coordinate assignment and active work so two agents cannot both begin work on one ticket.", state_id="in-progress", assignee="builder"),
+        _ticket_record(delivery_binding, ticket_id="fixture-active-1", number=103, title="Implement atomic ticket assignment", description="Coordinate assignment and active work so two agents cannot both begin work on one ticket.", state_id="in-progress", assignee="builder", active_run=active_run),
         _ticket_record(delivery_binding, ticket_id="fixture-review", number=104, title="Validate stale transition handling", description="Reject transitions when the ticket revision or workflow definition has changed. Return enough context for the agent to refresh and reevaluate.", state_id="review", assignee="reviewer", field_values={"acceptance-criteria": "A stale ticket revision or workflow digest cannot change state. Repeating an accepted operation returns its original result without a second transition.", "review-verdict": "Passed", "test-report": "artifacts/transition-tests.txt"}),
         _ticket_record(delivery_binding, ticket_id="fixture-review-2", number=105, title="Review the local storage contract", description="Check atomicity, history preservation, and storage error handling against the provider contract.", state_id="review"),
         _ticket_record(delivery_binding, ticket_id="fixture-done-1", number=106, title="Preserve canonical configuration authority", description="Keep workflow instance registration and integration settings in canonical configuration.", state_id="done", assignee="builder"),
         _ticket_record(delivery_binding, ticket_id="fixture-done-2", number=107, title="Separate ticket state from job lifecycle", description="Job completion, failure, and cancellation must not silently move tickets between workflow states.", state_id="done", assignee="reviewer"),
-        _ticket_record(delivery_binding, ticket_id="fixture-active-2", number=108, title="Verify recovery after interrupted agent runs", description="Retain assignment after a failed run. Clear active work only when the owning run is confirmed stopped.", state_id="in-progress", assignee="reviewer"),
+        _ticket_record(delivery_binding, ticket_id="fixture-active-2", number=108, title="Verify recovery after interrupted agent runs", description="Retain assignment after a failed run. Clear active work only when the owning run is confirmed stopped.", state_id="in-progress", assignee="reviewer", active_run=active_run),
     )
     research_rows = (
         _ticket_record(research_binding, ticket_id="fixture-question", number=201, title="Compare future GitHub storage mappings", description="Investigate how tickets, custom states, and evidence can map to GitHub without weakening workflow guarantees.", state_id="question"),
@@ -436,6 +470,20 @@ def _seed_jobs(runtime: Path, config_path: Path) -> None:
     _set_mtime(Path(failed.stderr_path), "2026-07-16T11:30:00+00:00")
     write_job(failed_path, failed)
 
+    active_path = authority.path("newsletter", "fixture-active-job")
+    active = JobRecord.from_spec(_job_spec(runtime, config_path, "fixture-active-job"))
+    active.trigger = "ticket"
+    active.integration_name = "ticket-test"
+    active.agent_name = "reviewer"
+    active.task_input = "Review the current workflow ticket state.\n"
+    active.runtime_policy = RuntimePolicySnapshot(timeout=2400, mode="restricted")
+    active.status = "running"
+    active.worker_pid = 4242
+    active.started_at = FIXED_NOW
+    active.launched_at = FIXED_NOW
+    active.session_id = "fixture-active-session"
+    write_job(active_path, active)
+
 
 def _seed_private_prompts(runtime: Path) -> None:
     PromptStore(runtime / "prompts").create(
@@ -473,6 +521,29 @@ def _safe_remove_runtime(runtime: Path) -> None:
     if candidate.parent != parent or candidate.name != "current":
         raise RuntimeError(f"Refusing to remove unsafe UI runtime path: {candidate}")
     shutil.rmtree(candidate, ignore_errors=True)
+
+
+def _reset_runtime_state(runtime: Path) -> None:
+    raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
+    config = _replace_runtime(raw, runtime)
+
+    _clear_directory(runtime / "workflow-library")
+    _clear_directory(runtime / "tickets")
+
+    memory_root = runtime / "memory-store"
+    _clear_directory(memory_root / "ui-ticket-memory")
+    _clear_directory(memory_root / ".jobs" / "teams" / "newsletter")
+    _clear_directory(memory_root / ".jobs" / "teams" / "research")
+
+    for path in (
+        runtime / "teams" / "newsletter" / "logs" / "2026-07-16",
+        runtime / "teams" / "research" / "logs" / "2026-07-16",
+    ):
+        _clear_directory(path)
+
+    _seed_memory(runtime, config)
+    _seed_ticket_workflows(runtime, config)
+    _seed_jobs(runtime, runtime / "config.yaml")
 
 
 def _prepare_runtime() -> tuple[Path, Path]:
@@ -605,6 +676,7 @@ def main() -> int:
         support_path = _ui_sitecustomize(runtime)
         env = os.environ.copy()
         env["FLOWGENCY_CONFIG"] = str(config_path)
+        env["FLOWGENCY_UI_RUNTIME"] = str(runtime)
         env["FLOWGENCY_FIXED_NOW"] = FIXED_NOW
         env["PYTHONPATH"] = os.pathsep.join((str(support_path), str(ROOT)))
         command = [

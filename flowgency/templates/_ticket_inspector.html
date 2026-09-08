@@ -73,13 +73,7 @@
     </div>
     <p class="workflow-ticket-status{% if current_ticket.active_run_job_id %} is-working{% elif current_ticket.pending_run_job_id %} is-queued{% else %} is-idle{% endif %}" data-ticket-run-status>
       <span class="workflow-status-dot" aria-hidden="true"></span>
-      {% if current_ticket.active_run_job_id %}
-      Working {{ current_ticket.active_run_job_id }}
-      {% elif current_ticket.pending_run_job_id %}
-      Queued {{ current_ticket.pending_run_job_id }}
-      {% else %}
-      No active run
-      {% endif %}
+      <span data-ticket-run-status-label>{% if current_ticket.active_run_job_id %}Working {{ current_ticket.active_run_job_id }}{% elif current_ticket.pending_run_job_id %}Queued {{ current_ticket.pending_run_job_id }}{% else %}No active run{% endif %}</span>
     </p>
   </div>
   <nav class="workflow-ticket-tabs" aria-label="Ticket views" role="tablist">
@@ -88,15 +82,29 @@
     <button type="button" role="tab" aria-selected="false" data-ticket-tab="history">History</button>
   </nav>
   <section class="workflow-ticket-panel" data-ticket-panel="overview">
+    {% set edit_requested = ticket_form_draft and ticket_form_draft.patch and (ticket_form_draft.patch.title is defined or ticket_form_draft.patch.description is defined) %}
     <section class="workflow-ticket-section">
-      <label class="workflow-field-block" for="ticket-title">
-        <span>Title</span>
-        <input id="ticket-title" type="text" aria-label="Title" data-ticket-input="title" data-ticket-kind="text" value="{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.title is defined and ticket_form_draft.patch.title is not none %}{{ ticket_form_draft.patch.title }}{% else %}{{ current_ticket.title }}{% endif %}">
-      </label>
-      <label class="workflow-field-block" for="ticket-description">
-        <span>Description</span>
-        <textarea id="ticket-description" aria-label="Description" data-ticket-input="description" data-ticket-kind="text">{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.description is defined and ticket_form_draft.patch.description is not none %}{{ ticket_form_draft.patch.description }}{% else %}{{ current_ticket.description }}{% endif %}</textarea>
-      </label>
+      <div class="workflow-ticket-overview-head">
+        <h3>Description</h3>
+        <button type="button" class="workflow-icon-button" id="ticket-edit-toggle" aria-label="Edit ticket" title="Edit ticket" aria-expanded="{{ 'true' if edit_requested else 'false' }}">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.5 2.5 13.5 4.5 5 13H3v-2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 4 12 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="workflow-ticket-description" data-ticket-description-read{% if edit_requested %} hidden{% endif %}>{{ current_ticket.description | ticket_markdown }}</div>
+      <div class="workflow-ticket-edit" data-ticket-edit{% if not edit_requested %} hidden{% endif %}>
+        <label class="workflow-field-block" for="ticket-title">
+          <span>Title</span>
+          <input id="ticket-title" type="text" aria-label="Title" data-ticket-input="title" data-ticket-kind="text" value="{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.title is defined and ticket_form_draft.patch.title is not none %}{{ ticket_form_draft.patch.title }}{% else %}{{ current_ticket.title }}{% endif %}">
+        </label>
+        <label class="workflow-field-block" for="ticket-description">
+          <span>Description</span>
+          <textarea id="ticket-description" aria-label="Description" data-ticket-input="description" data-ticket-kind="text">{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.description is defined and ticket_form_draft.patch.description is not none %}{{ ticket_form_draft.patch.description }}{% else %}{{ current_ticket.description }}{% endif %}</textarea>
+        </label>
+        <div class="workflow-edit-actions">
+          <button type="button" class="workflow-link-button" id="ticket-edit-cancel">Cancel</button>
+          <button type="button" class="workflow-primary-button" id="ticket-edit-save">Save</button>
+        </div>
+      </div>
     </section>
     <section class="workflow-ticket-section">
       <h3>Inputs</h3>
