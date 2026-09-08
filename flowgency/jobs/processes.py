@@ -261,6 +261,10 @@ def _group_exit_status(group_id: int, deadline: float) -> Literal["empty", "acti
         time.sleep(0.02)
 
 
+def _drain_deadline(seconds: float = 1.0) -> float:
+    return time.monotonic() + seconds
+
+
 def _run_supervised_posix(
     argv: list[str] | tuple[str, ...],
     *,
@@ -299,15 +303,48 @@ def _run_supervised_posix(
     identity = read_process_identity(process.pid)
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
-    stdout_thread = threading.Thread(target=_reader, args=(process.stdout, stdout_chunks))
-    stderr_thread = threading.Thread(target=_reader, args=(process.stderr, stderr_chunks))
+    stdout_thread = threading.Thread(target=_reader, args=(process.stdout, stdout_chunks), daemon=True)
+    stderr_thread = threading.Thread(target=_reader, args=(process.stderr, stderr_chunks), daemon=True)
     stdout_thread.start()
     stderr_thread.start()
     deadline = start + timeout
     try:
         exit_code = process.wait(timeout=timeout)
         group_status = _group_exit_status(process.pid, deadline)
-        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=deadline)
+        if group_status == "active":
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5)
+            wait_deadline = time.monotonic() + 5
+            group_status = _group_exit_status(process.pid, wait_deadline)
+            readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
+            if group_status == "empty" and readers_done and identity is not None:
+                confirmed = True
+                reason = "timeout"
+            elif group_status == "unknown" or identity is None:
+                confirmed = False
+                reason = "group-state-unavailable"
+            elif group_status == "active":
+                confirmed = False
+                reason = "descendants-still-running"
+            else:
+                confirmed = False
+                reason = "io-drain-incomplete"
+            return CompletedRuntimeProcess(
+                exit_code=124,
+                stdout=_decode(stdout_chunks),
+                stderr=_decode(stderr_chunks),
+                duration_seconds=time.monotonic() - start,
+                process_stop_evidence=_evidence(
+                    lifecycle,
+                    confirmed=confirmed,
+                    reason=reason,
+                ),
+                outcome="timeout",
+                root_identity=identity,
+            )
+        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=_drain_deadline())
         if group_status == "empty" and readers_done and identity is not None:
             confirmed = True
             reason = "exited"
@@ -410,6 +447,57 @@ def _join_reader_threads(*threads, deadline: float) -> bool:
         if thread.is_alive():
             all_done = False
     return all_done
+
+
+def _windows_timeout_result(
+    *,
+    job_handle,
+    process_handle,
+    stdout_thread,
+    stderr_thread,
+    stdout_chunks: list[bytes],
+    stderr_chunks: list[bytes],
+    lifecycle: RuntimeProcessLifecycle,
+    start: float,
+    identity: RuntimeProcessIdentity | None,
+) -> CompletedRuntimeProcess:
+    import contextlib as _contextlib
+    import win32con
+    import win32event
+    import win32job
+
+    with _contextlib.suppress(Exception):
+        win32job.TerminateJobObject(job_handle, 124)
+    with _contextlib.suppress(Exception):
+        win32event.WaitForSingleObject(process_handle, 5000)
+    wait_deadline = time.monotonic() + 5
+    job_status = _job_exit_status(job_handle, wait_deadline)
+    readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
+    if job_status == "empty" and readers_done:
+        confirmed = True
+        reason = "timeout"
+    elif job_status == "unknown":
+        confirmed = False
+        reason = "job-accounting-unavailable"
+    elif job_status == "active":
+        confirmed = False
+        reason = "job-active-processes"
+    else:
+        confirmed = False
+        reason = "io-drain-incomplete"
+    return CompletedRuntimeProcess(
+        exit_code=124,
+        stdout=_decode(stdout_chunks),
+        stderr=_decode(stderr_chunks),
+        duration_seconds=time.monotonic() - start,
+        process_stop_evidence=_evidence(
+            lifecycle,
+            confirmed=confirmed,
+            reason=reason,
+        ),
+        outcome="timeout",
+        root_identity=identity,
+    )
 
 
 def _open_pipe_reader(read_handle):
@@ -539,8 +627,8 @@ def _run_supervised_windows(
                 root_identity=identity,
             )
 
-        stdout_thread = threading.Thread(target=_reader, args=(stdout_reader, stdout_chunks))
-        stderr_thread = threading.Thread(target=_reader, args=(stderr_reader, stderr_chunks))
+        stdout_thread = threading.Thread(target=_reader, args=(stdout_reader, stdout_chunks), daemon=True)
+        stderr_thread = threading.Thread(target=_reader, args=(stderr_reader, stderr_chunks), daemon=True)
         stdout_thread.start()
         stderr_thread.start()
 
@@ -551,40 +639,33 @@ def _run_supervised_windows(
         stderr_write = None
 
         if win32event.WaitForSingleObject(process_handle, _remaining_millis(deadline)) == win32con.WAIT_TIMEOUT:
-            win32job.TerminateJobObject(job_handle, 124)
-            win32event.WaitForSingleObject(process_handle, 5000)
-            wait_deadline = time.monotonic() + 5
-            job_status = _job_exit_status(job_handle, wait_deadline)
-            readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
-            if job_status == "empty" and readers_done:
-                confirmed = True
-                reason = "timeout"
-            elif job_status == "unknown":
-                confirmed = False
-                reason = "job-accounting-unavailable"
-            elif job_status == "active":
-                confirmed = False
-                reason = "job-active-processes"
-            else:
-                confirmed = False
-                reason = "io-drain-incomplete"
-            return CompletedRuntimeProcess(
-                exit_code=124,
-                stdout=_decode(stdout_chunks),
-                stderr=_decode(stderr_chunks),
-                duration_seconds=time.monotonic() - start,
-                process_stop_evidence=_evidence(
-                    lifecycle,
-                    confirmed=confirmed,
-                    reason=reason,
-                ),
-                outcome="timeout",
-                root_identity=identity,
+            return _windows_timeout_result(
+                job_handle=job_handle,
+                process_handle=process_handle,
+                stdout_thread=stdout_thread,
+                stderr_thread=stderr_thread,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                lifecycle=lifecycle,
+                start=start,
+                identity=identity,
             )
 
         exit_code = win32process.GetExitCodeProcess(process_handle)
         job_status = _job_exit_status(job_handle, deadline)
-        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=deadline)
+        if job_status == "active":
+            return _windows_timeout_result(
+                job_handle=job_handle,
+                process_handle=process_handle,
+                stdout_thread=stdout_thread,
+                stderr_thread=stderr_thread,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                lifecycle=lifecycle,
+                start=start,
+                identity=identity,
+            )
+        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=_drain_deadline())
         if job_status == "empty" and readers_done:
             confirmed = True
             reason = "exited"

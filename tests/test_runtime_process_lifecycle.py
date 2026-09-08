@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import threading
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,48 @@ def _wait_for_process_exit(identity: RuntimeProcessIdentity, *, timeout: float) 
             return
         time.sleep(0.02)
     raise AssertionError(f"Timed out waiting for process {identity.pid} to exit")
+
+
+def _native_python_launch() -> tuple[str, dict[str, str]]:
+    env = os.environ.copy()
+    if os.name != "nt":
+        return sys.executable, env
+    import win32api
+    import win32process
+
+    env["__PYVENV_LAUNCHER__"] = sys.executable
+    return win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0), env
+
+
+def _capture_windows_identity_when_ready(
+    ready: Path,
+    pid_file: Path,
+    *,
+    timeout: float,
+):
+    captured: dict[str, object] = {}
+
+    def worker() -> None:
+        _wait_for_path(ready, timeout=timeout)
+        pid = int(pid_file.read_text(encoding="utf-8"))
+        identity = read_process_identity(pid)
+        if identity is None:
+            raise AssertionError(f"Could not capture identity for pid {pid}")
+        captured["pid"] = pid
+        captured["identity"] = identity
+        if os.name == "nt":
+            import win32api
+            import win32con
+
+            captured["handle"] = win32api.OpenProcess(
+                win32con.PROCESS_QUERY_LIMITED_INFORMATION,
+                False,
+                pid,
+            )
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    return captured, thread
 
 
 def test_run_supervised_reports_confirmed_exit_for_completed_process_tree(tmp_path: Path):
@@ -98,7 +141,9 @@ def test_run_supervised_waits_for_root_exit_with_live_descendant(tmp_path: Path)
     assert grandchild_marker.read_text(encoding="utf-8") == "done"
 
 
-def test_run_supervised_timeout_kills_descendants(tmp_path: Path):
+@pytest.mark.skipif(os.name != "nt", reason="Strict native containment proof is Windows-specific")
+def test_run_supervised_timeout_kills_native_descendants_after_root_exit(tmp_path: Path):
+    native_python, native_env = _native_python_launch()
     grandchild_script = _write_script(
         tmp_path / "grandchild_wait.py",
         "import os\n"
@@ -124,55 +169,79 @@ def test_run_supervised_timeout_kills_descendants(tmp_path: Path):
     )
     child_script = _write_script(
         tmp_path / "child_wait.py",
+        "import os\n"
         "import subprocess\n"
         "import sys\n"
-        "child = subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]], stdout=sys.stdout, stderr=sys.stderr, close_fds=False)\n"
+        "python = sys.argv[1]\n"
+        "argv = [python, sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]]\n"
+        "child = subprocess.Popen(argv, stdout=sys.stdout, stderr=sys.stderr, close_fds=False, env=os.environ.copy())\n"
         "child.wait()\n",
     )
     root_script = _write_script(
         tmp_path / "root_wait.py",
+        "import os\n"
+        "import pathlib\n"
         "import subprocess\n"
         "import sys\n"
-        "child = subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]], stdout=sys.stdout, stderr=sys.stderr, close_fds=False)\n"
-        "child.wait()\n",
+        "python = sys.argv[1]\n"
+        "child = subprocess.Popen([python, sys.argv[2], python, sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7]], stdout=sys.stdout, stderr=sys.stderr, close_fds=False, env=os.environ.copy())\n"
+        "pathlib.Path(sys.argv[8]).write_text('root-exited', encoding='utf-8')\n",
     )
     pid_file = tmp_path / "grandchild.pid"
     ready = tmp_path / "ready.txt"
     release = tmp_path / "release.txt"
     in_job_file = tmp_path / "grandchild.in_job"
-
-    result = run_supervised(
-        [
-            sys.executable,
-            str(root_script),
-            str(child_script),
-            str(grandchild_script),
-            str(pid_file),
-            str(ready),
-            str(release),
-            str(in_job_file),
-        ],
-        cwd=tmp_path,
-        env=os.environ.copy(),
-        timeout=1,
-        lifecycle=RuntimeProcessLifecycle(job_id="job-timeout", generation="gen-timeout"),
+    root_exited = tmp_path / "root-exited.txt"
+    captured, capture_thread = _capture_windows_identity_when_ready(
+        ready,
+        pid_file,
+        timeout=5,
     )
 
-    _wait_for_path(ready, timeout=5)
-    grandchild_pid = int(pid_file.read_text(encoding="utf-8"))
-    grandchild_in_job = in_job_file.read_text(encoding="utf-8") == "1"
-    grandchild_identity = read_process_identity(grandchild_pid)
-
-    if grandchild_in_job and grandchild_identity is not None and process_identity_state(grandchild_identity) != "alive":
+    try:
+        started = time.monotonic()
+        result = run_supervised(
+            [
+                native_python,
+                str(root_script),
+                native_python,
+                str(child_script),
+                str(grandchild_script),
+                str(pid_file),
+                str(ready),
+                str(release),
+                str(in_job_file),
+                str(root_exited),
+            ],
+            cwd=tmp_path,
+            env=native_env,
+            timeout=1,
+            lifecycle=RuntimeProcessLifecycle(job_id="job-timeout", generation="gen-timeout"),
+        )
+        elapsed = time.monotonic() - started
+        capture_thread.join(timeout=1)
+        assert not capture_thread.is_alive()
+        grandchild_identity = captured.get("identity")
+        assert isinstance(grandchild_identity, RuntimeProcessIdentity)
+        assert root_exited.read_text(encoding="utf-8") == "root-exited"
+        assert in_job_file.read_text(encoding="utf-8") == "1"
+        assert elapsed < 3
+        assert result.exit_code == 124
         assert result.process_stop_evidence.confirmed is True
         assert result.process_stop_evidence.reason == "timeout"
-    else:
-        release.write_text("release", encoding="utf-8")
-        if grandchild_identity is not None:
-            _wait_for_process_exit(grandchild_identity, timeout=5)
-        assert result.process_stop_evidence.confirmed is False
-        assert result.process_stop_evidence.reason == "io-drain-incomplete"
-    assert result.exit_code == 124
+        _wait_for_process_exit(grandchild_identity, timeout=5)
+        import win32con
+        import win32process
+
+        handle = captured.get("handle")
+        assert handle is not None
+        assert win32process.GetExitCodeProcess(handle) != win32con.STILL_ACTIVE
+    finally:
+        handle = captured.get("handle")
+        if handle is not None:
+            handle.Close()
+        if capture_thread.is_alive():
+            capture_thread.join(timeout=0.1)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows containment setup is Windows-specific")
@@ -217,8 +286,8 @@ def test_windows_completed_tree_is_unconfirmed_when_job_accounting_stays_nonzero
         "print('root-finished', flush=True)\n",
     )
     monkeypatch.setattr(
-        "flowgency.jobs.processes._job_active_processes",
-        lambda _job_handle: 1,
+        "flowgency.jobs.processes._job_exit_status",
+        lambda _job_handle, _deadline: "active",
     )
 
     result = run_supervised(
@@ -229,7 +298,7 @@ def test_windows_completed_tree_is_unconfirmed_when_job_accounting_stays_nonzero
         lifecycle=RuntimeProcessLifecycle(job_id="job-nonzero", generation="gen-nonzero"),
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 124
     assert result.process_stop_evidence.confirmed is False
     assert result.process_stop_evidence.reason == "job-active-processes"
 
@@ -321,8 +390,9 @@ def test_posix_read_process_identity_parses_proc_stat_with_spaces(monkeypatch):
 
 @pytest.mark.skipif(os.name != "nt", reason="Kill-on-close ownership is Windows-specific")
 def test_windows_owner_death_kills_job_tree(tmp_path: Path):
-    root_script = _write_script(
-        tmp_path / "owner_root.py",
+    native_python, native_env = _native_python_launch()
+    grandchild_script = _write_script(
+        tmp_path / "owner_grandchild.py",
         "import os\n"
         "import pathlib\n"
         "import sys\n"
@@ -334,45 +404,65 @@ def test_windows_owner_death_kills_job_tree(tmp_path: Path):
         "while True:\n"
         "    time.sleep(0.05)\n",
     )
+    root_script = _write_script(
+        tmp_path / "owner_root.py",
+        "import os\n"
+        "import subprocess\n"
+        "import sys\n"
+        "python = sys.argv[1]\n"
+        "child = subprocess.Popen([python, sys.argv[2], sys.argv[3], sys.argv[4]], stdout=sys.stdout, stderr=sys.stderr, close_fds=False, env=os.environ.copy())\n"
+        "child.wait()\n",
+    )
     worker_script = _write_script(
         tmp_path / "owner_worker.py",
         "import os\n"
         "import pathlib\n"
-        "import subprocess\n"
         "import sys\n"
         "import time\n"
-        "import win32con\n"
-        "import win32job\n"
-        "import win32process\n"
+        "from flowgency.jobs.processes import RuntimeProcessLifecycle, run_supervised\n"
         "root_script = pathlib.Path(sys.argv[1])\n"
-        "ready = pathlib.Path(sys.argv[2])\n"
-        "pid_file = pathlib.Path(sys.argv[3])\n"
-        "job = win32job.CreateJobObject(None, '')\n"
-        "limits = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)\n"
-        "limits['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE\n"
-        "win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, limits)\n"
-        "startup = win32process.STARTUPINFO()\n"
-        "process_handle, thread_handle, pid, _ = win32process.CreateProcess(None, subprocess.list2cmdline([sys.executable, str(root_script), str(pid_file), str(ready)]), None, None, False, getattr(subprocess, 'CREATE_NO_WINDOW', 0) | win32con.CREATE_SUSPENDED, os.environ.copy(), str(root_script.parent), startup)\n"
-        "win32job.AssignProcessToJobObject(job, process_handle)\n"
-        "win32process.ResumeThread(thread_handle)\n"
-        "deadline = time.monotonic() + 10\n"
-        "while not ready.exists() and time.monotonic() < deadline:\n"
-        "    time.sleep(0.02)\n"
-        "time.sleep(0.2)\n"
-        "os._exit(0)\n",
+        "grandchild_script = pathlib.Path(sys.argv[2])\n"
+        "ready = pathlib.Path(sys.argv[3])\n"
+        "pid_file = pathlib.Path(sys.argv[4])\n"
+        "python = sys.argv[5]\n"
+        "env = os.environ.copy()\n"
+        "run_supervised([python, str(root_script), python, str(grandchild_script), str(pid_file), str(ready)], cwd=root_script.parent, env=env, timeout=30, lifecycle=RuntimeProcessLifecycle(job_id='job-owner', generation='gen-owner'))\n",
     )
     ready = tmp_path / "owner-ready.txt"
-    pid_file = tmp_path / "owner-root.pid"
+    pid_file = tmp_path / "owner-grandchild.pid"
+    captured, capture_thread = _capture_windows_identity_when_ready(
+        ready,
+        pid_file,
+        timeout=10,
+    )
 
     worker = __import__("subprocess").Popen(
-        [sys.executable, str(worker_script), str(root_script), str(ready), str(pid_file)],
+        [native_python, str(worker_script), str(root_script), str(grandchild_script), str(ready), str(pid_file), native_python],
         cwd=tmp_path,
+        env=native_env,
     )
-    assert worker.wait(timeout=10) == 0
-    _wait_for_path(ready, timeout=5)
-    descendant_pid = int(pid_file.read_text(encoding="utf-8"))
-    descendant_identity = read_process_identity(descendant_pid)
-
-    if descendant_identity is not None:
+    try:
+        _wait_for_path(ready, timeout=5)
+        capture_thread.join(timeout=1)
+        assert not capture_thread.is_alive()
+        descendant_identity = captured.get("identity")
+        assert isinstance(descendant_identity, RuntimeProcessIdentity)
+        worker.kill()
+        assert worker.wait(timeout=10) != 0
         _wait_for_process_exit(descendant_identity, timeout=5)
+        import win32con
+        import win32process
+
+        handle = captured.get("handle")
+        assert handle is not None
+        assert win32process.GetExitCodeProcess(handle) != win32con.STILL_ACTIVE
+    finally:
+        handle = captured.get("handle")
+        if handle is not None:
+            handle.Close()
+        if capture_thread.is_alive():
+            capture_thread.join(timeout=0.1)
+        if worker.poll() is None:
+            worker.kill()
+            worker.wait(timeout=10)
 

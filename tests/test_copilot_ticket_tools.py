@@ -134,13 +134,26 @@ def _launch_with_lifecycle() -> TicketToolLaunch:
     )
 
 
+def _expected_bridge_launch() -> TicketToolLaunch:
+    return build_ticket_tool_launch(_endpoint())
+
+
 def test_build_ticket_tool_launch_uses_bridge_contract():
     launch = build_ticket_tool_launch(_endpoint())
 
-    assert launch.command == sys.executable
+    if sys.platform == "win32":
+        import win32api
+        import win32process
+
+        assert launch.command == win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0)
+        assert launch.env["__PYVENV_LAUNCHER__"] == sys.executable
+    else:
+        assert launch.command == sys.executable
+        assert "__PYVENV_LAUNCHER__" not in launch.env
     assert launch.args == ("-m", "flowgency.tickets.mcp_server")
     assert launch.server_name == "flowgency-tickets"
     assert launch.env == {
+        **({"__PYVENV_LAUNCHER__": sys.executable} if sys.platform == "win32" else {}),
         "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
         "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
     }
@@ -148,27 +161,15 @@ def test_build_ticket_tool_launch_uses_bridge_contract():
 
 def test_write_copilot_ticket_config_writes_expected_json(tmp_path: Path):
     config_path = tmp_path / "ticket-tools.json"
-    write_copilot_ticket_config(
-        TicketToolLaunch(
-            command=sys.executable,
-            args=("-m", "flowgency.tickets.mcp_server"),
-            env={
-                "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-                "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-            },
-        ),
-        config_path,
-    )
+    launch = _expected_bridge_launch()
+    write_copilot_ticket_config(launch, config_path)
 
     assert json.loads(config_path.read_text(encoding="utf-8")) == {
         "mcpServers": {
             "flowgency-tickets": {
-                "command": sys.executable,
+                "command": launch.command,
                 "args": ["-m", "flowgency.tickets.mcp_server"],
-                "env": {
-                    "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-                    "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-                },
+                "env": dict(launch.env),
                 "tools": ["*"],
             }
         }
@@ -270,12 +271,9 @@ def test_ticket_tools_use_private_ephemeral_config_and_delete_it_on_success(
     assert captured["config_payload"] == {
         "mcpServers": {
             "flowgency-tickets": {
-                "command": sys.executable,
+                "command": request.ticket_tools.command,
                 "args": ["-m", "flowgency.tickets.mcp_server"],
-                "env": {
-                    "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-                    "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-                },
+                "env": dict(request.ticket_tools.env),
                 "tools": ["*"],
             }
         }

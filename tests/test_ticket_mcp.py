@@ -8,6 +8,7 @@ import sys
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+from flowgency.integrations.ticket_tools import build_ticket_tool_launch
 from flowgency.tickets.broker import TicketBroker
 from flowgency.tickets.models import TicketRef
 from flowgency.workflows.models import ArtifactRef
@@ -22,13 +23,11 @@ def test_mcp_stdio_lifecycle_persists_mid_run(workflow_env):
     async def exercise() -> None:
         authority = env.running_job("builder", "run-a")
         with TicketBroker(env.service, env.access_registry, authority=authority) as broker:
+            launch = build_ticket_tool_launch(broker.endpoint)
             params = StdioServerParameters(
-                command=sys.executable,
-                args=["-m", "flowgency.tickets.mcp_server"],
-                env={
-                    "FLOWGENCY_TICKET_ENDPOINT": broker.endpoint.url,
-                    "FLOWGENCY_TICKET_TOKEN": broker.endpoint.grant.token,
-                },
+                command=launch.command,
+                args=list(launch.args),
+                env=dict(launch.env),
                 cwd=str(worktree),
             )
             async with stdio_client(params) as streams:
