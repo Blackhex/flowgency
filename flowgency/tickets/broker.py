@@ -4,6 +4,7 @@ import ipaddress
 import json
 import socket
 import threading
+from http.client import HTTPResponse
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -29,6 +30,8 @@ from flowgency.tickets.service import TicketService
 
 
 MAX_BROKER_BODY_BYTES = 2 * 1024 * 1024
+MAX_BROKER_RESPONSE_BYTES = 64 * 1024
+BROKER_CLIENT_TIMEOUT_SECONDS = 5.0
 
 
 class TicketUnauthorized(TicketStorageError):
@@ -43,6 +46,8 @@ def validate_loopback_endpoint(endpoint: str) -> str:
     parsed = urllib.parse.urlparse(endpoint)
     if parsed.scheme != "http":
         raise ValueError("Ticket endpoint must use http")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Ticket endpoint must not include credentials")
     if not parsed.hostname:
         raise ValueError("Ticket endpoint host is required")
     try:
@@ -69,7 +74,29 @@ def read_bearer(request: Request) -> str:
 
 
 async def read_bounded_json(request: Request, max_bytes: int) -> dict[str, Any]:
-    body = await request.body()
+    declared_length = request.headers.get("content-length")
+    if declared_length is not None:
+        try:
+            if int(declared_length) > max_bytes:
+                raise InvalidTicketRequest(
+                    "invalid-request",
+                    "Ticket request body exceeds the maximum size",
+                )
+        except ValueError as error:
+            raise InvalidTicketRequest(
+                "invalid-request",
+                "Ticket request body length is invalid",
+            ) from error
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            raise InvalidTicketRequest("invalid-request", "Ticket request body exceeds the maximum size")
+        chunks.append(chunk)
+    body = b"".join(chunks)
     if len(body) > max_bytes:
         raise InvalidTicketRequest("invalid-request", "Ticket request body exceeds the maximum size")
     try:
@@ -107,11 +134,11 @@ class TicketToolClient:
             method="POST",
         )
         try:
-            with self._opener.open(request) as response:
-                return json.loads(response.read().decode("utf-8"))
+            with self._opener.open(request, timeout=BROKER_CLIENT_TIMEOUT_SECONDS) as response:
+                return _read_json_response(response)
         except urllib.error.HTTPError as error:
             try:
-                return json.loads(error.read().decode("utf-8"))
+                return _read_json_response(error)
             except Exception:
                 return {
                     "ok": False,
@@ -121,7 +148,7 @@ class TicketToolClient:
                         "details": {},
                     },
                 }
-        except urllib.error.URLError:
+        except (urllib.error.URLError, TimeoutError, OSError):
             return {
                 "ok": False,
                 "error": {
@@ -130,6 +157,16 @@ class TicketToolClient:
                     "details": {},
                 },
             }
+
+
+def _read_json_response(response: HTTPResponse | urllib.error.HTTPError) -> dict:
+    payload = response.read(MAX_BROKER_RESPONSE_BYTES + 1)
+    if len(payload) > MAX_BROKER_RESPONSE_BYTES:
+        raise ValueError("ticket broker response exceeded the maximum size")
+    decoded = json.loads(payload.decode("utf-8"))
+    if not isinstance(decoded, dict):
+        raise ValueError("ticket broker response must be a JSON object")
+    return decoded
 
 
 def _error_response(error: TicketStorageError) -> JSONResponse:
@@ -172,14 +209,16 @@ def _build_app(
             request_origin = request.headers.get("origin")
             if request_origin is not None and request_origin != origin:
                 raise TicketRequestForbidden("forbidden-origin", "Ticket request origin is not allowed")
-            actor = registry.authenticate(read_bearer(request))
+            token = read_bearer(request)
             payload = await read_bounded_json(request, MAX_BROKER_BODY_BYTES)
-            command = parse_ticket_command(operation, payload)
-            binding = binding_for_command(service, actor, command)
-            version = getattr(command, "version", None)
-            if binding is not None and version is not None:
-                registry.register_target(actor, binding, version.ref)
-            result = await run_in_threadpool(dispatch_ticket_command, service, actor, command)
+            result = await run_in_threadpool(
+                _dispatch_authenticated_request,
+                service,
+                registry,
+                token,
+                operation,
+                payload,
+            )
             return JSONResponse({"ok": True, "result": result})
         except TicketStorageError as error:
             if error.http_status == 500:
@@ -207,41 +246,54 @@ class TicketBroker:
         self._thread = None
         self._socket = None
         self._ready = threading.Event()
+        self._start_error = None
 
     def start(self) -> LiveTicketEndpoint:
         grant = self.registry.open(self.authority)
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(("127.0.0.1", 0))
-        listener.listen()
-        origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
-        app = _build_app(self.service, self.registry, origin, self._ready)
-        config = uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=listener.getsockname()[1],
-            log_level="warning",
-            access_log=False,
-            proxy_headers=False,
-        )
-        server = uvicorn.Server(config)
+        listener = None
+        server = None
+        thread = None
+        try:
+            self._ready = threading.Event()
+            self._start_error = None
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
+            app = _build_app(self.service, self.registry, origin, self._ready)
+            config = uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=listener.getsockname()[1],
+                log_level="warning",
+                access_log=False,
+                proxy_headers=False,
+            )
+            server = uvicorn.Server(config)
 
-        def runner() -> None:
-            server.run(sockets=[listener])
+            def runner() -> None:
+                try:
+                    server.run(sockets=[listener])
+                except Exception as exc:
+                    self._start_error = exc
+                finally:
+                    self._ready.set()
 
-        thread = threading.Thread(target=runner, name="ticket-broker", daemon=True)
-        thread.start()
-        if not self._ready.wait(timeout=5):
-            self.registry.close(grant.session_id)
-            server.should_exit = True
-            thread.join(timeout=5)
-            listener.close()
-            raise RuntimeError("Ticket broker did not become ready")
-        self._server = server
-        self._thread = thread
-        self._socket = listener
-        self.endpoint = LiveTicketEndpoint(url=origin, grant=grant)
-        return self.endpoint
+            thread = threading.Thread(target=runner, name="ticket-broker", daemon=True)
+            thread.start()
+            if not self._ready.wait(timeout=5):
+                raise RuntimeError("Ticket broker did not become ready")
+            if self._start_error is not None:
+                raise self._start_error
+            self._server = server
+            self._thread = thread
+            self._socket = listener
+            self.endpoint = LiveTicketEndpoint(url=origin, grant=grant)
+            return self.endpoint
+        except Exception:
+            self._cleanup_start_failure(grant.session_id, server, thread, listener)
+            raise
 
     def close(self) -> None:
         if self.endpoint is not None:
@@ -265,3 +317,37 @@ class TicketBroker:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
+
+    def _cleanup_start_failure(
+        self,
+        session_id: str,
+        server: uvicorn.Server | None,
+        thread: threading.Thread | None,
+        listener: socket.socket | None,
+    ) -> None:
+        self.registry.close(session_id)
+        if server is not None:
+            server.should_exit = True
+        if thread is not None:
+            thread.join(timeout=5)
+        if listener is not None:
+            try:
+                listener.close()
+            except OSError:
+                pass
+
+
+def _dispatch_authenticated_request(
+    service: TicketService,
+    registry: TicketAccessRegistry,
+    token: str,
+    operation: str,
+    payload: dict[str, Any],
+):
+    actor = registry.authenticate(token)
+    command = parse_ticket_command(operation, payload)
+    binding = binding_for_command(service, actor, command)
+    version = getattr(command, "version", None)
+    if binding is not None and version is not None:
+        registry.register_target(actor, binding, version.ref)
+    return dispatch_ticket_command(service, actor, command)

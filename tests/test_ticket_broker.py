@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
+import io
 import json
+import socket
+import threading
 import urllib.error
 import urllib.request
 
+import httpx
 import pytest
 
-from flowgency.tickets.broker import TicketBroker, TicketToolClient
+import flowgency.tickets.broker as broker_module
+from flowgency.tickets.broker import (
+    BROKER_CLIENT_TIMEOUT_SECONDS,
+    MAX_BROKER_BODY_BYTES,
+    TicketBroker,
+    TicketToolClient,
+    _build_app,
+)
 from flowgency.tickets.models import TicketOperation, UserTicketContext
 
 
@@ -97,6 +109,39 @@ def test_broker_rejects_missing_token(workflow_env):
 
     assert status == 401
     assert payload["error"]["code"] == "missing-token"
+
+
+def test_broker_rejects_invalid_token(workflow_env):
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+
+    with TicketBroker(env.service, env.access_registry, authority=authority) as broker:
+        status, payload = _raw_call(
+            broker.endpoint.url,
+            "list_workflows",
+            {},
+            token=f"{broker.endpoint.grant.token}-tampered",
+        )
+
+    assert status == 403
+    assert payload["error"]["code"] == "invalid-token"
+
+
+def test_broker_rejects_invalid_host(workflow_env):
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+
+    with TicketBroker(env.service, env.access_registry, authority=authority) as broker:
+        status, payload = _raw_call(
+            broker.endpoint.url,
+            "list_workflows",
+            {},
+            token=broker.endpoint.grant.token,
+            headers={"Host": "127.0.0.1:1"},
+        )
+
+    assert status == 422
+    assert payload["error"]["code"] == "invalid-request"
 
 
 def test_broker_rejects_bad_origin(workflow_env):
@@ -265,6 +310,148 @@ def test_broker_redacts_unexpected_errors(workflow_env):
     assert "secret" not in result["error"]["message"].lower()
 
 
+def test_failed_authentication_does_not_create_registry_directory(workflow_env):
+    env = workflow_env
+    target = env.access_registry._access_path(env.team_id, "missing-job", create=False).parent
+
+    with pytest.raises(Exception):
+        env.access_registry.authenticate(f"{env.team_id}:missing-job:nonce:secret")
+
+    assert not target.exists()
+
+
+def test_broker_rejects_chunked_oversized_body_without_full_consumption(workflow_env):
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+    grant = env.access_registry.open(authority)
+    origin = "http://127.0.0.1:8500"
+    app = _build_app(env.service, env.access_registry, origin, threading.Event())
+    body = json.dumps(
+        {
+            "workflow_id": "board-a",
+            "query": "x" * MAX_BROKER_BODY_BYTES,
+        }
+    ).encode("utf-8")
+    split = MAX_BROKER_BODY_BYTES - 32
+    chunks = (body[:split], body[split : split + 128], body[split + 128 :])
+    yielded: list[int] = []
+
+    async def stream_body():
+        for index, chunk in enumerate(chunks):
+            yielded.append(index)
+            yield chunk
+
+    async def check() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=origin) as client:
+            response = await client.post(
+                "/operations/list_tickets",
+                headers={"Authorization": f"Bearer {grant.token}"},
+                content=stream_body(),
+            )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "invalid-request"
+
+    asyncio.run(check())
+
+    assert yielded == [0, 1]
+
+
+def test_blocked_binding_resolution_does_not_freeze_independent_request(workflow_env, monkeypatch):
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+    ticket = env.create()
+    grant = env.access_registry.open(authority)
+    origin = "http://127.0.0.1:8500"
+    app = _build_app(env.service, env.access_registry, origin, threading.Event())
+    entered = threading.Event()
+    release = threading.Event()
+    original = broker_module.binding_for_command
+
+    def blocked_binding(service, actor, command):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original(service, actor, command)
+
+    monkeypatch.setattr(broker_module, "binding_for_command", blocked_binding)
+
+    async def check() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=origin) as client:
+            pending = asyncio.create_task(
+                client.post(
+                    "/operations/get_ticket",
+                    headers={"Authorization": f"Bearer {grant.token}"},
+                    json={"ref": ticket.ref.model_dump(mode="json")},
+                )
+            )
+            try:
+                assert await asyncio.to_thread(entered.wait, 2)
+                response = await asyncio.wait_for(
+                    client.post("/operations/list_workflows", json={}),
+                    1,
+                )
+                assert response.status_code == 401
+                assert response.json()["error"]["code"] == "missing-token"
+                assert not pending.done()
+            finally:
+                release.set()
+                await pending
+
+    asyncio.run(check())
+
+
+def test_broker_start_failure_revokes_opened_grant(workflow_env, monkeypatch):
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+    broker = TicketBroker(env.service, env.access_registry, authority=authority)
+    opened = {}
+    original_open = env.access_registry.open
+
+    def recording_open(job_authority):
+        grant = original_open(job_authority)
+        opened["grant"] = grant
+        return grant
+
+    def broken_bind(self, address):
+        raise OSError("bind failed")
+
+    monkeypatch.setattr(env.access_registry, "open", recording_open)
+    monkeypatch.setattr(socket.socket, "bind", broken_bind)
+
+    with pytest.raises(OSError, match="bind failed"):
+        broker.start()
+
+    assert opened["grant"].session_id
+    with pytest.raises(Exception):
+        env.access_registry.authenticate(opened["grant"].token)
+
+
+def test_ticket_tool_client_uses_timeout_and_redacts_malformed_error(monkeypatch):
+    client = TicketToolClient("http://127.0.0.1:8500", "token")
+    observed = {}
+
+    def broken_open(request, timeout=None):
+        observed["timeout"] = timeout
+        raise urllib.error.HTTPError(
+            request.full_url,
+            503,
+            "boom",
+            hdrs=None,
+            fp=io.BytesIO(b"not-json token C:/secret/path"),
+        )
+
+    monkeypatch.setattr(client._opener, "open", broken_open)
+
+    result = client.call("list_workflows", {"request_digest": "token", "path": "C:/secret/path"})
+
+    assert observed["timeout"] == BROKER_CLIENT_TIMEOUT_SECONDS
+    assert result["ok"] is False
+    assert result["error"]["code"] == "unavailable"
+    assert "token" not in json.dumps(result)
+    assert "secret" not in json.dumps(result).lower()
+
+
 def test_broker_registers_target_before_start_work_commit(workflow_env):
     env = workflow_env
     ticket = env.create()
@@ -276,8 +463,8 @@ def test_broker_registers_target_before_start_work_commit(workflow_env):
     def factory(storage):
         def before_apply() -> None:
             payload = json.loads(access_path.read_text(encoding="utf-8"))
-            entries = next(iter(payload["original_targets"].values()))
-            assert entries[0]["ticket_id"] == ticket.ref.ticket_id
+            entry = payload["original_targets"][0]
+            assert entry["ref"]["ticket_id"] == ticket.ref.ticket_id
             observed["checked"] = True
 
         return _BoundaryHookStorage(original_factory(storage), before_apply)
@@ -303,3 +490,8 @@ def test_broker_registers_target_before_start_work_commit(workflow_env):
 def test_ticket_tool_client_rejects_non_loopback_endpoint():
     with pytest.raises(ValueError):
         TicketToolClient("http://example.com:8500", "token")
+
+
+def test_ticket_tool_client_rejects_endpoint_credentials():
+    with pytest.raises(ValueError):
+        TicketToolClient("http://user:pass@127.0.0.1:8500", "token")

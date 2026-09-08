@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from pathlib import Path
 import sys
 
@@ -31,8 +32,38 @@ def test_mcp_stdio_lifecycle_persists_mid_run(workflow_env):
                 async with ClientSession(*streams) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    names = {tool.name for tool in tools.tools}
-                    assert "ticket_create" in names
+                    names = tuple(tool.name for tool in tools.tools)
+                    assert names == (
+                        "workflows_list",
+                        "tickets_list",
+                        "ticket_get",
+                        "ticket_create",
+                        "ticket_start_work",
+                        "ticket_update",
+                        "ticket_report",
+                        "ticket_transition",
+                        "ticket_end_work",
+                        "ticket_sign_off",
+                        "ticket_artifact_publish",
+                    )
+                    catalog = {tool.name: tool for tool in tools.tools}
+                    _assert_response_schema(catalog["ticket_create"].output_schema)
+                    _assert_required_properties(
+                        catalog["ticket_create"].input_schema,
+                        ("workflow_id", "title", "description", "operation_id"),
+                    )
+                    _assert_required_properties(
+                        catalog["ticket_start_work"].input_schema,
+                        ("version", "operation_id"),
+                    )
+                    _assert_required_properties(
+                        catalog["ticket_get"].input_schema,
+                        ("ref",),
+                    )
+                    _assert_required_properties(
+                        catalog["ticket_artifact_publish"].input_schema,
+                        ("version", "filename", "media_type", "content_b64"),
+                    )
                     created = await session.call_tool(
                         "ticket_create",
                         {
@@ -93,3 +124,23 @@ def test_mcp_stdio_lifecycle_persists_mid_run(workflow_env):
                     assert rejected_payload["error"]["code"] == "stale-ticket"
 
     asyncio.run(exercise())
+
+
+def _assert_required_properties(schema: Mapping[str, object] | None, required: tuple[str, ...]) -> None:
+    assert schema is not None
+    assert schema.get("type") == "object"
+    assert tuple(schema.get("required", ())) == required
+    properties = schema.get("properties")
+    assert isinstance(properties, dict)
+    for name in required:
+        assert name in properties
+
+
+def _assert_response_schema(schema: Mapping[str, object] | None) -> None:
+    assert schema is not None
+    assert schema.get("type") == "object"
+    properties = schema.get("properties")
+    assert isinstance(properties, dict)
+    assert properties["ok"]["type"] == "boolean"
+    assert "result" in properties
+    assert "error" in properties
