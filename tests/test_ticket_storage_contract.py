@@ -7,7 +7,7 @@ import pytest
 from flowgency.tickets.errors import OperationConflict, TicketConflict
 from flowgency.tickets.models import TicketOperation, TicketRef
 from flowgency.tickets.storages import local
-from tests._ticket_helpers import storage_binding, ticket_record
+from tests._ticket_helpers import storage_binding, system_event, ticket_record
 
 NOW = datetime(2026, 9, 8, tzinfo=timezone.utc)
 
@@ -151,3 +151,52 @@ def test_same_local_number_across_namespaces(provider, root):
     )
     assert first_a.ticket.number == 1
     assert first_b.ticket.number == 1
+
+
+def test_create_finalizes_opening_event_and_reports_id(provider, root):
+    binding = storage_binding(root)
+    record = ticket_record(ticket_id="ticket-evt")
+    scoped = TicketRef.from_binding(binding, record.id)
+    result = provider.create(record.with_ref(scoped), TicketOperation("c-evt", "d-evt"))
+    assert result.event_id
+    stored = provider.read(scoped)
+    assert stored.events[-1].id == result.event_id
+    assert stored.events[-1].at is not None
+
+
+def test_apply_appends_single_event_and_preserves_history(provider, ref):
+    before = provider.read(ref)
+    prior_ids = [event.id for event in before.events]
+    assert prior_ids and all(prior_ids)
+
+    def mutate(ticket):
+        return ticket.model_copy(
+            update={"events": ticket.events + (system_event(kind="moved", summary="Moved"),)}
+        )
+
+    result = provider.apply(ref, before.revision, TicketOperation("op-move", "d-move"), mutate)
+    after = provider.read(ref)
+    assert [event.id for event in after.events[: len(prior_ids)]] == prior_ids
+    assert len(after.events) == len(prior_ids) + 1
+    assert after.events[-1].id == result.event_id
+
+    replay = provider.apply(
+        ref,
+        before.revision,
+        TicketOperation("op-move", "d-move"),
+        lambda ticket: pytest.fail("must not execute twice"),
+    )
+    assert replay.replayed is True
+    assert replay.event_id == result.event_id
+
+
+def test_apply_dropping_prior_events_is_rejected(provider, ref):
+    before = provider.read(ref)
+    with pytest.raises(TicketConflict):
+        provider.apply(
+            ref,
+            before.revision,
+            TicketOperation("op-drop", "d-drop"),
+            lambda ticket: ticket.model_copy(update={"events": ()}),
+        )
+    assert provider.read(ref).events == before.events

@@ -8,9 +8,13 @@ deliberately excludes the ledger itself so history cannot grow recursively.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Literal
 
 from pydantic import (
@@ -18,16 +22,50 @@ from pydantic import (
     ConfigDict,
     StrictInt,
     StrictStr,
+    computed_field,
+    model_validator,
 )
 
-from flowgency.tickets.errors import OperationConflict
+from flowgency.tickets.errors import OperationConflict, TicketConflict
 from flowgency.workflows.models import FieldValue
 
 
+def _canonical_config(integration: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Return a canonical, comparable config for a storage integration.
+
+    Local roots are resolved and case-normalized so two spellings of the same
+    directory yield the same binding identity.
+    """
+    data = dict(config)
+    if integration == "local":
+        root = data.get("root")
+        if root is None:
+            raise ValueError("Local storage config requires a root")
+        data["root"] = os.path.normcase(str(Path(root).resolve(strict=False)))
+    return data
+
+
+def _binding_digest(
+    integration: str, config: dict[str, Any], team_id: str, workflow_id: str
+) -> str:
+    payload = json.dumps(
+        {
+            "integration": integration,
+            "config": _canonical_config(integration, config),
+            "team_id": team_id,
+            "workflow_id": workflow_id,
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 class TicketRef(BaseModel):
-    """Fully scoped reference: team namespace, board namespace, ticket id."""
+    """Fully scoped reference: physical binding, team, board, and ticket id."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+    binding_id: StrictStr
     team_id: StrictStr
     workflow_id: StrictStr
     ticket_id: StrictStr
@@ -35,6 +73,7 @@ class TicketRef(BaseModel):
     @classmethod
     def from_binding(cls, binding: "StorageBinding", ticket_id: str) -> "TicketRef":
         return cls(
+            binding_id=binding.binding_id,
             team_id=binding.team_id,
             workflow_id=binding.workflow_id,
             ticket_id=ticket_id,
@@ -42,18 +81,38 @@ class TicketRef(BaseModel):
 
 
 class StorageBinding(BaseModel):
-    """Provider envelope. Carries the board namespace, never a blueprint pin."""
+    """Provider envelope: integration, canonical config, namespace, binding id.
+
+    The binding carries the board namespace and its physical binding identity,
+    never a blueprint pin.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    kind: Literal["local"]
-    root: str
+    integration: StrictStr
+    config: dict[str, Any]
     team_id: StrictStr
     workflow_id: StrictStr
 
-    def __init__(self, **data: Any) -> None:  # accept Path for root
-        if "root" in data:
-            data["root"] = str(data["root"])
-        super().__init__(**data)
+    @model_validator(mode="before")
+    @classmethod
+    def _canonicalize(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "integration" in data and "config" in data:
+            data = dict(data)
+            data["config"] = _canonical_config(data["integration"], data["config"])
+        return data
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def binding_id(self) -> str:
+        return _binding_digest(
+            self.integration, self.config, self.team_id, self.workflow_id
+        )
+
+    @staticmethod
+    def compute_binding_id(
+        integration: str, config: dict[str, Any], team_id: str, workflow_id: str
+    ) -> str:
+        return _binding_digest(integration, config, team_id, workflow_id)
 
 
 class TicketEvent(BaseModel):
@@ -71,6 +130,7 @@ class TicketMutationResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     ticket: "TicketRecord"
     replayed: bool = False
+    event_id: StrictStr = ""
 
 
 class TicketReceipt(BaseModel):
@@ -80,6 +140,7 @@ class TicketReceipt(BaseModel):
     operation_id: StrictStr
     request_digest: StrictStr
     at: datetime
+    event_id: StrictStr = ""
     snapshot: dict[str, Any]
 
     def require_digest(self, request_digest: str) -> None:
@@ -94,6 +155,7 @@ class TicketReceipt(BaseModel):
         return TicketMutationResult(
             ticket=TicketRecord.model_validate(self.snapshot),
             replayed=replayed,
+            event_id=self.event_id,
         )
 
 
@@ -132,16 +194,30 @@ class TicketRecord(BaseModel):
     ref: TicketRef | None = None
 
     def with_ref(self, ref: TicketRef) -> "TicketRecord":
-        """Return a validated copy scoped to ref. Not a persistent mutation."""
+        """Return a revalidated, independent copy scoped to ref.
+
+        The copy round-trips through validation so it is a genuine standalone
+        record, not a shared-structure ``model_copy``.
+        """
         if ref.ticket_id != self.id:
             raise ValueError("ref ticket_id must match record id")
-        return self.model_copy(update={"ref": ref})
+        data = self.model_dump()
+        data["ref"] = ref.model_dump()
+        return TicketRecord.model_validate(data)
 
     def find_receipt(self, operation_id: str) -> TicketReceipt | None:
         for receipt in self.receipts:
             if receipt.operation_id == operation_id:
                 return receipt
         return None
+
+    def commit_creation(
+        self, operation: TicketOperation, now: datetime
+    ) -> tuple["TicketRecord", TicketMutationResult]:
+        """Finalize the opening event supplied on creation and seal the receipt."""
+        events, event_id = _finalize_events((), self.events, now)
+        opened = self.model_copy(update={"events": events})
+        return seal_operation(opened, operation, now, event_id)
 
     def commit_operation(
         self,
@@ -152,24 +228,38 @@ class TicketRecord(BaseModel):
         """Advance revision, stamp time, finalize the supplied event, seal receipt.
 
         This does not append a second domain event: it only finalizes the one the
-        service callback already placed on the mutated record.
+        service callback already placed on the mutated record, and it rejects any
+        mutation that drops or rewrites prior event history.
         """
+        events, event_id = _finalize_events(current.events, self.events, now)
         updated = self.model_copy(
             update={
                 "revision": current.revision + 1,
                 "updated_at": now,
-                "events": _finalize_events(current, self, now),
+                "events": events,
             }
         )
-        return seal_operation(updated, operation, now)
+        return seal_operation(updated, operation, now, event_id)
 
 
 def _finalize_events(
-    current: TicketRecord, candidate: TicketRecord, now: datetime
-) -> tuple[TicketEvent, ...]:
-    carried = candidate.events[: len(current.events)]
-    finalized = list(carried)
-    for event in candidate.events[len(current.events) :]:
+    current_events: tuple[TicketEvent, ...],
+    candidate_events: tuple[TicketEvent, ...],
+    now: datetime,
+) -> tuple[tuple[TicketEvent, ...], str]:
+    """Preserve prior events and finalize newly supplied ones.
+
+    Returns the finalized event tuple and the accepted event id (the last event
+    after finalization). Raises if the mutation dropped or altered prior events.
+    """
+    prefix = candidate_events[: len(current_events)]
+    if prefix != current_events:
+        raise TicketConflict(
+            "event-history-changed",
+            "Prior ticket events must not be dropped or altered",
+        )
+    finalized = list(current_events)
+    for event in candidate_events[len(current_events) :]:
         finalized.append(
             event.model_copy(
                 update={
@@ -178,11 +268,12 @@ def _finalize_events(
                 }
             )
         )
-    return tuple(finalized)
+    accepted_event_id = finalized[-1].id if finalized else ""
+    return tuple(finalized), accepted_event_id
 
 
 def seal_operation(
-    record: TicketRecord, operation: TicketOperation, now: datetime
+    record: TicketRecord, operation: TicketOperation, now: datetime, event_id: str = ""
 ) -> tuple[TicketRecord, TicketMutationResult]:
     """Attach the operation receipt and return the original-result snapshot."""
     snapshot = record.model_dump(mode="json")
@@ -191,12 +282,14 @@ def seal_operation(
         operation_id=operation.operation_id,
         request_digest=operation.request_digest,
         at=now,
+        event_id=event_id,
         snapshot=snapshot,
     )
     sealed = record.model_copy(update={"receipts": record.receipts + (receipt,)})
     result = TicketMutationResult(
         ticket=TicketRecord.model_validate(snapshot),
         replayed=False,
+        event_id=event_id,
     )
     return sealed, result
 

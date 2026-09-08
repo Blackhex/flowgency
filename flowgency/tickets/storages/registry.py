@@ -18,8 +18,10 @@ def _default_clock() -> datetime:
 def resolve_storage(
     binding: StorageBinding, *, clock: Clock | None = None
 ) -> TicketStorage:
-    if binding.kind == "local":
-        return LocalTicketStorage(Path(binding.root), clock=clock or _default_clock)
+    if binding.integration == "local":
+        return LocalTicketStorage(
+            Path(binding.config["root"]), clock=clock or _default_clock
+        )
     raise StorageUnavailable(
         "unknown-provider", "No storage provider for this binding"
     )

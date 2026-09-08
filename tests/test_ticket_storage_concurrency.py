@@ -48,6 +48,23 @@ def _apply_worker(root_str: str, ready, go, queue: Queue) -> None:
         queue.put("conflict")
 
 
+def _create_worker(root_str: str, ticket_id: str, ready, go, queue: Queue) -> None:
+    from flowgency.tickets.models import TicketOperation, TicketRef
+    from flowgency.tickets.storages import local
+    from tests._ticket_helpers import storage_binding, ticket_record
+
+    provider = local.LocalTicketStorage(Path(root_str), clock=lambda: NOW)
+    binding = storage_binding(Path(root_str))
+    ref = TicketRef.from_binding(binding, ticket_id)
+    record = ticket_record(ticket_id=ticket_id)
+    ready.set()
+    go.wait(10)
+    result = provider.create(
+        record.with_ref(ref), TicketOperation(f"c-{ticket_id}", f"d-{ticket_id}")
+    )
+    queue.put(result.ticket.number)
+
+
 def _hold_ticket_lock(root_str: str, ticket_id: str, acquired, release) -> None:
     from flowgency.fs.locks import exclusive_lock
     from flowgency.tickets.models import TicketRef
@@ -79,6 +96,28 @@ def test_concurrent_apply_yields_one_success_one_conflict(tmp_path):
     assert second.exitcode == 0
     outcomes = sorted([queue.get(timeout=10), queue.get(timeout=10)])
     assert outcomes == ["conflict", "ok"]
+
+
+def test_concurrent_creation_yields_unique_numbers(tmp_path):
+    ready_one, ready_two, go = Event(), Event(), Event()
+    queue: Queue = Queue()
+    first = Process(
+        target=_create_worker, args=(str(tmp_path), "ticket-a", ready_one, go, queue)
+    )
+    second = Process(
+        target=_create_worker, args=(str(tmp_path), "ticket-b", ready_two, go, queue)
+    )
+    first.start()
+    second.start()
+    assert ready_one.wait(10)
+    assert ready_two.wait(10)
+    go.set()
+    first.join(30)
+    second.join(30)
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+    numbers = sorted([queue.get(timeout=10), queue.get(timeout=10)])
+    assert numbers == [1, 2]
 
 
 def test_distinct_ticket_locks_are_independent(tmp_path):

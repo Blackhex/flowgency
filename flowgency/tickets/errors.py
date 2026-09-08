@@ -33,6 +33,10 @@ class TicketCorrupt(TicketStorageError):
     http_status = 500
 
 
+class TicketTooLarge(TicketStorageError):
+    http_status = 413
+
+
 class TicketConflict(TicketStorageError):
     http_status = 409
 

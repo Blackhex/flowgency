@@ -3,10 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flowgency.tickets.models import StorageBinding, TicketRecord
+from flowgency.tickets.models import StorageBinding, TicketEvent, TicketRecord
 from flowgency.workflows.models import ArtifactRef
 
 SEED_TIME = datetime(2026, 9, 8, tzinfo=timezone.utc)
+
+
+def system_event(
+    kind: str = "opened",
+    actor: str = "system",
+    summary: str = "Ticket created",
+) -> TicketEvent:
+    """A trusted, not-yet-finalized audit event supplied by a mutation."""
+    return TicketEvent(kind=kind, actor=actor, summary=summary)
 
 
 def ticket_record(
@@ -30,7 +39,7 @@ def ticket_record(
         },
         field_provenance={"summary": "seed"},
         revision=1,
-        events=(),
+        events=(system_event(),),
         receipts=(),
         created_at=SEED_TIME,
         updated_at=SEED_TIME,
@@ -44,8 +53,8 @@ def storage_binding(
 ) -> StorageBinding:
     """Provider envelope carrying the board namespace, not a blueprint pin."""
     return StorageBinding(
-        kind="local",
-        root=Path(root),
+        integration="local",
+        config={"root": str(root)},
         team_id=team_id,
         workflow_id=workflow_id,
     )
