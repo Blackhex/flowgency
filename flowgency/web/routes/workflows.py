@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -77,6 +78,7 @@ def _workflow_page_context(request: Request, services: FlowgencyServices, team_i
                     "detailSnapshot": f"/{team_id}/workflows/{workflow_id}/tickets/__ticket__/snapshot",
                     "assignee": f"/{team_id}/workflows/{workflow_id}/tickets/__ticket__/assignee",
                     "update": f"/{team_id}/workflows/{workflow_id}/tickets/__ticket__/update",
+                    "run": f"/{team_id}/workflows/{workflow_id}/tickets/__ticket__/run",
                     "create": f"/{team_id}/workflows/{workflow_id}/tickets",
                 },
             },
@@ -86,7 +88,10 @@ def _workflow_page_context(request: Request, services: FlowgencyServices, team_i
 
 
 def _etag(payload: dict[str, Any]) -> str:
-    return f'W/"{hash(json.dumps(payload, sort_keys=True, default=str))}"'
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    return f'W/"{digest}"'
 
 
 def _json_with_etag(request: Request, payload: dict[str, Any]) -> Response:

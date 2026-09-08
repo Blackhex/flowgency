@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import json as json_module
 
 import flowgency.jobs.submission as submission_module
 import pytest
@@ -107,6 +109,64 @@ def test_assignee_post_rejects_active_reassignment(workflow_web_env):
     assert env.read(ticket.ref).record.assignee == "builder"
 
 
+def test_update_route_rerenders_html_with_submitted_draft_on_conflict(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="Draft conflict", values={"summary": "Server value", "verdict": True})
+    stale_version = ticket.version.model_dump(mode="json")
+    env.service.update(
+        env.user,
+        env.read(ticket.ref).version,
+        env.read(ticket.ref).patch(description="Remote change"),
+        env.operation("remote-change"),
+    )
+
+    response = env.client.post(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/update",
+        data={
+            "payload": json.dumps(
+                {
+                    "version": stale_version,
+                    "operation_id": "stale-form",
+                    "patch": {"description": "Local draft"},
+                }
+            )
+        },
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert "text/html" in response.headers["content-type"]
+    assert "Refresh the ticket" in response.text
+    assert "Local draft" in response.text
+
+
+def test_create_route_rerenders_html_with_submitted_draft_on_validation_error(workflow_web_env):
+    env = workflow_web_env
+
+    response = env.client.post(
+        f"{env.base_path}/tickets",
+        data={
+            "payload": json.dumps(
+                {
+                    "operation_id": "bad-create",
+                    "title": "Create draft",
+                    "description": "Preserve this description",
+                    "field_values": [],
+                }
+            )
+        },
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert "text/html" in response.headers["content-type"]
+    assert "Create draft" in response.text
+    assert "Preserve this description" in response.text
+    assert "Invalid value." in response.text or "Value must be an object." in response.text
+
+
 def test_create_route_keeps_markdown_raw_and_initial_state(workflow_web_env):
     env = workflow_web_env
     description = "# Heading\n\n<script>alert(1)</script>"
@@ -138,6 +198,29 @@ def test_create_route_keeps_markdown_raw_and_initial_state(workflow_web_env):
     assert "body_html" not in payload["ticket"]
 
 
+def test_create_json_success_redirects_to_ticket_snapshot(workflow_web_env):
+    env = workflow_web_env
+
+    response = env.client.post(
+        f"{env.base_path}/tickets",
+        data={
+            "payload": json.dumps(
+                {
+                    "operation_id": "create-json-redirect",
+                    "title": "JSON create",
+                    "description": "Redirect to the canonical snapshot",
+                    "field_values": {"summary": "hello"},
+                }
+            )
+        },
+        headers={"Accept": "application/json"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/snapshot")
+
+
 def test_ticket_detail_route_renders_html_page(workflow_web_env):
     env = workflow_web_env
     ticket = env.create(title="HTML detail")
@@ -148,6 +231,27 @@ def test_ticket_detail_route_renders_html_page(workflow_web_env):
     assert "text/html" in response.headers["content-type"]
     assert "Assigned agent" in response.text
     assert "Overview" in response.text
+
+
+def test_ticket_detail_snapshot_uses_deterministic_etag(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="ETag detail")
+
+    response = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    expected = hashlib.sha256(
+        json_module.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    assert response.headers["etag"] == f'W/"{expected}"'
+
+    not_modified = env.client.get(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot",
+        headers={"If-None-Match": response.headers["etag"]},
+    )
+
+    assert not_modified.status_code == 304
 
 
 def test_update_rejects_same_id_stale_binding_ref(workflow_web_env):
@@ -171,6 +275,52 @@ def test_update_rejects_same_id_stale_binding_ref(workflow_web_env):
     )
 
     assert response.status_code == 422
+
+
+def test_update_json_success_redirects_to_ticket_snapshot(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="JSON update")
+
+    response = env.client.post(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/update",
+        data={
+            "payload": json.dumps(
+                {
+                    "version": ticket.version.model_dump(mode="json"),
+                    "operation_id": "json-update",
+                    "patch": {"description": "Updated by JSON client"},
+                }
+            )
+        },
+        headers={"Accept": "application/json"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
+
+
+def test_assignee_json_success_redirects_to_ticket_snapshot(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="JSON assignee")
+
+    response = env.client.post(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/assignee",
+        data={
+            "payload": json.dumps(
+                {
+                    "version": ticket.version.model_dump(mode="json"),
+                    "assignee": "builder",
+                    "operation_id": "json-assignee",
+                }
+            )
+        },
+        headers={"Accept": "application/json"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
 
 
 def test_run_post_replays_existing_durable_job(workflow_web_env, monkeypatch):
@@ -199,6 +349,31 @@ def test_run_post_replays_existing_durable_job(workflow_web_env, monkeypatch):
     assert second.status_code == 303
     assert len(env.job_store.paths(env.team_id)) == 1
     assert env.read(ticket.ref).record.pending_run is not None
+
+
+def test_run_json_success_redirects_to_ticket_snapshot(workflow_web_env, monkeypatch):
+    env = workflow_web_env
+    monkeypatch.setattr(submission_module, "REGISTRY", {"claude-code": TicketRuntimeIntegration()})
+    ticket = env.create(title="JSON run")
+    env.service.assign(env.user, ticket.version, "builder", env.operation("assign-builder"))
+    current = env.read(ticket.ref)
+
+    response = env.client.post(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/run",
+        data={
+            "payload": json.dumps(
+                {
+                    "version": current.version.model_dump(mode="json"),
+                    "operation_id": "json-run",
+                }
+            )
+        },
+        headers={"Accept": "application/json"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot"
 
 
 def test_run_post_rejects_assignee_without_live_ticket_channel(workflow_web_env, monkeypatch):

@@ -496,8 +496,12 @@ def _audit_history(view: TicketView) -> tuple[TicketAuditEventView, ...]:
 
 
 def _matches_filter(view: TicketView, *, query: str, assignee: str | None) -> bool:
-    if assignee is not None and view.record.assignee != assignee:
-        return False
+    if assignee is not None:
+        if assignee == "unassigned":
+            if view.record.assignee is not None:
+                return False
+        elif view.record.assignee != assignee:
+            return False
     lowered = query.strip().lower()
     if not lowered:
         return True

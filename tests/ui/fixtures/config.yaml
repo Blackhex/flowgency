@@ -64,7 +64,7 @@ teams:
               scope: agent
       - name: builder
         blueprint: builder
-        integration: script
+        integration: ticket-test
         identity:
           display_name: Builder
           title: Production Editor
@@ -82,7 +82,7 @@ teams:
               scope: routine
       - name: reviewer
         blueprint: reviewer
-        integration: script
+        integration: ticket-test
         identity:
           display_name: Reviewer
           title: QA Lead
@@ -92,7 +92,7 @@ teams:
         routines: []
       - name: researcher
         blueprint: researcher
-        integration: script
+        integration: ticket-test
         identity:
           display_name: Researcher
           title: Research Lead

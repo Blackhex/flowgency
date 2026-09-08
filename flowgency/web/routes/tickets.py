@@ -61,7 +61,10 @@ def _workflow_nav(ticket_service, actor, snapshot, team_id: str) -> list[dict[st
 
 
 def _etag(payload: dict[str, Any]) -> str:
-    return f'W/"{hash(json.dumps(payload, sort_keys=True, default=str))}"'
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    return f'W/"{digest}"'
 
 
 def _json_with_etag(request: Request, payload: dict[str, Any]) -> Response:
@@ -207,6 +210,148 @@ def _draft(decoded: Any) -> dict[str, Any] | None:
     return decoded if isinstance(decoded, dict) else None
 
 
+def _wants_json(request: Request) -> bool:
+    return "application/json" in request.headers.get("accept", "")
+
+
+def _ticket_form_issues(payload: dict[str, Any]) -> list[dict[str, str]]:
+    issues = payload.get("issues")
+    if not isinstance(issues, list):
+        return []
+    rows: list[dict[str, str]] = []
+    for item in issues:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            {
+                "code": str(item.get("code", "invalid-request")),
+                "field": str(item.get("field", "payload")),
+                "message": str(item.get("message", "Invalid value.")),
+                "hint": str(item.get("hint", "Refresh and retry the ticket action.")),
+            }
+        )
+    return rows
+
+
+async def _render_ticket_page(
+    request: Request,
+    services: FlowgencyServices,
+    *,
+    team: str,
+    workflow: str,
+    ticket: str,
+    query: str = "",
+    assignee: str | None = None,
+    ticket_form_errors: list[dict[str, str]] | None = None,
+    ticket_form_draft: dict[str, Any] | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    context = await run_in_threadpool(require_team_and_workflow, services, team, workflow)
+    ticket_service = require_ticket_services(services)
+    board = await run_in_threadpool(
+        build_board_view,
+        ticket_service,
+        context.actor,
+        workflow,
+        query=query,
+        assignee=assignee,
+        selected_ticket_id=ticket,
+        ticket_jobs=services.ticket_jobs,
+    )
+    snapshot = services.config_store.load()
+    template_context = _team_context(request, snapshot, team)
+    template_context.update(
+        {
+            "active": "workflow-board",
+            "workflow_nav": _workflow_nav(ticket_service, context.actor, snapshot, team),
+            "active_workflow_id": workflow,
+            "board": board,
+            "selected_ticket_id": ticket,
+            "ticket_form_errors": ticket_form_errors or [],
+            "ticket_form_draft": ticket_form_draft or {},
+            "workflow_initial": {
+                "board": board.model_dump(mode="json"),
+                "urls": {
+                    "board": f"/{team}/workflows/{workflow}",
+                    "snapshot": f"/{team}/workflows/{workflow}/snapshot",
+                    "detail": f"/{team}/workflows/{workflow}/tickets/{ticket}",
+                    "detail_snapshot": f"/{team}/workflows/{workflow}/tickets/{ticket}/snapshot",
+                    "detailSnapshot": f"/{team}/workflows/{workflow}/tickets/{ticket}/snapshot",
+                    "assignee": f"/{team}/workflows/{workflow}/tickets/{ticket}/assignee",
+                    "update": f"/{team}/workflows/{workflow}/tickets/{ticket}/update",
+                    "run": f"/{team}/workflows/{workflow}/tickets/{ticket}/run",
+                    "create": f"/{team}/workflows/{workflow}/tickets",
+                },
+            },
+        }
+    )
+    return _templates(request).TemplateResponse(
+        request,
+        "ticket_detail.html",
+        template_context,
+        status_code=status_code,
+    )
+
+
+async def _render_board_page(
+    request: Request,
+    services: FlowgencyServices,
+    *,
+    team: str,
+    workflow: str,
+    query: str = "",
+    assignee: str | None = None,
+    selected_ticket_id: str | None = None,
+    new_ticket_errors: list[dict[str, str]] | None = None,
+    new_ticket_draft: dict[str, Any] | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    context = await run_in_threadpool(require_team_and_workflow, services, team, workflow)
+    ticket_service = require_ticket_services(services)
+    board = await run_in_threadpool(
+        build_board_view,
+        ticket_service,
+        context.actor,
+        workflow,
+        query=query,
+        assignee=assignee,
+        selected_ticket_id=selected_ticket_id,
+        ticket_jobs=services.ticket_jobs,
+    )
+    snapshot = services.config_store.load()
+    template_context = _team_context(request, snapshot, team)
+    template_context.update(
+        {
+            "active": "workflow-board",
+            "workflow_nav": _workflow_nav(ticket_service, context.actor, snapshot, team),
+            "active_workflow_id": workflow,
+            "board": board,
+            "selected_ticket_id": selected_ticket_id,
+            "new_ticket_errors": new_ticket_errors or [],
+            "new_ticket_draft": new_ticket_draft or {},
+            "workflow_initial": {
+                "board": board.model_dump(mode="json"),
+                "urls": {
+                    "board": f"/{team}/workflows/{workflow}",
+                    "snapshot": f"/{team}/workflows/{workflow}/snapshot",
+                    "detail": f"/{team}/workflows/{workflow}/tickets/__ticket__",
+                    "detailSnapshot": f"/{team}/workflows/{workflow}/tickets/__ticket__/snapshot",
+                    "assignee": f"/{team}/workflows/{workflow}/tickets/__ticket__/assignee",
+                    "update": f"/{team}/workflows/{workflow}/tickets/__ticket__/update",
+                    "run": f"/{team}/workflows/{workflow}/tickets/__ticket__/run",
+                    "create": f"/{team}/workflows/{workflow}/tickets",
+                },
+            },
+        }
+    )
+    return _templates(request).TemplateResponse(
+        request,
+        "workflow_board.html",
+        template_context,
+        status_code=status_code,
+    )
+
+
 def _artifact_namespace(binding) -> TicketRef:
     return TicketRef.from_binding(binding.storage, "artifact-namespace")
 
@@ -271,6 +416,7 @@ async def ticket_detail_page(
                     "detail_snapshot": f"/{team}/workflows/{workflow}/tickets/{ticket}/snapshot",
                     "detailSnapshot": f"/{team}/workflows/{workflow}/tickets/{ticket}/snapshot",
                     "assignee": f"/{team}/workflows/{workflow}/tickets/{ticket}/assignee",
+                    "run": f"/{team}/workflows/{workflow}/tickets/{ticket}/run",
                     "update": f"/{team}/workflows/{workflow}/tickets/{ticket}/update",
                     "create": f"/{team}/workflows/{workflow}/tickets",
                 },
@@ -317,9 +463,31 @@ async def create_ticket(
     try:
         payload = CreateTicketForm.model_validate_json(payload_text)
     except ValidationError as exc:
-        return JSONResponse({"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(json.loads(payload_text) if payload_text else None)}, status_code=422)
+        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(json.loads(payload_text) if payload_text else None)}
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=422)
+        return await _render_board_page(
+            request,
+            services,
+            team=team,
+            workflow=workflow,
+            new_ticket_errors=_ticket_form_issues(payload_dict),
+            new_ticket_draft=payload_dict.get("draft"),
+            status_code=422,
+        )
     except json.JSONDecodeError:
-        return _ticket_error_response(status_code=422, code="invalid-request", message="Payload must be valid JSON.", field="payload", draft=None)
+        payload_dict = {"code": "invalid-request", "issues": [{"code": "invalid-request", "field": "payload", "message": "Payload must be valid JSON.", "hint": "Correct the submitted ticket payload and try again."}], "draft": None}
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=422)
+        return await _render_board_page(
+            request,
+            services,
+            team=team,
+            workflow=workflow,
+            new_ticket_errors=_ticket_form_issues(payload_dict),
+            new_ticket_draft=None,
+            status_code=422,
+        )
     actor = user_context(team)
     operation = operation_for_user(actor, {"team": team, "workflow": workflow}, payload)
     try:
@@ -333,7 +501,24 @@ async def create_ticket(
             operation,
         )
     except (TicketConflict, TicketForbidden, WorkflowUnavailable) as error:
-        return _ticket_error_response(status_code=error.http_status, code=error.code, message=error.message, field="payload", draft=payload.model_dump(mode="json"))
+        payload_dict = {
+            "code": error.code,
+            "issues": [{"code": error.code, "field": "payload", "message": error.message, "hint": "Refresh and retry the ticket action."}],
+            "draft": payload.model_dump(mode="json"),
+        }
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=error.http_status)
+        return await _render_board_page(
+            request,
+            services,
+            team=team,
+            workflow=workflow,
+            new_ticket_errors=_ticket_form_issues(payload_dict),
+            new_ticket_draft=payload_dict["draft"],
+            status_code=error.http_status,
+        )
+    if _wants_json(request):
+        return RedirectResponse(f"{ticket_return_url(team, workflow, result.ticket.id)}/snapshot", status_code=303)
     return RedirectResponse(ticket_return_url(team, workflow, result.ticket.id), status_code=303)
 
 
@@ -355,26 +540,30 @@ async def update_ticket(
         binding_id = await run_in_threadpool(_resolve_current_binding_id, ticket_service, team, workflow)
         require_route_ref(payload.version, team, workflow, ticket, binding_id)
     except json.JSONDecodeError:
-        return _ticket_error_response(status_code=422, code="invalid-request", message="Payload must be valid JSON.", field="payload", draft=None)
+        payload_dict = {"code": "invalid-request", "issues": [{"code": "invalid-request", "field": "payload", "message": "Payload must be valid JSON.", "hint": "Correct the submitted ticket payload and try again."}], "draft": None}
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=422)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft={}, status_code=422)
     except ValidationError as exc:
-        return JSONResponse({"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}, status_code=422)
+        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=422)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict.get("draft") or {}, status_code=422)
     actor = user_context(team)
     operation = operation_for_user(actor, {"team": team, "workflow": workflow, "ticket": ticket}, payload)
     try:
         await run_in_threadpool(ticket_service.update, actor, payload.version, payload.patch, operation)
     except (TicketConflict, TicketForbidden, WorkflowUnavailable) as error:
-        return _ticket_error_response(status_code=error.http_status, code=error.code, message=error.message, field="payload", draft=payload.model_dump(mode="json"))
-    if "application/json" in request.headers.get("accept", ""):
-        detail = await run_in_threadpool(
-            _build_ticket_detail_snapshot,
-            ticket_service,
-            actor,
-            team,
-            workflow,
-            ticket,
-            services.ticket_jobs,
-        )
-        return _json_with_etag(request, detail.model_dump(mode="json"))
+        payload_dict = {
+            "code": error.code,
+            "issues": [{"code": error.code, "field": "payload", "message": error.message, "hint": "Refresh and retry the ticket action."}],
+            "draft": payload.model_dump(mode="json"),
+        }
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=error.http_status)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict["draft"], status_code=error.http_status)
+    if _wants_json(request):
+        return RedirectResponse(f"{ticket_return_url(team, workflow, ticket)}/snapshot", status_code=303)
     return RedirectResponse(ticket_return_url(team, workflow, ticket), status_code=303)
 
 
@@ -396,26 +585,30 @@ async def save_assignee(
         binding_id = await run_in_threadpool(_resolve_current_binding_id, ticket_service, team, workflow)
         require_route_ref(payload.version, team, workflow, ticket, binding_id)
     except json.JSONDecodeError:
-        return _ticket_error_response(status_code=422, code="invalid-request", message="Payload must be valid JSON.", field="payload", draft=None)
+        payload_dict = {"code": "invalid-request", "issues": [{"code": "invalid-request", "field": "payload", "message": "Payload must be valid JSON.", "hint": "Correct the submitted ticket payload and try again."}], "draft": None}
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=422)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft={}, status_code=422)
     except ValidationError as exc:
-        return JSONResponse({"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}, status_code=422)
+        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=422)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict.get("draft") or {}, status_code=422)
     actor = user_context(team)
     operation = operation_for_user(actor, {"team": team, "workflow": workflow, "ticket": ticket}, payload)
     try:
         await run_in_threadpool(ticket_service.assign, actor, payload.version, payload.assignee, operation)
     except (TicketConflict, TicketForbidden, WorkflowUnavailable) as error:
-        return _ticket_error_response(status_code=error.http_status, code=error.code, message=error.message, field="payload", draft=payload.model_dump(mode="json"))
-    if "application/json" in request.headers.get("accept", ""):
-        detail = await run_in_threadpool(
-            _build_ticket_detail_snapshot,
-            ticket_service,
-            actor,
-            team,
-            workflow,
-            ticket,
-            services.ticket_jobs,
-        )
-        return _json_with_etag(request, detail.model_dump(mode="json"))
+        payload_dict = {
+            "code": error.code,
+            "issues": [{"code": error.code, "field": "payload", "message": error.message, "hint": "Refresh and retry the ticket action."}],
+            "draft": payload.model_dump(mode="json"),
+        }
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=error.http_status)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict["draft"], status_code=error.http_status)
+    if _wants_json(request):
+        return RedirectResponse(f"{ticket_return_url(team, workflow, ticket)}/snapshot", status_code=303)
     return RedirectResponse(ticket_return_url(team, workflow, ticket), status_code=303)
 
 
@@ -437,14 +630,29 @@ async def run_ticket(
         binding_id = await run_in_threadpool(_resolve_current_binding_id, ticket_jobs.service, team, workflow)
         require_route_ref(payload.version, team, workflow, ticket, binding_id)
     except json.JSONDecodeError:
-        return _ticket_error_response(status_code=422, code="invalid-request", message="Payload must be valid JSON.", field="payload", draft=None)
+        payload_dict = {"code": "invalid-request", "issues": [{"code": "invalid-request", "field": "payload", "message": "Payload must be valid JSON.", "hint": "Correct the submitted ticket payload and try again."}], "draft": None}
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=422)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft={}, status_code=422)
     except ValidationError as exc:
-        return JSONResponse({"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}, status_code=422)
+        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=422)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict.get("draft") or {}, status_code=422)
     actor = user_context(team)
     try:
         await run_in_threadpool(ticket_jobs.submit, actor, payload.version, payload.operation_id)
     except (TicketConflict, TicketForbidden, WorkflowUnavailable) as error:
-        return _ticket_error_response(status_code=error.http_status, code=error.code, message=error.message, field="payload", draft=payload.model_dump(mode="json"))
+        payload_dict = {
+            "code": error.code,
+            "issues": [{"code": error.code, "field": "payload", "message": error.message, "hint": "Refresh and retry the ticket action."}],
+            "draft": payload.model_dump(mode="json"),
+        }
+        if _wants_json(request):
+            return JSONResponse(payload_dict, status_code=error.http_status)
+        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict["draft"], status_code=error.http_status)
+    if _wants_json(request):
+        return RedirectResponse(f"{ticket_return_url(team, workflow, ticket)}/snapshot", status_code=303)
     return RedirectResponse(ticket_return_url(team, workflow, ticket), status_code=303)
 
 

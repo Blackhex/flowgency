@@ -19,6 +19,13 @@
 {% block content %}
 <link rel="stylesheet" href="/static/workflow-board.css">
 <section class="workflow-board-page">
+  {% if new_ticket_errors %}
+  <div class="workflow-issue-banner" role="alert">
+    {% for issue in new_ticket_errors %}
+    <p><strong>{{ issue.code }}</strong>: {{ issue.message }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if board.issues %}
   <div class="workflow-issue-banner" role="status">
     {% for issue in board.issues %}
@@ -126,11 +133,11 @@
     </div>
     <label class="workflow-field-block" for="workflow-new-title">
       <span>Title</span>
-      <input id="workflow-new-title" name="title" type="text" maxlength="180" autocomplete="off">
+      <input id="workflow-new-title" name="title" type="text" maxlength="180" autocomplete="off" value="{{ new_ticket_draft.title if new_ticket_draft else '' }}">
     </label>
     <label class="workflow-field-block" for="workflow-new-description">
       <span>Description</span>
-      <textarea id="workflow-new-description" name="description"></textarea>
+      <textarea id="workflow-new-description" name="description">{{ new_ticket_draft.description if new_ticket_draft else '' }}</textarea>
     </label>
     <div class="workflow-dialog-actions">
       <button type="button" class="workflow-link-button" id="workflow-cancel-ticket-dialog">Cancel</button>

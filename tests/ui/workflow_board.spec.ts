@@ -114,6 +114,134 @@ test('concurrent dirty input keeps the remote value and the unsaved local draft'
   expect(initial.ticket.ref.ticket_id).toBe('fixture-review');
 });
 
+test('run queues durable work without changing the ticket state', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  const runResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/tickets/fixture-review/run') &&
+      response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+  await runResponse;
+
+  const detail = (await (
+    await request.get('/newsletter/workflows/delivery/tickets/fixture-review/snapshot')
+  ).json()) as DetailSnapshot & {
+    ticket: DetailSnapshot['ticket'] & {
+      pending_run_job_id: string | null;
+      active_run_job_id: string | null;
+      state_id: string;
+    };
+  };
+
+  expect(detail.ticket.pending_run_job_id).toBeTruthy();
+  expect(detail.ticket.active_run_job_id).toBeNull();
+  expect(detail.ticket.state_id).toBe('review');
+  await expect(page.getByText(/Queued /)).toBeVisible();
+});
+
+test('assignee filter applies without a manual form submit', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery');
+
+  await page.getByLabel('All assignees', { exact: true }).selectOption('unassigned');
+
+  await expect(page).toHaveURL(/assignee=unassigned/);
+  await expect(page.getByText('Review the local storage contract', { exact: true })).toBeVisible();
+  await expect(page.getByText('Validate stale transition handling', { exact: true })).toHaveCount(0);
+});
+
+test('description edits save through the overview controls', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().includes('/tickets/fixture-review/update') &&
+      response.request().method() === 'POST',
+  );
+  await page.locator('#ticket-description').fill('Updated description from the browser');
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).click();
+  await saved;
+
+  const detail = (await (
+    await request.get('/newsletter/workflows/delivery/tickets/fixture-review/snapshot')
+  ).json()) as DetailSnapshot & { ticket: DetailSnapshot['ticket'] & { description: string } };
+  expect(detail.ticket.description).toBe('Updated description from the browser');
+  await expect(page.locator('#ticket-description')).toHaveValue('Updated description from the browser');
+});
+
+test('board selection keeps ticket drafts across card navigation and browser history', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  const navigationRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.isNavigationRequest() && request.url().includes('/newsletter/workflows/delivery')) {
+      navigationRequests.push(request.url());
+    }
+  });
+
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Unsaved local workflow note');
+  await page.getByRole('link', { name: 'Review the local storage contract' }).click();
+
+  await expect(page).toHaveURL(/ticket=fixture-review-2/);
+  await expect(page.getByRole('heading', { name: 'Review the local storage contract' })).toBeVisible();
+  expect(navigationRequests).toEqual([]);
+
+  await page.goBack();
+
+  await expect(page).toHaveURL(/ticket=fixture-review/);
+  await expect(page.locator('#field-acceptance-criteria')).toHaveValue('Unsaved local workflow note');
+});
+
+test('visible polling refresh updates server content without wiping a dirty draft', async ({ page, request }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  const localField = page.locator('#field-acceptance-criteria');
+  await localField.fill('Locally edited and not yet saved');
+  await expect(localField).toBeFocused();
+
+  const detail = (await (
+    await request.get('/newsletter/workflows/delivery/tickets/fixture-review/snapshot')
+  ).json()) as DetailSnapshot & { ticket: DetailSnapshot['ticket'] & { description: string } };
+
+  const remoteUpdate = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/update', {
+    headers: { Accept: 'application/json' },
+    form: {
+      payload: JSON.stringify({
+        version: detail.ticket.version,
+        operation_id: operationId('poll-refresh-description'),
+        patch: {
+          description: 'Remote description refreshed through polling',
+        },
+      }),
+    },
+  });
+  expect(remoteUpdate.ok()).toBeTruthy();
+
+  await expect(page.locator('#ticket-description')).toHaveValue('Remote description refreshed through polling');
+  await expect(localField).toHaveValue('Locally edited and not yet saved');
+  await expect(localField).toBeFocused();
+});
+
+test('requirements and history show retained labels, reasoning, and links', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  await page.getByRole('tab', { name: 'Requirements' }).click();
+  await expect(page.getByText('Required inputs', { exact: true })).toBeVisible();
+  await expect(page.getByText('Required outputs', { exact: true })).toBeVisible();
+  await expect(page.getByText('Qualitative criteria', { exact: true })).toBeVisible();
+  await expect(page.getByText('The implementation satisfies the acceptance criteria.', { exact: true })).toBeVisible();
+
+  await page.getByRole('tab', { name: 'History' }).click();
+  await expect(page.getByText('Ticket created', { exact: true })).toBeVisible();
+  await expect(page.getByText('Assigned to reviewer', { exact: true })).toBeVisible();
+  await expect(page.getByText('{', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await expect(page.getByText('Outputs', { exact: true })).toBeVisible();
+  await expect(page.getByRole('term').filter({ hasText: 'Review verdict' })).toBeVisible();
+});
+
 test('desktop board and mobile ticket detail keep keyboard access and stable screenshots', async ({ page }, testInfo) => {
   const expectedCriteria = 'A stale ticket revision or workflow digest cannot change state. Repeating an accepted operation returns its original result without a second transition.';
   let detail = (await (await page.request.get('/newsletter/workflows/delivery/tickets/fixture-review/snapshot')).json()) as DetailSnapshot;

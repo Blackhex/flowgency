@@ -3,6 +3,21 @@
 {% set workflow_detail_page = workflow_detail_page|default(false) %}
 {% set current_ticket = detail.ticket %}
 {% set transitions = detail.current_definition.transitions | selectattr('from_state', 'equalto', current_ticket.state_id) | list %}
+{% macro render_value(field_type, value) -%}
+  {%- if field_type == "artifact" and value and value.kind == "id" -%}
+    <a class="workflow-value-link" href="/{{ team }}/workflows/{{ active_workflow_id }}/artifacts/{{ value.value }}">Download retained file</a>
+  {%- elif field_type == "artifact" and value and value.kind == "url" -%}
+    <a class="workflow-value-link" href="{{ value.value }}" target="_blank" rel="noreferrer">{{ value.value }}</a>
+  {%- elif value is sameas(false) -%}
+    False
+  {%- elif value == 0 or value == 0.0 -%}
+    {{ value }}
+  {%- elif value is none or value == "" -%}
+    <span class="workflow-empty-value">Not submitted</span>
+  {%- else -%}
+    {{ value }}
+  {%- endif -%}
+{%- endmacro %}
 {% set output_ns = namespace(ids=[]) %}
 {% for transition in transitions %}
   {% for field_use in transition.outputs %}
@@ -10,6 +25,13 @@
   {% endfor %}
 {% endfor %}
 <aside class="workflow-ticket-inspector{% if workflow_detail_page %} workflow-ticket-inspector-page{% endif %}" aria-label="Ticket details">
+  {% if ticket_form_errors %}
+  <div class="workflow-issue-banner" role="alert">
+    {% for issue in ticket_form_errors %}
+    <p><strong>{{ issue.code }}</strong>: {{ issue.message }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
   <header class="workflow-ticket-pane-heading">
     <div class="workflow-ticket-pane-row">
       {% if workflow_detail_page %}
@@ -49,7 +71,7 @@
         <span>Run</span>
       </button>
     </div>
-    <p class="workflow-ticket-status{% if current_ticket.active_run_job_id %} is-working{% elif current_ticket.pending_run_job_id %} is-queued{% else %} is-idle{% endif %}">
+    <p class="workflow-ticket-status{% if current_ticket.active_run_job_id %} is-working{% elif current_ticket.pending_run_job_id %} is-queued{% else %} is-idle{% endif %}" data-ticket-run-status>
       <span class="workflow-status-dot" aria-hidden="true"></span>
       {% if current_ticket.active_run_job_id %}
       Working {{ current_ticket.active_run_job_id }}
@@ -67,8 +89,14 @@
   </nav>
   <section class="workflow-ticket-panel" data-ticket-panel="overview">
     <section class="workflow-ticket-section">
-      <h3>Description</h3>
-      <p class="workflow-ticket-description">{{ current_ticket.description }}</p>
+      <label class="workflow-field-block" for="ticket-title">
+        <span>Title</span>
+        <input id="ticket-title" type="text" aria-label="Title" data-ticket-input="title" data-ticket-kind="text" value="{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.title is defined and ticket_form_draft.patch.title is not none %}{{ ticket_form_draft.patch.title }}{% else %}{{ current_ticket.title }}{% endif %}">
+      </label>
+      <label class="workflow-field-block" for="ticket-description">
+        <span>Description</span>
+        <textarea id="ticket-description" aria-label="Description" data-ticket-input="description" data-ticket-kind="text">{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.description is defined and ticket_form_draft.patch.description is not none %}{{ ticket_form_draft.patch.description }}{% else %}{{ current_ticket.description }}{% endif %}</textarea>
+      </label>
     </section>
     <section class="workflow-ticket-section">
       <h3>Inputs</h3>
@@ -76,7 +104,18 @@
       {% if field.type != "artifact" and field.id not in output_ns.ids %}
       <label class="workflow-field-block" for="field-{{ field.id }}">
         <span>{{ field.label }}</span>
-        <textarea id="field-{{ field.id }}" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}">{{ field.value if field.value is string else "" }}</textarea>
+        {% set field_draft = ticket_form_draft.patch.field_values[field.id] if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.field_values and field.id in ticket_form_draft.patch.field_values else field.value %}
+        {% if field.type == "boolean" %}
+        <select id="field-{{ field.id }}" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="boolean">
+          <option value="" {% if field_draft is none %}selected{% endif %}>Unset</option>
+          <option value="true" {% if field_draft is sameas true %}selected{% endif %}>True</option>
+          <option value="false" {% if field_draft is sameas false %}selected{% endif %}>False</option>
+        </select>
+        {% elif field.type == "number" %}
+        <input id="field-{{ field.id }}" type="number" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="number" value="{{ '' if field_draft is none else field_draft }}">
+        {% else %}
+        <textarea id="field-{{ field.id }}" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="text">{{ field_draft if field_draft is string else '' }}</textarea>
+        {% endif %}
       </label>
       {% endif %}
       {% endfor %}
@@ -93,13 +132,7 @@
         {% if field.id in output_ns.ids %}
         <div>
           <dt>{{ field.label }}</dt>
-          <dd>
-            {% if field.type == "artifact" and field.value %}
-            <span class="workflow-artifact-value">{{ field.value }}</span>
-            {% else %}
-            {{ field.value or "Not submitted" }}
-            {% endif %}
-          </dd>
+          <dd>{{ render_value(field.type, field.value) }}</dd>
         </div>
         {% endif %}
         {% endfor %}
@@ -112,19 +145,46 @@
     {% for transition in transitions %}
     <section class="workflow-ticket-section">
       <h3>{{ transition.name }}</h3>
-      {% if transition.outputs %}
-      {% for field_use in transition.outputs %}
+      {% if transition.preconditions %}
+      <p class="workflow-section-label">Current preconditions</p>
+      {% for precondition in transition.preconditions %}
+      <article class="workflow-check-row is-complete">
+        <span class="workflow-check-indicator" aria-hidden="true"></span>
+        <div>
+          <strong>{{ precondition.field_label }}</strong>
+          <small>{{ precondition.operator }} {{ render_value(precondition.field_type, precondition.comparison) }}</small>
+        </div>
+      </article>
+      {% endfor %}
+      {% endif %}
+      {% if transition.inputs %}
+      <p class="workflow-section-label">Required inputs</p>
+      {% for field_use in transition.inputs %}
       {% set field_row = (detail.fields | selectattr('id', 'equalto', field_use.field_id) | list | first) %}
-      <article class="workflow-check-row{% if field_row and field_row.value %} is-complete{% endif %}">
+      <article class="workflow-check-row{% if field_row and field_row.value is not none and field_row.value != '' %} is-complete{% else %} is-pending{% endif %}">
         <span class="workflow-check-indicator" aria-hidden="true"></span>
         <div>
           <strong>{{ field_row.label if field_row else field_use.field_id }}</strong>
-          <small>{% if field_row and field_row.value %}{{ field_row.value }}{% else %}Not submitted{% endif %}</small>
+          <small>{% if field_use.required %}Required{% else %}Optional{% endif %} · {{ render_value(field_row.type if field_row else 'text', field_row.value if field_row else none) }}</small>
+        </div>
+      </article>
+      {% endfor %}
+      {% endif %}
+      {% if transition.outputs %}
+      <p class="workflow-section-label">Required outputs</p>
+      {% for field_use in transition.outputs %}
+      {% set field_row = (detail.fields | selectattr('id', 'equalto', field_use.field_id) | list | first) %}
+      <article class="workflow-check-row{% if field_row and field_row.value is not none and field_row.value != '' %} is-complete{% else %} is-pending{% endif %}">
+        <span class="workflow-check-indicator" aria-hidden="true"></span>
+        <div>
+          <strong>{{ field_row.label if field_row else field_use.field_id }}</strong>
+          <small>{% if field_use.required %}Required{% else %}Optional{% endif %} · {{ render_value(field_row.type if field_row else 'text', field_row.value if field_row else none) }}</small>
         </div>
       </article>
       {% endfor %}
       {% endif %}
       {% if transition.criteria %}
+      <p class="workflow-section-label">Qualitative criteria</p>
       {% for criterion in transition.criteria %}
       <article class="workflow-check-row is-pending">
         <span class="workflow-check-indicator" aria-hidden="true"></span>
@@ -135,6 +195,30 @@
       </article>
       {% endfor %}
       {% endif %}
+      {% set assessment_ns = namespace(found=false) %}
+      {% for event in detail.history | reverse %}
+        {% if event.data.assessments %}
+          {% if not assessment_ns.found %}<p class="workflow-section-label">Recorded assessments</p>{% endif %}
+          {% set assessment_ns.found = true %}
+          {% for assessment in event.data.assessments %}
+          <article class="workflow-check-row is-complete">
+            <span class="workflow-check-indicator" aria-hidden="true"></span>
+            <div>
+              <strong>
+                {% set criteria_ns = namespace(description=assessment.criterion_id) %}
+                {% if event.data.transition_snapshot and event.data.transition_snapshot.criteria %}
+                  {% for criterion in event.data.transition_snapshot.criteria %}
+                    {% if criterion.id == assessment.criterion_id %}{% set criteria_ns.description = criterion.description %}{% endif %}
+                  {% endfor %}
+                {% endif %}
+                {{ criteria_ns.description }}
+              </strong>
+              <small>{{ assessment.reasoning }}</small>
+            </div>
+          </article>
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
     </section>
     {% endfor %}
     {% else %}
@@ -146,6 +230,33 @@
     <article class="workflow-history-event">
       <strong>{{ event.summary }}</strong>
       <p>{{ event.actor }}{% if event.at %} · {{ event.at }}{% endif %}</p>
+      {% if event.data.source_state_name or event.data.destination_state_name %}
+      <p>{{ event.data.source_state_name or event.data.transition_snapshot.from_state }} -> {{ event.data.destination_state_name or event.data.transition_snapshot.to_state }}</p>
+      {% endif %}
+      {% if event.data.effective_outputs %}
+      <dl class="workflow-field-list">
+        {% for field_id, value in event.data.effective_outputs.items() %}
+        {% set field_def = event.data.transition_snapshot.field_defs[field_id] if event.data.transition_snapshot and event.data.transition_snapshot.field_defs and field_id in event.data.transition_snapshot.field_defs else none %}
+        <div>
+          <dt>{{ field_def.label if field_def else field_id }}</dt>
+          <dd>{{ render_value(field_def.type if field_def else 'text', value) }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+      {% endif %}
+      {% if event.data.assessments %}
+      {% for assessment in event.data.assessments %}
+      <p>
+        {% set criteria_ns = namespace(description=assessment.criterion_id) %}
+        {% if event.data.transition_snapshot and event.data.transition_snapshot.criteria %}
+          {% for criterion in event.data.transition_snapshot.criteria %}
+            {% if criterion.id == assessment.criterion_id %}{% set criteria_ns.description = criterion.description %}{% endif %}
+          {% endfor %}
+        {% endif %}
+        {{ criteria_ns.description }}: {{ assessment.reasoning }}
+      </p>
+      {% endfor %}
+      {% endif %}
     </article>
     {% endfor %}
   </section>

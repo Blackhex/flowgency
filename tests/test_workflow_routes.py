@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import flowgency.jobs.submission as submission_module
 
 from tests._ticket_helpers import TicketRuntimeIntegration
@@ -53,6 +56,24 @@ def test_board_snapshot_reports_missing_storage_without_disabling_other_services
     html = env.client.get(env.base_path)
     assert html.status_code == 200
     assert "missing-root" in html.text
+
+
+def test_board_snapshot_uses_deterministic_etag(workflow_web_env):
+    response = workflow_web_env.client.get(f"{workflow_web_env.base_path}/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    expected = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    assert response.headers["etag"] == f'W/"{expected}"'
+
+    not_modified = workflow_web_env.client.get(
+        f"{workflow_web_env.base_path}/snapshot",
+        headers={"If-None-Match": response.headers["etag"]},
+    )
+
+    assert not_modified.status_code == 304
 
 
 def test_board_snapshot_reports_invalid_definition_history(workflow_web_env):

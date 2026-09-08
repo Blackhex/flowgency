@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -15,6 +17,9 @@ from urllib.request import urlopen
 import yaml
 
 from flowgency.configuration.models import MemorySelector
+from flowgency.configuration.store import ConfigStore
+from flowgency.integrations import REGISTRY
+from flowgency.jobs.models import JobHandle
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from flowgency.jobs.store import transition_job, write_job
@@ -29,6 +34,102 @@ RUNTIME_PARENT = Path(__file__).resolve().parent / ".runtime"
 RUNTIME_ROOT = RUNTIME_PARENT / "current"
 FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config.yaml"
 FIXED_NOW = "2026-07-16T12:00:00+00:00"
+
+
+def _ui_sitecustomize(runtime: Path) -> Path:
+    support = runtime / "test-support"
+    support.mkdir(parents=True, exist_ok=True)
+    _write(
+        support / "sitecustomize.py",
+        "from tests.ui.server import _install_ui_test_runtime\n"
+        "\n"
+        "_install_ui_test_runtime()\n",
+    )
+    return support
+
+
+def _ui_submit_job_request(request, launcher=None) -> JobHandle:
+    del launcher
+    config_store = ConfigStore(Path(request.config_path))
+    snapshot = config_store.load()
+    team = snapshot.config.teams[request.team_key]
+    agent = team.agents[request.agent_name]
+    memory_root = Path(snapshot.config.flowgency.memory_store)
+    job_store = JobStore(memory_root)
+    memory_selector = {
+        "scope": "agent",
+        "team": request.team_key,
+        "agent": request.agent_name,
+        "version": 1,
+    }
+    canonical_json = json.dumps(memory_selector, sort_keys=True, separators=(",", ":"))
+    memory_hash = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+    memory_path = memory_root / "ui-ticket-memory" / request.team_key / request.agent_name
+    memory_path.mkdir(parents=True, exist_ok=True)
+    cache_path = Path(snapshot.config.flowgency.compilation_cache) / "ticket-test" / "ui" / request.agent_name
+    cache_path.mkdir(parents=True, exist_ok=True)
+    timeout = getattr(team.runtime, "timeout", 1800)
+    mode = getattr(team.permissions, "mode", "unrestricted")
+    spec = JobSpec(
+        schema_version=6,
+        job_id=request.job_id,
+        config_path=str(config_store.path.resolve()),
+        config_revision=snapshot.revision,
+        team_key=request.team_key,
+        workspace_root=str(team.workspace_path.resolve()),
+        team_root=str(team.path.resolve()),
+        agent_name=request.agent_name,
+        trigger="ticket",
+        integration_name=agent.integration,
+        integration_config={},
+        blueprint=BlueprintRef(
+            key=agent.blueprint,
+            source_digest="0" * 64,
+            integration=agent.integration,
+            projector_version="ui-ticket",
+            cache_path=str(cache_path.resolve()),
+            instance_digest="1" * 64,
+        ),
+        routine_id=None,
+        skill=None,
+        skill_arguments=(),
+        task_input=request.task_input,
+        runtime_policy=RuntimePolicySnapshot(timeout=timeout, mode=mode),
+        memory=MemoryBinding(
+            selector=memory_selector,
+            canonical_json=canonical_json,
+            memory_hash=memory_hash,
+            path=str(memory_path.resolve()),
+        ),
+        trigger_context=request.trigger_context,
+        prompt_source={
+            "type": "ticket",
+            "scope": "ticket",
+            "name": "ticket-run",
+            "source_path": "ticket.prompt.md",
+            "source_digest": "0" * 64,
+        },
+        timeout_override=request.timeout_override,
+        created_at=FIXED_NOW,
+        private_prompts=(),
+        ticket_target=request.ticket_target,
+    )
+    authority = job_store.create(JobRecord.from_spec(spec, due_at=request.due_at))
+    return JobHandle(spec.job_id, "queued", authority.path, None)
+
+
+def _install_ui_test_runtime() -> None:
+    import flowgency.jobs.submission as submission_module
+    import flowgency.web.dependencies as web_dependencies
+    from tests._ticket_helpers import TicketRuntimeIntegration
+
+    class UITicketRuntimeIntegration(TicketRuntimeIntegration):
+        name = "ticket-test"
+        display_name = "UI Ticket Test Runtime"
+
+    REGISTRY["ticket-test"] = UITicketRuntimeIntegration()
+    submission_module.submit_job_request = _ui_submit_job_request
+    web_dependencies.submit_job_request = _ui_submit_job_request
 
 
 def _write(path: Path, content: str) -> None:
@@ -105,6 +206,15 @@ def _ticket_record(
     field_values: dict | None = None,
     events: tuple[TicketEvent, ...] | None = None,
 ) -> TicketRecord:
+    ticket_events = list(events or (TicketEvent(kind="opened", actor="local-user", summary="Ticket created"),))
+    if assignee is not None and not any(event.kind == "assigned" for event in ticket_events):
+        ticket_events.append(
+            TicketEvent(
+                kind="assigned",
+                actor="local-user",
+                summary=f"Assigned to {assignee}",
+            )
+        )
     return TicketRecord(
         id=ticket_id,
         number=number,
@@ -116,7 +226,7 @@ def _ticket_record(
         field_values=dict(field_values or {}),
         field_provenance={},
         revision=1,
-        events=events or (TicketEvent(kind="opened", actor="local-user", summary="Ticket created"),),
+        events=tuple(ticket_events),
         receipts=(),
         created_at=datetime.fromisoformat(FIXED_NOW),
         updated_at=datetime.fromisoformat(FIXED_NOW),
@@ -414,6 +524,34 @@ def _prepare_runtime() -> tuple[Path, Path]:
             ),
         ),
     )
+    _seed_blueprint(
+        runtime / "agent-library",
+        "reviewer",
+        "Reviewer",
+        "review-ticket",
+        prompts=(
+            (
+                "review-ticket",
+                "Shared review ticket prompt.",
+                "Review the current ticket evidence and report whether the work is ready.\n",
+                "Reference the most important blocking issue if one exists.",
+            ),
+        ),
+    )
+    _seed_blueprint(
+        runtime / "agent-library",
+        "researcher",
+        "Researcher",
+        "research-ticket",
+        prompts=(
+            (
+                "research-ticket",
+                "Shared research ticket prompt.",
+                "Investigate the current ticket question and summarize the evidence.\n",
+                "Include the most relevant sources or findings.",
+            ),
+        ),
+    )
     (runtime / "compiled-agents").mkdir()
     _seed_private_prompts(runtime)
     _seed_memory(runtime, config)
@@ -464,10 +602,11 @@ def main() -> int:
 
     try:
         runtime, config_path = _prepare_runtime()
+        support_path = _ui_sitecustomize(runtime)
         env = os.environ.copy()
         env["FLOWGENCY_CONFIG"] = str(config_path)
         env["FLOWGENCY_FIXED_NOW"] = FIXED_NOW
-        env["PYTHONPATH"] = str(ROOT)
+        env["PYTHONPATH"] = os.pathsep.join((str(support_path), str(ROOT)))
         command = [
             sys.executable,
             "-m",
