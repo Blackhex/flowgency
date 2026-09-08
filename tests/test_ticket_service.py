@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from pydantic import ValidationError
 
-from flowgency.tickets.models import TicketPatch, UserTicketContext
-from flowgency.tickets.errors import TicketConflict, TicketForbidden, WorkflowUnavailable
+from flowgency.tickets.models import TicketOperation, TicketPatch, UserTicketContext
+from flowgency.tickets.errors import OperationConflict, TicketConflict, TicketForbidden, WorkflowUnavailable
 from flowgency.tickets.storages.local import LocalTicketStorage
 from tests._ticket_helpers import storage_binding, ticket_record
 
@@ -16,6 +18,132 @@ def test_create_assigns_initial_state_and_version(workflow_env):
     assert ticket.version.ref == ticket.ref
     assert ticket.definition is not None
     assert ticket.issues == ()
+
+
+def test_create_same_content_with_different_operation_ids_creates_distinct_tickets(workflow_env):
+    env = workflow_env
+    digest = hashlib.sha256(b"same-content").hexdigest()
+    first = env.service.create(
+        env.user,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        TicketOperation(operation_id="op-user-first", request_digest=digest),
+    )
+    second = env.service.create(
+        env.user,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        TicketOperation(operation_id="op-user-second", request_digest=digest),
+    )
+    assert first.ticket.ref is not None
+    assert second.ticket.ref is not None
+    assert first.ticket.ref.ticket_id != second.ticket.ref.ticket_id
+
+
+def test_create_reused_operation_id_with_changed_digest_conflicts_without_extra_ticket(workflow_env):
+    env = workflow_env
+    first = TicketOperation(
+        operation_id="op-user-reused",
+        request_digest=hashlib.sha256(b"first-digest").hexdigest(),
+    )
+    second = TicketOperation(
+        operation_id="op-user-reused",
+        request_digest=hashlib.sha256(b"second-digest").hexdigest(),
+    )
+    created = env.service.create(
+        env.user,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        first,
+    )
+    assert created.ticket.ref is not None
+    with pytest.raises(OperationConflict):
+        env.service.create(
+            env.user,
+            env.workflow_id,
+            "Created",
+            "Body text.",
+            {"summary": "hello"},
+            second,
+        )
+    replayed = env.service.create(
+        env.user,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        first,
+    )
+    assert replayed.ticket.ref == created.ticket.ref
+    assert replayed.replayed is True
+
+
+def test_create_same_operation_and_digest_replays_original_ticket(workflow_env):
+    env = workflow_env
+    operation = TicketOperation(
+        operation_id="op-user-replay",
+        request_digest=hashlib.sha256(b"replay").hexdigest(),
+    )
+    first = env.service.create(
+        env.user,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        operation,
+    )
+    second = env.service.create(
+        env.user,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        operation,
+    )
+    assert first.ticket.ref == second.ticket.ref
+    assert second.replayed is True
+
+
+def test_create_scopes_ticket_identity_by_actor_and_binding(workflow_env):
+    env = workflow_env
+    digest = hashlib.sha256(b"same-content").hexdigest()
+    user_ticket = env.service.create(
+        env.user,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        TicketOperation(operation_id="op-shared", request_digest=digest),
+    )
+    other_actor = UserTicketContext(team_id=env.team_id, actor_name="other-user")
+    other_actor_ticket = env.service.create(
+        other_actor,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        TicketOperation(operation_id="op-shared", request_digest=digest),
+    )
+    env.set_storage_root(env.root_b)
+    other_binding_ticket = env.service.create(
+        env.user,
+        env.workflow_id,
+        "Created",
+        "Body text.",
+        {"summary": "hello"},
+        TicketOperation(operation_id="op-shared", request_digest=digest),
+    )
+    assert user_ticket.ticket.ref is not None
+    assert other_actor_ticket.ticket.ref is not None
+    assert other_binding_ticket.ticket.ref is not None
+    assert user_ticket.ticket.ref.ticket_id != other_actor_ticket.ticket.ref.ticket_id
+    assert user_ticket.ticket.ref.ticket_id != other_binding_ticket.ticket.ref.ticket_id
 
 
 def test_stale_revision_is_rejected(workflow_env):

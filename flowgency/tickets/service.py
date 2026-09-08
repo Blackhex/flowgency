@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from pathlib import Path
@@ -100,7 +101,7 @@ class TicketService:
             event_id = uuid.uuid4().hex
             event = self._event("opened", actor, "Ticket created", event_id, now)
             provider = self.storage_factory(binding.storage)
-            ticket_id = f"ticket-{operation.request_digest[:16]}"
+            ticket_id = self._creation_ticket_id(binding.storage, actor, operation)
             ref = TicketRef.from_binding(binding.storage, ticket_id)
             record = TicketRecord(
                 id=ticket_id,
@@ -494,4 +495,36 @@ class TicketService:
                 recorded_at=now,
             )
             for field_id in values
+        }
+
+    def _creation_ticket_id(
+        self,
+        binding: StorageBinding,
+        actor: TicketActor,
+        operation: TicketOperation,
+    ) -> str:
+        namespace = uuid.uuid5(uuid.NAMESPACE_URL, binding.binding_id)
+        identity = json.dumps(
+            {
+                "actor": self._creation_actor_identity(actor),
+                "operation_id": operation.operation_id,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return f"ticket-{uuid.uuid5(namespace, identity)}"
+
+    def _creation_actor_identity(self, actor: TicketActor) -> dict[str, str]:
+        if isinstance(actor, UserTicketContext):
+            return {
+                "actor_kind": "user",
+                "actor_name": actor.actor_name,
+                "team_id": actor.team_id,
+            }
+        return {
+            "actor_kind": "agent",
+            "agent_name": actor.agent_name,
+            "job_id": actor.job_id,
+            "session_id": actor.session_id,
+            "team_id": actor.team_id,
         }
