@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import threading
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -85,46 +86,76 @@ def patch_workflow_instance(
     """
 
     def apply(raw: dict[str, Any]) -> None:
-        teams = raw.get("teams")
-        if not isinstance(teams, dict):
-            raise TypeError("teams must be a mapping")
-        team = teams[team_id]
-        if not isinstance(team, dict):
-            raise TypeError(f"teams.{team_id} must be a mapping")
-        workflows = team.setdefault("workflows", {})
-        if not isinstance(workflows, dict):
-            raise TypeError(f"teams.{team_id}.workflows must be a mapping")
-        if create and workflow_id in workflows:
-            raise ValueError(f"Workflow already exists: {workflow_id}")
-        if not create and workflow_id not in workflows:
-            raise KeyError(workflow_id)
-        current = workflows.setdefault(workflow_id, {})
-        previous_selection = (
-            current.get("blueprint"),
-            current.get("integration"),
-            _normalized_provider_config(
-                current.get("integration"), current.get("integration_config", {})
-            ),
-        )
-        next_selection = (
-            patch.blueprint,
-            patch.integration,
-            _normalized_provider_config(patch.integration, patch.integration_config),
-        )
-        generation = int(current.get("context_generation", 0))
-        if not create and previous_selection != next_selection:
-            generation += 1
-        current.update(
-            {
-                "name": patch.name,
-                "blueprint": patch.blueprint,
-                "integration": patch.integration,
-                "integration_config": dict(patch.integration_config),
-                "context_generation": generation,
-            }
-        )
+        _apply_workflow_instance_patch(raw, team_id, workflow_id, patch, create=create)
 
     return store.patch(expected_revision, apply)
+
+
+def _apply_workflow_instance_patch(
+    raw: dict[str, Any],
+    team_id: str,
+    workflow_id: str,
+    patch: WorkflowInstancePatch,
+    *,
+    create: bool,
+) -> None:
+    teams = raw.get("teams")
+    if not isinstance(teams, dict):
+        raise TypeError("teams must be a mapping")
+    team = teams[team_id]
+    if not isinstance(team, dict):
+        raise TypeError(f"teams.{team_id} must be a mapping")
+    workflows = team.setdefault("workflows", {})
+    if not isinstance(workflows, dict):
+        raise TypeError(f"teams.{team_id}.workflows must be a mapping")
+    if create and workflow_id in workflows:
+        raise ValueError(f"Workflow already exists: {workflow_id}")
+    if not create and workflow_id not in workflows:
+        raise KeyError(workflow_id)
+    current = workflows.setdefault(workflow_id, {})
+    previous_selection = (
+        current.get("blueprint"),
+        current.get("integration"),
+        _normalized_provider_config(
+            current.get("integration"), current.get("integration_config", {})
+        ),
+    )
+    next_selection = (
+        patch.blueprint,
+        patch.integration,
+        _normalized_provider_config(patch.integration, patch.integration_config),
+    )
+    generation = int(current.get("context_generation", 0))
+    if not create and previous_selection != next_selection:
+        generation += 1
+    current.update(
+        {
+            "name": patch.name,
+            "blueprint": patch.blueprint,
+            "integration": patch.integration,
+            "integration_config": dict(patch.integration_config),
+            "context_generation": generation,
+        }
+    )
+
+
+def _preview_workflow_instance(
+    store: ConfigStore,
+    snapshot: ConfigSnapshot,
+    team_id: str,
+    workflow_id: str,
+    patch: WorkflowInstancePatch,
+    *,
+    create: bool,
+) -> ConfigSnapshot:
+    raw = deepcopy(snapshot.raw)
+    _apply_workflow_instance_patch(raw, team_id, workflow_id, patch, create=create)
+    return ConfigSnapshot(
+        path=snapshot.path,
+        revision=snapshot.revision,
+        raw=raw,
+        config=store._validated_config(raw),
+    )
 
 
 def _canonical_library(workflow_library: Path | None) -> str | None:
@@ -316,8 +347,9 @@ class WorkflowConfigurationService:
         or an existing ticket the candidate cannot interpret leaves config bytes,
         old tickets, and destination data untouched. A rebind is not a transfer –
         existing tickets under the previous storage are simply hidden by the new
-        selection. Only initial setup prepares the selected root, and only after
-        the patch has structurally validated the new configuration; an ordinary
+        selection. The candidate config is validated without committing, an
+        initial local root is prepared before its namespace is inspected, then a
+        single revision-checked config write publishes the change. An ordinary
         rebind creates no destination directory.
         """
         lock_blueprints = self._locked_blueprints(team_id, workflow_id, patch, create)
@@ -327,20 +359,28 @@ class WorkflowConfigurationService:
             library = self.library_for(snapshot)
             source = library.inspect(patch.blueprint)
             candidate = WorkflowDefinition.model_validate(source.definition.model_dump())
-            destination = StorageBinding(
-                integration=patch.integration,
-                config=dict(patch.integration_config),
-                team_id=team_id,
-                workflow_id=workflow_id,
+            candidate_snapshot = _preview_workflow_instance(
+                self.store,
+                snapshot,
+                team_id,
+                workflow_id,
+                patch,
+                create=create,
             )
-            require_compatible(
-                candidate, self._destination_records(destination, create=create)
-            )
+            destination = resolve_workflow_binding(
+                candidate_snapshot, team_id, workflow_id
+            ).storage
+            if create and destination.integration == "local":
+                prepare_writable_directory(
+                    Path(destination.config["root"]),
+                    label="workflow storage root",
+                )
+            require_compatible(candidate, self._destination_records(destination))
             if library.inspect(patch.blueprint).digest != source.digest:
                 raise ConfigConflictError(
                     "Blueprint source changed; reload before saving"
                 )
-            result = patch_workflow_instance(
+            return patch_workflow_instance(
                 self.store,
                 snapshot.revision,
                 team_id,
@@ -348,14 +388,6 @@ class WorkflowConfigurationService:
                 patch,
                 create=create,
             )
-            if create and patch.integration == "local":
-                root = patch.integration_config.get("root")
-                if root is not None:
-                    prepare_writable_directory(
-                        self._resolve_root(snapshot, root),
-                        label="workflow storage root",
-                    )
-            return result
 
     def _locked_blueprints(
         self,
@@ -381,16 +413,13 @@ class WorkflowConfigurationService:
                 blueprint_ids.add(workflow.blueprint)
         return tuple(sorted(blueprint_ids))
 
-    def _destination_records(
-        self, storage: StorageBinding, *, create: bool
-    ) -> tuple[TicketRecord, ...]:
+    def _destination_records(self, storage: StorageBinding) -> tuple[TicketRecord, ...]:
         """List the destination namespace, treating an unavailable one as a block.
 
-        Initial creation has no destination yet – its freshly prepared root is
-        definitionally empty – so no listing is attempted.
+        A new instance may target an already populated namespace; callers prepare
+        a new local root first when needed, then this method checks the actual
+        destination namespace that would be selected by the candidate config.
         """
-        if create:
-            return ()
         try:
             return self.storage_factory(storage).list(
                 storage.team_id, storage.workflow_id
@@ -404,15 +433,6 @@ class WorkflowConfigurationService:
                     )
                 ]
             ) from error
-
-    @staticmethod
-    def _resolve_root(snapshot: ConfigSnapshot, root: Any) -> Path:
-        """Resolve a configured storage root against the config directory, not cwd."""
-        path = Path(str(root)).expanduser()
-        if not path.is_absolute():
-            path = snapshot.path.parent / path
-        return path
-
     def save_blueprint(
         self,
         expected_revision: str,

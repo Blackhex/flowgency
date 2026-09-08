@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from flowgency.configuration.paths import DirectoryPreparationError
 from flowgency.configuration.issues import ValidationFailed
 from flowgency.configuration.store import ConfigConflictError
+from flowgency.tickets.models import StorageBinding, TicketOperation, TicketRef
 from flowgency.tickets.storages.registry import resolve_storage
 from flowgency.workflows.configuration import (
     WorkflowConfigurationService,
     WorkflowInstancePatch,
+    resolve_workflow_binding,
 )
 from flowgency.workflows.models import ContractError
+from tests._ticket_helpers import SEED_TIME, ticket_record
 
 
 def _settings_patch(flowgency, **overrides):
@@ -31,6 +37,25 @@ def _settings_patch(flowgency, **overrides):
     )
     values.update(overrides)
     return FlowgencySettingsPatch(**values)
+
+
+def _seed_destination_ticket(root: Path, workflow_id: str, *, state_id: str = "review"):
+    storage_binding = StorageBinding(
+        integration="local",
+        config={"root": str(root)},
+        team_id="newsletter",
+        workflow_id=workflow_id,
+    )
+    storage = resolve_storage(storage_binding, clock=lambda: SEED_TIME)
+    ref = TicketRef.from_binding(storage_binding, "seeded-ticket")
+    result = storage.create(
+        ticket_record(ticket_id="seeded-ticket", state_id=state_id).with_ref(ref),
+        TicketOperation(
+            operation_id=f"seed-{workflow_id}",
+            request_digest=f"seed-{workflow_id}",
+        ),
+    )
+    return ref, storage.read(ref)
 
 
 
@@ -199,6 +224,67 @@ def test_create_with_missing_blueprint_leaves_no_root(workflow_env):
     assert not fresh_root.exists()
 
 
+def test_create_existing_destination_requires_compatible_namespace(workflow_env):
+    env = workflow_env
+    env.write_blueprint("narrow", _narrow_blueprint())
+    existing_root = env.tmp_path / "tickets-existing"
+    existing_root.mkdir()
+    ref, seeded = _seed_destination_ticket(existing_root, "board-c")
+
+    before_file = env.store.inspect()
+    with pytest.raises(ValidationFailed):
+        env.configuration_service.save_instance(
+            before_file.revision,
+            "newsletter",
+            "board-c",
+            WorkflowInstancePatch(
+                name="Board C",
+                blueprint="narrow",
+                integration="local",
+                integration_config={"root": str(existing_root)},
+            ),
+            create=True,
+        )
+    after_fail = env.store.inspect()
+    assert after_fail.revision == before_file.revision
+    assert after_fail.payload == before_file.payload
+    assert resolve_storage(
+        StorageBinding(
+            integration="local",
+            config={"root": str(existing_root)},
+            team_id="newsletter",
+            workflow_id="board-c",
+        ),
+        clock=lambda: SEED_TIME,
+    ).read(ref) == seeded
+
+    created = env.configuration_service.save_instance(
+        after_fail.revision,
+        "newsletter",
+        "board-c",
+        WorkflowInstancePatch(
+            name="Board C",
+            blueprint="delivery",
+            integration="local",
+            integration_config={"root": str(existing_root)},
+        ),
+        create=True,
+    )
+    assert resolve_storage(
+        StorageBinding(
+            integration="local",
+            config={"root": str(existing_root)},
+            team_id="newsletter",
+            workflow_id="board-c",
+        ),
+        clock=lambda: SEED_TIME,
+    ).read(ref) == seeded
+    assert (
+        created.config.teams["newsletter"].workflows["board-c"].blueprint
+        == "delivery"
+    )
+
+
 def test_rebind_to_unavailable_destination_is_rejected(workflow_env):
     env = workflow_env
     env.seed_ticket(state_id="review")
@@ -246,6 +332,92 @@ def test_create_prepares_root_after_validation(workflow_env):
     after = env.store.load()
     assert "board-c" in after.config.teams["newsletter"].workflows
     assert fresh_root.is_dir()
+
+
+def test_relative_roots_use_config_directory_not_cwd_decoy(
+    workflow_env, monkeypatch
+):
+    env = workflow_env
+    env.write_blueprint("narrow", _narrow_blueprint())
+
+    configured_root = env.store.path.parent / "tickets-relative"
+    configured_root.mkdir()
+    _seed_destination_ticket(configured_root, "board-a")
+
+    decoy_cwd = env.tmp_path / "decoy-cwd"
+    (decoy_cwd / "tickets-relative").mkdir(parents=True)
+    monkeypatch.chdir(decoy_cwd)
+
+    before = env.store.inspect()
+    with pytest.raises(ValidationFailed):
+        env.configuration_service.save_instance(
+            before.revision,
+            "newsletter",
+            "board-a",
+            WorkflowInstancePatch(
+                name="Board A",
+                blueprint="narrow",
+                integration="local",
+                integration_config={"root": "tickets-relative"},
+            ),
+        )
+    after_fail = env.store.inspect()
+    assert after_fail.revision == before.revision
+    assert after_fail.payload == before.payload
+
+    created = env.configuration_service.save_instance(
+        after_fail.revision,
+        "newsletter",
+        "board-c",
+        WorkflowInstancePatch(
+            name="Board C",
+            blueprint="delivery",
+            integration="local",
+            integration_config={"root": "tickets-created-relative"},
+        ),
+        create=True,
+    )
+    binding = resolve_workflow_binding(created, "newsletter", "board-c")
+    assert Path(binding.storage.config["root"]) == (
+        env.store.path.parent / "tickets-created-relative"
+    ).resolve(strict=False)
+    assert not (decoy_cwd / "tickets-created-relative").exists()
+
+
+def test_create_preparation_failure_leaves_config_bytes_unchanged(
+    workflow_env, monkeypatch
+):
+    import flowgency.workflows.configuration as workflow_configuration
+
+    env = workflow_env
+    fresh_root = env.tmp_path / "tickets-fault"
+    before = env.store.inspect()
+
+    def fail_prepare(path, *, label):
+        raise DirectoryPreparationError(f"Injected failure for {label}: {path}")
+
+    monkeypatch.setattr(
+        workflow_configuration, "prepare_writable_directory", fail_prepare
+    )
+
+    with pytest.raises(DirectoryPreparationError):
+        env.configuration_service.save_instance(
+            before.revision,
+            "newsletter",
+            "board-c",
+            WorkflowInstancePatch(
+                name="Board C",
+                blueprint="delivery",
+                integration="local",
+                integration_config={"root": str(fresh_root)},
+            ),
+            create=True,
+        )
+
+    after = env.store.inspect()
+    assert after.revision == before.revision
+    assert after.payload == before.payload
+    assert not fresh_root.exists()
 
 
 def test_save_blueprint_rejects_config_change_after_compatibility(workflow_env):
