@@ -292,19 +292,25 @@ class TicketService:
         *,
         job_id: str,
         assignment_event_id: str,
+        expected_generation: str | None,
         stopped,
     ) -> TicketRecord:
         provider = self.storage_factory(binding)
         current = provider.read(ref)
         clear_pending = bool(
             stopped.confirmed
+            and stopped.job_id == job_id
             and current.pending_run is not None
             and current.pending_run.job_id == job_id
             and current.pending_run.assignment_event_id == assignment_event_id
         )
         from flowgency.jobs.processes import may_clear_active_work
 
-        clear_active = may_clear_active_work(current, stopped)
+        clear_active = bool(
+            expected_generation is not None
+            and expected_generation == stopped.generation
+            and may_clear_active_work(current, stopped)
+        )
         if not clear_pending and not clear_active:
             return current
         operation = TicketOperation(
@@ -322,6 +328,14 @@ class TicketService:
                 update={
                     "pending_run": None if clear_pending else record.pending_run,
                     "active_run": None if clear_active else record.active_run,
+                    "events": record.events
+                    + (
+                        TicketEvent(
+                            kind="ticket-run-cleanup",
+                            actor="system",
+                            summary="Ticket run cleanup confirmed",
+                        ),
+                    ),
                 }
             ),
         )

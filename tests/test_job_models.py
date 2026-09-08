@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import inspect
 import io
+from dataclasses import replace as dc_replace
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -20,7 +21,9 @@ from flowgency.jobs.models import (
     JobSpec,
     MemoryBinding,
     RuntimePolicySnapshot,
+    TicketJobTarget,
 )
+from flowgency.tickets.models import StorageBinding, TicketRef
 from flowgency.jobs.store import (
     InvalidJobTransition,
     active_jobs,
@@ -170,6 +173,61 @@ def test_schema_five_payload_keeps_historic_digest_and_shape():
 
     assert spec.to_dict() == payload
     assert spec.immutable_digest() == "f4fcd50b1d4f3a9b762afd9d099a9d7a24cf9eee4ecc5791719b318ed6b53649"
+
+
+def test_ticket_job_target_requires_canonical_binding_relation(tmp_path):
+    spec = make_spec(tmp_path)
+    binding = StorageBinding(
+        integration="local",
+        config={"root": str((tmp_path / "tickets-a").resolve())},
+        team_id="newsletter",
+        workflow_id="board-a",
+    )
+    wrong_binding = StorageBinding(
+        integration="local",
+        config={"root": str((tmp_path / "tickets-b").resolve())},
+        team_id="support",
+        workflow_id="board-b",
+    )
+
+    with pytest.raises(ValueError, match="binding"):
+        dc_replace(
+            spec,
+            schema_version=6,
+            trigger="ticket",
+            routine_id=None,
+            prompt_source={"type": "ticket"},
+            ticket_target=TicketJobTarget(
+                binding=wrong_binding,
+                ref=TicketRef.from_binding(binding, "ticket-1"),
+                assigned_agent="builder",
+                assignment_event_id="assigned-1",
+                context_digest="c" * 64,
+            ),
+        ).validate()
+
+
+def test_non_ticket_jobs_reject_ticket_target(tmp_path):
+    spec = make_spec(tmp_path)
+    binding = StorageBinding(
+        integration="local",
+        config={"root": str((tmp_path / "tickets-a").resolve())},
+        team_id="newsletter",
+        workflow_id="board-a",
+    )
+
+    with pytest.raises(ValueError, match="ticket_target"):
+        dc_replace(
+            spec,
+            schema_version=6,
+            ticket_target=TicketJobTarget(
+                binding=binding,
+                ref=TicketRef.from_binding(binding, "ticket-1"),
+                assigned_agent="builder",
+                assignment_event_id="assigned-1",
+                context_digest="c" * 64,
+            ),
+        ).validate()
 
 
 @pytest.mark.parametrize("schema_version", [3, 4])

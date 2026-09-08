@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -30,6 +31,7 @@ VALID_STATUSES = {
     "failed",
     "cancelled",
 }
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,20 @@ class TicketJobTarget:
     assigned_agent: str
     assignment_event_id: str
     context_digest: str
+
+    def __post_init__(self) -> None:
+        if self.ref.binding_id != self.binding.binding_id:
+            raise ValueError("ticket target ref binding must match its binding")
+        if self.ref.team_id != self.binding.team_id:
+            raise ValueError("ticket target ref team must match its binding")
+        if self.ref.workflow_id != self.binding.workflow_id:
+            raise ValueError("ticket target ref workflow must match its binding")
+        if not self.assigned_agent.strip():
+            raise ValueError("ticket target assigned_agent must not be blank")
+        if not self.assignment_event_id.strip():
+            raise ValueError("ticket target assignment_event_id must not be blank")
+        if not _DIGEST.fullmatch(self.context_digest):
+            raise ValueError("ticket target context_digest must be a SHA-256 digest")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -243,6 +259,8 @@ class JobSpec:
             raise ValueError("durable jobs must keep skill_arguments empty")
         if self.schema_version == 5 and self.ticket_target is not None:
             raise ValueError("schema v5 jobs must not set ticket_target")
+        if self.trigger != "ticket" and self.ticket_target is not None:
+            raise ValueError("non-ticket jobs must not set ticket_target")
         if self.trigger in {"scheduled_prompt", "manual_prompt"}:
             if self.prompt_source is None:
                 raise ValueError("prompt-backed jobs require a prompt_source")
@@ -257,6 +275,10 @@ class JobSpec:
                 raise ValueError("ticket jobs require ticket_target")
             if self.prompt_source is None or self.prompt_source.get("type") != "ticket":
                 raise ValueError("ticket jobs require a ticket prompt_source")
+            if self.ticket_target.ref.team_id != self.team_key:
+                raise ValueError("ticket jobs must target the same team as the enclosing job")
+            if self.ticket_target.assigned_agent != self.agent_name:
+                raise ValueError("ticket jobs must target the assigned agent of the enclosing job")
 
     def to_dict(self) -> dict[str, Any]:
         payload = {

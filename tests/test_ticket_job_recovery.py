@@ -5,6 +5,7 @@ import shutil
 import pytest
 
 from flowgency.jobs import JobSubmissionError
+from flowgency.jobs.tickets import TicketReservationError
 
 from tests._ticket_helpers import make_ticket_job_environment
 
@@ -54,6 +55,44 @@ def test_submit_clears_partial_reservation_when_job_was_never_created(
         env.coordinator.submit(env.user, ticket.version, "run-request")
 
     assert env.read(ticket.ref).record.pending_run is None
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+    assert reservation is not None
+    assert reservation.status == "retryable"
+
+
+def test_retry_after_missing_job_reuses_original_job_id_and_version(
+    ticket_job_env,
+    monkeypatch,
+):
+    import flowgency.jobs.submission as submission_module
+
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+    original_submit_resolved = submission_module._submit_resolved
+
+    monkeypatch.setattr(
+        submission_module,
+        "_submit_resolved",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("submit failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="submit failed"):
+        env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+    assert reservation is not None
+    assert env.read(ticket.ref).record.pending_run is None
+
+    monkeypatch.setattr(submission_module, "_submit_resolved", original_submit_resolved)
+
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    assert handle.job_id == reservation.job_id
+    current = env.read(ticket.ref).record
+    assert current.pending_run is not None
+    assert current.pending_run.job_id == reservation.job_id
+    assert sum(1 for event in current.events if event.kind == "ticket-run-reserved") == 1
+    assert sum(1 for event in current.events if event.kind == "ticket-run-reconciled") == 2
 
 
 def test_submit_keeps_reservation_when_job_record_exists_before_failure(ticket_job_env):
@@ -70,6 +109,51 @@ def test_submit_keeps_reservation_when_job_record_exists_before_failure(ticket_j
         type("Handle", (), {"path": env.job_store.path(env.team_id, current.pending_run.job_id), "job_id": current.pending_run.job_id})
     )
     assert failed.status == "failed"
+
+
+def test_retry_after_durable_job_creation_adopts_verified_authority(ticket_job_env):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+    env.launcher.launch.side_effect = OSError("spawn denied")
+
+    with pytest.raises(JobSubmissionError, match="spawn denied"):
+        env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+    assert reservation is not None
+    assert reservation.authority_digest is not None
+
+    env.launcher.launch.side_effect = None
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    assert handle.job_id == reservation.job_id
+    assert handle.path == env.job_store.path(env.team_id, reservation.job_id)
+
+
+def test_retry_rejects_stray_job_at_reserved_path(ticket_job_env, monkeypatch):
+    import flowgency.jobs.submission as submission_module
+
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+    original_submit_resolved = submission_module._submit_resolved
+
+    monkeypatch.setattr(
+        submission_module,
+        "_submit_resolved",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("submit failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="submit failed"):
+        env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+    assert reservation is not None
+    env.running_job("builder", reservation.job_id)
+
+    monkeypatch.setattr(submission_module, "_submit_resolved", original_submit_resolved)
+
+    with pytest.raises(TicketReservationError, match="ticket target|reservation"):
+        env.coordinator.submit(env.user, ticket.version, "run-request")
 
 
 def test_cleanup_uses_original_target_after_storage_switch(ticket_job_env):
@@ -93,6 +177,29 @@ def test_cleanup_uses_original_target_after_storage_switch(ticket_job_env):
         record = env.provider.read(ref)
         assert record.assignee == "builder"
         assert record.active_run is None
+
+
+def test_reconcile_uses_original_binding_and_cancels_stale_job_after_switch(ticket_job_env):
+    import flowgency.jobs.submission as submission_module
+
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+    real_submit = env.coordinator.submitter
+
+    def switching_submit(request):
+        handle = real_submit(request)
+        env.set_storage_root(env.root_b)
+        return handle
+
+    env.coordinator.submitter = switching_submit
+
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+    assert reservation is not None
+    assert reservation.status == "stale"
+    assert env.provider.read(ticket.ref).pending_run is None
+    assert env.jobs.read(handle).status == "cancelled"
 
 
 def test_cleanup_keeps_active_work_for_later_generation(ticket_job_env):
