@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flowgency | Workflow blueprint editor</title>
+  <link rel="icon" href="http://127.0.0.1:8500/static/favicon-32.png">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root { color-scheme: dark; --bg: #18191b; --sidebar: #111213; --surface: #222427; --raised: #282b2f; --line: #36393f; --text: #dedfe2; --heading: #f0f1f3; --muted: #a3a7af; --accent: #8cb8ff; --teal: #7ad7bf; --amber: #ebc77c; --rose: #eaa4ae; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    [hidden] { display: none !important; }
+    body { margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font: 13px/1.5 "Segoe WPC", "Segoe UI", sans-serif; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; opacity: .45; }
+    button, input, select, textarea { border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+    input, select, textarea { min-width: 0; width: 100%; padding: 6px 9px; }
+    input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), select { height: 34px; }
+    input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; flex-shrink: 0; }
+    input[type="color"] { width: 34px; height: 34px; padding: 3px; }
+    textarea { min-height: 76px; resize: vertical; line-height: 1.65; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2, h3 { color: var(--heading); font-weight: 600; }
+    h1 { font-size: 20px; line-height: 1.35; overflow-wrap: anywhere; }
+    h2 { font-size: 16px; }
+    h3 { font-size: 13px; }
+    small, .muted { color: var(--muted); }
+    .lucide { width: 16px; height: 16px; flex-shrink: 0; stroke-width: 1.7; }
+    .row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .between { justify-content: space-between; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 5px 10px; white-space: nowrap; font-size: 12px; }
+    .btn:hover:not(:disabled), .icon-btn:hover:not(:disabled) { background: var(--raised); }
+    .btn.primary { background: #21446f; border-color: #416d9e; color: #edf4ff; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: 0 0 30px; border-color: transparent; background: transparent; }
+    .sketch-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 20px; padding: 8px 20px; background: #22252a; border-bottom: 1px solid #4b515a; flex-shrink: 0; }
+    .sketch-bar strong { font-size: 12px; color: var(--heading); }
+    .sketch-bar small { font-size: 11px; }
+    .shell { display: flex; flex: 1; min-height: 0; min-width: 0; position: relative; }
+    .sidebar { width: 208px; flex-shrink: 0; background: var(--sidebar); border-right: 1px solid #27292c; padding: 18px 12px 12px; display: flex; flex-direction: column; overflow-y: auto; z-index: 5; }
+    .brand { font-size: 21px; font-weight: 600; color: var(--heading); padding: 0 10px 20px; gap: 10px; }
+    .brand img { width: 28px; height: 28px; border-radius: 6px; }
+    .nav-section { color: #969ba3; font-size: 11px; font-weight: 600; text-transform: uppercase; margin: 14px 11px 8px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 11px; min-height: 36px; margin: 1px 0; border: 1px solid transparent; border-radius: 5px; color: #b8bcc2; }
+    .nav-item.active { color: #ecf3ff; background: #243143; border-color: #334863; }
+    .sidebar-bottom { margin-top: auto; padding-top: 24px; }
+    main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 20px; min-height: 53px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+    .toolbar-title { flex: 1; min-width: 0; }
+    .toolbar-actions { display: flex; align-items: center; gap: 8px; }
+    .save-state { font-size: 11px; color: var(--muted); min-width: 110px; text-align: right; }
+    .save-state.dirty { color: var(--amber); }
+    .tabs { display: flex; gap: 22px; padding: 0 24px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+    .tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 10px 0; font-size: 12px; color: var(--muted); }
+    .tab[aria-selected="true"] { color: #d9e8ff; border-bottom-color: var(--accent); }
+    .editor-body { display: flex; flex: 1; min-height: 0; min-width: 0; }
+    .transition-nav { width: 226px; flex-shrink: 0; padding: 16px 12px; border-right: 1px solid var(--line); background: #1c1e21; overflow-y: auto; }
+    .transition-nav > .row { margin: 0 8px 10px; }
+    .transition-item { width: 100%; text-align: left; border: 1px solid transparent; background: transparent; padding: 11px 10px; margin-bottom: 5px; border-radius: 5px; }
+    .transition-item:hover { background: var(--surface); }
+    .transition-item[aria-pressed="true"] { background: #253144; border-color: #466184; }
+    .transition-item strong { display: block; font-size: 12px; color: #e1e6ef; font-weight: 500; overflow-wrap: anywhere; }
+    .transition-item small { display: flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 11px; }
+    .transition-item small .lucide { width: 12px; height: 12px; }
+    .content-scroll { flex: 1; min-width: 0; overflow: auto; padding: 18px 24px 28px; background: linear-gradient(180deg, #1b1d20 0, var(--bg) 160px); }
+    .editor-content { max-width: 1100px; margin: 0 auto; }
+    .section { border-bottom: 1px solid #303339; padding: 0 0 20px; margin: 0 0 20px; }
+    .section:last-child { border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; min-height: 30px; }
+    .label { display: block; font-size: 11px; color: #c4c9d1; margin-bottom: 6px; }
+    .transition-name-field { display: block; margin-bottom: 12px; }
+    .two-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+    .contracts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 30px; }
+    .contract-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px 50px 28px; align-items: center; gap: 6px; padding: 5px 0; }
+    .contract-row.header { padding-top: 0; font-size: 11px; color: var(--muted); }
+    .contract-row .required { display: flex; justify-content: center; }
+    .contract-row input[type="text"] { font-size: 12px; }
+    .contract-row select { padding: 5px 6px; font-size: 11px; }
+    .contract-row .icon-btn { width: 28px; height: 28px; }
+    .rule-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px minmax(0, 1fr) 28px; align-items: end; gap: 10px; }
+    .rule-row + .rule-row { margin-top: 10px; }
+    .criterion { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 10px; margin-bottom: 12px; }
+    .checkbox-label { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; }
+    .empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
+    .issues { border-left: 3px solid var(--rose); background: #302326; color: #f1c2c8; padding: 10px 14px; margin-bottom: 18px; font-size: 12px; }
+    .issues ul { margin: 4px 0 0; padding-left: 18px; }
+    .state-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 70px auto; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid #303339; }
+    .state-fields { min-width: 0; }
+    .state-actions { display: flex; gap: 2px; }
+    .overview { max-width: 740px; }
+    .overview > label { display: block; margin-bottom: 18px; }
+    .usage-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid #303339; }
+    .mobile-menu, .mobile-transition { display: none; }
+    .nav-scrim { display: none; }
+    .notice { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); z-index: 20; padding: 10px 14px; background: #303d38; color: #daf1e7; border: 1px solid #677f72; border-radius: 5px; font-size: 12px; }
+    @media (max-width: 1300px) { .contracts { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+    @media (max-width: 900px) { .sidebar { display: none; position: absolute; inset: 0 auto 0 0; } .sidebar.open { display: flex; } .mobile-menu { display: inline-flex; } .nav-scrim.visible { display: block; position: absolute; inset: 0; background: #0008; border: 0; border-radius: 0; z-index: 4; } .transition-nav { display: none; } .mobile-transition { display: block; margin-bottom: 18px; } }
+    @media (max-width: 560px) { .sketch-bar { padding: 7px 12px; } .sketch-bar small { display: none; } .toolbar { padding: 10px 12px; gap: 8px; } h1 { font-size: 18px; } .toolbar-title { flex-basis: calc(100% - 38px); } .toolbar-actions { margin-left: auto; } .save-state { min-width: auto; } .tabs { gap: 20px; padding: 0 16px; } .content-scroll { padding: 14px 16px 24px; } .two-fields { gap: 10px; } .rule-row { grid-template-columns: minmax(0, 1fr) 110px 28px; gap: 8px; } .rule-row > label:nth-child(3) { grid-column: 1 / 3; grid-row: 2; } .rule-row > button { grid-column: 3; grid-row: 2; } .state-row { grid-template-columns: 34px minmax(0, 1fr); gap: 10px; } .state-row > .checkbox-label { grid-column: 2; } .state-actions { grid-column: 2; } }
+  </style>
+</head>
+<body>
+  <header class="sketch-bar"><strong>Workflow blueprint editor: does this structure work?</strong><small>Design sketch &middot; Synthetic definition &middot; No application data is changed</small></header>
+  <div class="shell">
+    <button class="nav-scrim" aria-label="Close navigation" onclick="toggleNavigation(false)"></button>
+    <nav class="sidebar" aria-label="Main navigation">
+      <div class="brand row"><img src="http://127.0.0.1:8500/static/favicon-32.png" alt=""><span>Flowgency</span></div>
+      <div class="nav-section">Administration</div>
+      <div class="nav-item"><i data-lucide="users"></i>Teams</div>
+      <div class="nav-item"><i data-lucide="plug"></i>Integrations</div>
+      <div class="nav-item"><i data-lucide="book-open"></i>Agent Library</div>
+      <div class="nav-item active"><i data-lucide="workflow"></i>Workflow Library</div>
+      <div class="nav-item"><i data-lucide="database"></i>Memory Channels</div>
+      <div class="sidebar-bottom"><div class="nav-item"><i data-lucide="settings"></i>Settings</div></div>
+    </nav>
+    <main>
+      <header class="toolbar">
+        <button class="icon-btn mobile-menu" title="Open navigation" aria-label="Open navigation" onclick="toggleNavigation(true)"><i data-lucide="menu"></i></button>
+        <div class="toolbar-title"><h1 id="blueprint-title">Software delivery</h1></div>
+        <div class="toolbar-actions"><span id="save-state" class="save-state" aria-live="polite">Saved</span><button class="icon-btn" id="revert-button" title="Revert unsaved changes" aria-label="Revert unsaved changes" onclick="revertChanges()" disabled><i data-lucide="undo-2"></i></button><button class="btn primary" id="save-button" onclick="saveBlueprint()" disabled><i data-lucide="save"></i>Save</button></div>
+      </header>
+      <nav class="tabs" aria-label="Blueprint views" role="tablist">
+        <button class="tab" role="tab" aria-selected="false" data-tab="overview" onclick="selectTab('overview')">Overview</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="states" onclick="selectTab('states')">States</button>
+        <button class="tab" role="tab" aria-selected="true" data-tab="transitions" onclick="selectTab('transitions')">Transitions</button>
+      </nav>
+      <div class="editor-body">
+        <aside id="transition-nav" class="transition-nav" aria-label="Transitions"></aside>
+        <div class="content-scroll"><div class="editor-content"><div id="issues" class="issues" role="alert" hidden></div><div id="editor-panel" role="tabpanel"></div></div></div>
+      </div>
+    </main>
+  </div>
+  <div class="notice" id="notice" role="status" hidden></div>
+  <script>
+    let blueprint = {
+      id: 'software-delivery', name: 'Software delivery', description: 'Take a work item from an initial request through implementation and verified review.', initial_state: 'backlog',
+      states: [{ id: 'backlog', name: 'Backlog', color: '#a2acbd' }, { id: 'active', name: 'In progress', color: '#8cb8ff' }, { id: 'review', name: 'Review', color: '#ebc77c' }, { id: 'done', name: 'Done', color: '#7ad7bf' }],
+      transitions: [
+        { id: 'start-work', name: 'Start work', from: 'backlog', to: 'active', preconditions: [], inputs: [{ key: 'acceptance_criteria', label: 'Acceptance criteria', type: 'string', required: true }], outputs: [{ key: 'work_plan', label: 'Work plan', type: 'string', required: true }], criteria: [] },
+        { id: 'submit-review', name: 'Submit for review', from: 'active', to: 'review', preconditions: [], inputs: [{ key: 'acceptance_criteria', label: 'Acceptance criteria', type: 'string', required: true }], outputs: [{ key: 'implementation_ref', label: 'Implementation reference', type: 'string', required: true }, { key: 'review_verdict', label: 'Review verdict', type: 'string', required: true }], criteria: [{ id: 'implementation-ready', text: 'The implementation is ready for an independent review.' }] },
+        { id: 'complete-review', name: 'Complete review', from: 'review', to: 'done', preconditions: [{ input: 'review_verdict', operator: 'equals', value: 'passed' }], inputs: [{ key: 'acceptance_criteria', label: 'Acceptance criteria', type: 'string', required: true }, { key: 'implementation_ref', label: 'Implementation reference', type: 'string', required: true }, { key: 'review_verdict', label: 'Review verdict', type: 'string', required: true }], outputs: [{ key: 'test_report', label: 'Test report', type: 'artifact', required: true }, { key: 'review_summary', label: 'Review summary', type: 'string', required: true }], criteria: [{ id: 'acceptance-met', text: 'The implementation satisfies the ticket acceptance criteria. Verify against the current project and identify the supporting evidence.' }] },
+        { id: 'request-changes', name: 'Request changes', from: 'review', to: 'active', preconditions: [], inputs: [{ key: 'implementation_ref', label: 'Implementation reference', type: 'string', required: true }], outputs: [{ key: 'requested_changes', label: 'Requested changes', type: 'string', required: true }], criteria: [] }
+      ]
+    };
+    let savedBlueprint = structuredClone(blueprint);
+    let currentTab = 'transitions';
+    let selectedTransition = 2;
+    let dirty = false;
+    let noticeTimer;
+    const fieldTypes = { string: 'Text', number: 'Number', boolean: 'Boolean', artifact: 'Artifact' };
+    const operators = { equals: 'Equals', 'not-equals': 'Not equal', present: 'Is present' };
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+    const icon = name => `<i data-lucide="${name}"></i>`;
+    const currentTransition = () => blueprint.transitions[selectedTransition];
+    const stateName = identifier => blueprint.states.find(state => state.id === identifier)?.name || identifier;
+    const options = (entries, selected) => Object.entries(entries).map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    const stateOptions = selected => options(Object.fromEntries(blueprint.states.map(state => [state.id, state.name])), selected);
+    const refreshIcons = () => { if (window.lucide) window.lucide.createIcons(); };
+
+    function markDirty() {
+      dirty = true;
+      document.getElementById('save-state').textContent = 'Unsaved changes';
+      document.getElementById('save-state').classList.add('dirty');
+      document.getElementById('save-button').disabled = false;
+      document.getElementById('revert-button').disabled = false;
+    }
+    function showIssues(messages) {
+      const panel = document.getElementById('issues');
+      panel.hidden = !messages.length;
+      panel.innerHTML = messages.length ? `<strong>Cannot save blueprint</strong><ul>${messages.map(message => `<li>${escapeHtml(message)}</li>`).join('')}</ul>` : '';
+    }
+    function validateDefinition(value) {
+      if (!value || typeof value !== 'object' || !Array.isArray(value.states) || !Array.isArray(value.transitions)) return ['A definition must contain states and transitions.'];
+      const messages = [];
+      const identifier = /^[a-z][a-z0-9-]*$/;
+      const fieldKey = /^[a-z][a-z0-9_]*$/;
+      if (!identifier.test(value.id || '')) messages.push('Blueprint identifier must be a lowercase slug.');
+      if (typeof value.name !== 'string' || !value.name.trim()) messages.push('Blueprint name is required.');
+      const stateIds = new Set();
+      value.states.forEach(state => {
+        if (!state || !identifier.test(state.id || '') || typeof state.name !== 'string' || !state.name.trim() || !/^#[0-9a-f]{6}$/i.test(state.color || '')) messages.push('Each state needs a name, color, and valid internal reference.');
+        else if (stateIds.has(state.id)) messages.push(`Duplicate state: ${state.name}.`);
+        else stateIds.add(state.id);
+      });
+      if (!stateIds.has(value.initial_state)) messages.push('Initial state must reference an existing state.');
+      const transitionIds = new Set();
+      value.transitions.forEach(transition => {
+        if (!transition || !identifier.test(transition.id || '') || typeof transition.name !== 'string' || !transition.name.trim()) { messages.push('Each transition needs a name and valid internal reference.'); return; }
+        if (transitionIds.has(transition.id)) messages.push(`Duplicate transition: ${transition.name}.`);
+        transitionIds.add(transition.id);
+        if (!stateIds.has(transition.from) || !stateIds.has(transition.to)) messages.push(`Transition "${transition.name}" references an unknown state.`);
+        ['inputs', 'outputs'].forEach(kind => {
+          if (!Array.isArray(transition[kind])) { messages.push(`Transition "${transition.name}" needs a ${kind} list.`); return; }
+          const keys = new Set();
+          transition[kind].forEach(field => {
+            if (!field || !fieldKey.test(field.key || '') || typeof field.label !== 'string' || !field.label.trim() || !Object.hasOwn(fieldTypes, field.type) || typeof field.required !== 'boolean') messages.push(`Each ${kind} field in "${transition.name}" needs a label and valid type.`);
+            else if (keys.has(field.key)) messages.push(`Duplicate ${kind} field: ${field.label}.`);
+            else keys.add(field.key);
+          });
+        });
+        if (!Array.isArray(transition.preconditions) || !Array.isArray(transition.criteria)) { messages.push(`Transition "${transition.name}" needs preconditions and criteria lists.`); return; }
+        transition.preconditions.forEach(rule => {
+          if (!rule || !Object.hasOwn(operators, rule.operator) || !transition.inputs?.some(field => field?.key === rule.input)) messages.push(`Preconditions in "${transition.name}" must reference a declared input.`);
+        });
+        const criteriaIds = new Set();
+        transition.criteria.forEach(criterion => {
+          if (!criterion || !identifier.test(criterion.id || '') || typeof criterion.text !== 'string' || !criterion.text.trim()) messages.push(`Invalid agent criterion in "${transition.name}".`);
+          else if (criteriaIds.has(criterion.id)) messages.push(`Duplicate agent criterion in "${transition.name}".`);
+          else criteriaIds.add(criterion.id);
+        });
+      });
+      return messages;
+    }
+    function selectTab(tab) {
+      if (!['overview', 'states', 'transitions'].includes(tab)) return;
+      currentTab = tab;
+      showIssues([]);
+      render();
+    }
+    function renderTransitionNav() {
+      document.getElementById('transition-nav').innerHTML = `<div class="row between"><h3>Transitions</h3><button class="icon-btn" title="Add transition" aria-label="Add transition" onclick="addTransition()">${icon('plus')}</button></div>${blueprint.transitions.map((transition, index) => `<button class="transition-item" aria-pressed="${index === selectedTransition}" onclick="chooseTransition(${index})"><strong>${escapeHtml(transition.name)}</strong><small>${escapeHtml(stateName(transition.from))}${icon('arrow-right')}${escapeHtml(stateName(transition.to))}</small></button>`).join('')}`;
+    }
+    function chooseTransition(index) { selectedTransition = Number(index); render(); }
+    function renderContracts(kind, fields) {
+      const label = kind === 'inputs' ? 'Inputs' : 'Outputs';
+      return `<section><div class="section-heading"><h3>${label}</h3><button class="icon-btn" title="Add ${kind === 'inputs' ? 'input' : 'output'}" aria-label="Add ${kind === 'inputs' ? 'input' : 'output'}" onclick="addField('${kind}')">${icon('plus')}</button></div><div class="contract-row header"><span>Label</span><span>Type</span><span>Required</span><span></span></div>${fields.map((field, index) => `<div class="contract-row"><input type="text" value="${escapeHtml(field.label)}" aria-label="${label} label ${index + 1}" onchange="updateField('${kind}',${index},'label',this.value)"><select aria-label="${label} type ${index + 1}" onchange="updateField('${kind}',${index},'type',this.value)">${options(fieldTypes, field.type)}</select><label class="required"><input type="checkbox" aria-label="${label} required ${index + 1}" ${field.required ? 'checked' : ''} onchange="updateField('${kind}',${index},'required',this.checked)"></label><button class="icon-btn" title="Remove ${escapeHtml(field.label)}" aria-label="Remove ${kind} field ${index + 1}" onclick="removeField('${kind}',${index})">${icon('x')}</button></div>`).join('') || '<p class="empty">None</p>'}</section>`;
+    }
+    function renderTransitions() {
+      const transition = currentTransition();
+      const picker = `<div class="mobile-transition"><label class="label" for="transition-picker">Transition</label><div class="row"><select id="transition-picker" onchange="chooseTransition(this.value)">${blueprint.transitions.map((item, index) => `<option value="${index}" ${index === selectedTransition ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}</select><button class="icon-btn" aria-label="Add transition" title="Add transition" onclick="addTransition()">${icon('plus')}</button></div></div>`;
+      if (!transition) return `${picker}<p class="empty">No transitions</p>`;
+      const inputOptions = Object.fromEntries(transition.inputs.map(field => [field.key, field.label]));
+      return `${picker}<section class="section"><label class="transition-name-field"><span class="label">Name</span><input aria-label="Transition name" value="${escapeHtml(transition.name)}" onchange="updateTransition('name',this.value)"></label><div class="two-fields"><label><span class="label">From</span><select aria-label="From state" onchange="updateTransition('from',this.value)">${stateOptions(transition.from)}</select></label><label><span class="label">To</span><select aria-label="To state" onchange="updateTransition('to',this.value)">${stateOptions(transition.to)}</select></label></div></section><section class="section"><div class="section-heading"><h3>Preconditions</h3><button class="icon-btn" title="Add precondition" aria-label="Add precondition" onclick="addPrecondition()">${icon('plus')}</button></div>${transition.preconditions.map((rule, index) => `<div class="rule-row"><label><span class="label">Input</span><select aria-label="Precondition input ${index + 1}" onchange="updateRule(${index},'input',this.value)">${options(inputOptions, rule.input)}</select></label><label><span class="label">Operator</span><select aria-label="Precondition operator ${index + 1}" onchange="updateRule(${index},'operator',this.value)">${options(operators, rule.operator)}</select></label><label><span class="label">Value</span><input aria-label="Precondition value ${index + 1}" value="${escapeHtml(rule.value || '')}" ${rule.operator === 'present' ? 'disabled' : ''} onchange="updateRule(${index},'value',this.value)"></label><button class="icon-btn" title="Remove precondition" aria-label="Remove precondition ${index + 1}" onclick="removeRule(${index})">${icon('x')}</button></div>`).join('') || '<p class="empty">None</p>'}</section><section class="section contracts">${renderContracts('inputs', transition.inputs)}${renderContracts('outputs', transition.outputs)}</section><section class="section"><div class="section-heading"><h3>Agent criteria</h3><button class="icon-btn" title="Add criterion" aria-label="Add criterion" onclick="addCriterion()">${icon('plus')}</button></div>${transition.criteria.map((criterion, index) => `<div class="criterion"><textarea aria-label="Agent criterion ${index + 1}" onchange="updateCriterion(${index},this.value)">${escapeHtml(criterion.text)}</textarea><button class="icon-btn" title="Remove criterion" aria-label="Remove criterion ${index + 1}" onclick="removeCriterion(${index})">${icon('x')}</button></div>`).join('') || '<p class="empty">None</p>'}</section>`;
+    }
+    function renderStates() {
+      return `<section><div class="section-heading"><h2>States</h2><button class="btn" onclick="addState()">${icon('plus')}Add state</button></div>${blueprint.states.map((state, index) => {
+        const referenced = blueprint.initial_state === state.id || blueprint.transitions.some(transition => transition.from === state.id || transition.to === state.id);
+        return `<div class="state-row"><input type="color" value="${state.color}" aria-label="${escapeHtml(state.name)} color" onchange="updateState(${index},'color',this.value)"><label class="state-fields"><span class="label">Name</span><input aria-label="State name ${index + 1}" value="${escapeHtml(state.name)}" onchange="updateState(${index},'name',this.value)"></label><label class="checkbox-label"><input type="radio" name="initial-state" aria-label="Make ${escapeHtml(state.name)} initial" ${blueprint.initial_state === state.id ? 'checked' : ''} onchange="setInitialState(${index})">Initial</label><div class="state-actions"><button class="icon-btn" aria-label="Move ${escapeHtml(state.name)} up" title="Move up" ${index === 0 ? 'disabled' : ''} onclick="moveState(${index},-1)">${icon('arrow-up')}</button><button class="icon-btn" aria-label="Move ${escapeHtml(state.name)} down" title="Move down" ${index === blueprint.states.length - 1 ? 'disabled' : ''} onclick="moveState(${index},1)">${icon('arrow-down')}</button><button class="icon-btn" aria-label="Delete ${escapeHtml(state.name)}" title="${referenced ? 'State is referenced' : 'Delete state'}" ${referenced ? 'disabled' : ''} onclick="removeState(${index})">${icon('trash-2')}</button></div></div>`;
+      }).join('')}</section>`;
+    }
+    function renderOverview() {
+      return `<div class="overview"><label><span class="label">Name</span><input aria-label="Blueprint name" value="${escapeHtml(blueprint.name)}" onchange="blueprint.name=this.value;markDirty();document.getElementById('blueprint-title').textContent=this.value"></label><label><span class="label">Description</span><textarea aria-label="Blueprint description" rows="3" onchange="blueprint.description=this.value;markDirty()">${escapeHtml(blueprint.description)}</textarea></label><section class="section" style="margin-top:26px"><div class="section-heading"><h3>Used by</h3><span class="muted">2 workflows</span></div><div class="usage-row"><span>Flowgency / Delivery</span><span class="muted">8 tickets</span></div><div class="usage-row"><span>Client work / Delivery</span><span class="muted">12 tickets</span></div></section></div>`;
+    }
+    function render() {
+      document.getElementById('blueprint-title').textContent = blueprint.name;
+      document.querySelectorAll('[data-tab]').forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.tab === currentTab)));
+      document.getElementById('transition-nav').hidden = currentTab !== 'transitions';
+      renderTransitionNav();
+      document.getElementById('editor-panel').innerHTML = currentTab === 'transitions' ? renderTransitions() : currentTab === 'states' ? renderStates() : renderOverview();
+      refreshIcons();
+    }
+    function updateTransition(property, value) {
+      if (!['name', 'from', 'to'].includes(property)) return;
+      currentTransition()[property] = value;
+      markDirty();
+      renderTransitionNav();
+      refreshIcons();
+    }
+    function updateField(kind, index, property, value) {
+      if (!['label', 'type', 'required'].includes(property)) return;
+      const field = currentTransition()[kind][index];
+      field[property] = value;
+      if (property === 'label') {
+        blueprint.transitions.forEach(transition => {
+          [...transition.inputs, ...transition.outputs].filter(candidate => candidate.key === field.key).forEach(candidate => { candidate.label = value; });
+        });
+        document.querySelectorAll('.rule-row select[aria-label^="Precondition input"]').forEach(selector => {
+          [...selector.options].filter(option => option.value === field.key).forEach(option => { option.textContent = value; });
+        });
+      }
+      markDirty();
+    }
+    function addField(kind) { currentTransition()[kind].push({ key: `field_${crypto.randomUUID().replaceAll('-', '')}`, label: kind === 'inputs' ? 'New input' : 'New output', type: 'string', required: true }); markDirty(); render(); }
+    function removeField(kind, index) { currentTransition()[kind].splice(index, 1); markDirty(); render(); }
+    function updateRule(index, property, value) { currentTransition().preconditions[index][property] = value; markDirty(); if (property === 'operator') render(); }
+    function addPrecondition() { currentTransition().preconditions.push({ input: currentTransition().inputs[0]?.key || '', operator: 'present', value: '' }); markDirty(); render(); }
+    function removeRule(index) { currentTransition().preconditions.splice(index, 1); markDirty(); render(); }
+    function updateCriterion(index, text) { currentTransition().criteria[index].text = text; markDirty(); }
+    function addCriterion() { currentTransition().criteria.push({ id: `criterion-${crypto.randomUUID()}`, text: '' }); markDirty(); render(); }
+    function removeCriterion(index) { currentTransition().criteria.splice(index, 1); markDirty(); render(); }
+    function updateState(index, property, value) {
+      if (!['name', 'color'].includes(property)) return;
+      blueprint.states[index][property] = value;
+      markDirty();
+      render();
+    }
+    function setInitialState(index) { blueprint.initial_state = blueprint.states[index].id; markDirty(); render(); }
+    function moveState(index, offset) { const target = index + offset; if (target < 0 || target >= blueprint.states.length) return; [blueprint.states[index], blueprint.states[target]] = [blueprint.states[target], blueprint.states[index]]; markDirty(); render(); }
+    function addState() { blueprint.states.push({ id: `state-${crypto.randomUUID()}`, name: 'New state', color: '#a2acbd' }); markDirty(); render(); }
+    function removeState(index) { const state = blueprint.states[index]; if (blueprint.initial_state === state.id || blueprint.transitions.some(transition => transition.from === state.id || transition.to === state.id)) return; blueprint.states.splice(index, 1); markDirty(); render(); }
+    function addTransition() { blueprint.transitions.push({ id: `transition-${crypto.randomUUID()}`, name: 'New transition', from: blueprint.initial_state, to: blueprint.states.at(-1).id, preconditions: [], inputs: [], outputs: [], criteria: [] }); selectedTransition = blueprint.transitions.length - 1; markDirty(); render(); }
+    function saveBlueprint() {
+      const messages = validateDefinition(blueprint);
+      showIssues(messages);
+      if (messages.length) return;
+      savedBlueprint = structuredClone(blueprint);
+      dirty = false;
+      document.getElementById('save-state').textContent = 'Saved';
+      document.getElementById('save-state').classList.remove('dirty');
+      document.getElementById('save-button').disabled = true;
+      document.getElementById('revert-button').disabled = true;
+      const notice = document.getElementById('notice');
+      notice.textContent = 'Blueprint saved';
+      notice.hidden = false;
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { notice.hidden = true; }, 3000);
+    }
+    function revertChanges() {
+      blueprint = structuredClone(savedBlueprint);
+      selectedTransition = Math.min(selectedTransition, Math.max(0, blueprint.transitions.length - 1));
+      dirty = false;
+      document.getElementById('save-state').textContent = 'Saved';
+      document.getElementById('save-state').classList.remove('dirty');
+      document.getElementById('save-button').disabled = true;
+      document.getElementById('revert-button').disabled = true;
+      showIssues([]);
+      render();
+    }
+    function toggleNavigation(open) { document.querySelector('.sidebar').classList.toggle('open', open); document.querySelector('.nav-scrim').classList.toggle('visible', open); }
+    render();
+  </script>
+</body>
+</html>

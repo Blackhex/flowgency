@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flowgency | Workflow settings</title>
+  <link rel="icon" href="http://127.0.0.1:8500/static/favicon-32.png">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root { color-scheme: dark; --bg: #18191b; --sidebar: #111213; --surface: #222427; --raised: #282b2f; --line: #36393f; --text: #dedfe2; --heading: #f0f1f3; --muted: #a3a7af; --accent: #8cb8ff; --teal: #7ad7bf; --amber: #ebc77c; --rose: #eaa4ae; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    [hidden] { display: none !important; }
+    body { margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font: 13px/1.5 "Segoe WPC", "Segoe UI", sans-serif; }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2, h3 { font-weight: 600; color: var(--heading); }
+    h1 { font-size: 20px; line-height: 1.35; overflow-wrap: anywhere; }
+    h2 { font-size: 14px; }
+    button, input, select { color: inherit; font: inherit; }
+    button, input, select { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
+    input:not([type="checkbox"]), select { min-width: 0; width: 100%; height: 36px; padding: 6px 10px; }
+    input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+    button { cursor: pointer; }
+    button:disabled, select:disabled, input:disabled { opacity: .6; cursor: default; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    small, .muted { color: var(--muted); }
+    .lucide { width: 16px; height: 16px; flex-shrink: 0; stroke-width: 1.7; }
+    .row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .between { justify-content: space-between; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 5px 10px; white-space: nowrap; font-size: 12px; }
+    .btn:hover:not(:disabled), .icon-btn:hover:not(:disabled) { background: var(--raised); text-decoration: none; }
+    .btn.primary { background: #21446f; border-color: #416d9e; color: #edf4ff; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: 0 0 32px; background: transparent; border: 1px solid transparent; border-radius: 5px; color: var(--muted); }
+    .sketch-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 20px; padding: 8px 20px; flex-shrink: 0; background: #22252a; border-bottom: 1px solid #4b515a; }
+    .sketch-bar strong { font-size: 12px; }
+    .sketch-bar small, .sketch-bar label { font-size: 11px; }
+    .sketch-controls { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+    .shell { display: flex; flex: 1; min-height: 0; min-width: 0; position: relative; }
+    .sidebar { width: 208px; flex-shrink: 0; display: flex; flex-direction: column; padding: 18px 12px 12px; background: var(--sidebar); border-right: 1px solid #27292c; overflow-y: auto; z-index: 5; }
+    .brand { gap: 10px; padding: 0 10px 20px; font-size: 21px; font-weight: 600; color: var(--heading); }
+    .brand img { width: 28px; height: 28px; border-radius: 6px; }
+    .team { padding: 9px 11px; margin-bottom: 16px; border: 1px solid #303236; border-radius: 5px; background: #1b1d20; }
+    .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; text-align: left; padding: 8px 11px; margin: 1px 0; background: transparent; border: 1px solid transparent; border-radius: 5px; color: #b8bcc2; }
+    .nav-item:hover { text-decoration: none; }
+    button.nav-item:hover { background: #25272b; }
+    .nav-item.active { color: #ecf3ff; background: #243143; border-color: #334863; }
+    .nav-name { min-width: 0; overflow-wrap: anywhere; }
+    .nav-count { margin-left: auto; flex-shrink: 0; color: var(--muted); font-size: 11px; }
+    .nav-section { color: #969ba3; font-size: 11px; font-weight: 600; text-transform: uppercase; margin: 18px 0 4px 11px; }
+    .nav-section .icon-btn { width: 28px; height: 28px; flex-basis: 28px; }
+    .sidebar-bottom { margin-top: auto; padding-top: 24px; }
+    main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 20px; min-height: 49px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+    .toolbar-title { flex: 1; min-width: 0; }
+    .toolbar-actions { display: flex; align-items: center; gap: 8px; }
+    .save-state { min-width: 106px; text-align: right; color: var(--muted); font-size: 11px; }
+    .save-state.dirty { color: var(--amber); }
+    .content-scroll { flex: 1; min-width: 0; overflow: auto; padding: 24px; background: linear-gradient(180deg, #1b1d20 0, var(--bg) 160px); }
+    .settings-form { max-width: 800px; margin: 0 auto; }
+    .section { margin: 0 0 24px; padding: 0 0 24px; border-bottom: 1px solid #303339; }
+    .section:last-child { padding-bottom: 0; border-bottom: 0; }
+    .section-heading { min-height: 30px; margin-bottom: 16px; }
+    .fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+    .field-label { display: block; margin-bottom: 7px; color: #c4c9d1; font-size: 12px; }
+    .full-field { display: block; margin-top: 18px; }
+    .field-with-action { display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: center; gap: 7px; }
+    .path-input { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; }
+    .status-line { display: flex; align-items: center; gap: 7px; color: var(--teal); font-size: 12px; }
+    .status-line[data-health="unavailable"] { color: var(--rose); }
+    .status-line[data-health="unchecked"] { color: var(--muted); }
+    .storage-health { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+    .issues { border-left: 3px solid var(--rose); background: #302326; padding: 10px 14px; margin-bottom: 20px; color: #f1c2c8; font-size: 12px; }
+    .issues ul { margin: 6px 0 0; padding-left: 18px; }
+    .mobile-menu, .nav-scrim { display: none; }
+    .notice { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 10px 14px; background: #303d38; color: #daf1e7; border: 1px solid #677f72; border-radius: 5px; font-size: 12px; z-index: 20; }
+    @media (max-width: 900px) { .sidebar { display: none; position: absolute; inset: 0 auto 0 0; } .sidebar.open { display: flex; } .mobile-menu { display: inline-flex; } .nav-scrim.visible { display: block; position: absolute; inset: 0; background: #0008; border: 0; border-radius: 0; z-index: 4; } }
+    @media (max-width: 560px) { .sketch-bar { padding: 8px 12px; } .sketch-bar small { display: none; } .toolbar { padding: 8px 12px; gap: 8px; } .toolbar-title { flex-basis: calc(100% - 82px); } h1 { font-size: 18px; } .toolbar-actions { margin-left: auto; } .save-state { min-width: auto; } .content-scroll { padding: 20px 16px; } .fields { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+  </style>
+</head>
+<body>
+  <header class="sketch-bar"><strong>Workflow instance settings: does this structure work?</strong><div class="sketch-controls"><small>Design sketch &middot; Synthetic configuration</small><label class="row"><input type="checkbox" id="simulate-storage-failure" onchange="simulateStorageFailure(this.checked)">Storage unavailable</label></div></header>
+  <div class="shell">
+    <button class="nav-scrim" aria-label="Close navigation" onclick="toggleNavigation(false)"></button>
+    <nav class="sidebar" aria-label="Main navigation">
+      <div class="brand row"><img src="http://127.0.0.1:8500/static/favicon-32.png" alt=""><span>Flowgency</span></div>
+      <div class="team row between"><span>Flowgency</span><i data-lucide="chevrons-up-down"></i></div>
+      <div class="nav-item"><i data-lucide="inbox"></i>Inbox</div>
+      <div class="nav-item"><i data-lucide="users"></i>Agents<span class="nav-count">3</span></div>
+      <div class="nav-section row between"><span>Workflows</span><button class="icon-btn" title="New workflow" aria-label="New workflow" onclick="newWorkflow()"><i data-lucide="plus"></i></button></div>
+      <div id="workflow-nav"></div>
+      <div class="nav-section">Workspace</div>
+      <div class="nav-item"><i data-lucide="history"></i>Logs</div>
+      <div class="nav-item"><i data-lucide="activity"></i>Jobs</div>
+      <div class="nav-item"><i data-lucide="book-open"></i>Agent Library</div>
+      <a href="/files/workflow-blueprint-editor-v4.html" class="nav-item"><i data-lucide="workflow"></i>Workflow Library</a>
+      <div class="nav-item"><i data-lucide="database"></i>Memory Channels</div>
+      <div class="sidebar-bottom"><div class="nav-item"><i data-lucide="settings"></i>Settings</div></div>
+    </nav>
+    <main>
+      <header class="toolbar">
+        <button class="icon-btn mobile-menu" title="Open navigation" aria-label="Open navigation" onclick="toggleNavigation(true)"><i data-lucide="menu"></i></button>
+        <a class="icon-btn" id="back-to-board" href="/files/board-immediate-assignment-v7.html" title="Back to board" aria-label="Back to board"><i data-lucide="arrow-left"></i></a>
+        <div class="toolbar-title"><h1 id="settings-title">Delivery settings</h1></div>
+        <div class="toolbar-actions"><span id="save-state" class="save-state" aria-live="polite">Saved</span><button class="icon-btn" id="revert-button" title="Revert unsaved changes" aria-label="Revert unsaved changes" onclick="revertChanges()" disabled><i data-lucide="undo-2"></i></button><button class="btn primary" id="save-button" form="settings-form" type="submit" disabled><i data-lucide="save"></i><span id="save-label">Save</span></button></div>
+      </header>
+      <div class="content-scroll">
+        <form id="settings-form" class="settings-form" onsubmit="saveWorkflow(event)" novalidate>
+          <div id="issues" class="issues" role="alert" hidden></div>
+          <section class="section">
+            <div class="section-heading row between"><h2>Workflow</h2></div>
+            <div class="fields">
+              <label><span class="field-label">Name</span><input id="workflow-name" name="name" required maxlength="120" autocomplete="off" oninput="updateDraft('name',this.value)"></label>
+              <div><label class="field-label" for="workflow-blueprint">Blueprint</label><div class="field-with-action"><select id="workflow-blueprint" onchange="updateDraft('blueprint',this.value)"><option value="software-delivery">Software delivery</option><option value="research-investigation">Research investigation</option></select><a class="icon-btn" href="/files/workflow-blueprint-editor-v4.html" title="Open blueprint" aria-label="Open blueprint"><i data-lucide="external-link"></i></a></div></div>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-heading row between"><h2>Ticket storage</h2></div>
+            <div class="fields"><div><label class="field-label" for="storage-integration">Integration</label><select id="storage-integration" onchange="updateDraft('integration',this.value)"><option value="local">Local</option></select></div></div>
+            <label class="full-field"><span class="field-label">Storage root</span><input id="storage-root" class="path-input" spellcheck="false" value="C:/Flowgency/tickets" oninput="updateDraft('root',this.value)"></label>
+            <div class="storage-health"><span id="storage-health" class="status-line" data-health="available"><i data-lucide="circle-check"></i>Available</span><button type="button" class="btn" onclick="checkStorage()"><i data-lucide="plug-zap"></i>Check storage</button></div>
+          </section>
+        </form>
+      </div>
+    </main>
+  </div>
+  <div class="notice" id="notice" role="status" hidden></div>
+  <script>
+    const workflows = [
+      { id: 'delivery', name: 'Delivery', blueprint: 'software-delivery', storage: { integration: 'local', root: 'C:/Flowgency/tickets' }, tickets: 8 },
+      { id: 'research', name: 'Research', blueprint: 'research-investigation', storage: { integration: 'local', root: 'C:/Flowgency/tickets' }, tickets: 4 }
+    ];
+    let currentId = 'delivery';
+    let draft = structuredClone(workflows[0]);
+    let creating = false;
+    let storageUnavailable = false;
+    let checkedRoot = draft.storage.root;
+    let noticeTimer;
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+    const icon = name => `<i data-lucide="${name}"></i>`;
+    const selectedWorkflow = () => workflows.find(workflow => workflow.id === currentId);
+    const refreshIcons = () => { if (window.lucide) window.lucide.createIcons(); };
+
+    function showIssues(messages) {
+      const panel = document.getElementById('issues');
+      panel.hidden = !messages.length;
+      panel.innerHTML = messages.length ? `<strong>Cannot save workflow</strong><ul>${messages.map(message => `<li>${escapeHtml(message)}</li>`).join('')}</ul>` : '';
+    }
+    function setDirty(dirty) {
+      document.getElementById('save-state').textContent = dirty ? 'Unsaved changes' : 'Saved';
+      document.getElementById('save-state').classList.toggle('dirty', dirty);
+      document.getElementById('save-button').disabled = !dirty && !creating;
+      document.getElementById('revert-button').disabled = !dirty;
+    }
+    function renderNav() {
+      document.getElementById('workflow-nav').innerHTML = workflows.map(workflow => `<button type="button" class="nav-item ${!creating && workflow.id === currentId ? 'active' : ''}" data-workflow="${workflow.id}" onclick="selectWorkflow('${workflow.id}')">${icon('columns-3')}<span class="nav-name">${escapeHtml(workflow.name)}</span><span class="nav-count">${workflow.tickets}</span></button>`).join('');
+    }
+    function renderHealth() {
+      const state = storageUnavailable ? 'unavailable' : checkedRoot === draft.storage.root && draft.storage.root.trim() ? 'available' : 'unchecked';
+      const health = document.getElementById('storage-health');
+      health.dataset.health = state;
+      health.innerHTML = `${icon(state === 'available' ? 'circle-check' : state === 'unavailable' ? 'triangle-alert' : 'circle-dashed')}<span>${state === 'available' ? 'Available' : state === 'unavailable' ? 'Storage unavailable' : 'Not checked'}</span>`;
+      refreshIcons();
+    }
+    function render() {
+      renderNav();
+      document.getElementById('settings-title').textContent = creating ? 'New workflow' : `${selectedWorkflow().name} settings`;
+      document.getElementById('save-label').textContent = creating ? 'Create workflow' : 'Save';
+      document.getElementById('back-to-board').hidden = creating;
+      document.getElementById('workflow-name').value = draft.name;
+      document.getElementById('workflow-blueprint').value = draft.blueprint;
+      document.getElementById('storage-integration').value = draft.storage.integration;
+      document.getElementById('storage-root').value = draft.storage.root;
+      renderHealth();
+      refreshIcons();
+    }
+    function selectWorkflow(identifier) {
+      currentId = identifier;
+      creating = false;
+      draft = structuredClone(selectedWorkflow());
+      checkedRoot = draft.storage.root;
+      showIssues([]);
+      setDirty(false);
+      toggleNavigation(false);
+      render();
+    }
+    function newWorkflow() {
+      creating = true;
+      draft = { id: `workflow-${crypto.randomUUID()}`, name: '', blueprint: 'software-delivery', storage: { integration: 'local', root: 'C:/Flowgency/tickets' }, tickets: 0 };
+      checkedRoot = null;
+      showIssues([]);
+      setDirty(true);
+      toggleNavigation(false);
+      render();
+      document.getElementById('workflow-name').focus();
+    }
+    function updateDraft(property, value) {
+      if (property === 'name') draft.name = value;
+      else if (property === 'blueprint') draft.blueprint = value;
+      else if (property === 'integration') draft.storage.integration = value;
+      else if (property === 'root') { draft.storage.root = value; checkedRoot = null; renderHealth(); }
+      setDirty(true);
+    }
+    function checkStorage() {
+      if (!draft.storage.root.trim()) { showIssues(['Storage root is required.']); return; }
+      checkedRoot = storageUnavailable ? null : draft.storage.root;
+      renderHealth();
+      showIssues(storageUnavailable ? ['Cannot reach the configured ticket storage.'] : []);
+    }
+    function simulateStorageFailure(unavailable) { storageUnavailable = unavailable; checkedRoot = unavailable ? null : draft.storage.root; showIssues([]); renderHealth(); }
+    function saveWorkflow(event) {
+      event.preventDefault();
+      const messages = [];
+      if (!draft.name.trim()) messages.push('Workflow name is required.');
+      if (!['software-delivery', 'research-investigation'].includes(draft.blueprint)) messages.push('Select an available blueprint.');
+      if (!draft.storage.root.trim()) messages.push('Storage root is required.');
+      if (draft.storage.integration !== 'local') messages.push('Select an available ticket storage integration.');
+      const storageChanged = creating || draft.storage.integration !== selectedWorkflow().storage.integration || draft.storage.root.trim() !== selectedWorkflow().storage.root;
+      if (storageUnavailable && storageChanged) messages.push('Ticket storage must be available before connecting this workflow.');
+      showIssues(messages);
+      if (messages.length) return;
+      draft.name = draft.name.trim();
+      draft.storage.root = draft.storage.root.trim();
+      if (creating) { workflows.push(structuredClone(draft)); currentId = draft.id; creating = false; }
+      else workflows[workflows.findIndex(workflow => workflow.id === currentId)] = structuredClone(draft);
+      checkedRoot = storageUnavailable ? null : draft.storage.root;
+      setDirty(false);
+      render();
+      const notice = document.getElementById('notice');
+      notice.textContent = 'Workflow saved';
+      notice.hidden = false;
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { notice.hidden = true; }, 3000);
+    }
+    function revertChanges() { if (creating) { newWorkflow(); return; } draft = structuredClone(selectedWorkflow()); checkedRoot = draft.storage.root; showIssues([]); setDirty(false); render(); }
+    function toggleNavigation(open) { document.querySelector('.sidebar').classList.toggle('open', open); document.querySelector('.nav-scrim').classList.toggle('visible', open); }
+    render();
+  </script>
+</body>
+</html>

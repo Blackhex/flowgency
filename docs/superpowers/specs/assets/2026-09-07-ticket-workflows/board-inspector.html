@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flowgency | Immediate ticket assignment</title>
+  <link rel="icon" href="http://127.0.0.1:8500/static/favicon-32.png">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root { color-scheme: dark; --bg: #18191b; --sidebar: #111213; --surface: #222427; --raised: #282b2f; --line: #36393f; --text: #dedfe2; --heading: #f0f1f3; --muted: #a3a7af; --accent: #8cb8ff; --teal: #7ad7bf; --amber: #ebc77c; --rose: #eaa4ae; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    [hidden] { display: none !important; }
+    body { margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font: 13px/1.5 "Segoe WPC", "Segoe UI", sans-serif; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled, select:disabled { cursor: default; opacity: .52; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    button, input, select, textarea { border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+    input, select, textarea { border: 1px solid var(--line); width: 100%; min-width: 0; padding: 8px 10px; }
+    textarea { resize: vertical; min-height: 90px; }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2, h3 { color: var(--heading); font-weight: 600; }
+    h1 { font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
+    h2 { font-size: 19px; line-height: 1.4; overflow-wrap: anywhere; }
+    h3 { font-size: 13px; margin-bottom: 12px; }
+    small, .muted { color: var(--muted); }
+    code { font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; }
+    .lucide { width: 16px; height: 16px; flex-shrink: 0; stroke-width: 1.7; }
+    .row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .between { justify-content: space-between; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 11px; min-height: 34px; white-space: nowrap; }
+    .btn:hover:not(:disabled), .icon-btn:hover:not(:disabled) { background: var(--raised); }
+    .btn.primary { background: #21446f; border-color: #416d9e; color: #edf4ff; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: 0 0 32px; background: transparent; border-color: transparent; }
+    .sketch-bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 24px; justify-content: space-between; padding: 8px 20px; background: #22252a; border-bottom: 1px solid #4b515a; }
+    .sketch-bar strong { color: var(--heading); font-size: 12px; }
+    .sketch-bar small { font-size: 11px; }
+    .shell { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
+    .sidebar { width: 208px; flex-shrink: 0; background: var(--sidebar); border-right: 1px solid #27292c; display: flex; flex-direction: column; padding: 18px 12px 12px; overflow-y: auto; z-index: 5; }
+    .brand { font-size: 21px; font-weight: 600; color: var(--heading); padding: 0 10px 20px; gap: 10px; }
+    .brand img { width: 28px; height: 28px; border-radius: 6px; }
+    .team { margin: 0 0 16px; padding: 9px 11px; border: 1px solid #303236; border-radius: 5px; background: #1b1d20; }
+    .nav-item { display: flex; align-items: center; gap: 10px; text-align: left; padding: 8px 11px; margin: 1px 0; width: 100%; min-height: 36px; background: transparent; border: 1px solid transparent; color: #b8bcc2; }
+    .nav-item .lucide { opacity: .75; }
+    button.nav-item:hover { background: #25272b; }
+    .nav-item.active { color: #ecf3ff; background: #243143; border-color: #334863; }
+    .nav-count { margin-left: auto; font-size: 11px; color: #b5c5db; }
+    .nav-section { color: #969ba3; font-size: 11px; font-weight: 600; text-transform: uppercase; margin: 22px 11px 5px; }
+    .sidebar-bottom { margin-top: auto; padding-top: 24px; }
+    main { flex: 1; min-width: 0; display: flex; flex-direction: column; container-type: inline-size; }
+    .board-heading { display: grid; grid-template-columns: auto minmax(max-content, 1fr) minmax(140px, 220px) 140px auto; align-items: center; gap: 10px; padding: 8px 20px; flex-shrink: 0; border-bottom: 1px solid var(--line); }
+    .board-title-row, .board-tools { display: contents; }
+    .board-name { grid-column: 1; grid-row: 1; min-width: max-content; }
+    .heading-meta { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .board-stat { display: inline-flex; align-items: center; gap: 6px; height: 20px; line-height: 20px; font-weight: 400; font-variant-numeric: tabular-nums; }
+    .board-stat .lucide { width: 14px; height: 14px; }
+    .heading-action { grid-column: 5; grid-row: 1; min-height: 32px; height: 32px; padding: 5px 10px; font-size: 12px; }
+    .state-dot { height: 7px; width: 7px; border-radius: 50%; flex-shrink: 0; background: var(--teal); display: inline-block; }
+    .search { grid-column: 3; grid-row: 1; position: relative; min-width: 0; }
+    .search .lucide { position: absolute; left: 10px; top: 8px; color: var(--muted); }
+    .search input { padding: 5px 10px 5px 34px; height: 32px; background: #1d1f22; }
+    .filter { grid-column: 4; grid-row: 1; width: 100%; height: 32px; padding: 4px 10px; background: #1d1f22; }
+    .workspace { display: flex; flex: 1; min-height: 0; min-width: 0; }
+    .board-wrap { flex: 1; min-width: 0; overflow: auto; padding: 20px 20px 16px; background: linear-gradient(180deg, #1b1d20 0, var(--bg) 160px); }
+    .columns { display: grid; grid-auto-flow: column; grid-auto-columns: 230px; align-items: start; gap: 16px; min-height: 100%; }
+    .column { min-width: 0; }
+    .column-title { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; padding: 0 4px 10px; border-bottom: 2px solid var(--column-color); font-size: 13px; font-weight: 600; }
+    .column-title .state-dot { background: var(--column-color); }
+    .column-count { margin-left: auto; font-weight: 400; font-size: 12px; color: var(--muted); }
+    .ticket { display: block; width: 100%; margin-bottom: 11px; padding: 13px; border: 1px solid #393c41; background: var(--surface); border-radius: 6px; text-align: left; }
+    .ticket:hover { background: #292c30; border-color: #646c77; }
+    .ticket.selected-ticket { border-color: var(--accent); box-shadow: inset 2px 0 var(--accent); background: #252e3b; }
+    .ticket-id { color: #a9afb9; font-size: 11px; }
+    .ticket h3 { color: #e4e7ec; font-size: 13px; line-height: 1.5; font-weight: 500; margin: 8px 0 15px; overflow-wrap: anywhere; }
+    .ticket-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 9px; font-size: 11px; color: #bcc1ca; }
+    .avatar { width: 20px; height: 20px; background: #39414f; color: #dde7f7; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 10px; flex-shrink: 0; }
+    .ticket-run { color: var(--teal); display: inline-flex; align-items: center; gap: 5px; }
+    .ticket-run .lucide { width: 12px; height: 12px; }
+    .queued { color: var(--amber); }
+    .empty-column { padding: 18px 4px; font-size: 12px; color: var(--muted); }
+    .detail-pane { display: flex; flex-direction: column; flex: 0 0 404px; width: 404px; min-width: 0; background: #1c1e21; border-left: 1px solid #40444b; overflow: auto; }
+    .pane-heading { padding: 12px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: #1c1e21; z-index: 2; }
+    .pane-title { padding: 18px 22px 20px; }
+    .state-label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+    .ticket-layout { display: flex; flex-direction: column; padding: 0 22px 28px; gap: 24px; }
+    .assignment-panel { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 16px 0; }
+    .field-label { display: block; font-size: 12px; color: #c4c9d1; margin-bottom: 7px; }
+    .assignment-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+    .assignment-controls select, .assignment-controls .btn { min-height: 36px; height: 36px; }
+    .assignment-controls .btn { font-size: 12px; }
+    .run-line { color: var(--teal); margin-top: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+    .run-line.queued { color: var(--amber); }
+    .run-line.idle { color: var(--muted); }
+    .detail-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
+    .detail-tab { border: 0; background: transparent; padding: 0 0 10px; border-radius: 0; font-size: 12px; color: var(--muted); border-bottom: 2px solid transparent; }
+    .detail-tab[aria-selected="true"] { border-color: var(--accent); color: #d9e8ff; }
+    .detail-section { padding-bottom: 22px; margin-bottom: 22px; border-bottom: 1px solid #303339; }
+    .detail-section:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+    .description { line-height: 1.75; color: #c4c8cf; font-size: 13px; }
+    .save-inputs { margin-top: 10px; }
+    .field-list { margin: 0; }
+    .field-list > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 7px 0; }
+    dt { color: var(--muted); font-size: 12px; }
+    dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+    .check-row { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; border-bottom: 1px solid #303339; }
+    .check-row .lucide { margin-top: 2px; color: var(--teal); }
+    .check-row.pending .lucide { color: var(--amber); }
+    .check-row small { display: block; margin-top: 4px; }
+    .transition-name { margin-bottom: 12px; color: var(--heading); }
+    .definition-note { color: var(--muted); font-size: 11px; margin-top: 20px; }
+    .history-event { position: relative; padding: 0 0 22px 22px; border-left: 1px solid #40454d; margin-left: 5px; }
+    .history-event::before { content: ""; position: absolute; left: -4px; top: 6px; height: 7px; width: 7px; border-radius: 50%; background: #a0bbdc; }
+    .history-event strong { color: #d9dee7; font-size: 12px; font-weight: 500; }
+    .history-event p { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .history-event:last-child { padding-bottom: 0; }
+    body[data-layout="page"] .workspace.has-ticket .board-wrap { display: none; }
+    body[data-layout="page"] .detail-pane { flex: 1; width: auto; border-left: 0; background: var(--bg); padding: 0 24px; }
+    body[data-layout="page"] .pane-heading { padding-left: 0; padding-right: 0; background: var(--bg); }
+    body[data-layout="page"] .pane-title { padding: 24px 0; width: 100%; max-width: 1080px; margin: 0 auto; }
+    body[data-layout="page"] .pane-title h2 { font-size: 26px; max-width: 700px; }
+    body[data-layout="page"] .ticket-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 40px; padding: 0 0 30px; width: 100%; max-width: 1080px; margin: 0 auto; }
+    body[data-layout="page"] .assignment-panel { grid-column: 2; grid-row: 1; align-self: start; margin-top: 0; }
+    body[data-layout="page"] .ticket-information { grid-column: 1; grid-row: 1; }
+    .mobile-menu { display: none; }
+    .nav-scrim { display: none; }
+    dialog { color: var(--text); background: #222529; border: 1px solid #565f6b; border-radius: 8px; width: min(500px, calc(100% - 32px)); padding: 22px; }
+    dialog::backdrop { background: #0008; }
+    dialog h2 { margin-bottom: 20px; }
+    dialog label { display: block; margin-bottom: 16px; }
+    dialog label span { display: block; font-size: 12px; margin-bottom: 7px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+    .notice { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: calc(100% - 32px); padding: 10px 16px; background: #303d38; color: #daf1e7; border: 1px solid #677f72; border-radius: 5px; font-size: 12px; box-shadow: 0 5px 20px #0005; }
+    @media (min-width: 1750px) { .columns { grid-auto-columns: minmax(230px, 1fr); } .detail-pane { flex-basis: 440px; width: 440px; } }
+    @media (max-width: 1100px) { .sidebar { width: 186px; } .detail-pane { flex-basis: 366px; width: 366px; } }
+    @media (max-width: 900px) { .sidebar { display: none; position: absolute; inset: 0 auto 0 0; width: 208px; } .sidebar.open { display: flex; } .mobile-menu { display: inline-flex; } .nav-scrim.visible { display: block; position: absolute; inset: 0; background: #0008; border: 0; border-radius: 0; z-index: 4; } .workspace.has-ticket .board-wrap { display: none; } .detail-pane { flex: 1; width: auto; border-left: 0; } .pane-title, .ticket-layout { max-width: 690px; width: 100%; margin-left: auto; margin-right: auto; } body[data-layout="page"] .ticket-layout { display: flex; gap: 24px; } body[data-layout="page"] .pane-title h2 { font-size: 21px; } }
+    @media (max-width: 520px) { .sketch-bar { padding: 7px 12px; } .sketch-bar small { display: none; } .board-heading { padding: 8px 16px; } .pane-title { padding: 16px; } .ticket-layout { padding: 0 16px 24px; } .pane-heading { padding: 8px 12px; } body[data-layout="page"] .detail-pane { padding: 0 16px; } body[data-layout="page"] .pane-title { padding: 16px 0; } .board-wrap { padding: 16px; } .columns { grid-auto-columns: 260px; } }
+    @container (max-width: 800px) { .board-heading { grid-template-columns: auto minmax(max-content, 1fr) minmax(120px, 200px) 128px auto; gap: 8px; } }
+    @container (max-width: 720px) { .board-heading { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; } .board-name { min-width: 0; } .heading-meta { grid-row: 2; grid-column: 1 / -1; flex-wrap: wrap; gap: 4px 12px; white-space: normal; } .heading-action { grid-row: 1; grid-column: 2; } .search { grid-row: 3; grid-column: 1; } .filter { grid-row: 3; grid-column: 2; width: 127px; font-size: 12px; } }
+  </style>
+</head>
+<body data-layout="inspector">
+  <header class="sketch-bar" aria-label="Design review">
+    <strong>Does this board layout feel right?</strong>
+    <small>Board + inspector &middot; Design sketch &middot; Synthetic tickets</small>
+  </header>
+  <div class="shell">
+    <button class="nav-scrim" aria-label="Close navigation" onclick="toggleNavigation(false)"></button>
+    <nav class="sidebar" aria-label="Main navigation">
+      <div class="brand row"><img src="http://127.0.0.1:8500/static/favicon-32.png" alt=""><span>Flowgency</span></div>
+      <div class="team row between"><span>Flowgency</span><i data-lucide="chevrons-up-down"></i></div>
+      <div class="nav-item"><i data-lucide="inbox"></i>Inbox</div>
+      <div class="nav-item"><i data-lucide="users"></i>Agents<span class="nav-count">3</span></div>
+      <div class="nav-section">Workflows</div>
+      <button class="nav-item active" data-workflow="delivery" onclick="switchWorkflow('delivery')"><i data-lucide="columns-3"></i>Delivery<span class="nav-count" id="delivery-count">8</span></button>
+      <button class="nav-item" data-workflow="research" onclick="switchWorkflow('research')"><i data-lucide="columns-3"></i>Research<span class="nav-count" id="research-count">4</span></button>
+      <div class="nav-section">Workspace</div>
+      <div class="nav-item"><i data-lucide="history"></i>Logs</div>
+      <div class="nav-item"><i data-lucide="activity"></i>Jobs</div>
+      <div class="nav-item"><i data-lucide="book-open"></i>Agent Library</div>
+      <div class="nav-item"><i data-lucide="workflow"></i>Workflow Library</div>
+      <div class="nav-item"><i data-lucide="database"></i>Memory Channels</div>
+      <div class="sidebar-bottom"><div class="nav-item"><i data-lucide="settings"></i>Settings</div></div>
+    </nav>
+    <main>
+      <header class="board-heading">
+        <div class="board-title-row">
+          <div class="board-name row"><button class="icon-btn mobile-menu" title="Open navigation" aria-label="Open navigation" onclick="toggleNavigation(true)"><i data-lucide="menu"></i></button><h1 id="workflow-name">Delivery</h1></div>
+          <div class="heading-meta"><span class="board-stat ticket-count"><i data-lucide="ticket" aria-hidden="true"></i><span id="ticket-total">8 tickets</span></span><span class="board-stat live-count"><i data-lucide="activity" aria-hidden="true"></i><span id="working-total">2 working</span></span></div>
+          <button class="btn primary heading-action" onclick="openTicketDialog()"><i data-lucide="plus"></i>New ticket</button>
+        </div>
+        <div class="board-tools">
+          <div class="search"><i data-lucide="search"></i><input id="search" aria-label="Search tickets" placeholder="Search tickets" oninput="renderBoard()"></div>
+          <select class="filter" id="agent-filter" aria-label="Filter by assignee" onchange="renderBoard()"><option value="all">All assignees</option><option value="unassigned">Unassigned</option><option value="builder">builder</option><option value="researcher">researcher</option><option value="reviewer">reviewer</option></select>
+        </div>
+      </header>
+      <div class="workspace has-ticket">
+        <section class="board-wrap" aria-label="Kanban board"><div class="columns" id="columns"></div></section>
+        <aside class="detail-pane" id="ticket-pane" aria-label="Ticket details"></aside>
+      </div>
+    </main>
+  </div>
+  <dialog id="ticket-dialog" aria-labelledby="dialog-title">
+    <form onsubmit="createTicket(event)">
+      <h2 id="dialog-title">New ticket</h2>
+      <label><span>Title</span><input name="title" required maxlength="180" autocomplete="off"></label>
+      <label><span>Description</span><textarea name="description" rows="4"></textarea></label>
+      <div class="row muted"><i data-lucide="circle-dot"></i><span id="initial-state">Backlog</span></div>
+      <div class="dialog-actions"><button type="button" class="btn" onclick="document.getElementById('ticket-dialog').close()">Cancel</button><button type="submit" class="btn primary"><i data-lucide="plus"></i>Create ticket</button></div>
+    </form>
+  </dialog>
+  <div class="notice" id="notice" role="status" hidden></div>
+  <script>
+    const workflows = {
+      delivery: { name: 'Delivery', blueprint: 'Software delivery', states: [{ id: 'backlog', name: 'Backlog', color: '#a2acbd' }, { id: 'active', name: 'In progress', color: '#8cb8ff' }, { id: 'review', name: 'Review', color: '#ebc77c' }, { id: 'done', name: 'Done', color: '#7ad7bf' }] },
+      research: { name: 'Research', blueprint: 'Research investigation', states: [{ id: 'question', name: 'Questions', color: '#a2acbd' }, { id: 'investigating', name: 'Investigating', color: '#8cb8ff' }, { id: 'findings', name: 'Findings', color: '#ebc77c' }, { id: 'complete', name: 'Complete', color: '#7ad7bf' }] }
+    };
+    const tickets = [
+      { id: 'FG-101', workflow: 'delivery', state: 'backlog', title: 'Define reusable workflow blueprints', agent: null, description: 'Represent states, transition contracts, and qualitative criteria in a reusable definition.' },
+      { id: 'FG-102', workflow: 'delivery', state: 'backlog', title: 'Document ticket storage provider capabilities', agent: 'researcher', description: 'Describe the persistence guarantees every ticket storage integration must provide.' },
+      { id: 'FG-103', workflow: 'delivery', state: 'active', title: 'Implement atomic ticket assignment', agent: 'builder', active: true, run: 'run-482', description: 'Coordinate assignment and active work so two agents cannot both begin work on one ticket.' },
+      { id: 'FG-108', workflow: 'delivery', state: 'active', title: 'Verify recovery after interrupted agent runs', agent: 'reviewer', active: true, run: 'run-485', description: 'Retain assignment after a failed run. Clear active work only when the owning run is confirmed stopped.' },
+      { id: 'FG-104', workflow: 'delivery', state: 'review', title: 'Validate stale transition handling', agent: 'reviewer', description: 'Reject transitions when the ticket revision or workflow definition has changed. Return enough context for the agent to refresh and reevaluate.', criteria: 'A stale ticket revision or workflow digest cannot change state. Repeating an accepted operation returns its original result without a second transition.', verdict: 'Passed', report: 'artifacts/transition-tests.txt', history: [{ actor: 'reviewer', action: 'Run finished; assignment retained', time: '6 min ago' }, { actor: 'reviewer', action: 'Submitted review verdict and test report', time: '8 min ago' }, { actor: 'reviewer', action: 'Claimed ticket', time: '18 min ago' }, { actor: 'builder', action: 'Signed off', time: '24 min ago' }, { actor: 'builder', action: 'Transitioned In progress to Review', time: '24 min ago' }, { actor: 'You', action: 'Created ticket in Backlog', time: 'Yesterday' }] },
+      { id: 'FG-105', workflow: 'delivery', state: 'review', title: 'Review the local storage contract', agent: null, description: 'Check atomicity, history preservation, and storage error handling against the provider contract.' },
+      { id: 'FG-106', workflow: 'delivery', state: 'done', title: 'Preserve canonical configuration authority', agent: 'builder', description: 'Keep workflow instance registration and integration settings in canonical configuration.' },
+      { id: 'FG-107', workflow: 'delivery', state: 'done', title: 'Separate ticket state from job lifecycle', agent: 'reviewer', description: 'Job completion, failure, and cancellation must not silently move tickets between workflow states.' },
+      { id: 'RS-201', workflow: 'research', state: 'question', title: 'Compare future GitHub storage mappings', agent: null, description: 'Investigate how tickets, custom states, and evidence can map to GitHub without weakening workflow guarantees.' },
+      { id: 'RS-202', workflow: 'research', state: 'investigating', title: 'Examine Azure DevOps revision checks', agent: 'researcher', active: true, run: 'run-489', description: 'Evaluate concurrent-update handling in Azure DevOps work items.' },
+      { id: 'RS-203', workflow: 'research', state: 'findings', title: 'Document provider-independent ticket identity', agent: 'researcher', description: 'Record how a stable ticket ID differs from a provider-specific external reference.' },
+      { id: 'RS-204', workflow: 'research', state: 'complete', title: 'Inventory supported live agent tool channels', agent: null, description: 'Identify which runtimes can expose the live ticket interface without granting shell access.' }
+    ];
+    let currentWorkflow = 'delivery';
+    let selectedId = 'FG-104';
+    let currentTab = 'overview';
+    let noticeTimer;
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+    const icon = name => `<i data-lucide="${name}"></i>`;
+    const selectedTicket = () => tickets.find(ticket => ticket.id === selectedId);
+    const stateFor = ticket => workflows[ticket.workflow].states.find(state => state.id === ticket.state);
+    const refreshIcons = () => { if (window.lucide) window.lucide.createIcons(); };
+
+    function setLayout(layout) {
+      document.body.dataset.layout = layout;
+      renderDetail();
+    }
+    function toggleNavigation(open) {
+      document.querySelector('.sidebar').classList.toggle('open', open);
+      document.querySelector('.nav-scrim').classList.toggle('visible', open);
+    }
+    function switchWorkflow(workflow) {
+      currentWorkflow = workflow;
+      selectedId = null;
+      document.getElementById('search').value = '';
+      document.getElementById('agent-filter').value = 'all';
+      document.querySelectorAll('[data-workflow]').forEach(button => button.classList.toggle('active', button.dataset.workflow === workflow));
+      toggleNavigation(false);
+      renderBoard();
+      renderDetail();
+    }
+    function renderBoard() {
+      const workflow = workflows[currentWorkflow];
+      const workflowTickets = tickets.filter(ticket => ticket.workflow === currentWorkflow);
+      const query = document.getElementById('search').value.toLowerCase().trim();
+      const agent = document.getElementById('agent-filter').value;
+      const filtered = workflowTickets.filter(ticket => `${ticket.id} ${ticket.title}`.toLowerCase().includes(query) && (agent === 'all' || (agent === 'unassigned' ? !ticket.agent : ticket.agent === agent)));
+      document.getElementById('workflow-name').textContent = workflow.name;
+      document.getElementById('ticket-total').textContent = `${workflowTickets.length} tickets`;
+      document.getElementById('working-total').textContent = `${workflowTickets.filter(ticket => ticket.active).length} working`;
+      Object.keys(workflows).forEach(key => { document.getElementById(`${key}-count`).textContent = tickets.filter(ticket => ticket.workflow === key).length; });
+      document.getElementById('columns').innerHTML = workflow.states.map(state => {
+        const columnTickets = filtered.filter(ticket => ticket.state === state.id);
+        return `<section class="column" aria-label="${escapeHtml(state.name)}" style="--column-color: ${state.color}"><div class="column-title"><span class="state-dot"></span>${escapeHtml(state.name)}<span class="column-count">${columnTickets.length}</span></div>${columnTickets.length ? columnTickets.map(ticket => `<button class="ticket ${ticket.id === selectedId ? 'selected-ticket' : ''}" onclick="openTicket('${ticket.id}')" aria-label="${ticket.id}: ${escapeHtml(ticket.title)}"><span class="ticket-id">${ticket.id}</span><h3>${escapeHtml(ticket.title)}</h3><span class="ticket-footer"><span class="row">${ticket.agent ? `<span class="avatar">${ticket.agent.slice(0, 2).toUpperCase()}</span>${ticket.agent}` : `${icon('user-round')}Unassigned`}</span>${ticket.active ? `<span class="ticket-run">${icon('activity')}Working</span>` : ticket.queued ? `<span class="ticket-run queued">${icon('clock-3')}Queued</span>` : '<span class="muted">Idle</span>'}</span></button>`).join('') : '<p class="empty-column">No tickets</p>'}</section>`;
+      }).join('');
+      refreshIcons();
+    }
+    function openTicket(ticketId) {
+      selectedId = ticketId;
+      currentTab = 'overview';
+      renderBoard();
+      renderDetail();
+    }
+    function closeTicket() { selectedId = null; renderBoard(); renderDetail(); }
+    function renderDetail() {
+      const pane = document.getElementById('ticket-pane');
+      const ticket = selectedTicket();
+      pane.hidden = !ticket;
+      document.querySelector('.workspace').classList.toggle('has-ticket', Boolean(ticket));
+      if (!ticket) return;
+      const state = stateFor(ticket);
+      const pageLayout = document.body.dataset.layout === 'page';
+      pane.innerHTML = `<div class="pane-heading row between"><div class="row">${pageLayout ? `<button class="icon-btn" title="Back to board" aria-label="Back to board" onclick="closeTicket()">${icon('arrow-left')}</button>` : icon('ticket')}<code>${ticket.id}</code></div><div class="row">${!pageLayout ? `<button class="icon-btn" title="Open full page" aria-label="Open full page" onclick="setLayout('page')">${icon('expand')}</button>` : ''}<button class="icon-btn" title="Close ticket" aria-label="Close ticket" onclick="closeTicket()">${icon('x')}</button></div></div><div class="pane-title"><div class="state-label"><span class="state-dot" style="background:${state.color}"></span>${escapeHtml(state.name)}</div><h2>${escapeHtml(ticket.title)}</h2></div><div class="ticket-layout"><section class="assignment-panel" aria-label="Ticket assignment"><label class="field-label" for="ticket-agent">Assigned agent</label><div class="assignment-controls"><select id="ticket-agent" aria-label="Assigned agent" onchange="assignTicket()"><option value="">Unassigned</option>${['builder', 'researcher', 'reviewer'].map(agent => `<option value="${agent}">${agent}</option>`).join('')}</select><button class="btn primary" id="run-button" onclick="runTicket()" title="Run assigned agent">${icon('play')}Run</button></div><div id="ticket-run-status" class="run-line"></div></section><section class="ticket-information"><nav class="detail-tabs" aria-label="Ticket views" role="tablist">${['overview', 'requirements', 'history'].map(tab => `<button class="detail-tab" role="tab" aria-selected="${tab === currentTab}" onclick="selectTab('${tab}')">${tab[0].toUpperCase() + tab.slice(1)}</button>`).join('')}</nav><div id="tab-content" role="tabpanel"></div></section></div>`;
+      updateAssignmentControls();
+      renderTab();
+      refreshIcons();
+    }
+    function selectTab(tab) { currentTab = tab; renderDetail(); }
+    function renderTab() {
+      const ticket = selectedTicket();
+      const content = document.getElementById('tab-content');
+      if (currentTab === 'history') {
+        const history = ticket.history || [{ actor: ticket.agent || 'You', action: `Created ticket in ${workflows[ticket.workflow].states[0].name}`, time: 'Yesterday' }];
+        content.innerHTML = history.map(event => `<div class="history-event"><strong>${escapeHtml(event.action)}</strong><p>${escapeHtml(event.actor)} &middot; ${escapeHtml(event.time)}</p></div>`).join('');
+      } else if (currentTab === 'requirements') {
+        const state = stateFor(ticket);
+        if (ticket.state === 'review') {
+          content.innerHTML = `<div class="transition-name row"><strong>Review</strong>${icon('arrow-right')}<strong>Done</strong></div><h3>Structured requirements</h3><div class="check-row ${ticket.verdict ? '' : 'pending'}">${icon(ticket.verdict ? 'circle-check' : 'circle-dashed')}<div>Review verdict<small>${ticket.verdict ? 'Passed' : 'Not submitted'}</small></div></div><div class="check-row ${ticket.report ? '' : 'pending'}">${icon(ticket.report ? 'circle-check' : 'circle-dashed')}<div>Test report<small>${ticket.report ? escapeHtml(ticket.report) : 'Not submitted'}</small></div></div><h3 style="margin-top:24px">Agent assessment</h3><div class="check-row pending">${icon('circle-dashed')}<div>The implementation satisfies the acceptance criteria.<small>Awaiting evaluation against the current project</small></div></div><p class="definition-note">Software delivery &middot; Definition <code>8fa4c29</code></p>`;
+        } else {
+          content.innerHTML = `<h3>${escapeHtml(state.name)}</h3><p class="description">${['done', 'complete'].includes(ticket.state) ? 'No outgoing transitions.' : 'Evaluation not submitted.'}</p><p class="definition-note">${escapeHtml(workflows[ticket.workflow].blueprint)} &middot; Definition <code>8fa4c29</code></p>`;
+        }
+      } else {
+        content.innerHTML = `<section class="detail-section"><h3>Description</h3><p class="description">${escapeHtml(ticket.description)}</p></section><section class="detail-section"><h3>Inputs</h3><label class="field-label" for="acceptance-criteria">Acceptance criteria</label><textarea id="acceptance-criteria" rows="4">${escapeHtml(ticket.criteria || '')}</textarea><button class="btn save-inputs" onclick="saveInputs()">${icon('save')}Save inputs</button></section><section class="detail-section"><h3>Outputs</h3><dl class="field-list"><div><dt>Review verdict</dt><dd>${escapeHtml(ticket.verdict || 'Not submitted')}</dd></div><div><dt>Test report</dt><dd>${ticket.report ? `<code>${escapeHtml(ticket.report)}</code>` : 'Not submitted'}</dd></div></dl></section>`;
+      }
+      refreshIcons();
+    }
+    function updateAssignmentControls() {
+      const ticket = selectedTicket();
+      const selector = document.getElementById('ticket-agent');
+      selector.value = ticket.agent || '';
+      selector.disabled = Boolean(ticket.active);
+      selector.title = ticket.active ? `Active work: ${ticket.run}` : '';
+      document.getElementById('run-button').disabled = Boolean(ticket.active || ticket.queued || !ticket.agent);
+      const status = document.getElementById('ticket-run-status');
+      status.className = `run-line${ticket.queued ? ' queued' : ticket.active ? '' : ' idle'}`;
+      status.innerHTML = ticket.active || ticket.queued
+        ? `${icon(ticket.active ? 'activity' : 'clock-3')}<span>${ticket.active ? 'Working' : 'Queued'}</span><code>${ticket.run}</code>${ticket.active ? icon('lock-keyhole') : ''}`
+        : `${icon('circle-pause')}<span>No active run</span>`;
+      refreshIcons();
+    }
+    function recordActivity(ticket, action) {
+      ticket.history = [{ actor: 'You', action, time: 'Just now' }, ...(ticket.history || [])];
+    }
+    function notify(message) {
+      clearTimeout(noticeTimer);
+      const notice = document.getElementById('notice');
+      notice.textContent = message;
+      notice.hidden = false;
+      noticeTimer = setTimeout(() => { notice.hidden = true; }, 3500);
+    }
+    function assignTicket() {
+      const ticket = selectedTicket();
+      if (ticket.active) { updateAssignmentControls(); return; }
+      const agent = document.getElementById('ticket-agent').value || null;
+      if (agent === ticket.agent) return;
+      if (ticket.queued) recordActivity(ticket, `Queued run ${ticket.run} superseded by reassignment`);
+      ticket.agent = agent;
+      ticket.queued = false;
+      ticket.run = null;
+      recordActivity(ticket, agent ? `Assigned to ${agent}` : 'Cleared assignment');
+      renderBoard();
+      updateAssignmentControls();
+      if (currentTab === 'history') renderTab();
+      notify(`${ticket.id}: assignment saved`);
+    }
+    function runTicket() {
+      const ticket = selectedTicket();
+      if (!ticket.agent || ticket.active || ticket.queued) return;
+      ticket.queued = true;
+      ticket.run = `run-${500 + (ticket.history || []).length}`;
+      recordActivity(ticket, `Queued run for ${ticket.agent}`);
+      renderBoard();
+      updateAssignmentControls();
+      if (currentTab === 'history') renderTab();
+      notify(`${ticket.id}: run queued for ${ticket.agent}`);
+    }
+    function saveInputs() {
+      const ticket = selectedTicket();
+      ticket.criteria = document.getElementById('acceptance-criteria').value;
+      recordActivity(ticket, 'Updated acceptance criteria');
+      notify(`${ticket.id}: inputs saved`);
+    }
+    function openTicketDialog() {
+      const dialog = document.getElementById('ticket-dialog');
+      dialog.querySelector('form').reset();
+      document.getElementById('initial-state').textContent = workflows[currentWorkflow].states[0].name;
+      dialog.showModal();
+    }
+    function createTicket(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const title = form.elements.title.value.trim();
+      if (!title) return;
+      const ticket = { id: `${currentWorkflow === 'delivery' ? 'FG' : 'RS'}-${300 + tickets.length}`, workflow: currentWorkflow, state: workflows[currentWorkflow].states[0].id, title, description: form.elements.description.value.trim(), agent: null, history: [{ actor: 'You', action: `Created ticket in ${workflows[currentWorkflow].states[0].name}`, time: 'Just now' }] };
+      tickets.push(ticket);
+      document.getElementById('ticket-dialog').close();
+      openTicket(ticket.id);
+      notify(`${ticket.id}: ticket created`);
+    }
+    renderBoard();
+    renderDetail();
+    refreshIcons();
+  </script>
+</body>
+</html>
