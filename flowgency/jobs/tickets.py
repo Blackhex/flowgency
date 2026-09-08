@@ -8,6 +8,7 @@ from typing import Callable
 import uuid
 
 from pydantic import BaseModel, ConfigDict
+import yaml
 
 from flowgency.configuration.store import ConfigStore
 from flowgency.fs.atomic import atomic_write_text
@@ -27,6 +28,7 @@ from flowgency.tickets.models import (
     TicketRef,
     TicketRunReservation,
     TicketVersion,
+    TicketView,
     UserTicketContext,
 )
 from flowgency.tickets.service import TicketService
@@ -157,6 +159,20 @@ class TicketJobCoordinator:
             recovery_kind=recovery_kind,
             handle=handle,
         )
+
+    def iter_reservations(self, team_id: str) -> tuple[_DurableReservation, ...]:
+        root = self._reservation_root(team_id, create=False)
+        if not root.exists():
+            return ()
+        reservations: list[_DurableReservation] = []
+        for path in sorted(root.glob("*.json")):
+            if path.parent != root:
+                raise TicketReservationError("ticket reservation path escaped the authoritative store")
+            with exclusive_lock(job_lock_path(path), wait=True):
+                reservations.append(
+                    _DurableReservation.model_validate_json(path.read_text(encoding="utf-8"))
+                )
+        return tuple(reservations)
 
     def preflight(self, record: JobRecord):
         target = record.spec.ticket_target
@@ -323,7 +339,7 @@ class TicketJobCoordinator:
                 team_key=version.ref.team_id,
                 agent_name=current.assignee,
                 trigger="ticket",
-                task_input=_ticket_task_input(current),
+                task_input=_ticket_task_input(self.service.inspect(actor, version.ref)),
                 job_id=replay.job_id,
                 ticket_target=target,
             )
@@ -392,6 +408,23 @@ class TicketJobCoordinator:
             return None
         record = self.job_store.read(authority)
         if record.status in _TERMINAL_STATUSES:
+            if self._may_clear_terminal_pending(authority, record, current, linked):
+                try:
+                    provider.apply(
+                        ref,
+                        current.revision,
+                        _reconcile_operation(ref, linked.job_id, linked.target.assignment_event_id, record.status),
+                        lambda existing: _apply_pending_mutation(
+                            existing,
+                            actor="system",
+                            kind="ticket-run-reconciled",
+                            summary="Ticket run reservation reconciled",
+                            pending_run=None,
+                        ),
+                    )
+                except StorageUnavailable as error:
+                    self._write_recovery(linked, error)
+                    return None
             self._write_reservation(linked.model_copy(update={"status": "linked", "recovery": None}))
             return None
         stale_target = (
@@ -512,12 +545,7 @@ class TicketJobCoordinator:
             raise TicketReservationError("reserved job target does not match the durable reservation")
 
     def _reservation_path(self, team_id: str, ref: TicketRef, operation_id: str, *, create: bool) -> Path:
-        team_root = self.job_store.team_root(team_id)
-        root = (team_root / "ticket-runs").resolve(strict=False)
-        if root.parent != team_root.resolve(strict=False):
-            raise TicketReservationError("ticket reservation root escaped the authoritative store")
-        if create:
-            root.mkdir(parents=True, exist_ok=True)
+        root = self._reservation_root(team_id, create=create)
         key = hashlib.sha256(
             json.dumps(
                 {
@@ -534,6 +562,15 @@ class TicketJobCoordinator:
         if path.parent != root:
             raise TicketReservationError("ticket reservation path escaped the authoritative store")
         return path
+
+    def _reservation_root(self, team_id: str, *, create: bool) -> Path:
+        team_root = self.job_store.team_root(team_id)
+        root = (team_root / "ticket-runs").resolve(strict=False)
+        if root.parent != team_root.resolve(strict=False):
+            raise TicketReservationError("ticket reservation root escaped the authoritative store")
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+        return root
 
     def _read_reservation(
         self,
@@ -688,6 +725,32 @@ class TicketJobCoordinator:
         except Exception:
             return
 
+    def _may_clear_terminal_pending(
+        self,
+        authority: JobAuthorityRef,
+        record: JobRecord,
+        current: TicketRecord,
+        reservation: _DurableReservation,
+    ) -> bool:
+        pending = current.pending_run
+        if pending is None or pending.job_id != reservation.job_id:
+            return False
+        if current.active_run is not None:
+            return False
+        if self.registry.read_original_targets(authority):
+            return False
+        if record.status == "cancelled":
+            return True
+        return not any(
+            value not in (None, "")
+            for value in (
+                record.worker_pid,
+                record.launched_at,
+                record.started_at,
+                record.session_id,
+            )
+        )
+
 
 def _latest_assignment_event_id(record: TicketRecord) -> str:
     for event in reversed(record.events):
@@ -796,10 +859,35 @@ def _apply_pending_mutation(
     )
 
 
-def _ticket_task_input(record: TicketRecord) -> str:
+def _ticket_task_input(view: TicketView) -> str:
+    if view.version is None or view.definition is None:
+        raise WorkflowUnavailable(
+            "unavailable-workflow",
+            "Current workflow definition is unavailable",
+        )
+    record = view.record
+    ticket_payload = {
+        "ref": view.ref.model_dump(mode="json"),
+        "revision": view.version.revision,
+        "title": record.title,
+        "description": record.description,
+        "state_id": record.state_id,
+        "assignee": record.assignee,
+        "field_values": record.model_dump(mode="json")["field_values"],
+    }
+    workflow_payload = view.definition.model_dump(mode="json")
+    ticket_yaml = yaml.safe_dump(ticket_payload, sort_keys=False, allow_unicode=True).strip()
+    workflow_yaml = yaml.safe_dump(workflow_payload, sort_keys=False, allow_unicode=True).strip()
     return (
-        "Use the live ticket tools to inspect the currently assigned ticket and continue the work.\n\n"
-        f"Ticket: {record.id}\n"
-        f"Title: {record.title}\n"
-        f"State: {record.state_id}\n"
+        "Use the live ticket tools to inspect the current ticket state from the project, "
+        "re-evaluate the workflow contract below against the actual repository, and continue the work. "
+        "Do not rely on any stale earlier snapshot.\n\n"
+        "## Current ticket\n"
+        "```yaml\n"
+        f"{ticket_yaml}\n"
+        "```\n\n"
+        "## Current workflow definition\n"
+        "```yaml\n"
+        f"{workflow_yaml}\n"
+        "```\n"
     )

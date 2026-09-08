@@ -152,7 +152,12 @@ def submit_job_request(
             try:
                 from .queue import drain
 
-                drain(snapshot_config, memory_store=memory_store, launcher=launcher)
+                drain(
+                    snapshot_config,
+                    memory_store=memory_store,
+                    launcher=launcher,
+                    config_path=config_store.path,
+                )
             except Exception:
                 log.warning("drain after submission failed", exc_info=True)
             return _settle(handle)

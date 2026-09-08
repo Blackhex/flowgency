@@ -38,7 +38,7 @@ def reconcile_jobs(teams: dict, *, memory_store_root):
     return _reconcile_jobs(teams, memory_store_root=memory_store_root)
 
 
-def drain(config, *, memory_store, launcher=None, full_reconcile=False):
+def drain(config, *, memory_store, launcher=None, full_reconcile=False, config_path=None):
     from .queue import drain as _drain
 
     return _drain(
@@ -46,6 +46,7 @@ def drain(config, *, memory_store, launcher=None, full_reconcile=False):
         memory_store=memory_store,
         launcher=launcher,
         full_reconcile=full_reconcile,
+        config_path=config_path,
     )
 
 

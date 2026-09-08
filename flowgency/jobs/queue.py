@@ -81,9 +81,12 @@ def queue_snapshot(config, *, memory_store: Path) -> QueueView:
     return QueueView(running, tuple(waiting), config.flowgency.jobs.pool)
 
 
-def _team_roots(config) -> dict:
+def _team_roots(config, *, config_path: Path | None = None) -> dict:
     return {
-        team_id: {"team_root": str(team.path)}
+        team_id: {
+            "team_root": str(team.path),
+            **({"config_path": str(config_path)} if config_path is not None else {}),
+        }
         for team_id, team in config.teams.items()
     }
 
@@ -132,6 +135,7 @@ def drain(
     memory_store: Path,
     launcher: JobLauncher | None = None,
     full_reconcile: bool = False,
+    config_path: Path | None = None,
 ) -> int:
     """Start waiting jobs, oldest due first, while the pool has room.
 
@@ -155,7 +159,7 @@ def drain(
             log.info("another drainer holds the queue; leaving the work to it")
             return 0
         reconcile_jobs(
-            _team_roots(config),
+            _team_roots(config, config_path=config_path),
             memory_store_root=memory_store,
             statuses=None if full_reconcile else SLOT_STATUSES,
         )

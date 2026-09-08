@@ -2,6 +2,7 @@
 
 import logging
 import os
+from types import SimpleNamespace
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,7 +76,12 @@ def _ticket_cleanup_evidence(record) -> ProcessStopEvidence | None:
     if not isinstance(cleanup, dict):
         return None
     pending = cleanup.get("pending_cleanup") or ()
-    if not pending or cleanup.get("confirmed") is not True:
+    retryable = cleanup.get("requires_retry") is True or cleanup.get("status") in {
+        "pending",
+        "partial",
+        "error",
+    }
+    if cleanup.get("confirmed") is not True or (not pending and not retryable):
         return None
     if cleanup.get("job_id") != record.spec.job_id:
         return None
@@ -90,6 +96,103 @@ def _ticket_cleanup_evidence(record) -> ProcessStopEvidence | None:
         generation=generation,
         confirmed=True,
         reason=reason,
+    )
+
+
+def _ticket_coordinator(job_store: JobStore, team_id: str, team: dict):
+    config_path = team.get("config_path")
+    if not config_path:
+        return None
+    config_store = ConfigStore(Path(config_path))
+    workflow_library = config_store.load().config.flowgency.workflow_library
+    if workflow_library is None:
+        return None
+    registry = TicketAccessRegistry(job_store)
+    service = TicketService(
+        config_store,
+        WorkflowLibrary(Path(workflow_library)),
+        resolve_storage,
+        registry.validate_context,
+        clock=lambda: datetime.now(timezone.utc),
+    )
+    return TicketJobCoordinator(
+        service=service,
+        job_store=job_store,
+        config_store=config_store,
+        submitter=lambda request: None,
+    )
+
+
+def _reconcile_ticket_reservations(job_store: JobStore, team_id: str, team: dict) -> None:
+    reservation_root = job_store.team_root(team_id) / "ticket-runs"
+    if not reservation_root.is_dir() or not any(reservation_root.glob("*.json")):
+        return
+    try:
+        coordinator = _ticket_coordinator(job_store, team_id, team)
+    except Exception as error:
+        logger.warning(
+            "Skipping ticket reservation recovery for team %s: %s",
+            team_id,
+            error,
+        )
+        return
+    if coordinator is None:
+        return
+    try:
+        reservations = coordinator.iter_reservations(team_id)
+    except Exception as error:
+        logger.warning(
+            "Failed to read ticket reservations for team %s: %s",
+            team_id,
+            error,
+        )
+        return
+    for reservation in reservations:
+        try:
+            coordinator.reconcile_pending_submission(
+                team_id,
+                reservation.target.ref,
+                reservation.operation_id,
+            )
+        except Exception as error:
+            logger.warning(
+                "Failed to reconcile durable ticket reservation %s for team %s: %s",
+                reservation.operation_id,
+                team_id,
+                error,
+            )
+
+
+def _record_dead_worker_ticket_cleanup(job_store: JobStore, team_id: str, path: Path, record) -> None:
+    authority = job_store.reference(team_id, record.spec.job_id, record.authority_digest)
+    registry = TicketAccessRegistry(job_store)
+    try:
+        targets = registry.read_original_targets(authority)
+    except Exception:
+        targets = ()
+    try:
+        registry.revoke(authority)
+    except Exception:
+        pass
+    if not targets:
+        return
+    generation = next((target.generation for target in targets if target.generation), "")
+    _merge_result_metadata(
+        path,
+        {
+            "ticket_cleanup": _ticket_cleanup_metadata(
+                ProcessStopEvidence(
+                    job_id=record.spec.job_id,
+                    generation=generation,
+                    confirmed=False,
+                    reason="worker-missing",
+                ),
+                SimpleNamespace(
+                    cleared=(),
+                    pending_cleanup=tuple(target.ref for target in targets),
+                ),
+            )
+        },
     )
 
 
@@ -168,6 +271,7 @@ def reconcile_jobs(
     for team_id, team in teams.items():
         if not team.get("team_root"):
             continue
+        _reconcile_ticket_reservations(job_store, team_id, team)
         records: list[tuple[Path, object]] = []
         for path in job_store.paths(team_id):
             try:
@@ -221,6 +325,7 @@ def reconcile_jobs(
                 continue
 
             summary = f"Worker process (PID {record.worker_pid}) was not found."
+            _record_dead_worker_ticket_cleanup(job_store, team_id, path, record)
             try:
                 record = transition_job(
                     path,

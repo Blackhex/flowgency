@@ -25,8 +25,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     result = execute_job(reference)
     try:
-        config = ConfigStore(Path(read_job(reference.path).spec.config_path)).load().config
-        drain(config, memory_store=store.memory_store)
+        config_path = Path(read_job(reference.path).spec.config_path)
+        config = ConfigStore(config_path).load().config
+        drain(config, memory_store=store.memory_store, config_path=config_path)
     except Exception:
         logging.getLogger("flowgency.jobs.worker").exception("drain after job failed")
     return 0 if result.status == "complete" else 1

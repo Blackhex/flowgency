@@ -97,7 +97,7 @@ def test_retry_after_missing_job_reuses_original_job_id_and_version(
     assert sum(1 for event in current.events if event.kind == "ticket-run-reconciled") == 2
 
 
-def test_submit_keeps_reservation_when_job_record_exists_before_failure(ticket_job_env):
+def test_submit_clears_pending_reservation_when_never_started_job_fails(ticket_job_env):
     env = ticket_job_env
     ticket = env.create_assigned("builder")
     env.launcher.launch.side_effect = OSError("spawn denied")
@@ -106,9 +106,12 @@ def test_submit_keeps_reservation_when_job_record_exists_before_failure(ticket_j
         env.coordinator.submit(env.user, ticket.version, "run-request")
 
     current = env.read(ticket.ref).record
-    assert current.pending_run is not None
+    assert current.pending_run is None
+    assert current.assignee == "builder"
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+    assert reservation is not None
     failed = env.jobs.read(
-        type("Handle", (), {"path": env.job_store.path(env.team_id, current.pending_run.job_id), "job_id": current.pending_run.job_id})
+        type("Handle", (), {"path": env.job_store.path(env.team_id, reservation.job_id), "job_id": reservation.job_id})
     )
     assert failed.status == "failed"
 

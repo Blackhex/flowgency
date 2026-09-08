@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 from pathlib import Path
 
 import yaml
@@ -9,7 +10,7 @@ from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBindin
 from flowgency.jobs.reconciliation import reconcile_jobs, worker_alive
 from flowgency.memory.recovery import recover_publications
 from flowgency.jobs.store import job_path, read_job, write_job
-from flowgency.tickets.models import TicketEvent, TicketOperation, TicketRef
+from flowgency.tickets.models import ActiveTicketRun, TicketEvent, TicketOperation, TicketRef, TicketRunReservation
 from flowgency.workflows.configuration import resolve_workflow_binding
 
 from tests._ticket_helpers import SEED_TIME, make_ticket_job_environment
@@ -418,8 +419,17 @@ def test_reconcile_retries_confirmed_pending_ticket_cleanup_on_original_binding_
         update={
             "number": 0,
             "revision": 1,
-            "pending_run": None,
-            "active_run": None,
+            "pending_run": TicketRunReservation(
+                job_id="shadow-job",
+                request_id="shadow-request",
+                assignee="builder",
+                assignment_event_id="shadow-assignment",
+            ),
+            "active_run": ActiveTicketRun(
+                job_id="shadow-active",
+                session_id="shadow-session",
+                started_at=SEED_TIME,
+            ),
             "events": (
                 TicketEvent(kind="opened", actor="system", summary="Shadow ticket"),
             ),
@@ -432,6 +442,71 @@ def test_reconcile_retries_confirmed_pending_ticket_cleanup_on_original_binding_
         shadow,
         TicketOperation(operation_id="seed-shadow", request_digest="seed-shadow"),
     )
+    shadow_path = current_provider._ticket_path(current_ref)
+    shadow_before = shadow_path.read_text(encoding="utf-8")
+    team_root = str(env.store.load().config.teams[env.team_id].path)
+    Path(record.spec.config_path).unlink()
+
+    result = reconcile_jobs(
+        {env.team_id: {"team_root": team_root}},
+        memory_store_root=env.job_store.memory_store,
+    )
+
+    assert result.failed == 0
+    assert env.provider.read(ticket.ref).active_run is None
+    assert shadow_path.read_text(encoding="utf-8") == shadow_before
+    updated = read_job(authority.path)
+    assert updated.result_metadata is not None
+    assert updated.result_metadata["ticket_cleanup"]["status"] == "cleared"
+
+
+def test_reconcile_retries_confirmed_ticket_cleanup_error_without_enumerated_pending_refs(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    authority = env.running_job("builder", "run-a")
+
+    with env.broker_session(authority) as (context, client):
+        env.generation = context.session_id
+        started = client.call(
+            "start_work",
+            {
+                "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                "operation_id": "start-reconcile-cleanup-error",
+            },
+        )
+
+    assert started["ok"] is True
+
+    record = env.job_store.read(authority)
+    write_job(
+        authority.path,
+        replace(
+            record,
+            status="complete",
+            completed_at="2026-09-08T00:10:00+00:00",
+            result_metadata={
+                "ticket_cleanup": {
+                    "status": "error",
+                    "job_id": record.spec.job_id,
+                    "generation": env.generation,
+                    "confirmed": True,
+                    "reason": "exited",
+                    "cleared": [],
+                    "pending_cleanup": [],
+                    "requires_retry": True,
+                    "error": {
+                        "phase": "cleanup",
+                        "kind": "RuntimeError",
+                        "message": "Ticket cleanup failed",
+                    },
+                }
+            },
+        ),
+    )
 
     result = reconcile_jobs(
         {env.team_id: {"team_root": str(env.store.load().config.teams[env.team_id].path)}},
@@ -440,10 +515,166 @@ def test_reconcile_retries_confirmed_pending_ticket_cleanup_on_original_binding_
 
     assert result.failed == 0
     assert env.provider.read(ticket.ref).active_run is None
-    assert current_provider.read(current_ref).active_run is None
     updated = read_job(authority.path)
     assert updated.result_metadata is not None
     assert updated.result_metadata["ticket_cleanup"]["status"] == "cleared"
+
+
+def test_reconcile_consumes_cancelled_pending_reservation_sidecars(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    cancelled = replace(read_job(handle.path), status="cancelled")
+    write_job(handle.path, cancelled)
+
+    result = reconcile_jobs(
+        {
+            env.team_id: {
+                "team_root": str(env.store.load().config.teams[env.team_id].path),
+                "config_path": str(env.store.path),
+            }
+        },
+        memory_store_root=env.job_store.memory_store,
+    )
+
+    assert result.failed == 0
+    current = env.read(ticket.ref).record
+    assert current.assignee == "builder"
+    assert current.pending_run is None
+    assert current.active_run is None
+    assert env.jobs.read(handle).status == "cancelled"
+
+
+def test_reconcile_consumes_recovery_pending_reservation_sidecars_without_touching_shadow_destination(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    backup = env.tmp_path / "root-a-backup"
+    real_submit = env.coordinator.submitter
+
+    def unavailable_after_create(request):
+        handle = real_submit(request)
+        env.root_a.rename(backup)
+        return handle
+
+    env.coordinator.submitter = unavailable_after_create
+
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+
+    assert reservation is not None
+    assert reservation.status == "recovery-pending"
+
+    env.set_storage_root(env.root_b)
+    current_binding = resolve_workflow_binding(
+        env.store.load(),
+        env.team_id,
+        env.workflow_id,
+    ).storage
+    current_provider = env.current_provider()
+    current_ref = TicketRef.from_binding(current_binding, ticket.ref.ticket_id)
+    shadow = ticket.record.with_ref(current_ref).model_copy(
+        update={
+            "number": 0,
+            "revision": 1,
+            "pending_run": TicketRunReservation(
+                job_id="shadow-job",
+                request_id="shadow-request",
+                assignee="builder",
+                assignment_event_id="shadow-assignment",
+            ),
+            "active_run": ActiveTicketRun(
+                job_id="shadow-active",
+                session_id="shadow-session",
+                started_at=SEED_TIME,
+            ),
+            "events": (
+                TicketEvent(kind="opened", actor="system", summary="Shadow ticket"),
+            ),
+            "receipts": (),
+            "created_at": SEED_TIME,
+            "updated_at": SEED_TIME,
+        }
+    )
+    current_provider.create(
+        shadow,
+        TicketOperation(operation_id="seed-shadow", request_digest="seed-shadow"),
+    )
+    shadow_path = current_provider._ticket_path(current_ref)
+    shadow_before = shadow_path.read_text(encoding="utf-8")
+
+    backup.rename(env.root_a)
+
+    result = reconcile_jobs(
+        {
+            env.team_id: {
+                "team_root": str(env.store.load().config.teams[env.team_id].path),
+                "config_path": str(env.store.path),
+            }
+        },
+        memory_store_root=env.job_store.memory_store,
+    )
+
+    assert result.failed == 0
+    assert env.provider.read(ticket.ref).pending_run is None
+    assert env.jobs.read(handle).status == "cancelled"
+    assert shadow_path.read_text(encoding="utf-8") == shadow_before
+
+
+def test_reconcile_dead_worker_records_pending_ticket_cleanup_and_revokes_sessions(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    from flowgency.tickets.models import TicketOperation
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    authority = env.running_job("builder", "run-a")
+    grant = env.access_registry.open(authority)
+    binding = env.service.list_workflows(grant.context)[0]
+    env.access_registry.register_target(grant.context, binding, ticket.ref)
+    env.service.start_work(
+        grant.context,
+        env.read(ticket.ref).version,
+        TicketOperation(operation_id="start-reconcile-dead", request_digest="start-reconcile-dead"),
+    )
+    access_path = env.access_registry._access_path(env.team_id, authority.job_id)
+
+    monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
+
+    result = reconcile_jobs(
+        {
+            env.team_id: {
+                "team_root": str(env.store.load().config.teams[env.team_id].path),
+                "config_path": str(env.store.path),
+            }
+        },
+        memory_store_root=env.job_store.memory_store,
+    )
+
+    assert result.failed == 1
+    current = env.read(ticket.ref).record
+    assert current.active_run is not None
+    record = read_job(authority.path)
+    assert record.status == "failed"
+    assert record.result_metadata is not None
+    cleanup = record.result_metadata["ticket_cleanup"]
+    assert cleanup["status"] == "pending"
+    assert cleanup["confirmed"] is False
+    assert cleanup["reason"] == "worker-missing"
+    assert cleanup["pending_cleanup"] == [ticket.ref.model_dump(mode="json")]
+    payload = json.loads(access_path.read_text(encoding="utf-8"))
+    assert payload["sessions"] == {}
+    assert payload["original_targets"][0]["ref"]["ticket_id"] == ticket.ref.ticket_id
 
 
 def test_running_decision_without_job_id_is_not_failed(tmp_path):

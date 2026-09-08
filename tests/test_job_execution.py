@@ -1270,7 +1270,7 @@ def _patch_workflow_execution_context(monkeypatch, spec, integration):
     )
 
 
-def test_execute_ticket_target_job_refreshes_prompt_from_current_ticket(
+def test_execute_ticket_target_job_refreshes_prompt_from_current_ticket_and_workflow_rules(
     tmp_path,
     raw_config,
     monkeypatch,
@@ -1287,16 +1287,25 @@ def test_execute_ticket_target_job_refreshes_prompt_from_current_ticket(
     env.service.update(
         env.user,
         updated_view.version,
-        updated_view.patch(title="Updated title"),
+        updated_view.patch(
+            title="Updated title",
+            description="Updated body",
+            field_values={"summary": "fresh summary"},
+        ),
         env.operation("retitle-before-run"),
     )
+    env.publish_criteria_workflow()
 
     class Integration(TicketRuntimeIntegration):
         def run(self, request: IntegrationRunRequest):
             assert request.ticket_tools is not None
             prompt_text = request.task_file.read_text(encoding="utf-8")
             assert "Updated title" in prompt_text
+            assert "Updated body" in prompt_text
+            assert "fresh summary" in prompt_text
+            assert "Evidence was reviewed" in prompt_text
             assert "Original title" not in prompt_text
+            assert "Body text." not in prompt_text
             return RunResult(
                 0,
                 "done",
@@ -1518,6 +1527,145 @@ def test_execute_job_workflow_team_runtime_exception_keeps_pending_cleanup_visib
     stored = read_job(authority.path)
     assert stored.result_metadata["ticket_cleanup"]["status"] == "pending"
     assert stored.result_metadata["ticket_cleanup"]["confirmed"] is False
+
+
+def test_execute_job_workflow_team_cleanup_exception_persists_sanitized_cleanup_metadata(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    import flowgency.jobs.execution as execution_module
+
+    from flowgency.tickets.broker import TicketToolClient
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    captured = {}
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            captured["token"] = request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"]
+            captured["client"] = TicketToolClient(
+                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                captured["token"],
+            )
+            started = captured["client"].call(
+                "start_work",
+                {
+                    "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                    "operation_id": "start-then-runtime-fails",
+                },
+            )
+            assert started["ok"] is True
+            raise RuntimeError("primary boom")
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    real_ticket_runtime = execution_module._ticket_runtime
+
+    def exploding_ticket_runtime(*args, **kwargs):
+        runtime = real_ticket_runtime(*args, **kwargs)
+        assert runtime is not None
+
+        def explode_cleanup(authority, stopped):
+            raise RuntimeError(f"cleanup leaked {captured['token']}")
+
+        runtime.coordinator.cleanup = explode_cleanup
+        return runtime
+
+    monkeypatch.setattr(execution_module, "_ticket_runtime", exploding_ticket_runtime)
+
+    result = execute_job(authority)
+
+    assert result.status == "failed"
+    assert "primary boom" in (result.execution_summary or "")
+    assert "cleanup leaked" not in (result.execution_summary or "")
+    assert env.read(ticket.ref).record.active_run is not None
+    stored = read_job(authority.path)
+    cleanup = stored.result_metadata["ticket_cleanup"]
+    assert cleanup["status"] == "error"
+    assert cleanup["confirmed"] is False
+    assert cleanup["requires_retry"] is True
+    assert cleanup["error"]["phase"] == "cleanup"
+    assert captured["token"] not in str(cleanup)
+    failed = captured["client"].call("get_ticket", {"ref": ticket.ref.model_dump(mode="json")})
+    assert failed["ok"] is False
+    assert failed["error"]["code"] == "unavailable"
+
+
+def test_execute_job_workflow_team_broker_close_exception_persists_cleanup_outcome(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    import flowgency.jobs.execution as execution_module
+
+    from flowgency.jobs.processes import ProcessStopEvidence
+    from flowgency.tickets.broker import TicketBroker, TicketToolClient
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    captured = {}
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            captured["token"] = request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"]
+            captured["client"] = TicketToolClient(
+                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                captured["token"],
+            )
+            started = captured["client"].call(
+                "start_work",
+                {
+                    "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                    "operation_id": "start-then-close-fails",
+                },
+            )
+            assert started["ok"] is True
+            return RunResult(
+                0,
+                "done",
+                "",
+                0.1,
+                session_id="native-cli-session",
+                process_stop_evidence=ProcessStopEvidence(
+                    job_id=record.spec.job_id,
+                    generation=request.ticket_tools.lifecycle.generation,
+                    confirmed=True,
+                    reason="exited",
+                ),
+            )
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    real_close = TicketBroker.close
+
+    def exploding_close(self):
+        real_close(self)
+        raise RuntimeError(f"broker close leaked {captured['token']}")
+
+    monkeypatch.setattr(execution_module.TicketBroker, "close", exploding_close)
+
+    result = execute_job(authority)
+
+    assert result.status == "failed"
+    assert "broker shutdown failed" in (result.execution_summary or "").lower()
+    assert "broker close leaked" not in (result.execution_summary or "")
+    assert env.read(ticket.ref).record.active_run is None
+    stored = read_job(authority.path)
+    cleanup = stored.result_metadata["ticket_cleanup"]
+    assert cleanup["status"] == "cleared"
+    assert cleanup["confirmed"] is True
+    assert cleanup["requires_retry"] is False
+    assert cleanup["error"]["phase"] == "broker_close"
+    assert captured["token"] not in str(cleanup)
+    failed = captured["client"].call("get_ticket", {"ref": ticket.ref.model_dump(mode="json")})
+    assert failed["ok"] is False
+    assert failed["error"]["code"] == "unavailable"
 
 
 def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkeypatch):

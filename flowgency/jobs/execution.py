@@ -368,10 +368,10 @@ def _ticket_runtime(record: JobRecord, job_store: JobStore):
     )
 
 
-def _refresh_ticket_prompt(task_input: str, current_record) -> str:
+def _refresh_ticket_prompt(task_input: str, current_view) -> str:
     marker = "\n## Flowgency reporting protocol"
     _, separator, suffix = task_input.partition(marker)
-    refreshed = _ticket_task_input(current_record)
+    refreshed = _ticket_task_input(current_view)
     if not separator:
         return refreshed
     return refreshed + separator + suffix
@@ -380,6 +380,8 @@ def _refresh_ticket_prompt(task_input: str, current_record) -> str:
 def _ticket_cleanup_metadata(
     stopped: ProcessStopEvidence,
     result,
+    *,
+    error: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     if result.cleared and not result.pending_cleanup:
         status = "cleared"
@@ -389,7 +391,13 @@ def _ticket_cleanup_metadata(
         status = "partial"
     else:
         status = "idle"
-    return {
+    requires_retry = bool(result.pending_cleanup)
+    if error is not None:
+        if status == "idle":
+            status = "error"
+        if status != "cleared":
+            requires_retry = True
+    payload = {
         "status": status,
         "job_id": stopped.job_id,
         "generation": stopped.generation,
@@ -397,7 +405,80 @@ def _ticket_cleanup_metadata(
         "reason": stopped.reason,
         "cleared": [ref.model_dump(mode="json") for ref in result.cleared],
         "pending_cleanup": [ref.model_dump(mode="json") for ref in result.pending_cleanup],
+        "requires_retry": requires_retry,
     }
+    if error is not None:
+        payload["error"] = dict(error)
+    return payload
+
+
+def _ticket_cleanup_error(phase: str, error: Exception) -> dict[str, str]:
+    messages = {
+        "broker_close": "Ticket broker shutdown failed",
+        "cleanup": "Ticket cleanup failed",
+    }
+    return {
+        "phase": phase,
+        "kind": type(error).__name__,
+        "message": messages.get(phase, "Ticket cleanup failed"),
+    }
+
+
+def _finalize_ticket_runtime(
+    *,
+    authority: JobAuthorityRef,
+    job_path: Path,
+    record: JobRecord,
+    ticket_runtime,
+    broker,
+    ticket_generation: str | None,
+    result,
+) -> str | None:
+    if broker is None or ticket_runtime is None or ticket_generation is None:
+        return None
+    stop_evidence = (
+        getattr(result, "process_stop_evidence", None)
+        if result is not None
+        else None
+    )
+    if stop_evidence is None:
+        stop_evidence = ProcessStopEvidence(
+            job_id=record.spec.job_id,
+            generation=ticket_generation,
+            confirmed=False,
+            reason="unknown",
+        )
+    cleanup_result = SimpleNamespace(cleared=(), pending_cleanup=())
+    metadata_error = None
+    broker_error = None
+    cleanup_error = None
+    try:
+        broker.close()
+    except Exception as error:
+        broker_error = error
+    try:
+        cleanup_result = ticket_runtime.coordinator.cleanup(authority, stop_evidence)
+    except Exception as error:
+        cleanup_error = error
+    if cleanup_error is not None:
+        metadata_error = _ticket_cleanup_error("cleanup", cleanup_error)
+    elif broker_error is not None:
+        metadata_error = _ticket_cleanup_error("broker_close", broker_error)
+    _merge_result_metadata(
+        job_path,
+        {
+            "ticket_cleanup": _ticket_cleanup_metadata(
+                stop_evidence,
+                cleanup_result,
+                error=metadata_error,
+            )
+        },
+    )
+    if cleanup_error is not None:
+        return metadata_error["message"]
+    if broker_error is not None:
+        return metadata_error["message"]
+    return None
 
 
 def resolve_job_context(spec):
@@ -576,6 +657,8 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                 broker = None
                 ticket_generation = None
                 result = None
+                runtime_error = None
+                ticket_finalization_error = None
                 try:
                     ticket_runtime = _ticket_runtime(record, store)
                     if ticket_runtime is not None:
@@ -589,7 +672,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                         if record.spec.ticket_target is not None:
                             ticket_view = ticket_runtime.coordinator.preflight(record)
                             prompt_path.write_text(
-                                _refresh_ticket_prompt(record.spec.task_input, ticket_view.record),
+                                _refresh_ticket_prompt(record.spec.task_input, ticket_view),
                                 encoding="utf-8",
                             )
                         request = replace(
@@ -602,29 +685,22 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 ),
                             ),
                         )
-                    result = integration.run(request)
+                    try:
+                        result = integration.run(request)
+                    except Exception as error:
+                        runtime_error = error
                 finally:
-                    if broker is not None and ticket_runtime is not None and ticket_generation is not None:
-                        stop_evidence = (
-                            getattr(result, "process_stop_evidence", None)
-                            if result is not None
-                            else None
-                        )
-                        if stop_evidence is None:
-                            stop_evidence = ProcessStopEvidence(
-                                job_id=record.spec.job_id,
-                                generation=ticket_generation,
-                                confirmed=False,
-                                reason="unknown",
-                            )
-                        try:
-                            broker.close()
-                        finally:
-                            cleanup = ticket_runtime.coordinator.cleanup(authority, stop_evidence)
-                            _merge_result_metadata(
-                                job_path,
-                                {"ticket_cleanup": _ticket_cleanup_metadata(stop_evidence, cleanup)},
-                            )
+                    ticket_finalization_error = _finalize_ticket_runtime(
+                        authority=authority,
+                        job_path=job_path,
+                        record=record,
+                        ticket_runtime=ticket_runtime,
+                        broker=broker,
+                        ticket_generation=ticket_generation,
+                        result=result,
+                    )
+                if runtime_error is not None:
+                    raise runtime_error
                 policy_note = _unenforced_policy_note(result)
                 stdout_path.write_text(result.stdout, encoding="utf-8")
                 persisted_stderr_path = None
@@ -644,7 +720,21 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     for item in native_changes
                 ]
 
-                if result.exit_code != 0:
+                if ticket_finalization_error is not None:
+                    final = _terminalize_failure(
+                        job_path,
+                        summary=ticket_finalization_error + policy_note,
+                        started_at=started.isoformat(),
+                        stdout_path=str(stdout_path.resolve()),
+                        stderr_path=persisted_stderr_path,
+                        exit_code=result.exit_code,
+                        duration_seconds=result.duration_seconds,
+                        changed_files=changes,
+                        base_sha=base_sha,
+                        session_id=result.session_id,
+                        copilot_home=result.copilot_home,
+                    )
+                elif result.exit_code != 0:
                     if result.exit_code == 124:
                         timeout_seconds = getattr(
                             context,

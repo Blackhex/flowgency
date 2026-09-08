@@ -159,6 +159,7 @@ def run_dispatch_cycle(config, config_path: Path | str, launcher=None) -> None:
             memory_store=resolved.flowgency.memory_store,
             launcher=launcher,
             full_reconcile=True,
+            config_path=Path(config_path),
         )
     except Exception:
         log.exception("queue drain failed")

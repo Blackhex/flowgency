@@ -160,6 +160,18 @@ class TicketAccessRegistry:
             locked = self._load_locked_by_job(team_id, job_id)
             self._drop_session(locked.path, locked.state, session_id)
 
+    def revoke(self, authority: JobAuthorityRef) -> None:
+        trusted = self._trusted_authority(authority)
+        with exclusive_lock(job_lock_path(trusted.path), wait=True):
+            locked = self._load_locked(trusted, create=False)
+            self._save(
+                locked.path,
+                _StoredRegistry(
+                    sessions={},
+                    original_targets=locked.state.original_targets,
+                ),
+            )
+
     def register_target(
         self,
         context: AgentTicketContext,

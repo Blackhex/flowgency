@@ -357,6 +357,7 @@ async def lifespan(app: FastAPI):
                 snapshot.config,
                 memory_store=snapshot.config.flowgency.memory_store,
                 full_reconcile=True,
+                config_path=services.config_store.path,
             )
         except Exception:
             log.exception("startup drain failed")
