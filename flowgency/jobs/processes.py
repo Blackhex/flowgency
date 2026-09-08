@@ -227,6 +227,8 @@ def _owned_posix_group_state(
     group_identity: OwnedPosixProcessGroup,
 ) -> Literal["empty", "active", "unknown", "reused"]:
     leader_snapshot, leader_status = _read_posix_process_snapshot(group_identity.leader.pid)
+    if leader_status == "unknown":
+        return "unknown"
     if leader_status != "ok" or leader_snapshot is None:
         return "reused"
     if (

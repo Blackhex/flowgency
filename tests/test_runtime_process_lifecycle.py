@@ -635,6 +635,62 @@ def test_posix_reused_group_fails_closed_without_signaling(monkeypatch, tmp_path
     assert signal_calls == []
 
 
+def test_posix_unreadable_leader_snapshot_reported_as_unknown_not_reused(monkeypatch, tmp_path: Path):
+    # Leader /proc/<pid>/stat is unreadable (permission/parse/OS error, not exited);
+    # runner must report group-state-unavailable, not group-identity-unavailable,
+    # and must not signal the process group.
+    fake_process = _FakePosixProcess(4321)
+    fake_process.allow_reap = True
+    signal_calls: list[tuple[int, int]] = []
+
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.subprocess.Popen",
+        lambda *args, **kwargs: fake_process,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.read_process_identity",
+        lambda pid: RuntimeProcessIdentity(pid=pid, created_at="leader-created"),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._capture_posix_group_identity",
+        lambda pid: OwnedPosixProcessGroup(
+            leader=RuntimeProcessIdentity(pid=pid, created_at="leader-created"),
+            process_group_id=pid,
+            session_id=pid,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._observe_posix_root_exit",
+        lambda process, deadline: 0,
+        raising=False,
+    )
+    # Simulate leader whose /proc stat is unreadable (permission or parse failure),
+    # NOT exited — status "unknown" rather than "exited".
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._read_posix_process_snapshot",
+        lambda pid: (None, "unknown"),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.os.killpg",
+        lambda pgid, sig: signal_calls.append((pgid, sig)),
+        raising=False,
+    )
+
+    result = _run_supervised_posix(
+        [sys.executable, "ignored.py"],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=1,
+        lifecycle=RuntimeProcessLifecycle(job_id="job-leader-unknown", generation="gen-leader-unknown"),
+        start=time.monotonic(),
+    )
+
+    assert result.process_stop_evidence.confirmed is False
+    assert result.process_stop_evidence.reason == "group-state-unavailable"
+    assert signal_calls == []
+
+
 @pytest.mark.skipif(os.name == "nt", reason="requires a real POSIX host")
 def test_run_supervised_posix_confirms_completed_process_tree(tmp_path: Path):
     child_script = _write_script(
