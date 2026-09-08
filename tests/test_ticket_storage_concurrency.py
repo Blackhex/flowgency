@@ -7,9 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from flowgency.configuration.store import ConfigStore
 from flowgency.fs.locks import ResourceBusyError, exclusive_lock
-from flowgency.tickets.models import TicketOperation, TicketRef
+from flowgency.tickets.models import AgentTicketContext, TicketOperation, TicketRef, UserTicketContext
+from flowgency.tickets.service import TicketService
 from flowgency.tickets.storages import local
+from flowgency.tickets.storages.registry import resolve_storage
+from flowgency.workflows.library import WorkflowLibrary
 from tests._ticket_helpers import storage_binding, ticket_record
 
 NOW = datetime(2026, 9, 8, tzinfo=timezone.utc)
@@ -79,6 +83,42 @@ def _hold_ticket_lock(root_str: str, ticket_id: str, acquired, release) -> None:
         release.wait(10)
 
 
+def _service_start_worker(
+    config_path_str: str,
+    library_root_str: str,
+    ref_payload: dict,
+    actor_payload: dict,
+    ready,
+    go,
+    queue: Queue,
+) -> None:
+    from flowgency.tickets.errors import TicketConflict
+
+    actor = AgentTicketContext.model_validate(actor_payload)
+    service = TicketService(
+        ConfigStore(Path(config_path_str)),
+        WorkflowLibrary(Path(library_root_str)),
+        lambda binding: resolve_storage(binding, clock=lambda: NOW),
+        lambda context: None
+        if context.session_id == actor.session_id
+        else (_ for _ in ()).throw(PermissionError("bad session")),
+        clock=lambda: NOW,
+    )
+    ref = TicketRef.model_validate(ref_payload)
+    version = service.inspect(UserTicketContext(team_id=actor.team_id), ref).version
+    operation = TicketOperation(
+        f"op-{actor.agent_name}-{actor.job_id}",
+        f"digest-{actor.agent_name}-{actor.job_id}",
+    )
+    ready.set()
+    go.wait(10)
+    try:
+        result = service.start_work(actor, version, operation)
+        queue.put(("ok", result.ticket.assignee, result.ticket.active_run.session_id))
+    except TicketConflict:
+        queue.put(("conflict", actor.agent_name, actor.session_id))
+
+
 def test_concurrent_apply_yields_one_success_one_conflict(tmp_path):
     _seed(tmp_path)
     ready_one, ready_two, go = Event(), Event(), Event()
@@ -142,3 +182,50 @@ def test_distinct_ticket_locks_are_independent(tmp_path):
         release.set()
         holder.join(30)
     assert holder.exitcode == 0
+
+
+def test_concurrent_start_work_yields_single_active_run(workflow_env):
+    ticket = workflow_env.create()
+    builder = workflow_env.agent("builder", "run-a")
+    observer = workflow_env.agent("observer", "run-b")
+    ready_one, ready_two, go = Event(), Event(), Event()
+    queue: Queue = Queue()
+    first = Process(
+        target=_service_start_worker,
+        args=(
+            str(workflow_env.store.path),
+            str(workflow_env.library.root),
+            ticket.ref.model_dump(),
+            builder.model_dump(),
+            ready_one,
+            go,
+            queue,
+        ),
+    )
+    second = Process(
+        target=_service_start_worker,
+        args=(
+            str(workflow_env.store.path),
+            str(workflow_env.library.root),
+            ticket.ref.model_dump(),
+            observer.model_dump(),
+            ready_two,
+            go,
+            queue,
+        ),
+    )
+    first.start()
+    second.start()
+    assert ready_one.wait(10)
+    assert ready_two.wait(10)
+    go.set()
+    first.join(30)
+    second.join(30)
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+    outcomes = sorted([queue.get(timeout=10), queue.get(timeout=10)])
+    assert [item[0] for item in outcomes] == ["conflict", "ok"]
+    stored = workflow_env.read(ticket.ref).record
+    assert stored.active_run is not None
+    assert stored.assignee in {"builder", "observer"}
+    assert stored.active_run.session_id in {builder.session_id, observer.session_id}

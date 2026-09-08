@@ -15,7 +15,7 @@ from flowgency.tickets.errors import (
     TicketNotFound,
     TicketTooLarge,
 )
-from flowgency.tickets.models import TicketOperation, TicketRef
+from flowgency.tickets.models import ActiveTicketRun, TicketOperation, TicketRef
 from flowgency.tickets.storages import local
 from tests._ticket_helpers import storage_binding, ticket_record
 
@@ -277,6 +277,27 @@ def test_field_values_roundtrip_strict_scalars_and_artifacts(tmp_path):
     assert got["ref_id"] == ArtifactRef(kind="id", value="artifact-1")
     assert got["ref_url"] == ArtifactRef(kind="url", value="https://example.com/a")
     assert got["missing"] is None
+
+
+def test_active_run_and_field_provenance_roundtrip(tmp_path):
+    provider = local.LocalTicketStorage(tmp_path, clock=lambda: NOW)
+    binding = storage_binding(tmp_path)
+    record = ticket_record(ticket_id="ticket-owned", agent="builder").model_copy(
+        update={
+            "active_run": ActiveTicketRun(
+                job_id="run-a",
+                session_id="session-a",
+                started_at=NOW,
+            )
+        }
+    )
+    ref = TicketRef.from_binding(binding, record.id)
+    provider.create(record.with_ref(ref), TicketOperation("c-owned", "d-owned"))
+    loaded = provider.read(ref)
+    assert loaded.active_run is not None
+    assert loaded.active_run.job_id == "run-a"
+    assert loaded.active_run.generation == "session-a"
+    assert loaded.field_provenance["summary"].actor_kind == "user"
 
 
 def test_with_ref_returns_revalidated_independent_copy(tmp_path):

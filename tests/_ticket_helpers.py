@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -9,12 +10,18 @@ import yaml
 
 from flowgency.configuration.store import ConfigStore
 from flowgency.tickets.models import (
+    ActiveTicketRun,
+    AgentTicketContext,
+    FieldProvenance,
     StorageBinding,
     TicketEvent,
     TicketOperation,
     TicketRecord,
     TicketRef,
+    TicketView,
+    UserTicketContext,
 )
+from flowgency.tickets.service import TicketService
 from flowgency.tickets.storages.local import LocalTicketStorage
 from flowgency.tickets.storages.registry import resolve_storage
 from flowgency.workflows.configuration import (
@@ -41,7 +48,7 @@ def ticket_record(
     ticket_id: str = "ticket-a",
     state_id: str = "review",
     agent: str | None = None,
-    active_run: str | None = None,
+    active_run: ActiveTicketRun | None = None,
 ) -> TicketRecord:
     """Build a valid seed record with UTC timestamps and fixed test IDs."""
     return TicketRecord(
@@ -56,7 +63,15 @@ def ticket_record(
             "summary": "hello",
             "spec": ArtifactRef(kind="url", value="https://example.com/spec"),
         },
-        field_provenance={"summary": "seed"},
+        field_provenance={
+            "summary": FieldProvenance(
+                actor_kind="user",
+                actor_name="seed",
+                job_id=None,
+                event_id="seed",
+                recorded_at=SEED_TIME,
+            )
+        },
         revision=1,
         events=(system_event(),),
         receipts=(),
@@ -119,13 +134,17 @@ class WorkflowTestEnv:
     library: WorkflowLibrary
     binding: StorageBinding
     provider: LocalTicketStorage
+    service: TicketService
     root_a: Path
     root_b: Path
     configuration_service: WorkflowConfigurationService
+    user: UserTicketContext
+    registered_sessions: set[str]
     team_id: str = "newsletter"
     workflow_id: str = "board-a"
     blueprint_id: str = "delivery"
     _seq: int = field(default=0)
+    _session_seq: int = field(default=0)
 
     def _clock(self) -> datetime:
         return SEED_TIME
@@ -157,6 +176,60 @@ class WorkflowTestEnv:
         )
         self.provider.create(record, operation)
         return ref
+
+    def register_session(self, session_id: str) -> None:
+        self.registered_sessions.add(session_id)
+
+    def revoke_session(self, session_id: str) -> None:
+        self.registered_sessions.discard(session_id)
+
+    def agent(self, name: str, job_id: str) -> AgentTicketContext:
+        return self.agent_for_team(self.team_id, name, job_id)
+
+    def agent_for_team(self, team_id: str, name: str, job_id: str) -> AgentTicketContext:
+        self._session_seq += 1
+        session_id = f"session-{name}-{job_id}-{self._session_seq}"
+        self.register_session(session_id)
+        return AgentTicketContext(
+            job_id=job_id,
+            team_id=team_id,
+            agent_name=name,
+            session_id=session_id,
+        )
+
+    def operation(self, label: str, actor_name: str = "local-user") -> TicketOperation:
+        digest = hashlib.sha256(
+            f"{self.team_id}:{self.workflow_id}:{actor_name}:{label}".encode("utf-8")
+        ).hexdigest()
+        return TicketOperation(
+            operation_id=f"op-{actor_name}-{label}",
+            request_digest=digest,
+        )
+
+    def create(
+        self,
+        title: str = "Sample",
+        values: dict | None = None,
+        actor: UserTicketContext | None = None,
+    ) -> TicketView:
+        caller = actor or self.user
+        result = self.service.create(
+            caller,
+            self.workflow_id,
+            title,
+            "Body text.",
+            dict(values) if values is not None else {"summary": "hello"},
+            self.operation(f"create-{title}", actor_name=caller.actor_name),
+        )
+        assert result.ticket.ref is not None
+        return self.service.inspect(caller, result.ticket.ref)
+
+    def read(
+        self,
+        ref: TicketRef,
+        actor: UserTicketContext | AgentTicketContext | None = None,
+    ) -> TicketView:
+        return self.service.inspect(actor or self.user, ref)
 
     def write_blueprint(self, blueprint_id: str, definition: dict) -> None:
         """Author an additional blueprint source in the library, fixture-only."""
@@ -201,8 +274,12 @@ def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestE
     )
     root_a = tmp_path / "tickets-a"
     root_b = tmp_path / "tickets-b"
+    workspace_support = tmp_path / "workspace-support"
+    team_support = tmp_path / "teams" / "support"
     root_a.mkdir()
     root_b.mkdir()
+    workspace_support.mkdir()
+    team_support.mkdir(parents=True)
 
     raw["flowgency"]["workflow_library"] = str(library_root)
     team = raw["teams"]["newsletter"]
@@ -225,6 +302,35 @@ def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestE
             },
         }
     )
+    raw["teams"]["support"] = {
+        "name": "Support",
+        "workspace_path": str(workspace_support),
+        "path": str(team_support),
+        "default_integration": "claude-code",
+        "permissions": {
+            "mode": "unrestricted",
+            "rules": [{"tools": None}],
+        },
+        "runtime": {},
+        "agents": [
+            {
+                "name": "builder",
+                "blueprint": "builder-blueprint",
+                "integration": "claude-code",
+                "prompts": [],
+                "routines": [],
+            }
+        ],
+        "workspaces": [],
+        "workflows": {
+            "board-a": {
+                "name": "Board A",
+                "blueprint": "delivery",
+                "integration": "local",
+                "integration_config": {"root": str(root_b)},
+            }
+        },
+    }
 
     store = ConfigStore(tmp_path / "config.yaml")
     store.create(raw)
@@ -235,14 +341,30 @@ def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestE
     configuration_service = WorkflowConfigurationService(
         store, library, lambda b: resolve_storage(b)
     )
+    registered_sessions: set[str] = set()
+
+    def validate_agent_context(context: AgentTicketContext) -> None:
+        if context.session_id not in registered_sessions:
+            raise PermissionError(f"Unknown test session: {context.session_id}")
+
+    service = TicketService(
+        store,
+        library,
+        lambda storage: resolve_storage(storage, clock=lambda: SEED_TIME),
+        validate_agent_context,
+        clock=lambda: SEED_TIME,
+    )
     return WorkflowTestEnv(
         tmp_path=tmp_path,
         store=store,
         library=library,
         binding=binding,
         provider=provider,
+        service=service,
         root_a=root_a,
         root_b=root_b,
         configuration_service=configuration_service,
+        user=UserTicketContext(team_id="newsletter"),
+        registered_sessions=registered_sessions,
     )
 

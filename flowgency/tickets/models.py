@@ -20,6 +20,7 @@ from typing import Any, Callable, Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     StrictInt,
     StrictStr,
     computed_field,
@@ -27,7 +28,7 @@ from pydantic import (
 )
 
 from flowgency.tickets.errors import OperationConflict, TicketConflict
-from flowgency.workflows.models import FieldValue
+from flowgency.workflows.models import FieldValue, WorkflowDefinition
 
 
 def _canonical_config(integration: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -126,6 +127,96 @@ class TicketEvent(BaseModel):
     at: datetime | None = None
 
 
+class ActiveTicketRun(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    job_id: StrictStr
+    session_id: StrictStr
+    started_at: datetime
+
+    @property
+    def generation(self) -> str:
+        return self.session_id
+
+
+class FieldProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    actor_kind: Literal["user", "agent"]
+    actor_name: StrictStr
+    job_id: StrictStr | None = None
+    event_id: StrictStr
+    recorded_at: datetime
+
+
+class AgentTicketContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    job_id: StrictStr
+    team_id: StrictStr
+    agent_name: StrictStr
+    session_id: StrictStr
+
+
+class UserTicketContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    team_id: StrictStr
+    actor_name: StrictStr = "local-user"
+
+
+TicketActor = AgentTicketContext | UserTicketContext
+
+
+class TicketVersion(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    ref: TicketRef
+    revision: StrictInt
+    workflow_digest: StrictStr
+    context_digest: StrictStr
+
+
+class TicketPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    title: StrictStr | None = None
+    description: StrictStr | None = None
+    field_values: dict[str, FieldValue] | None = None
+
+    @model_validator(mode="after")
+    def _validate_non_empty(self) -> "TicketPatch":
+        if (
+            self.title is None
+            and self.description is None
+            and self.field_values is None
+        ):
+            raise ValueError("Ticket patch must change at least one field")
+        return self
+
+
+class TicketView(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    record: "TicketRecord"
+    version: TicketVersion | None
+    definition: WorkflowDefinition | None
+    issues: tuple[StrictStr, ...] = ()
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def ref(self) -> TicketRef:
+        if self.record.ref is None:
+            raise ValueError("Ticket view requires a scoped record")
+        return self.record.ref
+
+    def patch(
+        self,
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        field_values: dict[str, FieldValue] | None = None,
+    ) -> TicketPatch:
+        return TicketPatch(
+            title=title,
+            description=description,
+            field_values=field_values,
+        )
+
+
 class TicketMutationResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     ticket: "TicketRecord"
@@ -183,9 +274,9 @@ class TicketRecord(BaseModel):
     description: StrictStr
     state_id: StrictStr
     assignee: StrictStr | None = None
-    active_run: StrictStr | None = None
-    field_values: dict[str, FieldValue] = {}
-    field_provenance: dict[str, StrictStr] = {}
+    active_run: ActiveTicketRun | None = None
+    field_values: dict[str, FieldValue] = Field(default_factory=dict)
+    field_provenance: dict[str, FieldProvenance] = Field(default_factory=dict)
     revision: StrictInt
     events: tuple[TicketEvent, ...] = ()
     receipts: tuple[TicketReceipt, ...] = ()
@@ -297,6 +388,7 @@ def seal_operation(
 TicketMutationResult.model_rebuild()
 TicketReceipt.model_rebuild()
 TicketRecord.model_rebuild()
+TicketView.model_rebuild()
 
 
 Clock = Callable[[], datetime]
