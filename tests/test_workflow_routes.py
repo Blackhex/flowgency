@@ -85,7 +85,9 @@ def test_board_snapshot_keeps_readable_tickets_and_counts_when_definition_is_una
     assert payload["issues"][0]["code"] == "unavailable-workflow"
     assert payload["ticket_count"] == 2
     assert payload["working_count"] == 1
-    assert [column["state_id"] for column in payload["columns"]] == ["unavailable-workflow"]
+    assert [column["kind"] for column in payload["columns"]] == ["unavailable"]
+    assert [column["key"] for column in payload["columns"]] == ["unavailable"]
+    assert [column["state_id"] for column in payload["columns"]] == [None]
     assert payload["columns"][0]["count"] == 2
     assert [ticket["title"] for ticket in payload["columns"][0]["tickets"]] == [
         "Alpha review",
@@ -107,14 +109,93 @@ def test_board_snapshot_groups_unknown_state_records_without_fabricating_a_state
     assert response.status_code == 200
     payload = response.json()
     assert payload["ticket_count"] == 1
+    assert [column["kind"] for column in payload["columns"]] == [
+        "state",
+        "state",
+        "invalid-data",
+    ]
+    assert [column["key"] for column in payload["columns"]] == [
+        "state:review",
+        "state:done",
+        "invalid-data",
+    ]
     assert [column["state_id"] for column in payload["columns"]] == [
         "review",
         "done",
-        "invalid-data",
+        None,
     ]
     assert payload["columns"][2]["count"] == 1
     assert payload["columns"][2]["tickets"][0]["state_id"] == "missing-state"
     assert payload["columns"][2]["tickets"][0]["issues"][0]["code"] == "invalid-data"
+
+
+def test_board_snapshot_keeps_real_state_ids_distinct_from_synthetic_group_keys(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    source = env.library.inspect(env.blueprint_id)
+    states = source.definition.states + (
+        source.definition.state("review").model_copy(
+            update={"id": "invalid-data", "name": "Real invalid-data", "color": "#4f46e5"}
+        ),
+        source.definition.state("done").model_copy(
+            update={
+                "id": "unavailable-workflow",
+                "name": "Real unavailable-workflow",
+                "color": "#0891b2",
+            }
+        ),
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        source.definition.model_copy(
+            update={
+                "states": states,
+                "initial_state": "invalid-data",
+            }
+        ),
+    )
+    real_invalid = env.seed_ticket(state_id="invalid-data", values={"summary": "real invalid"})
+    real_unavailable = env.seed_ticket(
+        state_id="unavailable-workflow",
+        values={"summary": "real unavailable"},
+    )
+    unknown = env.seed_ticket(state_id="missing-state", values={"summary": "orphaned"})
+
+    response = env.client.get(
+        f"{env.base_path}/snapshot?selected_ticket={unknown.ticket_id}"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [column["state_id"] for column in payload["columns"]] == [
+        "review",
+        "done",
+        "invalid-data",
+        "unavailable-workflow",
+        None,
+    ]
+    assert [column["kind"] for column in payload["columns"]] == [
+        "state",
+        "state",
+        "state",
+        "state",
+        "invalid-data",
+    ]
+    assert [column["key"] for column in payload["columns"]] == [
+        "state:review",
+        "state:done",
+        "state:invalid-data",
+        "state:unavailable-workflow",
+        "invalid-data",
+    ]
+    assert [column["count"] for column in payload["columns"]] == [0, 0, 1, 1, 1]
+    assert payload["columns"][2]["tickets"][0]["ref"]["ticket_id"] == real_invalid.ticket_id
+    assert payload["columns"][3]["tickets"][0]["ref"]["ticket_id"] == real_unavailable.ticket_id
+    assert payload["columns"][4]["tickets"][0]["state_id"] == "missing-state"
+    assert payload["selected_ticket"]["ticket"]["state_id"] == "missing-state"
 
 
 def test_board_snapshot_reads_only_current_binding_after_rebind(workflow_web_env):

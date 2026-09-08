@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -91,6 +92,15 @@ class WorkflowCriterionView(BaseModel):
     description: str
 
 
+class WorkflowPreconditionView(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    field_id: str
+    field_label: str
+    field_type: str
+    operator: str
+    comparison: Any = None
+
+
 class WorkflowTransitionView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     id: str
@@ -99,6 +109,7 @@ class WorkflowTransitionView(BaseModel):
     to_state: str
     inputs: tuple[WorkflowFieldUseView, ...] = ()
     outputs: tuple[WorkflowFieldUseView, ...] = ()
+    preconditions: tuple[WorkflowPreconditionView, ...] = ()
     criteria: tuple[WorkflowCriterionView, ...] = ()
 
 
@@ -134,7 +145,9 @@ class TicketSummaryView(BaseModel):
 
 class BoardColumnView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    state_id: str
+    key: str
+    kind: Literal["state", "invalid-data", "unavailable"]
+    state_id: str | None
     name: str
     color: str
     count: int
@@ -420,6 +433,7 @@ def _definition_view(view: TicketView, blueprint_id: str) -> WorkflowDefinitionV
             blueprint_name=None,
             workflow_digest=None,
         )
+    field_index = {field.id: field for field in view.definition.fields}
     return WorkflowDefinitionView(
         available=True,
         blueprint_id=view.definition.id,
@@ -446,6 +460,16 @@ def _definition_view(view: TicketView, blueprint_id: str) -> WorkflowDefinitionV
                 outputs=tuple(
                     WorkflowFieldUseView(field_id=field_use.field_id, required=field_use.required)
                     for field_use in transition.outputs
+                ),
+                preconditions=tuple(
+                    WorkflowPreconditionView(
+                        field_id=precondition.field_id,
+                        field_label=field_index[precondition.field_id].label,
+                        field_type=field_index[precondition.field_id].type,
+                        operator=precondition.operator,
+                        comparison=precondition.value,
+                    )
+                    for precondition in transition.preconditions
                 ),
                 criteria=tuple(
                     WorkflowCriterionView(id=criterion.id, description=criterion.description)
@@ -492,12 +516,16 @@ def _has_known_state(view: TicketView) -> bool:
 
 def _group_column(
     *,
-    state_id: str,
+    key: str,
+    kind: Literal["state", "invalid-data", "unavailable"],
+    state_id: str | None,
     name: str,
     color: str,
     tickets: tuple[TicketView, ...],
 ) -> BoardColumnView:
     return BoardColumnView(
+        key=key,
+        kind=kind,
         state_id=state_id,
         name=name,
         color=color,
@@ -566,7 +594,9 @@ def build_board_view(
     if definition is None:
         columns = (
             _group_column(
-                state_id="unavailable-workflow",
+                key="unavailable",
+                kind="unavailable",
+                state_id=None,
                 name="Unavailable",
                 color="#6b7280",
                 tickets=filtered,
@@ -577,6 +607,8 @@ def build_board_view(
         invalid = tuple(view for view in filtered if not _has_known_state(view))
         columns = tuple(
             BoardColumnView(
+                key=f"state:{state.id}",
+                kind="state",
                 state_id=state.id,
                 name=state.name,
                 color=state.color,
@@ -599,7 +631,9 @@ def build_board_view(
         if invalid:
             columns = columns + (
                 BoardColumnView(
-                    state_id="invalid-data",
+                    key="invalid-data",
+                    kind="invalid-data",
+                    state_id=None,
                     name="Invalid data",
                     color="#b45309",
                     count=len(invalid),
@@ -619,7 +653,9 @@ def build_board_view(
     if definition is None:
         columns = (
             BoardColumnView(
-                state_id="unavailable-workflow",
+                key="unavailable",
+                kind="unavailable",
+                state_id=None,
                 name="Unavailable",
                 color="#6b7280",
                 count=len(filtered),

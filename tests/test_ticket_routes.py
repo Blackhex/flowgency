@@ -12,6 +12,7 @@ from flowgency.tickets.artifacts import RetainedArtifact
 from flowgency.tickets.models import TicketRef, TicketRecord
 from flowgency.tickets.storages.local import LocalTicketStorage
 from flowgency.integrations.models import RuntimeCapabilities
+from flowgency.workflows.models import Precondition
 from tests._ticket_helpers import SEED_TIME, TicketRuntimeIntegration, storage_binding, ticket_record
 
 
@@ -378,6 +379,90 @@ def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_sn
         "kind": "id",
         "value": artifact.value,
     }
+    serialized = json.dumps(payload)
+    assert str(env.root_a) not in serialized
+    assert "receipts" not in serialized
+
+
+def test_detail_snapshot_exposes_current_preconditions_without_overwriting_history(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    ticket = env.create(values={"verdict": True, "summary": "Initial summary"})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start", actor_name=actor.agent_name),
+    )
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(outputs={"summary": "Verified existing work"}),
+        env.operation("complete", actor_name=actor.agent_name),
+    )
+
+    source = env.library.inspect(env.blueprint_id)
+    fields = source.definition.fields + (
+        source.definition.field("summary").model_copy(
+            update={"id": "attempts", "label": "Attempt count", "type": "number"}
+        ),
+    )
+    transitions = tuple(
+        transition.model_copy(
+            update={
+                "preconditions": (
+                    Precondition(
+                        field_id="verdict",
+                        operator="not_equals",
+                        value=False,
+                    ),
+                    Precondition(
+                        field_id="attempts",
+                        operator="equals",
+                        value=0,
+                    ),
+                )
+            }
+        )
+        if transition.id == "complete"
+        else transition
+        for transition in source.definition.transitions
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        source.definition.model_copy(update={"fields": fields, "transitions": transitions}),
+    )
+
+    response = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_definition"]["transitions"][0]["preconditions"] == [
+        {
+            "field_id": "verdict",
+            "field_label": "Review verdict",
+            "field_type": "boolean",
+            "operator": "not_equals",
+            "comparison": False,
+        },
+        {
+            "field_id": "attempts",
+            "field_label": "Attempt count",
+            "field_type": "number",
+            "operator": "equals",
+            "comparison": 0,
+        },
+    ]
+    assert payload["history"][-1]["data"]["transition_snapshot"]["preconditions"] == [
+        {
+            "field_id": "verdict",
+            "operator": "equals",
+            "value": True,
+        }
+    ]
     serialized = json.dumps(payload)
     assert str(env.root_a) not in serialized
     assert "receipts" not in serialized
