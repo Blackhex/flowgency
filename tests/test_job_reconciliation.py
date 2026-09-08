@@ -863,6 +863,35 @@ def test_reconcile_retries_confirmed_pending_ticket_cleanup_for_cancelled_job(
     assert updated.result_metadata["ticket_cleanup"]["status"] == "cleared"
 
 
+def test_reconcile_leaves_cancelled_non_ticket_job_pin_and_decision_unchanged(
+    tmp_path,
+):
+    team_dir, decision, path = running_decision_job(tmp_path)
+    record = read_job(path)
+    artifact = record.spec.blueprint.to_artifact()
+    artifact.runtime_path.mkdir(parents=True, exist_ok=True)
+    (artifact.runtime_path / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
+    pin_artifact(record.spec.blueprint.cache_root, artifact.ref, record.spec.job_id)
+    decision_before = decision.read_text(encoding="utf-8")
+    write_job(
+        path,
+        replace(
+            record,
+            status="cancelled",
+            completed_at="2026-09-08T00:10:00+00:00",
+            execution_summary="Cancelled before completion.",
+        ),
+    )
+
+    reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
+
+    assert decision.read_text(encoding="utf-8") == decision_before
+    assert active_pins(record.spec.blueprint.cache_root, artifact.ref) == (
+        record.spec.job_id,
+    )
+    assert read_job(path).status == "cancelled"
+
+
 def test_worker_alive_rejects_missing_and_invalid_pids():
     assert worker_alive(None) is None
     assert worker_alive(0) is None

@@ -295,7 +295,17 @@ def reconcile_jobs(
                     record.spec.job_id,
                 )
                 continue
-            if record.status in {"complete", "failed", "cancelled"}:
+            if record.status == "cancelled":
+                try:
+                    _retry_ticket_cleanup(job_store, team_id, record)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to retry ticket cleanup for job %s: %s",
+                        record.spec.job_id,
+                        error,
+                    )
+                continue
+            if record.status in {"complete", "failed"}:
                 try:
                     _retry_ticket_cleanup(job_store, team_id, record)
                     record = read_job(path)
