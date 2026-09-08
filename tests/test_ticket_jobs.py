@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
+from flowgency.jobs.store import read_job, write_job
 from flowgency.tickets.errors import TicketConflict, TicketForbidden
 from flowgency.tickets.models import UserTicketContext
 
-from tests._ticket_helpers import make_ticket_job_environment
+from tests._ticket_helpers import delivery_definition, make_ticket_job_environment
 
 
 @pytest.fixture
@@ -91,6 +94,85 @@ def test_submit_rejects_cross_team_user_without_side_effects(ticket_job_env):
     assert env.read(ticket.ref).record.pending_run is None
     assert not env.job_store.paths("newsletter")
     assert not env.job_store.paths("support")
+
+
+def test_new_submit_rejects_stale_revision_without_side_effects(ticket_job_env):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+
+    env.service.update(
+        env.user,
+        ticket.version,
+        ticket.patch(title="Updated title"),
+        env.operation("update-before-run"),
+    )
+
+    with pytest.raises(TicketConflict, match="Refresh the ticket"):
+        env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    assert env.read(ticket.ref).record.pending_run is None
+    assert not env.job_store.paths(env.team_id)
+
+
+def test_new_submit_rejects_changed_workflow_source_without_side_effects(ticket_job_env):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+    changed = delivery_definition()
+    changed["description"] = "Changed source digest"
+    env.write_blueprint(env.blueprint_id, changed)
+
+    with pytest.raises(TicketConflict, match="Refresh the ticket"):
+        env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    assert env.read(ticket.ref).record.pending_run is None
+    assert not env.job_store.paths(env.team_id)
+
+
+def test_exact_submit_replay_keeps_original_job_after_workflow_source_changes(ticket_job_env):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+
+    first = env.coordinator.submit(env.user, ticket.version, "run-request")
+    changed = delivery_definition()
+    changed["description"] = "Changed source digest"
+    env.write_blueprint(env.blueprint_id, changed)
+
+    replay = env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    assert replay.job_id == first.job_id
+    assert replay.path == first.path
+
+
+@pytest.mark.parametrize("status", ["complete", "failed", "cancelled"])
+def test_new_submit_replaces_verified_terminal_pending_run_without_losing_replay(
+    ticket_job_env,
+    status,
+):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+
+    first = env.coordinator.submit(env.user, ticket.version, "run-request")
+    original = read_job(first.path)
+    write_job(
+        first.path,
+        replace(
+            original,
+            status=status,
+            completed_at="2026-09-08T00:05:00+00:00",
+        ),
+    )
+
+    current = env.read(ticket.ref).version
+    second = env.coordinator.submit(env.user, current, "rerun-request")
+    replay = env.coordinator.submit(env.user, env.read(ticket.ref).version, "run-request")
+
+    assert second.job_id != first.job_id
+    assert env.read(ticket.ref).record.pending_run is not None
+    assert env.read(ticket.ref).record.pending_run.request_id == "rerun-request"
+    assert replay.job_id == first.job_id
+    original_reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+    assert original_reservation is not None
+    assert original_reservation.job_id == first.job_id
 
 
 def test_cleanup_retains_assignment_for_all_run_targets(ticket_job_env):

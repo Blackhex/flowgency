@@ -230,6 +230,62 @@ def test_non_ticket_jobs_reject_ticket_target(tmp_path):
         ).validate()
 
 
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("assigned_agent", 1),
+        ("assignment_event_id", object()),
+        ("context_digest", None),
+    ],
+)
+def test_ticket_job_target_rejects_non_string_scalars(tmp_path, field_name, value):
+    binding = StorageBinding(
+        integration="local",
+        config={"root": str((tmp_path / "tickets-a").resolve())},
+        team_id="newsletter",
+        workflow_id="board-a",
+    )
+    payload = {
+        "binding": binding,
+        "ref": TicketRef.from_binding(binding, "ticket-1"),
+        "assigned_agent": "builder",
+        "assignment_event_id": "assigned-1",
+        "context_digest": "c" * 64,
+    }
+    payload[field_name] = value
+
+    with pytest.raises(TypeError, match=field_name):
+        TicketJobTarget(**payload)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("assigned_agent", 1),
+        ("assignment_event_id", object()),
+        ("context_digest", None),
+    ],
+)
+def test_ticket_job_target_from_dict_rejects_non_string_scalars(tmp_path, field_name, value):
+    binding = StorageBinding(
+        integration="local",
+        config={"root": str((tmp_path / "tickets-a").resolve())},
+        team_id="newsletter",
+        workflow_id="board-a",
+    )
+    payload = {
+        "binding": binding.model_dump(mode="json", exclude={"binding_id"}),
+        "ref": TicketRef.from_binding(binding, "ticket-1").model_dump(mode="json"),
+        "assigned_agent": "builder",
+        "assignment_event_id": "assigned-1",
+        "context_digest": "c" * 64,
+    }
+    payload[field_name] = value
+
+    with pytest.raises(TypeError, match=field_name):
+        TicketJobTarget.from_dict(payload)
+
+
 @pytest.mark.parametrize("schema_version", [3, 4])
 def test_job_rejects_prior_schema_versions(tmp_path, schema_version):
     from dataclasses import replace

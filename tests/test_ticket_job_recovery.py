@@ -6,8 +6,10 @@ import pytest
 
 from flowgency.jobs import JobSubmissionError
 from flowgency.jobs.tickets import TicketReservationError
+from flowgency.tickets.models import TicketEvent, TicketOperation, TicketRef
+from flowgency.workflows.configuration import resolve_workflow_binding
 
-from tests._ticket_helpers import make_ticket_job_environment
+from tests._ticket_helpers import SEED_TIME, make_ticket_job_environment
 
 
 @pytest.fixture
@@ -241,3 +243,115 @@ def test_cleanup_reports_pending_when_original_storage_is_unavailable(ticket_job
     )
 
     assert set(result.pending_cleanup) == set(targets)
+
+
+def test_submit_preserves_original_failure_when_original_storage_is_unavailable_before_job_creation(
+    ticket_job_env,
+):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+    backup = env.tmp_path / "root-a-backup"
+    original_submitter = env.coordinator.submitter
+
+    def unavailable_submit(request):
+        env.root_a.rename(backup)
+        raise RuntimeError("submit failed")
+
+    env.coordinator.submitter = unavailable_submit
+
+    with pytest.raises(RuntimeError, match="submit failed"):
+        env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+    assert reservation is not None
+    assert reservation.status == "recovery-pending"
+    assert reservation.recovery is not None
+    assert reservation.recovery.kind == "original-storage-unavailable"
+
+    backup.rename(env.root_a)
+
+    recovery = env.coordinator.reconcile_pending_submission(
+        env.team_id,
+        ticket.ref,
+        "run-request",
+    )
+
+    assert recovery is not None
+    assert recovery.status == "retryable"
+
+    env.coordinator.submitter = original_submitter
+
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+
+    assert handle.job_id == reservation.job_id
+
+
+def test_reconcile_pending_submission_retries_original_storage_without_touching_current_destination(
+    ticket_job_env,
+):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+    backup = env.tmp_path / "root-a-backup"
+    real_submit = env.coordinator.submitter
+
+    def unavailable_after_create(request):
+        handle = real_submit(request)
+        env.root_a.rename(backup)
+        return handle
+
+    env.coordinator.submitter = unavailable_after_create
+
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+    reservation = env.coordinator._read_reservation(env.team_id, ticket.ref, "run-request")
+
+    assert reservation is not None
+    assert reservation.status == "recovery-pending"
+    assert reservation.authority_digest is not None
+
+    env.set_storage_root(env.root_b)
+    current_binding = resolve_workflow_binding(
+        env.store.load(),
+        env.team_id,
+        env.workflow_id,
+    ).storage
+    current_provider = env.current_provider()
+    current_ref = TicketRef.from_binding(current_binding, ticket.ref.ticket_id)
+    shadow = ticket.record.with_ref(current_ref).model_copy(
+        update={
+            "number": 0,
+            "revision": 1,
+            "pending_run": None,
+            "active_run": None,
+            "events": (
+                TicketEvent(kind="opened", actor="system", summary="Shadow ticket"),
+            ),
+            "receipts": (),
+            "created_at": SEED_TIME,
+            "updated_at": SEED_TIME,
+        }
+    )
+    current_provider.create(
+        shadow,
+        TicketOperation(operation_id="seed-shadow", request_digest="seed-shadow"),
+    )
+
+    backup.rename(env.root_a)
+
+    recovery = env.coordinator.reconcile_pending_submission(
+        env.team_id,
+        ticket.ref,
+        "run-request",
+    )
+
+    assert recovery is not None
+    assert recovery.status == "stale"
+    assert recovery.handle is not None
+    assert recovery.handle.job_id == handle.job_id
+    assert env.provider.read(ticket.ref).pending_run is None
+    assert env.jobs.read(handle).status == "cancelled"
+
+    shadow_current = current_provider.read(current_ref)
+
+    assert shadow_current.revision == 1
+    assert shadow_current.pending_run is None
+    assert all(event.kind != "ticket-run-reconciled" for event in shadow_current.events)

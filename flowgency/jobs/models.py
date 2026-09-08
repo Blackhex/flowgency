@@ -134,6 +134,14 @@ class TicketJobTarget:
     context_digest: str
 
     def __post_init__(self) -> None:
+        string_fields = {
+            "assigned_agent": self.assigned_agent,
+            "assignment_event_id": self.assignment_event_id,
+            "context_digest": self.context_digest,
+        }
+        for field_name, value in string_fields.items():
+            if not isinstance(value, str):
+                raise TypeError(f"{field_name} must be a string")
         if self.ref.binding_id != self.binding.binding_id:
             raise ValueError("ticket target ref binding must match its binding")
         if self.ref.team_id != self.binding.team_id:

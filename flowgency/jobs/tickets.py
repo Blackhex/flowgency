@@ -14,7 +14,12 @@ from flowgency.fs.atomic import atomic_write_text
 from flowgency.fs.locks import exclusive_lock
 from flowgency.jobs.authority import JobAuthorityRef, JobStore
 from flowgency.tickets.access import OriginalTicketTarget, TicketAccessRegistry
-from flowgency.tickets.errors import TicketConflict, TicketForbidden, WorkflowUnavailable
+from flowgency.tickets.errors import (
+    StorageUnavailable,
+    TicketConflict,
+    TicketForbidden,
+    WorkflowUnavailable,
+)
 from flowgency.tickets.models import (
     TicketOperation,
     TicketEvent,
@@ -40,6 +45,13 @@ class CleanupResult:
 
 
 @dataclass(frozen=True)
+class ReservationRecoveryResult:
+    status: str
+    recovery_kind: str | None = None
+    handle: JobHandle | None = None
+
+
+@dataclass(frozen=True)
 class _ReservationPlan:
     handle: JobHandle | None
     request: JobRequest | None
@@ -51,6 +63,12 @@ class _ReservationPlan:
 
 class TicketReservationError(RuntimeError):
     pass
+
+
+class _ReservationRecovery(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: str
+    message: str
 
 
 class _DurableReservation(BaseModel):
@@ -65,6 +83,7 @@ class _DurableReservation(BaseModel):
     target: TicketJobTarget
     authority_digest: str | None = None
     status: str = "reserved"
+    recovery: _ReservationRecovery | None = None
 
 
 class TicketJobCoordinator:
@@ -111,6 +130,33 @@ class TicketJobCoordinator:
         if refreshed is not None and refreshed.authority_digest is not None:
             return self._verified_handle(refreshed)
         return handle
+
+    def reconcile_pending_submission(
+        self,
+        team_id: str,
+        ref: TicketRef,
+        operation_id: str,
+    ) -> ReservationRecoveryResult | None:
+        reservation = self._read_reservation(team_id, ref, operation_id)
+        if reservation is None:
+            return None
+        authority = self._verify_existing_job(reservation)
+        self._reconcile_pending(
+            reservation,
+            clear_missing_job=authority is None,
+        )
+        refreshed = self._read_reservation(team_id, ref, operation_id)
+        if refreshed is None:
+            return None
+        handle = None
+        if refreshed.authority_digest is not None:
+            handle = self._verified_handle(refreshed)
+        recovery_kind = None if refreshed.recovery is None else refreshed.recovery.kind
+        return ReservationRecoveryResult(
+            status=refreshed.status,
+            recovery_kind=recovery_kind,
+            handle=handle,
+        )
 
     def preflight(self, record: JobRecord):
         target = record.spec.ticket_target
@@ -198,7 +244,6 @@ class TicketJobCoordinator:
             binding = resolve_workflow_binding(snapshot, version.ref.team_id, version.ref.workflow_id)
             if binding.blueprint_id != initial.blueprint_id:
                 raise TicketConflict("stale-ticket", "Refresh the ticket")
-            self.service._require_current_version(binding, version)
             provider = self.service.storage_factory(binding.storage)
             current = provider.read(version.ref)
             if current.assignee is None:
@@ -216,39 +261,40 @@ class TicketJobCoordinator:
                 assignment_event_id=assignment_event_id,
                 context_digest=binding.context_digest,
             )
-            durable = self._reservation_state(
+            existing = self._read_reservation(version.ref.team_id, version.ref, operation_id)
+            replay = self._reservation_state(
                 actor,
                 version,
                 operation_id,
                 request_digest,
                 target,
-                self._read_reservation(version.ref.team_id, version.ref, operation_id),
+                existing,
             )
+            replay_handle = self._replay_handle(target, current, replay)
+            if replay_handle is not None:
+                return _ReservationPlan(
+                    handle=replay_handle,
+                    request=None,
+                    ref=version.ref,
+                    assignment_event_id=assignment_event_id,
+                    job_id=replay_handle.job_id,
+                    reservation=replay,
+                )
+            if existing is None:
+                self._require_new_request_freshness(snapshot, binding, current, version)
             pending = current.pending_run
             if pending is not None and _reservation_matches_current(current, pending, assignment_event_id):
-                existing = self._existing_handle(durable)
-                if existing is not None:
-                    if pending.request_id == durable.operation_id:
-                        return _ReservationPlan(
-                            handle=existing,
-                            request=None,
-                            ref=version.ref,
-                            assignment_event_id=assignment_event_id,
-                            job_id=existing.job_id,
-                            reservation=durable,
-                        )
-                    raise TicketConflict("already-queued", "Ticket already has a queued run")
-                if pending.request_id != durable.operation_id:
+                if pending.request_id != replay.operation_id and not self._may_replace_terminal_pending(ref=version.ref, pending=pending):
                     raise TicketConflict("already-queued", "Ticket already has a queued run")
             if not _target_matches_current(current, target):
                 raise TicketConflict("stale-ticket", "Refresh the ticket")
             reservation = TicketRunReservation(
-                job_id=durable.job_id,
-                request_id=durable.operation_id,
+                job_id=replay.job_id,
+                request_id=replay.operation_id,
                 assignee=current.assignee,
                 assignment_event_id=assignment_event_id,
             )
-            operation = _reservation_operation(actor, version, operation_id, durable.job_id)
+            operation = _reservation_operation(actor, version, operation_id, replay.job_id)
             provider.apply(
                 version.ref,
                 version.revision,
@@ -261,16 +307,16 @@ class TicketJobCoordinator:
                     pending_run=reservation,
                 ),
             )
-            self._write_reservation(durable)
-            existing = self._existing_handle(durable)
-            if existing is not None:
+            self._write_reservation(replay.model_copy(update={"status": "reserved", "recovery": None}))
+            exact_handle = self._existing_handle(replay)
+            if exact_handle is not None:
                 return _ReservationPlan(
-                    handle=existing,
+                    handle=exact_handle,
                     request=None,
                     ref=version.ref,
                     assignment_event_id=assignment_event_id,
-                    job_id=durable.job_id,
-                    reservation=durable,
+                    job_id=replay.job_id,
+                    reservation=replay,
                 )
             request = JobRequest(
                 config_path=self.config_store.path,
@@ -278,7 +324,7 @@ class TicketJobCoordinator:
                 agent_name=current.assignee,
                 trigger="ticket",
                 task_input=_ticket_task_input(current),
-                job_id=durable.job_id,
+                job_id=replay.job_id,
                 ticket_target=target,
             )
             return _ReservationPlan(
@@ -286,8 +332,8 @@ class TicketJobCoordinator:
                 request=request,
                 ref=version.ref,
                 assignment_event_id=assignment_event_id,
-                job_id=durable.job_id,
-                reservation=durable,
+                job_id=replay.job_id,
+                reservation=replay,
             )
 
     def _reconcile_pending(
@@ -297,38 +343,57 @@ class TicketJobCoordinator:
         clear_missing_job: bool,
     ) -> None:
         ref = reservation.target.ref
+        authority = self._verify_existing_job(reservation)
+        linked = reservation
+        if authority is not None and reservation.authority_digest != authority.immutable_digest:
+            linked = reservation.model_copy(
+                update={
+                    "authority_digest": authority.immutable_digest,
+                    "status": "linked",
+                    "recovery": None,
+                }
+            )
+            self._write_reservation(linked)
         provider = self.service.storage_factory(reservation.target.binding)
-        current = provider.read(ref)
+        try:
+            current = provider.read(ref)
+        except StorageUnavailable as error:
+            self._write_recovery(linked, error)
+            return None
         current_assignment_event_id = _latest_assignment_event_id(current)
         try:
             current_binding = self.service._resolve_current_binding(ref.team_id, ref.workflow_id)
         except Exception:
             current_binding = None
-        authority = self._verify_existing_job(reservation)
         if authority is None and clear_missing_job:
             pending = current.pending_run
             if pending is None or pending.job_id != reservation.job_id:
-                return
-            provider.apply(
-                ref,
-                current.revision,
-                _reconcile_operation(ref, reservation.job_id, reservation.target.assignment_event_id, "missing"),
-                lambda record: _apply_pending_mutation(
-                    record,
-                    actor="system",
-                    kind="ticket-run-reconciled",
-                    summary="Ticket run reservation reconciled",
-                    pending_run=None,
-                ),
-            )
-            self._write_reservation(reservation.model_copy(update={"status": "retryable"}))
+                self._write_reservation(linked.model_copy(update={"status": "retryable", "recovery": None}))
+                return None
+            try:
+                provider.apply(
+                    ref,
+                    current.revision,
+                    _reconcile_operation(ref, reservation.job_id, reservation.target.assignment_event_id, "missing"),
+                    lambda record: _apply_pending_mutation(
+                        record,
+                        actor="system",
+                        kind="ticket-run-reconciled",
+                        summary="Ticket run reservation reconciled",
+                        pending_run=None,
+                    ),
+                )
+            except StorageUnavailable as error:
+                self._write_recovery(linked, error)
+                return None
+            self._write_reservation(linked.model_copy(update={"status": "retryable", "recovery": None}))
             return None
         if authority is None:
             return None
-        linked = reservation
-        if reservation.authority_digest != authority.immutable_digest:
-            linked = reservation.model_copy(update={"authority_digest": authority.immutable_digest, "status": "linked"})
-            self._write_reservation(linked)
+        record = self.job_store.read(authority)
+        if record.status in _TERMINAL_STATUSES:
+            self._write_reservation(linked.model_copy(update={"status": "linked", "recovery": None}))
+            return None
         stale_target = (
             current.assignee != linked.target.assigned_agent
             or current_assignment_event_id != linked.target.assignment_event_id
@@ -338,42 +403,55 @@ class TicketJobCoordinator:
         )
         if stale_target:
             self._cancel_if_queued(authority)
-            current = provider.read(ref)
+            try:
+                current = provider.read(ref)
+            except StorageUnavailable as error:
+                self._write_recovery(linked, error)
+                return None
             pending = current.pending_run
             if pending is not None and pending.job_id == linked.job_id:
+                try:
+                    provider.apply(
+                        ref,
+                        current.revision,
+                        _reconcile_operation(ref, linked.job_id, linked.target.assignment_event_id, "stale"),
+                        lambda record: _apply_pending_mutation(
+                            record,
+                            actor="system",
+                            kind="ticket-run-reconciled",
+                            summary="Ticket run reservation reconciled",
+                            pending_run=None,
+                        ),
+                    )
+                except StorageUnavailable as error:
+                    self._write_recovery(linked, error)
+                    return None
+            self._write_reservation(linked.model_copy(update={"status": "stale", "recovery": None}))
+            return None
+        pending = current.pending_run
+        if pending is None or pending.job_id != linked.job_id:
+            try:
                 provider.apply(
                     ref,
                     current.revision,
-                    _reconcile_operation(ref, linked.job_id, linked.target.assignment_event_id, "stale"),
+                    _reconcile_operation(ref, linked.job_id, linked.target.assignment_event_id, "linked"),
                     lambda record: _apply_pending_mutation(
                         record,
                         actor="system",
                         kind="ticket-run-reconciled",
                         summary="Ticket run reservation reconciled",
-                        pending_run=None,
+                        pending_run=TicketRunReservation(
+                            job_id=linked.job_id,
+                            request_id=linked.operation_id,
+                            assignee=linked.target.assigned_agent,
+                            assignment_event_id=linked.target.assignment_event_id,
+                        ),
                     ),
                 )
-            self._write_reservation(linked.model_copy(update={"status": "stale"}))
-            return None
-        pending = current.pending_run
-        if pending is None or pending.job_id != linked.job_id:
-            provider.apply(
-                ref,
-                current.revision,
-                _reconcile_operation(ref, linked.job_id, linked.target.assignment_event_id, "linked"),
-                lambda record: _apply_pending_mutation(
-                    record,
-                    actor="system",
-                    kind="ticket-run-reconciled",
-                    summary="Ticket run reservation reconciled",
-                    pending_run=TicketRunReservation(
-                        job_id=linked.job_id,
-                        request_id=linked.operation_id,
-                        assignee=linked.target.assigned_agent,
-                        assignment_event_id=linked.target.assignment_event_id,
-                    ),
-                ),
-            )
+            except StorageUnavailable as error:
+                self._write_recovery(linked, error)
+                return None
+        self._write_reservation(linked.model_copy(update={"status": "linked", "recovery": None}))
         return None
 
     def _existing_handle(self, reservation: _DurableReservation) -> JobHandle | None:
@@ -510,9 +588,83 @@ class TicketJobCoordinator:
             raise TicketConflict("already-queued", "Ticket already has a queued run")
         if existing.actor_team_id != actor.team_id or existing.actor_name != actor.actor_name:
             raise TicketConflict("already-queued", "Ticket already has a queued run")
-        if existing.target != target:
-            raise TicketConflict("stale-ticket", "Refresh the ticket")
         return existing
+
+    def _replay_handle(
+        self,
+        current_target: TicketJobTarget,
+        current: TicketRecord,
+        reservation: _DurableReservation,
+    ) -> JobHandle | None:
+        refreshed = self.reconcile_pending_submission(
+            reservation.target.ref.team_id,
+            reservation.target.ref,
+            reservation.operation_id,
+        )
+        if refreshed is not None:
+            reservation = self._read_reservation(
+                reservation.target.ref.team_id,
+                reservation.target.ref,
+                reservation.operation_id,
+            ) or reservation
+        handle = self._existing_handle(reservation)
+        if handle is None:
+            return None
+        if handle.status in _TERMINAL_STATUSES:
+            return handle
+        if current.pending_run is None:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        if current.pending_run.job_id != reservation.job_id or current.pending_run.request_id != reservation.operation_id:
+            raise TicketConflict("already-queued", "Ticket already has a queued run")
+        if reservation.target != current_target:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        return handle
+
+    def _may_replace_terminal_pending(
+        self,
+        *,
+        ref: TicketRef,
+        pending: TicketRunReservation,
+    ) -> bool:
+        reservation = self._read_reservation(ref.team_id, ref, pending.request_id)
+        if reservation is None or reservation.job_id != pending.job_id:
+            return False
+        authority = self._verify_existing_job(reservation)
+        if authority is None:
+            return False
+        record = self.job_store.read(authority)
+        return record.status in _TERMINAL_STATUSES
+
+    def _require_new_request_freshness(
+        self,
+        snapshot,
+        binding,
+        current: TicketRecord,
+        version: TicketVersion,
+    ) -> None:
+        self.service._require_current_version(binding, version)
+        if current.revision != version.revision:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        _, workflow_snapshot = self.service._resolve_definition(binding, snapshot=snapshot)
+        if workflow_snapshot.digest != version.workflow_digest:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+
+    def _write_recovery(
+        self,
+        reservation: _DurableReservation,
+        error: StorageUnavailable,
+    ) -> None:
+        self._write_reservation(
+            reservation.model_copy(
+                update={
+                    "status": "recovery-pending",
+                    "recovery": _ReservationRecovery(
+                        kind="original-storage-unavailable",
+                        message=str(error),
+                    ),
+                }
+            )
+        )
 
     def _require_ticket_capable_assignee(self, snapshot, team_id: str, agent_name: str) -> None:
         team = snapshot.config.teams[team_id]
@@ -616,6 +768,9 @@ def _request_digest(
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+_TERMINAL_STATUSES = frozenset({"complete", "failed", "cancelled"})
 
 
 def _reserved_job_id(ref: TicketRef, operation_id: str) -> str:
