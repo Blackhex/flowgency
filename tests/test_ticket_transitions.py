@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from datetime import timezone
+
 import pytest
 from pydantic import ValidationError
 
-from flowgency.tickets.errors import TicketConflict
+from flowgency.tickets.errors import TicketConflict, TicketForbidden
 from flowgency.tickets.models import TicketReport, TransitionRequest
+from flowgency.tickets.storages.registry import resolve_storage
 from flowgency.workflows.models import CriterionAssessment
 from flowgency.workflows.models import ContractError
+from tests._ticket_helpers import storage_binding, ticket_record
 
 
 def test_rejected_transition_leaves_record_unchanged_and_report_is_separate(workflow_env):
@@ -246,3 +250,129 @@ def test_transition_request_and_report_reject_forged_actor_or_state_fields():
         )
     with pytest.raises(ValidationError):
         TicketReport.model_validate({"message": "note", "state_id": "done"})
+
+
+def test_transition_audit_snapshot_retains_canonical_binding_digest_and_field_catalog(workflow_env):
+    env = workflow_env
+    ticket = env.create(values={"verdict": True})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start", actor_name=actor.agent_name),
+    )
+
+    accepted = env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(outputs={"summary": "Verified existing work"}),
+        env.operation("complete", actor_name=actor.agent_name),
+    )
+
+    event = accepted.ticket.events[-1]
+    snapshot = event.data
+    assert snapshot["binding_id"] == accepted.ticket.ref.binding_id
+    assert snapshot["binding_id"] == env.binding.binding_id
+    assert event.actor == actor.agent_name
+    assert event.at is not None
+    assert event.at.tzinfo == timezone.utc
+    assert snapshot["blueprint_id"] == env.blueprint_id
+    assert snapshot["blueprint_name"] == "Delivery"
+    assert snapshot["transition_snapshot"] == {
+        "id": "complete",
+        "name": "Complete",
+        "from_state": "review",
+        "to_state": "done",
+        "inputs": [{"field_id": "verdict", "required": True}],
+        "outputs": [{"field_id": "summary", "required": True}],
+        "preconditions": [
+            {"field_id": "verdict", "operator": "equals", "value": True}
+        ],
+        "criteria": [],
+        "field_defs": {
+            "summary": {"id": "summary", "label": "Review summary", "type": "text"},
+            "verdict": {"id": "verdict", "label": "Review verdict", "type": "boolean"},
+        },
+    }
+
+
+def test_transition_rejects_stale_binding_when_destination_has_same_ticket_id(workflow_env):
+    env = workflow_env
+    ticket = env.create(values={"verdict": True})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start", actor_name=actor.agent_name),
+    )
+    stale_version = env.read(ticket.ref).version
+    other_provider = resolve_storage(
+        storage_binding(env.root_b, team_id=env.team_id, workflow_id=env.workflow_id),
+        clock=env._clock,
+    )
+    other_ref = ticket.ref.model_copy(
+        update={"binding_id": storage_binding(env.root_b, team_id=env.team_id, workflow_id=env.workflow_id).binding_id}
+    )
+    other_provider.create(
+        ticket_record(ticket_id=ticket.ref.ticket_id).with_ref(other_ref),
+        env.operation("seed-other-binding"),
+    )
+    env.set_storage_root(env.root_b)
+
+    with pytest.raises(TicketConflict):
+        env.service.transition(
+            actor,
+            stale_version,
+            env.transition_request(outputs={"summary": "Verified existing work"}),
+            env.operation("stale-binding", actor_name=actor.agent_name),
+        )
+
+    assert other_provider.read(other_ref).state_id == "review"
+
+
+def test_report_rejects_wrong_run_and_revoked_session_without_appending_event(workflow_env):
+    env = workflow_env
+    ticket = env.create(values={"verdict": True})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start", actor_name=actor.agent_name),
+    )
+    version = env.read(ticket.ref).version
+    before = env.read(ticket.ref).record
+
+    with pytest.raises(TicketForbidden):
+        env.service.report(
+            env.agent("builder", "run-b"),
+            version,
+            env.ticket_report("wrong run"),
+            env.operation("wrong-run", actor_name="builder"),
+        )
+
+    env.revoke_session(actor.session_id)
+    with pytest.raises(TicketForbidden):
+        env.service.report(
+            actor,
+            version,
+            env.ticket_report("revoked"),
+            env.operation("revoked-session", actor_name=actor.agent_name),
+        )
+
+    assert env.read(ticket.ref).record == before
+
+
+def test_transition_rejects_user_actor_without_mutating_ticket(workflow_env):
+    env = workflow_env
+    ticket = env.create(values={"verdict": True})
+    before = env.read(ticket.ref).record
+
+    with pytest.raises(TicketForbidden):
+        env.service.transition(
+            env.user,
+            ticket.version,
+            env.transition_request(outputs={"summary": "Verified existing work"}),
+            env.operation("user-transition"),
+        )
+
+    assert env.read(ticket.ref).record == before

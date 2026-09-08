@@ -324,8 +324,13 @@ class TicketService:
             if snapshot_def.digest != version.workflow_digest:
                 raise TicketConflict("stale-ticket", "Refresh the ticket")
             provider = self.storage_factory(binding.storage)
-            provider.read(version.ref)
+            record = provider.read(version.ref)
+            if record.revision != version.revision:
+                raise TicketConflict("stale-ticket", "Refresh the ticket")
+            if isinstance(actor, AgentTicketContext):
+                require_active_owner(record, actor)
             artifact = RetainedArtifact.create(filename, media_type, content)
+            self._require_current_contract(binding, snapshot.revision, snapshot_def.digest)
             return provider.put_artifact(version.ref, artifact)
 
     def _mutate(

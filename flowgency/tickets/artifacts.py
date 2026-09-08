@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import re
+from json import JSONDecodeError
+from math import ceil
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, StrictStr, computed_field, model_validator
 
@@ -11,8 +15,10 @@ from flowgency.workflows.models import ArtifactRef, FieldValue
 
 
 MAX_RETAINED_ARTIFACT_BYTES = 1 * 1024 * 1024
+MAX_RETAINED_ARTIFACT_ENVELOPE_BYTES = ceil(MAX_RETAINED_ARTIFACT_BYTES / 3) * 4 + 1024
 _MEDIA_TYPE_RE = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_ALLOWED_STORAGE_KEYS = frozenset({"content_b64", "filename", "media_type"})
 
 
 def sanitize_artifact_filename(filename: str) -> str:
@@ -30,6 +36,35 @@ def _canonical_artifact_payload(filename: str, media_type: str, content: bytes) 
         "media_type": media_type,
     }
     return json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _canonical_artifact_payload_from_b64(
+    filename: str,
+    media_type: str,
+    content_b64: str,
+) -> bytes:
+    envelope = {
+        "content_b64": content_b64,
+        "filename": filename,
+        "media_type": media_type,
+    }
+    return json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _validate_storage_mapping(data: Any) -> dict[str, str]:
+    if not isinstance(data, dict):
+        raise ValueError("Artifact envelope must be a JSON object")
+    keys = set(data)
+    if keys != _ALLOWED_STORAGE_KEYS:
+        raise ValueError("Artifact envelope keys are invalid")
+    for key in _ALLOWED_STORAGE_KEYS:
+        if not isinstance(data[key], str):
+            raise ValueError("Artifact envelope values must be strings")
+    return {
+        "filename": data["filename"],
+        "media_type": data["media_type"],
+        "content_b64": data["content_b64"],
+    }
 
 
 class RetainedArtifact(BaseModel):
@@ -94,9 +129,37 @@ class RetainedArtifact(BaseModel):
 
     @classmethod
     def from_storage_bytes(cls, payload: bytes) -> "RetainedArtifact":
-        data = json.loads(payload.decode("utf-8"))
-        content = base64.b64decode(data["content_b64"], validate=True)
-        return cls.create(data["filename"], data["media_type"], content)
+        if len(payload) > MAX_RETAINED_ARTIFACT_ENVELOPE_BYTES:
+            raise ValueError("Artifact envelope exceeds the maximum size")
+        try:
+            decoded = payload.decode("utf-8")
+            data = json.loads(decoded)
+        except (UnicodeDecodeError, JSONDecodeError) as error:
+            raise ValueError("Artifact envelope is not valid JSON") from error
+        validated = _validate_storage_mapping(data)
+        filename = validated["filename"]
+        media_type = validated["media_type"]
+        content_b64 = validated["content_b64"]
+        if filename != sanitize_artifact_filename(filename):
+            raise ValueError("Artifact filename must be sanitized")
+        if not _MEDIA_TYPE_RE.match(media_type):
+            raise ValueError("Artifact media type is invalid")
+        max_encoded = ceil(MAX_RETAINED_ARTIFACT_BYTES / 3) * 4
+        if len(content_b64) > max_encoded:
+            raise ValueError("Artifact content exceeds the maximum size")
+        try:
+            content = base64.b64decode(content_b64, validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise ValueError("Artifact content is not valid base64") from error
+        digest = hashlib.sha256(
+            _canonical_artifact_payload_from_b64(filename, media_type, content_b64)
+        ).hexdigest()
+        return cls(
+            filename=filename,
+            media_type=media_type,
+            content=content,
+            digest=digest,
+        )
 
 
 def iter_internal_artifact_refs(*value_maps: dict[str, FieldValue]) -> tuple[ArtifactRef, ...]:

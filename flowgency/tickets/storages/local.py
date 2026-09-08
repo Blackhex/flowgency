@@ -22,7 +22,11 @@ from pydantic import ValidationError
 from flowgency.fs.atomic import atomic_write_bytes, atomic_write_text
 from flowgency.fs.locks import exclusive_lock
 from flowgency.records.frontmatter import parse_frontmatter
-from flowgency.tickets.artifacts import RetainedArtifact
+from flowgency.tickets.artifacts import (
+    MAX_RETAINED_ARTIFACT_ENVELOPE_BYTES,
+    MAX_RETAINED_ARTIFACT_BYTES,
+    RetainedArtifact,
+)
 from flowgency.tickets.errors import (
     StorageUnavailable,
     TicketConflict,
@@ -301,6 +305,7 @@ class LocalTicketStorage:
         )
         self._verify_binding(namespace)
         self._require_root()
+        artifact = self._validated_artifact(artifact, namespace.ticket_id)
         self._require_safe_artifact_id(artifact.digest)
         self._require_safe_artifact_metadata(
             namespace.team_id, namespace.workflow_id, f"{artifact.digest}.lock"
@@ -338,11 +343,23 @@ class LocalTicketStorage:
         )
         path = self._artifact_path(namespace, artifact_id)
         try:
-            payload = path.read_bytes()
+            stat_result = path.lstat()
         except FileNotFoundError as error:
             raise TicketNotFound(
                 "artifact-not-found", "No such artifact", ticket_id=namespace.ticket_id
             ) from error
+        except PermissionError as error:
+            raise StorageUnavailable(
+                "unreadable-artifact", "Retained artifact is not readable"
+            ) from error
+        if stat_result.st_size > MAX_RETAINED_ARTIFACT_ENVELOPE_BYTES:
+            raise TicketTooLarge(
+                "artifact-too-large",
+                "Retained artifact exceeds the maximum size",
+                ticket_id=namespace.ticket_id,
+            )
+        try:
+            payload = path.read_bytes()
         except PermissionError as error:
             raise StorageUnavailable(
                 "unreadable-artifact", "Retained artifact is not readable"
@@ -353,7 +370,14 @@ class LocalTicketStorage:
             ) from error
         try:
             artifact = RetainedArtifact.from_storage_bytes(payload)
-        except Exception as error:
+        except ValueError as error:
+            message = str(error)
+            if "exceeds the maximum size" in message:
+                raise TicketTooLarge(
+                    "artifact-too-large",
+                    "Retained artifact exceeds the maximum size",
+                    ticket_id=namespace.ticket_id,
+                ) from error
             raise TicketCorrupt(
                 "corrupt-artifact",
                 "Retained artifact is not readable",
@@ -365,6 +389,42 @@ class LocalTicketStorage:
                 "Retained artifact content does not match its reference",
             )
         return artifact
+
+    def _validated_artifact(
+        self,
+        artifact: RetainedArtifact,
+        ticket_id: str,
+    ) -> RetainedArtifact:
+        try:
+            validated = RetainedArtifact.model_validate(
+                artifact.model_dump(exclude={"size"})
+            )
+        except ValidationError as error:
+            if self._artifact_size_exceeded(error):
+                raise TicketTooLarge(
+                    "artifact-too-large",
+                    "Retained artifact exceeds the maximum size",
+                    ticket_id=ticket_id,
+                ) from error
+            raise TicketConflict(
+                "invalid-artifact",
+                "Retained artifact content is invalid",
+                ticket_id=ticket_id,
+            ) from error
+        if len(validated.to_storage_bytes()) > MAX_RETAINED_ARTIFACT_ENVELOPE_BYTES:
+            raise TicketTooLarge(
+                "artifact-too-large",
+                "Retained artifact exceeds the maximum size",
+                ticket_id=ticket_id,
+            )
+        return validated
+
+    def _artifact_size_exceeded(self, error: ValidationError) -> bool:
+        return any(
+            issue.get("loc") == ("content",)
+            and "maximum size" in str(issue.get("msg", ""))
+            for issue in error.errors()
+        )
 
     def check(self) -> StorageHealth:
         if not self.root.exists():

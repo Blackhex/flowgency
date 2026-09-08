@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from flowgency.tickets.artifacts import RetainedArtifact
 from flowgency.tickets.errors import (
     StorageUnavailable,
     TicketConflict,
@@ -438,3 +439,53 @@ def test_check_detects_unreadable_root(tmp_path, monkeypatch):
 
     monkeypatch.setattr(local.os, "scandir", denied)
     assert provider.check().status == "unreadable"
+
+
+def test_put_artifact_revalidates_model_copy_boundary(tmp_path):
+    provider, ref = _seed(tmp_path)
+    artifact = RetainedArtifact.create("review.txt", "text/plain", b"verified evidence")
+    tampered = artifact.model_copy(update={"filename": "../review.txt"})
+
+    with pytest.raises(TicketConflict):
+        provider.put_artifact(ref, tampered)
+
+    assert not provider._artifact_path(ref, artifact.digest).exists()
+
+
+def test_put_artifact_does_not_overwrite_corrupt_existing_file(tmp_path):
+    provider, ref = _seed(tmp_path)
+    artifact = RetainedArtifact.create("review.txt", "text/plain", b"verified evidence")
+    path = provider._artifact_path(ref, artifact.digest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not-json}", encoding="utf-8")
+
+    with pytest.raises(TicketCorrupt):
+        provider.put_artifact(ref, artifact)
+
+    assert path.read_text(encoding="utf-8") == "{not-json}"
+
+
+def test_put_artifact_rejects_reparse_lock_leaf(tmp_path):
+    provider, ref = _seed(tmp_path)
+    artifact = RetainedArtifact.create("review.txt", "text/plain", b"verified evidence")
+    artifact_dir = provider._artifact_dir(ref.team_id, ref.workflow_id)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    target = tmp_path / "artifact-lock-target"
+    target.mkdir()
+    _make_reparse(artifact_dir / f"{artifact.digest}.lock", target)
+
+    with pytest.raises(TicketForbidden):
+        provider.put_artifact(ref, artifact)
+
+
+def test_read_artifact_rejects_reparse_data_leaf(tmp_path):
+    provider, ref = _seed(tmp_path)
+    artifact = RetainedArtifact.create("review.txt", "text/plain", b"verified evidence")
+    artifact_dir = provider._artifact_dir(ref.team_id, ref.workflow_id)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    target = tmp_path / "artifact-data-target"
+    target.mkdir()
+    _make_reparse(artifact_dir / f"{artifact.digest}.json", target)
+
+    with pytest.raises(TicketForbidden):
+        provider.read_artifact(ref, artifact.digest)
