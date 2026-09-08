@@ -101,7 +101,6 @@ class TicketService:
             definition, workflow_snapshot = self._resolve_definition(binding, snapshot=snapshot)
             field_values = dict(values or {})
             self._validate_field_values(definition, field_values)
-            self._require_current_contract(binding, snapshot.revision, workflow_snapshot.digest)
             now = self.clock()
             event_id = uuid.uuid4().hex
             event = self._event("opened", actor, "Ticket created", event_id, now)
@@ -125,6 +124,7 @@ class TicketService:
                 updated_at=now,
                 ref=ref,
             )
+            self._require_current_contract(binding, snapshot.revision, workflow_snapshot.digest)
             return provider.create(record, operation)
 
     def assign(
