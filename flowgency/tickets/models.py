@@ -156,6 +156,33 @@ class AgentTicketContext(BaseModel):
     session_id: StrictStr
 
 
+class TicketAccessGrant(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    session_id: StrictStr
+    token: StrictStr
+    context: AgentTicketContext
+
+
+class LiveTicketEndpoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    url: StrictStr
+    grant: TicketAccessGrant
+
+
+class TicketToolError(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    code: StrictStr
+    message: StrictStr
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class TicketToolResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    ok: bool
+    result: Any = None
+    error: TicketToolError | None = None
+
+
 class UserTicketContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     team_id: StrictStr

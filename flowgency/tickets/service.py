@@ -94,6 +94,66 @@ class TicketService:
             issues=(),
         )
 
+    def list_workflows(self, actor: TicketActor) -> tuple[WorkflowBinding, ...]:
+        snapshot = self.config_store.load()
+        self._validate_actor(actor)
+        if isinstance(actor, AgentTicketContext):
+            self._require_configured_agent(snapshot, actor)
+        team = snapshot.config.teams[actor.team_id]
+        return tuple(
+            resolve_workflow_binding(snapshot, actor.team_id, workflow_id)
+            for workflow_id in sorted(team.workflows)
+        )
+
+    def list_tickets(
+        self,
+        actor: TicketActor,
+        workflow_id: str,
+        *,
+        assignee: str | None = None,
+        state_id: str | None = None,
+        query: str = "",
+    ) -> tuple[TicketView, ...]:
+        snapshot = self.config_store.load()
+        self._validate_actor(actor)
+        if isinstance(actor, AgentTicketContext):
+            self._require_configured_agent(snapshot, actor)
+        binding = self._resolve_binding(snapshot, actor.team_id, workflow_id)
+        provider = self.storage_factory(binding.storage)
+        lowered_query = query.strip().lower()
+        records = tuple(
+            record
+            for record in provider.list(actor.team_id, workflow_id)
+            if (assignee is None or record.assignee == assignee)
+            and (state_id is None or record.state_id == state_id)
+            and (
+                not lowered_query
+                or lowered_query in record.title.lower()
+                or lowered_query in record.description.lower()
+            )
+        )
+        try:
+            definition, workflow_snapshot = self._resolve_definition(binding, snapshot=snapshot)
+        except WorkflowUnavailable as error:
+            return tuple(
+                TicketView(record=record, version=None, definition=None, issues=(error.message,))
+                for record in records
+            )
+        return tuple(
+            TicketView(
+                record=record,
+                version=TicketVersion(
+                    ref=record.ref,
+                    revision=record.revision,
+                    workflow_digest=workflow_snapshot.digest,
+                    context_digest=binding.context_digest,
+                ),
+                definition=definition,
+                issues=(),
+            )
+            for record in records
+        )
+
     def create(
         self,
         actor: TicketActor,

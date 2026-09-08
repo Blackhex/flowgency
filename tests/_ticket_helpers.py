@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
 from flowgency.configuration.store import ConfigStore
+from flowgency.jobs.authority import JobAuthorityRef, JobStore
+from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
+from flowgency.jobs.store import write_job
 from flowgency.tickets.models import (
     ActiveTicketRun,
     AgentTicketContext,
@@ -142,6 +146,7 @@ class WorkflowTestEnv:
     configuration_service: WorkflowConfigurationService
     user: UserTicketContext
     registered_sessions: set[str]
+    job_store: JobStore
     team_id: str = "newsletter"
     workflow_id: str = "board-a"
     blueprint_id: str = "delivery"
@@ -262,6 +267,80 @@ class WorkflowTestEnv:
             snapshot, self.team_id, self.workflow_id
         ).storage
         return resolve_storage(binding, clock=self._clock)
+
+    def running_job(self, agent: str, job_id: str) -> JobAuthorityRef:
+        snapshot = self.store.load()
+        team = snapshot.config.teams[self.team_id]
+        spec = JobSpec(
+            schema_version=5,
+            job_id=job_id,
+            config_path=str(self.store.path.resolve()),
+            config_revision=snapshot.revision,
+            team_key=self.team_id,
+            workspace_root=str(team.workspace_path.resolve()),
+            team_root=str(team.path.resolve()),
+            agent_name=agent,
+            trigger="manual_prompt",
+            integration_name="claude-code",
+            integration_config={},
+            blueprint=BlueprintRef(
+                key=f"{agent}-blueprint",
+                source_digest="source-digest",
+                integration="claude-code",
+                projector_version="p1",
+                cache_path=str((self.tmp_path / "cache" / "claude-code" / "p1" / "source-digest").resolve()),
+            ),
+            routine_id=None,
+            skill=None,
+            skill_arguments=(),
+            task_input="Run task safely",
+            runtime_policy=RuntimePolicySnapshot(timeout=30, mode="restricted"),
+            memory=MemoryBinding(
+                selector={"scope": "agent"},
+                canonical_json='{"agent":"%s","scope":"agent","team":"%s","version":1}' % (agent, self.team_id),
+                memory_hash="a" * 64,
+                path=str((self.tmp_path / "memory" / ("a" * 64)).resolve()),
+            ),
+            trigger_context=None,
+            prompt_source={
+                "type": "instance_prompt",
+                "scope": "instance",
+                "name": "manual",
+                "source_path": "manual.prompt.md",
+                "source_digest": "source-digest",
+            },
+            timeout_override=None,
+            created_at=SEED_TIME.isoformat(),
+        )
+        record = JobRecord.from_spec(spec)
+        authority = self.job_store.create(record)
+        running = replace(
+            record,
+            status="running",
+            worker_pid=123,
+            started_at=SEED_TIME.isoformat(),
+            launched_at=SEED_TIME.isoformat(),
+            session_id=f"job-session-{agent}-{job_id}",
+        )
+        write_job(authority.path, running)
+        return authority
+
+    @property
+    def access_registry(self):
+        from flowgency.tickets.access import TicketAccessRegistry
+
+        if not hasattr(self, "_access_registry"):
+            self._access_registry = TicketAccessRegistry(self.job_store)
+            self.service.validate_agent_context = self._access_registry.validate_context
+        return self._access_registry
+
+    @contextmanager
+    def broker_for(self, authority: JobAuthorityRef):
+        from flowgency.tickets.broker import TicketBroker, TicketToolClient
+
+        with TicketBroker(self.service, self.access_registry, authority=authority) as broker:
+            endpoint = broker.endpoint
+            yield TicketToolClient(endpoint.url, endpoint.grant.token)
 
     def transition_request(
         self,
@@ -439,6 +518,7 @@ def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestE
         store, library, lambda b: resolve_storage(b)
     )
     registered_sessions: set[str] = set()
+    job_store = JobStore(Path(raw["flowgency"]["memory_store"]))
 
     def validate_agent_context(context: AgentTicketContext) -> None:
         if context.session_id not in registered_sessions:
@@ -463,5 +543,6 @@ def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestE
         configuration_service=configuration_service,
         user=UserTicketContext(team_id="newsletter"),
         registered_sessions=registered_sessions,
+        job_store=job_store,
     )
 
