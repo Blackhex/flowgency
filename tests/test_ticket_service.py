@@ -10,6 +10,7 @@ from flowgency.tickets.models import TicketOperation, TicketPatch, UserTicketCon
 from flowgency.tickets.errors import OperationConflict, TicketConflict, TicketForbidden, WorkflowUnavailable
 from flowgency.tickets.storages.local import LocalTicketStorage
 from flowgency.tickets.storages.registry import resolve_storage
+from flowgency.workflows.configuration import WorkflowInstancePatch, patch_workflow_instance
 from tests._ticket_helpers import storage_binding, ticket_record
 
 
@@ -328,7 +329,20 @@ def test_update_rechecks_changed_binding_inside_locked_callback(workflow_env):
     ticket = env.create(values={"summary": "before"})
 
     def change_binding() -> None:
-        env.set_storage_root(env.root_b)
+        # Direct config-lock patch: env.set_storage_root re-enters the team lock already held by TicketService.update.
+        revision = env.store.load().revision
+        patch_workflow_instance(
+            env.store,
+            revision,
+            env.team_id,
+            env.workflow_id,
+            WorkflowInstancePatch(
+                name="Board A",
+                blueprint=env.blueprint_id,
+                integration="local",
+                integration_config={"root": str(env.root_b)},
+            ),
+        )
 
     _install_boundary_hooks(env, before_apply=change_binding)
     with pytest.raises(TicketConflict):
