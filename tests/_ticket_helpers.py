@@ -16,8 +16,10 @@ from flowgency.tickets.models import (
     StorageBinding,
     TicketEvent,
     TicketOperation,
+    TicketReport,
     TicketRecord,
     TicketRef,
+    TransitionRequest,
     TicketView,
     UserTicketContext,
 )
@@ -30,7 +32,7 @@ from flowgency.workflows.configuration import (
     resolve_workflow_binding,
 )
 from flowgency.workflows.library import WorkflowLibrary
-from flowgency.workflows.models import ArtifactRef
+from flowgency.workflows.models import AgentCriterion, ArtifactRef
 
 SEED_TIME = datetime(2026, 9, 8, tzinfo=timezone.utc)
 
@@ -260,6 +262,101 @@ class WorkflowTestEnv:
             snapshot, self.team_id, self.workflow_id
         ).storage
         return resolve_storage(binding, clock=self._clock)
+
+    def transition_request(
+        self,
+        *,
+        transition_id: str = "complete",
+        inputs: dict | None = None,
+        outputs: dict | None = None,
+        assessments=(),
+    ) -> TransitionRequest:
+        return TransitionRequest(
+            transition_id=transition_id,
+            inputs=dict(inputs or {}),
+            outputs=dict(outputs or {}),
+            assessments=tuple(assessments),
+        )
+
+    def ticket_report(self, message: str, assessments=()) -> TicketReport:
+        return TicketReport(message=message, assessments=tuple(assessments))
+
+    def rename_transition(self, transition_id: str, new_name: str) -> None:
+        source = self.library.inspect(self.blueprint_id)
+        transitions = tuple(
+            transition.model_copy(update={"name": new_name})
+            if transition.id == transition_id
+            else transition
+            for transition in source.definition.transitions
+        )
+        candidate = source.definition.model_copy(update={"transitions": transitions})
+        self.configuration_service.save_blueprint(
+            self.store.load().revision,
+            self.blueprint_id,
+            source.digest,
+            candidate,
+        )
+
+    def publish_artifact_field_workflow(self) -> None:
+        source = self.library.inspect(self.blueprint_id)
+        fields = source.definition.fields
+        if all(field.id != "evidence" for field in fields):
+            fields = fields + (
+                source.definition.field("summary").model_copy(
+                    update={"id": "evidence", "label": "Evidence", "type": "artifact"}
+                ),
+            )
+        transitions = tuple(
+            transition.model_copy(
+                update={
+                    "outputs": transition.outputs + (
+                        transition.outputs[0].model_copy(
+                            update={"field_id": "evidence", "required": True}
+                        ),
+                    )
+                }
+            )
+            if transition.id == "complete"
+            and all(use.field_id != "evidence" for use in transition.outputs)
+            else transition
+            for transition in source.definition.transitions
+        )
+        candidate = source.definition.model_copy(
+            update={"fields": fields, "transitions": transitions}
+        )
+        self.configuration_service.save_blueprint(
+            self.store.load().revision,
+            self.blueprint_id,
+            source.digest,
+            candidate,
+        )
+
+    def publish_criteria_workflow(self) -> None:
+        source = self.library.inspect(self.blueprint_id)
+        transitions = tuple(
+            transition.model_copy(
+                update={
+                    "criteria": transition.criteria
+                    + (
+                        AgentCriterion(
+                            id="evidence-reviewed",
+                            description="Evidence was reviewed",
+                        ),
+                    )
+                }
+            )
+            if transition.id == "complete"
+            and all(criterion.id != "evidence-reviewed" for criterion in transition.criteria)
+            else transition
+            for transition in source.definition.transitions
+        )
+        candidate = source.definition.model_copy(update={"transitions": transitions})
+        self.configuration_service.save_blueprint(
+            self.store.load().revision,
+            self.blueprint_id,
+            source.digest,
+            candidate,
+        )
 
 
 def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestEnv:

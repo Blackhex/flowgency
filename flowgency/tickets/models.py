@@ -28,7 +28,7 @@ from pydantic import (
 )
 
 from flowgency.tickets.errors import OperationConflict, TicketConflict
-from flowgency.workflows.models import FieldValue, WorkflowDefinition
+from flowgency.workflows.models import CriterionAssessment, FieldValue, WorkflowDefinition
 
 
 def _canonical_config(integration: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -124,6 +124,7 @@ class TicketEvent(BaseModel):
     kind: StrictStr
     actor: StrictStr
     summary: StrictStr
+    data: dict[str, Any] = Field(default_factory=dict)
     at: datetime | None = None
 
 
@@ -186,6 +187,26 @@ class TicketPatch(BaseModel):
             and self.field_values is None
         ):
             raise ValueError("Ticket patch must change at least one field")
+        return self
+
+
+class TransitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    transition_id: StrictStr
+    inputs: dict[str, FieldValue] = Field(default_factory=dict)
+    outputs: dict[str, FieldValue] = Field(default_factory=dict)
+    assessments: tuple[CriterionAssessment, ...] = ()
+
+
+class TicketReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    message: StrictStr
+    assessments: tuple[CriterionAssessment, ...] = ()
+
+    @model_validator(mode="after")
+    def _validate_message(self) -> "TicketReport":
+        if not self.message.strip():
+            raise ValueError("Ticket report message must not be blank")
         return self
 
 
@@ -389,6 +410,8 @@ TicketMutationResult.model_rebuild()
 TicketReceipt.model_rebuild()
 TicketRecord.model_rebuild()
 TicketView.model_rebuild()
+TransitionRequest.model_rebuild()
+TicketReport.model_rebuild()
 
 
 Clock = Callable[[], datetime]

@@ -11,6 +11,8 @@ from flowgency.tickets.models import (
     TicketRecord,
     TicketRef,
 )
+from flowgency.tickets.artifacts import RetainedArtifact
+from flowgency.workflows.models import ArtifactRef
 
 
 @runtime_checkable
@@ -36,5 +38,13 @@ class TicketStorage(Protocol):
     def receipt(
         self, ref: TicketRef, operation: TicketOperation
     ) -> TicketMutationResult | None: ...
+
+    def put_artifact(
+        self, namespace: TicketRef, artifact: RetainedArtifact
+    ) -> ArtifactRef: ...
+
+    def read_artifact(
+        self, namespace: TicketRef, artifact_id: str
+    ) -> RetainedArtifact: ...
 
     def check(self) -> StorageHealth: ...

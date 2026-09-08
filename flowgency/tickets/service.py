@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from flowgency.configuration.store import ConfigSnapshot, ConfigStore
+from flowgency.tickets.artifacts import RetainedArtifact, iter_internal_artifact_refs
 from flowgency.tickets.errors import TicketConflict, TicketForbidden, WorkflowUnavailable
 from flowgency.tickets.models import (
     ActiveTicketRun,
@@ -19,21 +20,37 @@ from flowgency.tickets.models import (
     TicketMutationResult,
     TicketOperation,
     TicketPatch,
+    TicketReport,
     TicketRecord,
     TicketRef,
+    TransitionRequest,
     TicketVersion,
     TicketView,
     UserTicketContext,
 )
 from flowgency.tickets.storages.base import TicketStorage
+from flowgency.tickets.transitions import report_event, transition_event
 from flowgency.workflows.configuration import WorkflowBinding, resolve_workflow_binding
 from flowgency.workflows.library import WorkflowLibrary
 from flowgency.workflows.locking import workflow_operation
 from flowgency.workflows.models import WorkflowDefinition, _kind_matches_value
+from flowgency.workflows.rules import evaluate_transition
 
 
 StorageFactory = Callable[[StorageBinding], TicketStorage]
 AgentContextValidator = Callable[[AgentTicketContext], None]
+
+
+def require_active_owner(record: TicketRecord, actor: AgentTicketContext) -> None:
+    if record.assignee != actor.agent_name:
+        raise TicketForbidden("assigned-elsewhere", "Ticket belongs to another agent")
+    if record.active_run is None:
+        raise TicketForbidden("not-working", "This run is not active on the ticket")
+    if (record.active_run.job_id, record.active_run.session_id) != (
+        actor.job_id,
+        actor.session_id,
+    ):
+        raise TicketForbidden("not-working", "This run is not active on the ticket")
 
 
 class TicketService:
@@ -140,7 +157,7 @@ class TicketService:
             actor,
             version,
             operation,
-            lambda record, definition, now, event_id, snapshot: self._assign_record(
+            lambda record, definition, now, event_id, snapshot, binding: self._assign_record(
                 snapshot,
                 record,
                 assignee,
@@ -161,7 +178,7 @@ class TicketService:
             actor,
             version,
             operation,
-            lambda record, definition, now, event_id, snapshot: self._start_work_record(
+            lambda record, definition, now, event_id, snapshot, binding: self._start_work_record(
                 snapshot,
                 record,
                 actor,
@@ -182,7 +199,7 @@ class TicketService:
             actor,
             version,
             operation,
-            lambda record, definition, now, event_id, snapshot: self._end_work_record(
+            lambda record, definition, now, event_id, snapshot, binding: self._end_work_record(
                 record,
                 actor,
                 self._event("ended-work", actor, "Agent ended active work", event_id, now),
@@ -201,7 +218,7 @@ class TicketService:
             actor,
             version,
             operation,
-            lambda record, definition, now, event_id, snapshot: self._sign_off_record(
+            lambda record, definition, now, event_id, snapshot, binding: self._sign_off_record(
                 record,
                 actor,
                 self._event("signed-off", actor, "Agent signed off the ticket", event_id, now),
@@ -219,7 +236,7 @@ class TicketService:
             actor,
             version,
             operation,
-            lambda record, definition, now, event_id, snapshot: self._update_record(
+            lambda record, definition, now, event_id, snapshot, binding: self._update_record(
                 record,
                 definition,
                 actor,
@@ -230,13 +247,94 @@ class TicketService:
             ),
         )
 
+    def transition(
+        self,
+        actor: AgentTicketContext,
+        version: TicketVersion,
+        request: TransitionRequest,
+        operation: TicketOperation,
+    ) -> TicketMutationResult:
+        if not isinstance(actor, AgentTicketContext):
+            raise TicketForbidden("forbidden", "Only an agent may transition tickets")
+        return self._mutate(
+            actor,
+            version,
+            operation,
+            lambda record, definition, now, event_id, snapshot, binding: self._transition_record(
+                record,
+                definition,
+                actor,
+                request,
+                now,
+                event_id,
+                operation,
+                version,
+                binding,
+            ),
+        )
+
+    def report(
+        self,
+        actor: AgentTicketContext,
+        version: TicketVersion,
+        report: TicketReport,
+        operation: TicketOperation,
+    ) -> TicketMutationResult:
+        if not isinstance(actor, AgentTicketContext):
+            raise TicketForbidden("forbidden", "Only an agent may report on tickets")
+        return self._mutate(
+            actor,
+            version,
+            operation,
+            lambda record, definition, now, event_id, snapshot, binding: self._report_record(
+                record,
+                definition,
+                actor,
+                report,
+                now,
+                event_id,
+                operation,
+                version,
+            ),
+        )
+
+    def publish_artifact(
+        self,
+        actor: TicketActor,
+        version: TicketVersion,
+        filename: str,
+        media_type: str,
+        content: bytes,
+    ):
+        self._validate_actor(actor)
+        self._require_team_access(actor, version.ref.team_id)
+        initial = self._resolve_current_binding(version.ref.team_id, version.ref.workflow_id)
+        with workflow_operation(
+            self.config_store,
+            (version.ref.team_id,),
+            (initial.blueprint_id,),
+        ) as snapshot:
+            binding = resolve_workflow_binding(snapshot, version.ref.team_id, version.ref.workflow_id)
+            if binding.blueprint_id != initial.blueprint_id:
+                raise TicketConflict("stale-ticket", "Refresh the ticket")
+            if isinstance(actor, AgentTicketContext):
+                self._require_configured_agent(snapshot, actor)
+            self._require_current_version(binding, version)
+            _, snapshot_def = self._resolve_definition(binding, snapshot=snapshot)
+            if snapshot_def.digest != version.workflow_digest:
+                raise TicketConflict("stale-ticket", "Refresh the ticket")
+            provider = self.storage_factory(binding.storage)
+            provider.read(version.ref)
+            artifact = RetainedArtifact.create(filename, media_type, content)
+            return provider.put_artifact(version.ref, artifact)
+
     def _mutate(
         self,
         actor: TicketActor,
         version: TicketVersion,
         operation: TicketOperation,
         mutation: Callable[
-            [TicketRecord, WorkflowDefinition, object, str, ConfigSnapshot],
+            [TicketRecord, WorkflowDefinition, object, str, ConfigSnapshot, WorkflowBinding],
             TicketRecord,
         ],
     ) -> TicketMutationResult:
@@ -279,7 +377,7 @@ class TicketService:
     def _mutate_current_record(
         self,
         mutation: Callable[
-            [TicketRecord, WorkflowDefinition, object, str, ConfigSnapshot],
+            [TicketRecord, WorkflowDefinition, object, str, ConfigSnapshot, WorkflowBinding],
             TicketRecord,
         ],
         record: TicketRecord,
@@ -291,7 +389,7 @@ class TicketService:
         workflow_digest: str,
     ) -> TicketRecord:
         self._require_current_contract(binding, snapshot.revision, workflow_digest)
-        return mutation(record, definition, now, event_id, snapshot)
+        return mutation(record, definition, now, event_id, snapshot, binding)
 
     def _assign_record(
         self,
@@ -416,15 +514,7 @@ class TicketService:
         record: TicketRecord,
         actor: AgentTicketContext,
     ) -> None:
-        if record.assignee != actor.agent_name:
-            raise TicketForbidden("assigned-elsewhere", "Ticket belongs to another agent")
-        if record.active_run is None:
-            raise TicketForbidden("not-working", "This run is not active on the ticket")
-        if (record.active_run.job_id, record.active_run.session_id) != (
-            actor.job_id,
-            actor.session_id,
-        ):
-            raise TicketForbidden("not-working", "This run is not active on the ticket")
+        require_active_owner(record, actor)
 
     def _validate_actor(self, actor: TicketActor) -> None:
         if isinstance(actor, AgentTicketContext):
@@ -602,3 +692,105 @@ class TicketService:
             "session_id": actor.session_id,
             "team_id": actor.team_id,
         }
+
+    def _transition_record(
+        self,
+        record: TicketRecord,
+        definition: WorkflowDefinition,
+        actor: AgentTicketContext,
+        request: TransitionRequest,
+        now,
+        event_id: str,
+        operation: TicketOperation,
+        version: TicketVersion,
+        binding: WorkflowBinding,
+    ) -> TicketRecord:
+        require_active_owner(record, actor)
+        evaluated = evaluate_transition(
+            definition,
+            request.transition_id,
+            record.state_id,
+            dict(record.field_values),
+            dict(request.inputs),
+            dict(request.outputs),
+            request.assessments,
+        )
+        if record.ref is None:
+            raise TicketConflict("unbound-record", "Ticket record must be scoped with a ref")
+        provider = self.storage_factory(binding.storage)
+        for artifact_ref in iter_internal_artifact_refs(
+            dict(evaluated.effective_inputs),
+            dict(evaluated.effective_outputs),
+        ):
+            provider.read_artifact(record.ref, artifact_ref.value)
+        field_values = dict(record.field_values)
+        field_values.update(dict(evaluated.effective_outputs))
+        field_provenance = dict(record.field_provenance)
+        field_provenance.update(
+            self._stamp_field_provenance(
+                actor,
+                dict(evaluated.effective_outputs),
+                event_id,
+                now,
+            )
+        )
+        base_event = transition_event(record, evaluated, actor)
+        event = base_event.model_copy(
+            update={
+                "id": event_id,
+                "at": now,
+                "data": {
+                    **base_event.data,
+                    "source_state_name": definition.state(record.state_id).name,
+                    "destination_state_name": definition.state(
+                        evaluated.destination_state_id
+                    ).name,
+                    "blueprint_id": definition.id,
+                    "blueprint_name": definition.name,
+                    "workflow_digest": version.workflow_digest,
+                    "context_digest": version.context_digest,
+                    "binding_id": binding.storage.binding_id,
+                    "operation_id": operation.operation_id,
+                    "recorded_at": now.isoformat(),
+                },
+            }
+        )
+        return record.model_copy(
+            update={
+                "state_id": evaluated.destination_state_id,
+                "field_values": field_values,
+                "field_provenance": field_provenance,
+                "events": record.events + (event,),
+            }
+        )
+
+    def _report_record(
+        self,
+        record: TicketRecord,
+        definition: WorkflowDefinition,
+        actor: AgentTicketContext,
+        report: TicketReport,
+        now,
+        event_id: str,
+        operation: TicketOperation,
+        version: TicketVersion,
+    ) -> TicketRecord:
+        require_active_owner(record, actor)
+        base_event = report_event(report, actor)
+        event = base_event.model_copy(
+            update={
+                "id": event_id,
+                "at": now,
+                "data": {
+                    **base_event.data,
+                    "state_id": record.state_id,
+                    "state_name": definition.state(record.state_id).name,
+                    "workflow_digest": version.workflow_digest,
+                    "context_digest": version.context_digest,
+                    "binding_id": version.ref.binding_id,
+                    "operation_id": operation.operation_id,
+                    "recorded_at": now.isoformat(),
+                },
+            }
+        )
+        return record.model_copy(update={"events": record.events + (event,)})

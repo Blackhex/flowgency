@@ -19,9 +19,10 @@ from typing import Callable
 import yaml
 from pydantic import ValidationError
 
-from flowgency.fs.atomic import atomic_write_text
+from flowgency.fs.atomic import atomic_write_bytes, atomic_write_text
 from flowgency.fs.locks import exclusive_lock
 from flowgency.records.frontmatter import parse_frontmatter
+from flowgency.tickets.artifacts import RetainedArtifact
 from flowgency.tickets.errors import (
     StorageUnavailable,
     TicketConflict,
@@ -39,8 +40,10 @@ from flowgency.tickets.models import (
     TicketRecord,
     TicketRef,
 )
+from flowgency.workflows.models import ArtifactRef
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _MAX_TICKET_BYTES = 512 * 1024
 _SEQUENCE_NAME = ".sequence"
 _NAMESPACE_LOCK_NAME = ".namespace.lock"
@@ -124,11 +127,29 @@ class LocalTicketStorage:
     ) -> None:
         self._walk_no_reparse(team_id, workflow_id, "tickets", name)
 
+    def _require_safe_artifact_id(self, artifact_id: str) -> None:
+        if not _DIGEST.match(artifact_id):
+            raise TicketForbidden("unsafe-path", "Artifact identifier is invalid")
+
+    def _require_safe_artifact_metadata(
+        self, team_id: str, workflow_id: str, name: str
+    ) -> None:
+        self._walk_no_reparse(team_id, workflow_id, "artifacts", name)
+
     def _namespace_dir(self, team_id: str, workflow_id: str) -> Path:
         return self.root / team_id / workflow_id / "tickets"
 
+    def _artifact_dir(self, team_id: str, workflow_id: str) -> Path:
+        return self.root / team_id / workflow_id / "artifacts"
+
     def _ticket_path(self, ref: TicketRef) -> Path:
         return self._namespace_dir(ref.team_id, ref.workflow_id) / f"{ref.ticket_id}.md"
+
+    def _artifact_path(self, ref: TicketRef, artifact_id: str) -> Path:
+        return self._artifact_dir(ref.team_id, ref.workflow_id) / f"{artifact_id}.json"
+
+    def _artifact_lock(self, ref: TicketRef, artifact_id: str) -> Path:
+        return self._artifact_dir(ref.team_id, ref.workflow_id) / f"{artifact_id}.lock"
 
     def lock_path(self, ref: TicketRef) -> Path:
         return self._namespace_dir(ref.team_id, ref.workflow_id) / f"{ref.ticket_id}.lock"
@@ -273,6 +294,77 @@ class LocalTicketStorage:
             return None
         previous.require_digest(operation.request_digest)
         return previous.result(replayed=True)
+
+    def put_artifact(self, namespace: TicketRef, artifact: RetainedArtifact) -> ArtifactRef:
+        self._require_safe_ref(
+            namespace.team_id, namespace.workflow_id, namespace.ticket_id
+        )
+        self._verify_binding(namespace)
+        self._require_root()
+        self._require_safe_artifact_id(artifact.digest)
+        self._require_safe_artifact_metadata(
+            namespace.team_id, namespace.workflow_id, f"{artifact.digest}.lock"
+        )
+        self._require_safe_artifact_metadata(
+            namespace.team_id, namespace.workflow_id, f"{artifact.digest}.json"
+        )
+        with exclusive_lock(self._artifact_lock(namespace, artifact.digest), wait=True):
+            path = self._artifact_path(namespace, artifact.digest)
+            if path.exists():
+                existing = self.read_artifact(namespace, artifact.digest)
+                if existing != artifact:
+                    raise TicketConflict(
+                        "artifact-digest-mismatch",
+                        "Retained artifact content does not match its reference",
+                    )
+                return artifact.ref()
+            try:
+                atomic_write_bytes(path, artifact.to_storage_bytes())
+            except OSError as error:
+                raise StorageUnavailable(
+                    "write-failed", "Could not persist the retained artifact"
+                ) from error
+            return artifact.ref()
+
+    def read_artifact(self, namespace: TicketRef, artifact_id: str) -> RetainedArtifact:
+        self._require_safe_ref(
+            namespace.team_id, namespace.workflow_id, namespace.ticket_id
+        )
+        self._verify_binding(namespace)
+        self._require_root()
+        self._require_safe_artifact_id(artifact_id)
+        self._require_safe_artifact_metadata(
+            namespace.team_id, namespace.workflow_id, f"{artifact_id}.json"
+        )
+        path = self._artifact_path(namespace, artifact_id)
+        try:
+            payload = path.read_bytes()
+        except FileNotFoundError as error:
+            raise TicketNotFound(
+                "artifact-not-found", "No such artifact", ticket_id=namespace.ticket_id
+            ) from error
+        except PermissionError as error:
+            raise StorageUnavailable(
+                "unreadable-artifact", "Retained artifact is not readable"
+            ) from error
+        except OSError as error:
+            raise StorageUnavailable(
+                "unreadable-artifact", "Retained artifact could not be read"
+            ) from error
+        try:
+            artifact = RetainedArtifact.from_storage_bytes(payload)
+        except Exception as error:
+            raise TicketCorrupt(
+                "corrupt-artifact",
+                "Retained artifact is not readable",
+                ticket_id=namespace.ticket_id,
+            ) from error
+        if artifact.digest != artifact_id:
+            raise TicketConflict(
+                "artifact-digest-mismatch",
+                "Retained artifact content does not match its reference",
+            )
+        return artifact
 
     def check(self) -> StorageHealth:
         if not self.root.exists():
