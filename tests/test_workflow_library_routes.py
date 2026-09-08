@@ -34,11 +34,16 @@ class _EditorParser(HTMLParser):
         self.tabs: list[str] = []
         self.labels: list[str] = []
         self.checkbox_labels: list[str] = []
+        self.script_ids: list[str | None] = []
+        self.script_bodies: dict[str, str] = {}
         self._capture_label = False
         self._current_label: list[str] = []
         self._in_tablist = False
         self._capture_tab = False
         self._current_tab: list[str] = []
+        self._capture_script = False
+        self._current_script_id: str | None = None
+        self._current_script_body: list[str] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
         attr_map = dict(attrs)
@@ -50,6 +55,11 @@ class _EditorParser(HTMLParser):
         elif tag == "label":
             self._capture_label = True
             self._current_label = []
+        elif tag == "script":
+            self._capture_script = True
+            self._current_script_id = attr_map.get("id")
+            self._current_script_body = []
+            self.script_ids.append(self._current_script_id)
         elif tag == "input" and attr_map.get("type") == "checkbox":
             aria = attr_map.get("aria-label")
             if aria:
@@ -60,6 +70,8 @@ class _EditorParser(HTMLParser):
             self._current_tab.append(data)
         if self._capture_label:
             self._current_label.append(data)
+        if self._capture_script:
+            self._current_script_body.append(data)
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "nav" and self._in_tablist:
@@ -76,6 +88,12 @@ class _EditorParser(HTMLParser):
                 self.labels.append(label)
             self._capture_label = False
             self._current_label = []
+        elif tag == "script" and self._capture_script:
+            if self._current_script_id is not None:
+                self.script_bodies[self._current_script_id] = "".join(self._current_script_body)
+            self._capture_script = False
+            self._current_script_id = None
+            self._current_script_body = []
 
 
 def _parse_editor(html: str) -> _EditorParser:
@@ -340,6 +358,50 @@ def test_preview_new_route_validates_without_writing_source(workflow_web_env):
     assert after == before
 
 
+def test_preview_new_route_ignores_posted_draft_id_without_writing_source(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    before = sorted(path.relative_to(env.library.root) for path in env.library.root.rglob("workflow.yaml"))
+
+    response = env.client.post(
+        "/admin/workflow-library/blueprints/new/preview",
+        data={
+            "payload": json.dumps(
+                {
+                    "expected_revision": env.store.load().revision,
+                    "expected_digest": None,
+                    "draft_version": 9,
+                    "draft": {
+                        "schema_version": 1,
+                        "id": "wf-forged-client-id",
+                        "name": "Preview only",
+                        "description": "Preview without publishing",
+                        "states": [
+                            {
+                                "key": "state-1",
+                                "existing_state_id": None,
+                                "name": "Queued",
+                                "color": "#9ca3af",
+                                "initial": True,
+                            }
+                        ],
+                        "fields": [],
+                        "transitions": [],
+                    },
+                }
+            )
+        },
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["draft_version"] == 9
+    assert response.json()["issues"] == []
+    after = sorted(path.relative_to(env.library.root) for path in env.library.root.rglob("workflow.yaml"))
+    assert after == before
+
+
 def test_save_route_rejects_invalid_draft_version_without_secondary_error(
     workflow_web_env,
 ):
@@ -362,6 +424,137 @@ def test_save_route_rejects_invalid_draft_version_without_secondary_error(
     body = response.json()
     assert body["draft"] == payload["draft"]
     assert any(issue["field"] == "draft_version" for issue in body["issues"])
+
+
+def test_save_route_reports_malformed_json_in_html_when_source_is_unavailable(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    source = env.library.inspect("delivery")
+    before = "not: [valid"
+    source.source_path.write_text(before, encoding="utf-8")
+
+    response = env.client.post(
+        "/admin/workflow-library/blueprints/delivery",
+        data={"payload": "{"},
+        headers={"Accept": "text/html"},
+    )
+
+    assert response.status_code == 422
+    assert "Payload must be valid JSON." in response.text
+    assert source.source_path.read_text(encoding="utf-8") == before
+
+
+def test_save_route_reports_malformed_json_in_json_when_source_is_unavailable(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    source = env.library.inspect("delivery")
+    before = "not: [valid"
+    source.source_path.write_text(before, encoding="utf-8")
+
+    response = env.client.post(
+        "/admin/workflow-library/blueprints/delivery",
+        data={"payload": "{"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["issues"][0]["code"] == "invalid-request"
+    assert source.source_path.read_text(encoding="utf-8") == before
+
+
+def test_create_route_ignores_posted_generated_id_and_allocates_server_id(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    forged_id = "wf-1234567890abcdef1234567890abcdef"
+
+    response = env.client.post(
+        "/admin/workflow-library/blueprints/new",
+        data={
+            "payload": json.dumps(
+                {
+                    "expected_revision": env.store.load().revision,
+                    "draft_version": 10,
+                    "draft": {
+                        "schema_version": 1,
+                        "id": forged_id,
+                        "name": "Research intake",
+                        "description": "Created from the workflow editor",
+                        "states": [
+                            {
+                                "key": "state-1",
+                                "existing_state_id": None,
+                                "name": "Queued",
+                                "color": "#9ca3af",
+                                "initial": True,
+                            }
+                        ],
+                        "fields": [],
+                        "transitions": [],
+                    },
+                }
+            )
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    created_id = response.headers["location"].rsplit("/", 1)[-1]
+    assert re.fullmatch(r"wf-[0-9a-f]{32}", created_id)
+    assert created_id != forged_id
+    created = env.library.inspect(created_id)
+    assert created.definition.id == created_id
+    assert created.definition.name == "Research intake"
+
+
+def test_editor_page_escapes_script_terminators_inside_initial_json(workflow_web_env):
+    env = workflow_web_env
+    sentinel = '</script><script id="editor-injected">window.injected = true</script>'
+    env.write_blueprint(
+        "script-safe",
+        {
+            "schema_version": 1,
+            "id": "script-safe",
+            "name": f"Workflow {sentinel}",
+            "description": f"Description {sentinel}",
+            "initial_state": "review",
+            "states": [
+                {"id": "review", "name": "Review", "color": "#ebc77c"},
+                {"id": "done", "name": "Done", "color": "#7ad7bf"},
+            ],
+            "fields": [],
+            "transitions": [
+                {
+                    "id": "approve",
+                    "name": "Approve",
+                    "from_state": "review",
+                    "to_state": "done",
+                    "inputs": [],
+                    "outputs": [],
+                    "preconditions": [],
+                    "criteria": [
+                        {"id": "criterion-a", "description": f"Criterion {sentinel}"}
+                    ],
+                }
+            ],
+        },
+    )
+
+    response = env.client.get("/admin/workflow-library/blueprints/script-safe")
+
+    assert response.status_code == 200
+    parser = _parse_editor(response.text)
+    assert parser.script_ids.count("workflow-editor-data") == 1
+    assert "editor-injected" not in [script_id for script_id in parser.script_ids if script_id is not None]
+    initial = json.loads(parser.script_bodies["workflow-editor-data"])
+    assert initial["draft"]["name"] == f"Workflow {sentinel}"
+    assert initial["draft"]["description"] == f"Description {sentinel}"
+    assert (
+        initial["draft"]["transitions"][0]["criteria"][0]["description"]
+        == f"Criterion {sentinel}"
+    )
 
 
 def test_save_route_preserves_submitted_draft_when_source_is_malformed(

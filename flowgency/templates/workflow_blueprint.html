@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% block title %}{{ editor.name }} — Workflow Library{% endblock %}
+{% block content %}
+<div class="max-w-6xl space-y-6" data-workflow-editor-root>
+  <style>@import url('/static/workflow-editor.css');</style>
+  <div class="workflow-editor-alert rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" data-editor-warning {% if not warning %}hidden{% endif %}>{{ warning }}</div>
+  <div class="workflow-editor-alert rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200" data-editor-issues {% if not issues %}hidden{% endif %}>
+    <strong>Reload or correct the draft before saving.</strong>
+    <ul class="mt-2 list-disc pl-5">
+      {% for issue in issues %}
+      <li>{{ issue.message }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <a href="/admin/workflow-library" class="text-sm text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">← Workflow Library</a>
+      <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">{{ editor.name }}</h1>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{% if create_mode %}Create{% else %}Edit{% endif %} the validated blueprint source without exposing internal identifiers in the form controls.</p>
+    </div>
+    <div class="flex items-center gap-3 self-start">
+      <span class="text-xs text-gray-500 dark:text-gray-400" aria-live="polite" data-editor-status>Saved</span>
+      <button type="button" class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200" data-editor-revert disabled>Revert</button>
+      <button type="button" class="rounded-lg bg-flowgency-600 px-3 py-2 text-sm font-medium text-white dark:bg-flowgency-700" data-editor-save disabled>Save</button>
+    </div>
+  </div>
+
+  <form class="workflow-editor-shell" data-editor-form data-preview-url="{% if create_mode %}{% else %}/admin/workflow-library/blueprints/{{ editor.id }}/preview{% endif %}" data-save-url="{% if create_mode %}/admin/workflow-library/blueprints/new{% else %}/admin/workflow-library/blueprints/{{ editor.id }}{% endif %}">
+    <input type="hidden" name="payload" value="" data-editor-payload>
+    <nav class="flex gap-6 border-b border-gray-200 px-5 dark:border-gray-700" aria-label="Blueprint views" role="tablist">
+      <button type="button" class="workflow-editor-tab border-b-2 border-flowgency-600 px-0 py-3 text-sm font-medium text-flowgency-700 dark:text-flowgency-200" role="tab" aria-selected="true" data-editor-tab="overview">Overview</button>
+      <button type="button" class="workflow-editor-tab border-b-2 border-transparent px-0 py-3 text-sm font-medium text-gray-500 dark:text-gray-400" role="tab" aria-selected="false" data-editor-tab="states">States</button>
+      <button type="button" class="workflow-editor-tab border-b-2 border-transparent px-0 py-3 text-sm font-medium text-gray-500 dark:text-gray-400" role="tab" aria-selected="false" data-editor-tab="transitions">Transitions</button>
+    </nav>
+
+    <div class="grid gap-0 lg:grid-cols-[16rem_minmax(0,1fr)]">
+      <aside class="hidden border-r border-gray-200 p-4 dark:border-gray-700 lg:block" data-editor-transition-nav hidden>
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Transitions</h2>
+          <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Add transition">+</button>
+        </div>
+        <div class="mt-4 space-y-2">
+          {% for transition in editor.transitions %}
+          <button type="button" class="workflow-editor-transition-item w-full rounded-lg border border-transparent px-3 py-3 text-left {% if loop.first %}bg-flowgency-50 text-flowgency-900 dark:bg-flowgency-950/40 dark:text-flowgency-100{% else %}text-gray-700 dark:text-gray-200{% endif %}" data-transition-button aria-pressed="{{ 'true' if loop.first else 'false' }}">
+            <span class="block text-sm font-medium">{{ transition.name }}</span>
+            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ transition.from_state_id }} → {{ transition.to_state_id }}</span>
+          </button>
+          {% endfor %}
+        </div>
+      </aside>
+
+      <div class="p-5 md:p-6">
+        <section data-editor-panel="overview" role="tabpanel" class="space-y-6">
+          <div class="grid gap-5 lg:max-w-3xl">
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Name</span>
+              <input type="text" value="{{ editor.name }}" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="name">
+            </label>
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Description</span>
+              <textarea rows="4" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="description">{{ editor.description }}</textarea>
+            </label>
+            <div>
+              <div class="flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Used by</h2>
+                <span class="text-sm text-gray-500 dark:text-gray-400">{{ workflow_count }} workflows</span>
+              </div>
+              <div class="mt-3 rounded-xl border border-gray-200 dark:border-gray-700">
+                <div class="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{% if create_mode %}New blueprint{% else %}Current source{% endif %}</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section data-editor-panel="states" role="tabpanel" class="space-y-4" hidden>
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">States</h2>
+            <button type="button" class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200">Add state</button>
+          </div>
+          <div class="space-y-4">
+            {% for state in editor.states %}
+            <div class="grid gap-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700 md:grid-cols-[2.5rem_minmax(0,1fr)_auto_auto] md:items-center">
+              <input type="color" value="{{ state.color }}" aria-label="{{ state.name }} color" class="h-10 w-10 rounded-md border border-gray-300 bg-transparent p-1 dark:border-gray-600" data-editor-bind="states.{{ loop.index0 }}.color">
+              <label class="block">
+                <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Name</span>
+                <input type="text" value="{{ state.name }}" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="states.{{ loop.index0 }}.name">
+              </label>
+              <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input type="radio" name="initial-state" {% if state.initial %}checked{% endif %} data-editor-bind="states.{{ loop.index0 }}.initial">
+                Initial
+              </label>
+              <div class="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                <button type="button" aria-label="Move {{ state.name }} up" class="rounded-md p-2">↑</button>
+                <button type="button" aria-label="Move {{ state.name }} down" class="rounded-md p-2">↓</button>
+                <button type="button" aria-label="Delete {{ state.name }}" class="rounded-md p-2">×</button>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section data-editor-panel="transitions" role="tabpanel" class="space-y-6" hidden>
+          <div class="lg:hidden">
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Transition</span>
+              <select class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-mobile-transition>
+                {% for transition in editor.transitions %}
+                <option>{{ transition.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+          {% for transition in editor.transitions %}
+          {% set transition_index = loop.index0 %}
+          <div class="space-y-6" data-transition-panel {% if not loop.first %}hidden{% endif %}>
+            <div class="space-y-4 border-b border-gray-200 pb-6 dark:border-gray-700">
+              <label class="block">
+                <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Name</span>
+                <input type="text" value="{{ transition.name }}" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="transitions.{{ loop.index0 }}.name">
+              </label>
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="block">
+                  <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">From</span>
+                  <select class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="transitions.{{ loop.index0 }}.from_state_id">
+                    {% for state in editor.states %}
+                    <option value="{{ state.existing_state_id or state.key }}" {% if state.existing_state_id == transition.from_state_id %}selected{% endif %}>{{ state.name }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label class="block">
+                  <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">To</span>
+                  <select class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="transitions.{{ loop.index0 }}.to_state_id">
+                    {% for state in editor.states %}
+                    <option value="{{ state.existing_state_id or state.key }}" {% if state.existing_state_id == transition.to_state_id %}selected{% endif %}>{{ state.name }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div class="space-y-4 border-b border-gray-200 pb-6 dark:border-gray-700">
+              <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Preconditions</h2>
+                <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Add precondition">+</button>
+              </div>
+              {% for rule in transition.preconditions %}
+              <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                <label class="block">
+                  <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Input</span>
+                  <select class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="transitions.{{ transition_index }}.preconditions.{{ loop.index0 }}.existing_field_id">
+                    {% for field in editor.fields %}
+                    <option value="{{ field.existing_field_id or field.key }}" {% if field.existing_field_id == rule.existing_field_id %}selected{% endif %}>{{ field.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label class="block">
+                  <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Operator</span>
+                  <select class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="transitions.{{ transition_index }}.preconditions.{{ loop.index0 }}.operator">
+                    <option value="equals" {% if rule.operator == 'equals' %}selected{% endif %}>Equals</option>
+                    <option value="not_equals" {% if rule.operator == 'not_equals' %}selected{% endif %}>Not equal</option>
+                    <option value="is_present" {% if rule.operator == 'is_present' %}selected{% endif %}>Is present</option>
+                  </select>
+                </label>
+                <label class="block">
+                  <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Value</span>
+                  {% set field = (editor.fields | selectattr('existing_field_id', 'equalto', rule.existing_field_id) | list | first) %}
+                  {% if field and field.type == 'boolean' %}
+                  <span class="inline-flex h-[2.75rem] items-center gap-2 rounded-lg border border-gray-300 px-3 dark:border-gray-600">
+                    <input type="checkbox" {% if rule.value %}checked{% endif %} data-editor-bind="transitions.{{ transition_index }}.preconditions.{{ loop.index0 }}.value">
+                    True
+                  </span>
+                  {% elif field and field.type == 'number' %}
+                  <input type="number" value="{{ rule.value if rule.value is not none else '' }}" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="transitions.{{ transition_index }}.preconditions.{{ loop.index0 }}.value">
+                  {% else %}
+                  <input type="text" value="{{ rule.value if rule.value is not none else '' }}" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="transitions.{{ transition_index }}.preconditions.{{ loop.index0 }}.value">
+                  {% endif %}
+                </label>
+                <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Remove precondition">×</button>
+              </div>
+              {% endfor %}
+            </div>
+
+            <div class="grid gap-6 border-b border-gray-200 pb-6 dark:border-gray-700 xl:grid-cols-2">
+              <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                  <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Inputs</h2>
+                  <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Add input">+</button>
+                </div>
+                {% for use in transition.inputs %}
+                {% set field = (editor.fields | selectattr('existing_field_id', 'equalto', use.existing_field_id) | list | first) %}
+                <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_auto_auto] md:items-center">
+                  <label class="block">
+                    <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Label</span>
+                    <input type="text" value="{{ field.label if field else '' }}" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="fields.{{ (editor.fields | map(attribute='existing_field_id') | list).index(use.existing_field_id) }}.label">
+                  </label>
+                  <label class="block">
+                    <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Type</span>
+                    <select class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="fields.{{ (editor.fields | map(attribute='existing_field_id') | list).index(use.existing_field_id) }}.type">
+                      <option value="text" {% if field and field.type == 'text' %}selected{% endif %}>Text</option>
+                      <option value="number" {% if field and field.type == 'number' %}selected{% endif %}>Number</option>
+                      <option value="boolean" {% if field and field.type == 'boolean' %}selected{% endif %}>Boolean</option>
+                      <option value="artifact" {% if field and field.type == 'artifact' %}selected{% endif %}>Artifact</option>
+                    </select>
+                  </label>
+                  <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" {% if use.required %}checked{% endif %} data-editor-bind="transitions.{{ transition_index }}.inputs.{{ loop.index0 }}.required">
+                    Required
+                  </label>
+                  <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Remove input">×</button>
+                </div>
+                {% endfor %}
+              </div>
+              <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                  <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Outputs</h2>
+                  <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Add output">+</button>
+                </div>
+                {% for use in transition.outputs %}
+                {% set field = (editor.fields | selectattr('existing_field_id', 'equalto', use.existing_field_id) | list | first) %}
+                <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_auto_auto] md:items-center">
+                  <label class="block">
+                    <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Label</span>
+                    <input type="text" value="{{ field.label if field else '' }}" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="fields.{{ (editor.fields | map(attribute='existing_field_id') | list).index(use.existing_field_id) }}.label">
+                  </label>
+                  <label class="block">
+                    <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Type</span>
+                    <select class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="fields.{{ (editor.fields | map(attribute='existing_field_id') | list).index(use.existing_field_id) }}.type">
+                      <option value="text" {% if field and field.type == 'text' %}selected{% endif %}>Text</option>
+                      <option value="number" {% if field and field.type == 'number' %}selected{% endif %}>Number</option>
+                      <option value="boolean" {% if field and field.type == 'boolean' %}selected{% endif %}>Boolean</option>
+                      <option value="artifact" {% if field and field.type == 'artifact' %}selected{% endif %}>Artifact</option>
+                    </select>
+                  </label>
+                  <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" {% if use.required %}checked{% endif %} data-editor-bind="transitions.{{ transition_index }}.outputs.{{ loop.index0 }}.required">
+                    Required
+                  </label>
+                  <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Remove output">×</button>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Agent criteria</h2>
+                <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Add criterion">+</button>
+              </div>
+              {% for criterion in transition.criteria %}
+              <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+                <label class="block">
+                  <span class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">Criterion</span>
+                  <textarea rows="3" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 dark:border-gray-600" data-editor-bind="transitions.{{ transition_index }}.criteria.{{ loop.index0 }}.description">{{ criterion.description }}</textarea>
+                </label>
+                <button type="button" class="rounded-md p-2 text-gray-500 dark:text-gray-400" aria-label="Remove criterion">×</button>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </section>
+      </div>
+    </div>
+  </form>
+
+  <script type="application/json" id="workflow-editor-data">{{ editor_state | tojson }}</script>
+  <script src="/static/workflow-editor.js"></script>
+</div>
+{% endblock %}

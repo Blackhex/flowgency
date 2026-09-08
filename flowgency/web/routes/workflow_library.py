@@ -201,22 +201,17 @@ def _new_snapshot() -> WorkflowSnapshot:
     return new_editor_snapshot("New workflow")
 
 
-def _draft_source(snapshot: WorkflowSnapshot, draft: dict[str, Any]) -> WorkflowSnapshot:
-    if draft.get("id") == _NEW_BLUEPRINT_SENTINEL:
-        return snapshot
-    candidate_id = draft.get("id")
-    if not isinstance(candidate_id, str) or not candidate_id.strip():
-        return snapshot
+def _fallback_snapshot(blueprint_id: str) -> WorkflowSnapshot:
     return WorkflowSnapshot(
-        definition=snapshot.definition.model_copy(update={"id": candidate_id}),
-        digest=snapshot.digest,
-        source_path=snapshot.source_path,
+        definition=_new_snapshot().definition.model_copy(
+            update={"id": blueprint_id, "name": blueprint_id}
+        ),
+        digest="",
+        source_path=Path("workflow.yaml"),
     )
 
 
 def _parseable_new_draft(source: WorkflowSnapshot, draft: dict[str, Any]) -> dict[str, Any]:
-    if draft.get("id") != _NEW_BLUEPRINT_SENTINEL:
-        return draft
     normalized = dict(draft)
     normalized["id"] = source.definition.id
     return normalized
@@ -319,7 +314,7 @@ def _render_editor(
         {
             **_base_admin_context(request, snapshot),
             "editor": editor_state["draft"],
-            "editor_state_json": json.dumps(editor_state),
+            "editor_state": editor_state,
             "issues": editor_state["issues"],
             "warning": editor_state["warning"],
             "workflow_count": editor_state["workflow_count"],
@@ -455,7 +450,7 @@ async def preview_workflow_blueprint(
         decoded = await _request_payload(request)
         payload = WorkflowEditorRequest.model_validate(decoded)
         if blueprint_id == "new":
-            source = _draft_source(_new_snapshot(), payload.draft)
+            source = _new_snapshot()
             references = 0
             draft_for_parse = _parseable_new_draft(source, payload.draft)
         else:
@@ -531,6 +526,7 @@ async def save_workflow_blueprint(
     configuration = _require_workflow_configuration(services)
     decoded: dict[str, Any] | None = None
     payload: WorkflowEditorRequest | None = None
+    source = _fallback_snapshot(blueprint_id)
     try:
         decoded = await _request_payload(request)
         payload = WorkflowEditorRequest.model_validate(decoded)
@@ -554,7 +550,7 @@ async def save_workflow_blueprint(
                 source=source,
                 draft={},
                 expected_revision=snapshot.revision,
-                expected_digest=source.digest,
+                expected_digest=source.digest or None,
                 draft_version=0,
                 issues=issues,
                 references=len(configuration.bindings_using(snapshot, blueprint_id)),
@@ -573,7 +569,7 @@ async def save_workflow_blueprint(
                 source=source,
                 draft=draft,
                 expected_revision=_safe_expected_revision(decoded, snapshot.revision),
-                expected_digest=_safe_expected_digest(decoded, source.digest),
+                expected_digest=_safe_expected_digest(decoded, source.digest or None),
                 draft_version=_safe_draft_version(decoded),
                 issues=issues,
                 references=await run_in_threadpool(_preview_bindings, configuration, snapshot, blueprint_id),
@@ -584,18 +580,14 @@ async def save_workflow_blueprint(
         issues = _source_unavailable_issues()
         draft = payload.draft if payload is not None else _safe_draft(decoded)
         draft_version = payload.draft_version if payload is not None else _safe_draft_version(decoded)
-        expected_digest = None
-        if payload is not None:
-            expected_digest = payload.expected_digest
-        elif 'source' in locals():
-            expected_digest = source.digest
+        expected_digest = payload.expected_digest if payload is not None else _safe_expected_digest(decoded, None)
         if _wants_json(request):
             return _request_issue_response(status_code=409, draft_version=draft_version, draft=draft, issues=issues)
         return _render_editor(
             request,
             snapshot,
             editor_state=_editor_state(
-                source=locals().get('source', _new_snapshot()),
+                source=source,
                 draft=draft,
                 expected_revision=payload.expected_revision if payload is not None else _safe_expected_revision(decoded, snapshot.revision),
                 expected_digest=expected_digest,
@@ -686,7 +678,6 @@ async def create_workflow_blueprint(
     try:
         decoded = await _request_payload(request)
         payload = WorkflowEditorRequest.model_validate(decoded)
-        source = _draft_source(source, payload.draft)
         candidate = await run_in_threadpool(parse_editor_draft, source, _parseable_new_draft(source, payload.draft))
         blueprint_id = candidate.id
         await run_in_threadpool(
