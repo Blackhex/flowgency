@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from flowgency.projector_capabilities import ProjectorCapabilities
 
 PermissionMode = Literal["restricted", "unrestricted"]
+LiveTicketTransport = Literal["mcp-stdio"]
 
 ANY_TOOL = "*"
 """Stands in for a per-path difference that no tool name can express.
@@ -128,6 +129,28 @@ def _under_launch(rule_path: Path, launch_dir: Path) -> bool:
 class RuntimeCapabilities:
     permission_modes: frozenset[PermissionMode] = frozenset()
     path_scopable_tools: frozenset[str] = frozenset()
+    live_ticket_transport: LiveTicketTransport | None = None
+
+
+@dataclass(frozen=True)
+class TicketToolLaunch:
+    command: str
+    args: tuple[str, ...]
+    env: dict[str, str] = field(repr=False)
+    server_name: str = "flowgency-tickets"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "args", tuple(self.args))
+        object.__setattr__(self, "env", dict(self.env))
+
+    def __repr__(self) -> str:
+        redacted = {name: "***" for name in self.env}
+        return (
+            "TicketToolLaunch("
+            f"command={self.command!r}, args={self.args!r}, "
+            f"env={redacted!r}, server_name={self.server_name!r}"
+            ")"
+        )
 
 
 @dataclass(frozen=True)
@@ -141,6 +164,7 @@ class IntegrationRunRequest:
     skill_arguments: tuple[str, ...] = ()
     enforce_validation: bool = True
     memory_working_dir: Path | None = None
+    ticket_tools: TicketToolLaunch | None = None
 
 
 @dataclass(frozen=True)

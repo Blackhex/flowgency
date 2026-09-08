@@ -165,3 +165,17 @@ def test_launch_environment_injects_no_empty_values(tmp_path, monkeypatch, works
     env = {name.upper() for name in captured["kwargs"]["env"]}
     assert "LANG" not in env
     assert "NUMBER_OF_PROCESSORS" not in env
+
+
+def test_launch_environment_does_not_forward_ticket_bridge_credentials(
+    tmp_path, monkeypatch, workspace
+):
+    monkeypatch.setenv("FLOWGENCY_TICKET_ENDPOINT", "http://127.0.0.1:9999")
+    monkeypatch.setenv("FLOWGENCY_TICKET_TOKEN", "not-for-copilot")
+    policy = _policy(ResolvedPermissionRule(path=workspace, tools=("read",)))
+
+    captured, _job_home = _launch(policy, workspace, tmp_path, monkeypatch)
+
+    env = {name.upper() for name in captured["kwargs"]["env"]}
+    assert "FLOWGENCY_TICKET_ENDPOINT" not in env
+    assert "FLOWGENCY_TICKET_TOKEN" not in env

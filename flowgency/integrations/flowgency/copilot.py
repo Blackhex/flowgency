@@ -1,5 +1,6 @@
 """GitHub Copilot CLI integration."""
 
+import contextlib
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ from flowgency.integrations.models import (
     ResolvedPermissionRule,
     RuntimeCapabilities,
 )
+from flowgency.integrations.ticket_tools import write_copilot_ticket_config
 from flowgency.integrations.tool_catalog import ToolCatalog, ToolDescriptor
 
 
@@ -138,6 +140,7 @@ class CopilotIntegration(BaseIntegration):
     declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"restricted", "unrestricted"}),
         path_scopable_tools=frozenset({"write"}),
+        live_ticket_transport="mcp-stdio",
     )
     _WINDOWS_SHELL_HOSTS = ("powershell.exe", "pwsh.exe")
     _WINDOWS_SCRIPT_EXTENSIONS = (".ps1",)
@@ -158,6 +161,7 @@ class CopilotIntegration(BaseIntegration):
     # The probe runs on request paths, so it must not be able to stall one for
     # long. Reporting a version is a local read; seconds is already generous.
     _VERSION_PROBE_TIMEOUT = 5
+    _HELP_PROBE_TIMEOUT = 5
     # What the CLI is given, by name. Everything else in Flowgency's environment
     # stays with Flowgency. Compared upper-cased: Windows folds the case of
     # environment names, so the same variable arrives spelled either way.
@@ -232,6 +236,19 @@ class CopilotIntegration(BaseIntegration):
             return None
         return (result.stdout or result.stderr or "").strip() or None
 
+    def _probe_cli_help(self, command: str) -> str | None:
+        result = subprocess.run(
+            [command, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=self._HELP_PROBE_TIMEOUT,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode != 0:
+            return None
+        return (result.stdout or result.stderr or "").strip() or None
+
     @staticmethod
     def _executable_stamp(command: str) -> object:
         """Identity of the installed binary, so an in-place upgrade re-probes."""
@@ -267,6 +284,36 @@ class CopilotIntegration(BaseIntegration):
         self._version_cache = (stamp, version)
         return version
 
+    def _cli_help(self) -> str | None:
+        command = self.resolve_executable()
+        stamp = self._executable_stamp(command) if command else None
+        cached = getattr(self, "_help_cache", None)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        try:
+            help_text = self._probe_cli_help(command) if command else None
+        except Exception:
+            logger.warning(
+                "copilot: could not read CLI help from %s; live ticket tools are not claimed",
+                command,
+                exc_info=True,
+            )
+            help_text = None
+        self._help_cache = (stamp, help_text)
+        return help_text
+
+    def _ticket_tool_contract(self, version: str | None) -> str | None:
+        if version is None:
+            return None
+        help_text = self._cli_help()
+        if not help_text:
+            return None
+        has_mcp_config = re.search(r"^\s+--additional-mcp-config\b", help_text, re.MULTILINE)
+        has_allow_tool = re.search(r"^\s+--allow-tool(?:\[=tools\.\.\.\])?\b", help_text, re.MULTILINE)
+        if has_mcp_config and has_allow_tool:
+            return "mcp-stdio"
+        return None
+
     @classmethod
     def _sandbox_enforces_writes(cls, reported: str | None) -> bool:
         """Is this a CLI whose sandbox was measured to refuse a denied write?"""
@@ -293,17 +340,30 @@ class CopilotIntegration(BaseIntegration):
         return cls._SANDBOX_MEASURED_VERSION <= version < cls._SANDBOX_UNMEASURED_VERSION
 
     def _capability_cache_key(self) -> str | None:
-        return self._cli_version()
+        version = self._cli_version()
+        contract = self._ticket_tool_contract(version)
+        if version is None:
+            return None
+        return f"{version}|ticket:{contract or 'none'}"
 
     def detect_runtime_capabilities(self) -> RuntimeCapabilities:
         declared = self.declared_runtime_capabilities
-        if self._sandbox_enforces_writes(self._cli_version()):
-            return declared
-        return RuntimeCapabilities(permission_modes=declared.permission_modes)
+        version = self._cli_version()
+        ticket_transport = self._ticket_tool_contract(version) if version is not None else None
+        return RuntimeCapabilities(
+            permission_modes=declared.permission_modes,
+            path_scopable_tools=(
+                declared.path_scopable_tools
+                if self._sandbox_enforces_writes(version)
+                else frozenset()
+            ),
+            live_ticket_transport=ticket_transport,
+        )
 
     def invalidate_capability_cache(self) -> None:
         super().invalidate_capability_cache()
         self._version_cache = None
+        self._help_cache = None
 
     def _identity_file(self, agent_dir: Path) -> Path:
         return agent_dir / "AGENTS.md"
@@ -805,6 +865,8 @@ class CopilotIntegration(BaseIntegration):
             # Restricted with no rule reaches nothing and grants nothing.
             granted = ()
 
+        ticket_config_path: Path | None = None
+
         cmd_args = [
             cmd, "-p", prompt_text,
             "--no-ask-user",
@@ -824,6 +886,18 @@ class CopilotIntegration(BaseIntegration):
         else:
             for t in granted:
                 cmd_args += ["--allow-tool", t]
+
+        if request.ticket_tools is not None:
+            ticket_config_path = write_copilot_ticket_config(
+                request.ticket_tools,
+                request.launch_dir / "ticket-tools.mcp.json",
+            )
+            cmd_args += [
+                "--additional-mcp-config",
+                "@" + str(ticket_config_path),
+                "--allow-tool",
+                request.ticket_tools.server_name,
+            ]
 
         start = time.monotonic()
         # On Windows `copilot` resolves to a .bat wrapper that spawns
@@ -912,6 +986,10 @@ class CopilotIntegration(BaseIntegration):
             )
         except FileNotFoundError:
             raise IntegrationError(f"GitHub Copilot CLI not found. Looked for: {cmd}")
+        finally:
+            if ticket_config_path is not None:
+                with contextlib.suppress(OSError):
+                    ticket_config_path.unlink()
 
     def prompt(self, text: str, timeout: int = 60) -> str:
         cmd = self.require_executable()

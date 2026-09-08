@@ -17,6 +17,7 @@ from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
     ResolvedPermissionRule,
+    TicketToolLaunch,
 )
 
 
@@ -286,6 +287,48 @@ def test_a_scoped_write_is_not_granted_without_a_sandbox(tmp_path, monkeypatch, 
     args = _launch(policy, tmp_path, monkeypatch)
 
     assert _granted(args) == ["read"]
+
+
+def test_ticket_server_grant_does_not_add_workspace_write(tmp_path, monkeypatch, repo):
+    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
+    prompt = tmp_path / "p.prompt"
+    prompt.write_text("do the thing", encoding="utf-8")
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = list(args)
+        return _FakeCompleted()
+
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
+    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
+    monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "shared-home"))
+
+    CopilotIntegration().run(
+        IntegrationRunRequest(
+            workspace_root=tmp_path,
+            launch_dir=tmp_path / "runtime",
+            task_file=prompt,
+            timeout=60,
+            runtime_policy=EffectiveRuntimePolicy(
+                timeout=60,
+                mode="restricted",
+                rules=(ResolvedPermissionRule(path=repo, tools=("read", "search")),),
+            ),
+            ticket_tools=TicketToolLaunch(
+                command="python",
+                args=("-m", "flowgency.tickets.mcp_server"),
+                env={
+                    "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
+                    "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
+                },
+            ),
+        )
+    )
+
+    assert _granted(captured["args"]) == ["read", "search", "flowgency-tickets"]
 
 
 def test_write_is_not_granted_when_no_rule_grants_it(tmp_path, monkeypatch, repo):

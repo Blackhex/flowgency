@@ -23,6 +23,7 @@ from flowgency.integrations.models import (
     InteractiveSetupResult,
     ProjectorCapabilities,
     RuntimeCapabilities,
+    TicketToolLaunch,
 )
 
 SIDECAR_FILENAME = ".flowgency-meta.yaml"
@@ -135,6 +136,11 @@ class BaseIntegration:
         detected = RuntimeCapabilities(
             permission_modes=detected.permission_modes & declared.permission_modes,
             path_scopable_tools=detected.path_scopable_tools & declared.path_scopable_tools,
+            live_ticket_transport=(
+                detected.live_ticket_transport
+                if detected.live_ticket_transport == declared.live_ticket_transport
+                else None
+            ),
         )
         if key is not None:
             self._capability_cache = (key, detected)
@@ -272,6 +278,22 @@ class BaseIntegration:
 
     def validate_run(self, request: IntegrationRunRequest) -> tuple[ValidationIssue, ...]:
         issues = list(self.validate_runtime_policy(request.runtime_policy))
+        if request.ticket_tools is not None and self.runtime_capabilities.live_ticket_transport is None:
+            issues.append(
+                ValidationIssue(
+                    code="unsupported-ticket-channel",
+                    scope=f"integrations.{self.name}",
+                    field="runtime.ticket_tools",
+                    message=(
+                        f"Integration '{self.name}' cannot attach the live ticket tool channel "
+                        "with the current runtime contract."
+                    ),
+                    corrective_hint=(
+                        "Use an integration with verified live ticket tool support, or run without "
+                        "ticket workflows."
+                    ),
+                )
+            )
         if not self.supports_execution:
             issues.append(
                 ValidationIssue(

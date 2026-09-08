@@ -131,6 +131,7 @@ def test_registry_runtime_capabilities_surface_is_fail_closed():
         "copilot": RuntimeCapabilities(
             permission_modes=frozenset({"restricted", "unrestricted"}),
             path_scopable_tools=frozenset({"write"}),
+            live_ticket_transport="mcp-stdio",
         ),
         "script": RuntimeCapabilities(
             permission_modes=frozenset({"unrestricted"})
@@ -155,6 +156,10 @@ def test_registry_runtime_capabilities_surface_is_fail_closed():
         assert detected.path_scopable_tools <= integration.declared_runtime_capabilities.path_scopable_tools, (
             f"{name}: detected path_scopable_tools wider than declared"
         )
+        assert (
+            detected.live_ticket_transport is None
+            or detected.live_ticket_transport == integration.declared_runtime_capabilities.live_ticket_transport
+        ), f"{name}: detected live_ticket_transport wider than declared"
 
 
 def test_widening_detector_is_capped_to_declared():
@@ -170,6 +175,7 @@ def test_widening_detector_is_capped_to_declared():
             return RuntimeCapabilities(
                 permission_modes=frozenset({"unrestricted", "restricted"}),
                 path_scopable_tools=frozenset({"write"}),
+                live_ticket_transport="mcp-stdio",
             )
 
         def _capability_cache_key(self):
@@ -188,6 +194,7 @@ def test_widening_detector_is_capped_to_declared():
     caps = integration.runtime_capabilities
     assert caps.permission_modes <= integration.declared_runtime_capabilities.permission_modes
     assert caps.path_scopable_tools <= integration.declared_runtime_capabilities.path_scopable_tools
+    assert caps.live_ticket_transport is None
 
 
 def test_builtin_ai_cli_integrations_declare_canonical_commands():
@@ -208,16 +215,19 @@ def test_builtin_ai_cli_runtime_capabilities_are_truthful(monkeypatch):
     # Stubbed both ways so the claim is pinned regardless of what this machine
     # happens to have installed.
     monkeypatch.setattr(type(copilot), "_cli_version", lambda self: "1.0.78-2")
+    monkeypatch.setattr(type(copilot), "_ticket_tool_contract", lambda self, version: "mcp-stdio")
     copilot.invalidate_capability_cache()
     try:
         assert copilot.runtime_capabilities == RuntimeCapabilities(
             permission_modes=frozenset({"restricted", "unrestricted"}),
             path_scopable_tools=frozenset({"write"}),
+            live_ticket_transport="mcp-stdio",
         )
     finally:
         copilot.invalidate_capability_cache()
 
     monkeypatch.setattr(type(copilot), "_cli_version", lambda self: None)
+    monkeypatch.setattr(type(copilot), "_ticket_tool_contract", lambda self, version: None)
     copilot.invalidate_capability_cache()
     try:
         assert copilot.runtime_capabilities == RuntimeCapabilities(
