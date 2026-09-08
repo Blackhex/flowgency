@@ -52,13 +52,17 @@ class TicketService:
         self.clock = clock
 
     def inspect(self, actor: TicketActor, ref: TicketRef) -> TicketView:
+        snapshot = self.config_store.load()
+        self._validate_actor(actor)
         self._require_team_access(actor, ref.team_id)
-        binding = self._resolve_current_binding(ref.team_id, ref.workflow_id)
+        if isinstance(actor, AgentTicketContext):
+            self._require_configured_agent(snapshot, actor)
+        binding = self._resolve_binding(snapshot, ref.team_id, ref.workflow_id)
         if binding.storage.binding_id != ref.binding_id:
             raise TicketConflict("stale-ticket", "Refresh the ticket")
         record = self.storage_factory(binding.storage).read(ref)
         try:
-            definition, snapshot = self._resolve_definition(binding)
+            definition, workflow_snapshot = self._resolve_definition(binding, snapshot=snapshot)
         except WorkflowUnavailable as error:
             return TicketView(record=record, version=None, definition=None, issues=(error.message,))
         return TicketView(
@@ -66,7 +70,7 @@ class TicketService:
             version=TicketVersion(
                 ref=ref,
                 revision=record.revision,
-                workflow_digest=snapshot.digest,
+                workflow_digest=workflow_snapshot.digest,
                 context_digest=binding.context_digest,
             ),
             definition=definition,
@@ -94,9 +98,10 @@ class TicketService:
                 raise TicketConflict("stale-ticket", "Refresh the ticket")
             if isinstance(actor, AgentTicketContext):
                 self._require_configured_agent(snapshot, actor)
-            definition, _ = self._resolve_definition(binding, snapshot=snapshot)
+            definition, workflow_snapshot = self._resolve_definition(binding, snapshot=snapshot)
             field_values = dict(values or {})
             self._validate_field_values(definition, field_values)
+            self._require_current_contract(binding, snapshot.revision, workflow_snapshot.digest)
             now = self.clock()
             event_id = uuid.uuid4().hex
             event = self._event("opened", actor, "Ticket created", event_id, now)
@@ -259,8 +264,34 @@ class TicketService:
                 version.ref,
                 version.revision,
                 operation,
-                lambda record: mutation(record, definition, now, event_id, snapshot),
+                lambda record: self._mutate_current_record(
+                    mutation,
+                    record,
+                    definition,
+                    now,
+                    event_id,
+                    snapshot,
+                    binding,
+                    snapshot_def.digest,
+                ),
             )
+
+    def _mutate_current_record(
+        self,
+        mutation: Callable[
+            [TicketRecord, WorkflowDefinition, object, str, ConfigSnapshot],
+            TicketRecord,
+        ],
+        record: TicketRecord,
+        definition: WorkflowDefinition,
+        now,
+        event_id: str,
+        snapshot: ConfigSnapshot,
+        binding: WorkflowBinding,
+        workflow_digest: str,
+    ) -> TicketRecord:
+        self._require_current_contract(binding, snapshot.revision, workflow_digest)
+        return mutation(record, definition, now, event_id, snapshot)
 
     def _assign_record(
         self,
@@ -412,6 +443,14 @@ class TicketService:
 
     def _resolve_current_binding(self, team_id: str, workflow_id: str) -> WorkflowBinding:
         snapshot = self.config_store.load()
+        return self._resolve_binding(snapshot, team_id, workflow_id)
+
+    def _resolve_binding(
+        self,
+        snapshot: ConfigSnapshot,
+        team_id: str,
+        workflow_id: str,
+    ) -> WorkflowBinding:
         try:
             return resolve_workflow_binding(snapshot, team_id, workflow_id)
         except KeyError as error:
@@ -424,14 +463,14 @@ class TicketService:
         snapshot: ConfigSnapshot | None = None,
     ) -> tuple[WorkflowDefinition, object]:
         current = snapshot or self.config_store.load()
-        library = self._library_for(current)
+        library = self.library_for(current)
         try:
             workflow_snapshot = library.inspect(binding.blueprint_id)
         except Exception as error:
             raise WorkflowUnavailable("unavailable-workflow", "Current workflow definition is unavailable") from error
         return workflow_snapshot.definition, workflow_snapshot
 
-    def _library_for(self, snapshot: ConfigSnapshot) -> WorkflowLibrary:
+    def library_for(self, snapshot: ConfigSnapshot) -> WorkflowLibrary:
         configured = snapshot.config.flowgency.workflow_library
         if configured is None:
             raise WorkflowUnavailable("unavailable-workflow", "Current workflow definition is unavailable")
@@ -440,6 +479,41 @@ class TicketService:
         if configured_root == cached_root:
             return self._library
         return WorkflowLibrary(Path(configured))
+
+    def _require_current_contract(
+        self,
+        binding: WorkflowBinding,
+        expected_config_revision: str,
+        expected_workflow_digest: str | None,
+    ) -> None:
+        current = self._load_current_snapshot()
+        current_binding = self._resolve_binding(current, binding.team_id, binding.workflow_id)
+        if current.revision != expected_config_revision and not self._bindings_match(binding, current_binding):
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        if current_binding.blueprint_id != binding.blueprint_id:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        if expected_workflow_digest is None:
+            return
+        current_definition, current_snapshot = self._resolve_definition(current_binding, snapshot=current)
+        if current_definition.id != binding.blueprint_id:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+        if current_snapshot.digest != expected_workflow_digest:
+            raise TicketConflict("stale-ticket", "Refresh the ticket")
+
+    def _bindings_match(
+        self,
+        expected: WorkflowBinding,
+        current: WorkflowBinding,
+    ) -> bool:
+        return (
+            current.storage.binding_id == expected.storage.binding_id
+            and current.context_digest == expected.context_digest
+            and current.blueprint_id == expected.blueprint_id
+        )
+
+    def _load_current_snapshot(self) -> ConfigSnapshot:
+        payload = self.config_store.path.read_bytes()
+        return self.config_store._snapshot(payload)
 
     def _validate_field_values(
         self,
