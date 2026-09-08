@@ -85,3 +85,11 @@ def raw_config(config_paths):
             }
         },
     }
+
+
+@pytest.fixture
+def workflow_env(tmp_path, raw_config):
+    from tests._ticket_helpers import make_workflow_environment
+
+    return make_workflow_environment(tmp_path, raw_config)
+
