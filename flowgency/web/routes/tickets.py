@@ -155,33 +155,28 @@ def _draft(decoded: Any) -> dict[str, Any] | None:
     return decoded if isinstance(decoded, dict) else None
 
 
-def _find_artifact_namespace(ticket_service, actor, workflow: str, artifact_id: str) -> TicketRef:
-    tickets = ticket_service.list_tickets(actor, workflow)
-    for view in tickets:
-        for artifact_ref in view.record.field_values.values():
-            if getattr(artifact_ref, "kind", None) == "id" and getattr(artifact_ref, "value", None) == artifact_id:
-                return view.ref
-    raise TicketNotFound("artifact-not-found", "No such artifact")
+def _artifact_namespace(binding) -> TicketRef:
+    return TicketRef.from_binding(binding.storage, "artifact-namespace")
 
 
 def _resolve_current_binding_id(ticket_service, team: str, workflow: str) -> str:
     return ticket_service._resolve_current_binding(team, workflow).storage.binding_id
 
 
-def _build_ticket_detail_snapshot(ticket_service, actor, team: str, workflow: str, ticket: str):
+def _build_ticket_detail_snapshot(ticket_service, actor, team: str, workflow: str, ticket: str, ticket_jobs):
     binding = ticket_service._resolve_current_binding(team, workflow)
     return build_ticket_detail_view(
         ticket_service,
         actor,
         TicketRef.from_binding(binding.storage, ticket),
+        ticket_jobs=ticket_jobs,
     )
 
 
 def _read_artifact_for_route(ticket_service, actor, team: str, workflow: str, artifact: str):
-    namespace = _find_artifact_namespace(ticket_service, actor, workflow, artifact)
     binding = ticket_service._resolve_current_binding(team, workflow)
     provider = ticket_service.storage_factory(binding.storage)
-    return provider.read_artifact(namespace, artifact)
+    return provider.read_artifact(_artifact_namespace(binding), artifact)
 
 
 @router.get("/{team}/workflows/{workflow}/tickets/{ticket}")
@@ -211,6 +206,7 @@ async def ticket_detail_snapshot(
         team,
         workflow,
         ticket,
+        services.ticket_jobs,
     )
     if detail.ticket is None and detail.issues and detail.issues[0].code == "ticket-not-found":
         raise HTTPException(status_code=404, detail="Ticket not found")

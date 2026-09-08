@@ -7,6 +7,7 @@ import pytest
 from dataclasses import replace
 
 from flowgency.jobs.authority import JobStore
+from flowgency.jobs.store import read_job, write_job
 from flowgency.tickets.artifacts import RetainedArtifact
 from flowgency.tickets.models import TicketRef, TicketRecord
 from flowgency.tickets.storages.local import LocalTicketStorage
@@ -254,3 +255,293 @@ def test_detail_and_artifact_download_use_current_namespace_only(workflow_web_en
     assert download.content == b"newsletter evidence"
     assert download.headers["content-disposition"] == 'attachment; filename="review.txt"'
     assert download.headers["x-content-type-options"] == "nosniff"
+
+
+def test_detail_snapshot_exposes_current_definition_fields_and_retained_audit_snapshots(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    env.publish_artifact_field_workflow()
+    env.publish_criteria_workflow()
+    ticket = env.create(values={"verdict": True, "summary": "Initial summary", "evidence": None})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start", actor_name=actor.agent_name),
+    )
+    artifact = env.service.publish_artifact(
+        actor,
+        env.read(ticket.ref).version,
+        "evidence.txt",
+        "text/plain",
+        b"artifact-bytes",
+    )
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(
+            outputs={"summary": "Verified existing work", "evidence": artifact},
+            assessments=(
+                {
+                    "criterion_id": "evidence-reviewed",
+                    "satisfied": True,
+                    "reasoning": "Checked the attached evidence.",
+                    "supporting_fields": ("summary", "evidence"),
+                },
+            ),
+        ),
+        env.operation("complete", actor_name=actor.agent_name),
+    )
+
+    source = env.library.inspect(env.blueprint_id)
+    fields = tuple(
+        field.model_copy(update={"label": "Review result"})
+        if field.id == "verdict"
+        else field
+        for field in source.definition.fields
+    )
+    transitions = tuple(
+        transition.model_copy(
+            update={
+                "criteria": tuple(
+                    criterion.model_copy(update={"description": "Evidence was checked"})
+                    if criterion.id == "evidence-reviewed"
+                    else criterion
+                    for criterion in transition.criteria
+                )
+            }
+        )
+        if transition.id == "complete"
+        else transition
+        for transition in source.definition.transitions
+    )
+    env.configuration_service.save_blueprint(
+        env.store.load().revision,
+        env.blueprint_id,
+        source.digest,
+        source.definition.model_copy(update={"fields": fields, "transitions": transitions}),
+    )
+
+    response = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ticket"]["state_id"] == "done"
+    assert payload["ticket"]["active_run_job_id"] == "run-a"
+    assert payload["fields"] == [
+        {
+            "id": "verdict",
+            "label": "Review result",
+            "type": "boolean",
+            "value": True,
+            "provenance": {
+                "actor_kind": "user",
+                "actor_name": "local-user",
+                "job_id": None,
+                "event_id": payload["fields"][0]["provenance"]["event_id"],
+                "recorded_at": payload["fields"][0]["provenance"]["recorded_at"],
+            },
+        },
+        {
+            "id": "summary",
+            "label": "Review summary",
+            "type": "text",
+            "value": "Verified existing work",
+            "provenance": {
+                "actor_kind": "agent",
+                "actor_name": "builder",
+                "job_id": "run-a",
+                "event_id": payload["fields"][1]["provenance"]["event_id"],
+                "recorded_at": payload["fields"][1]["provenance"]["recorded_at"],
+            },
+        },
+        {
+            "id": "evidence",
+            "label": "Evidence",
+            "type": "artifact",
+            "value": {"kind": "id", "value": artifact.value},
+            "provenance": {
+                "actor_kind": "agent",
+                "actor_name": "builder",
+                "job_id": "run-a",
+                "event_id": payload["fields"][2]["provenance"]["event_id"],
+                "recorded_at": payload["fields"][2]["provenance"]["recorded_at"],
+            },
+        },
+    ]
+    assert payload["current_definition"]["fields"][0]["label"] == "Review result"
+    assert payload["current_definition"]["transitions"][0]["criteria"][0]["description"] == "Evidence was checked"
+    assert payload["history"][-1]["data"]["transition_snapshot"]["field_defs"]["verdict"]["label"] == "Review verdict"
+    assert payload["history"][-1]["data"]["transition_snapshot"]["criteria"][0]["description"] == "Evidence was reviewed"
+    assert payload["history"][-1]["data"]["effective_outputs"]["evidence"] == {
+        "kind": "id",
+        "value": artifact.value,
+    }
+    serialized = json.dumps(payload)
+    assert str(env.root_a) not in serialized
+    assert "receipts" not in serialized
+
+
+def test_artifact_download_uses_current_namespace_without_live_ticket_reference(
+    workflow_web_env,
+):
+    env = workflow_web_env
+    ticket = env.create(values={"summary": "hello", "verdict": True})
+    retained = env.service.publish_artifact(
+        env.user,
+        ticket.version,
+        "review.txt",
+        "text/plain",
+        b"retained evidence",
+    )
+    replacement = env.service.publish_artifact(
+        env.user,
+        env.read(ticket.ref).version,
+        "replacement.txt",
+        "text/plain",
+        b"replacement evidence",
+    )
+    env.publish_artifact_field_workflow()
+    env.service.update(
+        env.user,
+        env.read(ticket.ref).version,
+        env.read(ticket.ref).patch(field_values={"evidence": replacement}),
+        env.operation("replace-live-artifact"),
+    )
+
+    response = env.client.get(f"{env.base_path}/artifacts/{retained.value}")
+
+    assert response.status_code == 200
+    assert response.content == b"retained evidence"
+    assert response.headers["content-disposition"] == 'attachment; filename="review.txt"'
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_artifact_download_reads_retained_namespace_bytes_for_empty_board(workflow_web_env):
+    env = workflow_web_env
+    artifact = RetainedArtifact.create("review.txt", "text/plain", b"orphaned evidence")
+    namespace = TicketRef.from_binding(env.binding, "artifact-namespace")
+    env.current_provider().put_artifact(namespace, artifact)
+
+    response = env.client.get(f"{env.base_path}/artifacts/{artifact.digest}")
+
+    assert response.status_code == 200
+    assert response.content == b"orphaned evidence"
+
+
+def test_detail_snapshot_reports_retryable_reservation_without_fabricating_queued_job(
+    workflow_web_env,
+    monkeypatch,
+):
+    import flowgency.jobs.submission as submission_module
+
+    env = workflow_web_env
+    monkeypatch.setattr(submission_module, "REGISTRY", {"claude-code": TicketRuntimeIntegration()})
+    monkeypatch.setattr(
+        submission_module,
+        "_submit_resolved",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("submit failed")),
+    )
+    ticket = env.create(title="Retryable queue")
+    env.service.assign(env.user, ticket.version, "builder", env.operation("assign-builder"))
+    current = env.read(ticket.ref)
+
+    with pytest.raises(RuntimeError, match="submit failed"):
+        env.client.post(
+            f"{env.base_path}/tickets/{ticket.ref.ticket_id}/run",
+            data={
+                "payload": json.dumps(
+                    {
+                        "version": current.version.model_dump(mode="json"),
+                        "operation_id": "run-request",
+                    }
+                )
+            },
+            follow_redirects=False,
+        )
+
+    detail = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot")
+
+    assert detail.status_code == 200
+    payload = detail.json()["ticket"]
+    assert payload["pending_run_job_id"] is None
+    assert payload["pending_run_status"] is None
+    assert payload["pending_run_issue"]["code"] == "pending-run-retryable"
+
+
+def test_detail_snapshot_reports_verified_durable_queued_job(workflow_web_env, monkeypatch):
+    import flowgency.jobs.submission as submission_module
+
+    env = workflow_web_env
+    monkeypatch.setattr(submission_module, "REGISTRY", {"claude-code": TicketRuntimeIntegration()})
+    ticket = env.create(title="Queued once")
+    env.service.assign(env.user, ticket.version, "builder", env.operation("assign-builder"))
+    current = env.read(ticket.ref)
+
+    response = env.client.post(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/run",
+        data={
+            "payload": json.dumps(
+                {
+                    "version": current.version.model_dump(mode="json"),
+                    "operation_id": "run-request",
+                }
+            )
+        },
+        follow_redirects=False,
+    )
+
+    detail = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot")
+
+    assert response.status_code == 303
+    payload = detail.json()["ticket"]
+    assert payload["pending_run_job_id"] is not None
+    assert payload["pending_run_status"] == "queued"
+    assert payload["pending_run_issue"] is None
+
+
+def test_detail_snapshot_hides_terminal_or_stale_pending_jobs(workflow_web_env, monkeypatch):
+    import flowgency.jobs.submission as submission_module
+
+    env = workflow_web_env
+    monkeypatch.setattr(submission_module, "REGISTRY", {"claude-code": TicketRuntimeIntegration()})
+    ticket = env.create(title="Queued once")
+    env.service.assign(env.user, ticket.version, "builder", env.operation("assign-builder"))
+    current = env.read(ticket.ref)
+
+    env.client.post(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/run",
+        data={
+            "payload": json.dumps(
+                {
+                    "version": current.version.model_dump(mode="json"),
+                    "operation_id": "run-request",
+                }
+            )
+        },
+        follow_redirects=False,
+    )
+    queued = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot").json()["ticket"]
+    job_path = env.job_store.path(env.team_id, queued["pending_run_job_id"])
+    write_job(
+        job_path,
+        replace(
+            read_job(job_path),
+            status="complete",
+            completed_at="2026-09-08T00:05:00+00:00",
+        ),
+    )
+
+    terminal = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot")
+    env.service.assign(env.user, env.read(ticket.ref).version, "observer", env.operation("assign-observer"))
+    stale = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}/snapshot")
+
+    terminal_payload = terminal.json()["ticket"]
+    assert terminal_payload["pending_run_job_id"] is None
+    assert terminal_payload["pending_run_status"] is None
+    assert terminal_payload["pending_run_issue"]["code"] == "pending-run-terminal"
+    stale_payload = stale.json()["ticket"]
+    assert stale_payload["pending_run_job_id"] is None
+    assert stale_payload["pending_run_status"] is None
+    assert stale_payload["pending_run_issue"]["code"] == "pending-run-stale"

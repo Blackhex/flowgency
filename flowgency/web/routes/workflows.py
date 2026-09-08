@@ -42,5 +42,6 @@ async def workflow_board_snapshot(
         query=query,
         assignee=assignee,
         selected_ticket_id=selected_ticket,
+        ticket_jobs=services.ticket_jobs,
     )
     return JSONResponse(view.model_dump(mode="json"))
