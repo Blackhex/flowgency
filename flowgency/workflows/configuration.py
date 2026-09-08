@@ -479,3 +479,17 @@ class WorkflowConfigurationService:
         """
         if self.store.load().revision != expected_revision:
             raise ConfigConflictError("config.yaml changed; reload before saving")
+
+    def create_blueprint(
+        self,
+        expected_revision: str,
+        blueprint_id: str,
+        definition: WorkflowDefinition,
+    ) -> WorkflowSnapshot:
+        """Create a new blueprint under the shared library guard."""
+        with workflow_operation(
+            self.store, (), (blueprint_id,), expected_revision=expected_revision
+        ) as snapshot:
+            library = self.library_for(snapshot)
+            self._assert_config_unchanged(snapshot.revision)
+            return library.create_candidate(blueprint_id, definition)

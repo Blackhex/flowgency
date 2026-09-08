@@ -77,6 +77,7 @@ from flowgency.web.routes import (
     agents_router,
     jobs_router,
     tickets_router,
+    workflow_library_router,
     workflows_router,
 )
 
@@ -981,6 +982,7 @@ templates.env.filters["integration_badge"] = integration_badge_filter
 app.include_router(admin_teams_router)
 app.include_router(admin_library_router)
 app.include_router(admin_memory_router)
+app.include_router(workflow_library_router)
 app.include_router(agents_router)
 app.include_router(agent_permissions_router)
 app.include_router(agent_routines_router)

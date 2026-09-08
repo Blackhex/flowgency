@@ -206,3 +206,37 @@ class WorkflowLibrary:
             digest=_source_digest(payload_bytes),
             source_path=path,
         )
+
+    def create_candidate(
+        self,
+        blueprint_id: str,
+        definition: WorkflowDefinition,
+    ) -> WorkflowSnapshot:
+        """Create a new blueprint source after validation, never overwriting one.
+
+        The candidate is validated and pinned to ``blueprint_id`` before any file is
+        created. If a source already exists, creation is rejected rather than
+        silently replacing it.
+        """
+        candidate = WorkflowDefinition.model_validate(definition.model_dump())
+        if candidate.id != blueprint_id:
+            raise ContractError(
+                "identity-mismatch",
+                f"Candidate id {candidate.id!r} does not match blueprint {blueprint_id!r}",
+            )
+        path = self.source_path(blueprint_id)
+        if path.exists():
+            raise ConfigConflictError("Blueprint already exists; reload before saving")
+        self._guard_no_reparse(blueprint_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = yaml.safe_dump(
+            candidate.model_dump(mode="json"), sort_keys=False, allow_unicode=True
+        )
+        payload_bytes = payload.encode("utf-8")
+        check_source_size(payload_bytes)
+        atomic_write_text(path, payload)
+        return WorkflowSnapshot(
+            definition=candidate,
+            digest=_source_digest(payload_bytes),
+            source_path=path,
+        )
