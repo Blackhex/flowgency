@@ -376,3 +376,92 @@ def test_transition_rejects_user_actor_without_mutating_ticket(workflow_env):
         )
 
     assert env.read(ticket.ref).record == before
+
+
+def test_transition_audit_snapshot_persists_session_id_and_nonempty_assessment(workflow_env):
+    env = workflow_env
+    env.publish_criteria_workflow()
+    ticket = env.create(values={"verdict": True})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start", actor_name=actor.agent_name),
+    )
+    assessment = CriterionAssessment(
+        criterion_id="evidence-reviewed",
+        satisfied=True,
+        reasoning="Evidence was inspected and confirmed complete",
+        supporting_fields=("verdict",),
+    )
+
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        env.transition_request(
+            outputs={"summary": "Reviewed with evidence"},
+            assessments=(assessment,),
+        ),
+        env.operation("complete", actor_name=actor.agent_name),
+    )
+
+    # Reread from the real provider to verify on-disk persistence
+    persisted = env.read(ticket.ref).record
+    event = persisted.events[-1]
+    snapshot = event.data
+
+    assert event.actor == actor.agent_name
+    assert snapshot["job_id"] == actor.job_id
+    assert snapshot["session_id"] == actor.session_id
+    assert snapshot["assessments"] == [
+        {
+            "criterion_id": "evidence-reviewed",
+            "satisfied": True,
+            "reasoning": "Evidence was inspected and confirmed complete",
+            "supporting_fields": ["verdict"],
+        }
+    ]
+    assert snapshot["transition_id"] == "complete"
+    assert snapshot["blueprint_id"] == env.blueprint_id
+    assert snapshot["effective_inputs"] == {"verdict": True}
+    assert snapshot["effective_outputs"] == {"summary": "Reviewed with evidence"}
+
+
+def test_attempt_only_inputs_do_not_update_current_fields_or_provenance(workflow_env):
+    env = workflow_env
+    # Ticket starts with verdict=False stored; the agent supplies True only as an attempt input
+    ticket = env.create(values={"verdict": False, "summary": "initial"})
+    actor = env.agent("builder", "run-a")
+    env.service.start_work(
+        actor,
+        ticket.version,
+        env.operation("start", actor_name=actor.agent_name),
+    )
+
+    env.service.transition(
+        actor,
+        env.read(ticket.ref).version,
+        TransitionRequest(
+            transition_id="complete",
+            inputs={"verdict": True},  # attempt-only; not a declared output
+            outputs={"summary": "Completed via input override"},
+        ),
+        env.operation("complete", actor_name=actor.agent_name),
+    )
+
+    # Reread from real provider to verify on-disk persistence
+    persisted = env.read(ticket.ref).record
+
+    # Attempt-only input does not overwrite the stored field value or its provenance
+    assert persisted.field_values["verdict"] is False
+    assert persisted.field_provenance["verdict"].actor_kind == "user"
+
+    # Declared output persists with agent provenance
+    assert persisted.field_values["summary"] == "Completed via input override"
+    prov = persisted.field_provenance["summary"]
+    assert prov.actor_kind == "agent"
+    assert prov.job_id == actor.job_id
+
+    # The accepted attempt's effective input is retained in the event snapshot
+    event = persisted.events[-1]
+    assert event.data["effective_inputs"] == {"verdict": True}
