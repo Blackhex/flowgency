@@ -596,3 +596,38 @@ def test_snapshot_json_round_trip():
     assert parsed["effective_inputs"]["verdict"] is True
     assert "field_defs" in parsed["transition_snapshot"]
 
+
+# ---------------------------------------------------------------------------
+# Finding 4 fix-round-2 – nested snapshot immutability and projection aliasing
+# ---------------------------------------------------------------------------
+
+def test_snapshot_field_def_rejects_nested_edit():
+    """field_defs entries must be immutable; item assignment must raise TypeError."""
+    result = _complete_transition()
+    with pytest.raises(TypeError):
+        result.transition_snapshot["field_defs"]["verdict"]["type"] = "text"  # type: ignore[index]
+
+
+def test_snapshot_input_entry_rejects_nested_edit():
+    """Each inputs entry must be immutable; item assignment must raise TypeError."""
+    result = _complete_transition()
+    with pytest.raises(TypeError):
+        result.transition_snapshot["inputs"][0]["required"] = False  # type: ignore[index]
+
+
+def test_to_json_projection_does_not_alias_snapshot():
+    """Mutating the to_json() output must not change the stored snapshot."""
+    result = _complete_transition()
+    projection = result.to_json()
+    projection["transition_snapshot"]["field_defs"]["verdict"]["type"] = "hacked"
+    assert result.transition_snapshot["field_defs"]["verdict"]["type"] == "boolean"
+
+
+def test_repeated_to_json_projections_are_independent():
+    """Two separate to_json() calls must return independent nested dicts."""
+    result = _complete_transition()
+    p1 = result.to_json()
+    p2 = result.to_json()
+    p1["transition_snapshot"]["field_defs"]["verdict"]["type"] = "mutated"
+    assert p2["transition_snapshot"]["field_defs"]["verdict"]["type"] == "boolean"
+

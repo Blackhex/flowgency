@@ -16,6 +16,15 @@ from flowgency.workflows.models import (
 )
 
 
+def _deep_freeze(obj: Any) -> Any:
+    """Recursively convert dicts to MappingProxyType and sequences to tuples."""
+    if isinstance(obj, dict):
+        return types.MappingProxyType({k: _deep_freeze(v) for k, v in obj.items()})
+    if isinstance(obj, (list, tuple)):
+        return tuple(_deep_freeze(i) for i in obj)
+    return obj
+
+
 def validate_field_value(
     kind: FieldKind, value: object, *, required: bool
 ) -> FieldValue:
@@ -48,7 +57,7 @@ class EvaluatedTransition:
 
     def to_json(self) -> dict[str, Any]:
         def _cv(obj: Any) -> Any:
-            if isinstance(obj, types.MappingProxyType):
+            if isinstance(obj, (types.MappingProxyType, dict)):
                 return {k: _cv(v) for k, v in obj.items()}
             if isinstance(obj, (tuple, list)):
                 return [_cv(i) for i in obj]
@@ -238,6 +247,6 @@ def evaluate_transition(
         effective_inputs=types.MappingProxyType(effective_inputs),
         effective_outputs=types.MappingProxyType(dict(outputs)),
         assessments=tuple(assessments),
-        transition_snapshot=types.MappingProxyType(snapshot),
+        transition_snapshot=_deep_freeze(snapshot),
     )
 
