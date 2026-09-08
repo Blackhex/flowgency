@@ -1644,14 +1644,6 @@ The browser follows that 303 and reads canonical JSON. Errors return 409/422/503
 with the submitted draft for HTML or the same structured issue payload for JSON.
 No arbitrary return URL or redirect from posted data is allowed.
 
-Board/detail reads load records even when a current definition is invalid and
-surface `WorkflowUnavailable` with readable history. Unknown-state tickets in an
-externally invalid definition are shown in an explicitly labeled invalid-data
-section, not moved into a fabricated state column or omitted from totals. Storage
-unavailability/corruption produces a visible board error, not an empty collection.
-Use the existing sanitized Markdown renderer (`nh3` policy) and Jinja autoescape;
-never embed raw ticket strings in executable JavaScript.
-
 - [ ] **Step 4: Add positive and negative HTTP tests.**
 
 ```python
@@ -1824,6 +1816,14 @@ Requirements tab distinguishes structured checks from qualitative assessments;
 History shows old display names/values from snapshots, not current renamed labels
 substituted into old events. All state controls are read-only; no drag handler.
 
+Board and detail pages load records even when the current definition is invalid and
+surface `WorkflowUnavailable` with readable history. Unknown-state tickets in an
+externally invalid definition are shown in an explicitly labeled invalid-data
+section, not moved into a fabricated state column or omitted from totals. Storage
+unavailability/corruption produces a visible board error, not an empty collection.
+Use the existing sanitized Markdown renderer (`nh3` policy) and Jinja autoescape;
+never embed raw ticket strings in executable JavaScript.
+
 - [ ] **Step 4: Add visual and behavior coverage against the approved assets.**
 
 ```typescript
@@ -1855,8 +1855,11 @@ case into an accidental last-write-wins overwrite.
 
 Run `python -m pytest tests/test_workflow_routes.py tests/test_ticket_routes.py -q`
 and `npm run test:ui -- tests/ui/workflow_board.spec.ts`.
-Review desktop-light/dark and mobile-light/dark screenshots, then commit
-`feat(ui): add workflow boards and ticket inspector`.
+Verify that `test_workflow_routes.py` and `test_ticket_routes.py` include: HTML GET
+responses for board and detail pages (200 with board/ticket data), HTML error states
+for invalid-definition and unavailable-storage boards, and draft retention on
+409/422 POST responses. Review desktop-light/dark and mobile-light/dark screenshots,
+then commit `feat(ui): add workflow boards and ticket inspector`.
 
 ## Task 12: Build the Approved Workflow Library Editor
 
