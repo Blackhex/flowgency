@@ -10,11 +10,14 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from flowgency.tickets.broker import TicketBroker
 from flowgency.tickets.models import TicketRef
+from flowgency.workflows.models import ArtifactRef
 
 
 def test_mcp_stdio_lifecycle_persists_mid_run(workflow_env):
     env = workflow_env
     worktree = Path(__file__).resolve().parents[1]
+    env.publish_artifact_field_workflow()
+    env.publish_criteria_workflow()
 
     async def exercise() -> None:
         authority = env.running_job("builder", "run-a")
@@ -113,11 +116,33 @@ def test_mcp_stdio_lifecycle_persists_mid_run(workflow_env):
                             "version": started_version,
                             "operation_id": "mcp-transition",
                             "transition_id": "complete",
-                            "outputs": {"summary": "Done"},
+                            "inputs": {"verdict": True},
+                            "outputs": {
+                                "summary": "Done",
+                                "evidence": {
+                                    "kind": "url",
+                                    "value": "https://example.com/evidence",
+                                },
+                            },
+                            "assessments": [
+                                {
+                                    "criterion_id": "evidence-reviewed",
+                                    "satisfied": True,
+                                    "reasoning": "Reviewed evidence",
+                                    "supporting_fields": ["summary", "evidence"],
+                                }
+                            ],
                         },
                     )
                     transitioned_payload = transitioned.structured_content
                     assert transitioned_payload["ok"] is True
+                    record = env.current_provider().read(
+                        env.current_provider()._ref_for(ref["team_id"], ref["workflow_id"], ref["ticket_id"])
+                    )
+                    assert record.field_values["evidence"] == ArtifactRef(
+                        kind="url",
+                        value="https://example.com/evidence",
+                    )
                     rejected = await session.call_tool(
                         "ticket_transition",
                         {
@@ -166,7 +191,7 @@ def _assert_create_schema(schema: Mapping[str, object] | None) -> None:
     _assert_schema_type(schema, properties["title"], "string")
     _assert_schema_type(schema, properties["description"], "string")
     _assert_schema_type(schema, properties["operation_id"], "string")
-    _assert_schema_type(schema, properties["field_values"], "object")
+    _assert_field_value_map_schema(schema, properties["field_values"])
     assert "actor" not in properties
     assert "assignee" not in properties
     assert "config" not in properties
@@ -190,9 +215,7 @@ def _assert_report_schema(schema: Mapping[str, object] | None) -> None:
     _assert_ticket_version_schema(schema, properties["version"])
     _assert_schema_type(schema, properties["operation_id"], "string")
     _assert_schema_type(schema, properties["message"], "string")
-    assessments = _resolve_schema(schema, properties["assessments"])
-    _assert_schema_type(schema, assessments, "array")
-    _assert_schema_type(schema, assessments["items"], "object")
+    _assert_assessment_array_schema(schema, properties["assessments"])
     assert "actor" not in properties
     assert "assignee" not in properties
     assert "config" not in properties
@@ -209,11 +232,9 @@ def _assert_transition_schema(schema: Mapping[str, object] | None) -> None:
     _assert_ticket_version_schema(schema, properties["version"])
     _assert_schema_type(schema, properties["operation_id"], "string")
     _assert_schema_type(schema, properties["transition_id"], "string")
-    _assert_schema_type(schema, properties["inputs"], "object")
-    _assert_schema_type(schema, properties["outputs"], "object")
-    assessments = _resolve_schema(schema, properties["assessments"])
-    _assert_schema_type(schema, assessments, "array")
-    _assert_schema_type(schema, assessments["items"], "object")
+    _assert_field_value_map_schema(schema, properties["inputs"])
+    _assert_field_value_map_schema(schema, properties["outputs"])
+    _assert_assessment_array_schema(schema, properties["assessments"])
     assert "actor" not in properties
     assert "assignee" not in properties
     assert "config" not in properties
@@ -263,6 +284,68 @@ def _assert_ticket_ref_schema(root: Mapping[str, object] | None, schema: Mapping
     _assert_schema_type(root, properties["team_id"], "string")
     _assert_schema_type(root, properties["workflow_id"], "string")
     _assert_schema_type(root, properties["ticket_id"], "string")
+
+
+def _assert_field_value_map_schema(
+    root: Mapping[str, object] | None,
+    schema: Mapping[str, object] | None,
+) -> None:
+    resolved = _resolve_schema(root, schema)
+    assert resolved.get("type") == "object"
+    additional = resolved.get("additionalProperties")
+    assert isinstance(additional, Mapping)
+    variants = additional.get("anyOf")
+    assert isinstance(variants, list)
+    seen = set()
+    for variant in variants:
+        assert isinstance(variant, Mapping)
+        candidate = _resolve_schema(root, variant)
+        if candidate.get("type") == "object":
+            _assert_artifact_ref_schema(root, candidate)
+            seen.add("artifact")
+            continue
+        seen.add(candidate.get("type"))
+    assert seen == {"artifact", "boolean", "integer", "number", "string", "null"}
+
+
+def _assert_assessment_array_schema(
+    root: Mapping[str, object] | None,
+    schema: Mapping[str, object] | None,
+) -> None:
+    resolved = _resolve_schema(root, schema)
+    _assert_schema_type(root, resolved, "array")
+    _assert_criterion_assessment_schema(root, resolved["items"])
+
+
+def _assert_artifact_ref_schema(
+    root: Mapping[str, object] | None,
+    schema: Mapping[str, object] | None,
+) -> None:
+    resolved = _resolve_schema(root, schema)
+    _assert_closed_object_schema(root, resolved, ("kind", "value"))
+    properties = resolved["properties"]
+    _assert_schema_type(root, properties["kind"], "string")
+    _assert_schema_type(root, properties["value"], "string")
+
+
+def _assert_criterion_assessment_schema(
+    root: Mapping[str, object] | None,
+    schema: Mapping[str, object] | None,
+) -> None:
+    resolved = _resolve_schema(root, schema)
+    _assert_closed_object_schema(
+        root,
+        resolved,
+        ("criterion_id", "satisfied", "reasoning", "supporting_fields"),
+    )
+    properties = resolved["properties"]
+    _assert_schema_type(root, properties["criterion_id"], "string")
+    bool_schema = _resolve_schema(root, properties["satisfied"])
+    assert bool_schema.get("type") == "boolean"
+    _assert_schema_type(root, properties["reasoning"], "string")
+    supporting_fields = _resolve_schema(root, properties["supporting_fields"])
+    assert supporting_fields.get("type") == "array"
+    _assert_schema_type(root, supporting_fields["items"], "string")
 
 
 def _assert_closed_object_schema(

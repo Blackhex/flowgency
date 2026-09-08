@@ -371,6 +371,127 @@ def test_broker_redacts_validation_details_and_keeps_422(workflow_env):
     assert "private/server/path" not in serialized.lower()
 
 
+def test_parse_ticket_command_redacts_unknown_and_dynamic_location_keys(workflow_env):
+    ticket = workflow_env.create()
+    sentinel = "PRIVATE-SENTINEL-C:/private/server/path"
+    cases = (
+        (
+            "create_ticket",
+            {
+                "workflow_id": "board-a",
+                "title": "MCP ticket",
+                "description": "Body text.",
+                "operation_id": "create-redaction-extra",
+                sentinel: "leak-me",
+            },
+            {()},
+        ),
+        (
+            "start_work",
+            {
+                "version": {
+                    **ticket.version.model_dump(mode="json"),
+                    "ref": {
+                        **ticket.ref.model_dump(mode="json"),
+                        sentinel: "leak-me",
+                    },
+                },
+                "operation_id": "start-redaction-extra",
+            },
+            {("version",)},
+        ),
+        (
+            "update_ticket",
+            {
+                "version": ticket.version.model_dump(mode="json"),
+                "operation_id": "update-redaction-map",
+                "field_values": {sentinel: []},
+            },
+            {("field_values",)},
+        ),
+    )
+
+    for operation, payload, allowed_locations in cases:
+        with pytest.raises(InvalidTicketRequest) as exc_info:
+            parse_ticket_command(operation, payload)
+
+        error_payload = exc_info.value.as_dict()
+        serialized = json.dumps(error_payload, sort_keys=True)
+
+        assert error_payload["code"] == "invalid-request"
+        assert error_payload["details"]["issues"]
+        assert {
+            tuple(issue["location"])
+            for issue in error_payload["details"]["issues"]
+        } <= allowed_locations
+        assert sentinel not in serialized
+        assert sentinel.lower() not in serialized.lower()
+        assert "private/server/path" not in serialized.lower()
+
+
+def test_broker_redacts_unknown_and_dynamic_location_keys_and_keeps_422(workflow_env):
+    sentinel = "PRIVATE-SENTINEL-C:/private/server/path"
+    ticket = workflow_env.create()
+    authority = workflow_env.running_job("builder", "run-a")
+    cases = (
+        (
+            "create_ticket",
+            {
+                "workflow_id": "board-a",
+                "title": "MCP ticket",
+                "description": "Body text.",
+                "operation_id": "create-redaction-extra",
+                sentinel: "leak-me",
+            },
+            {()},
+        ),
+        (
+            "start_work",
+            {
+                "version": {
+                    **ticket.version.model_dump(mode="json"),
+                    "ref": {
+                        **ticket.ref.model_dump(mode="json"),
+                        sentinel: "leak-me",
+                    },
+                },
+                "operation_id": "start-redaction-extra",
+            },
+            {("version",)},
+        ),
+        (
+            "update_ticket",
+            {
+                "version": ticket.version.model_dump(mode="json"),
+                "operation_id": "update-redaction-map",
+                "field_values": {sentinel: []},
+            },
+            {("field_values",)},
+        ),
+    )
+
+    with TicketBroker(workflow_env.service, workflow_env.access_registry, authority=authority) as broker:
+        for operation, payload, allowed_locations in cases:
+            status, response = _raw_call(
+                broker.endpoint.url,
+                operation,
+                payload,
+                token=broker.endpoint.grant.token,
+            )
+            serialized = json.dumps(response, sort_keys=True)
+
+            assert status == 422
+            assert response["error"]["code"] == "invalid-request"
+            assert response["error"]["details"]["issues"]
+            assert {
+                tuple(issue["location"])
+                for issue in response["error"]["details"]["issues"]
+            } <= allowed_locations
+            assert sentinel not in serialized
+            assert sentinel.lower() not in serialized.lower()
+            assert "private/server/path" not in serialized.lower()
+
+
 def test_failed_authentication_does_not_create_registry_directory(workflow_env):
     env = workflow_env
     target = env.access_registry._access_path(env.team_id, "missing-job", create=False).parent

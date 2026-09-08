@@ -21,6 +21,7 @@ from flowgency.tickets.models import (
 )
 from flowgency.tickets.service import TicketService
 from flowgency.workflows.configuration import WorkflowBinding
+from flowgency.workflows.models import CriterionAssessment, FieldValue
 
 
 class InvalidTicketRequest(TicketStorageError):
@@ -53,7 +54,7 @@ class TicketCreateCommand(BaseModel):
     workflow_id: StrictStr
     title: StrictStr
     description: StrictStr
-    field_values: dict[str, object] = Field(default_factory=dict)
+    field_values: dict[str, FieldValue] = Field(default_factory=dict)
     operation_id: StrictStr
 
 
@@ -69,7 +70,7 @@ class TicketUpdateCommand(BaseModel):
     operation_id: StrictStr
     title: StrictStr | None = None
     description: StrictStr | None = None
-    field_values: dict[str, object] | None = None
+    field_values: dict[str, FieldValue] | None = None
 
     def patch(self) -> TicketPatch:
         return TicketPatch(
@@ -84,7 +85,7 @@ class TicketReportCommand(BaseModel):
     version: TicketVersion
     operation_id: StrictStr
     message: StrictStr
-    assessments: tuple[dict[str, object], ...] = ()
+    assessments: tuple[CriterionAssessment, ...] = ()
 
     def report(self) -> TicketReport:
         return TicketReport(message=self.message, assessments=self.assessments)
@@ -95,9 +96,9 @@ class TicketTransitionCommand(BaseModel):
     version: TicketVersion
     operation_id: StrictStr
     transition_id: StrictStr
-    inputs: dict[str, object] = Field(default_factory=dict)
-    outputs: dict[str, object] = Field(default_factory=dict)
-    assessments: tuple[dict[str, object], ...] = ()
+    inputs: dict[str, FieldValue] = Field(default_factory=dict)
+    outputs: dict[str, FieldValue] = Field(default_factory=dict)
+    assessments: tuple[CriterionAssessment, ...] = ()
 
     def request(self) -> TransitionRequest:
         return TransitionRequest(
@@ -158,17 +159,19 @@ TicketCommand = (
 )
 
 
-def _safe_validation_issues(error: ValidationError) -> list[dict[str, object]]:
+def _safe_validation_issues(
+    error: ValidationError,
+    model: type[BaseModel],
+) -> list[dict[str, object]]:
+    safe_top_level_fields = frozenset(model.model_fields)
     issues: list[dict[str, object]] = []
     for issue in error.errors(include_url=False):
         raw_location = issue.get("loc", ())
         location: list[str | int] = []
-        if isinstance(raw_location, tuple | list):
-            for part in raw_location:
-                if isinstance(part, str | int):
-                    location.append(part)
-                else:
-                    location.append(str(part))
+        if isinstance(raw_location, tuple | list) and raw_location:
+            first = raw_location[0]
+            if isinstance(first, str) and first in safe_top_level_fields:
+                location.append(first)
         issue_type = issue.get("type")
         issues.append(
             {
@@ -202,7 +205,7 @@ def parse_ticket_command(operation: str, payload: dict[str, Any]) -> TicketComma
         raise InvalidTicketRequest(
             "invalid-request",
             "Ticket request payload is invalid",
-            issues=_safe_validation_issues(error),
+            issues=_safe_validation_issues(error, model),
         ) from error
 
 
