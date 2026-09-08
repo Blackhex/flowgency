@@ -176,6 +176,14 @@ def _validation_ticket_tools() -> TicketToolLaunch:
     )
 
 
+def _requires_live_ticket_tools(request: JobRequest, team) -> bool:
+    if request.ticket_target is not None:
+        return True
+    if request.trigger not in {"manual_prompt", "scheduled_prompt"}:
+        return False
+    return bool(team.workflows)
+
+
 def resolve_job_request(
     request: JobRequest,
     *,
@@ -259,7 +267,7 @@ def resolve_job_request(
             enforce_validation=True,
             memory_working_dir=None,
             ticket_tools=(
-                _validation_ticket_tools() if request.ticket_target is not None else None
+                _validation_ticket_tools() if _requires_live_ticket_tools(request, team) else None
             ),
         )
     )

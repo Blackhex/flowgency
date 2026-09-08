@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import yaml
 
@@ -14,12 +15,14 @@ from flowgency.blueprints.cache import release_pin
 from flowgency.configuration.models import MemorySelector
 from flowgency.permissions.zones import ZONE_INSTRUCTIONS
 from flowgency.configuration.store import load_config_snapshot
+from flowgency.configuration.store import ConfigStore
 from flowgency.fs.locks import LockCancelledError, exclusive_lock
 from flowgency.integrations import get_integration
 from flowgency.integrations.models import (
     EffectiveRuntimePolicy,
     IntegrationRunRequest,
 )
+from flowgency.integrations.ticket_tools import build_ticket_tool_launch
 from flowgency.memory.models import ResolvedMemory
 from flowgency.prompts.projection import project_prompt_snapshots
 from flowgency.memory.publication import (
@@ -36,6 +39,11 @@ from flowgency.memory.store import (
 from flowgency.records.ingest import ingest_records
 from flowgency.records.outbox import copy_outbox_memory_to_stage, create_outbox
 from flowgency.records.validation import validate_outbox, writable_agent_names
+from flowgency.tickets.access import TicketAccessRegistry
+from flowgency.tickets.broker import TicketBroker
+from flowgency.tickets.service import TicketService
+from flowgency.tickets.storages.registry import resolve_storage
+from flowgency.workflows.library import WorkflowLibrary
 
 from .atomic import atomic_write_text
 from .authority import JobAuthorityError, JobAuthorityRef, JobStore
@@ -43,12 +51,15 @@ from .artifacts import JobArtifact, retain_failed_stage, retain_rejected_records
 from .changes import capture_base_sha, capture_git_changes
 from .launch_view import create_launch_view
 from .models import JobRecord
+from .processes import ProcessStopEvidence, RuntimeProcessLifecycle
 from .store import (
     InvalidJobTransition,
+    job_lock_path,
     read_job,
     transition_job,
     write_job,
 )
+from .tickets import TicketJobCoordinator, _ticket_task_input
 
 logger = logging.getLogger(__name__)
 
@@ -307,6 +318,88 @@ def _merge_failed_terminal_metadata(
     return updated
 
 
+def _merge_result_metadata(job_path: Path, update: dict[str, Any]) -> JobRecord:
+    with exclusive_lock(job_lock_path(job_path), wait=True):
+        record = read_job(job_path)
+        merged = dict(record.result_metadata or {})
+        merged.update(update)
+        updated = replace(record, result_metadata=merged or None)
+        write_job(job_path, updated)
+        return updated
+
+
+def _requires_live_ticket_tools(record: JobRecord, snapshot) -> bool:
+    if record.spec.ticket_target is not None:
+        return True
+    if record.spec.trigger not in {"manual_prompt", "scheduled_prompt"}:
+        return False
+    team = snapshot.config.teams.get(record.spec.team_key)
+    return bool(team and team.workflows)
+
+
+def _ticket_runtime(record: JobRecord, job_store: JobStore):
+    config_store = ConfigStore(Path(record.spec.config_path))
+    snapshot = config_store.load()
+    if not _requires_live_ticket_tools(record, snapshot):
+        return None
+    workflow_library = snapshot.config.flowgency.workflow_library
+    if workflow_library is None:
+        raise ValueError("Current workflow definition is unavailable")
+    registry = TicketAccessRegistry(job_store)
+    service = TicketService(
+        config_store,
+        WorkflowLibrary(Path(workflow_library)),
+        resolve_storage,
+        registry.validate_context,
+        clock=lambda: datetime.now(timezone.utc),
+    )
+    coordinator = TicketJobCoordinator(
+        service=service,
+        job_store=job_store,
+        config_store=config_store,
+        submitter=lambda request: None,
+    )
+    return SimpleNamespace(
+        config_store=config_store,
+        snapshot=snapshot,
+        registry=registry,
+        service=service,
+        coordinator=coordinator,
+    )
+
+
+def _refresh_ticket_prompt(task_input: str, current_record) -> str:
+    marker = "\n## Flowgency reporting protocol"
+    _, separator, suffix = task_input.partition(marker)
+    refreshed = _ticket_task_input(current_record)
+    if not separator:
+        return refreshed
+    return refreshed + separator + suffix
+
+
+def _ticket_cleanup_metadata(
+    stopped: ProcessStopEvidence,
+    result,
+) -> dict[str, Any]:
+    if result.cleared and not result.pending_cleanup:
+        status = "cleared"
+    elif result.pending_cleanup and not result.cleared:
+        status = "pending"
+    elif result.cleared:
+        status = "partial"
+    else:
+        status = "idle"
+    return {
+        "status": status,
+        "job_id": stopped.job_id,
+        "generation": stopped.generation,
+        "confirmed": stopped.confirmed,
+        "reason": stopped.reason,
+        "cleared": [ref.model_dump(mode="json") for ref in result.cleared],
+        "pending_cleanup": [ref.model_dump(mode="json") for ref in result.pending_cleanup],
+    }
+
+
 def resolve_job_context(spec):
     runtime_policy = spec.runtime_policy.to_effective_policy()
     integration = get_integration(spec.integration_name)
@@ -479,7 +572,59 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     enforce_validation=True,
                     memory_working_dir=outbox.memory,
                 )
-                result = integration.run(request)
+                ticket_runtime = None
+                broker = None
+                ticket_generation = None
+                result = None
+                try:
+                    ticket_runtime = _ticket_runtime(record, store)
+                    if ticket_runtime is not None:
+                        broker = TicketBroker(
+                            ticket_runtime.service,
+                            ticket_runtime.registry,
+                            authority=authority,
+                        )
+                        endpoint = broker.start()
+                        ticket_generation = endpoint.grant.context.session_id
+                        if record.spec.ticket_target is not None:
+                            ticket_view = ticket_runtime.coordinator.preflight(record)
+                            prompt_path.write_text(
+                                _refresh_ticket_prompt(record.spec.task_input, ticket_view.record),
+                                encoding="utf-8",
+                            )
+                        request = replace(
+                            request,
+                            ticket_tools=replace(
+                                build_ticket_tool_launch(endpoint),
+                                lifecycle=RuntimeProcessLifecycle(
+                                    job_id=record.spec.job_id,
+                                    generation=ticket_generation,
+                                ),
+                            ),
+                        )
+                    result = integration.run(request)
+                finally:
+                    if broker is not None and ticket_runtime is not None and ticket_generation is not None:
+                        stop_evidence = (
+                            getattr(result, "process_stop_evidence", None)
+                            if result is not None
+                            else None
+                        )
+                        if stop_evidence is None:
+                            stop_evidence = ProcessStopEvidence(
+                                job_id=record.spec.job_id,
+                                generation=ticket_generation,
+                                confirmed=False,
+                                reason="unknown",
+                            )
+                        try:
+                            broker.close()
+                        finally:
+                            cleanup = ticket_runtime.coordinator.cleanup(authority, stop_evidence)
+                            _merge_result_metadata(
+                                job_path,
+                                {"ticket_cleanup": _ticket_cleanup_metadata(stop_evidence, cleanup)},
+                            )
                 policy_note = _unenforced_policy_note(result)
                 stdout_path.write_text(result.stdout, encoding="utf-8")
                 persisted_stderr_path = None

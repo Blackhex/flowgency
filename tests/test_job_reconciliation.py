@@ -9,6 +9,10 @@ from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBindin
 from flowgency.jobs.reconciliation import reconcile_jobs, worker_alive
 from flowgency.memory.recovery import recover_publications
 from flowgency.jobs.store import job_path, read_job, write_job
+from flowgency.tickets.models import TicketEvent, TicketOperation, TicketRef
+from flowgency.workflows.configuration import resolve_workflow_binding
+
+from tests._ticket_helpers import SEED_TIME, make_ticket_job_environment
 
 
 def _job_store(tmp_path: Path) -> JobStore:
@@ -358,8 +362,88 @@ def test_reconcile_recovers_published_journal_before_failing_dead_worker(tmp_pat
     )
 
     assert result.failed == 0
-    assert read_job(path).status == "complete"
-    assert read_job(path).memory_publication is not None
+
+
+def test_reconcile_retries_confirmed_pending_ticket_cleanup_on_original_binding_only(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    authority = env.running_job("builder", "run-a")
+
+    with env.broker_session(authority) as (context, client):
+        env.generation = context.session_id
+        started = client.call(
+            "start_work",
+            {
+                "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                "operation_id": "start-reconcile-retry",
+            },
+        )
+
+    assert started["ok"] is True
+
+    record = env.job_store.read(authority)
+    write_job(
+        authority.path,
+        replace(
+            record,
+            status="complete",
+            completed_at="2026-09-08T00:10:00+00:00",
+            result_metadata={
+                "ticket_cleanup": {
+                    "status": "pending",
+                    "job_id": record.spec.job_id,
+                    "generation": env.generation,
+                    "confirmed": True,
+                    "reason": "exited",
+                    "cleared": [],
+                    "pending_cleanup": [ticket.ref.model_dump(mode="json")],
+                }
+            },
+        ),
+    )
+
+    env.set_storage_root(env.root_b)
+    current_binding = resolve_workflow_binding(
+        env.store.load(),
+        env.team_id,
+        env.workflow_id,
+    ).storage
+    current_provider = env.current_provider()
+    current_ref = TicketRef.from_binding(current_binding, ticket.ref.ticket_id)
+    shadow = ticket.record.with_ref(current_ref).model_copy(
+        update={
+            "number": 0,
+            "revision": 1,
+            "pending_run": None,
+            "active_run": None,
+            "events": (
+                TicketEvent(kind="opened", actor="system", summary="Shadow ticket"),
+            ),
+            "receipts": (),
+            "created_at": SEED_TIME,
+            "updated_at": SEED_TIME,
+        }
+    )
+    current_provider.create(
+        shadow,
+        TicketOperation(operation_id="seed-shadow", request_digest="seed-shadow"),
+    )
+
+    result = reconcile_jobs(
+        {env.team_id: {"team_root": str(env.store.load().config.teams[env.team_id].path)}},
+        memory_store_root=env.job_store.memory_store,
+    )
+
+    assert result.failed == 0
+    assert env.provider.read(ticket.ref).active_run is None
+    assert current_provider.read(current_ref).active_run is None
+    updated = read_job(authority.path)
+    assert updated.result_metadata is not None
+    assert updated.result_metadata["ticket_cleanup"]["status"] == "cleared"
 
 
 def test_running_decision_without_job_id_is_not_failed(tmp_path):

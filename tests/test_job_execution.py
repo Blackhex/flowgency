@@ -28,6 +28,7 @@ from flowgency.configuration.models import MemorySelector
 from flowgency.blueprints.cache import active_pins, pin_artifact
 from flowgency.fs.locks import exclusive_lock
 from flowgency.permissions.zones import ZONE_INSTRUCTIONS, ZONE_MEMORY, ZONE_OUTBOX
+from tests._ticket_helpers import TicketRuntimeIntegration, make_ticket_job_environment
 
 
 def _authority(spec: JobSpec):
@@ -1109,6 +1110,414 @@ def test_execute_job_persists_session_id_from_failed_run(tmp_path, monkeypatch):
     execute_job(fixture.authority)
 
     assert read_job(fixture.job_path).session_id == "sess-fail-xyz"
+
+
+def test_execute_job_workflow_team_run_opens_live_ticket_broker_and_persists_cleanup(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    from flowgency.integrations import RunResult
+    from flowgency.integrations import FileChange
+    from flowgency.integrations.models import EffectiveRuntimePolicy
+    from flowgency.jobs.models import JobRecord, JobRequest
+    from flowgency.jobs.processes import ProcessStopEvidence
+    from flowgency.jobs.resolution import resolve_job_request
+    from flowgency.prompts import PromptStore
+    from flowgency.blueprints import CompilationCache
+    from flowgency.blueprints.library import BlueprintLibrary
+    from flowgency.tickets.broker import TicketToolClient
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    config = env.store.path
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            assert request.ticket_tools is not None
+            assert request.ticket_tools.lifecycle is not None
+            assert request.ticket_tools.lifecycle.job_id == record.spec.job_id
+            client = TicketToolClient(
+                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+            )
+            looked_up = client.call(
+                "get_ticket",
+                {"ref": ticket.ref.model_dump(mode="json")},
+            )
+            assert looked_up["ok"] is True
+            started = client.call(
+                "start_work",
+                {
+                    "version": ticket.version.model_dump(mode="json"),
+                    "operation_id": "start-workflow-team-run",
+                },
+            )
+            assert started["ok"] is True
+            live = env.read(ticket.ref).record
+            assert live.active_run is not None
+            assert live.active_run.job_id == record.spec.job_id
+            assert live.active_run.session_id == request.ticket_tools.lifecycle.generation
+            Path(request.workspace_root / "changed.txt").write_text("changed\n", encoding="utf-8")
+            return RunResult(
+                0,
+                "done",
+                "",
+                0.1,
+                changed_files=[FileChange("changed.txt", "added", 1, 0)],
+                session_id="native-cli-session",
+                process_stop_evidence=ProcessStopEvidence(
+                    job_id=record.spec.job_id,
+                    generation=request.ticket_tools.lifecycle.generation,
+                    confirmed=True,
+                    reason="exited",
+                ),
+            )
+
+    spec = resolve_job_request(
+        JobRequest(
+            config_path=config,
+            team_key=env.team_id,
+            agent_name="builder",
+            trigger="manual_prompt",
+            routine_id=None,
+            task_input="Inspect workflow tickets.",
+        ),
+        config_store=env.store,
+        library=BlueprintLibrary(env.store.load().config.flowgency.agent_library),
+        cache=CompilationCache(env.store.load().config.flowgency.compilation_cache, {"claude-code": Integration.projector}),
+        prompt_store=PromptStore(env.store.load().config.flowgency.prompt_store),
+        integrations={"claude-code": Integration()},
+    )
+    authority = env.job_store.create(JobRecord.from_spec(spec))
+    record = env.job_store.read(authority)
+
+    monkeypatch.setattr(
+        "flowgency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            workspace_root=Path(spec.workspace_root),
+            integration=Integration(),
+            timeout=30,
+            sandbox_root=None,
+            team_root=Path(spec.team_root),
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
+        ),
+    )
+
+    result = execute_job(authority)
+
+    stored = read_job(authority.path)
+    assert result.status == "complete"
+    assert stored.session_id == "native-cli-session"
+    assert stored.changed_files == [
+        {
+            "path": "changed.txt",
+            "status": "added",
+            "lines_added": 1,
+            "lines_removed": 0,
+        }
+    ]
+    assert stored.result_metadata is not None
+    assert stored.result_metadata["ticket_cleanup"]["status"] == "cleared"
+    assert stored.result_metadata["ticket_cleanup"]["generation"]
+    assert stored.result_metadata["ticket_cleanup"]["cleared"] == [
+        ticket.ref.model_dump(mode="json")
+    ]
+    assert stored.result_metadata["ticket_cleanup"]["pending_cleanup"] == []
+    assert env.read(ticket.ref).record.active_run is None
+
+
+def _workflow_team_manual_authority(env, integration):
+    from flowgency.blueprints import CompilationCache
+    from flowgency.blueprints.library import BlueprintLibrary
+    from flowgency.jobs.models import JobRecord, JobRequest
+    from flowgency.jobs.resolution import resolve_job_request
+    from flowgency.prompts import PromptStore
+
+    spec = resolve_job_request(
+        JobRequest(
+            config_path=env.store.path,
+            team_key=env.team_id,
+            agent_name="builder",
+            trigger="manual_prompt",
+            routine_id=None,
+            task_input="Inspect workflow tickets.",
+        ),
+        config_store=env.store,
+        library=BlueprintLibrary(env.store.load().config.flowgency.agent_library),
+        cache=CompilationCache(
+            env.store.load().config.flowgency.compilation_cache,
+            {"claude-code": type(integration).projector},
+        ),
+        prompt_store=PromptStore(env.store.load().config.flowgency.prompt_store),
+        integrations={"claude-code": integration},
+    )
+    authority = env.job_store.create(JobRecord.from_spec(spec))
+    return authority, env.job_store.read(authority)
+
+
+def _patch_workflow_execution_context(monkeypatch, spec, integration):
+    monkeypatch.setattr(
+        "flowgency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            workspace_root=Path(spec.workspace_root),
+            integration=integration,
+            timeout=30,
+            sandbox_root=None,
+            team_root=Path(spec.team_root),
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
+        ),
+    )
+
+
+def test_execute_ticket_target_job_refreshes_prompt_from_current_ticket(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    from flowgency.integrations import RunResult
+    from flowgency.jobs.processes import ProcessStopEvidence
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder", "Original title")
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+    authority = env.jobs.authority_for_handle(handle)
+
+    updated_view = env.read(ticket.ref)
+    env.service.update(
+        env.user,
+        updated_view.version,
+        updated_view.patch(title="Updated title"),
+        env.operation("retitle-before-run"),
+    )
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            assert request.ticket_tools is not None
+            prompt_text = request.task_file.read_text(encoding="utf-8")
+            assert "Updated title" in prompt_text
+            assert "Original title" not in prompt_text
+            return RunResult(
+                0,
+                "done",
+                "",
+                0.1,
+                session_id="native-cli-session",
+                process_stop_evidence=ProcessStopEvidence(
+                    job_id=handle.job_id,
+                    generation=request.ticket_tools.lifecycle.generation,
+                    confirmed=True,
+                    reason="exited",
+                ),
+            )
+
+    _patch_workflow_execution_context(
+        monkeypatch,
+        env.jobs.read(handle).spec,
+        Integration(),
+    )
+
+    result = execute_job(authority)
+
+    assert result.status == "complete"
+
+
+def test_execute_job_workflow_team_retains_active_on_unknown_evidence_and_closes_broker(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    from flowgency.integrations import RunResult
+    from flowgency.tickets.broker import TicketToolClient
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    captured = {}
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            client = TicketToolClient(
+                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+            )
+            captured["client"] = client
+            captured["ref"] = ticket.ref.model_dump(mode="json")
+            started = client.call(
+                "start_work",
+                {
+                    "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                    "operation_id": "start-unknown-evidence",
+                },
+            )
+            assert started["ok"] is True
+            return RunResult(0, "done", "", 0.1, session_id="native-cli-session")
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    result = execute_job(authority)
+
+    assert result.status == "complete"
+    assert env.read(ticket.ref).record.active_run is not None
+    stored = read_job(authority.path)
+    assert stored.result_metadata["ticket_cleanup"]["status"] == "pending"
+    assert stored.result_metadata["ticket_cleanup"]["confirmed"] is False
+    failed = captured["client"].call("get_ticket", {"ref": captured["ref"]})
+    assert failed["ok"] is False
+    assert failed["error"]["code"] == "unavailable"
+
+
+def test_execute_job_workflow_team_retains_active_on_later_generation(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    from flowgency.integrations import RunResult
+    from flowgency.jobs.processes import ProcessStopEvidence
+    from flowgency.tickets.broker import TicketToolClient
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            client = TicketToolClient(
+                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+            )
+            started = client.call(
+                "start_work",
+                {
+                    "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                    "operation_id": "start-later-generation",
+                },
+            )
+            assert started["ok"] is True
+            return RunResult(
+                0,
+                "done",
+                "",
+                0.1,
+                session_id="native-cli-session",
+                process_stop_evidence=ProcessStopEvidence(
+                    job_id=record.spec.job_id,
+                    generation=request.ticket_tools.lifecycle.generation + "-later",
+                    confirmed=True,
+                    reason="exited",
+                ),
+            )
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    result = execute_job(authority)
+
+    assert result.status == "complete"
+    assert env.read(ticket.ref).record.active_run is not None
+    stored = read_job(authority.path)
+    assert stored.result_metadata["ticket_cleanup"]["status"] == "pending"
+    assert stored.result_metadata["ticket_cleanup"]["confirmed"] is True
+
+
+def test_execute_job_workflow_team_records_pending_cleanup_when_original_storage_is_unavailable(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    from flowgency.integrations import RunResult
+    from flowgency.jobs.processes import ProcessStopEvidence
+    from flowgency.tickets.broker import TicketToolClient
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    backup = env.tmp_path / "tickets-a-backup"
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            client = TicketToolClient(
+                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+            )
+            started = client.call(
+                "start_work",
+                {
+                    "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                    "operation_id": "start-missing-original-root",
+                },
+            )
+            assert started["ok"] is True
+            env.root_a.rename(backup)
+            return RunResult(
+                0,
+                "done",
+                "",
+                0.1,
+                session_id="native-cli-session",
+                process_stop_evidence=ProcessStopEvidence(
+                    job_id=record.spec.job_id,
+                    generation=request.ticket_tools.lifecycle.generation,
+                    confirmed=True,
+                    reason="exited",
+                ),
+            )
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    try:
+        result = execute_job(authority)
+    finally:
+        if backup.exists():
+            backup.rename(env.root_a)
+
+    assert result.status == "complete"
+    assert env.read(ticket.ref).record.active_run is not None
+    stored = read_job(authority.path)
+    assert stored.result_metadata["ticket_cleanup"]["status"] == "pending"
+    assert stored.result_metadata["ticket_cleanup"]["confirmed"] is True
+
+
+def test_execute_job_workflow_team_runtime_exception_keeps_pending_cleanup_visible(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    from flowgency.tickets.broker import TicketToolClient
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+
+    class Integration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            client = TicketToolClient(
+                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+            )
+            started = client.call(
+                "start_work",
+                {
+                    "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                    "operation_id": "start-then-crash",
+                },
+            )
+            assert started["ok"] is True
+            raise RuntimeError("boom after broker work")
+
+    integration = Integration()
+    authority, record = _workflow_team_manual_authority(env, integration)
+    _patch_workflow_execution_context(monkeypatch, record.spec, integration)
+
+    result = execute_job(authority)
+
+    assert result.status == "failed"
+    assert "boom after broker work" in (result.execution_summary or "")
+    assert env.read(ticket.ref).record.active_run is not None
+    stored = read_job(authority.path)
+    assert stored.result_metadata["ticket_cleanup"]["status"] == "pending"
+    assert stored.result_metadata["ticket_cleanup"]["confirmed"] is False
 
 
 def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkeypatch):

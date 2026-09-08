@@ -53,6 +53,13 @@ def require_active_owner(record: TicketRecord, actor: AgentTicketContext) -> Non
         raise TicketForbidden("not-working", "This run is not active on the ticket")
 
 
+def _latest_assignment_event_id(record: TicketRecord) -> str:
+    for event in reversed(record.events):
+        if event.kind == "assigned":
+            return event.id
+    return ""
+
+
 class TicketService:
     def __init__(
         self,
@@ -541,6 +548,15 @@ class TicketService:
     ) -> TicketRecord:
         if record.assignee not in (None, actor.agent_name):
             raise TicketForbidden("assigned-elsewhere", "Ticket belongs to another agent")
+        pending_run = record.pending_run
+        if pending_run is not None:
+            assignment_event_id = _latest_assignment_event_id(record)
+            if (
+                pending_run.job_id != actor.job_id
+                or pending_run.assignee != actor.agent_name
+                or pending_run.assignment_event_id != assignment_event_id
+            ):
+                raise TicketConflict("already-queued", "Another queued run owns this ticket")
         if record.active_run is not None and (
             record.active_run.job_id,
             record.active_run.session_id,
@@ -552,6 +568,7 @@ class TicketService:
         return record.model_copy(
             update={
                 "assignee": actor.agent_name,
+                "pending_run": None,
                 "active_run": ActiveTicketRun(
                     job_id=actor.job_id,
                     session_id=actor.session_id,

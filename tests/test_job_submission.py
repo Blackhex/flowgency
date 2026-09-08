@@ -11,6 +11,7 @@ import yaml
 from flowgency.blueprints import CompilationCache
 from flowgency.blueprints.library import BlueprintLibrary
 from flowgency.blueprints.projectors import StaticRuntimeProjector
+from flowgency.configuration import ValidationFailed
 from flowgency.configuration.store import ConfigStore
 from flowgency.integrations import BaseIntegration
 from flowgency.integrations.models import ProjectorCapabilities, RuntimeCapabilities
@@ -443,6 +444,14 @@ class NoSkillIntegration(FakeIntegration):
     )
 
 
+class NoTicketRuntimeIntegration(FakeIntegration):
+    runtime_capabilities = RuntimeCapabilities(
+        permission_modes=frozenset({"restricted", "unrestricted"}),
+        path_scopable_tools=frozenset({"read", "search", "write", "shell"}),
+        live_ticket_transport=None,
+    )
+
+
 def _write_blueprint(root: Path, key: str = "builder-blueprint") -> None:
     blueprint = root / key
     prompt_dir = blueprint / ".agents" / "prompts"
@@ -566,6 +575,58 @@ def test_submit_request_persists_validated_current_snapshot(tmp_path):
     assert record.spec.skill is None
     assert record.spec.routine_id == "daily-review"
     assert record.spec.prompt_source["type"] == "blueprint_prompt"
+
+
+def test_workflow_team_manual_run_requires_live_ticket_transport(tmp_path):
+    config = _write_config(tmp_path, command="echo ok")
+    _write_blueprint(tmp_path / "agent-library")
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["flowgency"]["workflow_library"] = str((tmp_path / "workflow-library").resolve())
+    workflow_root = tmp_path / "workflow-library" / "delivery"
+    workflow_root.mkdir(parents=True, exist_ok=True)
+    (workflow_root / "workflow.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "id": "delivery",
+                "name": "Delivery",
+                "description": "Deliver work",
+                "initial_state": "review",
+                "states": [{"id": "review", "name": "Review", "color": "#000000"}],
+                "fields": [{"id": "summary", "label": "Summary", "type": "text"}],
+                "transitions": [],
+            },
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    raw["teams"]["newsletter"]["workflows"] = {
+        "board-a": {
+            "name": "Board A",
+            "blueprint": "delivery",
+            "integration": "local",
+            "integration_config": {"root": str((tmp_path / "tickets").resolve())},
+        }
+    }
+    config.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ValidationFailed, match="live ticket tool channel"):
+        resolve_job_request(
+            JobRequest(
+                config_path=config,
+                team_key="newsletter",
+                agent_name="builder",
+                trigger="manual_prompt",
+                routine_id="daily-review",
+                task_input="",
+            ),
+            config_store=ConfigStore(config),
+            library=BlueprintLibrary(tmp_path / "agent-library"),
+            cache=CompilationCache(tmp_path / "compiled-agents", {"copilot": _projector()}),
+            prompt_store=PromptStore(tmp_path / "prompts"),
+            integrations={"copilot": NoTicketRuntimeIntegration()},
+        )
 
 
 def test_submit_resolves_from_locked_second_snapshot_without_third_load(

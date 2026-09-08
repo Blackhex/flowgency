@@ -218,3 +218,61 @@ def test_cleanup_rejects_mismatched_confirmed_job_identity(ticket_job_env):
         record = env.read(ref).record
         assert record.active_run is not None
         assert all(event.kind != "ticket-run-cleanup" for event in record.events)
+
+
+def test_start_work_consumes_matching_pending_run(ticket_job_env):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+    authority = env.jobs.authority_for_handle(handle)
+    queued = read_job(handle.path)
+    write_job(
+        handle.path,
+        replace(
+            queued,
+            status="running",
+            worker_pid=123,
+            started_at="2026-09-08T00:00:00+00:00",
+            launched_at="2026-09-08T00:00:00+00:00",
+        ),
+    )
+
+    with env.broker_session(authority) as (_, client):
+        started = client.call(
+            "start_work",
+            {
+                "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                "operation_id": "start-matching-pending",
+            },
+        )
+
+    assert started["ok"] is True
+    live = env.read(ticket.ref).record
+    assert live.active_run is not None
+    assert live.active_run.job_id == handle.job_id
+    assert live.pending_run is None
+
+
+def test_start_work_rejects_other_run_when_another_job_is_pending(ticket_job_env):
+    env = ticket_job_env
+    ticket = env.create_assigned("builder")
+
+    handle = env.coordinator.submit(env.user, ticket.version, "run-request")
+    other_authority = env.running_job("builder", "other-run")
+
+    with env.broker_session(other_authority) as (_, client):
+        started = client.call(
+            "start_work",
+            {
+                "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                "operation_id": "start-other-pending",
+            },
+        )
+
+    assert started["ok"] is False
+    assert started["error"]["code"] == "already-queued"
+    live = env.read(ticket.ref).record
+    assert live.active_run is None
+    assert live.pending_run is not None
+    assert live.pending_run.job_id == handle.job_id

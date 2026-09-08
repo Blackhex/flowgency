@@ -8,11 +8,18 @@ from pathlib import Path
 
 import yaml
 
+from flowgency.configuration.store import ConfigStore
 from flowgency.blueprints.cache import release_pin
 from .authority import JobStore
-from .execution import project_decision
+from .execution import _merge_result_metadata, _ticket_cleanup_metadata, project_decision
 from flowgency.memory.recovery import recover_publications
+from flowgency.jobs.processes import ProcessStopEvidence
+from flowgency.tickets.access import TicketAccessRegistry
+from flowgency.tickets.service import TicketService
+from flowgency.tickets.storages.registry import resolve_storage
+from flowgency.workflows.library import WorkflowLibrary
 from .store import InvalidJobTransition, read_job, transition_job
+from .tickets import TicketJobCoordinator
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +67,62 @@ def worker_alive(pid: int | None) -> bool | None:
             handle.Close()
     except Exception:
         return None
+
+
+def _ticket_cleanup_evidence(record) -> ProcessStopEvidence | None:
+    metadata = record.result_metadata or {}
+    cleanup = metadata.get("ticket_cleanup")
+    if not isinstance(cleanup, dict):
+        return None
+    pending = cleanup.get("pending_cleanup") or ()
+    if not pending or cleanup.get("confirmed") is not True:
+        return None
+    if cleanup.get("job_id") != record.spec.job_id:
+        return None
+    generation = cleanup.get("generation")
+    reason = cleanup.get("reason")
+    if not isinstance(generation, str) or not generation:
+        return None
+    if not isinstance(reason, str) or not reason:
+        reason = "confirmed"
+    return ProcessStopEvidence(
+        job_id=record.spec.job_id,
+        generation=generation,
+        confirmed=True,
+        reason=reason,
+    )
+
+
+def _retry_ticket_cleanup(job_store: JobStore, team_id: str, record) -> None:
+    evidence = _ticket_cleanup_evidence(record)
+    if evidence is None:
+        return
+    authority = job_store.reference(team_id, record.spec.job_id, record.authority_digest)
+    config_store = ConfigStore(Path(record.spec.config_path))
+    try:
+        workflow_library = config_store.load().config.flowgency.workflow_library
+    except Exception:
+        workflow_library = None
+    library_root = Path(workflow_library) if workflow_library is not None else Path(record.spec.team_root)
+    registry = TicketAccessRegistry(job_store)
+    service = TicketService(
+        config_store,
+        WorkflowLibrary(library_root),
+        resolve_storage,
+        registry.validate_context,
+        clock=lambda: datetime.now(timezone.utc),
+    )
+    coordinator = TicketJobCoordinator(
+        service=service,
+        job_store=job_store,
+        config_store=config_store,
+        submitter=lambda request: None,
+    )
+    cleanup = coordinator.cleanup(authority, evidence)
+    _merge_result_metadata(
+        authority.path,
+        {"ticket_cleanup": _ticket_cleanup_metadata(evidence, cleanup)},
+    )
 
 
 def reconcile_jobs(
@@ -129,6 +192,15 @@ def reconcile_jobs(
                 )
                 continue
             if record.status in {"complete", "failed"}:
+                try:
+                    _retry_ticket_cleanup(job_store, team_id, record)
+                    record = read_job(path)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to retry ticket cleanup for job %s: %s",
+                        record.spec.job_id,
+                        error,
+                    )
                 try:
                     _release_job_pin(record)
                 except Exception:
