@@ -182,7 +182,7 @@ def _make_criterion_def():
             "inputs": [{"field_id": "f1", "required": True}],
             "outputs": [],
             "preconditions": [],
-            "criteria": [{"id": "c1", "agent_id": "ag1", "description": "Quality check"}],
+            "criteria": [{"id": "c1", "description": "Quality check"}],
         }],
     })
 
@@ -393,3 +393,206 @@ def test_supporting_fields_must_reference_supplied_values():
                 reasoning="OK", supporting_fields=("not_a_field",),
             ),),
         )
+
+
+# ---------------------------------------------------------------------------
+# Finding 3 – strict-type precondition comparison
+# ---------------------------------------------------------------------------
+
+def _bool_precondition_def():
+    return WorkflowDefinition.model_validate({
+        "schema_version": 1,
+        "id": "w", "name": "W", "description": "D",
+        "initial_state": "s1",
+        "states": [
+            {"id": "s1", "name": "S1", "color": "#aaaaaa"},
+            {"id": "s2", "name": "S2", "color": "#bbbbbb"},
+        ],
+        "fields": [{"id": "flag", "label": "Flag", "type": "boolean"}],
+        "transitions": [{
+            "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
+            "inputs": [],
+            "outputs": [],
+            "preconditions": [{"field_id": "flag", "operator": "equals", "value": True}],
+            "criteria": [],
+        }],
+    })
+
+
+def test_integer_one_does_not_satisfy_boolean_equals_true():
+    defn = _bool_precondition_def()
+    with pytest.raises(ContractError):
+        evaluate_transition(defn, "t1", "s1", {"flag": 1}, {}, {}, ())
+
+
+def test_wrong_type_current_value_on_precondition_field_raises():
+    """Integer in current_values for a boolean field must fail type validation."""
+    defn = _bool_precondition_def()
+    with pytest.raises(ContractError):
+        evaluate_transition(defn, "t1", "s1", {"flag": 1}, {}, {}, ())
+
+
+def test_false_satisfies_not_equals_true():
+    defn = WorkflowDefinition.model_validate({
+        "schema_version": 1,
+        "id": "w", "name": "W", "description": "D",
+        "initial_state": "s1",
+        "states": [
+            {"id": "s1", "name": "S1", "color": "#aaaaaa"},
+            {"id": "s2", "name": "S2", "color": "#bbbbbb"},
+        ],
+        "fields": [{"id": "flag", "label": "Flag", "type": "boolean"}],
+        "transitions": [{
+            "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
+            "inputs": [],
+            "outputs": [],
+            "preconditions": [{"field_id": "flag", "operator": "not_equals", "value": True}],
+            "criteria": [],
+        }],
+    })
+    result = evaluate_transition(defn, "t1", "s1", {"flag": False}, {}, {}, ())
+    assert result.destination_state_id == "s2"
+
+
+def test_zero_does_not_satisfy_not_equals_false():
+    """Integer 0 is not equal to boolean False under strict comparison."""
+    defn = WorkflowDefinition.model_validate({
+        "schema_version": 1,
+        "id": "w", "name": "W", "description": "D",
+        "initial_state": "s1",
+        "states": [
+            {"id": "s1", "name": "S1", "color": "#aaaaaa"},
+            {"id": "s2", "name": "S2", "color": "#bbbbbb"},
+        ],
+        "fields": [{"id": "flag", "label": "Flag", "type": "boolean"}],
+        "transitions": [{
+            "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
+            "inputs": [],
+            "outputs": [],
+            "preconditions": [{"field_id": "flag", "operator": "not_equals", "value": False}],
+            "criteria": [],
+        }],
+    })
+    # 0 is not False (different types); not_equals False should pass for integer 0
+    # But validate_field_value will catch integer in a boolean field
+    with pytest.raises(ContractError):
+        evaluate_transition(defn, "t1", "s1", {"flag": 0}, {}, {}, ())
+
+
+def test_field_id_included_in_contract_error_for_required_input():
+    defn = sample_definition()
+    try:
+        evaluate_transition(defn, "complete", "review", {}, {}, {"summary": "x"}, ())
+        pytest.fail("Expected ContractError")
+    except ContractError as err:
+        assert err.field_id == "verdict"
+
+
+def test_field_id_included_in_contract_error_for_required_output():
+    defn = sample_definition()
+    try:
+        evaluate_transition(defn, "complete", "review", {"verdict": True}, {}, {}, ())
+        pytest.fail("Expected ContractError")
+    except ContractError as err:
+        assert err.field_id == "summary"
+
+
+# ---------------------------------------------------------------------------
+# Finding 4 – recursively immutable snapshot / aliasing / round trip
+# ---------------------------------------------------------------------------
+
+def _complete_transition():
+    return evaluate_transition(
+        sample_definition(), "complete", "review",
+        {"verdict": True}, {}, {"summary": "Done"}, (),
+    )
+
+
+def test_effective_inputs_rejects_item_assignment():
+    result = _complete_transition()
+    with pytest.raises(TypeError):
+        result.effective_inputs["verdict"] = False  # type: ignore[index]
+
+
+def test_effective_outputs_rejects_item_assignment():
+    result = _complete_transition()
+    with pytest.raises(TypeError):
+        result.effective_outputs["summary"] = "tampered"  # type: ignore[index]
+
+
+def test_caller_mutation_does_not_alias_effective_inputs():
+    caller_current = {"verdict": True}
+    result = evaluate_transition(
+        sample_definition(), "complete", "review",
+        caller_current, {}, {"summary": "Done"}, (),
+    )
+    caller_current["verdict"] = False
+    assert result.effective_inputs["verdict"] is True
+
+
+def test_absent_field_not_in_effective_inputs():
+    """Optional field absent from current_values must be absent from effective_inputs."""
+    defn = WorkflowDefinition.model_validate({
+        "schema_version": 1,
+        "id": "w", "name": "W", "description": "D",
+        "initial_state": "s1",
+        "states": [
+            {"id": "s1", "name": "S1", "color": "#aaaaaa"},
+            {"id": "s2", "name": "S2", "color": "#bbbbbb"},
+        ],
+        "fields": [{"id": "opt", "label": "Opt", "type": "text"}],
+        "transitions": [{
+            "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
+            "inputs": [{"field_id": "opt", "required": False}],
+            "outputs": [], "preconditions": [], "criteria": [],
+        }],
+    })
+    result = evaluate_transition(defn, "t1", "s1", {}, {}, {}, ())
+    assert "opt" not in result.effective_inputs
+
+
+def test_explicit_null_present_in_effective_inputs():
+    """Explicit None in current_values must appear in effective_inputs."""
+    defn = WorkflowDefinition.model_validate({
+        "schema_version": 1,
+        "id": "w", "name": "W", "description": "D",
+        "initial_state": "s1",
+        "states": [
+            {"id": "s1", "name": "S1", "color": "#aaaaaa"},
+            {"id": "s2", "name": "S2", "color": "#bbbbbb"},
+        ],
+        "fields": [{"id": "opt", "label": "Opt", "type": "text"}],
+        "transitions": [{
+            "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
+            "inputs": [{"field_id": "opt", "required": False}],
+            "outputs": [], "preconditions": [], "criteria": [],
+        }],
+    })
+    result = evaluate_transition(defn, "t1", "s1", {"opt": None}, {}, {}, ())
+    assert "opt" in result.effective_inputs
+    assert result.effective_inputs["opt"] is None
+
+
+def test_transition_snapshot_includes_field_defs():
+    result = _complete_transition()
+    assert "field_defs" in result.transition_snapshot
+    assert "verdict" in result.transition_snapshot["field_defs"]
+
+
+def test_transition_snapshot_field_def_has_label_and_type():
+    result = _complete_transition()
+    fd = result.transition_snapshot["field_defs"]["verdict"]
+    assert fd["label"] == "Review verdict"
+    assert fd["type"] == "boolean"
+
+
+def test_snapshot_json_round_trip():
+    import json
+    result = _complete_transition()
+    data = result.to_json()
+    serialized = json.dumps(data)
+    parsed = json.loads(serialized)
+    assert parsed["destination_state_id"] == "done"
+    assert parsed["effective_inputs"]["verdict"] is True
+    assert "field_defs" in parsed["transition_snapshot"]
+

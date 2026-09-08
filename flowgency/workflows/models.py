@@ -2,6 +2,7 @@
 
 import re
 from typing import Literal, Union
+from urllib.parse import urlparse
 
 from pydantic import (
     BaseModel,
@@ -45,11 +46,16 @@ class ArtifactRef(BaseModel):
     @model_validator(mode="after")
     def _validate_ref(self) -> "ArtifactRef":
         if self.kind == "url":
-            if not self.value.startswith("https://"):
+            parsed = urlparse(self.value)
+            if parsed.scheme != "https":
                 raise ValueError("Artifact URL must use HTTPS")
-            host_part = self.value[len("https://") :].split("/")[0]
-            if "@" in host_part:
+            if not parsed.netloc:
+                raise ValueError("Artifact URL must have a valid host")
+            if "@" in parsed.netloc:
                 raise ValueError("Artifact URL must not contain credentials")
+        elif self.kind == "id":
+            if "/" in self.value or "\\" in self.value:
+                raise ValueError("Artifact ID must not contain path separators")
         return self
 
 
@@ -101,7 +107,6 @@ class Precondition(BaseModel):
 class AgentCriterion(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     id: str
-    agent_id: str
     description: str
 
 
@@ -122,6 +127,15 @@ class TransitionDefinition(BaseModel):
             raise ValueError(
                 f"At most {MAX_CRITERIA_PER_TRANSITION} criteria per transition"
             )
+        criterion_ids = [c.id for c in self.criteria]
+        if len(set(criterion_ids)) != len(criterion_ids):
+            raise ValueError("Duplicate criterion IDs in transition")
+        input_ids = [u.field_id for u in self.inputs]
+        if len(set(input_ids)) != len(input_ids):
+            raise ValueError("Duplicate input field uses in transition")
+        output_ids = [u.field_id for u in self.outputs]
+        if len(set(output_ids)) != len(output_ids):
+            raise ValueError("Duplicate output field uses in transition")
         return self
 
 
@@ -137,6 +151,29 @@ class CriterionAssessment(BaseModel):
         if not self.reasoning.strip():
             raise ValueError("Assessment reasoning must not be blank")
         return self
+
+
+def _kind_matches_value(kind: FieldKind, value: object) -> bool:
+    """Return True only when value's type is exactly right for kind."""
+    if kind == "text":
+        return type(value) is str
+    if kind == "boolean":
+        return type(value) is bool
+    if kind == "number":
+        return type(value) in (int, float)
+    if kind == "artifact":
+        return isinstance(value, ArtifactRef)
+    return False
+
+
+def check_source_size(source: bytes) -> None:
+    """Raise ContractError if source exceeds MAX_BLUEPRINT_SOURCE_BYTES."""
+    if len(source) > MAX_BLUEPRINT_SOURCE_BYTES:
+        raise ContractError(
+            "source-too-large",
+            f"Blueprint source must not exceed {MAX_BLUEPRINT_SOURCE_BYTES} bytes,"
+            f" got {len(source)}",
+        )
 
 
 class WorkflowDefinition(BaseModel):
@@ -199,6 +236,15 @@ class WorkflowDefinition(BaseModel):
                     raise ValueError(
                         f"Transition {t.id!r}: precondition field {pre.field_id!r} not declared"
                     )
+                if pre.operator in ("equals", "not_equals"):
+                    field_kind = next(
+                        f.type for f in self.fields if f.id == pre.field_id
+                    )
+                    if not _kind_matches_value(field_kind, pre.value):
+                        raise ValueError(
+                            f"Transition {t.id!r}: precondition on {pre.field_id!r}"
+                            f" value type does not match field type {field_kind!r}"
+                        )
         return self
 
     def state(self, state_id: str) -> StateDefinition:

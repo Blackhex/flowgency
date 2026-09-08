@@ -2,6 +2,7 @@
 
 import dataclasses
 import math
+import types
 from typing import Any
 
 from flowgency.workflows.models import (
@@ -11,6 +12,7 @@ from flowgency.workflows.models import (
     FieldKind,
     FieldValue,
     WorkflowDefinition,
+    _kind_matches_value,
 )
 
 
@@ -39,10 +41,36 @@ def validate_field_value(
 @dataclasses.dataclass(frozen=True)
 class EvaluatedTransition:
     destination_state_id: str
-    effective_inputs: dict[str, Any]
-    effective_outputs: dict[str, Any]
+    effective_inputs: types.MappingProxyType
+    effective_outputs: types.MappingProxyType
     assessments: tuple[CriterionAssessment, ...]
-    transition_snapshot: dict[str, Any]
+    transition_snapshot: types.MappingProxyType
+
+    def to_json(self) -> dict[str, Any]:
+        def _cv(obj: Any) -> Any:
+            if isinstance(obj, types.MappingProxyType):
+                return {k: _cv(v) for k, v in obj.items()}
+            if isinstance(obj, (tuple, list)):
+                return [_cv(i) for i in obj]
+            if isinstance(obj, ArtifactRef):
+                return obj.model_dump()
+            return obj
+
+        return {
+            "destination_state_id": self.destination_state_id,
+            "effective_inputs": _cv(self.effective_inputs),
+            "effective_outputs": _cv(self.effective_outputs),
+            "transition_snapshot": _cv(self.transition_snapshot),
+            "assessments": [
+                {
+                    "criterion_id": a.criterion_id,
+                    "satisfied": a.satisfied,
+                    "reasoning": a.reasoning,
+                    "supporting_fields": list(a.supporting_fields),
+                }
+                for a in self.assessments
+            ],
+        }
 
 
 def evaluate_transition(
@@ -70,7 +98,10 @@ def evaluate_transition(
     for use in transition.inputs:
         raw = effective.get(use.field_id)
         kind = field_kinds[use.field_id]
-        validate_field_value(kind, raw, required=use.required)
+        try:
+            validate_field_value(kind, raw, required=use.required)
+        except ContractError as err:
+            raise ContractError(err.code, err.message, field_id=use.field_id) from err
 
     declared_output_ids = {use.field_id for use in transition.outputs}
     for key in outputs:
@@ -82,29 +113,55 @@ def evaluate_transition(
     for use in transition.outputs:
         raw = outputs.get(use.field_id)
         kind = field_kinds[use.field_id]
-        validate_field_value(kind, raw, required=use.required)
+        try:
+            validate_field_value(kind, raw, required=use.required)
+        except ContractError as err:
+            raise ContractError(err.code, err.message, field_id=use.field_id) from err
 
+    input_field_ids = {use.field_id for use in transition.inputs}
     for pre in transition.preconditions:
+        # Validate effective value type for fields not already validated as inputs.
+        if pre.field_id not in input_field_ids:
+            val_raw = effective.get(pre.field_id)
+            if val_raw is not None:
+                kind = field_kinds[pre.field_id]
+                if not _kind_matches_value(kind, val_raw):
+                    raise ContractError(
+                        "invalid-type",
+                        f"Field {pre.field_id!r}: expected {kind}",
+                        field_id=pre.field_id,
+                    )
+
         val = effective.get(pre.field_id)
         if pre.operator == "equals":
-            if val != pre.value:
+            if type(val) is not type(pre.value) or val != pre.value:
                 raise ContractError(
                     "precondition-failed",
                     f"Precondition on {pre.field_id!r}: expected {pre.value!r},"
                     f" got {val!r}",
+                    field_id=pre.field_id,
                 )
         elif pre.operator == "not_equals":
-            if val is None or val == pre.value:
+            if val is None:
                 raise ContractError(
                     "precondition-failed",
                     f"Precondition on {pre.field_id!r}: value must not equal"
                     f" {pre.value!r}",
+                    field_id=pre.field_id,
+                )
+            if type(val) is type(pre.value) and val == pre.value:
+                raise ContractError(
+                    "precondition-failed",
+                    f"Precondition on {pre.field_id!r}: value must not equal"
+                    f" {pre.value!r}",
+                    field_id=pre.field_id,
                 )
         elif pre.operator == "is_present":
             if val is None:
                 raise ContractError(
                     "precondition-failed",
                     f"Precondition on {pre.field_id!r}: field must be present",
+                    field_id=pre.field_id,
                 )
 
     criterion_ids = {c.id for c in transition.criteria}
@@ -145,14 +202,42 @@ def evaluate_transition(
             f"Missing assessments for criteria: {sorted(missing_criteria)}",
         )
 
+    # Distinguish absent fields from explicit-null fields.
     effective_inputs = {
-        use.field_id: effective.get(use.field_id) for use in transition.inputs
+        use.field_id: effective[use.field_id]
+        for use in transition.inputs
+        if use.field_id in effective
+    }
+
+    referenced_field_ids = (
+        {u.field_id for u in transition.inputs}
+        | {u.field_id for u in transition.outputs}
+        | {p.field_id for p in transition.preconditions}
+    )
+    snapshot = {
+        "id": transition.id,
+        "name": transition.name,
+        "from_state": transition.from_state,
+        "to_state": transition.to_state,
+        "inputs": tuple(
+            {"field_id": u.field_id, "required": u.required} for u in transition.inputs
+        ),
+        "outputs": tuple(
+            {"field_id": u.field_id, "required": u.required} for u in transition.outputs
+        ),
+        "preconditions": tuple(p.model_dump() for p in transition.preconditions),
+        "criteria": tuple(c.model_dump() for c in transition.criteria),
+        "field_defs": {
+            fid: definition.field(fid).model_dump()
+            for fid in sorted(referenced_field_ids)
+        },
     }
 
     return EvaluatedTransition(
         destination_state_id=transition.to_state,
-        effective_inputs=effective_inputs,
-        effective_outputs=dict(outputs),
+        effective_inputs=types.MappingProxyType(effective_inputs),
+        effective_outputs=types.MappingProxyType(dict(outputs)),
         assessments=tuple(assessments),
-        transition_snapshot=transition.model_dump(),
+        transition_snapshot=types.MappingProxyType(snapshot),
     )
+
