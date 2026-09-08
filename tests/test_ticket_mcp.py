@@ -64,6 +64,14 @@ def test_mcp_stdio_lifecycle_persists_mid_run(workflow_env):
                         catalog["ticket_artifact_publish"].input_schema,
                         ("version", "filename", "media_type", "content_b64"),
                     )
+                    _assert_create_schema(catalog["ticket_create"].input_schema)
+                    _assert_versioned_mutation_schema(catalog["ticket_start_work"].input_schema)
+                    _assert_versioned_mutation_schema(catalog["ticket_update"].input_schema)
+                    _assert_report_schema(catalog["ticket_report"].input_schema)
+                    _assert_transition_schema(catalog["ticket_transition"].input_schema)
+                    _assert_versioned_mutation_schema(catalog["ticket_end_work"].input_schema)
+                    _assert_versioned_mutation_schema(catalog["ticket_sign_off"].input_schema)
+                    _assert_artifact_schema(catalog["ticket_artifact_publish"].input_schema)
                     created = await session.call_tool(
                         "ticket_create",
                         {
@@ -144,3 +152,181 @@ def _assert_response_schema(schema: Mapping[str, object] | None) -> None:
     assert properties["ok"]["type"] == "boolean"
     assert "result" in properties
     assert "error" in properties
+
+
+def _assert_create_schema(schema: Mapping[str, object] | None) -> None:
+    resolved = _resolve_schema(schema, schema)
+    _assert_object_schema(
+        schema,
+        resolved,
+        ("workflow_id", "title", "description", "operation_id"),
+    )
+    properties = resolved["properties"]
+    _assert_schema_type(schema, properties["workflow_id"], "string")
+    _assert_schema_type(schema, properties["title"], "string")
+    _assert_schema_type(schema, properties["description"], "string")
+    _assert_schema_type(schema, properties["operation_id"], "string")
+    _assert_schema_type(schema, properties["field_values"], "object")
+    assert "actor" not in properties
+    assert "assignee" not in properties
+    assert "config" not in properties
+
+
+def _assert_versioned_mutation_schema(schema: Mapping[str, object] | None) -> None:
+    resolved = _resolve_schema(schema, schema)
+    _assert_object_schema(schema, resolved, ("version", "operation_id"))
+    properties = resolved["properties"]
+    _assert_ticket_version_schema(schema, properties["version"])
+    _assert_schema_type(schema, properties["operation_id"], "string")
+    assert "actor" not in properties
+    assert "assignee" not in properties
+    assert "config" not in properties
+
+
+def _assert_report_schema(schema: Mapping[str, object] | None) -> None:
+    resolved = _resolve_schema(schema, schema)
+    _assert_object_schema(schema, resolved, ("version", "operation_id", "message"))
+    properties = resolved["properties"]
+    _assert_ticket_version_schema(schema, properties["version"])
+    _assert_schema_type(schema, properties["operation_id"], "string")
+    _assert_schema_type(schema, properties["message"], "string")
+    assessments = _resolve_schema(schema, properties["assessments"])
+    _assert_schema_type(schema, assessments, "array")
+    _assert_schema_type(schema, assessments["items"], "object")
+    assert "actor" not in properties
+    assert "assignee" not in properties
+    assert "config" not in properties
+
+
+def _assert_transition_schema(schema: Mapping[str, object] | None) -> None:
+    resolved = _resolve_schema(schema, schema)
+    _assert_object_schema(
+        schema,
+        resolved,
+        ("version", "operation_id", "transition_id"),
+    )
+    properties = resolved["properties"]
+    _assert_ticket_version_schema(schema, properties["version"])
+    _assert_schema_type(schema, properties["operation_id"], "string")
+    _assert_schema_type(schema, properties["transition_id"], "string")
+    _assert_schema_type(schema, properties["inputs"], "object")
+    _assert_schema_type(schema, properties["outputs"], "object")
+    assessments = _resolve_schema(schema, properties["assessments"])
+    _assert_schema_type(schema, assessments, "array")
+    _assert_schema_type(schema, assessments["items"], "object")
+    assert "actor" not in properties
+    assert "assignee" not in properties
+    assert "config" not in properties
+
+
+def _assert_artifact_schema(schema: Mapping[str, object] | None) -> None:
+    resolved = _resolve_schema(schema, schema)
+    _assert_object_schema(
+        schema,
+        resolved,
+        ("version", "filename", "media_type", "content_b64"),
+    )
+    properties = resolved["properties"]
+    _assert_ticket_version_schema(schema, properties["version"])
+    _assert_schema_type(schema, properties["filename"], "string")
+    _assert_schema_type(schema, properties["media_type"], "string")
+    _assert_schema_type(schema, properties["content_b64"], "string")
+    assert "operation_id" not in properties
+    assert "actor" not in properties
+    assert "assignee" not in properties
+    assert "config" not in properties
+
+
+def _assert_ticket_version_schema(root: Mapping[str, object] | None, schema: Mapping[str, object] | None) -> None:
+    resolved = _resolve_schema(root, schema)
+    _assert_closed_object_schema(
+        root,
+        resolved,
+        ("ref", "revision", "workflow_digest", "context_digest"),
+    )
+    properties = resolved["properties"]
+    _assert_ticket_ref_schema(root, properties["ref"])
+    _assert_schema_type(root, properties["revision"], "integer")
+    _assert_schema_type(root, properties["workflow_digest"], "string")
+    _assert_schema_type(root, properties["context_digest"], "string")
+
+
+def _assert_ticket_ref_schema(root: Mapping[str, object] | None, schema: Mapping[str, object] | None) -> None:
+    resolved = _resolve_schema(root, schema)
+    _assert_closed_object_schema(
+        root,
+        resolved,
+        ("binding_id", "team_id", "workflow_id", "ticket_id"),
+    )
+    properties = resolved["properties"]
+    _assert_schema_type(root, properties["binding_id"], "string")
+    _assert_schema_type(root, properties["team_id"], "string")
+    _assert_schema_type(root, properties["workflow_id"], "string")
+    _assert_schema_type(root, properties["ticket_id"], "string")
+
+
+def _assert_closed_object_schema(
+    root: Mapping[str, object] | None,
+    schema: Mapping[str, object] | None,
+    required: tuple[str, ...],
+) -> None:
+    _assert_object_schema(root, schema, required)
+    assert schema is not None
+    assert schema.get("additionalProperties") is False
+
+
+def _assert_object_schema(
+    root: Mapping[str, object] | None,
+    schema: Mapping[str, object] | None,
+    required: tuple[str, ...],
+) -> None:
+    assert schema is not None
+    assert schema.get("type") == "object"
+    assert tuple(schema.get("required", ())) == required
+    properties = schema.get("properties")
+    assert isinstance(properties, dict)
+    for name in required:
+        assert name in properties
+
+
+def _resolve_schema(
+    root: Mapping[str, object] | None,
+    schema: Mapping[str, object] | None,
+) -> Mapping[str, object]:
+    assert root is not None
+    assert schema is not None
+    current = schema
+    while "$ref" in current:
+        ref = current["$ref"]
+        assert isinstance(ref, str)
+        current = _resolve_ref(root, ref)
+    return current
+
+
+def _resolve_ref(root: Mapping[str, object], ref: str) -> Mapping[str, object]:
+    assert ref.startswith("#/")
+    current: object = root
+    for segment in ref.removeprefix("#/").split("/"):
+        assert isinstance(current, Mapping)
+        current = current[segment]
+    assert isinstance(current, Mapping)
+    return current
+
+
+def _assert_schema_type(
+    root: Mapping[str, object] | None,
+    schema: Mapping[str, object] | None,
+    expected_type: str,
+) -> None:
+    resolved = _resolve_schema(root, schema)
+    direct_type = resolved.get("type")
+    if direct_type == expected_type:
+        return
+    variants = resolved.get("anyOf")
+    assert isinstance(variants, list)
+    for variant in variants:
+        assert isinstance(variant, Mapping)
+        candidate = _resolve_schema(root, variant)
+        if candidate.get("type") == expected_type:
+            return
+    raise AssertionError(f"schema does not include type {expected_type!r}")

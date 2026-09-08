@@ -158,6 +158,27 @@ TicketCommand = (
 )
 
 
+def _safe_validation_issues(error: ValidationError) -> list[dict[str, object]]:
+    issues: list[dict[str, object]] = []
+    for issue in error.errors(include_url=False):
+        raw_location = issue.get("loc", ())
+        location: list[str | int] = []
+        if isinstance(raw_location, tuple | list):
+            for part in raw_location:
+                if isinstance(part, str | int):
+                    location.append(part)
+                else:
+                    location.append(str(part))
+        issue_type = issue.get("type")
+        issues.append(
+            {
+                "location": location,
+                "type": issue_type if isinstance(issue_type, str) else "invalid",
+            }
+        )
+    return issues
+
+
 def parse_ticket_command(operation: str, payload: dict[str, Any]) -> TicketCommand:
     mapping: dict[str, type[BaseModel]] = {
         "list_workflows": ListWorkflowsCommand,
@@ -181,7 +202,7 @@ def parse_ticket_command(operation: str, payload: dict[str, Any]) -> TicketComma
         raise InvalidTicketRequest(
             "invalid-request",
             "Ticket request payload is invalid",
-            errors=error.errors(include_url=False),
+            issues=_safe_validation_issues(error),
         ) from error
 
 

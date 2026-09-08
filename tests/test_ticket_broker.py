@@ -21,6 +21,7 @@ from flowgency.tickets.broker import (
     _build_app,
 )
 from flowgency.tickets.models import TicketOperation, UserTicketContext
+from flowgency.tickets.protocol import InvalidTicketRequest, parse_ticket_command
 
 
 def _raw_call(
@@ -308,6 +309,66 @@ def test_broker_redacts_unexpected_errors(workflow_env):
     assert result["ok"] is False
     assert result["error"]["code"] == "unavailable"
     assert "secret" not in result["error"]["message"].lower()
+
+
+def test_parse_ticket_command_redacts_validation_details_and_stays_json_safe(workflow_env):
+    sentinel = "Bearer sentinel C:/private/server/path"
+
+    class _NonJsonSafe:
+        def __repr__(self) -> str:
+            return sentinel
+
+    with pytest.raises(InvalidTicketRequest) as exc_info:
+        parse_ticket_command(
+            "create_ticket",
+            {
+                "workflow_id": _NonJsonSafe(),
+                "title": "MCP ticket",
+                "description": "Body text.",
+                "operation_id": "create-redaction",
+            },
+        )
+
+    payload = exc_info.value.as_dict()
+    serialized = json.dumps(payload, sort_keys=True)
+
+    assert payload["code"] == "invalid-request"
+    assert payload["details"]["issues"] == [
+        {"location": ["workflow_id"], "type": "string_type"}
+    ]
+    assert "sentinel" not in serialized.lower()
+    assert "private/server/path" not in serialized.lower()
+    assert "mcp ticket" not in serialized.lower()
+
+
+def test_broker_redacts_validation_details_and_keeps_422(workflow_env):
+    sentinel = "Bearer sentinel C:/private/server/path"
+
+    with workflow_env.broker_for(workflow_env.running_job("builder", "run-a")) as client:
+        result = client.call(
+            "create_ticket",
+            {
+                "workflow_id": {"token": sentinel},
+                "title": "MCP ticket",
+                "description": "Body text.",
+                "operation_id": "create-redaction",
+            },
+        )
+
+    serialized = json.dumps(result, sort_keys=True)
+
+    assert result == {
+        "ok": False,
+        "error": {
+            "code": "invalid-request",
+            "message": "Ticket request payload is invalid",
+            "details": {
+                "issues": [{"location": ["workflow_id"], "type": "string_type"}],
+            },
+        },
+    }
+    assert "sentinel" not in serialized.lower()
+    assert "private/server/path" not in serialized.lower()
 
 
 def test_failed_authentication_does_not_create_registry_directory(workflow_env):
