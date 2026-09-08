@@ -19,6 +19,9 @@ RuntimeProcessOutcome = Literal[
 ]
 
 
+_POSIX_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
+
 @dataclass(frozen=True)
 class ProcessStopEvidence:
     job_id: str
@@ -37,6 +40,22 @@ class RuntimeProcessLifecycle:
 class RuntimeProcessIdentity:
     pid: int
     created_at: str | None
+
+
+@dataclass(frozen=True)
+class PosixProcessSnapshot:
+    pid: int
+    created_at: str
+    process_group_id: int
+    session_id: int
+    state: str
+
+
+@dataclass(frozen=True)
+class OwnedPosixProcessGroup:
+    leader: RuntimeProcessIdentity
+    process_group_id: int
+    session_id: int
 
 
 @dataclass(frozen=True)
@@ -94,17 +113,51 @@ def read_process_identity(pid: int) -> RuntimeProcessIdentity | None:
 
 
 def _parse_proc_stat_created_at(text: str) -> str | None:
+    snapshot = _parse_proc_stat_snapshot(text)
+    if snapshot is None:
+        return None
+    return snapshot.created_at
+
+
+def _parse_proc_stat_snapshot(text: str) -> PosixProcessSnapshot | None:
     line = text.strip()
     closing = line.rfind(")")
     if closing <= 0:
         return None
+    prefix = line[:closing]
+    pid_text, _, _ = prefix.partition(" ")
+    try:
+        pid = int(pid_text)
+    except ValueError:
+        return None
     fields = line[closing + 1 :].strip().split()
     if len(fields) < 20:
         return None
-    return fields[19]
+    try:
+        process_group_id = int(fields[2])
+        session_id = int(fields[3])
+    except ValueError:
+        return None
+    created_at = fields[19]
+    return PosixProcessSnapshot(
+        pid=pid,
+        created_at=created_at,
+        process_group_id=process_group_id,
+        session_id=session_id,
+        state=fields[0],
+    )
 
 
 def _read_posix_process_created_at(pid: int) -> tuple[str | None, Literal["ok", "exited", "unknown"]]:
+    snapshot, status = _read_posix_process_snapshot(pid)
+    if status != "ok" or snapshot is None:
+        return None, status
+    return snapshot.created_at, "ok"
+
+
+def _read_posix_process_snapshot(
+    pid: int,
+) -> tuple[PosixProcessSnapshot | None, Literal["ok", "exited", "unknown"]]:
     stat_path = Path(f"/proc/{pid}/stat")
     try:
         text = stat_path.read_text(encoding="utf-8")
@@ -114,10 +167,139 @@ def _read_posix_process_created_at(pid: int) -> tuple[str | None, Literal["ok", 
         return None, "unknown"
     except OSError:
         return None, "unknown"
-    created_at = _parse_proc_stat_created_at(text)
-    if created_at is None:
+    snapshot = _parse_proc_stat_snapshot(text)
+    if snapshot is None:
         return None, "unknown"
-    return created_at, "ok"
+    return snapshot, "ok"
+
+
+def _capture_posix_group_identity(pid: int) -> OwnedPosixProcessGroup | None:
+    snapshot, status = _read_posix_process_snapshot(pid)
+    if status != "ok" or snapshot is None:
+        return None
+    if snapshot.process_group_id != pid or snapshot.session_id != pid:
+        return None
+    return OwnedPosixProcessGroup(
+        leader=RuntimeProcessIdentity(pid=pid, created_at=snapshot.created_at),
+        process_group_id=snapshot.process_group_id,
+        session_id=snapshot.session_id,
+    )
+
+
+def _supports_waitid_wnowait() -> bool:
+    return all(
+        hasattr(os, name)
+        for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    )
+
+
+def _observe_posix_root_exit(process: subprocess.Popen[bytes], deadline: float) -> int | None:
+    del deadline
+    if _supports_waitid_wnowait():
+        try:
+            result = os.waitid(  # type: ignore[attr-defined]
+                os.P_PID,
+                process.pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+            )
+        except ChildProcessError:
+            return 0
+        except OSError:
+            return None
+        if result is not None and getattr(result, "si_pid", 0):
+            status = int(getattr(result, "si_status", 0))
+            code = getattr(result, "si_code", None)
+            if code in {
+                getattr(os, "CLD_KILLED", object()),
+                getattr(os, "CLD_DUMPED", object()),
+            }:
+                return -status
+            return status
+    snapshot, status = _read_posix_process_snapshot(process.pid)
+    if status == "exited":
+        return 0
+    if status == "ok" and snapshot is not None and snapshot.state == "Z":
+        return 0
+    return None
+
+
+def _owned_posix_group_state(
+    group_identity: OwnedPosixProcessGroup,
+) -> Literal["empty", "active", "unknown", "reused"]:
+    leader_snapshot, leader_status = _read_posix_process_snapshot(group_identity.leader.pid)
+    if leader_status != "ok" or leader_snapshot is None:
+        return "reused"
+    if (
+        leader_snapshot.created_at != group_identity.leader.created_at
+        or leader_snapshot.process_group_id != group_identity.process_group_id
+        or leader_snapshot.session_id != group_identity.session_id
+    ):
+        return "reused"
+    if leader_snapshot.state != "Z":
+        return "active"
+
+    proc_root = Path("/proc")
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError:
+        return "unknown"
+
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        snapshot, status = _read_posix_process_snapshot(int(entry.name))
+        if status == "unknown":
+            return "unknown"
+        if status != "ok" or snapshot is None:
+            continue
+        if snapshot.process_group_id != group_identity.process_group_id:
+            continue
+        if snapshot.session_id != group_identity.session_id:
+            return "reused"
+        if snapshot.pid == group_identity.leader.pid:
+            if snapshot.created_at != group_identity.leader.created_at:
+                return "reused"
+            continue
+        if snapshot.state != "Z":
+            return "active"
+    return "empty"
+
+
+def _owned_posix_group_status(
+    group_identity: OwnedPosixProcessGroup,
+    deadline: float,
+) -> Literal["empty", "active", "unknown", "reused"]:
+    while True:
+        state = _owned_posix_group_state(group_identity)
+        if state != "active":
+            return state
+        if _remaining_seconds(deadline) <= 0:
+            return "active"
+        time.sleep(0.02)
+
+
+def _signal_owned_posix_group(
+    group_identity: OwnedPosixProcessGroup,
+    sig: int,
+) -> Literal["signaled", "empty", "unavailable"]:
+    leader_snapshot, leader_status = _read_posix_process_snapshot(group_identity.leader.pid)
+    if leader_status != "ok" or leader_snapshot is None:
+        return "unavailable"
+    if (
+        leader_snapshot.created_at != group_identity.leader.created_at
+        or leader_snapshot.process_group_id != group_identity.process_group_id
+        or leader_snapshot.session_id != group_identity.session_id
+    ):
+        return "unavailable"
+    try:
+        os.killpg(group_identity.process_group_id, sig)
+    except ProcessLookupError:
+        return "empty"
+    except PermissionError:
+        return "unavailable"
+    except OSError:
+        return "unavailable"
+    return "signaled"
 
 
 def process_identity_matches(identity: RuntimeProcessIdentity) -> bool | None:
@@ -153,6 +335,13 @@ def process_identity_state(identity: RuntimeProcessIdentity) -> ProcessIdentityS
             return "unknown"
         finally:
             handle.Close()
+
+    return _posix_process_identity_state(identity)
+
+
+def _posix_process_identity_state(identity: RuntimeProcessIdentity) -> ProcessIdentityState:
+    if identity.pid <= 0:
+        return "unknown"
 
     created_at, status = _read_posix_process_created_at(identity.pid)
     if status == "exited":
@@ -265,6 +454,48 @@ def _drain_deadline(seconds: float = 1.0) -> float:
     return time.monotonic() + seconds
 
 
+def _reap_posix_root(process: subprocess.Popen[bytes], *, timeout: float) -> int | None:
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def _posix_completed_result(
+    *,
+    process: subprocess.Popen[bytes],
+    lifecycle: RuntimeProcessLifecycle,
+    start: float,
+    stdout_chunks: list[bytes],
+    stderr_chunks: list[bytes],
+    stdout_thread,
+    stderr_thread,
+    outcome: RuntimeProcessOutcome,
+    exit_code: int,
+    confirmed: bool,
+    reason: str,
+    root_identity: RuntimeProcessIdentity | None,
+    drain_deadline: float,
+) -> CompletedRuntimeProcess:
+    readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=drain_deadline)
+    if confirmed and not readers_done:
+        confirmed = False
+        reason = "io-drain-incomplete"
+    return CompletedRuntimeProcess(
+        exit_code=exit_code,
+        stdout=_decode(stdout_chunks),
+        stderr=_decode(stderr_chunks),
+        duration_seconds=time.monotonic() - start,
+        process_stop_evidence=_evidence(
+            lifecycle,
+            confirmed=confirmed,
+            reason=reason,
+        ),
+        outcome=outcome,
+        root_identity=root_identity,
+    )
+
+
 def _run_supervised_posix(
     argv: list[str] | tuple[str, ...],
     *,
@@ -307,102 +538,167 @@ def _run_supervised_posix(
     stderr_thread = threading.Thread(target=_reader, args=(process.stderr, stderr_chunks), daemon=True)
     stdout_thread.start()
     stderr_thread.start()
-    deadline = start + timeout
-    try:
-        exit_code = process.wait(timeout=timeout)
-        group_status = _group_exit_status(process.pid, deadline)
-        if group_status == "active":
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=5)
-            wait_deadline = time.monotonic() + 5
-            group_status = _group_exit_status(process.pid, wait_deadline)
-            readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
-            if group_status == "empty" and readers_done and identity is not None:
-                confirmed = True
-                reason = "timeout"
-            elif group_status == "unknown" or identity is None:
-                confirmed = False
-                reason = "group-state-unavailable"
-            elif group_status == "active":
-                confirmed = False
-                reason = "descendants-still-running"
-            else:
-                confirmed = False
-                reason = "io-drain-incomplete"
-            return CompletedRuntimeProcess(
-                exit_code=124,
-                stdout=_decode(stdout_chunks),
-                stderr=_decode(stderr_chunks),
-                duration_seconds=time.monotonic() - start,
-                process_stop_evidence=_evidence(
-                    lifecycle,
-                    confirmed=confirmed,
-                    reason=reason,
-                ),
-                outcome="timeout",
-                root_identity=identity,
-            )
-        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=_drain_deadline())
-        if group_status == "empty" and readers_done and identity is not None:
-            confirmed = True
-            reason = "exited"
-        elif group_status == "unknown" or identity is None:
-            confirmed = False
-            reason = "group-state-unavailable"
-        elif group_status == "active":
-            confirmed = False
-            reason = "descendants-still-running"
-        else:
-            confirmed = False
-            reason = "io-drain-incomplete"
-        return CompletedRuntimeProcess(
-            exit_code=exit_code,
-            stdout=_decode(stdout_chunks),
-            stderr=_decode(stderr_chunks),
-            duration_seconds=time.monotonic() - start,
-            process_stop_evidence=_evidence(
-                lifecycle,
-                confirmed=confirmed,
-                reason=reason,
-            ),
-            outcome="exited",
-            root_identity=identity,
-        )
-    except subprocess.TimeoutExpired:
+    group_identity = _capture_posix_group_identity(process.pid)
+    if group_identity is None:
         with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
+            os.kill(process.pid, signal.SIGKILL)
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=5)
-        wait_deadline = time.monotonic() + 5
-        group_status = _group_exit_status(process.pid, wait_deadline)
-        readers_done = _join_reader_threads(stdout_thread, stderr_thread, deadline=wait_deadline)
-        if group_status == "empty" and readers_done and identity is not None:
-            confirmed = True
-            reason = "timeout"
-        elif group_status == "unknown" or identity is None:
-            confirmed = False
-            reason = "group-state-unavailable"
-        elif group_status == "active":
-            confirmed = False
-            reason = "descendants-still-running"
-        else:
-            confirmed = False
-            reason = "io-drain-incomplete"
-        return CompletedRuntimeProcess(
-            exit_code=124,
-            stdout=_decode(stdout_chunks),
-            stderr=_decode(stderr_chunks),
-            duration_seconds=time.monotonic() - start,
-            process_stop_evidence=_evidence(
-                lifecycle,
-                confirmed=confirmed,
-                reason=reason,
-            ),
-            outcome="timeout",
+        return _posix_completed_result(
+            process=process,
+            lifecycle=lifecycle,
+            start=start,
+            stdout_chunks=stdout_chunks,
+            stderr_chunks=stderr_chunks,
+            stdout_thread=stdout_thread,
+            stderr_thread=stderr_thread,
+            outcome="containment-setup-failed",
+            exit_code=125,
+            confirmed=False,
+            reason="containment-setup-failed",
             root_identity=identity,
+            drain_deadline=time.monotonic() + 5,
         )
+    deadline = start + timeout
+    root_exited = False
+    while _remaining_seconds(deadline) > 0:
+        if _observe_posix_root_exit(process, deadline) is not None:
+            root_exited = True
+        group_status = _owned_posix_group_status(group_identity, time.monotonic())
+        if root_exited and group_status == "empty":
+            exit_code = _reap_posix_root(process, timeout=0)
+            if exit_code is None:
+                return _posix_completed_result(
+                    process=process,
+                    lifecycle=lifecycle,
+                    start=start,
+                    stdout_chunks=stdout_chunks,
+                    stderr_chunks=stderr_chunks,
+                    stdout_thread=stdout_thread,
+                    stderr_thread=stderr_thread,
+                    outcome="exited",
+                    exit_code=125,
+                    confirmed=False,
+                    reason="group-state-unavailable",
+                    root_identity=identity,
+                    drain_deadline=_drain_deadline(),
+                )
+            return _posix_completed_result(
+                process=process,
+                lifecycle=lifecycle,
+                start=start,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                stdout_thread=stdout_thread,
+                stderr_thread=stderr_thread,
+                outcome="exited",
+                exit_code=exit_code,
+                confirmed=identity is not None,
+                reason="exited" if identity is not None else "group-state-unavailable",
+                root_identity=identity,
+                drain_deadline=_drain_deadline(),
+            )
+        if root_exited and group_status == "reused":
+            exit_code = _reap_posix_root(process, timeout=0) or 0
+            return _posix_completed_result(
+                process=process,
+                lifecycle=lifecycle,
+                start=start,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                stdout_thread=stdout_thread,
+                stderr_thread=stderr_thread,
+                outcome="exited",
+                exit_code=exit_code,
+                confirmed=False,
+                reason="group-identity-unavailable",
+                root_identity=identity,
+                drain_deadline=_drain_deadline(),
+            )
+        if root_exited and group_status == "unknown":
+            exit_code = _reap_posix_root(process, timeout=0) or 0
+            return _posix_completed_result(
+                process=process,
+                lifecycle=lifecycle,
+                start=start,
+                stdout_chunks=stdout_chunks,
+                stderr_chunks=stderr_chunks,
+                stdout_thread=stdout_thread,
+                stderr_thread=stderr_thread,
+                outcome="exited",
+                exit_code=exit_code,
+                confirmed=False,
+                reason="group-state-unavailable",
+                root_identity=identity,
+                drain_deadline=_drain_deadline(),
+            )
+        time.sleep(0.02)
+
+    group_status = _owned_posix_group_status(group_identity, time.monotonic())
+    if group_status == "active":
+        signal_status = _signal_owned_posix_group(group_identity, _POSIX_KILL_SIGNAL)
+        if signal_status == "signaled":
+            wait_deadline = time.monotonic() + 5
+            group_status = _owned_posix_group_status(group_identity, wait_deadline)
+            if group_status == "empty":
+                exit_code = _reap_posix_root(process, timeout=0)
+                if exit_code is None:
+                    exit_code = _reap_posix_root(process, timeout=5)
+                if exit_code is not None:
+                    return _posix_completed_result(
+                        process=process,
+                        lifecycle=lifecycle,
+                        start=start,
+                        stdout_chunks=stdout_chunks,
+                        stderr_chunks=stderr_chunks,
+                        stdout_thread=stdout_thread,
+                        stderr_thread=stderr_thread,
+                        outcome="timeout",
+                        exit_code=124,
+                        confirmed=identity is not None,
+                        reason="timeout" if identity is not None else "group-state-unavailable",
+                        root_identity=identity,
+                        drain_deadline=wait_deadline,
+                    )
+        elif signal_status == "empty":
+            exit_code = _reap_posix_root(process, timeout=0)
+            if exit_code is not None:
+                return _posix_completed_result(
+                    process=process,
+                    lifecycle=lifecycle,
+                    start=start,
+                    stdout_chunks=stdout_chunks,
+                    stderr_chunks=stderr_chunks,
+                    stdout_thread=stdout_thread,
+                    stderr_thread=stderr_thread,
+                    outcome="timeout",
+                    exit_code=124,
+                    confirmed=identity is not None,
+                    reason="timeout" if identity is not None else "group-state-unavailable",
+                    root_identity=identity,
+                    drain_deadline=_drain_deadline(),
+                )
+
+    reason = "descendants-still-running"
+    if group_status == "unknown":
+        reason = "group-state-unavailable"
+    elif group_status == "reused":
+        reason = "group-identity-unavailable"
+    return _posix_completed_result(
+        process=process,
+        lifecycle=lifecycle,
+        start=start,
+        stdout_chunks=stdout_chunks,
+        stderr_chunks=stderr_chunks,
+        stdout_thread=stdout_thread,
+        stderr_thread=stderr_thread,
+        outcome="timeout",
+        exit_code=124,
+        confirmed=False,
+        reason=reason,
+        root_identity=identity,
+        drain_deadline=_drain_deadline(),
+    )
 
 
 def _job_active_processes(job_handle) -> int:

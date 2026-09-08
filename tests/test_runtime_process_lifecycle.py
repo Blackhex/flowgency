@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import io
+import signal
 import sys
 import time
 import threading
@@ -9,7 +11,12 @@ from pathlib import Path
 import pytest
 
 from flowgency.jobs.processes import (
+    OwnedPosixProcessGroup,
     RuntimeProcessLifecycle,
+    _run_supervised_posix,
+    _owned_posix_group_state,
+    _posix_process_identity_state,
+    _read_posix_process_snapshot,
     process_identity_matches,
     process_identity_state,
     RuntimeProcessIdentity,
@@ -81,6 +88,34 @@ def _capture_windows_identity_when_ready(
     thread = threading.Thread(target=worker)
     thread.start()
     return captured, thread
+
+
+class _FakePipe:
+    def __init__(self, payload: bytes = b""):
+        self._buffer = io.BytesIO(payload)
+        self.closed = False
+
+    def read(self, size: int = -1) -> bytes:
+        return self._buffer.read(size)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakePosixProcess:
+    def __init__(self, pid: int, *, exit_code: int = 0):
+        self.pid = pid
+        self.stdout = _FakePipe()
+        self.stderr = _FakePipe()
+        self._exit_code = exit_code
+        self.wait_calls: list[float | int | None] = []
+        self.allow_reap = False
+
+    def wait(self, timeout=None):
+        self.wait_calls.append(timeout)
+        if not self.allow_reap:
+            raise AssertionError("wait() reaped the leader before group completion")
+        return self._exit_code
 
 
 def test_run_supervised_reports_confirmed_exit_for_completed_process_tree(tmp_path: Path):
@@ -360,7 +395,6 @@ def test_windows_open_process_access_error_is_unknown(monkeypatch):
 def test_posix_permission_error_reports_unknown_identity_state(monkeypatch):
     identity = RuntimeProcessIdentity(pid=4321, created_at="98765")
 
-    monkeypatch.setattr("flowgency.jobs.processes.os.name", "posix")
     monkeypatch.setattr("flowgency.jobs.processes._read_posix_process_created_at", lambda pid: ("98765", "ok") if pid == 4321 else (None, "exited"))
 
     def deny_signal(*args, **kwargs):
@@ -368,7 +402,7 @@ def test_posix_permission_error_reports_unknown_identity_state(monkeypatch):
 
     monkeypatch.setattr("flowgency.jobs.processes.os.kill", deny_signal)
 
-    assert process_identity_state(identity) == "unknown"
+    assert _posix_process_identity_state(identity) == "unknown"
 
 
 def test_posix_read_process_identity_parses_proc_stat_with_spaces(monkeypatch):
@@ -382,10 +416,276 @@ def test_posix_read_process_identity_parses_proc_stat_with_spaces(monkeypatch):
             return sample
         return original_read_text(self, *args, **kwargs)
 
-    monkeypatch.setattr("flowgency.jobs.processes.os.name", "posix")
     monkeypatch.setattr(Path, "read_text", fake_read_text)
 
-    assert read_process_identity(4321) == RuntimeProcessIdentity(pid=4321, created_at="98765")
+    snapshot, status = _read_posix_process_snapshot(4321)
+
+    assert status == "ok"
+    assert snapshot is not None
+    assert snapshot.created_at == "98765"
+    assert snapshot.process_group_id == 2
+    assert snapshot.session_id == 3
+
+
+def test_owned_posix_group_state_is_unknown_when_membership_scan_fails(monkeypatch):
+    group_identity = OwnedPosixProcessGroup(
+        leader=RuntimeProcessIdentity(pid=4321, created_at="leader-created"),
+        process_group_id=4321,
+        session_id=4321,
+    )
+
+    def fake_snapshot(pid: int):
+        if pid == 4321:
+            return (
+                type("Snapshot", (), {
+                    "pid": 4321,
+                    "created_at": "leader-created",
+                    "process_group_id": 4321,
+                    "session_id": 4321,
+                    "state": "Z",
+                })(),
+                "ok",
+            )
+        return None, "unknown"
+
+    monkeypatch.setattr("flowgency.jobs.processes._read_posix_process_snapshot", fake_snapshot)
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.Path.iterdir",
+        lambda self: [Path("/proc/1234")],
+    )
+
+    assert _owned_posix_group_state(group_identity) == "unknown"
+
+
+def test_owned_posix_group_state_rejects_reused_leader_identity(monkeypatch):
+    group_identity = OwnedPosixProcessGroup(
+        leader=RuntimeProcessIdentity(pid=4321, created_at="leader-created"),
+        process_group_id=4321,
+        session_id=4321,
+    )
+
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._read_posix_process_snapshot",
+        lambda pid: (
+            type("Snapshot", (), {
+                "pid": 4321,
+                "created_at": "different-created",
+                "process_group_id": 4321,
+                "session_id": 4321,
+                "state": "Z",
+            })(),
+            "ok",
+        ),
+    )
+
+    assert _owned_posix_group_state(group_identity) == "reused"
+
+
+def test_owned_posix_group_state_rejects_member_with_wrong_session(monkeypatch):
+    group_identity = OwnedPosixProcessGroup(
+        leader=RuntimeProcessIdentity(pid=4321, created_at="leader-created"),
+        process_group_id=4321,
+        session_id=4321,
+    )
+
+    def fake_snapshot(pid: int):
+        if pid == 4321:
+            return (
+                type("Snapshot", (), {
+                    "pid": 4321,
+                    "created_at": "leader-created",
+                    "process_group_id": 4321,
+                    "session_id": 4321,
+                    "state": "Z",
+                })(),
+                "ok",
+            )
+        return (
+            type("Snapshot", (), {
+                "pid": 5000,
+                "created_at": "member-created",
+                "process_group_id": 4321,
+                "session_id": 9999,
+                "state": "S",
+            })(),
+            "ok",
+        )
+
+    monkeypatch.setattr("flowgency.jobs.processes._read_posix_process_snapshot", fake_snapshot)
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.Path.iterdir",
+        lambda self: [Path("/proc/4321"), Path("/proc/5000")],
+    )
+
+    assert _owned_posix_group_state(group_identity) == "reused"
+
+
+def test_posix_timeout_reaps_only_after_owned_group_finishes(monkeypatch, tmp_path: Path):
+    fake_process = _FakePosixProcess(4321)
+    signal_calls: list[tuple[int, int]] = []
+
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.subprocess.Popen",
+        lambda *args, **kwargs: fake_process,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.read_process_identity",
+        lambda pid: RuntimeProcessIdentity(pid=pid, created_at="leader-created"),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._capture_posix_group_identity",
+        lambda pid: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._observe_posix_root_exit",
+        lambda process, deadline: 0,
+        raising=False,
+    )
+
+    def fake_group_status(group_identity, deadline):
+        if signal_calls:
+            fake_process.allow_reap = True
+            return "empty"
+        return "active"
+
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._owned_posix_group_status",
+        fake_group_status,
+        raising=False,
+    )
+
+    def fake_signal(group_identity, sig):
+        signal_calls.append((fake_process.pid, sig))
+        return "signaled"
+
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._signal_owned_posix_group",
+        fake_signal,
+        raising=False,
+    )
+
+    result = _run_supervised_posix(
+        [sys.executable, "ignored.py"],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=1,
+        lifecycle=RuntimeProcessLifecycle(job_id="job-posix-timeout", generation="gen-posix-timeout"),
+        start=time.monotonic(),
+    )
+
+    assert result.exit_code == 124
+    assert result.process_stop_evidence.confirmed is True
+    assert result.process_stop_evidence.reason == "timeout"
+    assert signal_calls == [(4321, getattr(signal, "SIGKILL", signal.SIGTERM))]
+    assert fake_process.wait_calls == [0]
+
+
+def test_posix_reused_group_fails_closed_without_signaling(monkeypatch, tmp_path: Path):
+    fake_process = _FakePosixProcess(4321)
+    fake_process.allow_reap = True
+    signal_calls: list[tuple[int, int]] = []
+
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.subprocess.Popen",
+        lambda *args, **kwargs: fake_process,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.read_process_identity",
+        lambda pid: RuntimeProcessIdentity(pid=pid, created_at="leader-created"),
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._capture_posix_group_identity",
+        lambda pid: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._observe_posix_root_exit",
+        lambda process, deadline: 0,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._owned_posix_group_status",
+        lambda group_identity, deadline: "reused",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes.os.killpg",
+        lambda pgid, sig: signal_calls.append((pgid, sig)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "flowgency.jobs.processes._signal_owned_posix_group",
+        lambda group_identity, sig: signal_calls.append((9999, sig)),
+        raising=False,
+    )
+
+    result = _run_supervised_posix(
+        [sys.executable, "ignored.py"],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=1,
+        lifecycle=RuntimeProcessLifecycle(job_id="job-posix-reused", generation="gen-posix-reused"),
+        start=time.monotonic(),
+    )
+
+    assert result.exit_code == 0
+    assert result.process_stop_evidence.confirmed is False
+    assert result.process_stop_evidence.reason == "group-identity-unavailable"
+    assert signal_calls == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires a real POSIX host")
+def test_run_supervised_posix_confirms_completed_process_tree(tmp_path: Path):
+    child_script = _write_script(
+        tmp_path / "posix_child.py",
+        "import pathlib\n"
+        "import subprocess\n"
+        "import sys\n"
+        "grandchild = pathlib.Path(sys.argv[1])\n"
+        "subprocess.run([sys.executable, '-c', 'import pathlib,sys; pathlib.Path(sys.argv[1]).write_text(\"done\", encoding=\"utf-8\"); print(\"posix-grandchild-finished\", flush=True)', str(grandchild)], check=True)\n"
+        "print('posix-root-finished', flush=True)\n",
+    )
+    grandchild_marker = tmp_path / "posix-grandchild.txt"
+
+    result = run_supervised(
+        [sys.executable, str(child_script), str(grandchild_marker)],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=10,
+        lifecycle=RuntimeProcessLifecycle(job_id="job-posix-real", generation="gen-posix-real"),
+    )
+
+    assert result.exit_code == 0
+    assert result.process_stop_evidence.confirmed is True
+    assert result.process_stop_evidence.reason == "exited"
+    assert "posix-root-finished" in result.stdout
+    assert "posix-grandchild-finished" in result.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires a real POSIX host")
+def test_run_supervised_posix_timeout_kills_group_after_root_exit(tmp_path: Path):
+    root_script = _write_script(
+        tmp_path / "posix_root_exit_first.py",
+        "import pathlib\n"
+        "import subprocess\n"
+        "import sys\n"
+        "marker = pathlib.Path(sys.argv[1])\n"
+        "subprocess.Popen([sys.executable, '-c', 'import pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text(\"started\", encoding=\"utf-8\"); time.sleep(30)', str(marker)])\n"
+        "print('posix-root-finished', flush=True)\n",
+    )
+    started = tmp_path / "posix-started.txt"
+
+    result = run_supervised(
+        [sys.executable, str(root_script), str(started)],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        timeout=1,
+        lifecycle=RuntimeProcessLifecycle(job_id="job-posix-real-timeout", generation="gen-posix-real-timeout"),
+    )
+
+    assert result.exit_code == 124
+    assert result.process_stop_evidence.reason == "timeout"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Kill-on-close ownership is Windows-specific")
