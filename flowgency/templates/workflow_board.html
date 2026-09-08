@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% set active = "workflow-board" %}
+{% block title %}{{ board.name }} - {{ flowgency_title }}{% endblock %}
+{% block content_container_class %}px-0 py-0{% endblock %}
+{% block sidebar_extra %}
+{% if workflow_nav %}
+<div class="nav-section">Workflows</div>
+{% for workflow in workflow_nav %}
+<a href="/{{ team }}/workflows/{{ workflow.id }}" class="nav-item {% if workflow.id == active_workflow_id %}active{% endif %}">
+  <span class="flex items-center gap-2">
+    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    {{ workflow.name }}
+  </span>
+  <span class="nav-badge bg-white/10 text-gray-400">{{ workflow.count }}</span>
+</a>
+{% endfor %}
+{% endif %}
+{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/workflow-board.css">
+<section class="workflow-board-page">
+  {% if board.issues %}
+  <div class="workflow-issue-banner" role="status">
+    {% for issue in board.issues %}
+    <p><strong>{{ issue.code }}</strong>: {{ issue.message }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <header class="workflow-board-toolbar">
+    <div class="workflow-board-title">
+      <h1>{{ board.name }}</h1>
+      <div class="workflow-board-stats">
+        <span class="workflow-board-stat" data-board-stat="tickets">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5A1.5 1.5 0 0 1 4.5 2H6v2h4V2h1.5A1.5 1.5 0 0 1 13 3.5V5h-2v2h2v2h-2v2h2v1.5A1.5 1.5 0 0 1 11.5 14H10v-2H6v2H4.5A1.5 1.5 0 0 1 3 12.5V11h2V9H3V7h2V5H3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+          <span>{{ board.ticket_count }} tickets</span>
+        </span>
+        <span class="workflow-board-stat" data-board-stat="working">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h2.5l1.5-3 3 6 1.5-3H14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>{{ board.working_count }} working</span>
+        </span>
+      </div>
+    </div>
+    <form method="get" class="workflow-board-filters">
+      {% if selected_ticket_id %}<input type="hidden" name="ticket" value="{{ selected_ticket_id }}">{% endif %}
+      <label class="sr-only" for="workflow-search">Search tickets</label>
+      <div class="workflow-search-field">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M10.5 10.5 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        <input id="workflow-search" name="query" type="search" value="{{ board.query }}" placeholder="Search tickets" aria-label="Search tickets">
+      </div>
+      <label class="sr-only" for="workflow-assignee">All assignees</label>
+      <select id="workflow-assignee" name="assignee" aria-label="All assignees">
+        <option value="" {% if not board.assignee %}selected{% endif %}>All assignees</option>
+        <option value="unassigned">Unassigned</option>
+        {% for agent in ["advisor", "builder", "researcher", "reviewer"] %}
+        <option value="{{ agent }}" {% if board.assignee == agent %}selected{% endif %}>{{ agent }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="workflow-primary-button" id="workflow-new-ticket">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span>New ticket</span>
+      </button>
+    </form>
+  </header>
+
+  <div class="workflow-board-layout{% if board.selected_ticket %} has-ticket{% endif %}">
+    <section class="workflow-board-wrap" aria-label="Workflow board">
+    <section class="workflow-board-columns" aria-label="Workflow board" style="--workflow-column-count: {{ board.columns|length if board.columns else 1 }};">
+      {% if not board.columns %}
+      <section class="workflow-column">
+        <p class="workflow-empty-column">No tickets yet.</p>
+      </section>
+      {% endif %}
+      {% for column in board.columns %}
+      <section class="workflow-column" data-column-kind="{{ column.kind }}">
+        <header class="workflow-column-header" style="--workflow-column-color: {{ column.color }};">
+          <span class="workflow-column-dot" aria-hidden="true"></span>
+          <span>{{ column.name }}</span>
+          <span>{{ column.count }}</span>
+        </header>
+        {% if column.tickets %}
+        {% for item in column.tickets %}
+        <a class="workflow-ticket-card{% if board.selected_ticket and board.selected_ticket.ticket and board.selected_ticket.ticket.ref.ticket_id == item.ref.ticket_id %} is-selected{% endif %}" href="/{{ team }}/workflows/{{ active_workflow_id }}?ticket={{ item.ref.ticket_id }}{% if board.query %}&query={{ board.query|urlencode }}{% endif %}{% if board.assignee %}&assignee={{ board.assignee|urlencode }}{% endif %}">
+          <span class="workflow-ticket-number">FG-{{ item.number }}</span>
+          <strong>{{ item.title }}</strong>
+          <span class="workflow-ticket-footer">
+            <span class="workflow-ticket-meta">
+              {% if item.assignee %}
+              <span class="workflow-ticket-avatar">{{ item.assignee[:2]|upper }}</span>
+              {{ item.assignee }}
+              {% else %}
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm-4 5a4 4 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              Unassigned
+              {% endif %}
+            </span>
+            <span class="workflow-ticket-status-badge{% if item.active_run_job_id %} is-working{% elif item.pending_run_job_id %} is-queued{% endif %}">
+              {% if item.active_run_job_id %}
+              Working
+              {% elif item.pending_run_job_id %}
+              Queued
+              {% else %}
+              Idle
+              {% endif %}
+            </span>
+          </span>
+        </a>
+        {% endfor %}
+        {% else %}
+        <p class="workflow-empty-column">No tickets</p>
+        {% endif %}
+      </section>
+      {% endfor %}
+    </section>
+    </section>
+
+    {% if board.selected_ticket %}
+    {% include "_ticket_inspector.html" %}
+    {% endif %}
+  </div>
+</section>
+<dialog id="workflow-ticket-dialog" class="workflow-dialog">
+  <form method="post" action="/{{ team }}/workflows/{{ active_workflow_id }}/tickets" id="workflow-create-ticket-form">
+    <input type="hidden" name="payload" id="workflow-create-ticket-payload" value="">
+    <div class="workflow-dialog-header">
+      <h2>New ticket</h2>
+      <button type="button" class="workflow-link-button" id="workflow-close-ticket-dialog">Close</button>
+    </div>
+    <label class="workflow-field-block" for="workflow-new-title">
+      <span>Title</span>
+      <input id="workflow-new-title" name="title" type="text" maxlength="180" autocomplete="off">
+    </label>
+    <label class="workflow-field-block" for="workflow-new-description">
+      <span>Description</span>
+      <textarea id="workflow-new-description" name="description"></textarea>
+    </label>
+    <div class="workflow-dialog-actions">
+      <button type="button" class="workflow-link-button" id="workflow-cancel-ticket-dialog">Cancel</button>
+      <button type="submit" class="workflow-primary-button">Create ticket</button>
+    </div>
+  </form>
+</dialog>
+<script id="workflow-initial" type="application/json">{{ workflow_initial | tojson }}</script>
+{% endblock %}
+{% block page_scripts %}
+<script src="/static/workflow-board.js"></script>
+{% endblock %}

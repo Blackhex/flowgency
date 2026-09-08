@@ -20,6 +20,8 @@ from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBindin
 from flowgency.jobs.store import transition_job, write_job
 from flowgency.memory import MemoryStore, resolve_memory_selector
 from flowgency.prompts import PromptStore
+from flowgency.tickets.models import StorageBinding, TicketEvent, TicketOperation, TicketRecord, TicketRef
+from flowgency.tickets.storages.local import LocalTicketStorage
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -76,6 +78,154 @@ def _seed_blueprint(
         (prompt_root / f"{name}.prompt.md").write_bytes(
             _prompt_bytes(name, description, body, argument_hint=argument_hint)
         )
+
+
+def _seed_workflow_blueprint(library: Path, key: str, definition: dict) -> None:
+    directory = library / key
+    directory.mkdir(parents=True, exist_ok=True)
+    _write(
+        directory / "workflow.yaml",
+        yaml.safe_dump(definition, sort_keys=False, allow_unicode=True),
+    )
+
+
+def _ticket_operation(label: str) -> TicketOperation:
+    return TicketOperation(operation_id=f"seed-{label}", request_digest=f"seed-{label}")
+
+
+def _ticket_record(
+    binding,
+    *,
+    ticket_id: str,
+    number: int,
+    title: str,
+    description: str,
+    state_id: str,
+    assignee: str | None = None,
+    field_values: dict | None = None,
+    events: tuple[TicketEvent, ...] | None = None,
+) -> TicketRecord:
+    return TicketRecord(
+        id=ticket_id,
+        number=number,
+        title=title,
+        description=description,
+        state_id=state_id,
+        assignee=assignee,
+        active_run=None,
+        field_values=dict(field_values or {}),
+        field_provenance={},
+        revision=1,
+        events=events or (TicketEvent(kind="opened", actor="local-user", summary="Ticket created"),),
+        receipts=(),
+        created_at=datetime.fromisoformat(FIXED_NOW),
+        updated_at=datetime.fromisoformat(FIXED_NOW),
+        ref=TicketRef.from_binding(binding, ticket_id),
+    )
+
+
+def _delivery_definition() -> dict:
+    return {
+        "schema_version": 1,
+        "id": "delivery",
+        "name": "Delivery",
+        "description": "Deliver verified work.",
+        "initial_state": "backlog",
+        "states": [
+            {"id": "backlog", "name": "Backlog", "color": "#9ca3af"},
+            {"id": "in-progress", "name": "In progress", "color": "#8cb8ff"},
+            {"id": "review", "name": "Review", "color": "#ebc77c"},
+            {"id": "done", "name": "Done", "color": "#7ad7bf"},
+        ],
+        "fields": [
+            {"id": "acceptance-criteria", "label": "Acceptance criteria", "type": "text"},
+            {"id": "review-verdict", "label": "Review verdict", "type": "text"},
+            {"id": "test-report", "label": "Test report", "type": "artifact"},
+        ],
+        "transitions": [
+            {
+                "id": "complete-review",
+                "name": "Complete review",
+                "from_state": "review",
+                "to_state": "done",
+                "inputs": [{"field_id": "acceptance-criteria", "required": True}],
+                "outputs": [
+                    {"field_id": "review-verdict", "required": True},
+                    {"field_id": "test-report", "required": False},
+                ],
+                "preconditions": [],
+                "criteria": [
+                    {"id": "implementation-satisfies", "description": "The implementation satisfies the acceptance criteria."}
+                ],
+            }
+        ],
+    }
+
+
+def _research_definition() -> dict:
+    return {
+        "schema_version": 1,
+        "id": "research-workflow",
+        "name": "Research",
+        "description": "Investigate workflow questions.",
+        "initial_state": "question",
+        "states": [
+            {"id": "question", "name": "Questions", "color": "#9ca3af"},
+            {"id": "investigating", "name": "Investigating", "color": "#8cb8ff"},
+            {"id": "findings", "name": "Findings", "color": "#ebc77c"},
+            {"id": "complete", "name": "Complete", "color": "#7ad7bf"},
+        ],
+        "fields": [
+            {"id": "research-notes", "label": "Research notes", "type": "text"},
+        ],
+        "transitions": [],
+    }
+
+
+def _seed_ticket_workflows(runtime: Path, config: dict) -> None:
+    workflow_library = runtime / "workflow-library"
+    _seed_workflow_blueprint(workflow_library, "delivery", _delivery_definition())
+    _seed_workflow_blueprint(workflow_library, "research-workflow", _research_definition())
+
+    delivery_root = runtime / "tickets" / "delivery"
+    research_root = runtime / "tickets" / "research"
+    delivery_root.mkdir(parents=True, exist_ok=True)
+    research_root.mkdir(parents=True, exist_ok=True)
+    delivery_provider = LocalTicketStorage(delivery_root, clock=lambda: datetime.fromisoformat(FIXED_NOW))
+    research_provider = LocalTicketStorage(research_root, clock=lambda: datetime.fromisoformat(FIXED_NOW))
+    delivery_binding = StorageBinding(
+        integration="local",
+        config={"root": str(delivery_root)},
+        team_id="newsletter",
+        workflow_id="delivery",
+    )
+    research_binding = StorageBinding(
+        integration="local",
+        config={"root": str(research_root)},
+        team_id="newsletter",
+        workflow_id="research-workflow",
+    )
+
+    delivery_rows = (
+        _ticket_record(delivery_binding, ticket_id="fixture-backlog-1", number=101, title="Define reusable workflow blueprints", description="Represent states, transition contracts, and qualitative criteria in reusable workflow sources.", state_id="backlog"),
+        _ticket_record(delivery_binding, ticket_id="fixture-backlog-2", number=102, title="Document ticket storage provider capabilities", description="Describe the persistence guarantees every ticket storage integration must provide.", state_id="backlog", assignee="researcher"),
+        _ticket_record(delivery_binding, ticket_id="fixture-active-1", number=103, title="Implement atomic ticket assignment", description="Coordinate assignment and active work so two agents cannot both begin work on one ticket.", state_id="in-progress", assignee="builder"),
+        _ticket_record(delivery_binding, ticket_id="fixture-review", number=104, title="Validate stale transition handling", description="Reject transitions when the ticket revision or workflow definition has changed. Return enough context for the agent to refresh and reevaluate.", state_id="review", assignee="reviewer", field_values={"acceptance-criteria": "A stale ticket revision or workflow digest cannot change state. Repeating an accepted operation returns its original result without a second transition.", "review-verdict": "Passed", "test-report": "artifacts/transition-tests.txt"}),
+        _ticket_record(delivery_binding, ticket_id="fixture-review-2", number=105, title="Review the local storage contract", description="Check atomicity, history preservation, and storage error handling against the provider contract.", state_id="review"),
+        _ticket_record(delivery_binding, ticket_id="fixture-done-1", number=106, title="Preserve canonical configuration authority", description="Keep workflow instance registration and integration settings in canonical configuration.", state_id="done", assignee="builder"),
+        _ticket_record(delivery_binding, ticket_id="fixture-done-2", number=107, title="Separate ticket state from job lifecycle", description="Job completion, failure, and cancellation must not silently move tickets between workflow states.", state_id="done", assignee="reviewer"),
+        _ticket_record(delivery_binding, ticket_id="fixture-active-2", number=108, title="Verify recovery after interrupted agent runs", description="Retain assignment after a failed run. Clear active work only when the owning run is confirmed stopped.", state_id="in-progress", assignee="reviewer"),
+    )
+    research_rows = (
+        _ticket_record(research_binding, ticket_id="fixture-question", number=201, title="Compare future GitHub storage mappings", description="Investigate how tickets, custom states, and evidence can map to GitHub without weakening workflow guarantees.", state_id="question"),
+        _ticket_record(research_binding, ticket_id="fixture-investigating", number=202, title="Examine Azure DevOps revision checks", description="Evaluate concurrent-update handling in Azure DevOps work items.", state_id="investigating", assignee="researcher"),
+        _ticket_record(research_binding, ticket_id="fixture-findings", number=203, title="Document provider-independent ticket identity", description="Record how a stable ticket ID differs from a provider-specific external reference.", state_id="findings", assignee="researcher"),
+        _ticket_record(research_binding, ticket_id="fixture-complete", number=204, title="Inventory supported live agent tool channels", description="Identify which runtimes can expose the live ticket interface without granting shell access.", state_id="complete"),
+    )
+    for row in delivery_rows:
+        delivery_provider.create(row, _ticket_operation(row.id))
+    for row in research_rows:
+        research_provider.create(row, _ticket_operation(row.id))
 
 
 def _seed_pipeline(team: Path) -> None:
@@ -267,6 +417,7 @@ def _prepare_runtime() -> tuple[Path, Path]:
     (runtime / "compiled-agents").mkdir()
     _seed_private_prompts(runtime)
     _seed_memory(runtime, config)
+    _seed_ticket_workflows(runtime, config)
     _seed_jobs(runtime, config_path)
     (runtime / "server.pid").write_text(str(os.getpid()), encoding="ascii")
     return runtime, config_path

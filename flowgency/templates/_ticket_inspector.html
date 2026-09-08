@@ -1,0 +1,153 @@
+{% set detail = board.selected_ticket %}
+{% if detail and detail.ticket %}
+{% set workflow_detail_page = workflow_detail_page|default(false) %}
+{% set current_ticket = detail.ticket %}
+{% set transitions = detail.current_definition.transitions | selectattr('from_state', 'equalto', current_ticket.state_id) | list %}
+{% set output_ns = namespace(ids=[]) %}
+{% for transition in transitions %}
+  {% for field_use in transition.outputs %}
+    {% if field_use.field_id not in output_ns.ids %}{% set _ = output_ns.ids.append(field_use.field_id) %}{% endif %}
+  {% endfor %}
+{% endfor %}
+<aside class="workflow-ticket-inspector{% if workflow_detail_page %} workflow-ticket-inspector-page{% endif %}" aria-label="Ticket details">
+  <header class="workflow-ticket-pane-heading">
+    <div class="workflow-ticket-pane-row">
+      {% if workflow_detail_page %}
+      <form method="get" action="/{{ team }}/workflows/{{ active_workflow_id }}" class="workflow-pane-back-form">
+        {% if board.query %}<input type="hidden" name="query" value="{{ board.query }}">{% endif %}
+        {% if board.assignee %}<input type="hidden" name="assignee" value="{{ board.assignee }}">{% endif %}
+        <button type="submit" class="workflow-icon-button" aria-label="Back to board">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 3 4.5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
+      {% endif %}
+      <span class="workflow-ticket-code">FG-{{ current_ticket.number }}</span>
+    </div>
+    <div class="workflow-ticket-pane-actions">
+      {% if selected_ticket_id and not workflow_detail_page %}
+      <a class="workflow-icon-link" aria-label="Expand" href="/{{ team }}/workflows/{{ active_workflow_id }}/tickets/{{ selected_ticket_id }}{% if board.query %}?query={{ board.query|urlencode }}{% if board.assignee %}&assignee={{ board.assignee|urlencode }}{% endif %}{% elif board.assignee %}?assignee={{ board.assignee|urlencode }}{% endif %}">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3H3v3M10 3h3v3M13 10v3h-3M6 13H3v-3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+      {% endif %}
+    </div>
+  </header>
+  <div class="workflow-ticket-title-block">
+    <p class="workflow-ticket-state-label"><span class="workflow-state-dot" aria-hidden="true"></span><span data-ticket-state>{{ current_ticket.state_name }}</span></p>
+    <h2>{{ current_ticket.title }}</h2>
+  </div>
+  <div class="workflow-ticket-assignment">
+    <label for="ticket-assignee">Assigned agent</label>
+    <div class="workflow-assignment-row">
+      <select id="ticket-assignee" aria-label="Assigned agent">
+        <option value="">Unassigned</option>
+        {% for agent in ["advisor", "builder", "researcher", "reviewer"] %}
+        <option value="{{ agent }}" {% if current_ticket.assignee == agent %}selected{% endif %}>{{ agent }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="workflow-primary-button" id="ticket-run-button" {% if not current_ticket.assignee or current_ticket.active_run_job_id or current_ticket.pending_run_job_id %}disabled{% endif %}>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 4 7 4-7 4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+        <span>Run</span>
+      </button>
+    </div>
+    <p class="workflow-ticket-status{% if current_ticket.active_run_job_id %} is-working{% elif current_ticket.pending_run_job_id %} is-queued{% else %} is-idle{% endif %}">
+      <span class="workflow-status-dot" aria-hidden="true"></span>
+      {% if current_ticket.active_run_job_id %}
+      Working {{ current_ticket.active_run_job_id }}
+      {% elif current_ticket.pending_run_job_id %}
+      Queued {{ current_ticket.pending_run_job_id }}
+      {% else %}
+      No active run
+      {% endif %}
+    </p>
+  </div>
+  <nav class="workflow-ticket-tabs" aria-label="Ticket views" role="tablist">
+    <button type="button" class="is-active" role="tab" aria-selected="true" data-ticket-tab="overview">Overview</button>
+    <button type="button" role="tab" aria-selected="false" data-ticket-tab="requirements">Requirements</button>
+    <button type="button" role="tab" aria-selected="false" data-ticket-tab="history">History</button>
+  </nav>
+  <section class="workflow-ticket-panel" data-ticket-panel="overview">
+    <section class="workflow-ticket-section">
+      <h3>Description</h3>
+      <p class="workflow-ticket-description">{{ current_ticket.description }}</p>
+    </section>
+    <section class="workflow-ticket-section">
+      <h3>Inputs</h3>
+      {% for field in detail.fields %}
+      {% if field.type != "artifact" and field.id not in output_ns.ids %}
+      <label class="workflow-field-block" for="field-{{ field.id }}">
+        <span>{{ field.label }}</span>
+        <textarea id="field-{{ field.id }}" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}">{{ field.value if field.value is string else "" }}</textarea>
+      </label>
+      {% endif %}
+      {% endfor %}
+      <button type="button" class="workflow-link-button workflow-save-button" id="ticket-save-inputs">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h8l2 2v8H3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5 3v4h5V3M5 13v-3h6v3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+        <span>Save inputs</span>
+      </button>
+    </section>
+    {% if output_ns.ids %}
+    <section class="workflow-ticket-section">
+      <h3>Outputs</h3>
+      <dl class="workflow-field-list">
+        {% for field in detail.fields %}
+        {% if field.id in output_ns.ids %}
+        <div>
+          <dt>{{ field.label }}</dt>
+          <dd>
+            {% if field.type == "artifact" and field.value %}
+            <span class="workflow-artifact-value">{{ field.value }}</span>
+            {% else %}
+            {{ field.value or "Not submitted" }}
+            {% endif %}
+          </dd>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </dl>
+    </section>
+    {% endif %}
+  </section>
+  <section class="workflow-ticket-panel" data-ticket-panel="requirements" hidden>
+    {% if transitions %}
+    {% for transition in transitions %}
+    <section class="workflow-ticket-section">
+      <h3>{{ transition.name }}</h3>
+      {% if transition.outputs %}
+      {% for field_use in transition.outputs %}
+      {% set field_row = (detail.fields | selectattr('id', 'equalto', field_use.field_id) | list | first) %}
+      <article class="workflow-check-row{% if field_row and field_row.value %} is-complete{% endif %}">
+        <span class="workflow-check-indicator" aria-hidden="true"></span>
+        <div>
+          <strong>{{ field_row.label if field_row else field_use.field_id }}</strong>
+          <small>{% if field_row and field_row.value %}{{ field_row.value }}{% else %}Not submitted{% endif %}</small>
+        </div>
+      </article>
+      {% endfor %}
+      {% endif %}
+      {% if transition.criteria %}
+      {% for criterion in transition.criteria %}
+      <article class="workflow-check-row is-pending">
+        <span class="workflow-check-indicator" aria-hidden="true"></span>
+        <div>
+          <strong>{{ criterion.description }}</strong>
+          <small>Awaiting evaluation against the current project</small>
+        </div>
+      </article>
+      {% endfor %}
+      {% endif %}
+    </section>
+    {% endfor %}
+    {% else %}
+    <p>No outgoing requirements.</p>
+    {% endif %}
+  </section>
+  <section class="workflow-ticket-panel" data-ticket-panel="history" hidden>
+    {% for event in detail.history %}
+    <article class="workflow-history-event">
+      <strong>{{ event.summary }}</strong>
+      <p>{{ event.actor }}{% if event.at %} · {{ event.at }}{% endif %}</p>
+    </article>
+    {% endfor %}
+  </section>
+</aside>
+{% endif %}

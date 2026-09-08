@@ -5,11 +5,13 @@ import flowgency.jobs.submission as submission_module
 from tests._ticket_helpers import TicketRuntimeIntegration
 
 
-def test_workflow_board_redirects_to_snapshot(workflow_web_env):
-    response = workflow_web_env.client.get(workflow_web_env.base_path, follow_redirects=False)
+def test_workflow_board_renders_html_page(workflow_web_env):
+    response = workflow_web_env.client.get(workflow_web_env.base_path)
 
-    assert response.status_code == 303
-    assert response.headers["location"] == f"{workflow_web_env.base_path}/snapshot"
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Search tickets" in response.text
+    assert "New ticket" in response.text
 
 
 def test_board_snapshot_uses_definition_order_and_filtered_counts(workflow_web_env):
@@ -48,6 +50,10 @@ def test_board_snapshot_reports_missing_storage_without_disabling_other_services
     assert payload["issues"][0]["code"] == "missing-root"
     assert env.client.app.state.services.instances is not None
 
+    html = env.client.get(env.base_path)
+    assert html.status_code == 200
+    assert "missing-root" in html.text
+
 
 def test_board_snapshot_reports_invalid_definition_history(workflow_web_env):
     env = workflow_web_env
@@ -59,6 +65,10 @@ def test_board_snapshot_reports_invalid_definition_history(workflow_web_env):
     payload = response.json()
     assert payload["issues"][0]["code"] == "unavailable-workflow"
     assert any("missing-blueprint" in item for item in payload["issues"][0]["history"])
+
+    html = env.client.get(env.base_path)
+    assert html.status_code == 200
+    assert "unavailable-workflow" in html.text
 
 
 def test_board_snapshot_keeps_readable_tickets_and_counts_when_definition_is_unavailable(

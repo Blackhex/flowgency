@@ -7,6 +7,7 @@ flowgency:
   compilation_cache: __RUNTIME__/compiled-agents
   memory_store: __RUNTIME__/memory-store
   prompt_store: __RUNTIME__/prompts
+  workflow_library: __RUNTIME__/workflow-library
 memory:
   channels:
     brand-strategy:
@@ -79,6 +80,39 @@ teams:
               every: "3600"
             memory:
               scope: routine
+      - name: reviewer
+        blueprint: reviewer
+        integration: script
+        identity:
+          display_name: Reviewer
+          title: QA Lead
+          emoji: R
+        default_memory:
+          scope: agent
+        routines: []
+      - name: researcher
+        blueprint: researcher
+        integration: script
+        identity:
+          display_name: Researcher
+          title: Research Lead
+          emoji: R
+        default_memory:
+          scope: agent
+        routines: []
+    workflows:
+      delivery:
+        name: Delivery
+        blueprint: delivery
+        integration: local
+        integration_config:
+          root: __RUNTIME__/tickets/delivery
+      research-workflow:
+        name: Research
+        blueprint: research-workflow
+        integration: local
+        integration_config:
+          root: __RUNTIME__/tickets/research
     workspaces: []
   research:
     name: Research

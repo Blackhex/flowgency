@@ -347,6 +347,8 @@
           <span class="nav-badge bg-white/10 text-gray-400">{{ nav_agent_count }}</span>
         </a>
 
+        {% block sidebar_extra %}{% endblock %}
+
         <!-- Pipeline: Observe > Propose > Decide -->
         <div class="nav-section">Pipeline</div>
 
@@ -449,12 +451,14 @@
     </nav>
 
     <!-- Main content -->
-    <main class="flex-1 overflow-y-auto pt-12 md:pt-0">
-      <div class="max-w-5xl 2xl:max-w-screen-xl 3xl:max-w-[1800px] mx-auto px-4 md:px-6 2xl:px-8 py-4 md:py-6">
+    <main class="{% block main_class %}flex-1 overflow-y-auto pt-12 md:pt-0{% endblock %}">
+      <div class="{% block content_container_class %}max-w-5xl 2xl:max-w-screen-xl 3xl:max-w-[1800px] mx-auto px-4 md:px-6 2xl:px-8 py-4 md:py-6{% endblock %}">
         {% block content %}{% endblock %}
       </div>
     </main>
   </div>
+
+  {% block page_scripts %}{% endblock %}
 
   <script>
     var mobileMenuButton = document.getElementById('mobile-menu-button');

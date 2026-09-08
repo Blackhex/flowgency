@@ -127,11 +127,27 @@ def test_create_route_keeps_markdown_raw_and_initial_state(workflow_web_env):
     )
 
     assert create_response.status_code == 303
-    detail = env.client.get(create_response.headers["location"])
-    payload = detail.json()
+    detail_page = env.client.get(create_response.headers["location"])
+    assert detail_page.status_code == 200
+    assert "text/html" in detail_page.headers["content-type"]
+
+    snapshot = env.client.get(f"{create_response.headers['location']}/snapshot")
+    payload = snapshot.json()
     assert payload["ticket"]["description"] == description
     assert payload["ticket"]["state_id"] == "review"
     assert "body_html" not in payload["ticket"]
+
+
+def test_ticket_detail_route_renders_html_page(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="HTML detail")
+
+    response = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Assigned agent" in response.text
+    assert "Overview" in response.text
 
 
 def test_update_rejects_same_id_stale_binding_ref(workflow_web_env):

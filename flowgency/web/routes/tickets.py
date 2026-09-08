@@ -5,18 +5,70 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from flowgency.tickets.errors import TicketConflict, TicketForbidden, TicketNotFound, TicketStorageError, WorkflowUnavailable
 from flowgency.tickets.models import TicketOperation, TicketPatch, TicketRef, TicketVersion
-from flowgency.tickets.views import build_ticket_detail_view
+from flowgency.tickets.views import build_board_view, build_ticket_detail_view
 from flowgency.web.dependencies import FlowgencyServices, get_services
 from flowgency.web.workflow_context import require_team_and_workflow, require_ticket_jobs, require_ticket_services, user_context
 
 
 router = APIRouter()
+
+
+def _templates(request: Request):
+    return request.app.state.templates
+
+
+def _theme_css(request: Request) -> str:
+    return request.app.state.theme_css_getter()
+
+
+def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
+    team_cfg = snapshot.config.teams[team_id]
+    return {
+        "team": team_id,
+        "team_name": team_cfg.name,
+        "teams": {key: value.name for key, value in snapshot.config.teams.items()},
+        "flowgency_title": snapshot.config.flowgency.title,
+        "admin_active": False,
+        "workspaces": [workspace.model_dump(mode="json") for workspace in team_cfg.workspaces],
+        "workspaces_available": bool(team_cfg.workspaces),
+        "nav_open_observations": 0,
+        "nav_actionable": 0,
+        "nav_actionable_proposals": 0,
+        "nav_agent_count": len(team_cfg.agents),
+        "nav_running_decisions": 0,
+        "show_tips": False,
+        "tips_dismissed": [],
+        "theme_css": _theme_css(request),
+    }
+
+
+def _workflow_nav(ticket_service, actor, snapshot, team_id: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    workflows = snapshot.config.teams[team_id].workflows
+    for workflow_id, workflow in workflows.items():
+        try:
+            count = len(ticket_service.list_tickets(actor, workflow_id))
+        except Exception:
+            count = 0
+        rows.append({"id": workflow_id, "name": workflow.name, "count": count})
+    return rows
+
+
+def _etag(payload: dict[str, Any]) -> str:
+    return f'W/"{hash(json.dumps(payload, sort_keys=True, default=str))}"'
+
+
+def _json_with_etag(request: Request, payload: dict[str, Any]) -> Response:
+    etag = _etag(payload)
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
+    return JSONResponse(payload, headers={"ETag": etag, "Cache-Control": "no-cache"})
 
 
 class CreateTicketForm(BaseModel):
@@ -148,7 +200,7 @@ def operation_for_user(actor, route_target: dict[str, str], payload_model: BaseM
 
 
 def ticket_return_url(team: str, workflow: str, ticket: str) -> str:
-    return f"/{team}/workflows/{workflow}/tickets/{ticket}/snapshot"
+    return f"/{team}/workflows/{workflow}/tickets/{ticket}"
 
 
 def _draft(decoded: Any) -> dict[str, Any] | None:
@@ -180,23 +232,62 @@ def _read_artifact_for_route(ticket_service, actor, team: str, workflow: str, ar
 
 
 @router.get("/{team}/workflows/{workflow}/tickets/{ticket}")
-async def ticket_detail_redirect(
+async def ticket_detail_page(
+    request: Request,
     team: str,
     workflow: str,
     ticket: str,
+    query: str = "",
+    assignee: str | None = None,
     services: FlowgencyServices = Depends(get_services),
-):
-    await run_in_threadpool(require_team_and_workflow, services, team, workflow)
-    return RedirectResponse(ticket_return_url(team, workflow, ticket), status_code=303)
+) -> HTMLResponse:
+    context = await run_in_threadpool(require_team_and_workflow, services, team, workflow)
+    ticket_service = require_ticket_services(services)
+    board = await run_in_threadpool(
+        build_board_view,
+        ticket_service,
+        context.actor,
+        workflow,
+        query=query,
+        assignee=assignee,
+        selected_ticket_id=ticket,
+        ticket_jobs=services.ticket_jobs,
+    )
+    snapshot = services.config_store.load()
+    template_context = _team_context(request, snapshot, team)
+    template_context.update(
+        {
+            "active": "workflow-board",
+            "workflow_nav": _workflow_nav(ticket_service, context.actor, snapshot, team),
+            "active_workflow_id": workflow,
+            "board": board,
+            "selected_ticket_id": ticket,
+            "workflow_initial": {
+                "board": board.model_dump(mode="json"),
+                "urls": {
+                    "board": f"/{team}/workflows/{workflow}",
+                    "snapshot": f"/{team}/workflows/{workflow}/snapshot",
+                    "detail": f"/{team}/workflows/{workflow}/tickets/{ticket}",
+                    "detail_snapshot": f"/{team}/workflows/{workflow}/tickets/{ticket}/snapshot",
+                    "detailSnapshot": f"/{team}/workflows/{workflow}/tickets/{ticket}/snapshot",
+                    "assignee": f"/{team}/workflows/{workflow}/tickets/{ticket}/assignee",
+                    "update": f"/{team}/workflows/{workflow}/tickets/{ticket}/update",
+                    "create": f"/{team}/workflows/{workflow}/tickets",
+                },
+            },
+        }
+    )
+    return _templates(request).TemplateResponse(request, "ticket_detail.html", template_context)
 
 
 @router.get("/{team}/workflows/{workflow}/tickets/{ticket}/snapshot")
 async def ticket_detail_snapshot(
+    request: Request,
     team: str,
     workflow: str,
     ticket: str,
     services: FlowgencyServices = Depends(get_services),
-) -> JSONResponse:
+) -> Response:
     context = await run_in_threadpool(require_team_and_workflow, services, team, workflow)
     ticket_service = require_ticket_services(services)
     detail = await run_in_threadpool(
@@ -210,7 +301,7 @@ async def ticket_detail_snapshot(
     )
     if detail.ticket is None and detail.issues and detail.issues[0].code == "ticket-not-found":
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return JSONResponse(detail.model_dump(mode="json"))
+    return _json_with_etag(request, detail.model_dump(mode="json"))
 
 
 @router.post("/{team}/workflows/{workflow}/tickets")
@@ -273,6 +364,17 @@ async def update_ticket(
         await run_in_threadpool(ticket_service.update, actor, payload.version, payload.patch, operation)
     except (TicketConflict, TicketForbidden, WorkflowUnavailable) as error:
         return _ticket_error_response(status_code=error.http_status, code=error.code, message=error.message, field="payload", draft=payload.model_dump(mode="json"))
+    if "application/json" in request.headers.get("accept", ""):
+        detail = await run_in_threadpool(
+            _build_ticket_detail_snapshot,
+            ticket_service,
+            actor,
+            team,
+            workflow,
+            ticket,
+            services.ticket_jobs,
+        )
+        return _json_with_etag(request, detail.model_dump(mode="json"))
     return RedirectResponse(ticket_return_url(team, workflow, ticket), status_code=303)
 
 
@@ -303,6 +405,17 @@ async def save_assignee(
         await run_in_threadpool(ticket_service.assign, actor, payload.version, payload.assignee, operation)
     except (TicketConflict, TicketForbidden, WorkflowUnavailable) as error:
         return _ticket_error_response(status_code=error.http_status, code=error.code, message=error.message, field="payload", draft=payload.model_dump(mode="json"))
+    if "application/json" in request.headers.get("accept", ""):
+        detail = await run_in_threadpool(
+            _build_ticket_detail_snapshot,
+            ticket_service,
+            actor,
+            team,
+            workflow,
+            ticket,
+            services.ticket_jobs,
+        )
+        return _json_with_etag(request, detail.model_dump(mode="json"))
     return RedirectResponse(ticket_return_url(team, workflow, ticket), status_code=303)
 
 

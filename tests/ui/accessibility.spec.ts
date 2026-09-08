@@ -22,6 +22,8 @@ const pages = [
   { name: 'Jobs', path: '/newsletter/jobs', identity: ['heading', 'Jobs in Newsletter'] },
   { name: 'Waiting job', path: '/newsletter/jobs/job-waiting', identity: ['text', 'Memory: Channel: Brand Strategy'] },
   { name: 'Failed job', path: '/newsletter/jobs/job-failed', identity: ['link', 'Failed memory snapshot'] },
+  { name: 'Workflow board', path: '/newsletter/workflows/delivery?ticket=fixture-review', identity: ['heading', 'Delivery'] },
+  { name: 'Workflow detail', path: '/newsletter/workflows/delivery/tickets/fixture-review', identity: ['heading', 'Delivery'] },
 ] as const;
 
 function identityLocator(page: Page, identity: (typeof pages)[number]['identity']) {
