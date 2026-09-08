@@ -70,6 +70,25 @@
       <span>New ticket</span>
     </button>
   </header>
+  <noscript>
+  <section class="workflow-ticket-section" data-noscript-create>
+    <h2>New ticket</h2>
+    <form method="post" action="/{{ team }}/workflows/{{ active_workflow_id }}/tickets">
+      <input type="hidden" name="operation_id" value="{{ new_ticket_operation_id }}">
+      <label class="workflow-field-block" for="workflow-noscript-title">
+        <span>Title</span>
+        <input id="workflow-noscript-title" name="title" type="text" maxlength="180" autocomplete="off" value="{{ new_ticket_draft.title if new_ticket_draft else '' }}">
+      </label>
+      <label class="workflow-field-block" for="workflow-noscript-description">
+        <span>Description</span>
+        <textarea id="workflow-noscript-description" name="description">{{ new_ticket_draft.description if new_ticket_draft else '' }}</textarea>
+      </label>
+      <div class="workflow-dialog-actions">
+        <button type="submit" class="workflow-primary-button">Create ticket</button>
+      </div>
+    </form>
+  </section>
+  </noscript>
 
   <div class="workflow-board-layout{% if board.selected_ticket %} has-ticket{% endif %}">
     <section class="workflow-board-wrap" aria-label="Workflow board">

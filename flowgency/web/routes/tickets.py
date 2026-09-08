@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from uuid import uuid4
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.datastructures import FormData
 from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -159,6 +161,172 @@ async def _payload_text(request: Request) -> str:
     return str(form.get("payload", ""))
 
 
+def _form_operation_id(prefix: str) -> str:
+    return f"{prefix}-{uuid4().hex}"
+
+
+def _validation_error(location: tuple[str, ...], error_type: str, input_value: Any) -> ValidationError:
+    return ValidationError.from_exception_data(
+        "StructuredTicketForm",
+        [{"type": error_type, "loc": location, "input": input_value}],
+    )
+
+
+def _draft_validation_error(
+    location: tuple[str, ...],
+    error_type: str,
+    input_value: Any,
+    draft: dict[str, Any] | None,
+) -> ValidationError:
+    error = _validation_error(location, error_type, input_value)
+    setattr(error, "draft_payload", draft)
+    return error
+
+
+def _form_text(form: FormData, key: str) -> str | None:
+    value = form.get(key)
+    if value is None:
+        return None
+    return str(value)
+
+
+def _parse_ticket_version_form(form: FormData) -> tuple[dict[str, Any], set[str]]:
+    keys = {
+        "version.ref.binding_id",
+        "version.ref.team_id",
+        "version.ref.workflow_id",
+        "version.ref.ticket_id",
+        "version.revision",
+        "version.workflow_digest",
+        "version.context_digest",
+    }
+    version = {
+        "ref": {
+            "binding_id": _form_text(form, "version.ref.binding_id"),
+            "team_id": _form_text(form, "version.ref.team_id"),
+            "workflow_id": _form_text(form, "version.ref.workflow_id"),
+            "ticket_id": _form_text(form, "version.ref.ticket_id"),
+        },
+        "revision": int(_form_text(form, "version.revision")) if _form_text(form, "version.revision") not in (None, "") else _form_text(form, "version.revision"),
+        "workflow_digest": _form_text(form, "version.workflow_digest"),
+        "context_digest": _form_text(form, "version.context_digest"),
+    }
+    return version, keys
+
+
+def _coerce_progressive_field_value(field_type: str, raw: str) -> Any:
+    if field_type == "boolean":
+        if raw == "":
+            return None
+        if raw == "true":
+            return True
+        if raw == "false":
+            return False
+        return raw
+    if field_type == "number":
+        if raw == "":
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+    return raw
+
+
+def _reject_unknown_form_keys(
+    form: FormData,
+    consumed: set[str],
+    draft: dict[str, Any] | None,
+    dynamic_prefixes: tuple[str, ...] = (),
+) -> None:
+    for key in form.keys():
+        if key in consumed:
+            continue
+        if any(key.startswith(prefix) for prefix in dynamic_prefixes):
+            continue
+        raise _draft_validation_error((key,), "extra_forbidden", _form_text(form, key), draft)
+
+
+def _progressive_create_payload(form: FormData) -> dict[str, Any]:
+    payload = {
+        "operation_id": _form_text(form, "operation_id"),
+        "title": _form_text(form, "title"),
+        "description": _form_text(form, "description"),
+    }
+    consumed = {"operation_id", "title", "description"}
+    _reject_unknown_form_keys(form, consumed, payload)
+    return payload
+
+
+def _progressive_update_payload(form: FormData, field_types: dict[str, str]) -> dict[str, Any]:
+    version, consumed = _parse_ticket_version_form(form)
+    payload: dict[str, Any] = {
+        "version": version,
+        "operation_id": _form_text(form, "operation_id"),
+        "patch": {},
+    }
+    consumed.update({"operation_id"})
+    title = _form_text(form, "patch.title")
+    description = _form_text(form, "patch.description")
+    if title is not None:
+        payload["patch"]["title"] = title
+        consumed.add("patch.title")
+    if description is not None:
+        payload["patch"]["description"] = description
+        consumed.add("patch.description")
+    field_values: dict[str, Any] = {}
+    for key in form.keys():
+        if not key.startswith("patch.field_values."):
+            continue
+        field_id = key.removeprefix("patch.field_values.")
+        if field_id not in field_types:
+            raise _draft_validation_error(("patch", "field_values", field_id), "extra_forbidden", _form_text(form, key), payload)
+        field_values[field_id] = _coerce_progressive_field_value(field_types[field_id], _form_text(form, key) or "")
+        consumed.add(key)
+    if field_values:
+        payload["patch"]["field_values"] = field_values
+    _reject_unknown_form_keys(form, consumed, payload)
+    return payload
+
+
+def _progressive_assignee_payload(form: FormData) -> dict[str, Any]:
+    version, consumed = _parse_ticket_version_form(form)
+    assignee = _form_text(form, "assignee")
+    payload = {
+        "version": version,
+        "operation_id": _form_text(form, "operation_id"),
+        "assignee": assignee or None,
+    }
+    consumed.update({"operation_id", "assignee"})
+    _reject_unknown_form_keys(form, consumed, payload)
+    return payload
+
+
+def _progressive_run_payload(form: FormData) -> dict[str, Any]:
+    version, consumed = _parse_ticket_version_form(form)
+    payload = {
+        "version": version,
+        "operation_id": _form_text(form, "operation_id"),
+    }
+    consumed.add("operation_id")
+    _reject_unknown_form_keys(form, consumed, payload)
+    return payload
+
+
+async def _request_ticket_payload(
+    request: Request,
+    *,
+    progressive: callable | None = None,
+) -> tuple[dict[str, Any] | None, Any]:
+    form = await request.form()
+    payload_text = _form_text(form, "payload") or ""
+    if payload_text:
+        return _draft(json.loads(payload_text)), form
+    if progressive is None:
+        return None, form
+    return progressive(form), form
+
+
 def require_route_ref(
     version: TicketVersion,
     team: str,
@@ -242,6 +410,7 @@ async def _render_ticket_page(
     ticket: str,
     query: str = "",
     assignee: str | None = None,
+    ticket_edit_requested: bool = False,
     ticket_form_errors: list[dict[str, str]] | None = None,
     ticket_form_draft: dict[str, Any] | None = None,
     status_code: int = 200,
@@ -267,8 +436,14 @@ async def _render_ticket_page(
             "active_workflow_id": workflow,
             "board": board,
             "selected_ticket_id": ticket,
+            "ticket_edit_requested": ticket_edit_requested,
             "ticket_form_errors": ticket_form_errors or [],
             "ticket_form_draft": ticket_form_draft or {},
+            "ticket_form_operation_ids": {
+                "assignee": _form_operation_id("ticket-assignee"),
+                "run": _form_operation_id("ticket-run"),
+                "update": _form_operation_id("ticket-update"),
+            },
             "workflow_initial": {
                 "board": board.model_dump(mode="json"),
                 "urls": {
@@ -329,6 +504,7 @@ async def _render_board_page(
             "selected_ticket_id": selected_ticket_id,
             "new_ticket_errors": new_ticket_errors or [],
             "new_ticket_draft": new_ticket_draft or {},
+            "new_ticket_operation_id": _form_operation_id("ticket-create"),
             "workflow_initial": {
                 "board": board.model_dump(mode="json"),
                 "urls": {
@@ -384,6 +560,7 @@ async def ticket_detail_page(
     ticket: str,
     query: str = "",
     assignee: str | None = None,
+    edit: bool = False,
     services: FlowgencyServices = Depends(get_services),
 ) -> HTMLResponse:
     context = await run_in_threadpool(require_team_and_workflow, services, team, workflow)
@@ -407,6 +584,12 @@ async def ticket_detail_page(
             "active_workflow_id": workflow,
             "board": board,
             "selected_ticket_id": ticket,
+            "ticket_edit_requested": edit,
+            "ticket_form_operation_ids": {
+                "assignee": _form_operation_id("ticket-assignee"),
+                "run": _form_operation_id("ticket-run"),
+                "update": _form_operation_id("ticket-update"),
+            },
             "workflow_initial": {
                 "board": board.model_dump(mode="json"),
                 "urls": {
@@ -459,11 +642,12 @@ async def create_ticket(
 ):
     await run_in_threadpool(require_team_and_workflow, services, team, workflow)
     ticket_service = require_ticket_services(services)
-    payload_text = await _payload_text(request)
+    decoded = None
     try:
-        payload = CreateTicketForm.model_validate_json(payload_text)
+        decoded, _ = await _request_ticket_payload(request, progressive=_progressive_create_payload)
+        payload = CreateTicketForm.model_validate(decoded)
     except ValidationError as exc:
-        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(json.loads(payload_text) if payload_text else None)}
+        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(getattr(exc, "draft_payload", decoded))}
         if _wants_json(request):
             return JSONResponse(payload_dict, status_code=422)
         return await _render_board_page(
@@ -532,10 +716,19 @@ async def update_ticket(
 ):
     await run_in_threadpool(require_team_and_workflow, services, team, workflow)
     ticket_service = require_ticket_services(services)
-    payload_text = await _payload_text(request)
     decoded = None
     try:
-        decoded = json.loads(payload_text)
+        detail = await run_in_threadpool(
+            _build_ticket_detail_snapshot,
+            ticket_service,
+            user_context(team),
+            team,
+            workflow,
+            ticket,
+            services.ticket_jobs,
+        )
+        field_types = {field.id: field.type for field in detail.fields}
+        decoded, _ = await _request_ticket_payload(request, progressive=lambda form: _progressive_update_payload(form, field_types))
         payload = UpdateTicketForm.model_validate(decoded)
         binding_id = await run_in_threadpool(_resolve_current_binding_id, ticket_service, team, workflow)
         require_route_ref(payload.version, team, workflow, ticket, binding_id)
@@ -545,10 +738,20 @@ async def update_ticket(
             return JSONResponse(payload_dict, status_code=422)
         return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft={}, status_code=422)
     except ValidationError as exc:
-        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}
+        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(getattr(exc, "draft_payload", decoded))}
         if _wants_json(request):
             return JSONResponse(payload_dict, status_code=422)
-        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict.get("draft") or {}, status_code=422)
+        return await _render_ticket_page(
+            request,
+            services,
+            team=team,
+            workflow=workflow,
+            ticket=ticket,
+            ticket_edit_requested=bool((payload_dict.get("draft") or {}).get("patch", {}).get("title") is not None or (payload_dict.get("draft") or {}).get("patch", {}).get("description") is not None),
+            ticket_form_errors=_ticket_form_issues(payload_dict),
+            ticket_form_draft=payload_dict.get("draft") or {},
+            status_code=422,
+        )
     actor = user_context(team)
     operation = operation_for_user(actor, {"team": team, "workflow": workflow, "ticket": ticket}, payload)
     try:
@@ -561,7 +764,17 @@ async def update_ticket(
         }
         if _wants_json(request):
             return JSONResponse(payload_dict, status_code=error.http_status)
-        return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict["draft"], status_code=error.http_status)
+        return await _render_ticket_page(
+            request,
+            services,
+            team=team,
+            workflow=workflow,
+            ticket=ticket,
+            ticket_edit_requested=bool(payload.patch.title is not None or payload.patch.description is not None),
+            ticket_form_errors=_ticket_form_issues(payload_dict),
+            ticket_form_draft=payload_dict["draft"],
+            status_code=error.http_status,
+        )
     if _wants_json(request):
         return RedirectResponse(f"{ticket_return_url(team, workflow, ticket)}/snapshot", status_code=303)
     return RedirectResponse(ticket_return_url(team, workflow, ticket), status_code=303)
@@ -577,10 +790,9 @@ async def save_assignee(
 ):
     await run_in_threadpool(require_team_and_workflow, services, team, workflow)
     ticket_service = require_ticket_services(services)
-    payload_text = await _payload_text(request)
     decoded = None
     try:
-        decoded = json.loads(payload_text)
+        decoded, _ = await _request_ticket_payload(request, progressive=_progressive_assignee_payload)
         payload = AssigneeForm.model_validate(decoded)
         binding_id = await run_in_threadpool(_resolve_current_binding_id, ticket_service, team, workflow)
         require_route_ref(payload.version, team, workflow, ticket, binding_id)
@@ -590,7 +802,7 @@ async def save_assignee(
             return JSONResponse(payload_dict, status_code=422)
         return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft={}, status_code=422)
     except ValidationError as exc:
-        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}
+        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(getattr(exc, "draft_payload", decoded))}
         if _wants_json(request):
             return JSONResponse(payload_dict, status_code=422)
         return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict.get("draft") or {}, status_code=422)
@@ -622,10 +834,9 @@ async def run_ticket(
 ):
     await run_in_threadpool(require_team_and_workflow, services, team, workflow)
     ticket_jobs = require_ticket_jobs(services)
-    payload_text = await _payload_text(request)
     decoded = None
     try:
-        decoded = json.loads(payload_text)
+        decoded, _ = await _request_ticket_payload(request, progressive=_progressive_run_payload)
         payload = RunTicketForm.model_validate(decoded)
         binding_id = await run_in_threadpool(_resolve_current_binding_id, ticket_jobs.service, team, workflow)
         require_route_ref(payload.version, team, workflow, ticket, binding_id)
@@ -635,7 +846,7 @@ async def run_ticket(
             return JSONResponse(payload_dict, status_code=422)
         return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft={}, status_code=422)
     except ValidationError as exc:
-        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(decoded)}
+        payload_dict = {"code": "invalid-request", "issues": _pydantic_issue_dicts(exc), "draft": _draft(getattr(exc, "draft_payload", decoded))}
         if _wants_json(request):
             return JSONResponse(payload_dict, status_code=422)
         return await _render_ticket_page(request, services, team=team, workflow=workflow, ticket=ticket, ticket_form_errors=_ticket_form_issues(payload_dict), ticket_form_draft=payload_dict.get("draft") or {}, status_code=422)

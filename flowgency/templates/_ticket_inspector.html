@@ -57,16 +57,39 @@
     <p class="workflow-ticket-state-label"><span class="workflow-state-dot" aria-hidden="true"></span><span data-ticket-state>{{ current_ticket.state_name }}</span></p>
     <h2>{{ current_ticket.title }}</h2>
   </div>
+  <form id="ticket-assignee-form" method="post" action="/{{ team }}/workflows/{{ active_workflow_id }}/tickets/{{ current_ticket.ref.ticket_id }}/assignee" data-noscript-assignee-form>
+    <input type="hidden" name="version.ref.binding_id" value="{{ current_ticket.version.ref.binding_id }}">
+    <input type="hidden" name="version.ref.team_id" value="{{ current_ticket.version.ref.team_id }}">
+    <input type="hidden" name="version.ref.workflow_id" value="{{ current_ticket.version.ref.workflow_id }}">
+    <input type="hidden" name="version.ref.ticket_id" value="{{ current_ticket.version.ref.ticket_id }}">
+    <input type="hidden" name="version.revision" value="{{ current_ticket.version.revision }}">
+    <input type="hidden" name="version.workflow_digest" value="{{ current_ticket.version.workflow_digest }}">
+    <input type="hidden" name="version.context_digest" value="{{ current_ticket.version.context_digest }}">
+    <input type="hidden" name="operation_id" value="{{ ticket_form_operation_ids.assignee }}">
+  </form>
+  <form id="ticket-run-form" method="post" action="/{{ team }}/workflows/{{ active_workflow_id }}/tickets/{{ current_ticket.ref.ticket_id }}/run">
+    <input type="hidden" name="version.ref.binding_id" value="{{ current_ticket.version.ref.binding_id }}">
+    <input type="hidden" name="version.ref.team_id" value="{{ current_ticket.version.ref.team_id }}">
+    <input type="hidden" name="version.ref.workflow_id" value="{{ current_ticket.version.ref.workflow_id }}">
+    <input type="hidden" name="version.ref.ticket_id" value="{{ current_ticket.version.ref.ticket_id }}">
+    <input type="hidden" name="version.revision" value="{{ current_ticket.version.revision }}">
+    <input type="hidden" name="version.workflow_digest" value="{{ current_ticket.version.workflow_digest }}">
+    <input type="hidden" name="version.context_digest" value="{{ current_ticket.version.context_digest }}">
+    <input type="hidden" name="operation_id" value="{{ ticket_form_operation_ids.run }}">
+  </form>
   <div class="workflow-ticket-assignment">
     <label for="ticket-assignee">Assigned agent</label>
     <div class="workflow-assignment-row">
-      <select id="ticket-assignee" aria-label="Assigned agent">
+      <select id="ticket-assignee" aria-label="Assigned agent" name="assignee" form="ticket-assignee-form">
         <option value="">Unassigned</option>
         {% for agent in ["advisor", "builder", "researcher", "reviewer"] %}
         <option value="{{ agent }}" {% if current_ticket.assignee == agent %}selected{% endif %}>{{ agent }}</option>
         {% endfor %}
       </select>
-      <button type="button" class="workflow-primary-button" id="ticket-run-button" {% if not current_ticket.assignee or current_ticket.active_run_job_id or current_ticket.pending_run_job_id %}disabled{% endif %}>
+      <noscript>
+      <button type="submit" class="workflow-link-button" form="ticket-assignee-form" {% if current_ticket.active_run_job_id or current_ticket.pending_run_job_id %}disabled{% endif %}>Assign</button>
+      </noscript>
+      <button type="submit" class="workflow-primary-button" id="ticket-run-button" form="ticket-run-form" {% if not current_ticket.assignee or current_ticket.active_run_job_id or current_ticket.pending_run_job_id %}disabled{% endif %}>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 4 7 4-7 4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
         <span>Run</span>
       </button>
@@ -82,47 +105,71 @@
     <button type="button" role="tab" aria-selected="false" data-ticket-tab="history">History</button>
   </nav>
   <section class="workflow-ticket-panel" data-ticket-panel="overview">
-    {% set edit_requested = ticket_form_draft and ticket_form_draft.patch and (ticket_form_draft.patch.title is defined or ticket_form_draft.patch.description is defined) %}
+    {% set edit_requested = ticket_edit_requested or (ticket_form_draft and ticket_form_draft.patch and (ticket_form_draft.patch.title is defined or ticket_form_draft.patch.description is defined)) %}
     <section class="workflow-ticket-section">
       <div class="workflow-ticket-overview-head">
         <h3>Description</h3>
         <button type="button" class="workflow-icon-button" id="ticket-edit-toggle" aria-label="Edit ticket" title="Edit ticket" aria-expanded="{{ 'true' if edit_requested else 'false' }}">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.5 2.5 13.5 4.5 5 13H3v-2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 4 12 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
         </button>
+        <noscript>
+        <a href="/{{ team }}/workflows/{{ active_workflow_id }}/tickets/{{ current_ticket.ref.ticket_id }}?edit=1" class="workflow-link-button">Edit ticket</a>
+        </noscript>
       </div>
       <div class="workflow-ticket-description" data-ticket-description-read{% if edit_requested %} hidden{% endif %}>{{ current_ticket.description | ticket_markdown }}</div>
-      <div class="workflow-ticket-edit" data-ticket-edit{% if not edit_requested %} hidden{% endif %}>
+      <form class="workflow-ticket-edit" data-ticket-edit data-noscript-edit-form{% if not edit_requested %} hidden{% endif %} method="post" action="/{{ team }}/workflows/{{ active_workflow_id }}/tickets/{{ current_ticket.ref.ticket_id }}/update">
+        <input type="hidden" name="version.ref.binding_id" value="{{ current_ticket.version.ref.binding_id }}">
+        <input type="hidden" name="version.ref.team_id" value="{{ current_ticket.version.ref.team_id }}">
+        <input type="hidden" name="version.ref.workflow_id" value="{{ current_ticket.version.ref.workflow_id }}">
+        <input type="hidden" name="version.ref.ticket_id" value="{{ current_ticket.version.ref.ticket_id }}">
+        <input type="hidden" name="version.revision" value="{{ current_ticket.version.revision }}">
+        <input type="hidden" name="version.workflow_digest" value="{{ current_ticket.version.workflow_digest }}">
+        <input type="hidden" name="version.context_digest" value="{{ current_ticket.version.context_digest }}">
+        <input type="hidden" name="operation_id" value="{{ ticket_form_operation_ids.update }}">
         <label class="workflow-field-block" for="ticket-title">
           <span>Title</span>
-          <input id="ticket-title" type="text" aria-label="Title" data-ticket-input="title" data-ticket-kind="text" value="{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.title is defined and ticket_form_draft.patch.title is not none %}{{ ticket_form_draft.patch.title }}{% else %}{{ current_ticket.title }}{% endif %}">
+          <input id="ticket-title" type="text" aria-label="Title" data-ticket-input="title" data-ticket-kind="text" name="patch.title" value="{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.title is defined and ticket_form_draft.patch.title is not none %}{{ ticket_form_draft.patch.title }}{% else %}{{ current_ticket.title }}{% endif %}">
         </label>
         <label class="workflow-field-block" for="ticket-description">
           <span>Description</span>
-          <textarea id="ticket-description" aria-label="Description" data-ticket-input="description" data-ticket-kind="text">{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.description is defined and ticket_form_draft.patch.description is not none %}{{ ticket_form_draft.patch.description }}{% else %}{{ current_ticket.description }}{% endif %}</textarea>
+          <textarea id="ticket-description" aria-label="Description" data-ticket-input="description" data-ticket-kind="text" name="patch.description">{% if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.description is defined and ticket_form_draft.patch.description is not none %}{{ ticket_form_draft.patch.description }}{% else %}{{ current_ticket.description }}{% endif %}</textarea>
         </label>
         <div class="workflow-edit-actions">
           <button type="button" class="workflow-link-button" id="ticket-edit-cancel">Cancel</button>
           <button type="button" class="workflow-primary-button" id="ticket-edit-save">Save</button>
+          <noscript>
+          <a href="/{{ team }}/workflows/{{ active_workflow_id }}/tickets/{{ current_ticket.ref.ticket_id }}" class="workflow-link-button">Cancel</a>
+          <button type="submit" class="workflow-primary-button" data-noscript-edit-save>Save</button>
+          </noscript>
         </div>
-      </div>
+      </form>
     </section>
     <section class="workflow-ticket-section">
       <h3>Inputs</h3>
+      <form method="post" action="/{{ team }}/workflows/{{ active_workflow_id }}/tickets/{{ current_ticket.ref.ticket_id }}/update" data-noscript-inputs-form>
+        <input type="hidden" name="version.ref.binding_id" value="{{ current_ticket.version.ref.binding_id }}">
+        <input type="hidden" name="version.ref.team_id" value="{{ current_ticket.version.ref.team_id }}">
+        <input type="hidden" name="version.ref.workflow_id" value="{{ current_ticket.version.ref.workflow_id }}">
+        <input type="hidden" name="version.ref.ticket_id" value="{{ current_ticket.version.ref.ticket_id }}">
+        <input type="hidden" name="version.revision" value="{{ current_ticket.version.revision }}">
+        <input type="hidden" name="version.workflow_digest" value="{{ current_ticket.version.workflow_digest }}">
+        <input type="hidden" name="version.context_digest" value="{{ current_ticket.version.context_digest }}">
+        <input type="hidden" name="operation_id" value="{{ ticket_form_operation_ids.update }}">
       {% for field in detail.fields %}
       {% if field.type != "artifact" and field.id not in output_ns.ids %}
       <label class="workflow-field-block" for="field-{{ field.id }}">
         <span>{{ field.label }}</span>
         {% set field_draft = ticket_form_draft.patch.field_values[field.id] if ticket_form_draft and ticket_form_draft.patch and ticket_form_draft.patch.field_values and field.id in ticket_form_draft.patch.field_values else field.value %}
         {% if field.type == "boolean" %}
-        <select id="field-{{ field.id }}" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="boolean">
+        <select id="field-{{ field.id }}" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="boolean" name="patch.field_values.{{ field.id }}">
           <option value="" {% if field_draft is none %}selected{% endif %}>Unset</option>
           <option value="true" {% if field_draft is sameas true %}selected{% endif %}>True</option>
           <option value="false" {% if field_draft is sameas false %}selected{% endif %}>False</option>
         </select>
         {% elif field.type == "number" %}
-        <input id="field-{{ field.id }}" type="number" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="number" value="{{ '' if field_draft is none else field_draft }}">
+        <input id="field-{{ field.id }}" type="number" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="number" name="patch.field_values.{{ field.id }}" value="{{ '' if field_draft is none else field_draft }}">
         {% else %}
-        <textarea id="field-{{ field.id }}" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="text">{{ field_draft if field_draft is string else '' }}</textarea>
+        <textarea id="field-{{ field.id }}" aria-label="{{ field.label }}" data-ticket-input="{{ field.id }}" data-ticket-kind="text" name="patch.field_values.{{ field.id }}">{{ field_draft if field_draft is string else '' }}</textarea>
         {% endif %}
       </label>
       {% endif %}
@@ -131,6 +178,10 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h8l2 2v8H3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5 3v4h5V3M5 13v-3h6v3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
         <span>Save inputs</span>
       </button>
+      <noscript>
+      <button type="submit" class="workflow-link-button workflow-save-button">Save inputs</button>
+      </noscript>
+      </form>
     </section>
     {% if output_ns.ids %}
     <section class="workflow-ticket-section">

@@ -39,6 +39,25 @@
       <span>New ticket</span>
     </button>
   </header>
+  <noscript>
+  <section class="workflow-ticket-section" data-noscript-create>
+    <h2>New ticket</h2>
+    <form method="post" action="/{{ team }}/workflows/{{ active_workflow_id }}/tickets">
+      <input type="hidden" name="operation_id" value="{{ new_ticket_operation_id if new_ticket_operation_id is defined else 'ticket-create-fallback' }}">
+      <label class="workflow-field-block" for="workflow-detail-noscript-title">
+        <span>Title</span>
+        <input id="workflow-detail-noscript-title" name="title" type="text" maxlength="180" autocomplete="off" value="{{ new_ticket_draft.title if new_ticket_draft is defined and new_ticket_draft else '' }}">
+      </label>
+      <label class="workflow-field-block" for="workflow-detail-noscript-description">
+        <span>Description</span>
+        <textarea id="workflow-detail-noscript-description" name="description">{{ new_ticket_draft.description if new_ticket_draft is defined and new_ticket_draft else '' }}</textarea>
+      </label>
+      <div class="workflow-dialog-actions">
+        <button type="submit" class="workflow-primary-button">Create ticket</button>
+      </div>
+    </form>
+  </section>
+  </noscript>
   <div class="workflow-ticket-page-layout">
     {% set workflow_detail_page = true %}
     {% include "_ticket_inspector.html" %}

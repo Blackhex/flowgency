@@ -167,6 +167,83 @@ def test_create_route_rerenders_html_with_submitted_draft_on_validation_error(wo
     assert "Invalid value." in response.text or "Value must be an object." in response.text
 
 
+def test_create_route_accepts_progressive_form_fields_without_json_payload(workflow_web_env):
+    env = workflow_web_env
+
+    response = env.client.post(
+        f"{env.base_path}/tickets",
+        data={
+            "operation_id": "create-form-post",
+            "title": "Create from HTML form",
+            "description": "Use the strict create route without client-side JSON.",
+        },
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    created = env.client.get(f"{response.headers['location']}/snapshot")
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["ticket"]["title"] == "Create from HTML form"
+    assert payload["ticket"]["description"] == "Use the strict create route without client-side JSON."
+
+
+def test_update_route_accepts_structured_form_fields_without_json_payload(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="HTML form update", values={"summary": "Server value", "verdict": True})
+
+    response = env.client.post(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/update",
+        data={
+            "version.ref.binding_id": ticket.version.ref.binding_id,
+            "version.ref.team_id": ticket.version.ref.team_id,
+            "version.ref.workflow_id": ticket.version.ref.workflow_id,
+            "version.ref.ticket_id": ticket.version.ref.ticket_id,
+            "version.revision": str(ticket.version.revision),
+            "version.workflow_digest": ticket.version.workflow_digest,
+            "version.context_digest": ticket.version.context_digest,
+            "operation_id": "structured-update",
+            "patch.field_values.summary": "Updated from structured HTML",
+            "patch.field_values.verdict": "false",
+        },
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    refreshed = env.read(ticket.ref)
+    assert refreshed.record.field_values["summary"] == "Updated from structured HTML"
+    assert refreshed.record.field_values["verdict"] is False
+
+
+def test_update_route_rejects_unknown_progressive_form_fields(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="Reject unknown field")
+
+    response = env.client.post(
+        f"{env.base_path}/tickets/{ticket.ref.ticket_id}/update",
+        data={
+            "version.ref.binding_id": ticket.version.ref.binding_id,
+            "version.ref.team_id": ticket.version.ref.team_id,
+            "version.ref.workflow_id": ticket.version.ref.workflow_id,
+            "version.ref.ticket_id": ticket.version.ref.ticket_id,
+            "version.revision": str(ticket.version.revision),
+            "version.workflow_digest": ticket.version.workflow_digest,
+            "version.context_digest": ticket.version.context_digest,
+            "operation_id": "structured-update-invalid",
+            "patch.description": "Keep this draft visible",
+            "patch.actor_name": "override-attempt",
+        },
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert "Unexpected field." in response.text
+    assert "Keep this draft visible" in response.text
+
+
 def test_create_route_keeps_markdown_raw_and_initial_state(workflow_web_env):
     env = workflow_web_env
     description = "# Heading\n\n<script>alert(1)</script>"

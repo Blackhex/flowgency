@@ -21,6 +21,16 @@ async function resetUiRuntime(request: APIRequestContext): Promise<void> {
   expect(response.status()).toBe(204);
 }
 
+async function detailSnapshot(request: APIRequestContext, ticketId = 'fixture-review'): Promise<DetailSnapshot> {
+  const response = await request.get(`/newsletter/workflows/delivery/tickets/${ticketId}/snapshot`);
+  expect(response.ok()).toBeTruthy();
+  return await response.json() as DetailSnapshot;
+}
+
+async function waitForWorkflowController(page: Parameters<typeof test.beforeEach>[0]['page']): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as typeof window & { workflowBoardController?: unknown }).workflowBoardController));
+}
+
 test.beforeEach(async ({ page, request }, testInfo) => {
   await resetUiRuntime(request);
   installConsoleErrorGate(page);
@@ -127,6 +137,55 @@ test('concurrent dirty input keeps the remote value and the unsaved local draft'
   expect(persisted.fields.find((field) => field.id === 'acceptance-criteria')?.value).toBe('Remote server edit');
   await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('My unsaved local edit');
   expect(initial.ticket.ref.ticket_id).toBe('fixture-review');
+});
+
+test('remote input change before the assignee response reaches the browser keeps the stale draft local', async ({ page, request, context }) => {
+  let releaseAssigneeResponse: (() => void) | null = null;
+  const assigneeResponseReleased = new Promise<void>((resolve) => {
+    releaseAssigneeResponse = resolve;
+  });
+
+  await context.route('**/tickets/fixture-review/assignee', async (route) => {
+    const upstream = await route.fetch();
+    const detail = await upstream.json() as DetailSnapshot;
+    const remoteUpdate = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/update', {
+      headers: { Accept: 'application/json' },
+      form: {
+        payload: JSON.stringify({
+          version: detail.ticket.version,
+          operation_id: operationId('remote-before-assignee-release'),
+          patch: {
+            field_values: {
+              'acceptance-criteria': 'Remote server edit before assignee response',
+            },
+          },
+        }),
+      },
+    });
+    expect(remoteUpdate.ok()).toBeTruthy();
+    await assigneeResponseReleased;
+    await route.fulfill({ response: upstream });
+  });
+
+  await page.goto('/newsletter/workflows/delivery/tickets/fixture-review');
+  await waitForWorkflowController(page);
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('My unsaved local edit');
+
+  const assigneeSaved = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/assignee') && response.request().method() === 'POST');
+  await page.getByLabel('Assigned agent', { exact: true }).selectOption('builder');
+  releaseAssigneeResponse?.();
+  await assigneeSaved;
+
+  const conflictResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/update') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save inputs', exact: true }).click();
+  const conflict = await conflictResponse;
+  expect(conflict.status()).toBe(409);
+
+  const persisted = await detailSnapshot(request);
+  expect(persisted.ticket.assignee).toBe('builder');
+  expect(persisted.fields.find((field) => field.id === 'acceptance-criteria')?.value).toBe('Remote server edit before assignee response');
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('My unsaved local edit');
+  await expect(page.locator('#workflow-action-errors')).toContainText('Refresh the ticket');
 });
 
 test('run queues durable work without changing the ticket state', async ({ page, request }) => {
@@ -326,6 +385,187 @@ test('visible polling refresh updates server content without wiping a dirty draf
   await expect(page.locator('#ticket-description')).toHaveValue('Remote description refreshed through polling');
   await expect(localField).toHaveValue('Locally edited and not yet saved');
   await expect(localField).toBeFocused();
+});
+
+test('hidden pages pause polling and abort an in-flight refresh without extra snapshot requests', async ({ page, request }) => {
+  await page.addInitScript(() => {
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get() {
+        return hidden;
+      },
+      set(value) {
+        hidden = Boolean(value);
+      },
+    });
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get() {
+        return hidden ? 'hidden' : 'visible';
+      },
+    });
+    (window as typeof window & { __setTestHidden?: (value: boolean) => void }).__setTestHidden = (value: boolean) => {
+      hidden = value;
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+  });
+  await page.goto('/newsletter/workflows/delivery/tickets/fixture-review');
+  await waitForWorkflowController(page);
+  await page.evaluate(() => clearTimeout((window as typeof window & { workflowBoardController: { pollTimer: number } }).workflowBoardController.pollTimer));
+
+  const paused = await page.evaluate(async () => {
+    const win = window as typeof window & {
+      __setTestHidden: (value: boolean) => void;
+      workflowBoardController: {
+        pollTimer: number;
+        requestCounters: { refresh: number };
+        requestControllers: { refresh: AbortController | null };
+        refreshBoard: () => Promise<void>;
+        scheduleRefresh: () => void;
+      };
+    };
+    const controller = win.workflowBoardController;
+    let releaseSnapshot: (() => void) | null = null;
+    const held = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const originalFetch = window.fetch.bind(window);
+    let snapshotRequests = 0;
+    window.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes('/tickets/fixture-review/snapshot')) {
+        snapshotRequests += 1;
+        if (snapshotRequests === 1) {
+          await held;
+        }
+      }
+      return originalFetch(input, init);
+    };
+    void controller.refreshBoard();
+    await Promise.resolve();
+    win.__setTestHidden(true);
+    const aborted = controller.requestControllers.refresh?.signal.aborted ?? false;
+    const beforeHiddenSchedule = controller.requestCounters.refresh;
+    controller.scheduleRefresh();
+    const afterHiddenSchedule = controller.requestCounters.refresh;
+    releaseSnapshot?.();
+    window.fetch = originalFetch;
+    return { aborted, beforeHiddenSchedule, afterHiddenSchedule, snapshotRequests };
+  });
+
+  expect(paused.snapshotRequests).toBe(1);
+  expect(paused.aborted).toBe(true);
+  expect(paused.afterHiddenSchedule).toBe(paused.beforeHiddenSchedule);
+
+  const remoteUpdate = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/update', {
+    headers: { Accept: 'application/json' },
+    form: {
+      payload: JSON.stringify({
+        version: (await detailSnapshot(request)).ticket.version,
+        operation_id: operationId('resume-hidden-poll'),
+        patch: { description: 'Visibility refresh after hidden pause' },
+      }),
+    },
+  });
+  expect(remoteUpdate.ok()).toBeTruthy();
+  await page.evaluate(() => (window as typeof window & { __setTestHidden: (value: boolean) => void }).__setTestHidden(false));
+  await expect(page.locator('#ticket-description')).toHaveValue('Visibility refresh after hidden pause');
+});
+
+test('older selection and refresh responses cannot replace a newer ticket selection or draft', async ({ page, context }) => {
+  const delayedHtml: Array<() => void> = [];
+  const delayedSnapshot: Array<() => void> = [];
+  await context.route('**/newsletter/workflows/delivery?ticket=fixture-review-2', async (route) => {
+    const upstream = await route.fetch();
+    await new Promise<void>((resolve) => delayedHtml.push(resolve));
+    await route.fulfill({ response: upstream });
+  });
+  await context.route('**/newsletter/workflows/delivery/tickets/fixture-review/snapshot', async (route) => {
+    const upstream = await route.fetch();
+    await new Promise<void>((resolve) => delayedSnapshot.push(resolve));
+    await route.fulfill({ response: upstream });
+  });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await waitForWorkflowController(page);
+  await page.evaluate(() => clearTimeout((window as typeof window & { workflowBoardController: { pollTimer: number } }).workflowBoardController.pollTimer));
+  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { refreshBoard: () => Promise<void> } }).workflowBoardController.refreshBoard());
+  const delayedSelectionRequested = page.waitForRequest((request) => request.url().includes('ticket=fixture-review-2'));
+  await page.getByRole('link', { name: 'Review the local storage contract' }).click();
+  await delayedSelectionRequested;
+  await page.evaluate(() => void (window as typeof window & { workflowBoardController: { openTicket: (ticketId: string) => Promise<void> } }).workflowBoardController.openTicket('fixture-active-1'));
+  await expect(page).toHaveURL(/ticket=fixture-active-1/);
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Draft on the newer selection');
+
+  delayedSnapshot.splice(0).forEach((release) => release());
+  delayedHtml.splice(0).forEach((release) => release());
+
+  await expect(page).toHaveURL(/ticket=fixture-active-1/);
+  await expect(page.getByRole('heading', { name: 'Implement atomic ticket assignment' })).toBeVisible();
+  await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Draft on the newer selection');
+});
+
+test.describe('javascript-disabled workflow forms', () => {
+  test.use({ javaScriptEnabled: false });
+
+  test('create, edit, assign, save inputs, and run submit through HTML forms', async ({ page, request }) => {
+    await page.goto('/newsletter/workflows/delivery');
+
+    const createForm = page.locator('[data-noscript-create]');
+    await createForm.getByLabel('Title', { exact: true }).fill('Create ticket without JavaScript');
+    await createForm.getByLabel('Description', { exact: true }).fill('Use the same strict routes with ordinary HTML form fields.');
+    await createForm.getByRole('button', { name: 'Create ticket', exact: true }).click();
+
+    await expect(page.getByRole('heading', { name: 'Create ticket without JavaScript', exact: true })).toBeVisible();
+    await page.locator('#ticket-assignee').selectOption('builder');
+    await page.getByRole('button', { name: 'Assign', exact: true }).click();
+    await expect(page.locator('#ticket-assignee')).toHaveValue('builder');
+
+    await page.getByRole('link', { name: 'Edit ticket', exact: true }).click();
+    const editForm = page.locator('[data-noscript-edit-form]');
+    await editForm.getByLabel('Title', { exact: true }).fill('Edited without JavaScript');
+    await editForm.getByLabel('Description', { exact: true }).fill('The HTML fallback keeps the approved route semantics.');
+    await editForm.locator('[data-noscript-edit-save]').click();
+    await expect(page.getByRole('heading', { name: 'Edited without JavaScript', exact: true })).toBeVisible();
+
+    const inputsForm = page.locator('[data-noscript-inputs-form]');
+    await inputsForm.getByLabel('Acceptance criteria', { exact: true }).fill('Preserve strict version checking and HTML drafts.');
+    await inputsForm.locator('button[type="submit"]').click();
+    await expect(page.getByLabel('Acceptance criteria', { exact: true })).toHaveValue('Preserve strict version checking and HTML drafts.');
+
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.locator('[data-ticket-run-status]')).toContainText('Queued');
+
+    const createdUrl = new URL(page.url());
+    const ticketId = createdUrl.pathname.split('/').at(-1) ?? '';
+    const detail = await detailSnapshot(request, ticketId);
+    expect(detail.ticket.assignee).toBe('builder');
+  });
+
+  test('stale HTML edit errors keep the local draft visible', async ({ page, request }) => {
+    await page.goto('/newsletter/workflows/delivery/tickets/fixture-review?edit=1');
+
+    const stale = await detailSnapshot(request);
+    const remoteUpdate = await request.post('/newsletter/workflows/delivery/tickets/fixture-review/update', {
+      headers: { Accept: 'application/json' },
+      form: {
+        payload: JSON.stringify({
+          version: stale.ticket.version,
+          operation_id: operationId('remote-html-stale'),
+          patch: { description: 'Remote change before HTML submit' },
+        }),
+      },
+    });
+    expect(remoteUpdate.ok()).toBeTruthy();
+
+    const editForm = page.locator('[data-noscript-edit-form]');
+    await editForm.getByLabel('Description', { exact: true }).fill('Local stale HTML draft');
+    await editForm.locator('[data-noscript-edit-save]').click();
+
+    await expect(page.locator('.workflow-issue-banner')).toContainText('Refresh the ticket');
+    await expect(editForm.getByLabel('Description', { exact: true })).toHaveValue('Local stale HTML draft');
+  });
 });
 
 test('requirements and history show retained labels, reasoning, and links', async ({ page }) => {

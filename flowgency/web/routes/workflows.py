@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from uuid import uuid4
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -57,6 +58,10 @@ def _workflow_nav(ticket_service, actor, snapshot, team_id: str) -> list[dict[st
     return rows
 
 
+def _form_operation_id(prefix: str) -> str:
+    return f"{prefix}-{uuid4().hex}"
+
+
 def _workflow_page_context(request: Request, services: FlowgencyServices, team_id: str, workflow_id: str, board, *, ticket_id: str | None) -> dict[str, Any]:
     snapshot = services.config_store.load()
     ticket_service = require_ticket_services(services)
@@ -69,6 +74,12 @@ def _workflow_page_context(request: Request, services: FlowgencyServices, team_i
             "active_workflow_id": workflow_id,
             "board": board,
             "selected_ticket_id": ticket_id,
+            "new_ticket_operation_id": _form_operation_id("ticket-create"),
+            "ticket_form_operation_ids": {
+                "assignee": _form_operation_id("ticket-assignee"),
+                "run": _form_operation_id("ticket-run"),
+                "update": _form_operation_id("ticket-update"),
+            },
             "workflow_initial": {
                 "board": board.model_dump(mode="json"),
                 "urls": {
