@@ -1,9 +1,12 @@
 """Integration plugin system for Flowgency."""
 
+from __future__ import annotations
+
 import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -25,6 +28,9 @@ from flowgency.integrations.models import (
     RuntimeCapabilities,
     TicketToolLaunch,
 )
+
+if TYPE_CHECKING:
+    from flowgency.jobs.processes import ProcessStopEvidence
 
 SIDECAR_FILENAME = ".flowgency-meta.yaml"
 
@@ -51,6 +57,7 @@ class RunResult:
     copilot_home: str | None = None
     # Finished phrases naming what the policy asked for and why it did not hold.
     unenforced_rules: list[str] = field(default_factory=list)
+    process_stop_evidence: ProcessStopEvidence | None = None
 
 
 @dataclass

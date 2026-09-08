@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from flowgency.projector_capabilities import ProjectorCapabilities
+
+if TYPE_CHECKING:
+    from flowgency.jobs.processes import RuntimeProcessLifecycle
 
 PermissionMode = Literal["restricted", "unrestricted"]
 LiveTicketTransport = Literal["mcp-stdio"]
@@ -138,6 +141,7 @@ class TicketToolLaunch:
     args: tuple[str, ...]
     env: dict[str, str] = field(repr=False)
     server_name: str = "flowgency-tickets"
+    lifecycle: RuntimeProcessLifecycle | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "args", tuple(self.args))

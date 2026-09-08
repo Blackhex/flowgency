@@ -47,6 +47,7 @@ from flowgency.integrations.models import (
 )
 from flowgency.integrations.ticket_tools import write_copilot_ticket_config
 from flowgency.integrations.tool_catalog import ToolCatalog, ToolDescriptor
+from flowgency.jobs.processes import run_supervised
 
 
 logger = logging.getLogger(__name__)
@@ -914,24 +915,45 @@ class CopilotIntegration(BaseIntegration):
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         run_env = self._launch_environment(job_home)
         try:
-            result = subprocess.run(
-                cmd_args,
-                capture_output=True, text=True, timeout=request.timeout,
-                cwd=str(request.launch_dir),
-                stdin=subprocess.DEVNULL,
-                creationflags=creationflags,
-                env=run_env,
-            )
-            duration = time.monotonic() - start
+            process_stop_evidence = None
+            if (
+                request.ticket_tools is not None
+                and request.ticket_tools.lifecycle is not None
+            ):
+                completed = run_supervised(
+                    cmd_args,
+                    cwd=request.launch_dir,
+                    env=run_env,
+                    timeout=request.timeout,
+                    lifecycle=request.ticket_tools.lifecycle,
+                )
+                result_stdout = completed.stdout
+                result_stderr = completed.stderr
+                result_returncode = completed.exit_code
+                duration = completed.duration_seconds
+                process_stop_evidence = completed.process_stop_evidence
+            else:
+                result = subprocess.run(
+                    cmd_args,
+                    capture_output=True, text=True, timeout=request.timeout,
+                    cwd=str(request.launch_dir),
+                    stdin=subprocess.DEVNULL,
+                    creationflags=creationflags,
+                    env=run_env,
+                )
+                result_stdout = result.stdout
+                result_stderr = result.stderr
+                result_returncode = result.returncode
+                duration = time.monotonic() - start
             parse_root = request.workspace_root
             parsed_text, changed_files, write_attempts = self._parse_jsonl_output_details(
-                result.stdout,
+                result_stdout,
                 parse_root,
             )
             usage_summary = self._usage_summary(
-                result.stdout, copilot_home=job_home, cmd=cmd,
+                result_stdout, copilot_home=job_home, cmd=cmd,
             )
-            stderr = result.stderr
+            stderr = result_stderr
             if degraded:
                 warning = f"sandbox: {degraded}\n"
                 stderr = f"{warning}{stderr}" if stderr else warning
@@ -942,15 +964,16 @@ class CopilotIntegration(BaseIntegration):
                     else usage_summary
                 )
             return RunResult(
-                exit_code=result.returncode,
+                exit_code=result_returncode,
                 stdout=parsed_text,
                 stderr=stderr,
                 duration_seconds=duration,
                 changed_files=changed_files,
                 write_attempts=write_attempts,
-                session_id=self._parse_session_id(result.stdout),
+                session_id=self._parse_session_id(result_stdout),
                 copilot_home=str(job_home) if job_home is not None else None,
                 unenforced_rules=unenforced,
+                process_stop_evidence=process_stop_evidence,
             )
         except subprocess.TimeoutExpired as error:
             duration = time.monotonic() - start
