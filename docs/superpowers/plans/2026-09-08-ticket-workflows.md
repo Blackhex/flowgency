@@ -28,7 +28,7 @@ approved [design specification](../specs/2026-09-08-ticket-workflows-design.md).
 - "An unavailable or unreadable root is not an empty ticket set."
 - "The ticket operation is atomic; the external project is not."
 - "The same ticket persists throughout its workflow; observations, proposals, and decisions are no longer special built-in kinds of work item."
-- Ship Local only. Do not implement GitHub/Azure DevOps providers, record imports, a legacy archive UI, automatic storage migration, event subscriptions, agent-role bindings, user moves, or per-ticket execution worktrees.
+- Ship Local only. Do not implement GitHub/Azure DevOps providers, record imports, an archive UI, automatic storage migration, event subscriptions, agent-role bindings, user moves, or per-ticket execution worktrees.
 - Run all commands from `C:/Projekty/Flowgency/.worktrees/ticket-workflows` on `feat/ticket-workflows`. Do not implement on `master` or run tests from a different checkout.
 - Preserve runtime-local and user-owned files. Stage explicit task files only; never stage `config.yaml`, lock files, logs, team data, or another checkout's output.
 - The design is committed as `405ba7f`; this plan must be a separate documentation-only commit before application implementation.
@@ -116,7 +116,7 @@ boundaries and serialize/validate on provider reads.
 
 **Interfaces**
 
-- Consumes: Pydantic v2 and `flowgency.configuration.issues.ValidationIssue`.
+- Consumes: Pydantic 2 and `flowgency.configuration.issues.ValidationIssue`.
 - Produces: `FieldDefinition`, `FieldUse`, `StateDefinition`, `Precondition`,
   `AgentCriterion`, `TransitionDefinition`, `WorkflowDefinition`, `ArtifactRef`,
     `CriterionAssessment`, `FieldKind`, `FieldValue` and `ContractError` from
@@ -582,7 +582,7 @@ original identity while the current context digest does not. External editors
 that bypass cooperating writers are detected by current-byte checks when observed;
 do not claim to detect an unobserved external change-and-revert atomically.
 
-Also test legacy current-shape configurations with no workflows: they load without
+Also test existing current-shape configurations with no workflows: they load without
 a fabricated board or a newly created workflow-library root. Reject a configured
 workflow with missing library, unavailable provider, overlapping source workspace
 root, wrong provider types or traversal-capable IDs.
@@ -1094,7 +1094,7 @@ then commit `feat(tickets): validate and audit live transitions`.
     results. Definitions and labels are included through scoped service views, not
     exposed as arbitrary server filesystem paths.
 
-**Transport choice:** use the official Python MCP SDK v2 (`mcp>=2.0,<3`) for the
+**Transport choice:** use the official Python MCP SDK 2 (`mcp>=2.0,<3`) for the
 stdio protocol and a small authenticated loopback HTTP broker for trusted service
 execution. The bridge process receives only endpoint/token and sends typed tool
 requests; it cannot choose another actor or configure a storage root. The SDK's
@@ -1674,8 +1674,8 @@ Cover active reassignment/unassignment returning conflict; read-only agent eligi
 for Run when its channel is supported; unsupported channel failing before enqueue;
 create initial state; no assignee on Run; pending-run duplication; search/assignee
 filters; board count versus job count; unsafe Markdown; unknown route refs;
-cross-team artifact access; invalid blueprint with retained history; and no legacy
-directory reads during the new routes.
+cross-team artifact access; invalid blueprint with retained history; and no retired-directory
+reads during the new routes.
 
 - [ ] **Step 5: Run green, review, and commit.**
 
@@ -2138,7 +2138,7 @@ then commit `feat(ui): configure workflow instances and storage`.
 **Interfaces**
 
 - Consumes: all new workflow/ticket services and the existing memory publication
-    contract. No public legacy pipeline API is retained as a compatibility loader.
+    contract. No public retired pipeline API is retained as a compatibility loader.
 - Produces `LaunchMemory(root: Path, memory: Path)`,
     `prepare_launch_memory(launch_view: Path, *, memory_files: Mapping[str, bytes])
     -> LaunchMemory` and `copy_launch_memory_to_stage(launch: LaunchMemory,
@@ -2155,38 +2155,38 @@ then commit `feat(ui): configure workflow instances and storage`.
     unchanged; it requires write on the workspace root, not merely a child path.
 - `ResolvedTeamPaths` retains workspace/team/locks/logs and exposes
     `runtime_directories`; it no longer makes observations/proposals/decisions
-    required startup directories. Existing legacy directories are untouched.
+    required startup directories. Existing retired directories are untouched.
 
-- [ ] **Step 1: Add a legacy-files-unchanged red integration test.**
+- [ ] **Step 1: Add a retired-files-unchanged red integration test.**
 
 ```python
-def test_dashboard_and_jobs_do_not_touch_legacy_records(workflow_web_env, tmp_path):
+def test_dashboard_and_jobs_do_not_touch_retired_records(workflow_web_env, tmp_path):
         env = workflow_web_env
-        legacy = env.team_root / "observations" / "old.md"
-        legacy.parent.mkdir(parents=True)
-        legacy.write_text("---\nstatus: open\nttl_days: 1\ndate: 2000-01-01\n---\nOld record\n",
+        retired_record = env.team_root / "observations" / "old.md"
+        retired_record.parent.mkdir(parents=True)
+        retired_record.write_text("---\nstatus: open\nttl_days: 1\ndate: 2000-01-01\n---\nOld record\n",
                                             encoding="utf-8")
-        before = legacy.read_bytes()
+        before = retired_record.read_bytes()
         for url in ("/newsletter/", "/newsletter/agents", "/newsletter/jobs", env.base_path):
                 assert env.client.get(url).status_code == 200
-        assert legacy.read_bytes() == before
+        assert retired_record.read_bytes() == before
         for url in ("/newsletter/observations", "/newsletter/proposals", "/newsletter/decisions"):
                 assert env.client.get(url).status_code in (404, 410)
                 assert env.client.post(url, data={}).status_code in (404, 405, 410)
 ```
 
 Expose `.team_root` on `workflow_web_env` from its real normalized configuration.
-Also create a team with no workflows and no legacy directories; startup/dashboard
-must not manufacture either legacy directories or a board.
+Also create a team with no workflows and no retired directories; startup/dashboard
+must not manufacture either retired directories or a board.
 
 - [ ] **Step 2: Run red and identify the exact pipeline callers being removed.**
 
 Run `python -m pytest tests/test_pipeline_retirement.py -q`.
-Expected: old routes are still active or TTL modifies the legacy record. Search
+Expected: old routes are still active or TTL modifies the retired record. Search
 the active worktree with `rg -n "list_observations|list_proposals|list_decisions|project_decision|validate_outbox|create_outbox" flowgency tests`.
 Use the result to update direct consumers, not to retain forwarding wrappers.
 
-- [ ] **Step 3: Separate memory, stop legacy execution, and replace reporting.**
+- [ ] **Step 3: Separate memory, stop old execution, and replace reporting.**
 
 Move the bounded memory-directory preparation/copying behavior out of the outbox
 module without changing the memory publication protocol. Preserve limits of 20
@@ -2217,7 +2217,7 @@ pipeline HTTP/CLI actions. Historical schema-5 decision jobs remain readable and
 unchanged on disk. New submission rejects decision/decision_retry. If an old queued
 decision is encountered, mark it failed with a specific retired-trigger summary
 under the existing job transition path without creating or modifying a decision
-file; do not automatically convert it into a ticket job. Active legacy runs are
+file; do not automatically convert it into a ticket job. Active old runs are
 not force-terminated by a configuration load, and terminal historical records
 are not rewritten merely for being old.
 
@@ -2285,7 +2285,7 @@ to satisfy obsolete expectations, and do not suppress unrelated failing tests.
 - [ ] **Step 5: Run green, review and commit.**
 
 Run `python -m pytest tests/test_pipeline_retirement.py tests/test_ticket_cli.py tests/test_ticket_reporting.py tests/test_memory_launch.py tests/test_dashboard.py tests/test_agent_detail.py tests/test_job_execution.py tests/test_job_reconciliation.py tests/test_cli_contract.py -q`.
-Review the direct legacy read/write removal and preserved behavior, then commit
+Review the direct retired read/write removal and preserved behavior, then commit
 `refactor(pipeline): replace records with ticket workflows`.
 
 ## Task 15: Update Setup, Examples and User Documentation
@@ -2421,7 +2421,7 @@ def test_setup_uses_ticket_reporting_without_native_authority():
 ```
 
 Retain the current canonical-path parity tests and configuration validation tests.
-Do not alter the user's actual setup/config/team directories. Removing legacy
+Do not alter the user's actual setup/config/team directories. Removing retired
 instructions from shipped examples is not permission to rewrite user-created
 prompts at startup.
 
@@ -2534,7 +2534,7 @@ Run `python -m pytest tests/ -q` from the worktree, including installed live pro
 Inspect the full branch diff against master and record review findings by severity.
 Review auth/context derivation, concurrency/lock order, same-agent multi-run races,
 original-target cleanup, idempotent reservations, no migration, compatibility
-validation, hidden IDs, no user moves and legacy-file preservation. Repair any
+validation, hidden IDs, no user moves and retired-file preservation. Repair any
 findings with their own regression tests and rerun affected tests before the final
 full suite. Do not integrate with unverified required gates.
 
@@ -2623,7 +2623,7 @@ commit, test evidence, publication and cleanup status.
 | Approved board/inspector, editor and settings designs | 11, 12, 13, 16 |
 | Hidden IDs, no Source tab/evidence toggle/provider badge | 4, 11, 12, 13 |
 | Preserve jobs, routines, memory, logs and workspaces | 9, 14, 15, 16 |
-| No legacy import/archive/startup conversion | 3, 14, 15 |
+| No retired import/archive/startup conversion | 3, 14, 15 |
 | Cross-team, path, artifact, XSS and credential safety | 2, 6, 7, 8, 10, 16 |
 | Full baseline, task reviews and approved-asset comparison | Setup, every task, 16 |
 | Fast-forward integration, publishing and cleanup | 17 |

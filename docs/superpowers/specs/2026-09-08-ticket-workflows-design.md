@@ -46,7 +46,7 @@ implemented as part of this design work.
 - Ticket-event subscriptions that automatically start agents.
 - Workflow-defined agent roles, transition executors, or role-to-agent bindings.
 - User-driven state changes, drag-to-transition, and force-move overrides.
-- Import, conversion, or archive UI for legacy pipeline records.
+- Import, conversion, or archive UI for retired pipeline records.
 - Transfer or migration of tickets when a storage selection changes.
 - Blueprint releases, per-instance revision adoption, and a Source editor tab.
 - A new source-workspace isolation system or transactionality for repository edits.
@@ -482,7 +482,7 @@ Changing storage switches the board's data source:
   because the existing provider is temporarily unavailable.
 
 Do not introduce implicit migration, directory scanning, or fallback to the old
-storage. This rule is separate from the decision not to import legacy pipeline
+storage. This rule is separate from the decision not to import retired pipeline
 records.
 
 ### Changes During Execution
@@ -626,7 +626,7 @@ rendered results against them before UI completion is claimed.
 
 Retire the fixed observation/proposal/decision UI and runtime handling. Do not keep
 an archive UI, import command, compatibility loader, or automatic migration for
-those records. Leave existing legacy files untouched. Retired routes must not
+those records. Leave existing retired files untouched. Retired routes must not
 continue to mutate them or appear as normal navigation targets.
 
 Replace the observation/proposal outbox reporting contract with provider-neutral
@@ -648,10 +648,10 @@ retired decision jobs must not silently invoke removed pipeline handling or be
 converted into ticket jobs on startup.
 
 Existing user-owned configuration, workspace files, prompts, team-state
-directories, logs, and legacy records are not rewritten simply because the
+directories, logs, and retired records are not rewritten simply because the
 application gains workflows. Setup and shipped examples should produce the new
 model. An unconfigured team has an explicit no-workflows state, not a fabricated
-board inferred from legacy directories.
+board inferred from retired directories.
 
 ## 13. Failure Semantics and Verification
 
@@ -710,7 +710,7 @@ controls or synthetic JavaScript handlers:
     workspace-read-only agent. Unsupported channels fail explicitly rather than
     silently using the old outbox behavior.
 16. The old Pipeline UI and reporting/decision actions are retired without deleting
-    legacy files or regressing unrelated jobs, routines, memory, logs, agents, and
+    retired files or regressing unrelated jobs, routines, memory, logs, agents, and
     workspace behavior.
 
 Use focused tests while implementing and run the complete suite before review and
@@ -749,7 +749,7 @@ evidence.
 | Assignment as a nonbinding preference | Assignment prevents other agents from starting ticket work. |
 | Mandatory sign-off or automatic unassignment on completion | Assignment persists; sign-off is an agent's option. |
 | Only one ticket per agent run | One run can work on several tickets. |
-| Legacy record import or read-only archive UI | Clean replacement, leaving old files untouched. |
+| Retired record import or read-only archive UI | Clean replacement, leaving old files untouched. |
 | Permanent blueprint/storage locks when tickets exist | Keep settings editable; validate the actual operation. |
 | Automatic ticket transfer when storage changes | Switch source only, with no transfer or deletion. |
 | Dedicated ticket page as the default | Board plus inspector is default; full-page expansion remains available. |
