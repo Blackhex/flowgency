@@ -806,7 +806,7 @@ Review all lock acquisition order and external-edit limitations; commit
   `sign_off(actor: AgentTicketContext, version, operation)`, and
   `update(actor: TicketActor, version, patch: TicketPatch, operation)`.
   Mutation methods return `TicketMutationResult`. `inspect` constructs the current
-  `TicketVersion`; `TicketView.ref` delegates to `version.ref`.
+  `TicketVersion`; `TicketView.ref` derives from `record.ref`.
 
 - [ ] **Step 1: Add a real service fixture and ownership red tests.**
 
@@ -1561,9 +1561,9 @@ partial reservation recovery, then commit
 
 | Method | Path | Outcome |
 | --- | --- | --- |
-| GET | `/{team}/workflows/{workflow}` | Board page. |
+| GET | `/{team}/workflows/{workflow}` | Redirects 303 to the board snapshot; replaced by the HTML board page in Task 11. |
 | GET | `/{team}/workflows/{workflow}/snapshot` | Board JSON, including current revisions. |
-| GET | `/{team}/workflows/{workflow}/tickets/{ticket}` | Expanded detail. |
+| GET | `/{team}/workflows/{workflow}/tickets/{ticket}` | Redirects 303 to the scoped detail snapshot; replaced by the HTML detail page in Task 11. |
 | GET | `/{team}/workflows/{workflow}/tickets/{ticket}/snapshot` | Scoped detail JSON. |
 | POST | `/{team}/workflows/{workflow}/tickets` | Create in initial state, then 303. |
 | POST | `/{team}/workflows/{workflow}/tickets/{ticket}/update` | Content/inputs only, then 303. |
@@ -1637,8 +1637,9 @@ async def save_assignee(team: str, workflow: str, ticket: str, request: Request)
 Define `AssigneeForm(version, assignee, operation_id)`, `user_context`,
 `require_route_ref`, `operation_for_user`, and `ticket_return_url` in
 `routes/tickets.py`. Extract shared parsing only when another route actually reuses
-it. `ticket_return_url` returns an internal board/detail URL for ordinary forms;
-for `Accept: application/json`, it redirects to the scoped detail snapshot GET.
+it. `ticket_return_url` redirects to the scoped detail snapshot GET until Task 11
+introduces the HTML detail page; Task 11 replaces this with an internal board/detail
+URL for ordinary forms while retaining snapshot redirect for `Accept: application/json`.
 The browser follows that 303 and reads canonical JSON. Errors return 409/422/503
 with the submitted draft for HTML or the same structured issue payload for JSON.
 No arbitrary return URL or redirect from posted data is allowed.
@@ -1688,13 +1689,18 @@ Review server-side authority, not just disabled controls; commit
 
 - Create: `flowgency/templates/workflow_board.html`, `ticket_detail.html`,
     `_ticket_inspector.html`, `flowgency/static/workflow-board.js`, `workflow-board.css`.
-- Modify: `flowgency/templates/base.html`, Task 10 routes/views as needed for context.
+- Modify: `flowgency/templates/base.html`; extend `flowgency/web/routes/workflows.py`
+    and `flowgency/web/routes/tickets.py` to replace Task 10's snapshot redirects with
+    HTML board and detail GET routes and update `ticket_return_url`.
 - Extend fixtures: `tests/ui/server.py`, `tests/ui/fixtures/config.yaml`.
 - Create: `tests/ui/workflow_board.spec.ts`; extend `tests/test_workflow_routes.py`.
 
 **Interfaces**
 
 - Consumes: Task 10's BoardView, snapshots and POST routes; Task 9 Run coordinator.
+- Delivers `GET /{team}/workflows/{workflow}` (board page) and
+    `GET /{team}/workflows/{workflow}/tickets/{ticket}` (expanded detail),
+    replacing Task 10's temporary snapshot redirects for these paths.
 - Produces a script JSON payload at `#workflow-initial` with board/ticket views,
     route URLs and revisions. Encode via Jinja `tojson`, not string interpolation.
 - Produces `WorkflowBoardController` in `workflow-board.js` with
