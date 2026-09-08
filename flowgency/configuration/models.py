@@ -40,6 +40,7 @@ class FlowgencySettings(BaseModel):
     compilation_cache: Path | None = None
     memory_store: Path | None = None
     prompt_store: Path | None = None
+    workflow_library: Path | None = None
 
 
 class MemoryChannel(BaseModel):
@@ -125,6 +126,15 @@ class TeamDispatch(BaseModel):
     enabled: bool = False
 
 
+class WorkflowInstance(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True)
+    name: str
+    blueprint: str
+    integration: str
+    integration_config: dict[str, Any] = Field(default_factory=dict)
+    context_generation: int = 0
+
+
 class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
     name: str
@@ -148,6 +158,7 @@ class TeamConfig(BaseModel):
     dispatch: TeamDispatch = Field(default_factory=TeamDispatch)
     agents: dict[str, AgentInstance] = Field(default_factory=dict)
     workspaces: tuple[WorkspaceConfig, ...] = ()
+    workflows: dict[str, WorkflowInstance] = Field(default_factory=dict)
 
 
 class FlowgencyConfig(BaseModel):
@@ -313,6 +324,28 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
         workspaces = team_map.get("workspaces")
         if workspaces is not None and not _is_list(workspaces):
             issues.append(_shape_issue(f"{team_field}.workspaces", "list"))
+
+        workflows = team_map.get("workflows")
+        workflows_map = _mapping_or_none(workflows)
+        if workflows is not None and workflows_map is None:
+            issues.append(_shape_issue(f"{team_field}.workflows", "mapping"))
+        elif workflows_map is not None:
+            for workflow_name, workflow in workflows_map.items():
+                if not _is_mapping(workflow):
+                    issues.append(
+                        _shape_issue(
+                            f"{team_field}.workflows.{workflow_name}", "mapping"
+                        )
+                    )
+                    continue
+                config = workflow.get("integration_config")
+                if config is not None and not _is_mapping(config):
+                    issues.append(
+                        _shape_issue(
+                            f"{team_field}.workflows.{workflow_name}.integration_config",
+                            "mapping",
+                        )
+                    )
 
         agents = team_map.get("agents")
         agents_list = None
@@ -612,6 +645,92 @@ def _validate_default_team(default_team: Any, teams: Mapping[str, Any]) -> list[
     return None
 
 
+def _validate_workflows(
+    team_name: str, team: Mapping[str, Any]
+) -> tuple[list[ValidationIssue], bool]:
+    workflows = team.get("workflows")
+    if not _is_mapping(workflows):
+        # A non-mapping value is reported by the shape pass; treat as no workflows.
+        return [], False
+    issues: list[ValidationIssue] = []
+    for workflow_id, workflow in workflows.items():
+        scope = f"teams.{team_name}.workflows.{workflow_id}"
+        identifier_issue = _validate_identifier("workflow", workflow_id, scope)
+        if identifier_issue:
+            issues.append(identifier_issue)
+        if not _is_mapping(workflow):
+            issues.append(
+                _build_issue(
+                    code="invalid-workflow-entry",
+                    scope=scope,
+                    field=f"teams.{team_name}.workflows.{workflow_id}",
+                    message="Workflow entry must be a mapping.",
+                    hint="Define each workflow as a mapping with name, blueprint, integration, and integration_config.",
+                )
+            )
+            continue
+        name = workflow.get("name")
+        if not isinstance(name, str) or not name.strip():
+            issues.append(
+                _build_issue(
+                    code="missing-workflow-name",
+                    scope=scope,
+                    field="name",
+                    message="Workflow name is required.",
+                    hint="Set workflow.name to a non-empty label.",
+                )
+            )
+        blueprint = workflow.get("blueprint")
+        if not isinstance(blueprint, str) or not blueprint.strip():
+            issues.append(
+                _build_issue(
+                    code="missing-workflow-blueprint",
+                    scope=scope,
+                    field="blueprint",
+                    message="Workflow blueprint is required.",
+                    hint="Set workflow.blueprint to a stable blueprint identifier.",
+                )
+            )
+        else:
+            blueprint_issue = _validate_identifier("blueprint", blueprint, scope)
+            if blueprint_issue:
+                issues.append(blueprint_issue)
+        integration = workflow.get("integration")
+        if not isinstance(integration, str) or not integration.strip():
+            issues.append(
+                _build_issue(
+                    code="missing-workflow-integration",
+                    scope=scope,
+                    field="integration",
+                    message="Workflow integration is required.",
+                    hint="Set workflow.integration to a supported storage provider.",
+                )
+            )
+        else:
+            config = workflow.get("integration_config")
+            if config is None:
+                config = {}
+            if _is_mapping(config):
+                from flowgency.tickets.storages.registry import (
+                    validate_storage_config,
+                )
+
+                for message in validate_storage_config(integration, config):
+                    issues.append(
+                        _build_issue(
+                            code="invalid-workflow-provider",
+                            scope=scope,
+                            field="integration_config",
+                            message=message,
+                            hint="Configure a supported provider with only its required keys.",
+                        )
+                    )
+        generation = workflow.get("context_generation")
+        if generation is not None and not isinstance(generation, int):
+            issues.append(_shape_issue(f"{scope}.context_generation", "integer"))
+    return issues, bool(workflows)
+
+
 def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if raw.get("schema_version") != CONFIG_SCHEMA_VERSION:
@@ -658,6 +777,7 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
             )
     teams = raw.get("teams") if _is_mapping(raw.get("teams")) else {}
     issues.extend(_validate_default_team(flowgency.get("default_team", ""), teams))
+    any_workflows = False
     for team_name, team in teams.items():
         identifier_issue = _validate_identifier("team", team_name, f"teams.{team_name}")
         if identifier_issue:
@@ -687,6 +807,9 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                 )
         runtime = team.get("runtime") or {}
         issues.extend(_validate_team_runtime(runtime, f"teams.{team_name}"))
+        workflow_issues, team_has_workflows = _validate_workflows(team_name, team)
+        issues.extend(workflow_issues)
+        any_workflows = any_workflows or team_has_workflows
         agents = team.get("agents") if _is_list(team.get("agents")) else []
         seen_agents: set[str] = set()
         for index, agent in enumerate(agents):
@@ -826,6 +949,16 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                             hint="Remove the unsupported field or migrate it to a supported location.",
                         )
                     )
+    if any_workflows and not str(flowgency.get("workflow_library", "")).strip():
+        issues.append(
+            _build_issue(
+                code="missing-workflow-library",
+                scope="flowgency",
+                field="workflow_library",
+                message="workflow_library is required when workflows are configured.",
+                hint="Set flowgency.workflow_library to the shared Workflow Library directory.",
+            )
+        )
     return issues
 
 def _sorted_issues(issues: list[ValidationIssue]) -> tuple[ValidationIssue, ...]:
@@ -903,6 +1036,10 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
         flowgency["memory_store"] = _path_from_config(flowgency["memory_store"], config_dir)
     if flowgency.get("prompt_store") is not None:
         flowgency["prompt_store"] = _path_from_config(flowgency["prompt_store"], config_dir)
+    if flowgency.get("workflow_library") is not None:
+        flowgency["workflow_library"] = _path_from_config(
+            flowgency["workflow_library"], config_dir
+        )
     prepared["flowgency"] = flowgency
 
     teams = dict(prepared.get("teams") or {})
@@ -955,6 +1092,26 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
         resolved_team["agents"] = agents
         if resolved_team.get("workspaces") is not None:
             resolved_team["workspaces"] = tuple(resolved_team.get("workspaces") or ())
+        workflows = resolved_team.get("workflows")
+        if _is_mapping(workflows):
+            resolved_workflows: dict[str, Any] = {}
+            for workflow_id, workflow in workflows.items():
+                if not _is_mapping(workflow):
+                    continue
+                workflow_entry = dict(workflow)
+                config = workflow_entry.get("integration_config")
+                if _is_mapping(config):
+                    config = dict(config)
+                    if (
+                        workflow_entry.get("integration") == "local"
+                        and config.get("root") is not None
+                    ):
+                        config["root"] = str(
+                            _path_from_config(config["root"], config_dir)
+                        )
+                    workflow_entry["integration_config"] = config
+                resolved_workflows[workflow_id] = workflow_entry
+            resolved_team["workflows"] = resolved_workflows
         resolved_teams[team_name] = resolved_team
     prepared["teams"] = resolved_teams
     return prepared

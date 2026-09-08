@@ -460,3 +460,66 @@ def test_patch_agent_runtime_clears_only_known_fields(config_store):
         {"path": str(snapshot.path.parent / "old"), "tools": ["shell"]}
     ]
     assert runtime["runtime_extension"] == {"preserve": True}
+
+
+def test_patch_workflow_instance_advances_generation_only_on_selection_change(
+    tmp_path, raw_config
+):
+    from copy import deepcopy
+
+    from flowgency.configuration.store import ConfigStore
+    from flowgency.workflows.configuration import (
+        WorkflowInstancePatch,
+        patch_workflow_instance,
+    )
+
+    library = tmp_path / "workflow-library"
+    library.mkdir()
+    root_a = tmp_path / "tickets-a"
+    root_a.mkdir()
+    root_b = tmp_path / "tickets-b"
+    root_b.mkdir()
+    raw = deepcopy(raw_config)
+    raw["flowgency"]["workflow_library"] = str(library)
+    store = ConfigStore(_write_yaml(tmp_path / "config.yaml", raw))
+
+    snapshot = store.load()
+    created = patch_workflow_instance(
+        store,
+        snapshot.revision,
+        "newsletter",
+        "workflow-one",
+        WorkflowInstancePatch("Delivery", "blueprint-one", "local", {"root": str(root_a)}),
+        create=True,
+    )
+    workflow = created.config.teams["newsletter"].workflows["workflow-one"]
+    assert workflow.context_generation == 0
+
+    switched = patch_workflow_instance(
+        store,
+        created.revision,
+        "newsletter",
+        "workflow-one",
+        WorkflowInstancePatch("Delivery", "blueprint-one", "local", {"root": str(root_b)}),
+    )
+    assert (
+        switched.config.teams["newsletter"].workflows["workflow-one"].context_generation
+        == 1
+    )
+
+    renamed = patch_workflow_instance(
+        store,
+        switched.revision,
+        "newsletter",
+        "workflow-one",
+        WorkflowInstancePatch("Renamed", "blueprint-one", "local", {"root": str(root_b)}),
+    )
+    assert (
+        renamed.config.teams["newsletter"].workflows["workflow-one"].context_generation
+        == 1
+    )
+    # The stored raw board keeps the authored relative root untouched.
+    assert (
+        renamed.raw["teams"]["newsletter"]["workflows"]["workflow-one"]["name"]
+        == "Renamed"
+    )

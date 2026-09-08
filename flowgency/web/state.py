@@ -40,6 +40,7 @@ def flowgency_settings(snapshot: ConfigSnapshot) -> dict[str, Any]:
         "compilation_cache": str(resolved.compilation_cache or ""),
         "memory_store": str(resolved.memory_store or ""),
         "prompt_store": str(resolved.prompt_store or ""),
+        "workflow_library": str(resolved.workflow_library or ""),
     }
 
 

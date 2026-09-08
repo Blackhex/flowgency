@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import os
 from typing import Any, Literal
 
 from .store import ConfigSnapshot, ConfigStore
@@ -18,6 +19,7 @@ class FlowgencySettingsPatch:
     compilation_cache: str
     memory_store: str
     prompt_store: str
+    workflow_library: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,44 @@ def _merge_mapping(target: dict[str, Any], updates: dict[str, Any]) -> None:
     target.update(updates)
 
 
+def _normalized_library(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return os.path.normcase(os.path.normpath(text))
+
+
+def _apply_workflow_library(
+    raw: dict[str, Any], flowgency: dict[str, Any], workflow_library: str
+) -> None:
+    """Set the shared workflow library, fencing affected instances on real change.
+
+    An explicit change advances ``context_generation`` for every configured
+    workflow instance so a stale queued target cannot survive the move; an
+    equivalent path spelling is treated as a no-op and preserves the fence.
+    """
+    previous = _normalized_library(flowgency.get("workflow_library"))
+    flowgency["workflow_library"] = workflow_library
+    if previous == _normalized_library(workflow_library):
+        return
+    teams = raw.get("teams")
+    if not isinstance(teams, dict):
+        return
+    for team in teams.values():
+        if not isinstance(team, dict):
+            continue
+        workflows = team.get("workflows")
+        if not isinstance(workflows, dict):
+            continue
+        for workflow in workflows.values():
+            if isinstance(workflow, dict):
+                workflow["context_generation"] = (
+                    int(workflow.get("context_generation", 0)) + 1
+                )
+
+
 def _clear_known_keys(mapping: dict[str, Any], keys: tuple[str, ...]) -> None:
     for key in keys:
         mapping.pop(key, None)
@@ -126,6 +166,8 @@ def patch_flowgency_settings(
         flowgency["prompt_store"] = patch.prompt_store
         dispatch = flowgency.setdefault("dispatch", {})
         dispatch["interval"] = patch.dispatch_interval
+        if patch.workflow_library is not None:
+            _apply_workflow_library(raw, flowgency, patch.workflow_library)
 
     return store.patch(expected_revision, apply)
 

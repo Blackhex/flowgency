@@ -34,6 +34,7 @@ from flowgency.configuration import (
     resolve_team_paths,
 )
 from flowgency.configuration.models import MemorySelector
+from flowgency.jobs.store import revision_bound_team_operation
 from flowgency.integrations import get_integration, REGISTRY
 from flowgency.dispatch.install import install_timer, get_timer_status as _get_timer_status
 from flowgency.jobs import (
@@ -1395,6 +1396,7 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
         "dispatch": get_dispatch_status(),
         "dispatch_error": dispatch_error,
         "theme_css": get_theme_css(),
+        "workflow_library": flowgency.get("workflow_library", ""),
     }
 
 
@@ -1560,22 +1562,29 @@ async def admin_save_settings(request: Request):
             candidate_interval = 0
         if 5 <= candidate_interval <= 120:
             dispatch_interval = candidate_interval
+    workflow_library_raw = str(form.get("workflow_library", "")).strip()
+    store = ConfigStore(snapshot.path)
+    expected_revision = revision or snapshot.revision
     try:
-        patch_flowgency_settings(
-            ConfigStore(snapshot.path),
-            revision or snapshot.revision,
-            FlowgencySettingsPatch(
-                title=title or "Flowgency",
-                default_team=default_team,
-                ai_backend=ai_backend,
-                theme=theme,
-                dispatch_interval=int(dispatch_interval),
-                agent_library=settings.get("agent_library", ""),
-                compilation_cache=settings.get("compilation_cache", ""),
-                memory_store=settings.get("memory_store", ""),
-                prompt_store=settings.get("prompt_store", ""),
-            ),
-        )
+        with revision_bound_team_operation(
+            store, all_teams=True, expected_revision=expected_revision
+        ):
+            patch_flowgency_settings(
+                store,
+                expected_revision,
+                FlowgencySettingsPatch(
+                    title=title or "Flowgency",
+                    default_team=default_team,
+                    ai_backend=ai_backend,
+                    theme=theme,
+                    dispatch_interval=int(dispatch_interval),
+                    agent_library=settings.get("agent_library", ""),
+                    compilation_cache=settings.get("compilation_cache", ""),
+                    memory_store=settings.get("memory_store", ""),
+                    prompt_store=settings.get("prompt_store", ""),
+                    workflow_library=workflow_library_raw or None,
+                ),
+            )
     except ConfigConflictError:
         return templates.TemplateResponse(
             request,

@@ -92,3 +92,66 @@ def test_runtime_team_exposes_resolved_agent_instances_without_mutating_raw_inpu
     assert runtime["logs"] == root / "logs"
     assert "path" not in runtime
     assert "shared" not in runtime
+
+
+def _config_with_workflow():
+    return {
+        "schema_version": 1,
+        "flowgency": {
+            "title": "Flowgency",
+            "default_team": "team",
+            "ai_backend": "copilot",
+            "agent_library": "/library",
+            "compilation_cache": "/cache",
+            "memory_store": "/memory",
+            "prompt_store": "/prompts",
+            "workflow_library": "workflow-library",
+        },
+        "memory": {"channels": {}},
+        "teams": {
+            "team": {
+                "name": "Team",
+                "workspace_path": "/groups/team",
+                "path": "/groups/team",
+                "default_integration": "copilot",
+                "agents": [],
+                "workflows": {
+                    "workflow-one": {
+                        "name": "Delivery",
+                        "blueprint": "blueprint-one",
+                        "integration": "local",
+                        "integration_config": {"root": "tickets"},
+                    }
+                },
+            }
+        },
+    }
+
+
+def test_workflow_instance_normalizes_paths_without_mutating_raw():
+    raw_config = _config_with_workflow()
+    config_path = Path("config.yaml")
+    snapshot = ConfigStore(config_path)._snapshot(
+        yaml.safe_dump(raw_config, sort_keys=False).encode("utf-8")
+    )
+
+    stored = snapshot.raw["teams"]["team"]["workflows"]["workflow-one"]
+    assert stored["integration_config"]["root"] == "tickets"
+    assert snapshot.raw["flowgency"]["workflow_library"] == "workflow-library"
+
+    workflow = snapshot.config.teams["team"].workflows["workflow-one"]
+    assert Path(workflow.integration_config["root"]).is_absolute()
+    assert snapshot.config.flowgency.workflow_library.is_absolute()
+    assert workflow.context_generation == 0
+
+
+def test_malformed_workflows_value_is_rejected_not_silently_accepted():
+    from flowgency.configuration.models import validate_config
+
+    raw_config = _config_with_workflow()
+    raw_config["teams"]["team"]["workflows"] = ["not", "a", "mapping"]
+    issues = validate_config(raw_config, Path("config.yaml"))
+    assert any(
+        issue.field == "teams.team.workflows" and issue.code == "invalid-field-shape"
+        for issue in issues
+    )

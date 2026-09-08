@@ -284,7 +284,30 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
         )
     )
 
+    workflow_library_authority: _Authority | None = None
+    if config.flowgency.workflow_library is not None:
+        workflow_library = Path(config.flowgency.workflow_library).resolve(
+            strict=False
+        )
+        issues.extend(
+            _validate_existing_directory(
+                workflow_library,
+                code="invalid-workflow-library",
+                scope="flowgency",
+                field="workflow_library",
+                writable=False,
+            )
+        )
+        workflow_library_authority = _Authority(
+            "flowgency",
+            "workflow_library",
+            "flowgency.workflow_library",
+            workflow_library,
+        )
+
     authorities = list(control_authorities)
+    if workflow_library_authority is not None:
+        authorities.append(workflow_library_authority)
     for team_id, paths in team_paths.items():
         scope = f"teams.{team_id}"
         issues.extend(
@@ -325,6 +348,31 @@ def validate_resolved_paths(config: FlowgencyConfig) -> tuple[ValidationIssue, .
             )
             issues.append(_overlap_issue(left, right, hint=hint))
             issues.append(_overlap_issue(right, left, hint=hint))
+
+    for team_id, team in config.teams.items():
+        scope = f"teams.{team_id}"
+        for workflow_id, workflow in team.workflows.items():
+            if workflow.integration != "local":
+                continue
+            root_value = workflow.integration_config.get("root")
+            if root_value is None:
+                continue
+            workflow_root = Path(str(root_value)).resolve(strict=False)
+            workflow_authority = _Authority(
+                f"{scope}.workflows.{workflow_id}",
+                "integration_config.root",
+                f"{scope}.workflows.{workflow_id}.integration_config.root",
+                workflow_root,
+            )
+            hint = (
+                "Store ticket roots in a directory disjoint from control-plane "
+                "storage, team roots, and source workspaces."
+            )
+            for other in authorities:
+                if not _overlap(other.path, workflow_root):
+                    continue
+                issues.append(_overlap_issue(workflow_authority, other, hint=hint))
+                issues.append(_overlap_issue(other, workflow_authority, hint=hint))
 
     for team_id, team in config.teams.items():
         scope = f"teams.{team_id}"
