@@ -10,15 +10,17 @@ from uuid import uuid4
 from flowgency.blueprints.cache import CacheRef, CompiledArtifact
 from flowgency.configuration.models import MemorySelector, PromptSelector
 from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+from flowgency.tickets.models import StorageBinding, TicketRef
 
 
-SCHEMA_VERSION = 5
-SUPPORTED_SCHEMA_VERSIONS = frozenset({5})
+SCHEMA_VERSION = 6
+SUPPORTED_SCHEMA_VERSIONS = frozenset({5, 6})
 VALID_TRIGGERS = {
     "scheduled_prompt",
     "manual_prompt",
     "decision",
     "decision_retry",
+    "ticket",
 }
 VALID_STATUSES = {
     "queued",
@@ -122,6 +124,34 @@ class PromptSnapshot:
 
 
 @dataclass(frozen=True)
+class TicketJobTarget:
+    binding: StorageBinding
+    ref: TicketRef
+    assigned_agent: str
+    assignment_event_id: str
+    context_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "binding": self.binding.model_dump(mode="json", exclude={"binding_id"}),
+            "ref": self.ref.model_dump(mode="json"),
+            "assigned_agent": self.assigned_agent,
+            "assignment_event_id": self.assignment_event_id,
+            "context_digest": self.context_digest,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TicketJobTarget":
+        return cls(
+            binding=StorageBinding.model_validate(data["binding"]),
+            ref=TicketRef.model_validate(data["ref"]),
+            assigned_agent=data["assigned_agent"],
+            assignment_event_id=data["assignment_event_id"],
+            context_digest=data["context_digest"],
+        )
+
+
+@dataclass(frozen=True)
 class JobRequest:
     config_path: Path
     team_key: str
@@ -136,6 +166,7 @@ class JobRequest:
     timeout_override: int | None = None
     trigger_context: dict[str, Any] | None = None
     due_at: str | None = None
+    ticket_target: TicketJobTarget | None = None
 
     @property
     def prompt_content(self) -> str:
@@ -174,6 +205,7 @@ class JobSpec:
     # Instances that may be named as a proposal's execution_agent, resolved from
     # the pinned configuration at submission. None means "not snapshotted".
     writable_agents: tuple[str, ...] | None = None
+    ticket_target: TicketJobTarget | None = None
 
     def validate(self) -> None:
         if self.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
@@ -202,13 +234,15 @@ class JobSpec:
             raise ValueError("Agent name is required")
         if not self.task_input.strip():
             raise ValueError("Prompt content must not be blank")
-        self._validate_prompt_contract()
+        self._validate_trigger_contract()
 
-    def _validate_prompt_contract(self) -> None:
+    def _validate_trigger_contract(self) -> None:
         if self.skill is not None:
-            raise ValueError("schema v5 jobs must not set skill")
+            raise ValueError("durable jobs must not set skill")
         if self.skill_arguments != ():
-            raise ValueError("schema v5 jobs must keep skill_arguments empty")
+            raise ValueError("durable jobs must keep skill_arguments empty")
+        if self.schema_version == 5 and self.ticket_target is not None:
+            raise ValueError("schema v5 jobs must not set ticket_target")
         if self.trigger in {"scheduled_prompt", "manual_prompt"}:
             if self.prompt_source is None:
                 raise ValueError("prompt-backed jobs require a prompt_source")
@@ -216,6 +250,13 @@ class JobSpec:
                 raise ValueError("scheduled prompt jobs require routine_id")
         if self.trigger in {"decision", "decision_retry"} and self.routine_id is not None:
             raise ValueError("decision jobs require routine_id to be null")
+        if self.trigger == "ticket":
+            if self.schema_version < 6:
+                raise ValueError("ticket jobs require schema version 6")
+            if self.ticket_target is None:
+                raise ValueError("ticket jobs require ticket_target")
+            if self.prompt_source is None or self.prompt_source.get("type") != "ticket":
+                raise ValueError("ticket jobs require a ticket prompt_source")
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -245,6 +286,10 @@ class JobSpec:
         }
         if self.writable_agents is not None:
             payload["writable_agents"] = list(self.writable_agents)
+        if self.schema_version >= 6:
+            payload["ticket_target"] = (
+                None if self.ticket_target is None else self.ticket_target.to_dict()
+            )
         return payload
 
     def immutable_digest(self) -> str:
@@ -275,6 +320,10 @@ class JobSpec:
         writable_agents = values.get("writable_agents")
         values["writable_agents"] = (
             None if writable_agents is None else tuple(writable_agents)
+        )
+        ticket_target = values.get("ticket_target")
+        values["ticket_target"] = (
+            None if ticket_target is None else TicketJobTarget.from_dict(ticket_target)
         )
         spec = cls(**values)
         spec.validate()

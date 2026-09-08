@@ -285,6 +285,48 @@ class TicketService:
             ),
         )
 
+    def _cleanup_job_target(
+        self,
+        binding: StorageBinding,
+        ref: TicketRef,
+        *,
+        job_id: str,
+        assignment_event_id: str,
+        stopped,
+    ) -> TicketRecord:
+        provider = self.storage_factory(binding)
+        current = provider.read(ref)
+        clear_pending = bool(
+            stopped.confirmed
+            and current.pending_run is not None
+            and current.pending_run.job_id == job_id
+            and current.pending_run.assignment_event_id == assignment_event_id
+        )
+        from flowgency.jobs.processes import may_clear_active_work
+
+        clear_active = may_clear_active_work(current, stopped)
+        if not clear_pending and not clear_active:
+            return current
+        operation = TicketOperation(
+            operation_id=f"cleanup-{job_id}-{stopped.generation}",
+            request_digest=uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"cleanup:{ref.binding_id}:{ref.ticket_id}:{job_id}:{stopped.generation}:{assignment_event_id}:{stopped.confirmed}",
+            ).hex,
+        )
+        result = provider.apply(
+            ref,
+            current.revision,
+            operation,
+            lambda record: record.model_copy(
+                update={
+                    "pending_run": None if clear_pending else record.pending_run,
+                    "active_run": None if clear_active else record.active_run,
+                }
+            ),
+        )
+        return result.ticket
+
     def update(
         self,
         actor: TicketActor,

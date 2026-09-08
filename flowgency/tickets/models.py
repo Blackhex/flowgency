@@ -139,6 +139,14 @@ class ActiveTicketRun(BaseModel):
         return self.session_id
 
 
+class TicketRunReservation(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    job_id: StrictStr
+    request_id: StrictStr
+    assignee: StrictStr
+    assignment_event_id: StrictStr
+
+
 class FieldProvenance(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     actor_kind: Literal["user", "agent"]
@@ -322,6 +330,7 @@ class TicketRecord(BaseModel):
     description: StrictStr
     state_id: StrictStr
     assignee: StrictStr | None = None
+    pending_run: TicketRunReservation | None = None
     active_run: ActiveTicketRun | None = None
     field_values: dict[str, FieldValue] = Field(default_factory=dict)
     field_provenance: dict[str, FieldProvenance] = Field(default_factory=dict)

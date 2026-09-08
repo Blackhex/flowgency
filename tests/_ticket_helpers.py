@@ -6,13 +6,19 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import Mock
 
 import yaml
 
 from flowgency.configuration.store import ConfigStore
+from flowgency.blueprints.projectors import StaticRuntimeProjector
+from flowgency.integrations import BaseIntegration
+from flowgency.integrations.models import RuntimeCapabilities
 from flowgency.jobs.authority import JobAuthorityRef, JobStore
+from flowgency.jobs.launcher import LaunchResult
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
-from flowgency.jobs.store import write_job
+from flowgency.jobs.store import read_job, write_job
+from flowgency.projector_capabilities import ProjectorCapabilities
 from flowgency.tickets.models import (
     ActiveTicketRun,
     AgentTicketContext,
@@ -39,6 +45,63 @@ from flowgency.workflows.library import WorkflowLibrary
 from flowgency.workflows.models import AgentCriterion, ArtifactRef
 
 SEED_TIME = datetime(2026, 9, 8, tzinfo=timezone.utc)
+
+
+def _ticket_runtime_projector() -> StaticRuntimeProjector:
+    return StaticRuntimeProjector(
+        version="v-ticket-tests",
+        capabilities=ProjectorCapabilities(
+            instruction_target=Path("AGENTS.md"),
+            skills_target=Path(".agents/skills"),
+            prompts_target=Path(".github/prompts"),
+            prompt_format="prompt-markdown",
+            discovers_instructions=True,
+            discovers_skills=True,
+            discovers_prompts=True,
+            activates_selected_skill=True,
+        ),
+    )
+
+
+class TicketRuntimeIntegration(BaseIntegration):
+    name = "claude-code"
+    display_name = "Ticket Test Runtime"
+    supports_execution = True
+    projector = _ticket_runtime_projector()
+    declared_runtime_capabilities = RuntimeCapabilities(
+        permission_modes=frozenset({"restricted", "unrestricted"}),
+        path_scopable_tools=frozenset({"read", "search", "write", "shell"}),
+        live_ticket_transport="mcp-stdio",
+    )
+
+    def identity_filename(self) -> str:
+        return "AGENTS.md"
+
+    def parse_identity(self, agent_dir: Path):
+        return None
+
+    def write_identity(self, agent_dir: Path, identity):
+        raise NotImplementedError
+
+    def run(self, request):
+        raise NotImplementedError
+
+
+@dataclass(frozen=True)
+class DurableJobProbe:
+    store: JobStore
+    team_id: str
+
+    def authority_for_handle(self, handle) -> JobAuthorityRef:
+        record = read_job(handle.path)
+        return self.store.reference(
+            self.team_id,
+            handle.job_id,
+            record.authority_digest,
+        )
+
+    def read(self, handle) -> JobRecord:
+        return self.store.read(self.authority_for_handle(handle))
 
 
 def system_event(
@@ -342,6 +405,14 @@ class WorkflowTestEnv:
             endpoint = broker.endpoint
             yield TicketToolClient(endpoint.url, endpoint.grant.token)
 
+    @contextmanager
+    def broker_session(self, authority: JobAuthorityRef):
+        from flowgency.tickets.broker import TicketBroker, TicketToolClient
+
+        with TicketBroker(self.service, self.access_registry, authority=authority) as broker:
+            endpoint = broker.endpoint
+            yield endpoint.grant.context, TicketToolClient(endpoint.url, endpoint.grant.token)
+
     def transition_request(
         self,
         *,
@@ -544,5 +615,98 @@ def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestE
         user=UserTicketContext(team_id="newsletter"),
         registered_sessions=registered_sessions,
         job_store=job_store,
+    )
+
+
+@dataclass
+class TicketJobTestEnv(WorkflowTestEnv):
+    coordinator: object | None = None
+    jobs: DurableJobProbe | None = None
+    launcher: Mock | None = None
+    generation: str | None = None
+
+    def create_assigned(self, agent: str, title: str = "Assigned") -> TicketView:
+        ticket = self.create(title)
+        self.service.assign(
+            self.user,
+            ticket.version,
+            agent,
+            self.operation(f"assign-{ticket.ref.ticket_id}"),
+        )
+        return self.read(ticket.ref)
+
+    def assign_idle(self, ref: TicketRef, agent: str | None) -> TicketView:
+        current = self.read(ref)
+        self.service.assign(
+            self.user,
+            current.version,
+            agent,
+            self.operation(f"reassign-{ref.ticket_id}"),
+        )
+        return self.read(ref)
+
+    def start_two_tickets(
+        self,
+        *,
+        agent: str,
+        job_id: str,
+    ) -> tuple[JobAuthorityRef, tuple[TicketRef, TicketRef]]:
+        first = self.create_assigned(agent, "First")
+        second = self.create_assigned(agent, "Second")
+        authority = self.running_job(agent, job_id)
+        with self.broker_session(authority) as (context, client):
+            self.generation = context.session_id
+            for index, ticket in enumerate((first, second), start=1):
+                looked_up = client.call(
+                    "get_ticket",
+                    {"ref": ticket.ref.model_dump(mode="json")},
+                )
+                assert looked_up["ok"] is True
+                started = client.call(
+                    "start_work",
+                    {
+                        "version": ticket.version.model_dump(mode="json"),
+                        "operation_id": f"start-{job_id}-{index}",
+                    },
+                )
+                assert started["ok"] is True
+        return authority, (first.ref, second.ref)
+
+
+def make_ticket_job_environment(tmp_path: Path, raw_config: dict, monkeypatch) -> TicketJobTestEnv:
+    env = make_workflow_environment(tmp_path, raw_config)
+    snapshot = env.store.load()
+    library_root = snapshot.config.flowgency.agent_library
+    for blueprint_root, title in (
+        (library_root / "builder-blueprint", "Builder"),
+        (library_root / "observer-blueprint", "Observer"),
+    ):
+        blueprint_root.mkdir(parents=True, exist_ok=True)
+        (blueprint_root / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
+
+    import flowgency.jobs.submission as submission_module
+
+    monkeypatch.setattr(
+        submission_module,
+        "REGISTRY",
+        {"claude-code": TicketRuntimeIntegration()},
+    )
+
+    from flowgency.jobs.submission import submit_job_request
+    from flowgency.jobs.tickets import TicketJobCoordinator
+
+    launcher = Mock()
+    launcher.launch.return_value = LaunchResult(worker_pid=4321)
+    coordinator = TicketJobCoordinator(
+        service=env.service,
+        job_store=env.job_store,
+        config_store=env.store,
+        submitter=lambda request: submit_job_request(request, launcher),
+    )
+    return TicketJobTestEnv(
+        **env.__dict__,
+        coordinator=coordinator,
+        jobs=DurableJobProbe(env.job_store, env.team_id),
+        launcher=launcher,
     )
 

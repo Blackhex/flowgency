@@ -117,6 +117,61 @@ def test_current_job_schema_serializes_team_fields(tmp_path):
     assert "group_root" not in payload
 
 
+def test_schema_five_payload_keeps_historic_digest_and_shape():
+    payload = {
+        "schema_version": 5,
+        "job_id": "job-compat-1",
+        "config_path": "C:/compat/config.yaml",
+        "config_revision": "cfg-1",
+        "team_key": "newsletter",
+        "workspace_root": "C:/compat/workspace",
+        "team_root": "C:/compat/team",
+        "agent_name": "product",
+        "trigger": "manual_prompt",
+        "integration_name": "copilot",
+        "integration_config": {"model": "gpt-5.4"},
+        "blueprint": {
+            "key": "writer",
+            "source_digest": "digest-1",
+            "integration": "copilot",
+            "projector_version": "v1",
+            "cache_path": "C:/cache/copilot/v1/digest-1",
+            "instance_digest": "",
+        },
+        "routine_id": "routine-1",
+        "skill": None,
+        "skill_arguments": [],
+        "task_input": "# Routine\n",
+        "runtime_policy": {
+            "timeout": 1800,
+            "mode": "restricted",
+            "rules": [],
+        },
+        "memory": {
+            "selector": {"scope": "run", "version": 1, "job": "placeholder"},
+            "canonical_json": '{"job":"placeholder","scope":"run","version":1}',
+            "memory_hash": "memory-hash-1",
+            "path": "C:/memory/memory-hash-1",
+        },
+        "trigger_context": {"source": "test"},
+        "prompt_source": {
+            "type": "blueprint_prompt",
+            "scope": "blueprint",
+            "name": "daily-review",
+            "source_path": ".agents/prompts/daily-review.prompt.md",
+            "source_digest": "digest-1",
+        },
+        "timeout_override": None,
+        "created_at": "2026-07-15T00:00:00+00:00",
+        "private_prompts": [],
+    }
+
+    spec = JobSpec.from_dict(payload)
+
+    assert spec.to_dict() == payload
+    assert spec.immutable_digest() == "f4fcd50b1d4f3a9b762afd9d099a9d7a24cf9eee4ecc5791719b318ed6b53649"
+
+
 @pytest.mark.parametrize("schema_version", [3, 4])
 def test_job_rejects_prior_schema_versions(tmp_path, schema_version):
     from dataclasses import replace

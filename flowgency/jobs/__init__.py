@@ -17,7 +17,9 @@ from .models import (
     MemoryBinding,
     PromptSnapshot,
     RuntimePolicySnapshot,
+    TicketJobTarget,
 )
+from .processes import ProcessStopEvidence, may_clear_active_work
 from .resolution import JobValidationError, resolve_job_request
 from .store import (
     active_jobs,
@@ -27,6 +29,7 @@ from .store import (
     latest_terminal_job,
 )
 from .submission import JobSubmissionError, submit_job_request
+from .tickets import CleanupResult, TicketJobCoordinator
 
 
 def reconcile_jobs(teams: dict, *, memory_store_root):
@@ -78,10 +81,15 @@ __all__ = [
     "latest_terminal_job",
     "MemoryBinding",
     "PromptSnapshot",
+    "ProcessStopEvidence",
     "queue_snapshot",
     "reconcile_jobs",
     "resolve_job_request",
     "retain_failed_stage",
     "RuntimePolicySnapshot",
     "submit_job_request",
+    "TicketJobCoordinator",
+    "TicketJobTarget",
+    "CleanupResult",
+    "may_clear_active_work",
 ]

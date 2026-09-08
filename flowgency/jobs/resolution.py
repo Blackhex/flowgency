@@ -13,7 +13,7 @@ from flowgency.configuration.paths import validate_resolved_paths
 from flowgency.configuration.team_paths import resolve_team_paths
 from flowgency.configuration.store import ConfigSnapshot, ConfigStore
 from flowgency.integrations import BaseIntegration, get_integration
-from flowgency.integrations.models import IntegrationRunRequest
+from flowgency.integrations.models import IntegrationRunRequest, TicketToolLaunch
 from flowgency.memory.selectors import (
     resolve_memory_selector,
     select_effective_memory,
@@ -22,7 +22,7 @@ from flowgency.prompts import PromptNotFoundError, PromptStore, build_prompt_tas
 from flowgency.records.protocol import append_reporting_protocol
 from flowgency.records.validation import writable_agent_names
 
-from .models import BlueprintRef, JobRequest, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot
+from .models import BlueprintRef, JobRequest, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot, SCHEMA_VERSION
 
 
 class JobValidationError(ValueError):
@@ -165,6 +165,17 @@ def _resolve_saved_prompt(
         ) from exc
 
 
+def _validation_ticket_tools() -> TicketToolLaunch:
+    return TicketToolLaunch(
+        command="python",
+        args=("-m", "flowgency.tickets.mcp_server"),
+        env={
+            "FLOWGENCY_TICKET_ENDPOINT": "validation-only",
+            "FLOWGENCY_TICKET_TOKEN": "validation-only",
+        },
+    )
+
+
 def resolve_job_request(
     request: JobRequest,
     *,
@@ -247,6 +258,9 @@ def resolve_job_request(
             skill_arguments=(),
             enforce_validation=True,
             memory_working_dir=None,
+            ticket_tools=(
+                _validation_ticket_tools() if request.ticket_target is not None else None
+            ),
         )
     )
 
@@ -292,12 +306,17 @@ def resolve_job_request(
     elif request.trigger == "decision":
         task_input = request.task_input
         prompt_source = {"type": "decision"}
+    elif request.trigger == "ticket":
+        if request.ticket_target is None:
+            raise JobValidationError("ticket jobs require a ticket_target")
+        task_input = request.task_input
+        prompt_source = {"type": "ticket"}
     else:
         task_input = request.task_input
         prompt_source = {"type": "decision_retry"}
 
     return JobSpec(
-        schema_version=5,
+        schema_version=SCHEMA_VERSION,
         job_id=request.job_id,
         config_path=str(snapshot.path),
         config_revision=snapshot.revision,
@@ -339,4 +358,5 @@ def resolve_job_request(
         writable_agents=tuple(
             sorted(writable_agent_names(snapshot.config, request.team_key))
         ),
+        ticket_target=request.ticket_target,
     )

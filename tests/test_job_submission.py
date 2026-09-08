@@ -551,6 +551,8 @@ def test_submit_request_persists_validated_current_snapshot(tmp_path):
     handle = submit_job_request(request, launcher)
 
     record = read_job(handle.path)
+    assert record.spec.schema_version == 6
+    assert record.spec.ticket_target is None
     assert record.spec.config_revision not in {"compat-unresolved", "compat-submission-resolved"}
     assert record.spec.workspace_root == str((tmp_path / "workspaces" / "newsletter").resolve())
     assert record.spec.team_root == str((tmp_path / "agents" / "newsletter").resolve())
