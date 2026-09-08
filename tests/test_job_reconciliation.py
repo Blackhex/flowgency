@@ -766,6 +766,103 @@ def test_reconcile_does_not_fail_recovery_blocked_dead_job(
     assert "manual intervention" in caplog.text
 
 
+def test_reconcile_retries_confirmed_pending_ticket_cleanup_for_cancelled_job(
+    tmp_path,
+    raw_config,
+    monkeypatch,
+):
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+    ticket = env.create_assigned("builder")
+    authority = env.running_job("builder", "run-a")
+
+    with env.broker_session(authority) as (context, client):
+        env.generation = context.session_id
+        started = client.call(
+            "start_work",
+            {
+                "version": env.read(ticket.ref).version.model_dump(mode="json"),
+                "operation_id": "start-cancelled-cleanup",
+            },
+        )
+
+    assert started["ok"] is True
+
+    record = env.job_store.read(authority)
+    write_job(
+        authority.path,
+        replace(
+            record,
+            status="cancelled",
+            completed_at="2026-09-08T00:10:00+00:00",
+            result_metadata={
+                "ticket_cleanup": {
+                    "status": "pending",
+                    "job_id": record.spec.job_id,
+                    "generation": env.generation,
+                    "confirmed": True,
+                    "reason": "exited",
+                    "cleared": [],
+                    "pending_cleanup": [ticket.ref.model_dump(mode="json")],
+                }
+            },
+        ),
+    )
+
+    env.set_storage_root(env.root_b)
+    current_binding = resolve_workflow_binding(
+        env.store.load(),
+        env.team_id,
+        env.workflow_id,
+    ).storage
+    current_provider = env.current_provider()
+    current_ref = TicketRef.from_binding(current_binding, ticket.ref.ticket_id)
+    shadow = ticket.record.with_ref(current_ref).model_copy(
+        update={
+            "number": 0,
+            "revision": 1,
+            "pending_run": TicketRunReservation(
+                job_id="shadow-job",
+                request_id="shadow-request",
+                assignee="builder",
+                assignment_event_id="shadow-assignment",
+            ),
+            "active_run": ActiveTicketRun(
+                job_id="shadow-active",
+                session_id="shadow-session",
+                started_at=SEED_TIME,
+            ),
+            "events": (
+                TicketEvent(kind="opened", actor="system", summary="Shadow ticket"),
+            ),
+            "receipts": (),
+            "created_at": SEED_TIME,
+            "updated_at": SEED_TIME,
+        }
+    )
+    current_provider.create(
+        shadow,
+        TicketOperation(operation_id="seed-shadow-cancelled", request_digest="seed-shadow-cancelled"),
+    )
+    shadow_path = current_provider._ticket_path(current_ref)
+    shadow_before = shadow_path.read_text(encoding="utf-8")
+    team_root = str(env.store.load().config.teams[env.team_id].path)
+    Path(record.spec.config_path).unlink()
+
+    result = reconcile_jobs(
+        {env.team_id: {"team_root": team_root}},
+        memory_store_root=env.job_store.memory_store,
+    )
+
+    assert result.failed == 0
+    assert env.provider.read(ticket.ref).active_run is None
+    assert env.provider.read(ticket.ref).assignee == "builder"
+    assert shadow_path.read_text(encoding="utf-8") == shadow_before
+    updated = read_job(authority.path)
+    assert updated.status == "cancelled"
+    assert updated.result_metadata is not None
+    assert updated.result_metadata["ticket_cleanup"]["status"] == "cleared"
+
+
 def test_worker_alive_rejects_missing_and_invalid_pids():
     assert worker_alive(None) is None
     assert worker_alive(0) is None
