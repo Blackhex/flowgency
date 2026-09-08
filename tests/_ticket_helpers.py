@@ -158,6 +158,15 @@ class WorkflowTestEnv:
         self.provider.create(record, operation)
         return ref
 
+    def write_blueprint(self, blueprint_id: str, definition: dict) -> None:
+        """Author an additional blueprint source in the library, fixture-only."""
+        directory = self.library.root / blueprint_id
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "workflow.yaml").write_text(
+            yaml.safe_dump(definition, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+
     def set_storage_root(self, root: Path) -> None:
         snapshot = self.store.load()
         self.configuration_service.save_instance(

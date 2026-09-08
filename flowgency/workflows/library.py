@@ -131,13 +131,33 @@ class WorkflowLibrary:
             blueprint_id = entry.name
             if not _SLUG.match(blueprint_id):
                 continue
-            if not (entry / SOURCE_NAME).exists():
+            try:
+                has_source = (entry / SOURCE_NAME).exists()
+            except OSError:
+                inspections.append(
+                    WorkflowInspection(
+                        blueprint_id,
+                        None,
+                        (f"Blueprint {blueprint_id!r} could not be read.",),
+                    )
+                )
+                continue
+            if not has_source:
                 continue
             try:
                 snapshot = self.inspect(blueprint_id)
             except (ContractError, yaml.YAMLError, ValueError) as error:
                 inspections.append(
                     WorkflowInspection(blueprint_id, None, (str(error),))
+                )
+            except OSError:
+                # A neutral message: never leak the private filesystem path.
+                inspections.append(
+                    WorkflowInspection(
+                        blueprint_id,
+                        None,
+                        (f"Blueprint {blueprint_id!r} could not be read.",),
+                    )
                 )
             else:
                 inspections.append(WorkflowInspection(blueprint_id, snapshot, ()))
@@ -153,17 +173,36 @@ class WorkflowLibrary:
     ) -> WorkflowSnapshot:
         """Publish a validated definition after a final current-byte check.
 
-        External editors cannot be forced into Flowgency locks, so the current
-        bytes are re-hashed immediately before the overwrite; a known conflict is
-        rejected rather than silently clobbered.
+        The candidate is revalidated (a ``model_copy`` skips validators), its
+        identity is pinned to ``blueprint_id``, and the serialized bytes are size
+        checked before anything is written, so an invalid or oversized candidate
+        can never destroy the prior valid file. External editors cannot be forced
+        into Flowgency locks, so the current bytes are re-hashed immediately before
+        the overwrite and a known conflict is rejected. The returned snapshot
+        describes the exact bytes committed here, not whatever a post-write inspect
+        might read back.
         """
+        candidate = WorkflowDefinition.model_validate(definition.model_dump())
+        self._blueprint_dir(blueprint_id)
+        if candidate.id != blueprint_id:
+            raise ContractError(
+                "identity-mismatch",
+                f"Candidate id {candidate.id!r} does not match blueprint "
+                f"{blueprint_id!r}",
+            )
+        payload = yaml.safe_dump(
+            candidate.model_dump(mode="json"), sort_keys=False, allow_unicode=True
+        )
+        payload_bytes = payload.encode("utf-8")
+        check_source_size(payload_bytes)
         source, path = self._read_source(blueprint_id)
         if _source_digest(source) != expected_digest:
             raise ConfigConflictError(
                 "Blueprint source changed on disk; reload before saving"
             )
-        payload = yaml.safe_dump(
-            definition.model_dump(mode="json"), sort_keys=False, allow_unicode=True
-        )
         atomic_write_text(path, payload)
-        return self.inspect(blueprint_id)
+        return WorkflowSnapshot(
+            definition=candidate,
+            digest=_source_digest(payload_bytes),
+            source_path=path,
+        )

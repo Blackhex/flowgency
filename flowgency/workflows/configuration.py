@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -244,23 +245,31 @@ class WorkflowConfigurationService:
         self.storage_factory = storage_factory
         self._library = library
         self._library_root = _canonical_library(library.root)
+        self._library_guard = threading.Lock()
 
     def library_for(self, snapshot: ConfigSnapshot) -> WorkflowLibrary:
         """Return a library bound to the guarded current library root.
 
         A cached library object is reused only while the normalized root still
         matches, so an external change to ``workflow_library`` is not ignored by
-        a constructor-time object held by the ``get_services`` cache.
+        a constructor-time object held by the ``get_services`` cache. The cached
+        ``(object, root)`` pair is read and written atomically, and the locally
+        selected library is returned so a concurrent call cannot hand back a
+        library mismatched with the snapshot it was resolved from.
         """
         root = snapshot.config.flowgency.workflow_library
         normalized = _canonical_library(root)
-        if self._library is not None and self._library_root == normalized:
-            return self._library
+        with self._library_guard:
+            cached = self._library
+            cached_root = self._library_root
+        if cached is not None and cached_root == normalized:
+            return cached
         if root is None:
             raise ConfigConflictError("No workflow library is configured")
         library = WorkflowLibrary(root)
-        self._library = library
-        self._library_root = normalized
+        with self._library_guard:
+            self._library = library
+            self._library_root = normalized
         return library
 
     def teams_using(self, blueprint_id: str) -> tuple[str, ...]:
@@ -302,21 +311,36 @@ class WorkflowConfigurationService:
     ) -> ConfigSnapshot:
         """Create or rebind a single workflow instance under the operation guard.
 
-        A rebind is not a transfer: existing tickets under the previous storage
-        are left untouched and simply hidden by the new selection. Only initial
-        setup prepares the selected root; an ordinary rebind does not create
-        destination directories.
+        The selected blueprint's current source and the destination namespace are
+        validated first: a missing/invalid blueprint, an unavailable destination,
+        or an existing ticket the candidate cannot interpret leaves config bytes,
+        old tickets, and destination data untouched. A rebind is not a transfer –
+        existing tickets under the previous storage are simply hidden by the new
+        selection. Only initial setup prepares the selected root, and only after
+        the patch has structurally validated the new configuration; an ordinary
+        rebind creates no destination directory.
         """
+        lock_blueprints = self._locked_blueprints(team_id, workflow_id, patch, create)
         with workflow_operation(
-            self.store, (team_id,), (), expected_revision=expected_revision
+            self.store, (team_id,), lock_blueprints, expected_revision=expected_revision
         ) as snapshot:
-            if create and patch.integration == "local":
-                root = patch.integration_config.get("root")
-                if root is not None:
-                    prepare_writable_directory(
-                        Path(str(root)), label="workflow storage root"
-                    )
-            return patch_workflow_instance(
+            library = self.library_for(snapshot)
+            source = library.inspect(patch.blueprint)
+            candidate = WorkflowDefinition.model_validate(source.definition.model_dump())
+            destination = StorageBinding(
+                integration=patch.integration,
+                config=dict(patch.integration_config),
+                team_id=team_id,
+                workflow_id=workflow_id,
+            )
+            require_compatible(
+                candidate, self._destination_records(destination, create=create)
+            )
+            if library.inspect(patch.blueprint).digest != source.digest:
+                raise ConfigConflictError(
+                    "Blueprint source changed; reload before saving"
+                )
+            result = patch_workflow_instance(
                 self.store,
                 snapshot.revision,
                 team_id,
@@ -324,6 +348,70 @@ class WorkflowConfigurationService:
                 patch,
                 create=create,
             )
+            if create and patch.integration == "local":
+                root = patch.integration_config.get("root")
+                if root is not None:
+                    prepare_writable_directory(
+                        self._resolve_root(snapshot, root),
+                        label="workflow storage root",
+                    )
+            return result
+
+    def _locked_blueprints(
+        self,
+        team_id: str,
+        workflow_id: str,
+        patch: WorkflowInstancePatch,
+        create: bool,
+    ) -> tuple[str, ...]:
+        """Blueprint ids to lock: the new selection plus, for a rebind, the old one.
+
+        The current config is read only to choose locks; the guarded snapshot is
+        re-resolved inside :func:`workflow_operation`.
+        """
+        blueprint_ids = {patch.blueprint}
+        if not create:
+            try:
+                workflow = (
+                    self.store.load().config.teams[team_id].workflows[workflow_id]
+                )
+            except KeyError:
+                workflow = None
+            if workflow is not None:
+                blueprint_ids.add(workflow.blueprint)
+        return tuple(sorted(blueprint_ids))
+
+    def _destination_records(
+        self, storage: StorageBinding, *, create: bool
+    ) -> tuple[TicketRecord, ...]:
+        """List the destination namespace, treating an unavailable one as a block.
+
+        Initial creation has no destination yet – its freshly prepared root is
+        definitionally empty – so no listing is attempted.
+        """
+        if create:
+            return ()
+        try:
+            return self.storage_factory(storage).list(
+                storage.team_id, storage.workflow_id
+            )
+        except StorageUnavailable as error:
+            raise ValidationFailed(
+                [
+                    _compatibility_issue(
+                        "Cannot verify compatibility: destination storage for "
+                        f"{storage.workflow_id!r} is unavailable ({error})."
+                    )
+                ]
+            ) from error
+
+    @staticmethod
+    def _resolve_root(snapshot: ConfigSnapshot, root: Any) -> Path:
+        """Resolve a configured storage root against the config directory, not cwd."""
+        path = Path(str(root)).expanduser()
+        if not path.is_absolute():
+            path = snapshot.path.parent / path
+        return path
 
     def save_blueprint(
         self,
@@ -358,4 +446,16 @@ class WorkflowConfigurationService:
                         ]
                     ) from error
                 require_compatible(candidate, records)
+            self._assert_config_unchanged(snapshot.revision)
             return library.write_candidate(blueprint_id, expected_digest, candidate)
+
+    def _assert_config_unchanged(self, expected_revision: str) -> None:
+        """Detect an external config change immediately before persistence.
+
+        Compatibility reads can span a window in which another writer changes
+        bindings or the library root. The config file lock is taken here only
+        through :class:`ConfigStore`, never while holding it, so the guard's
+        non-reentrant lock is not re-entered.
+        """
+        if self.store.load().revision != expected_revision:
+            raise ConfigConflictError("config.yaml changed; reload before saving")
