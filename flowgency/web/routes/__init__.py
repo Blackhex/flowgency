@@ -6,6 +6,8 @@ from .agent_permissions import router as agent_permissions_router
 from .agent_routines import router as agent_routines_router
 from .agents import router as agents_router
 from .jobs import router as jobs_router
+from .tickets import router as tickets_router
+from .workflows import router as workflows_router
 
 __all__ = [
     "admin_teams_router",
@@ -16,4 +18,6 @@ __all__ = [
     "agent_routines_router",
     "agents_router",
     "jobs_router",
+    "tickets_router",
+    "workflows_router",
 ]

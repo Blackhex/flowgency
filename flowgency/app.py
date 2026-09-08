@@ -75,6 +75,8 @@ from flowgency.web.routes import (
     agent_routines_router,
     agents_router,
     jobs_router,
+    tickets_router,
+    workflows_router,
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -959,6 +961,8 @@ app.include_router(agent_permissions_router)
 app.include_router(agent_routines_router)
 app.include_router(agent_detail_router)
 app.include_router(jobs_router)
+app.include_router(workflows_router)
+app.include_router(tickets_router)
 
 
 def _fault_line(status, now: datetime) -> str:

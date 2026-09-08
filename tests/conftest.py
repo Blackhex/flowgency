@@ -93,3 +93,10 @@ def workflow_env(tmp_path, raw_config):
 
     return make_workflow_environment(tmp_path, raw_config)
 
+
+@pytest.fixture
+def workflow_web_env(tmp_path, raw_config, monkeypatch):
+    from tests._ticket_helpers import make_workflow_web_environment
+
+    return make_workflow_web_environment(tmp_path, raw_config, monkeypatch)
+

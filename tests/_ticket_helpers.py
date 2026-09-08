@@ -8,8 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
+from fastapi.testclient import TestClient
 import yaml
 
+from flowgency import app as app_mod
 from flowgency.configuration.store import ConfigStore
 from flowgency.blueprints.projectors import StaticRuntimeProjector
 from flowgency.integrations import BaseIntegration
@@ -512,6 +514,11 @@ class WorkflowTestEnv:
 def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestEnv:
     """Build a real-filesystem workflow environment from an existing raw config."""
     raw = deepcopy(raw_config)
+    agent_library = Path(raw["flowgency"]["agent_library"])
+    for blueprint_id, title in (("builder-blueprint", "Builder"), ("observer-blueprint", "Observer")):
+        blueprint_root = agent_library / blueprint_id
+        blueprint_root.mkdir(parents=True, exist_ok=True)
+        (blueprint_root / "AGENTS.md").write_text(f"# {title}\n", encoding="utf-8")
 
     library_root = tmp_path / "workflow-library"
     (library_root / "delivery").mkdir(parents=True)
@@ -673,6 +680,12 @@ class TicketJobTestEnv(WorkflowTestEnv):
         return authority, (first.ref, second.ref)
 
 
+@dataclass
+class WorkflowWebTestEnv(WorkflowTestEnv):
+    client: TestClient | None = None
+    base_path: str = "/newsletter/workflows/board-a"
+
+
 def make_ticket_job_environment(tmp_path: Path, raw_config: dict, monkeypatch) -> TicketJobTestEnv:
     env = make_workflow_environment(tmp_path, raw_config)
     snapshot = env.store.load()
@@ -708,5 +721,17 @@ def make_ticket_job_environment(tmp_path: Path, raw_config: dict, monkeypatch) -
         coordinator=coordinator,
         jobs=DurableJobProbe(env.job_store, env.team_id),
         launcher=launcher,
+    )
+
+
+def make_workflow_web_environment(tmp_path: Path, raw_config: dict, monkeypatch) -> WorkflowWebTestEnv:
+    env = make_workflow_environment(tmp_path, raw_config)
+    config_path = env.store.path
+    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
+    app_mod.refresh_services()
+    client = TestClient(app_mod.app)
+    return WorkflowWebTestEnv(
+        **env.__dict__,
+        client=client,
     )
 

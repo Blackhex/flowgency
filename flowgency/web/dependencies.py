@@ -17,9 +17,17 @@ from flowgency.configuration.paths import (
 from flowgency.integrations import REGISTRY, BaseIntegration
 from flowgency.instances import InstanceService
 from flowgency.jobs.authority import JobStore
+from flowgency.jobs.tickets import TicketJobCoordinator
+from flowgency.jobs.submission import submit_job_request
 from flowgency.jobs.submission import _projector_registry
 from flowgency.memory import MemoryStore
 from flowgency.prompts import PromptService, PromptStore, validate_prompt_catalogs
+from flowgency.tickets.access import TicketAccessRegistry
+from flowgency.tickets.service import TicketService
+from flowgency.tickets.storages.registry import resolve_storage
+from flowgency.workflows.configuration import WorkflowConfigurationService
+from flowgency.workflows.library import WorkflowLibrary
+from flowgency.clock import now as clock_now
 
 
 @dataclass(frozen=True)
@@ -36,6 +44,10 @@ class FlowgencyServices:
     startup_error: Exception | None = None
     prompt_service: PromptService | None = None
     prompt_issues: tuple[ValidationIssue, ...] = ()
+    workflow_library: WorkflowLibrary | None = None
+    workflow_configuration: WorkflowConfigurationService | None = None
+    tickets: TicketService | None = None
+    ticket_jobs: TicketJobCoordinator | None = None
 
 
 def build_services(config_path: Path | None = None) -> FlowgencyServices:
@@ -75,6 +87,38 @@ def build_services(config_path: Path | None = None) -> FlowgencyServices:
             memory_store=memory_store,
             prompt_store=prompt_store,
         )
+        workflow_library = None
+        workflow_configuration = None
+        tickets = None
+        ticket_jobs = None
+        workflow_root = flowgency.workflow_library
+        if workflow_root is not None:
+            try:
+                workflow_library = WorkflowLibrary(Path(workflow_root))
+                workflow_configuration = WorkflowConfigurationService(
+                    config_store,
+                    workflow_library,
+                    lambda binding: resolve_storage(binding, clock=clock_now),
+                )
+                access_registry = TicketAccessRegistry(job_store)
+                tickets = TicketService(
+                    config_store,
+                    workflow_library,
+                    lambda binding: resolve_storage(binding, clock=clock_now),
+                    access_registry.validate_context,
+                    clock=clock_now,
+                )
+                ticket_jobs = TicketJobCoordinator(
+                    service=tickets,
+                    job_store=job_store,
+                    config_store=config_store,
+                    submitter=submit_job_request,
+                )
+            except Exception:
+                workflow_library = None
+                workflow_configuration = None
+                tickets = None
+                ticket_jobs = None
         return FlowgencyServices(
             config_path=resolved,
             config_store=config_store,
@@ -88,6 +132,10 @@ def build_services(config_path: Path | None = None) -> FlowgencyServices:
             integrations=REGISTRY,
             startup_error=None,
             prompt_issues=catalog_issues,
+            workflow_library=workflow_library,
+            workflow_configuration=workflow_configuration,
+            tickets=tickets,
+            ticket_jobs=ticket_jobs,
         )
     except Exception as exc:
         return FlowgencyServices(
@@ -102,6 +150,10 @@ def build_services(config_path: Path | None = None) -> FlowgencyServices:
             instances=None,
             integrations=REGISTRY,
             startup_error=exc,
+            workflow_library=None,
+            workflow_configuration=None,
+            tickets=None,
+            ticket_jobs=None,
         )
 
 
