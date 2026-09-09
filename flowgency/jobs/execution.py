@@ -619,6 +619,14 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                 if result.stderr:
                     stderr_path.write_text(result.stderr, encoding="utf-8")
                     persisted_stderr_path = str(stderr_path.resolve())
+                # A write the agent tried but did not land is denial evidence a
+                # read-only run must not lose; the parsed changes only record what
+                # succeeded, so the attempt is recorded against the job separately.
+                write_attempts = list(getattr(result, "write_attempts", []) or [])
+                if write_attempts:
+                    _merge_result_metadata(
+                        job_path, {"write_attempts": write_attempts}
+                    )
                 native_changes = list(getattr(result, "changed_files", []))
                 if not native_changes:
                     native_changes = capture_git_changes(git_root, base_sha)

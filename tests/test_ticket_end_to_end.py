@@ -216,3 +216,82 @@ def test_ordinary_user_context_cannot_transition_a_ticket(workflow_env):
         )
 
     assert env.read(ticket.ref).record.state_id == "review"
+
+
+def test_execute_job_records_denied_write_attempts(tmp_path, raw_config, monkeypatch):
+    """A write the agent tried but the boundary refused is recorded on the job.
+
+    The parsed change set only carries writes that landed, so a read-only run
+    that attempted (and was denied) a workspace edit would otherwise leave no
+    trace. The live read/search-only Copilot probe reads this same telemetry to
+    prove an attempt was actually made, not merely that bytes stayed unchanged.
+    """
+    from flowgency.blueprints import CompilationCache
+    from flowgency.blueprints.library import BlueprintLibrary
+    from flowgency.jobs.execution import execute_job
+    from flowgency.jobs.models import JobRecord, JobRequest
+    from flowgency.jobs.processes import ProcessStopEvidence
+    from flowgency.jobs.resolution import resolve_job_request
+    from flowgency.jobs.store import read_job
+    from flowgency.prompts import PromptStore
+
+    env = make_ticket_job_environment(tmp_path, raw_config, monkeypatch)
+
+    class DeniedWriteIntegration(TicketRuntimeIntegration):
+        def run(self, request: IntegrationRunRequest):
+            return RunResult(
+                0,
+                "attempted a denied write",
+                "",
+                0.1,
+                changed_files=[],
+                write_attempts=["blocked-note.txt"],
+                session_id="denied-write-session",
+                process_stop_evidence=ProcessStopEvidence(
+                    job_id=record.spec.job_id,
+                    generation=request.ticket_tools.lifecycle.generation,
+                    confirmed=True,
+                    reason="exited",
+                ),
+            )
+
+    spec = resolve_job_request(
+        JobRequest(
+            config_path=env.store.path,
+            team_key=env.team_id,
+            agent_name="builder",
+            trigger="manual_prompt",
+            routine_id=None,
+            task_input="Attempt a workspace write that the boundary refuses.",
+        ),
+        config_store=env.store,
+        library=BlueprintLibrary(env.store.load().config.flowgency.agent_library),
+        cache=CompilationCache(
+            env.store.load().config.flowgency.compilation_cache,
+            {"claude-code": DeniedWriteIntegration.projector},
+        ),
+        prompt_store=PromptStore(env.store.load().config.flowgency.prompt_store),
+        integrations={"claude-code": DeniedWriteIntegration()},
+    )
+    authority = env.job_store.create(JobRecord.from_spec(spec))
+    record = env.job_store.read(authority)
+
+    monkeypatch.setattr(
+        "flowgency.jobs.execution.resolve_job_context",
+        lambda ignored: SimpleNamespace(
+            workspace_root=Path(spec.workspace_root),
+            integration=DeniedWriteIntegration(),
+            timeout=30,
+            sandbox_root=None,
+            team_root=Path(spec.team_root),
+            runtime_policy=EffectiveRuntimePolicy(timeout=30),
+        ),
+    )
+
+    result = execute_job(authority)
+
+    assert result.status == "complete", read_job(authority.path).execution_summary
+    metadata = read_job(authority.path).result_metadata
+    assert metadata["write_attempts"] == ["blocked-note.txt"]
+    assert read_job(authority.path).changed_files == []
+
