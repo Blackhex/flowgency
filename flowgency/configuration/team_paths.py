@@ -17,13 +17,19 @@ class ResolvedTeamPaths:
     logs: Path
 
     @property
+    def runtime_directories(self) -> tuple[Path, ...]:
+        return (
+            self.team_root,
+            self.locks,
+            self.logs,
+        )
+
+    @property
     def record_directories(self) -> tuple[Path, ...]:
         return (
             self.observations,
             self.proposals,
             self.decisions,
-            self.locks,
-            self.logs,
         )
 
 

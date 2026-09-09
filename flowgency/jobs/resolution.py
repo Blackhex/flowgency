@@ -19,8 +19,7 @@ from flowgency.memory.selectors import (
     select_effective_memory,
 )
 from flowgency.prompts import PromptNotFoundError, PromptStore, build_prompt_task_input, resolve_catalog_prompt
-from flowgency.records.protocol import append_reporting_protocol
-from flowgency.records.validation import writable_agent_names
+from flowgency.tickets.reporting import append_ticket_reporting_protocol
 
 from .models import BlueprintRef, JobRequest, JobSpec, MemoryBinding, PromptSnapshot, RuntimePolicySnapshot, SCHEMA_VERSION
 
@@ -218,9 +217,9 @@ def resolve_job_request(
         raise JobValidationError(
             f"Routine '{routine.id}' is disabled; enable it before running"
         )
-    if request.trigger in {"decision", "decision_retry"} and request.routine_id is not None:
+    if request.trigger in {"decision", "decision_retry"}:
         raise JobValidationError(
-            "decision jobs require routine_id and skill to be null"
+            "decision-trigger jobs are retired; submit work through a ticket workflow"
         )
 
     integration = _bind_integration(
@@ -311,17 +310,15 @@ def resolve_job_request(
             prompt_source = {"type": "ad_hoc"}
         else:
             raise JobValidationError("manual prompt jobs require a routine, saved prompt, or nonblank task_input")
-    elif request.trigger == "decision":
-        task_input = request.task_input
-        prompt_source = {"type": "decision"}
     elif request.trigger == "ticket":
         if request.ticket_target is None:
             raise JobValidationError("ticket jobs require a ticket_target")
         task_input = request.task_input
         prompt_source = {"type": "ticket"}
     else:
-        task_input = request.task_input
-        prompt_source = {"type": "decision_retry"}
+        raise JobValidationError(
+            f"unsupported job trigger for new submission: {request.trigger}"
+        )
 
     return JobSpec(
         schema_version=SCHEMA_VERSION,
@@ -346,8 +343,9 @@ def resolve_job_request(
         routine_id=routine.id if routine is not None else None,
         skill=None,
         skill_arguments=(),
-        task_input=append_reporting_protocol(
+        task_input=append_ticket_reporting_protocol(
             task_input,
+            workflows_available=bool(team.workflows),
             tool_mode=_tool_mode_from_policy(runtime_policy),
             tool_names=_tool_names_from_policy(runtime_policy),
         ),
@@ -363,8 +361,6 @@ def resolve_job_request(
         timeout_override=request.timeout_override,
         created_at=datetime.now(timezone.utc).isoformat(),
         private_prompts=private_prompts,
-        writable_agents=tuple(
-            sorted(writable_agent_names(snapshot.config, request.team_key))
-        ),
+        writable_agents=None,
         ticket_target=request.ticket_target,
     )

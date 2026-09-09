@@ -167,7 +167,11 @@ def get_services(request: Request) -> FlowgencyServices:
             os.environ.get("FLOWGENCY_CONFIG") or Path.cwd() / "config.yaml"
         ).expanduser().resolve()
     )
-    if services is None or services.config_path != current_path:
+    if (
+        services is None
+        or not hasattr(services, "config_path")
+        or services.config_path != current_path
+    ):
         services = build_services(current_path)
         request.app.state.services = services
     return services

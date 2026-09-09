@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from flowgency.configuration.store import ConfigStore
-from flowgency.permissions.eligibility import may_execute_decisions
+from flowgency.permissions.eligibility import may_write_workspace
 
 
 def _config(tmp_path: Path, raw_config, rules):
@@ -28,13 +28,13 @@ def _config(tmp_path: Path, raw_config, rules):
 def test_write_on_the_workspace_confers_eligibility(tmp_path, raw_config):
     config = _config(tmp_path, raw_config, [{"path": "<ws>", "tools": ["read", "write"]}])
 
-    assert may_execute_decisions(config, "newsletter", "builder") is True
+    assert may_write_workspace(config, "newsletter", "builder") is True
 
 
 def test_read_only_workspace_does_not(tmp_path, raw_config):
     config = _config(tmp_path, raw_config, [{"path": "<ws>", "tools": ["read"]}])
 
-    assert may_execute_decisions(config, "newsletter", "builder") is False
+    assert may_write_workspace(config, "newsletter", "builder") is False
 
 
 def test_write_on_a_subdirectory_does_not(tmp_path, raw_config):
@@ -47,22 +47,22 @@ def test_write_on_a_subdirectory_does_not(tmp_path, raw_config):
         ],
     )
 
-    assert may_execute_decisions(config, "newsletter", "builder") is False
+    assert may_write_workspace(config, "newsletter", "builder") is False
 
 
 def test_omitted_tools_confers_eligibility(tmp_path, raw_config):
     config = _config(tmp_path, raw_config, [{"path": "<ws>"}])
 
-    assert may_execute_decisions(config, "newsletter", "builder") is True
+    assert may_write_workspace(config, "newsletter", "builder") is True
 
 
 def test_unknown_team_is_not_eligible(tmp_path, raw_config):
     config = _config(tmp_path, raw_config, [{"path": "<ws>", "tools": ["write"]}])
 
-    assert may_execute_decisions(config, "nope", "builder") is False
+    assert may_write_workspace(config, "nope", "builder") is False
 
 
 def test_unknown_agent_is_not_eligible(tmp_path, raw_config):
     config = _config(tmp_path, raw_config, [{"path": "<ws>", "tools": ["write"]}])
 
-    assert may_execute_decisions(config, "newsletter", "nope") is False
+    assert may_write_workspace(config, "newsletter", "nope") is False

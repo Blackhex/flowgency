@@ -929,68 +929,31 @@ def test_execute_job_accepts_result_without_changed_files(tmp_path, monkeypatch)
     assert result.changed_files == []
 
 
-def test_execute_job_projection_failure_before_run_still_completes(tmp_path, monkeypatch, caplog):
-    path, spec = queued_job(tmp_path)
-    calls = {"count": 0}
-
-    def flaky_project(record):
-        calls["count"] += 1
-        if calls["count"] == 1:
-            raise OSError("projection write failed")
-
-    monkeypatch.setattr("flowgency.jobs.execution.project_decision", flaky_project)
-    monkeypatch.setattr(
-        "flowgency.jobs.execution.resolve_job_context",
-        lambda ignored: SimpleNamespace(
-            workspace_root=tmp_path / "team",
-            timeout=30,
-            sandbox_root=None,
-            team_root=tmp_path / "team",
-            runtime_policy=EffectiveRuntimePolicy(timeout=30),
-            integration=SimpleNamespace(
-                run=lambda request: RunResult(0, "done", "", 0.1)
-            ),
-        ),
+def test_execute_job_retired_decision_trigger_fails_without_touching_decision(tmp_path):
+    decisions = tmp_path / "team" / "decisions"
+    decisions.mkdir(parents=True)
+    decision = decisions / "proposal.md"
+    decision.write_text(
+        "---\nexecution_job_id: newer-job\nexecution_status: running\n---\n",
+        encoding="utf-8",
+    )
+    before = decision.read_text(encoding="utf-8")
+    _, spec = queued_job(
+        tmp_path,
+        decision_context={
+            "decision_path": str(decision),
+            "proposal_path": "proposal.md",
+        },
     )
 
     result = execute_job(_authority(spec))
 
-    assert calls["count"] == 2
-    assert result.status == "complete"
-    assert read_job(path).status == "complete"
-    assert "projection write failed" in caplog.text
-
-
-def test_execute_job_projection_failure_before_run_still_fails(tmp_path, monkeypatch, caplog):
-    path, spec = queued_job(tmp_path)
-    calls = {"count": 0}
-
-    def flaky_project(record):
-        calls["count"] += 1
-        if calls["count"] == 1:
-            raise OSError("projection read failed")
-
-    monkeypatch.setattr("flowgency.jobs.execution.project_decision", flaky_project)
-    monkeypatch.setattr(
-        "flowgency.jobs.execution.resolve_job_context",
-        lambda ignored: SimpleNamespace(
-            workspace_root=tmp_path / "team",
-            timeout=30,
-            sandbox_root=None,
-            team_root=tmp_path / "team",
-            runtime_policy=EffectiveRuntimePolicy(timeout=30),
-            integration=SimpleNamespace(
-                run=lambda request: (_ for _ in ()).throw(RuntimeError("boom"))
-            ),
-        ),
-    )
-
-    result = execute_job(_authority(spec))
-
-    assert calls["count"] == 2
     assert result.status == "failed"
-    assert read_job(path).status == "failed"
-    assert "projection read failed" in caplog.text
+    assert result.execution_summary == (
+        "Retired pipeline trigger 'decision' is no longer supported. "
+        "Submit work through a ticket workflow instead."
+    )
+    assert decision.read_text(encoding="utf-8") == before
 
 
 def test_execute_job_records_live_worker_pid_for_reconciliation(tmp_path, monkeypatch):
@@ -1709,10 +1672,6 @@ def test_execute_job_strips_authored_write_on_instructions_zone(tmp_path, monkey
             runtime_policy=authored_policy,
         ),
     )
-    # queued_job uses a schema_version 4 config; stub writable-agents resolution
-    # so the successful-run path completes without needing a schema v5 config.
-    monkeypatch.setattr("flowgency.jobs.execution._writable_agents", lambda spec: frozenset())
-
     result = execute_job(_authority(spec))
 
     assert result.status == "complete"
@@ -1735,7 +1694,7 @@ def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, m
     its run()) to prove generated zone rules do not trigger rejection."""
     from flowgency.integrations.flowgency.script import ScriptIntegration
 
-    path, spec = queued_job(tmp_path, decision_context={"decision_path": "d.md", "proposal_path": "p.md"})
+    path, spec = queued_job(tmp_path)
 
     authored_policy = EffectiveRuntimePolicy(
         timeout=30,
@@ -1770,8 +1729,6 @@ def test_execute_job_zoned_policy_passes_real_integration_validation(tmp_path, m
             runtime_policy=authored_policy,
         ),
     )
-    monkeypatch.setattr("flowgency.jobs.execution._writable_agents", lambda spec: frozenset())
-
     result = execute_job(_authority(spec))
 
     assert result.status == "complete"

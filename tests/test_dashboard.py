@@ -20,6 +20,7 @@ from flowgency.app import (
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from flowgency.jobs.store import transition_job, write_job
+from tests._ticket_helpers import SEED_TIME
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -197,6 +198,31 @@ Decision body
     # Assert change stats are rendered
     assert "+2" in html
     assert "−1" in html or "&minus;1" in html
+
+
+def test_home_renders_ticket_workflow_summary_and_activity(workflow_web_env):
+    env = workflow_web_env
+    first = env.create(title="Alpha review")
+    second = env.create(title="Beta review")
+    env.service.assign(env.user, first.version, "builder", env.operation("assign-alpha"))
+    builder = env.agent("builder", "run-alpha")
+    env.service.start_work(
+        builder,
+        env.read(first.ref).version,
+        env.operation("start-alpha", actor_name=builder.agent_name),
+    )
+
+    response = env.client.get(f"/{env.team_id}/")
+
+    assert response.status_code == 200
+    assert "Ticket workflows" in response.text
+    assert "Board A" in response.text
+    assert "2 tickets" in response.text
+    assert "1 active" in response.text
+    assert "1 unassigned" in response.text
+    assert "Recent ticket activity" in response.text
+    assert "Alpha review" in response.text
+    assert "Agent started work" in response.text
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:

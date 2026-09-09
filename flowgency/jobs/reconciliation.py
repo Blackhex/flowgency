@@ -12,7 +12,7 @@ import yaml
 from flowgency.configuration.store import ConfigStore
 from flowgency.blueprints.cache import release_pin
 from .authority import JobStore
-from .execution import _merge_result_metadata, _ticket_cleanup_metadata, project_decision
+from .execution import _merge_result_metadata, _ticket_cleanup_metadata
 from flowgency.memory.recovery import recover_publications
 from flowgency.jobs.processes import ProcessStopEvidence
 from flowgency.tickets.access import TicketAccessRegistry
@@ -319,14 +319,6 @@ def reconcile_jobs(
                     _release_job_pin(record)
                 except Exception:
                     pass
-                try:
-                    project_decision(record)
-                except Exception as error:
-                    logger.warning(
-                        "Failed to project terminal job %s to its decision: %s",
-                        record.spec.job_id,
-                        error,
-                    )
                 continue
             if record.status not in {"running", "waiting_for_memory"}:
                 continue
@@ -351,12 +343,4 @@ def reconcile_jobs(
                 _release_job_pin(record)
             except Exception:
                 pass
-            try:
-                project_decision(record)
-            except Exception as error:
-                logger.warning(
-                    "Failed to project reconciled job %s to its decision: %s",
-                    record.spec.job_id,
-                    error,
-                )
     return ReconciliationResult(failed=failed, left_running=left_running)

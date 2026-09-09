@@ -97,6 +97,50 @@
   {% endif %}
 </div>
 
+{% if workflow_dashboard.workflows %}
+<div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 mb-3">
+  <div class="flex items-center justify-between gap-2 mb-2">
+    <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ticket workflows</span>
+    <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ workflow_dashboard.ticket_count }} tickets · {{ workflow_dashboard.working_count }} active · {{ workflow_dashboard.unassigned|length }} unassigned</span>
+  </div>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+    <div class="space-y-2">
+      {% for workflow in workflow_dashboard.workflows %}
+      <a href="{{ workflow.href }}" class="block rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 hover:border-flowgency-400 dark:hover:border-flowgency-600 transition-colors">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm font-semibold text-gray-900 dark:text-gray-100">{{ workflow.name }}</span>
+          <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ workflow.ticket_count }} tickets</span>
+        </div>
+        <div class="mt-1 flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
+          <span>{{ workflow.working_count }} active</span>
+          <span>{{ workflow.unassigned_count }} unassigned</span>
+          {% if workflow.issue_count %}<span>{{ workflow.issue_count }} issues</span>{% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    <div>
+      <div class="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Recent ticket activity</div>
+      {% if workflow_dashboard.activity %}
+      <div class="space-y-2">
+        {% for item in workflow_dashboard.activity %}
+        <a href="{{ item.href }}" class="block rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-800 hover:border-flowgency-400 dark:hover:border-flowgency-600 transition-colors">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ item.title }}</span>
+            <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ item.workflow_name }}</span>
+          </div>
+          <div class="mt-1 text-xs text-gray-600 dark:text-gray-300">{{ item.summary }}</div>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-sm text-gray-500 dark:text-gray-400">No ticket activity yet.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% if running_decisions %}
 <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mb-3">
   <div class="flex items-center gap-2 mb-1.5">

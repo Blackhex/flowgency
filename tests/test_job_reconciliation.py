@@ -111,6 +111,7 @@ def test_reconcile_leaves_live_worker_running(tmp_path, monkeypatch):
 
 def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
     team_dir, decision, path = running_decision_job(tmp_path)
+    decision_before = decision.read_text(encoding="utf-8")
     monkeypatch.setattr("flowgency.jobs.reconciliation.worker_alive", lambda pid: False)
     result = reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
     assert result.failed == 1
@@ -118,7 +119,7 @@ def test_reconcile_marks_confirmed_dead_worker_failed(tmp_path, monkeypatch):
     assert record.status == "failed"
     assert record.completed_at is not None
     assert record.execution_summary == "Worker process (PID 999999) was not found."
-    assert "execution_status: failed" in decision.read_text()
+    assert decision.read_text(encoding="utf-8") == decision_before
 
 
 def test_reconcile_releases_pin_for_dead_waiting_worker(tmp_path, monkeypatch):
@@ -189,8 +190,9 @@ def test_reconcile_releases_pin_for_dead_running_worker_but_keeps_live_pin(
     )
 
 
-def test_reconcile_projects_terminal_job_to_stale_decision(tmp_path):
+def test_reconcile_leaves_terminal_decision_file_unchanged(tmp_path):
     team_dir, decision, path = running_decision_job(tmp_path)
+    decision_before = decision.read_text(encoding="utf-8")
     record = read_job(path)
     write_job(
         path,
@@ -204,17 +206,12 @@ def test_reconcile_projects_terminal_job_to_stale_decision(tmp_path):
 
     reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
-    decision_text = decision.read_text()
-    assert "execution_status: failed" in decision_text
-    assert "Agent timed out after 300 seconds." in decision_text
+    assert decision.read_text(encoding="utf-8") == decision_before
 
 
-def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
-    """A terminal ``complete`` job carrying non-empty ``changed_files`` must
-    project both its status and the captured files onto a stale ``running``
-    decision. This is the exact behaviour the cross-tool capture advertises and
-    was previously only asserted for a failed, empty-changes job."""
+def test_reconcile_leaves_complete_job_decision_file_unchanged(tmp_path):
     team_dir, decision, path = running_decision_job(tmp_path)
+    decision_before = decision.read_text(encoding="utf-8")
     record = read_job(path)
     changed_files = [
         {"path": "a.py", "status": "modified", "lines_added": 3, "lines_removed": 1},
@@ -233,12 +230,7 @@ def test_reconcile_projects_complete_job_with_changed_files(tmp_path):
 
     reconcile_for_test({"test": {"team_root": str(team_dir)}}, tmp_path)
 
-    metadata = yaml.safe_load(decision.read_text().split("---")[1])
-    assert metadata["execution_status"] == "complete"
-    assert metadata["changed_files"] == changed_files
-    assert metadata["execution_summary"] == (
-        "Agent completed execution; captured 2 changed files."
-    )
+    assert decision.read_text(encoding="utf-8") == decision_before
     assert read_job(path).status == "complete"
 
 

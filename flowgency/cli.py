@@ -45,6 +45,9 @@ from flowgency.proposals import (
     validate_answers,
     validate_proposal_schema,
 )
+from flowgency.tickets.cli import register_ticket_commands
+from flowgency.tickets.models import UserTicketContext
+from flowgency.tickets.views import build_board_view
 from flowgency.web.dependencies import FlowgencyServices, build_services
 
 
@@ -184,7 +187,7 @@ def _team(args: Namespace):
 def _resolve_team(args: Namespace) -> dict[str, Any]:
     snapshot, team_id, team = _team(args)
     paths = resolve_team_paths(team)
-    from flowgency.permissions.eligibility import may_execute_decisions
+    from flowgency.permissions.eligibility import may_write_workspace
     return {
         "key": team_id,
         "name": team.name,
@@ -200,7 +203,7 @@ def _resolve_team(args: Namespace) -> dict[str, Any]:
                 "name": instance.name,
                 "integration": instance.integration,
                 "integration_config": dict(instance.integration_config),
-                "capabilities": {"write": may_execute_decisions(snapshot.config, team_id, instance.name)},
+                "capabilities": {"write": may_write_workspace(snapshot.config, team_id, instance.name)},
             }
             for instance in team.agents.values()
         ],
@@ -434,19 +437,34 @@ def cmd_serve(args: Namespace) -> int:
 
 
 def cmd_status(args: Namespace) -> int:
-    snapshot = _snapshot(args)
+    services = _services(args)
+    snapshot = services.config_store.load()
     job_store = JobStore(snapshot.config.flowgency.memory_store)
     result = {}
     for team_id, team in snapshot.config.teams.items():
-        paths = resolve_team_paths(team)
-        observations = _markdown_items(paths.observations)
-        proposals = _markdown_items(paths.proposals)
-        decisions = _markdown_items(paths.decisions)
+        workflows = []
+        if services.tickets is not None:
+            actor = UserTicketContext(team_id=team_id)
+            for binding in services.tickets.list_workflows(actor):
+                board = build_board_view(
+                    services.tickets,
+                    actor,
+                    binding.workflow_id,
+                    ticket_jobs=services.ticket_jobs,
+                )
+                workflows.append(board)
         result[team_id] = {
             "name": team.name,
-            "observations": len(observations),
-            "proposals": len(proposals),
-            "decisions": len(decisions),
+            "workflows": len(workflows),
+            "tickets": sum(board.ticket_count for board in workflows),
+            "working": sum(board.working_count for board in workflows),
+            "unassigned": sum(
+                1
+                for board in workflows
+                for column in board.columns
+                for ticket in column.tickets
+                if ticket.assignee is None
+            ),
             "agents": len(team.agents),
             "active": sum(bool(job_store.active(team_id, name)) for name in team.agents),
         }
@@ -457,8 +475,8 @@ def cmd_status(args: Namespace) -> int:
         for team_id, item in result.items():
             print(f"  {bold(item['name'])} ({team_id})")
             print(
-                f"    {item['agents']} agents - {item['active']} active - {item['observations']} observations - "
-                f"{item['proposals']} proposals - {item['decisions']} decisions"
+                f"    {item['agents']} agents - {item['active']} active - {item['workflows']} workflows - "
+                f"{item['tickets']} tickets - {item['working']} working - {item['unassigned']} unassigned"
             )
         print()
     return 0
@@ -631,35 +649,64 @@ def cmd_decisions(args: Namespace) -> int:
 
 
 def cmd_inbox(args: Namespace) -> int:
-    resolved = _resolve_team(args)
-    snapshot = resolved["_snapshot"]
-    team_id = resolved["key"]
-    observations = _markdown_items(resolved["observations"])
-    proposals = _markdown_items(resolved["proposals"])
-    decisions = _markdown_items(resolved["decisions"])
-    actionable = [item for item in proposals if item.get("status") in {"proposed", "investigating"}]
-    floated = [item for item in observations if item.get("float") and item.get("status") == "open"]
-    open_items = [item for item in observations if item.get("status") == "open"]
+    cli_services = _services(args)
+    snapshot = cli_services.config_store.load()
+    team_id = _team_id(args, snapshot)
+    actor = UserTicketContext(team_id=team_id)
+    boards = []
+    if cli_services.tickets is not None:
+        for binding in cli_services.tickets.list_workflows(actor):
+            boards.append(
+                build_board_view(
+                    cli_services.tickets,
+                    actor,
+                    binding.workflow_id,
+                    ticket_jobs=cli_services.ticket_jobs,
+                )
+            )
+    unassigned = [
+        {"workflow": board.binding.workflow_id, "id": ticket.ref.ticket_id, "title": ticket.title}
+        for board in boards
+        for column in board.columns
+        for ticket in column.tickets
+        if ticket.assignee is None
+    ]
+    active = [
+        {
+            "workflow": board.binding.workflow_id,
+            "id": ticket.ref.ticket_id,
+            "title": ticket.title,
+            "assignee": ticket.assignee,
+        }
+        for board in boards
+        for column in board.columns
+        for ticket in column.tickets
+        if ticket.active_run_job_id is not None
+    ]
+    failed_jobs = [
+        {"job_id": record.spec.job_id, "agent": record.spec.agent_name, "summary": record.execution_summary}
+        for _, record in _job_records(snapshot, team_id)
+        if record is not None and record.status == "failed"
+    ]
     payload = {
         "team": team_id,
-        "actionable_proposals": [
-            {"slug": item["_slug"], "title": item["_title"], "status": item.get("status", ""), "agent": item.get("origin_agent", "")}
-            for item in actionable
+        "unassigned_tickets": unassigned,
+        "active_tickets": active,
+        "workflow_issues": [
+            {"workflow": board.binding.workflow_id, "issues": [issue.model_dump(mode="json") for issue in board.issues]}
+            for board in boards
+            if board.issues
         ],
-        "floated_observations": [
-            {"slug": item["_slug"], "title": item["_title"], "agent": item.get("agent", "")}
-            for item in floated
-        ],
-        "open_observations": len(open_items),
-        "total_decisions": len(decisions),
+        "failed_jobs": failed_jobs,
     }
     if args.json:
         _print_json(payload)
     else:
-        print(f"\n{bold(snapshot.config.flowgency.title)} - {resolved['name']}\n")
-        print(f"  Needs decision: {len(actionable)}")
-        print(f"  Floated signals: {len(floated)}")
-        print(f"  Open observations: {len(open_items)}\n")
+        print(f"\n{bold(snapshot.config.flowgency.title)} - {snapshot.config.teams[team_id].name}\n")
+        print(f"  Unassigned tickets: {len(unassigned)}")
+        print(f"  Active tickets: {len(active)}")
+        print(f"  Workflow issues: {sum(len(board.issues) for board in boards)}")
+        print(f"  Failed jobs: {len(failed_jobs)}\n")
     return 0
 
 
@@ -1069,6 +1116,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config(validate)
     validate.add_argument("--json", action="store_true")
     validate.set_defaults(handler=cmd_validate)
+
+    register_ticket_commands(subparsers)
 
     for name, help_text, handler in (
         ("inbox", "What needs attention", cmd_inbox),

@@ -39,11 +39,23 @@ class PreparedPermissions:
     issues: tuple[ValidationIssue, ...] = ()
 
 
+def _catalog_for_integration(name: str) -> ToolCatalog:
+    try:
+        return get_tool_catalog(get_integration(name))
+    except KeyError:
+        return ToolCatalog(
+            integration=name,
+            version="unavailable",
+            complete=False,
+            warning="Tool availability could not be determined.",
+        )
+
+
 def load_editor(
     snapshot: ConfigSnapshot, team_id: str, agent_id: str
 ) -> PreparedPermissions:
     instance = snapshot.config.teams[team_id].agents[agent_id]
-    catalog = get_tool_catalog(get_integration(instance.integration))
+    catalog = _catalog_for_integration(instance.integration)
     agent_raw = _find_agent_raw(snapshot.raw, team_id, agent_id)
     form = build_form(agent_raw, catalog)
     try:
@@ -104,7 +116,7 @@ def save_permissions(
         current = parse_config(raw, store.path).resolved
         snapshot = ConfigSnapshot(store.path, request.revision, raw, current)
         instance = current.teams[team_id].agents[agent_id]
-        catalog = get_tool_catalog(get_integration(instance.integration))
+        catalog = _catalog_for_integration(instance.integration)
         prepared = prepare_permissions(snapshot, team_id, agent_id, request, catalog)
         original_agent = _find_agent_raw(raw, team_id, agent_id)
         candidate_agent = _find_agent_raw(prepared.candidate, team_id, agent_id)

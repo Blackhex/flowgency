@@ -3,11 +3,14 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from flowgency.configuration.issues import ValidationFailed, ValidationIssue
 from flowgency.configuration.models import FlowgencyConfig, AgentInstance, TeamConfig, PermissionMode
-from flowgency.integrations import BaseIntegration, get_integration
 from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermissionRule
+
+if TYPE_CHECKING:
+    from flowgency.integrations import BaseIntegration
 
 
 def _build_issue(code: str, scope: str, field: str, message: str, corrective_hint: str) -> ValidationIssue:
@@ -104,6 +107,8 @@ def resolve_effective_policy(
     )
 
     if integration is None:
+        from flowgency.integrations import get_integration
+
         try:
             integration = get_integration(agent.integration)
         except KeyError as exc:

@@ -17,7 +17,9 @@ from flowgency.configuration.models import MemorySelector
 from flowgency.fs.locks import exclusive_lock
 from flowgency.jobs import JobHandle, JobSubmissionError
 from flowgency.memory import resolve_memory_selector
+from flowgency.tickets.models import TicketOperation, UserTicketContext
 from flowgency.web.dependencies import build_services
+from tests._ticket_helpers import delivery_definition
 from tests._team_helpers import apply_team_paths, create_team_environment
 
 
@@ -39,6 +41,42 @@ def _write_blueprint(root: Path) -> None:
     )
 
 
+def _write_workflow(root: Path) -> None:
+    workflow = root / "delivery"
+    workflow.mkdir(parents=True)
+    (workflow / "workflow.yaml").write_text(
+        yaml.safe_dump(delivery_definition(), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+
+def _seed_ticket(config_path: Path, *, title: str = "Alpha review", assignee: str | None = None):
+    services = build_services(config_path)
+    assert services.tickets is not None
+    actor = UserTicketContext(team_id="newsletter")
+    op_key = title.lower().replace(" ", "-")
+    created = services.tickets.create(
+        actor,
+        "delivery",
+        title,
+        "",
+        None,
+        TicketOperation(operation_id=f"seed-{op_key}", request_digest=f"seed-{op_key}"),
+    )
+    record = created.ticket
+    ref = record.ref
+    if assignee is not None:
+        version = services.tickets.inspect(actor, ref).version
+        assert version is not None
+        services.tickets.assign(
+            actor,
+            version,
+            assignee,
+            TicketOperation(operation_id=f"assign-{op_key}", request_digest=f"assign-{op_key}"),
+        )
+    return ref.ticket_id
+
+
 @pytest.fixture
 def cli_config(tmp_path):
     paths = create_team_environment(
@@ -46,6 +84,8 @@ def cli_config(tmp_path):
         "newsletter",
     )
     _write_blueprint(tmp_path / "agent-library")
+    _write_workflow(tmp_path / "workflow-library")
+    (tmp_path / "tickets").mkdir(parents=True, exist_ok=True)
     raw = {
         "schema_version": 1,
         "flowgency": {
@@ -55,6 +95,7 @@ def cli_config(tmp_path):
             "compilation_cache": str((tmp_path / "compiled-agents").resolve()),
             "memory_store": str((tmp_path / "memory").resolve()),
             "prompt_store": str((tmp_path / "prompts").resolve()),
+            "workflow_library": str((tmp_path / "workflow-library").resolve()),
         },
         "memory": {"channels": {"support": {"display_name": "Support Desk"}}},
         "teams": {
@@ -82,6 +123,14 @@ def cli_config(tmp_path):
                         ],
                     }
                 ],
+                "workflows": {
+                    "delivery": {
+                        "name": "Delivery",
+                        "blueprint": "delivery",
+                        "integration": "local",
+                        "integration_config": {"root": str((tmp_path / "tickets").resolve())},
+                    }
+                },
             }, paths)
         },
     }
@@ -90,19 +139,14 @@ def cli_config(tmp_path):
     return config_path
 
 
-def test_cli_reads_team_records_without_workspace_shared(cli_config, cli_runner):
+def test_cli_reads_team_workflows_without_workspace_shared(cli_config, cli_runner):
     team_root = cli_config.parent / "teams" / "newsletter"
-    observation = team_root / "observations" / "signal.md"
-    observation.parent.mkdir(parents=True, exist_ok=True)
-    observation.write_text(
-        "---\nagent: builder\nstatus: open\n---\n# Signal\n",
-        encoding="utf-8",
-    )
+    _seed_ticket(cli_config, title="Signal review")
 
-    result = cli_runner("observations", "--team", "newsletter", "--json", config=cli_config)
+    result = cli_runner("workflows", "--team", "newsletter", "--json", config=cli_config)
 
     assert result.exit_code == 0
-    assert "signal" in result.stdout
+    assert "delivery" in result.stdout
     assert not (team_root / "shared").exists()
 
 
@@ -289,15 +333,15 @@ def test_agents_json_uses_friendly_stable_fields_and_policy_parity(cli_config, c
         ("status", "--json"),
         ("agents", "--team", "newsletter", "--json"),
         ("inbox", "--team", "newsletter", "--json"),
-        ("observations", "--team", "newsletter", "--json"),
-        ("proposals", "--team", "newsletter", "--json"),
-        ("decisions", "--team", "newsletter", "--json"),
+        ("workflows", "--team", "newsletter", "--json"),
+        ("tickets", "--team", "newsletter", "--workflow", "delivery", "--json"),
         ("jobs", "--team", "newsletter", "--json"),
         ("logs", "--team", "newsletter"),
     ],
 )
 def test_read_commands_do_not_change_config_cache_or_memory(cli_config, cli_runner, arguments):
-    roots = [cli_config.parent, cli_config.parent / "compiled-agents", cli_config.parent / "memory"]
+    _seed_ticket(cli_config, title="Seed read only")
+    roots = [cli_config.parent, cli_config.parent / "compiled-agents", cli_config.parent / "memory", cli_config.parent / "tickets"]
     before = tuple(_tree_snapshot(root) for root in roots)
     result = cli_runner(*arguments, config=cli_config)
     assert result.exit_code == 0, result.stderr

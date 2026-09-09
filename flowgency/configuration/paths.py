@@ -488,7 +488,7 @@ def initialize_storage_directories(config: FlowgencyConfig) -> None:
     ]
     for team in config.teams.values():
         paths = resolve_team_paths(team)
-        directories.extend((paths.team_root, *paths.record_directories))
+        directories.extend(paths.runtime_directories)
     for path in directories:
         _ensure_real_directory(path, create=True)
 

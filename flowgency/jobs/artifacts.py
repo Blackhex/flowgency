@@ -9,7 +9,7 @@ import stat
 import unicodedata
 
 from flowgency.fs.atomic import atomic_write_bytes
-from flowgency.records.validation import MAX_OUTBOX_ENTRIES_PER_KIND, MAX_RECORD_BYTES
+from flowgency.memory.limits import MAX_MEMORY_ENTRIES, MAX_MEMORY_FILE_BYTES
 
 
 _WINDOWS_RESERVED_NAMES = {
@@ -156,7 +156,7 @@ def _read_retainable_files(directory: Path) -> Iterator[tuple[str, bytes]]:
     if not directory.is_dir():
         return
     entries = list(
-        itertools.islice(directory.iterdir(), MAX_OUTBOX_ENTRIES_PER_KIND)
+        itertools.islice(directory.iterdir(), MAX_MEMORY_ENTRIES)
     )
     for entry in sorted(entries, key=lambda item: item.name.casefold()):
         if _is_symlink_or_reparse(entry) or not entry.is_file():
@@ -167,7 +167,7 @@ def _read_retainable_files(directory: Path) -> Iterator[tuple[str, bytes]]:
             _validate_stage_filename(entry.name)
         except ValueError:
             continue
-        if entry.stat().st_size > MAX_RECORD_BYTES:
+        if entry.stat().st_size > MAX_MEMORY_FILE_BYTES:
             continue
         yield entry.name, entry.read_bytes()
 

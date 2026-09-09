@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
@@ -24,7 +25,7 @@ from flowgency.configuration import (
     resolve_team_paths,
 )
 from flowgency.configuration.models import MemorySelector
-from flowgency.permissions.eligibility import may_execute_decisions
+from flowgency.permissions.eligibility import may_write_workspace
 from flowgency.fs import ResourceBusyError
 from flowgency.health import (
     elapsed_coarse,
@@ -36,6 +37,7 @@ from flowgency.health import (
     schedule_lateness,
 )
 from flowgency.integrations import get_integration
+from flowgency.integrations.models import RuntimeCapabilities
 from flowgency.jobs.authority import JobStore
 from flowgency.memory import MemoryConflictError, resolve_memory_selector
 from flowgency.prompts import PromptConflictError, PromptNotFoundError
@@ -445,9 +447,23 @@ def _prompts_context(
     }
 
 
-def _runtime_context(snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
+def _resolve_integration(services: FlowgencyServices, name: str):
+    integration = services.integrations.get(name)
+    if integration is not None:
+        return integration
+    try:
+        return get_integration(name)
+    except KeyError:
+        return SimpleNamespace(
+            display_name=name,
+            runtime_capabilities=RuntimeCapabilities(),
+            projector=None,
+        )
+
+
+def _runtime_context(services: FlowgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
     team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
-    integration = get_integration(instance.integration)
+    integration = _resolve_integration(services, instance.integration)
     return {
         "integration_name": instance.integration,
         "integration_display_name": integration.display_name,
@@ -473,7 +489,7 @@ def _blueprint_context(services: FlowgencyServices, snapshot, team_id: str, agen
             "edit_library_href": f"/admin/agent-library/blueprints/{instance.blueprint}",
             "edit_skills_href": f"/admin/agent-library/blueprints/{instance.blueprint}/skills",
         }
-    integration = get_integration(instance.integration)
+    integration = _resolve_integration(services, instance.integration)
     projector = integration.projector
     projector_capabilities = getattr(projector, "capabilities", None)
     cache_status = {"state": "unavailable", "path": "", "pins": ()}
@@ -553,7 +569,7 @@ def _detail_context(
         "emoji": instance.identity.emoji,
         "integration": instance.integration,
         "blueprint": instance.blueprint,
-        "can_write": may_execute_decisions(snapshot.config, team_id, agent_id),
+        "can_write": may_write_workspace(snapshot.config, team_id, agent_id),
         "issues": handler_issues,
         "banner": banner,
         "memory_conflict": memory_conflict,
@@ -572,7 +588,7 @@ def _detail_context(
     elif tab == "blueprint":
         context.update(_blueprint_context(services, snapshot, team_id, agent_id))
     elif tab == "runtime":
-        context.update(_runtime_context(snapshot, team_id, agent_id))
+        context.update(_runtime_context(services, snapshot, team_id, agent_id))
     elif tab == "prompts":
         context.update(_prompts_context(services, snapshot, team_id, agent_id))
     elif tab == "memory":

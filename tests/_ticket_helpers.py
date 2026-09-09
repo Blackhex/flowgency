@@ -206,6 +206,7 @@ class WorkflowTestEnv:
     binding: StorageBinding
     provider: LocalTicketStorage
     service: TicketService
+    team_root: Path
     root_a: Path
     root_b: Path
     configuration_service: WorkflowConfigurationService
@@ -616,6 +617,7 @@ def make_workflow_environment(tmp_path: Path, raw_config: dict) -> WorkflowTestE
         binding=binding,
         provider=provider,
         service=service,
+        team_root=store.load().config.teams["newsletter"].path,
         root_a=root_a,
         root_b=root_b,
         configuration_service=configuration_service,

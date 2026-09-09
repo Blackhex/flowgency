@@ -14,7 +14,6 @@ import yaml
 from flowgency.blueprints.cache import release_pin
 from flowgency.configuration.models import MemorySelector
 from flowgency.permissions.zones import ZONE_INSTRUCTIONS
-from flowgency.configuration.store import load_config_snapshot
 from flowgency.configuration.store import ConfigStore
 from flowgency.fs.locks import LockCancelledError, exclusive_lock
 from flowgency.integrations import get_integration
@@ -36,18 +35,15 @@ from flowgency.memory.store import (
     _memory_lock,
     _stage_memory_locked,
 )
-from flowgency.records.ingest import ingest_records
-from flowgency.records.outbox import copy_outbox_memory_to_stage, create_outbox
-from flowgency.records.validation import validate_outbox, writable_agent_names
+from flowgency.memory.launch import copy_launch_memory_to_stage, prepare_launch_memory
 from flowgency.tickets.access import TicketAccessRegistry
 from flowgency.tickets.broker import TicketBroker
 from flowgency.tickets.service import TicketService
 from flowgency.tickets.storages.registry import resolve_storage
 from flowgency.workflows.library import WorkflowLibrary
 
-from .atomic import atomic_write_text
 from .authority import JobAuthorityError, JobAuthorityRef, JobStore
-from .artifacts import JobArtifact, retain_failed_stage, retain_rejected_records
+from .artifacts import JobArtifact, retain_failed_stage
 from .changes import capture_base_sha, capture_git_changes
 from .launch_view import create_launch_view
 from .models import JobRecord
@@ -63,39 +59,7 @@ from .tickets import TicketJobCoordinator, _ticket_task_input
 
 logger = logging.getLogger(__name__)
 
-# The rejection summary quotes agent-controlled filenames back to the operator
-# and is persisted and rendered, so it is bounded.
-MAX_SUMMARY_REASONS = 2000
-MAX_SUMMARY_SOURCE_NAME = 120
-
-
-def _writable_agents(spec) -> frozenset[str]:
-    """Instances a proposal may name as its executor.
-
-    Resolved at submission and carried on the spec, so a configuration edit
-    between submission and execution cannot fail a run the agent got right.
-    Specs persisted before the field existed fall back to the live read.
-    """
-    if spec.writable_agents is not None:
-        return frozenset(spec.writable_agents)
-    snapshot = load_config_snapshot(Path(spec.config_path))
-    return writable_agent_names(snapshot.config, spec.team_key)
-
-
-def _rejection_summary(rejected, ingested_count: int) -> str:
-    joined = "; ".join(
-        f"{item.kind} {item.source_name[:MAX_SUMMARY_SOURCE_NAME]}: {item.reason}"
-        for item in rejected
-    )
-    if len(joined) > MAX_SUMMARY_REASONS:
-        joined = f"{joined[:MAX_SUMMARY_REASONS]} … (truncated)"
-    filed = (
-        f" Filed {ingested_count} valid "
-        f"{'record' if ingested_count == 1 else 'records'}."
-        if ingested_count
-        else ""
-    )
-    return f"Rejected agent records: {joined}{filed}"
+RETIRED_TRIGGERS = frozenset({"decision", "decision_retry"})
 
 
 def _unenforced_policy_note(result) -> str:
@@ -109,29 +73,6 @@ def _unenforced_policy_note(result) -> str:
         return ""
     listed = "\n".join(f"- {entry}" for entry in entries)
     return f"\n\n**Permission policy not fully enforced**\n\n{listed}"
-
-
-def _retained_outbox_artifacts(
-    job_path: Path,
-    job_id: str,
-    outbox,
-) -> list[dict[str, object]]:
-    """Retain what survives of a rejected outbox, never at the cost of the reasons."""
-    try:
-        artifacts = retain_rejected_records(
-            job_store=_jobs_dir(job_path),
-            job_id=job_id,
-            sources={
-                "observations": outbox.observations,
-                "proposals": outbox.proposals,
-            },
-        )
-    except Exception as error:
-        logger.warning(
-            "Failed to retain rejected records for job %s: %s", job_id, error
-        )
-        return []
-    return [artifact.to_dict() for artifact in artifacts]
 
 
 def _resolved_memory(spec) -> ResolvedMemory:
@@ -497,51 +438,32 @@ def resolve_job_context(spec):
     )
 
 
-def _read_frontmatter(path: Path) -> tuple[dict, str]:
-    text = path.read_text(encoding="utf-8")
-    if not text.startswith("---"):
-        return {}, text
-    parts = text.split("---", 2)
-    if len(parts) != 3:
-        return {}, text
-    frontmatter = parts[1].strip()
-    body = parts[2].lstrip("\r\n")
-    try:
-        metadata = yaml.safe_load(frontmatter) or {}
-    except yaml.YAMLError:
-        metadata = {}
-    return metadata, body
-
-
-def _write_frontmatter_atomic(path: Path, metadata: dict, body: str) -> None:
-    frontmatter = yaml.safe_dump(metadata, sort_keys=False).strip()
-    payload = f"---\n{frontmatter}\n---\n\n{body}"
-    atomic_write_text(path, payload)
-
-
-def project_decision(record: JobRecord) -> None:
-    context = record.spec.decision_context
-    if not context:
-        return
-    decision_path = Path(context["decision_path"])
-    metadata, body = _read_frontmatter(decision_path)
-    if metadata.get("execution_job_id") != record.spec.job_id:
-        return
-    metadata.update(
-        {
-            "execution_status": record.status,
-            "execution_agent": record.spec.agent_name,
-            "executed_by": record.spec.agent_name,
-            "execution_log": record.stdout_path,
-            "changed_files": record.changed_files,
-            "execution_summary": record.execution_summary,
-        }
+def _retired_trigger_summary(trigger: str) -> str:
+    return (
+        f"Retired pipeline trigger '{trigger}' is no longer supported. "
+        "Submit work through a ticket workflow instead."
     )
-    _write_frontmatter_atomic(decision_path, metadata, body)
 
 
 def execute_job(authority: JobAuthorityRef) -> JobRecord:
     store, job_path, record = _read_authority(authority)
+    if record.spec.trigger in RETIRED_TRIGGERS:
+        final = transition_job(
+            job_path,
+            "queued",
+            "failed",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            execution_summary=_retired_trigger_summary(record.spec.trigger),
+        )
+        try:
+            release_pin(
+                record.spec.blueprint.cache_root,
+                record.spec.blueprint.cache_ref,
+                record.spec.job_id,
+            )
+        except Exception:
+            pass
+        return final
     record = transition_job(
         job_path,
         "queued",
@@ -585,7 +507,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                 canonical_files = dict(snapshot.files)
                 if launch_view is None:
                     launch_view = create_launch_view(artifact, launch_dir)
-                outbox = create_outbox(launch_view, memory_files=canonical_files)
+                launch_memory = prepare_launch_memory(launch_view, memory_files=canonical_files)
                 if spec.private_prompts:
                     projector = getattr(integration, "projector", None)
                     if projector is None:
@@ -651,7 +573,7 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     skill=spec.skill,
                     skill_arguments=spec.skill_arguments,
                     enforce_validation=True,
-                    memory_working_dir=outbox.memory,
+                    memory_working_dir=launch_memory.memory,
                 )
                 ticket_runtime = None
                 broker = None
@@ -770,53 +692,56 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     )
                 else:
                     try:
-                        writable_agents = _writable_agents(spec)
-                    except Exception as cfg_error:
-                        cfg_path = spec.config_path
-                        # Must fall through to tail — project_decision must run.
-                        final = _terminalize_failure(
-                            job_path,
-                            summary=(
-                                f"Config load failed for '{cfg_path}': "
-                                f"{cfg_error}{policy_note}"
-                            ),
-                            started_at=started.isoformat(),
-                            stdout_path=str(stdout_path.resolve()),
-                            stderr_path=persisted_stderr_path,
-                            exit_code=result.exit_code,
-                            duration_seconds=result.duration_seconds,
-                            changed_files=changes,
-                            base_sha=base_sha,
-                            memory_publication={
-                                "failed_artifacts": _retained_outbox_artifacts(
-                                    job_path, spec.job_id, outbox
-                                )
-                            },
-                            session_id=result.session_id,
-                            copilot_home=result.copilot_home,
+                        copy_launch_memory_to_stage(launch_memory, stage.directory)
+                        prepared = prepare_publication(
+                            stage,
+                            job_store=_jobs_dir(job_path),
+                            job_path=job_path,
+                            lease=memory_lease,
                         )
-                    else:
-                        validation = validate_outbox(
-                            outbox,
-                            writable_agents=writable_agents,
+                        finalize_publication(
+                            apply_publication(
+                                prepared,
+                                retain_failed_stage_artifacts=True,
+                                lease=memory_lease,
+                            )
                         )
-                        # Valid records land even when the same run produced
-                        # invalid ones, and always before memory publishes.
-                        ingested = ingest_records(
-                            validation,
-                            observations_dir=Path(context.team_root) / "observations",
-                            proposals_dir=Path(context.team_root) / "proposals",
-                            agent_name=spec.agent_name,
-                            now=started,
-                            job_id=spec.job_id,
-                        )
-                        if validation.rejected:
-                            # Must fall through to tail — project_decision must run.
-                            final = _terminalize_failure(
+                        summary = (
+                            f"Agent completed execution; captured "
+                            f"{len(changes)} changed "
+                            f"{'file' if len(changes) == 1 else 'files'}."
+                            if changes
+                            else "Agent completed execution (inferred from exit code)."
+                        ) + policy_note
+                        final = read_job(job_path)
+                        if final.status == "complete":
+                            final = replace(
+                                final,
+                                started_at=started.isoformat(),
+                                stdout_path=str(stdout_path.resolve()),
+                                stderr_path=persisted_stderr_path,
+                                exit_code=result.exit_code,
+                                duration_seconds=result.duration_seconds,
+                                changed_files=changes,
+                                execution_summary=summary,
+                                base_sha=base_sha,
+                                session_id=result.session_id,
+                                copilot_home=result.copilot_home,
+                            )
+                            write_job(job_path, final)
+                    except (MemoryPublicationError, ValueError) as error:
+                        current = read_job(job_path)
+                        artifacts = _retained_failed_artifacts(job_path)
+                        if not artifacts:
+                            artifacts = _failed_memory_artifacts(
                                 job_path,
-                                summary=_rejection_summary(
-                                    validation.rejected, len(ingested)
-                                ) + policy_note,
+                                stage.directory,
+                                canonical_files,
+                            )
+                        if current.status == "failed":
+                            final = _merge_failed_terminal_metadata(
+                                job_path,
+                                summary=f"Memory publication failed: {error}{policy_note}",
                                 started_at=started.isoformat(),
                                 stdout_path=str(stdout_path.resolve()),
                                 stderr_path=persisted_stderr_path,
@@ -825,108 +750,31 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                                 changed_files=changes,
                                 base_sha=base_sha,
                                 memory_publication={
-                                    "failed_artifacts": _retained_outbox_artifacts(
-                                        job_path, spec.job_id, outbox
-                                    )
+                                    "failed_artifacts": artifacts,
                                 },
                                 session_id=result.session_id,
                                 copilot_home=result.copilot_home,
                             )
                         else:
-                            try:
-                                copy_outbox_memory_to_stage(outbox, stage.directory)
-                                prepared = prepare_publication(
-                                    stage,
-                                    job_store=_jobs_dir(job_path),
-                                    job_path=job_path,
-                                    lease=memory_lease,
-                                )
-                                finalize_publication(
-                                    apply_publication(
-                                        prepared,
-                                        retain_failed_stage_artifacts=True,
-                                        lease=memory_lease,
-                                    )
-                                )
-                                record_note = (
-                                    f" Filed {len(ingested)} "
-                                    f"{'record' if len(ingested) == 1 else 'records'}."
-                                    if ingested
-                                    else ""
-                                )
-                                summary = (
-                                    f"Agent completed execution; captured "
-                                    f"{len(changes)} changed "
-                                    f"{'file' if len(changes) == 1 else 'files'}."
-                                    f"{record_note}"
-                                    if changes
-                                    else (
-                                        "Agent completed execution "
-                                        f"(inferred from exit code).{record_note}"
-                                    )
-                                ) + policy_note
-                                final = read_job(job_path)
-                                if final.status == "complete":
-                                    final = replace(
-                                        final,
-                                        started_at=started.isoformat(),
-                                        stdout_path=str(stdout_path.resolve()),
-                                        stderr_path=persisted_stderr_path,
-                                        exit_code=result.exit_code,
-                                        duration_seconds=result.duration_seconds,
-                                        changed_files=changes,
-                                        execution_summary=summary,
-                                        base_sha=base_sha,
-                                        session_id=result.session_id,
-                                        copilot_home=result.copilot_home,
-                                    )
-                                    write_job(job_path, final)
-                            except (MemoryPublicationError, ValueError) as error:
-                                current = read_job(job_path)
-                                artifacts = _retained_failed_artifacts(job_path)
-                                if not artifacts:
-                                    artifacts = _failed_memory_artifacts(
-                                        job_path,
-                                        stage.directory,
-                                        canonical_files,
-                                    )
-                                if current.status == "failed":
-                                    final = _merge_failed_terminal_metadata(
-                                        job_path,
-                                        summary=f"Memory publication failed: {error}{policy_note}",
-                                        started_at=started.isoformat(),
-                                        stdout_path=str(stdout_path.resolve()),
-                                        stderr_path=persisted_stderr_path,
-                                        exit_code=result.exit_code,
-                                        duration_seconds=result.duration_seconds,
-                                        changed_files=changes,
-                                        base_sha=base_sha,
-                                        memory_publication={
-                                            "failed_artifacts": artifacts,
-                                        },
-                                        session_id=result.session_id,
-                                        copilot_home=result.copilot_home,
-                                    )
-                                else:
-                                    final = _terminalize_failure(
-                                        job_path,
-                                        summary=(
-                                            f"Memory publication failed: {error}"
-                                            f"{policy_note}"
-                                        ),
-                                        started_at=started.isoformat(),
-                                        stdout_path=str(stdout_path.resolve()),
-                                        stderr_path=persisted_stderr_path,
-                                        exit_code=result.exit_code,
-                                        duration_seconds=result.duration_seconds,
-                                        changed_files=changes,
-                                        base_sha=base_sha,
-                                        memory_publication={
-                                            "failed_artifacts": artifacts,
-                                        },
-                                        session_id=result.session_id,
-                                        copilot_home=result.copilot_home,
-                                    )
+                            final = _terminalize_failure(
+                                job_path,
+                                summary=(
+                                    f"Memory publication failed: {error}"
+                                    f"{policy_note}"
+                                ),
+                                started_at=started.isoformat(),
+                                stdout_path=str(stdout_path.resolve()),
+                                stderr_path=persisted_stderr_path,
+                                exit_code=result.exit_code,
+                                duration_seconds=result.duration_seconds,
+                                changed_files=changes,
+                                base_sha=base_sha,
+                                memory_publication={
+                                    "failed_artifacts": artifacts,
+                                },
+                                session_id=result.session_id,
+                                copilot_home=result.copilot_home,
+                            )
         except LockCancelledError:
             final = _mark_cancelled_if_waiting(job_path)
             return final
@@ -953,15 +801,4 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
             )
         except Exception:
             pass
-
-    # Keep terminalization authoritative even if projection fails.
-    try:
-        project_decision(final)
-    except Exception as error:
-        logger.warning(
-            "Failed to project final status for job %s to its decision: %s",
-            final.spec.job_id,
-            error,
-        )
-
     return final

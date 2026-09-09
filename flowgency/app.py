@@ -62,6 +62,8 @@ from flowgency.health import (
 from flowgency.prompts import resolve_catalog_prompt
 from flowgency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, SKIP_EXECUTION_SUMMARY
 from flowgency.records.frontmatter import extract_display_title, parse_frontmatter
+from flowgency.tickets.models import UserTicketContext
+from flowgency.tickets.views import build_board_view
 import json as json_module
 from flowgency.workspaces import REGISTRY as WORKSPACE_REGISTRY
 from flowgency.web import FlowgencyServices, build_services, get_services
@@ -441,15 +443,13 @@ def team_context(g: dict, observations: list[dict] | None = None, proposals: lis
     snapshot = _load_snapshot()
     flowgency = flowgency_settings(snapshot)
     team_cfg = snapshot.config.teams[g["key"]]
-    if observations is None:
-        observations = list_observations(g)
-    if proposals is None:
-        proposals = list_proposals(g)
+    observations = observations or []
+    proposals = proposals or []
     open_observation_count = sum(1 for c in observations if c.get("status") == "open")
     actionable_proposal_count = sum(1 for c in proposals if c.get("status") in ("proposed", "investigating"))
     floated_observation_count = sum(1 for c in observations if c.get("float") and c.get("status") == "open")
     needs_action_count = actionable_proposal_count + floated_observation_count
-    decisions = list_decisions(g)
+    decisions: list[dict] = []
     running_decisions = sum(1 for d in decisions if d.get("execution_status") == "running")
     return {
         "team": g["key"],
@@ -701,6 +701,98 @@ def build_activity_feed(observations: list[dict], proposals: list[dict],
     return events[:limit]
 
 
+def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[str, list[dict] | int]:
+    if services.tickets is None:
+        return {
+            "workflows": [],
+            "activity": [],
+            "unassigned": [],
+            "issue_count": 0,
+            "ticket_count": 0,
+            "working_count": 0,
+        }
+    actor = UserTicketContext(team_id=team_id)
+    workflows: list[dict] = []
+    activity: list[dict] = []
+    unassigned: list[dict] = []
+    issue_count = 0
+    ticket_count = 0
+    working_count = 0
+    try:
+        bindings = services.tickets.list_workflows(actor)
+    except Exception:
+        return {
+            "workflows": [],
+            "activity": [],
+            "unassigned": [],
+            "issue_count": 0,
+            "ticket_count": 0,
+            "working_count": 0,
+        }
+    snapshot = services.config_store.load()
+    for binding in bindings:
+        board = build_board_view(
+            services.tickets,
+            actor,
+            binding.workflow_id,
+            ticket_jobs=services.ticket_jobs,
+        )
+        rows = [ticket for column in board.columns for ticket in column.tickets]
+        issue_count += len(board.issues)
+        ticket_count += board.ticket_count
+        working_count += board.working_count
+        workflow_name = snapshot.config.teams[team_id].workflows[binding.workflow_id].name
+        workflows.append(
+            {
+                "id": binding.workflow_id,
+                "name": workflow_name,
+                "href": f"/{team_id}/workflows/{binding.workflow_id}",
+                "ticket_count": board.ticket_count,
+                "working_count": board.working_count,
+                "unassigned_count": sum(1 for ticket in rows if ticket.assignee is None),
+                "issue_count": len(board.issues),
+            }
+        )
+        for ticket in rows:
+            if ticket.assignee is None:
+                unassigned.append(
+                    {
+                        "workflow_id": binding.workflow_id,
+                        "workflow_name": workflow_name,
+                        "ticket_id": ticket.ref.ticket_id,
+                        "title": ticket.title,
+                        "href": f"/{team_id}/workflows/{binding.workflow_id}?ticket={ticket.ref.ticket_id}",
+                    }
+                )
+            latest = ticket.history[-1] if ticket.history else None
+            if latest is not None:
+                activity.append(
+                    {
+                        "workflow_id": binding.workflow_id,
+                        "workflow_name": workflow_name,
+                        "ticket_id": ticket.ref.ticket_id,
+                        "title": ticket.title,
+                        "kind": latest.kind,
+                        "summary": latest.summary,
+                        "at": latest.at,
+                        "href": f"/{team_id}/workflows/{binding.workflow_id}?ticket={ticket.ref.ticket_id}",
+                    }
+                )
+    activity.sort(
+        key=lambda item: item["at"] or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    workflows.sort(key=lambda item: item["name"])
+    return {
+        "workflows": workflows,
+        "activity": activity[:8],
+        "unassigned": unassigned[:8],
+        "issue_count": issue_count,
+        "ticket_count": ticket_count,
+        "working_count": working_count,
+    }
+
+
 def _is_empty_error_log(path: Path, size: int | None = None) -> bool:
     return path.suffix.lower() == ".err" and (
         path.stat().st_size if size is None else size
@@ -790,13 +882,13 @@ templates.env.filters["ticket_markdown"] = render_ticket_markdown
 
 def execution_agent_options(g: dict) -> list[str]:
     """List configured writable instances whose integration supports execution."""
-    from flowgency.permissions.eligibility import may_execute_decisions
+    from flowgency.permissions.eligibility import may_write_workspace
     config = _load_snapshot().config
     options = []
     for name in g["agents"]:
         try:
             integration = get_agent_integration(g, name)
-            if integration.supports_execution and may_execute_decisions(config, g["key"], name):
+            if integration.supports_execution and may_write_workspace(config, g["key"], name):
                 options.append(name)
         except KeyError:
             continue
@@ -1091,20 +1183,18 @@ def _apply_agent_status(g: dict, agent: dict, routines, dispatch_cfg: dict) -> N
 
 def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
     """Build configured instance info. The retired subagent list is always empty."""
-    observations = list_observations(g)
     dispatch_cfg = g.get("dispatch", {})
     run_timeout = g.get("runtime", {}).get("timeout", 1800)
     agents = []
     for instance in g.get("agents_full", []):
         agent_name = instance["name"]
         identity = instance.get("identity") or {}
-        open_count = sum(1 for c in observations if c.get("agent") == agent_name and c.get("status") == "open")
         info = {
             "name": agent_name,
             "display_name": identity.get("display_name") or agent_name,
             "title": identity.get("title", ""),
             "emoji": identity.get("emoji", ""),
-            "open_observations": open_count,
+            "open_observations": 0,
             "is_subagent": False,
             "has_headshot": False,
             "integration": instance["integration"],
@@ -1182,7 +1272,6 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
     if g["key"] not in snapshot.config.teams:
         return []
     team_cfg = snapshot.config.teams[g["key"]]
-    observations = list_observations(g)
     fleet: list[dict] = []
     dispatch_cfg = g.get("dispatch", {})
     for instance in team_cfg.agents.values():
@@ -1200,7 +1289,7 @@ def build_dashboard_fleet(g: dict) -> list[dict]:
                 "emoji": instance.identity.emoji,
                 "blueprint": instance.blueprint,
                 "integration": instance.integration,
-                "open_observations": sum(1 for item in observations if item.get("agent") == instance.name and item.get("status") == "open"),
+                "open_observations": 0,
                 "memory_label": _dashboard_memory_label(selector, snapshot.config.memory.channels),
             }
         )
@@ -1412,7 +1501,7 @@ def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dic
             "team_path": str(tcfg.path),
             "agents": list(tcfg.agents.keys()),
             "agent_count": len(tcfg.agents),
-            "initialized": all(path.is_dir() for path in paths.record_directories),
+            "initialized": all(path.is_dir() for path in paths.runtime_directories),
             "workspace_exists": paths.workspace_root.exists(),
             "dispatch_enabled": dispatch_cfg.enabled,
         })
@@ -1830,20 +1919,26 @@ async def agent_run(
 async def home(request: Request, team: str):
     """Dashboard home — mission control."""
     g = get_team(team)
-    observations = list_observations(g)
-    proposals = list_proposals(g)
-    decisions = list_decisions(g)
+    services = get_services(request)
+    observations: list[dict] = []
+    proposals: list[dict] = []
+    decisions: list[dict] = []
 
-    open_observations = [c for c in observations if c.get("status") in ("open",)]
-    floated_observations = [c for c in observations if c.get("float")]
-    actionable_proposals = [c for c in proposals if c.get("status") in ("proposed", "investigating")]
+    open_observations: list[dict] = []
+    floated_observations: list[dict] = []
+    actionable_proposals: list[dict] = []
 
-    floated_open_observations = [c for c in observations if c.get("float") and c.get("status") == "open"]
+    floated_open_observations: list[dict] = []
+    workflow_dashboard = build_ticket_dashboard(services, team)
 
     # Zone 1: Fleet status
     agents = build_dashboard_fleet(g)
     health_items = build_health_items(g, agents)
-    needs_action_count = len(actionable_proposals) + len(floated_open_observations) + len(health_items)
+    needs_action_count = (
+        len(health_items)
+        + len(workflow_dashboard["unassigned"])
+        + int(workflow_dashboard["issue_count"])
+    )
 
     # Zone 2: Pipeline pulse
     pipeline = build_pipeline_stats(observations, proposals, decisions)
@@ -1874,7 +1969,7 @@ async def home(request: Request, team: str):
     }
 
     # Zone 4: Activity feed
-    activity = build_activity_feed(observations, proposals, limit=15)
+    activity: list[dict] = []
 
     return templates.TemplateResponse(request, "home.html", {
         "request": request,
@@ -1887,6 +1982,7 @@ async def home(request: Request, team: str):
         "fleet_running": sum(1 for a in agents if a.get("running")),
         # Zone 2: Pipeline
         "pipeline": pipeline,
+        "workflow_dashboard": workflow_dashboard,
         # Work queue
         "work_queue": work_queue,
         # Zone 3: Attention queue
@@ -1904,22 +2000,7 @@ async def home(request: Request, team: str):
 
 @app.get("/{team}/observations", response_class=HTMLResponse)
 async def observations_list(request: Request, team: str, agent: str = "", status: str = ""):
-    """List all observations with optional filtering."""
-    g = get_team(team)
-    observations = list_observations(g)
-    filtered = observations
-    if agent:
-        filtered = [c for c in filtered if c.get("agent") == agent]
-    if status:
-        filtered = [c for c in filtered if c.get("status") == status]
-    return templates.TemplateResponse(request, "observations.html", {
-        "request": request,
-        **team_context(g, observations=observations),
-        "observations": filtered,
-        "filter_agent": agent,
-        "filter_status": status,
-        "agents": g["agents"],
-    })
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.get("/{team}/observations/{slug}", response_class=HTMLResponse)
@@ -1981,14 +2062,7 @@ async def observation_update_status(request: Request, team: str, slug: str):
 
 @app.get("/{team}/proposals", response_class=HTMLResponse)
 async def proposals_list(request: Request, team: str):
-    """List all proposals."""
-    g = get_team(team)
-    items = list_proposals(g)
-    return templates.TemplateResponse(request, "proposals.html", {
-        "request": request,
-        **team_context(g),
-        "proposals": items,
-    })
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.get("/{team}/proposals/{slug}", response_class=HTMLResponse)
@@ -2207,14 +2281,7 @@ async def proposal_decide(request: Request, team: str, slug: str):
 
 @app.get("/{team}/decisions", response_class=HTMLResponse)
 async def decisions_list(request: Request, team: str):
-    """List all decisions."""
-    g = get_team(team)
-    items = list_decisions(g)
-    return templates.TemplateResponse(request, "decisions.html", {
-        "request": request,
-        **team_context(g),
-        "decisions": items,
-    })
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.get("/{team}/decisions/{slug}", response_class=HTMLResponse)

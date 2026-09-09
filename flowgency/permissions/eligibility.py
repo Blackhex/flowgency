@@ -1,4 +1,4 @@
-"""Whether an agent may be trusted to execute a decision.
+"""Whether an agent may be trusted to write the team workspace.
 
 Derived from the permission rules rather than stored, so the answer cannot
 disagree with the policy the agent actually runs under.
@@ -33,17 +33,11 @@ def grants_write_on(rules: Iterable[_Rule], workspace: Path | str) -> bool:
     return False
 
 
-def may_execute_decisions(config, team_key: str, agent_name: str) -> bool:
+def may_write_workspace(config, team_key: str, agent_name: str) -> bool:
     """Return True iff the agent's effective policy grants write on the team workspace root."""
-    from flowgency.configuration.effective import resolve_effective_policy
-    from flowgency.configuration.issues import ValidationFailed
+    from flowgency.configuration.effective import _merge_rules
 
     team = config.teams.get(team_key)
     if team is None or agent_name not in team.agents:
         return False
-    try:
-        policy = resolve_effective_policy(config, team_key, agent_name)
-    except (ValidationFailed, KeyError):
-        return False
-
-    return grants_write_on(policy.rules, team.workspace_path)
+    return grants_write_on(_merge_rules(team, team.agents[agent_name]), team.workspace_path)
