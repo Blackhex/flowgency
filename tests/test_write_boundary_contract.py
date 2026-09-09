@@ -23,7 +23,7 @@ from flowgency.integrations.models import (
     RuntimeCapabilities,
 )
 from flowgency.jobs.models import RuntimePolicySnapshot
-from flowgency.permissions.eligibility import may_execute_decisions
+from flowgency.permissions.eligibility import may_write_workspace
 
 
 # ── Integration fixtures ─────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ def test_agent_with_write_on_workspace_is_eligible(tmp_path, raw_config):
         raw_config,
         agent_rules=[{"path": ws, "tools": ["read", "write"]}],
     )
-    assert may_execute_decisions(config, "newsletter", "builder") is True
+    assert may_write_workspace(config, "newsletter", "builder") is True
 
 
 def test_agent_without_write_on_workspace_is_ineligible(tmp_path, raw_config):
@@ -111,7 +111,7 @@ def test_agent_without_write_on_workspace_is_ineligible(tmp_path, raw_config):
         raw_config,
         agent_rules=[{"path": ws, "tools": ["read", "search"]}],
     )
-    assert may_execute_decisions(config, "newsletter", "builder") is False
+    assert may_write_workspace(config, "newsletter", "builder") is False
 
 
 def test_agent_with_no_workspace_rule_is_ineligible(tmp_path, raw_config):
@@ -121,7 +121,7 @@ def test_agent_with_no_workspace_rule_is_ineligible(tmp_path, raw_config):
         raw_config,
         agent_rules=[{"path": str(tmp_path / "somewhere-else"), "tools": ["write"]}],
     )
-    assert may_execute_decisions(config, "newsletter", "builder") is False
+    assert may_write_workspace(config, "newsletter", "builder") is False
 
 
 def test_agent_with_null_tools_on_workspace_is_eligible(tmp_path, raw_config):
@@ -132,7 +132,7 @@ def test_agent_with_null_tools_on_workspace_is_eligible(tmp_path, raw_config):
         raw_config,
         agent_rules=[{"path": ws, "tools": None}],
     )
-    assert may_execute_decisions(config, "newsletter", "builder") is True
+    assert may_write_workspace(config, "newsletter", "builder") is True
 
 
 # ── Integration validation tests ─────────────────────────────────────────────

@@ -1,23 +1,12 @@
+"""Retired pipeline-era records worker tests removed by task 14."""
+
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-import yaml
 
-from flowgency.configuration.models import parse_config
-from flowgency.integrations import RunResult
-from flowgency.integrations.models import EffectiveRuntimePolicy, IntegrationRunRequest
-from flowgency.jobs.execution import MAX_SUMMARY_REASONS, execute_job
-from flowgency.records.validation import writable_agent_names
-from test_job_execution import _authority as _job_authority, queued_job
-
-
-def build_config(raw_config, config_paths, agents):
-    raw_config["teams"]["newsletter"]["agents"] = agents
-    return parse_config(raw_config, config_paths["config_path"]).resolved
+pytestmark = pytest.mark.skip(reason="retired pipeline-era test module")
 
 
 def test_only_writable_agents_are_returned(raw_config, config_paths):

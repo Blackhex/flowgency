@@ -378,25 +378,38 @@ def test_activity_tab_is_read_only(monkeypatch, tmp_path, raw_config):
     assert '<form' not in response.text
 
 
-def test_activity_links_use_routed_team_key_and_round_trip(monkeypatch, tmp_path, raw_config):
-    client, _, log_file = _seed_activity_app(monkeypatch, tmp_path, raw_config)
+def test_activity_links_use_ticket_events_not_retired_records(workflow_web_env):
+    env = workflow_web_env
+    created = env.create(title="Alpha review")
+    env.service.assign(env.user, created.version, "builder", env.operation("assign-alpha"))
+    builder = env.agent("builder", "run-alpha")
+    env.service.start_work(
+        builder,
+        env.read(created.ref).version,
+        env.operation("start-alpha", actor_name=builder.agent_name),
+    )
+    (env.team_root / "observations").mkdir(parents=True, exist_ok=True)
+    (env.team_root / "proposals").mkdir(parents=True, exist_ok=True)
+    (env.team_root / "observations" / "status.md").write_text(
+        "---\nagent: builder\nstatus: open\n---\n\nRetired observation\n",
+        encoding="utf-8",
+    )
+    (env.team_root / "proposals" / "old.md").write_text(
+        "---\norigin_agent: builder\nstatus: proposed\n---\n\nRetired proposal\n",
+        encoding="utf-8",
+    )
 
-    response = client.get("/newsletter-prod/agents/advisor/activity")
+    response = env.client.get("/newsletter/agents/builder/activity")
 
     assert response.status_code == 200
     body = response.text
-    assert "/newsletter-workspace/" not in body
-    assert "/newsletter-prod/observations/status" in body
-    assert "/newsletter-prod/proposals/" not in body
-    log_href_match = __import__("re").search(r'href="([^"]+/logs/view\?path=[^"]+)"', body)
-    assert log_href_match is not None
-    log_href = log_href_match.group(1)
-    assert log_href.startswith("/newsletter-prod/logs/view?path=")
-    assert "%3A" in log_href or "%5C" in log_href
-
-    log_response = client.get(log_href)
-    assert log_response.status_code == 200
-    assert log_file.name in log_response.text
+    assert "Alpha review" in body
+    assert "Agent started work" in body
+    assert f"/newsletter/workflows/board-a?ticket={created.ref.ticket_id}" in body
+    assert "/newsletter/observations/" not in body
+    assert "/newsletter/proposals/" not in body
+    assert "Retired observation" not in body
+    assert "Retired proposal" not in body
 
 
 def test_profile_post_updates_config_revision_owned_fields(monkeypatch, tmp_path, raw_config):

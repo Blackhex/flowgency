@@ -4,29 +4,6 @@
 {% block title %}Mission Control - {{ team_name }}{% endblock %}
 
 {% block content %}
-{# ── Tip block (preserved) ── #}
-{% if show_tips and 'pipeline' not in tips_dismissed %}
-<div class="mb-4 p-3 bg-flowgency-50 dark:bg-flowgency-950/40 border border-flowgency-200 dark:border-flowgency-800 rounded-lg relative">
-  <div class="pr-10">
-    <div class="text-base font-semibold text-gray-900 dark:text-gray-100 mb-0.5">How the pipeline works</div>
-    <div class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-      Agents observe things and write <strong>observations</strong>.
-      When observations converge, they become <strong>proposals</strong> for your review.
-      You make <strong>decisions</strong> to approve, defer, or reject.
-    </div>
-    <form method="POST" action="/tips/hide-all" class="inline">
-      <input type="hidden" name="redirect" value="/{{ team }}/">
-      <button type="submit" class="text-sm text-flowgency-700 hover:text-flowgency-800 dark:text-flowgency-200 dark:hover:text-flowgency-100 mt-1">Hide all tips</button>
-    </form>
-  </div>
-  <form method="POST" action="/tips/dismiss" class="absolute top-2 right-2">
-    <input type="hidden" name="tip_id" value="pipeline">
-    <input type="hidden" name="redirect" value="/{{ team }}/">
-    <button type="submit" aria-label="Dismiss pipeline tip" class="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 text-lg leading-none">&times;</button>
-  </form>
-</div>
-{% endif %}
-
 {# ════════════════════════════════════════════════════════════
    ZONE 1: FLEET STATUS BAR
    ════════════════════════════════════════════════════════════ #}
@@ -97,12 +74,22 @@
   {% endif %}
 </div>
 
-{% if workflow_dashboard.workflows %}
+{% if workflow_dashboard.workflows or workflow_dashboard.issues or workflow_dashboard.configured_count == 0 %}
 <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 mb-3">
   <div class="flex items-center justify-between gap-2 mb-2">
     <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Ticket workflows</span>
     <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ workflow_dashboard.ticket_count }} tickets · {{ workflow_dashboard.working_count }} active · {{ workflow_dashboard.unassigned|length }} unassigned</span>
   </div>
+  {% if workflow_dashboard.issues %}
+  <div class="mb-3 space-y-2">
+    {% for issue in workflow_dashboard.issues %}
+    <div class="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+      {% if issue.workflow_name %}<span class="font-semibold">{{ issue.workflow_name }}:</span> {% endif %}{{ issue.message }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if workflow_dashboard.workflows %}
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
     <div class="space-y-2">
       {% for workflow in workflow_dashboard.workflows %}
@@ -138,84 +125,11 @@
       {% endif %}
     </div>
   </div>
+  {% else %}
+  <div class="text-sm text-gray-500 dark:text-gray-400">No workflows configured.</div>
+  {% endif %}
 </div>
 {% endif %}
-
-{% if running_decisions %}
-<div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mb-3">
-  <div class="flex items-center gap-2 mb-1.5">
-    <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-    <span class="text-sm font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wider">Executing</span>
-  </div>
-  {% for d in running_decisions %}
-  <a href="/{{ team }}/decisions/{{ d._slug }}" class="flex items-center justify-between py-1.5 text-sm group">
-    <span class="text-blue-800 dark:text-blue-200 font-medium group-hover:underline">{{ d._slug | replace("-", " ") | title }}</span>
-    {% if d.get("proposal") %}
-    <span class="text-blue-500 dark:text-blue-400 text-xs font-mono">{{ d.get("proposal", "").replace(".md", "") }}</span>
-    {% endif %}
-  </a>
-  {% endfor %}
-</div>
-{% endif %}
-
-{# ════════════════════════════════════════════════════════════
-   ZONE 2: PIPELINE PULSE
-   ════════════════════════════════════════════════════════════ #}
-<div class="bg-gray-50 dark:bg-gray-800/50 border rounded-lg px-4 py-3 mb-3
-            {% if pipeline.flow_status == 'bottleneck' %}border-amber-300 dark:border-amber-700{% else %}border-emerald-200 dark:border-emerald-800{% endif %}">
-  <div class="flex items-center justify-between gap-2 mb-1">
-    <span class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Pipeline</span>
-    {% if pipeline.flow_status == 'bottleneck' %}
-    <span class="text-sm font-mono text-amber-700 dark:text-amber-300">bottleneck</span>
-    {% else %}
-    <span class="text-sm font-mono text-emerald-700 dark:text-emerald-300">healthy</span>
-    {% endif %}
-  </div>
-  <div class="flex items-center justify-between">
-    {# Observations #}
-    <div class="flex-1 text-center">
-      <div class="text-sm text-blue-600 dark:text-blue-400 font-medium mb-0.5">Observations</div>
-      <div class="font-mono font-bold text-2xl text-blue-700 dark:text-blue-300">{{ pipeline.observations.total }}</div>
-      <svg class="w-20 h-6 mx-auto text-blue-500 dark:text-blue-400 mt-0.5" viewBox="0 0 70 24">
-        {% set max_val = pipeline.observations.sparkline|max or 1 %}
-        {% for val in pipeline.observations.sparkline %}
-        {% set bar_h = (val / max_val * 20)|round|int %}
-        <rect x="{{ loop.index0 * 10 }}" y="{{ 24 - (bar_h if bar_h > 0 else 1) }}" width="8" height="{{ bar_h if bar_h > 0 else 1 }}" rx="1" fill="currentColor" opacity="0.5"/>
-        {% endfor %}
-      </svg>
-    </div>
-
-    <div class="text-gray-300 dark:text-gray-600 text-2xl font-light px-2 self-center">&rarr;</div>
-
-    {# Proposals #}
-    <div class="flex-1 text-center">
-      <div class="text-sm text-purple-600 dark:text-purple-400 font-medium mb-0.5">Proposals</div>
-      <div class="font-mono font-bold text-2xl text-purple-700 dark:text-purple-300">{{ pipeline.proposals.total }}</div>
-      <svg class="w-20 h-6 mx-auto text-purple-500 dark:text-purple-400 mt-0.5" viewBox="0 0 70 24">
-        {% set max_val = pipeline.proposals.sparkline|max or 1 %}
-        {% for val in pipeline.proposals.sparkline %}
-        {% set bar_h = (val / max_val * 20)|round|int %}
-        <rect x="{{ loop.index0 * 10 }}" y="{{ 24 - (bar_h if bar_h > 0 else 1) }}" width="8" height="{{ bar_h if bar_h > 0 else 1 }}" rx="1" fill="currentColor" opacity="0.5"/>
-        {% endfor %}
-      </svg>
-    </div>
-
-    <div class="text-gray-300 dark:text-gray-600 text-2xl font-light px-2 self-center">&rarr;</div>
-
-    {# Decisions #}
-    <div class="flex-1 text-center">
-      <div class="text-sm text-emerald-700 dark:text-emerald-300 font-medium mb-0.5">Decisions</div>
-      <div class="font-mono font-bold text-2xl text-emerald-700 dark:text-emerald-300">{{ pipeline.decisions.total }}</div>
-      <svg class="w-20 h-6 mx-auto text-emerald-500 dark:text-emerald-400 mt-0.5" viewBox="0 0 70 24">
-        {% set max_val = pipeline.decisions.sparkline|max or 1 %}
-        {% for val in pipeline.decisions.sparkline %}
-        {% set bar_h = (val / max_val * 20)|round|int %}
-        <rect x="{{ loop.index0 * 10 }}" y="{{ 24 - (bar_h if bar_h > 0 else 1) }}" width="8" height="{{ bar_h if bar_h > 0 else 1 }}" rx="1" fill="currentColor" opacity="0.5"/>
-        {% endfor %}
-      </svg>
-    </div>
-  </div>
-</div>
 
 {# ════════════════════════════════════════════════════════════
    WORK QUEUE STRIP
@@ -256,7 +170,7 @@
       {% endif %}
     </div>
 
-    {% if health_items or actionable_proposals or open_observations or floated_observations %}
+    {% if health_items or workflow_dashboard.issues or workflow_dashboard.unassigned %}
 
     {# ─ Agent health (highest priority) ─ #}
     {% for h in health_items %}
@@ -277,57 +191,24 @@
     </div>
     {% endfor %}
 
-    {# ─ Proposals (high priority) ─ #}
-    {% for c in actionable_proposals %}
-    <a href="/{{ team }}/proposals/{{ c._slug }}" class="block border border-purple-200 dark:border-purple-800 rounded-md px-3 py-2.5 mb-2 bg-white dark:bg-gray-800 hover:border-purple-400 dark:hover:border-purple-600 transition-colors">
-      <div class="flex items-start justify-between gap-2">
-        <div class="min-w-0 flex-1">
-          <span class="text-base font-medium text-gray-900 dark:text-gray-100 leading-tight">{{ c._title }}</span>
-          <div class="flex flex-wrap items-center gap-1.5 mt-1">
-            {{ c.get("origin_agent", "") | agent_badge }}
-            {{ c.get("status", "") | status_badge }}
-            {% if c.get("feedback_received") %}
-            <span class="text-sm text-gray-400 dark:text-gray-500 font-mono">feedback: {{ c.get("feedback_received", []) | join(", ") }}</span>
-            {% endif %}
-          </div>
-        </div>
-        <div class="flex items-center gap-2 shrink-0">
-          {% set q_count = c.get("questions", [])|length %}
-          {% if q_count %}
-          <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300">{{ q_count }} question{{ 's' if q_count != 1 else '' }}</span>
-          {% endif %}
-        </div>
-      </div>
-    </a>
-    {% endfor %}
-
-    {# ─ Floated signals ─ #}
-    {% for c in floated_observations %}
-    <a href="/{{ team }}/observations/{{ c._slug }}" class="block border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2.5 mb-2 bg-amber-50/50 dark:bg-amber-950/30 hover:border-amber-400 dark:hover:border-amber-600 transition-colors">
-      <div class="flex items-center gap-1.5">
-        <span class="text-sm text-amber-700 dark:text-amber-300 font-medium">floated</span>
-        {{ c.get("agent", "") | agent_badge }}
-      </div>
-      <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ c._title }}</div>
-    </a>
-    {% endfor %}
-
-    {# ─ Open observations (lower priority) ─ #}
-    {% for c in open_observations %}
-    <a href="/{{ team }}/observations/{{ c._slug }}" class="block border border-gray-150 dark:border-gray-700 rounded-md px-3 py-2 mb-1.5 hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
-      <div class="flex items-center gap-1.5">
-        {{ c.get("agent", "") | agent_badge }}
-        {% if c.get("float") %}<span class="text-sm text-amber-700 dark:text-amber-300">floated</span>{% endif %}
-      </div>
-      <div class="text-sm text-gray-700 dark:text-gray-300 mt-0.5 leading-tight">{{ c._title }}</div>
-    </a>
-    {% endfor %}
-
-    {# ─ Footer links ─ #}
-    <div class="flex gap-4 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-      <a href="/{{ team }}/observations" class="text-sm text-flowgency-700 dark:text-flowgency-200 hover:text-flowgency-800 dark:hover:text-white">View all observations &rarr;</a>
-      <a href="/{{ team }}/proposals" class="text-sm text-flowgency-700 dark:text-flowgency-200 hover:text-flowgency-800 dark:hover:text-white">View all proposals &rarr;</a>
+    {# ─ Workflow issues ─ #}
+    {% for issue in workflow_dashboard.issues %}
+    <div class="block border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2.5 mb-2 bg-amber-50/60 dark:bg-amber-950/30">
+      <div class="text-sm font-semibold text-amber-700 dark:text-amber-300">Workflow issue{% if issue.workflow_name %} · {{ issue.workflow_name }}{% endif %}</div>
+      <div class="text-base text-gray-800 dark:text-gray-200 mt-0.5 leading-tight">{{ issue.message }}</div>
     </div>
+    {% endfor %}
+
+    {# ─ Unassigned tickets ─ #}
+    {% for ticket in workflow_dashboard.unassigned %}
+    <a href="{{ ticket.href }}" class="block border border-sky-200 dark:border-sky-800 rounded-md px-3 py-2.5 mb-2 bg-white dark:bg-gray-800 hover:border-sky-400 dark:hover:border-sky-600 transition-colors">
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-base font-medium text-gray-900 dark:text-gray-100 leading-tight">{{ ticket.title }}</span>
+        <span class="text-xs font-mono text-sky-700 dark:text-sky-300">{{ ticket.workflow_name }}</span>
+      </div>
+      <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">Unassigned ticket · {{ ticket.ticket_id }}</div>
+    </a>
+    {% endfor %}
 
     {% else %}
     <div class="text-sm text-gray-400 dark:text-gray-500 py-2">No items need attention right now.</div>
@@ -340,10 +221,10 @@
     {% if activity_feed %}
     <div class="max-h-96 overflow-y-auto space-y-1 pr-1">
       {% for ev in activity_feed %}
-      <a href="/{{ team }}/{% if ev.type == 'observation' %}observations{% else %}proposals{% endif %}/{{ ev.slug }}"
+      <a href="{{ ev.href }}"
          class="flex items-baseline gap-2 py-1 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors group">
-        <span class="font-mono text-sm text-gray-600 dark:text-gray-300 w-14 flex-shrink-0 text-right">{{ ev.timestamp | relative_time }}</span>
-        <span class="text-sm truncate"><span class="text-gray-700 dark:text-gray-200 group-hover:text-gray-800 dark:group-hover:text-white">{{ ev.agent }}</span> <span class="text-gray-600 dark:text-gray-300">&rarr;</span> filed {{ ev.type }}</span>
+        <span class="font-mono text-sm text-gray-600 dark:text-gray-300 w-14 flex-shrink-0 text-right">{{ ev.at | relative_time }}</span>
+        <span class="text-sm truncate"><span class="text-gray-700 dark:text-gray-200 group-hover:text-gray-800 dark:group-hover:text-white">{{ ev.title }}</span> <span class="text-gray-600 dark:text-gray-300">&middot;</span> {{ ev.summary }}</span>
       </a>
       {% endfor %}
     </div>

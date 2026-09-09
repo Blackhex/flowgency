@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import pytest
 
 from flowgency import cli
 from flowgency.jobs import JobHandle
@@ -184,3 +185,19 @@ def test_ticket_run_submits_ticket_job(cli_config, cli_runner, monkeypatch):
     assert submitted[0][1].ref.ticket_id == ticket_id
     payload = json.loads(result.stdout)
     assert payload["status"] == "queued"
+
+
+@pytest.mark.parametrize("argv", [
+    ["observations"],
+    ["proposals"],
+    ["decisions"],
+    ["decide", "old"],
+    ["ticket", "transition", "ticket-a", "--workflow", "delivery", "--state", "done"],
+])
+def test_cli_rejects_retired_pipeline_commands(argv):
+    parser = cli.build_parser()
+
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args(argv)
+
+    assert error.value.code != 0

@@ -55,12 +55,7 @@ def test_invalid_fixed_clock_fails_clearly(monkeypatch):
 def test_dashboard_time_helpers_use_fixed_clock(monkeypatch):
     clock = _clock()
     monkeypatch.setenv("FLOWGENCY_FIXED_NOW", "2026-07-16T12:00:00+00:00")
-    from flowgency.app import build_pipeline_stats, relative_time
+    from flowgency.app import relative_time
 
     assert relative_time(datetime(2026, 7, 16, 10, 0, 0)) == "2h ago"
-    stats = build_pipeline_stats(
-        [{"date": "2026-07-10"}, {"date": "2026-07-16"}],
-        [],
-        [],
-    )
-    assert stats["observations"]["sparkline"] == [1, 0, 0, 0, 0, 0, 1]
+    assert clock.today() == datetime(2026, 7, 16, 12, 0, 0).date()

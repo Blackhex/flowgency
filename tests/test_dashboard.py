@@ -1,6 +1,5 @@
 """Tests for mission control dashboard helpers."""
 from copy import deepcopy
-from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -12,192 +11,13 @@ from fastapi.testclient import TestClient
 from flowgency import app as app_mod
 from flowgency.app import (
     app,
-    build_activity_feed,
     build_dashboard_fleet,
-    build_pipeline_stats,
-    list_markdown_items,
 )
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.models import BlueprintRef, JobRecord, JobSpec, MemoryBinding, RuntimePolicySnapshot
 from flowgency.jobs.store import transition_job, write_job
 from tests._ticket_helpers import SEED_TIME
 from tests._team_helpers import apply_team_paths, create_team_environment
-
-
-class TestBuildPipelineStats:
-    def test_counts_items_per_stage(self):
-        observations = [{"status": "open"}, {"status": "open"}, {"status": "archived"}]
-        proposals = [{"status": "proposed"}]
-        decisions = [{"answers": {"approve": "approved"}}, {"answers": {"approach": "Option A"}}]
-        result = build_pipeline_stats(observations, proposals, decisions)
-        assert result["observations"]["total"] == 3
-        assert result["proposals"]["total"] == 1
-        assert result["decisions"]["total"] == 2
-
-    def test_sparkline_buckets_last_7_days(self):
-        today = datetime.now()
-        observations = [{"date": (today - timedelta(days=i)).isoformat()} for i in range(3)]
-        result = build_pipeline_stats(observations, [], [])
-        assert len(result["observations"]["sparkline"]) == 7
-
-    def test_empty_pipeline(self):
-        result = build_pipeline_stats([], [], [])
-        assert result["observations"]["total"] == 0
-        assert result["proposals"]["total"] == 0
-        assert result["decisions"]["total"] == 0
-        assert len(result["observations"]["sparkline"]) == 7
-
-    def test_detects_bottleneck(self):
-        observations = [{"status": "open"}] * 10
-        proposals = [{"status": "proposed"}]
-        decisions = []
-        result = build_pipeline_stats(observations, proposals, decisions)
-        assert result["flow_status"] == "bottleneck"
-
-    def test_healthy_flow(self):
-        observations = [{"status": "open"}] * 3
-        proposals = [{"status": "proposed"}] * 2
-        decisions = [{"answers": {"approve": "approved"}}] * 2
-        result = build_pipeline_stats(observations, proposals, decisions)
-        assert result["flow_status"] == "healthy"
-
-
-def test_list_markdown_items_reads_the_explicit_team_directory(tmp_path):
-    observations = tmp_path / "observations"
-    observations.mkdir()
-    (observations / "signal.md").write_text(
-        "---\nagent: scout\nstatus: open\n---\n\n**Signal**\n",
-        encoding="utf-8",
-    )
-
-    items = list_markdown_items(observations, apply_ttl=True)
-
-    assert [item["_slug"] for item in items] == ["signal"]
-
-
-class TestBuildActivityFeed:
-    def test_interleaves_observations_and_proposals(self):
-        obs = [
-            {"agent": "scout", "_slug": "obs-1", "date": "2026-03-22T10:00:00", "status": "open"},
-            {"agent": "scout", "_slug": "obs-2", "date": "2026-03-22T08:00:00", "status": "open"},
-        ]
-        props = [
-            {"origin_agent": "arch", "_slug": "prop-1", "date": "2026-03-22T09:00:00", "status": "proposed"},
-        ]
-        feed = build_activity_feed(obs, props, limit=10)
-        assert len(feed) == 3
-        assert feed[0]["slug"] == "obs-1"
-        assert feed[1]["slug"] == "prop-1"
-        assert feed[2]["slug"] == "obs-2"
-
-    def test_limits_results(self):
-        obs = [{"agent": f"a{i}", "_slug": f"obs-{i}", "date": f"2026-03-{20+i}T10:00:00", "status": "open"} for i in range(10)]
-        feed = build_activity_feed(obs, [], limit=5)
-        assert len(feed) == 5
-
-    def test_handles_empty_input(self):
-        feed = build_activity_feed([], [])
-        assert feed == []
-
-
-def test_decision_detail_shows_agent_log_and_changes(tmp_path, monkeypatch):
-    """Verify decision_detail route passes executed_by, execution_log, and changed_files to template."""
-    from pathlib import Path
-    from fastapi.testclient import TestClient
-    import flowgency.app as app_mod
-    from flowgency.app import app
-
-    # Set up team with decision directory
-    paths = create_team_environment(
-        tmp_path,
-        "test",
-        create_state=True,
-    )
-    team_path = paths.state_root
-    decisions_path = team_path / "decisions"
-    logs_path = team_path / "logs" / "2026-07-10"
-    decisions_path.mkdir(parents=True, exist_ok=True)
-    logs_path.mkdir(parents=True, exist_ok=True)
-
-    # Create decision with execution metadata
-    log_file = logs_path / "worker-exec-12345.out"
-    log_file.write_text("execution output")
-    
-    decision = decisions_path / "test-decision.md"
-    decision.write_text(f"""---
-decided_by: admin
-date: 2026-07-10
-execution_status: complete
-execution_summary: "Task completed successfully."
-executed_by: worker
-execution_log: {str(log_file)}
-changed_files:
-  - path: a.txt
-    status: modified
-    lines_added: 2
-    lines_removed: 1
----
-Decision body
-""")
-
-    library_root = tmp_path / "agent-library"
-    cache_root = tmp_path / "compiled-agents"
-    memory_root = tmp_path / "memory-store"
-    prompt_root = tmp_path / "prompts"
-    library_root.mkdir()
-    (library_root / "worker").mkdir(parents=True, exist_ok=True)
-    (library_root / "worker" / "AGENTS.md").write_text("# Worker\n", encoding="utf-8")
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "schema_version": 1,
-                "flowgency": {
-                    "title": "Flowgency",
-                    "default_team": "test",
-                    "ai_backend": "script",
-                    "agent_library": str(library_root),
-                    "compilation_cache": str(cache_root),
-                    "memory_store": str(memory_root),
-                    "prompt_store": str(prompt_root),
-                },
-                "memory": {"channels": {}},
-                "teams": {
-                    "test": apply_team_paths({
-                        "name": "Test Group",
-                        "default_integration": "script",
-                        "agents": [
-                            {
-                                "name": "worker",
-                                "blueprint": "worker",
-                                "integration": "script",
-                            }
-                        ],
-                    }, paths)
-                },
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(app_mod, "CONFIG_PATH", config_path)
-    app_mod.refresh_services()
-
-    client = TestClient(app)
-    resp = client.get("/test/decisions/test-decision")
-
-    assert resp.status_code == 200
-    html = resp.text
-    # Assert agent badge is rendered (via agent_badge filter)
-    assert "worker" in html
-    # Assert log link is rendered
-    assert "/test/logs/view" in html
-    assert "worker-exec-12345.out" in html
-    # Assert changed file is rendered
-    assert "a.txt" in html
-    # Assert change stats are rendered
-    assert "+2" in html
-    assert "−1" in html or "&minus;1" in html
 
 
 def test_home_renders_ticket_workflow_summary_and_activity(workflow_web_env):
@@ -223,6 +43,22 @@ def test_home_renders_ticket_workflow_summary_and_activity(workflow_web_env):
     assert "Recent ticket activity" in response.text
     assert "Alpha review" in response.text
     assert "Agent started work" in response.text
+    assert "How the pipeline works" not in response.text
+
+
+def test_home_reports_unavailable_workflow_storage(workflow_web_env):
+    env = workflow_web_env
+    missing_root = env.tmp_path / "missing-storage"
+    missing_root.mkdir()
+    env.set_storage_root(missing_root)
+    missing_root.rmdir()
+
+    response = env.client.get(f"/{env.team_id}/")
+
+    assert response.status_code == 200
+    assert "Board A" in response.text
+    assert "Ticket storage root does not exist" in response.text
+    assert "How the pipeline works" not in response.text
 
 
 def _write_yaml(path: Path, raw: dict) -> Path:

@@ -205,37 +205,6 @@ def test_failed_run_still_records_what_was_not_enforced(tmp_path, monkeypatch):
     assert entry in result.execution_summary
 
 
-def test_note_reaches_the_decision_record(tmp_path, monkeypatch):
-    decisions = tmp_path / "team" / "decisions"
-    decisions.mkdir(parents=True)
-    decision = decisions / "proposal.md"
-    decision.write_text(
-        "---\nexecution_job_id: queued-job\nexecution_status: pending\n---\n\nbody\n",
-        encoding="utf-8",
-    )
-    path, spec = queued_job(
-        tmp_path,
-        decision_context={
-            "decision_path": str(decision),
-            "proposal_path": "proposal.md",
-        },
-    )
-    entry = "Rule granting write on C:/vault: dropped."
-    monkeypatch.setattr(
-        "flowgency.jobs.execution.resolve_job_context",
-        lambda ignored: _context(
-            tmp_path,
-            RunResult(0, "done", "", 0.1, unenforced_rules=[entry]),
-        ),
-    )
-
-    execute_job(_authority(spec))
-
-    summary = read_metadata(decision)["execution_summary"]
-    assert NOTE_HEADING in summary
-    assert entry in summary
-
-
 def test_note_order_is_stable_across_runs(tmp_path, monkeypatch):
     entries = [
         "Rule granting write on C:/vault: dropped.",

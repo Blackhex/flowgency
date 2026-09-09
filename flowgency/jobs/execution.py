@@ -528,16 +528,6 @@ def execute_job(authority: JobAuthorityRef) -> JobRecord:
                     started_at=started.isoformat(),
                 )
 
-                try:
-                    project_decision(record)
-                except Exception as error:
-                    logger.warning(
-                        "Failed to project running status for job %s to its "
-                        "decision: %s",
-                        record.spec.job_id,
-                        error,
-                    )
-
                 # Tie change capture to the root the job actually ran in.
                 git_root = None
                 if (

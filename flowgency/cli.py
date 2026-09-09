@@ -31,20 +31,11 @@ from flowgency.configuration.models import MemorySelector
 from flowgency.dispatch.install import get_timer_status, install_timer, uninstall_timer
 from flowgency.fs.locks import LockCancelledError, ResourceBusyError
 from flowgency.integrations import REGISTRY
-from flowgency.jobs import JobRequest, JobSubmissionError, submit_job_request
+from flowgency.jobs import JobRequest, submit_job_request
 from flowgency.jobs.authority import JobStore
-from flowgency.jobs.atomic import atomic_write_text
-from flowgency.jobs.prompts import build_decision_prompt
 from flowgency.jobs.store import read_job
 from flowgency.memory import MemoryConflictError, MemoryStore, resolve_memory_selector
 from flowgency.prompts import PromptStore
-from flowgency.proposals import (
-    SKIP_EXECUTION_SUMMARY,
-    question_option_labels,
-    should_execute_decision,
-    validate_answers,
-    validate_proposal_schema,
-)
 from flowgency.tickets.cli import register_ticket_commands
 from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
@@ -590,64 +581,6 @@ def cmd_agent_run(args: Namespace) -> int:
     return 0
 
 
-def _list_command(args: Namespace, kind: str) -> int:
-    resolved = _resolve_team(args)
-    items = _markdown_items(resolved[kind])
-    if getattr(args, "status", None):
-        items = [item for item in items if item.get("status") == args.status]
-    agent_key = "origin_agent" if kind == "proposals" else "agent"
-    if getattr(args, "agent", None):
-        items = [item for item in items if item.get(agent_key) == args.agent]
-    payload = [
-        {
-            "slug": item["_slug"],
-            "title": item.get("_title", item["_slug"]),
-            "agent": item.get(agent_key, ""),
-            "status": item.get("status", ""),
-            "date": str(item.get("date", "")),
-        }
-        for item in items
-    ]
-    if args.json:
-        _print_json(payload)
-    else:
-        print(f"\n{bold(kind.title())} - {resolved['name']} ({len(payload)} total)\n")
-        for item in payload:
-            print(f"  {item['agent'][:16].rjust(16)}  {item['title'][:60]}  {dim(item['status'])}")
-        print()
-    return 0
-
-
-def cmd_observations(args: Namespace) -> int:
-    return _list_command(args, "observations")
-
-
-def cmd_proposals(args: Namespace) -> int:
-    return _list_command(args, "proposals")
-
-
-def cmd_decisions(args: Namespace) -> int:
-    resolved = _resolve_team(args)
-    items = _markdown_items(resolved["decisions"])
-    payload = [
-        {
-            "slug": item["_slug"],
-            "title": item.get("_title", item["_slug"]),
-            "answers": item.get("answers", {}),
-            "date": str(item.get("date", "")),
-        }
-        for item in items
-    ]
-    if args.json:
-        _print_json(payload)
-    else:
-        print(f"\n{bold('Decisions')} - {resolved['name']} ({len(payload)} total)\n")
-        for item in payload:
-            print(f"  decided  {item['title'][:60]}  {dim(item['date'])}")
-        print()
-    return 0
-
-
 def cmd_inbox(args: Namespace) -> int:
     cli_services = _services(args)
     snapshot = cli_services.config_store.load()
@@ -933,158 +866,6 @@ def _cmd_dispatch_inner(args: Namespace) -> int:
     return 0
 
 
-def _write_frontmatter(path: Path, metadata: dict[str, Any], body: str = "") -> None:
-    frontmatter = yaml.safe_dump(metadata, sort_keys=False).strip()
-    suffix = f"\n{body}" if body else "\n"
-    atomic_write_text(path, f"---\n{frontmatter}\n---{suffix}")
-
-
-def _update_frontmatter_field(path: Path, field: str, value: Any) -> None:
-    metadata, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
-    metadata[field] = value
-    _write_frontmatter(path, metadata, body)
-
-
-def cmd_decide(args: Namespace) -> int:
-    try:
-        return _cmd_decide_inner(args)
-    except EOFError as error:
-        return _render_failure(
-            CliFailure(ExitCode.OPERATIONAL_FAILURE, "input-closed", "Input closed unexpectedly."),
-            json_output=False,
-        )
-    except BaseException as error:
-        if isinstance(error, (KeyboardInterrupt, SystemExit)):
-            raise
-        return _render_failure(error, json_output=False)
-
-
-def _cmd_decide_inner(args: Namespace) -> int:
-    config_path = _config_path(args)
-    resolved = _resolve_team(args)
-    snapshot = resolved.get("_snapshot")
-    team_id = resolved["key"]
-    proposal_path = resolved["proposals"] / f"{args.slug}.md"
-    decision_path = resolved["decisions"] / f"{args.slug}.md"
-    if not proposal_path.is_file():
-        raise CliFailure(ExitCode.OPERATIONAL_FAILURE, "proposal-not-found", f"Proposal '{args.slug}' not found.")
-    metadata, body = _parse_frontmatter(proposal_path.read_text(encoding="utf-8"))
-    schema_errors = validate_proposal_schema(metadata)
-    if schema_errors:
-        issues = tuple(
-            _issue("invalid-proposal", f"proposals.{args.slug}", "questions", message, "Correct the proposal frontmatter.")
-            for message in schema_errors
-        )
-        raise CliFailure(ExitCode.VALIDATION, "invalid-proposal", "Proposal is invalid", issues)
-    eligible = [
-        item["name"]
-        for item in resolved.get("_agents_normalized", ())
-        if bool(item.get("capabilities", {}).get("write"))
-    ]
-    declared = metadata["execution_agent"].strip()
-    if declared not in eligible:
-        raise _validation_failure(
-            "invalid-execution-agent",
-            f"execution_agent '{declared}' is not available or not writable.",
-            field="execution_agent",
-        )
-    print(f"\n{bold(args.slug)}\n\n  Executor:")
-    for index, name in enumerate(eligible, 1):
-        print(f"    [{index}] {name}{' (default)' if name == declared else ''}")
-    execution_agent = None
-    while execution_agent is None:
-        raw = input("  > ").strip()
-        if not raw:
-            execution_agent = declared
-        elif raw.isdigit() and 1 <= int(raw) <= len(eligible):
-            execution_agent = eligible[int(raw) - 1]
-        else:
-            print(f"     Enter a number 1-{len(eligible)} or press Enter for default.")
-    answers: dict[str, Any] = {}
-    questions = metadata["questions"]
-    for index, question in enumerate(questions, 1):
-        print(f"\n  {index}. {question['prompt']}")
-        question_id = question["id"]
-        question_type = question["type"]
-        required = question.get("required", True) is not False
-        if question_type == "boolean":
-            while True:
-                choice = input("     [a]pprove / [d]ecline > ").strip().lower()
-                if choice in {"a", "approve"}:
-                    answers[question_id] = "approved"
-                    break
-                if choice in {"d", "decline"}:
-                    answers[question_id] = "declined"
-                    break
-                print("     Enter a/approve or d/decline.")
-        elif question_type == "choice":
-            labels = question_option_labels(question)
-            for option, label in enumerate(labels, 1):
-                print(f"     [{option}] {label}")
-            if question.get("multi"):
-                while True:
-                    raw = input("     > ").strip()
-                    indices = [int(value.strip()) for value in raw.split(",") if value.strip().isdigit()]
-                    selected = list(dict.fromkeys(labels[value - 1] for value in indices if 1 <= value <= len(labels)))
-                    if not raw or selected:
-                        answers[question_id] = selected
-                        break
-                    print(f"     No valid selections. Enter numbers 1-{len(labels)} or leave blank to skip.")
-            else:
-                while True:
-                    raw = input("     > ").strip()
-                    if raw.isdigit() and 1 <= int(raw) <= len(labels):
-                        answers[question_id] = labels[int(raw) - 1]
-                        break
-                    print(f"     Enter a number 1-{len(labels)}.")
-        else:
-            while True:
-                answer = input("     > ").strip()
-                if answer or not required:
-                    answers[question_id] = answer
-                    break
-    note = input("\n  Decision note (optional): ").strip()
-    answer_errors = validate_answers(questions, answers)
-    if answer_errors:
-        issues = tuple(
-            _issue("invalid-answer", f"proposals.{args.slug}", "answers", message, "Answer every required question.")
-            for message in answer_errors
-        )
-        raise CliFailure(ExitCode.VALIDATION, "invalid-answers", "Decision answers are invalid", issues)
-    decision = {
-        "proposal": f"{args.slug}.md",
-        "decided_by": "cli",
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "answers": answers,
-        "decision_note": note,
-        "execution_agent": execution_agent,
-        "execution_job_history": [],
-    }
-    decision_path.parent.mkdir(parents=True, exist_ok=True)
-    if should_execute_decision(questions, answers, note):
-        request = JobRequest(
-            config_path=config_path,
-            team_key=team_id,
-            agent_name=execution_agent,
-            trigger="decision",
-            task_input=build_decision_prompt(body, answers, note),
-            trigger_context={"decision_path": str(decision_path.resolve()), "proposal_path": str(proposal_path.resolve())},
-        )
-        decision.update(execution_status="pending", execution_job_id=request.job_id)
-        _write_frontmatter(decision_path, decision)
-        try:
-            submit_job_request(request)
-        except JobSubmissionError:
-            decision_path.unlink(missing_ok=True)
-            raise
-    else:
-        decision.update(execution_status="skipped", execution_summary=SKIP_EXECUTION_SUMMARY)
-        _write_frontmatter(decision_path, decision)
-    _update_frontmatter_field(proposal_path, "status", "decided")
-    print(f"Decision saved: decisions/{args.slug}.md")
-    return 0
-
-
 def _add_config(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", default=argparse.SUPPRESS, help="Path to canonical config.yaml")
 
@@ -1122,28 +903,10 @@ def build_parser() -> argparse.ArgumentParser:
     for name, help_text, handler in (
         ("inbox", "What needs attention", cmd_inbox),
         ("agents", "List agent instances", cmd_agents),
-        ("decisions", "List decisions", cmd_decisions),
     ):
         command = subparsers.add_parser(name, help=help_text)
         _add_team_json(command)
         command.set_defaults(handler=handler)
-
-    observations = subparsers.add_parser("observations", help="List observations")
-    _add_team_json(observations)
-    observations.add_argument("--status", "-s")
-    observations.add_argument("--agent", "-a")
-    observations.set_defaults(handler=cmd_observations)
-
-    proposals = subparsers.add_parser("proposals", help="List proposals")
-    _add_team_json(proposals)
-    proposals.add_argument("--status", "-s")
-    proposals.set_defaults(handler=cmd_proposals)
-
-    decide = subparsers.add_parser("decide", help="Answer a proposal's questions")
-    _add_config(decide)
-    decide.add_argument("slug")
-    decide.add_argument("--team", "-t")
-    decide.set_defaults(handler=cmd_decide, json=False)
 
     agent = subparsers.add_parser("agent", help="Inspect or run one agent")
     _add_config(agent)

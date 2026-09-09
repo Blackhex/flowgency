@@ -1,7 +1,7 @@
 <section class="space-y-6">
   <div>
     <h2 class="text-lg font-semibold text-gray-900">Recent activity</h2>
-    <p class="text-sm text-gray-500">Current jobs, logs, observations, and proposals associated with this agent.</p>
+    <p class="text-sm text-gray-500">Current jobs, logs, and ticket events associated with this agent.</p>
   </div>
   <div class="grid gap-6 lg:grid-cols-2 text-sm text-gray-700">
     <div>
@@ -25,22 +25,12 @@
       </ul>
     </div>
     <div>
-      <h3 class="font-semibold text-gray-900">Observations</h3>
+      <h3 class="font-semibold text-gray-900">Ticket events</h3>
       <ul class="mt-2 space-y-2">
-        {% for item in observations %}
+        {% for item in ticket_activity %}
         <li><a href="{{ item.href }}" class="text-indigo-600 hover:text-indigo-800">{{ item.title }}</a> <span class="text-gray-500">{{ item.meta }}</span></li>
         {% else %}
-        <li class="text-gray-500">No observations.</li>
-        {% endfor %}
-      </ul>
-    </div>
-    <div>
-      <h3 class="font-semibold text-gray-900">Proposals</h3>
-      <ul class="mt-2 space-y-2">
-        {% for item in proposals %}
-        <li><a href="{{ item.href }}" class="text-indigo-600 hover:text-indigo-800">{{ item.title }}</a> <span class="text-gray-500">{{ item.meta }}</span></li>
-        {% else %}
-        <li class="text-gray-500">No proposals.</li>
+        <li class="text-gray-500">No ticket events.</li>
         {% endfor %}
       </ul>
     </div>

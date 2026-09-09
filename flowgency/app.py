@@ -9,6 +9,7 @@ import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import markdown
 import nh3
@@ -46,8 +47,6 @@ from flowgency.jobs import (
     latest_executed_job,
     submit_job_request,
 )
-from flowgency.jobs.atomic import atomic_write_text
-from flowgency.jobs.prompts import build_decision_prompt
 from flowgency.jobs.queue import drain, queue_snapshot, QueueView
 from flowgency.health import (
     describe_agent_health,
@@ -60,8 +59,6 @@ from flowgency.health import (
     schedule_lateness,
 )
 from flowgency.prompts import resolve_catalog_prompt
-from flowgency.proposals import validate_proposal_schema, validate_answers, should_execute_decision, SKIP_EXECUTION_SUMMARY
-from flowgency.records.frontmatter import extract_display_title, parse_frontmatter
 from flowgency.tickets.models import UserTicketContext
 from flowgency.tickets.views import build_board_view
 import json as json_module
@@ -87,7 +84,6 @@ from flowgency.web.routes import (
 # ── Config ────────────────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path(os.environ.get("FLOWGENCY_CONFIG") or Path.cwd() / "config.yaml").expanduser().resolve()
-
 
 def refresh_services() -> FlowgencyServices:
     services = build_services(CONFIG_PATH)
@@ -184,7 +180,6 @@ def generate_theme_css(theme: dict) -> str:
     scale = theme.get("scale", {})
     ui = theme.get("ui", {})
 
-    # CSS custom properties
     props_light = []
     props_dark = []
     for key, val in light.items():
@@ -192,7 +187,6 @@ def generate_theme_css(theme: dict) -> str:
     for key, val in dark.items():
         props_dark.append(f"  --t-{key.replace('_', '-')}: {val};")
 
-    # Logo properties
     logo_light = logo.get("light", {})
     logo_dark = logo.get("dark", {})
     for key, val in logo_light.items():
@@ -200,7 +194,6 @@ def generate_theme_css(theme: dict) -> str:
     for key, val in logo_dark.items():
         props_dark.append(f"  --t-logo-{key.replace('_', '-')}: {val};")
 
-    # Scale properties
     for key, val in scale.items():
         props_light.append(f"  --t-scale-{key}: {val};")
         props_dark.append(f"  --t-scale-{key}: {val};")
@@ -215,14 +208,12 @@ def generate_theme_css(theme: dict) -> str:
     lines.append(".dark {")
     lines.extend(props_dark)
     lines.append("}")
-
-    # Structural overrides using the custom properties
     lines.append("""
 /* Body */
 body {
   background-color: var(--t-bg) !important;
   color: var(--t-text) !important;
-  font-family: var(--t-ui-font-family, "DM Sans", system-ui, sans-serif) !important;
+  font-family: var(--t-ui-font-family, \"DM Sans\", system-ui, sans-serif) !important;
 }
 @media (min-width: 768px) {
   main { font-size: var(--t-ui-main-font-size, 1.0625rem); }
@@ -701,20 +692,31 @@ def build_activity_feed(observations: list[dict], proposals: list[dict],
     return events[:limit]
 
 
-def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[str, list[dict] | int]:
+def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[str, Any]:
+    def _dashboard_time(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=None) if value.tzinfo is not None else value
+
+    snapshot = services.config_store.load()
+    team = snapshot.config.teams[team_id]
+    configured_count = len(team.workflows)
     if services.tickets is None:
         return {
             "workflows": [],
             "activity": [],
             "unassigned": [],
+            "issues": [],
             "issue_count": 0,
             "ticket_count": 0,
             "working_count": 0,
+            "configured_count": configured_count,
         }
     actor = UserTicketContext(team_id=team_id)
     workflows: list[dict] = []
     activity: list[dict] = []
     unassigned: list[dict] = []
+    issues: list[dict] = []
     issue_count = 0
     ticket_count = 0
     working_count = 0
@@ -725,11 +727,12 @@ def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[st
             "workflows": [],
             "activity": [],
             "unassigned": [],
-            "issue_count": 0,
+            "issues": [{"workflow_id": None, "workflow_name": None, "message": "Ticket workflows are unavailable"}] if configured_count else [],
+            "issue_count": 1 if configured_count else 0,
             "ticket_count": 0,
             "working_count": 0,
+            "configured_count": configured_count,
         }
-    snapshot = services.config_store.load()
     for binding in bindings:
         board = build_board_view(
             services.tickets,
@@ -741,7 +744,7 @@ def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[st
         issue_count += len(board.issues)
         ticket_count += board.ticket_count
         working_count += board.working_count
-        workflow_name = snapshot.config.teams[team_id].workflows[binding.workflow_id].name
+        workflow_name = team.workflows[binding.workflow_id].name
         workflows.append(
             {
                 "id": binding.workflow_id,
@@ -753,6 +756,14 @@ def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[st
                 "issue_count": len(board.issues),
             }
         )
+        for issue in board.issues:
+            issues.append(
+                {
+                    "workflow_id": binding.workflow_id,
+                    "workflow_name": workflow_name,
+                    "message": issue.message,
+                }
+            )
         for ticket in rows:
             if ticket.assignee is None:
                 unassigned.append(
@@ -774,12 +785,12 @@ def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[st
                         "title": ticket.title,
                         "kind": latest.kind,
                         "summary": latest.summary,
-                        "at": latest.at,
+                        "at": _dashboard_time(latest.at),
                         "href": f"/{team_id}/workflows/{binding.workflow_id}?ticket={ticket.ref.ticket_id}",
                     }
                 )
     activity.sort(
-        key=lambda item: item["at"] or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda item: item["at"] or datetime.min,
         reverse=True,
     )
     workflows.sort(key=lambda item: item["name"])
@@ -787,9 +798,11 @@ def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[st
         "workflows": workflows,
         "activity": activity[:8],
         "unassigned": unassigned[:8],
+        "issues": issues,
         "issue_count": issue_count,
         "ticket_count": ticket_count,
         "working_count": working_count,
+        "configured_count": configured_count,
     }
 
 
@@ -1920,15 +1933,6 @@ async def home(request: Request, team: str):
     """Dashboard home — mission control."""
     g = get_team(team)
     services = get_services(request)
-    observations: list[dict] = []
-    proposals: list[dict] = []
-    decisions: list[dict] = []
-
-    open_observations: list[dict] = []
-    floated_observations: list[dict] = []
-    actionable_proposals: list[dict] = []
-
-    floated_open_observations: list[dict] = []
     workflow_dashboard = build_ticket_dashboard(services, team)
 
     # Zone 1: Fleet status
@@ -1937,13 +1941,10 @@ async def home(request: Request, team: str):
     needs_action_count = (
         len(health_items)
         + len(workflow_dashboard["unassigned"])
-        + int(workflow_dashboard["issue_count"])
+        + len(workflow_dashboard["issues"])
     )
 
-    # Zone 2: Pipeline pulse
-    pipeline = build_pipeline_stats(observations, proposals, decisions)
-
-    # Work queue strip (between Pipeline and Attention Queue)
+    # Work queue strip
     try:
         snapshot = _load_snapshot()
         ms = snapshot.config.flowgency.memory_store
@@ -1969,32 +1970,25 @@ async def home(request: Request, team: str):
     }
 
     # Zone 4: Activity feed
-    activity: list[dict] = []
+    activity = workflow_dashboard["activity"]
 
     return templates.TemplateResponse(request, "home.html", {
         "request": request,
-        **team_context(g, observations=observations, proposals=proposals),
+        **team_context(g),
         # Zone 1: Fleet
         "fleet_agents": agents,
         "fleet_healthy": sum(1 for a in agents if a["health"] == "green"),
         "fleet_never_run": sum(1 for a in agents if a["health"] == "gray"),
         "fleet_attention": len(health_items),
         "fleet_running": sum(1 for a in agents if a.get("running")),
-        # Zone 2: Pipeline
-        "pipeline": pipeline,
         "workflow_dashboard": workflow_dashboard,
         # Work queue
         "work_queue": work_queue,
         # Zone 3: Attention queue
         "health_items": health_items,
-        "actionable_proposals": actionable_proposals,
-        "open_observations": open_observations[:7],
-        "floated_observations": floated_observations,
         "needs_action_count": needs_action_count,
         # Zone 4: Activity
         "activity_feed": activity,
-        # Executing decisions
-        "running_decisions": [d for d in decisions if d.get("execution_status") == "running"],
     })
 
 
@@ -2005,59 +1999,12 @@ async def observations_list(request: Request, team: str, agent: str = "", status
 
 @app.get("/{team}/observations/{slug}", response_class=HTMLResponse)
 async def observation_detail(request: Request, team: str, slug: str):
-    """View a single observation."""
-    g = get_team(team)
-    path = Path(g["observations"]) / f"{slug}.md"
-    if not path.exists():
-        raise HTTPException(404, "Observation not found")
-    raw = path.read_text()
-    meta, body = parse_frontmatter(raw)
-
-    # Resolve pipeline chain: observation → proposal → decision
-    pipeline = None
-    linked_proposal_slug = meta.get("linked_proposal", "")
-    if linked_proposal_slug:
-        proposal_slug = linked_proposal_slug.replace(".md", "")
-        proposal_path = Path(g["proposals"]) / f"{proposal_slug}.md"
-        pipeline = {"proposal_slug": proposal_slug, "proposal_exists": proposal_path.exists()}
-        # Check for a decision on that proposal
-        decision_path = Path(g["decisions"]) / f"{proposal_slug}.md"
-        if decision_path.exists():
-            dmeta, _ = parse_frontmatter(decision_path.read_text())
-            pipeline["decision_slug"] = proposal_slug
-            pipeline["decision_status"] = dmeta.get("execution_status", "decided")
-        else:
-            pipeline["decision_slug"] = None
-
-    return templates.TemplateResponse(request, "observation_detail.html", {
-        "request": request,
-        **team_context(g),
-        "meta": meta,
-        "body_html": render_md(body),
-        "body_raw": body,
-        "slug": slug,
-        "title": extract_display_title(body, slug),
-        "filename": path.name,
-        "pipeline": pipeline,
-    })
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.post("/{team}/observations/{slug}/status", response_class=HTMLResponse)
 async def observation_update_status(request: Request, team: str, slug: str):
-    """Update an observation's status via form submission."""
-    g = get_team(team)
-    path = Path(g["observations"]) / f"{slug}.md"
-    if not path.exists():
-        raise HTTPException(404, "Observation not found")
-
-    form = await request.form()
-    new_status = form.get("status", "")
-    if new_status not in ("open", "connected", "dismissed", "archived"):
-        raise HTTPException(400, "Invalid status")
-
-    update_frontmatter_field(path, "status", new_status)
-
-    return RedirectResponse(f"/{team}/observations/{slug}", status_code=303)
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.get("/{team}/proposals", response_class=HTMLResponse)
@@ -2067,216 +2014,12 @@ async def proposals_list(request: Request, team: str):
 
 @app.get("/{team}/proposals/{slug}", response_class=HTMLResponse)
 async def proposal_detail(request: Request, team: str, slug: str):
-    """View a single proposal."""
-    g = get_team(team)
-    return render_proposal_detail(request, g, team, slug)
-
-
-def render_proposal_detail(request: Request, g: dict, team: str, slug: str,
-                            *, selected_execution_agent: str | None = None,
-                            submitted_answers: dict | None = None,
-                            decision_note: str = "",
-                            decision_error: str = "", status_code: int = 200):
-    """Build the proposal_detail template response. Shared by the GET route and
-    the POST /decide route so validation errors can re-render the same page."""
-    proposals_dir = Path(g["proposals"])
-    observations_dir = Path(g["observations"])
-    decisions_dir = Path(g["decisions"])
-
-    path = proposals_dir / f"{slug}.md"
-    if not path.exists():
-        raise HTTPException(404, "Proposal not found")
-    raw = path.read_text()
-    meta, body = parse_frontmatter(raw)
-
-    # Compute proposal-level schema errors (shown on GET and POST)
-    proposal_errors = validate_proposal_schema(meta)
-    declared_executor = meta.get("execution_agent", "")
-    if declared_executor and declared_executor not in execution_agent_options(g):
-        proposal_errors.append(
-            f"Declared executor '{declared_executor}' is not an eligible agent"
-        )
-
-    # Find linked observations
-    linked = []
-    for c in meta.get("observations", []):
-        cpath = observations_dir / c
-        if cpath.exists():
-            linked.append({"filename": c, "slug": cpath.stem})
-
-    # Find related decision
-    decision = None
-    if decisions_dir.exists():
-        for d in decisions_dir.glob("*.md"):
-            dtext = d.read_text()
-            if slug in dtext:
-                dmeta, dbody = parse_frontmatter(dtext)
-                decision = {"filename": d.name, "slug": d.stem, "meta": dmeta, "body": dbody}
-                break
-
-    # Sync proposal status if a decision exists but status is stale
-    if decision and meta.get("status") != "decided":
-        update_frontmatter_field(path, "status", "decided")
-        meta["status"] = "decided"
-
-    # Parse questions for template
-    questions = meta.get("questions", [])
-    decision_answers = decision["meta"].get("answers", {}) if decision else {}
-
-    if selected_execution_agent is None:
-        selected_execution_agent = meta.get("execution_agent") or ""
-
-    return templates.TemplateResponse(request, "proposal_detail.html", {
-        "request": request,
-        **team_context(g),
-        "meta": meta,
-        "body_html": render_md(body),
-        "body_raw": body,
-        "slug": slug,
-        "title": extract_display_title(body, slug),
-        "linked_observations": linked,
-        "decision": decision,
-        "questions": questions,
-        "answers": decision_answers,
-        "execution_agents": execution_agent_options(g),
-        "selected_execution_agent": selected_execution_agent,
-        "proposal_errors": proposal_errors,
-        "submitted_answers": submitted_answers if submitted_answers is not None else {},
-        "decision_note": decision_note,
-        "decision_error": decision_error,
-    }, status_code=status_code)
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.post("/{team}/proposals/{slug}/decide", response_class=HTMLResponse)
 async def proposal_decide(request: Request, team: str, slug: str):
-    """Create a decision by answering a proposal's questions and submitting a
-    durable job for the selected execution agent."""
-    g = get_team(team)
-    decisions_dir = Path(g["decisions"])
-    proposals_dir = Path(g["proposals"])
-
-    # Read proposal to get questions
-    cpath = proposals_dir / f"{slug}.md"
-    if not cpath.exists():
-        raise HTTPException(404, "Proposal not found")
-    cmeta, proposal_body = parse_frontmatter(cpath.read_text())
-    questions = cmeta.get("questions", [])
-
-    form = await request.form()
-    execution_agent = form.get("execution_agent", "")
-    decision_note = str(form.get("decision_note", "")).strip()
-
-    # Build answers from form data
-    answers = {}
-    for q in questions:
-        key = f"answer_{q['id']}"
-        if q.get("type") == "choice" and q.get("multi"):
-            answers[q["id"]] = form.getlist(key)
-        else:
-            answers[q["id"]] = form.get(key, "")
-
-    # 1. Schema validation — blocking before trusting answers
-    schema_errors = validate_proposal_schema(cmeta)
-    if schema_errors:
-        return render_proposal_detail(
-            request, g, team, slug,
-            selected_execution_agent=execution_agent,
-            submitted_answers=answers,
-            decision_note=decision_note,
-            status_code=400,
-        )
-
-    # 1b. Declared executor eligibility — mirrors render_proposal_detail check
-    declared_executor = cmeta.get("execution_agent", "")
-    if declared_executor and declared_executor not in execution_agent_options(g):
-        return render_proposal_detail(
-            request, g, team, slug,
-            selected_execution_agent=execution_agent,
-            submitted_answers=answers,
-            decision_note=decision_note,
-            status_code=400,
-        )
-
-    # 2. Answer validation
-    all_errors = validate_answers(questions, answers)
-
-    # 3. Executor eligibility validation
-    if execution_agent not in execution_agent_options(g):
-        error_msg = (
-            f"Agent '{execution_agent}' does not support execution or is unavailable."
-            if execution_agent else "Select an agent to implement this decision."
-        )
-        all_errors.append(error_msg)
-
-    if all_errors:
-        return render_proposal_detail(
-            request, g, team, slug,
-            selected_execution_agent=execution_agent,
-            submitted_answers=answers,
-            decision_note=decision_note,
-            decision_error="; ".join(all_errors),
-            status_code=400,
-        )
-
-    flowgency_cfg = get_flowgency_config()
-    decided_by = flowgency_cfg.get("decided_by", "admin")
-    today = clock_now().strftime("%Y-%m-%d")
-
-    decisions_dir.mkdir(exist_ok=True)
-    decision_path = decisions_dir / f"{slug}.md"
-
-    # Shared metadata base
-    meta = {
-        "proposal": f"{slug}.md",
-        "decided_by": decided_by,
-        "date": today,
-        "answers": answers,
-        "decision_note": decision_note,
-        "execution_agent": execution_agent,
-        "execution_job_history": [],
-    }
-
-    # 4. Determine execution vs skip
-    if should_execute_decision(questions, answers, decision_note):
-        request_obj = JobRequest(
-            config_path=CONFIG_PATH,
-            team_key=team,
-            agent_name=execution_agent,
-            trigger="decision",
-            task_input=build_decision_prompt(proposal_body, answers, decision_note),
-            trigger_context={
-                "decision_path": str(decision_path.resolve()),
-                "proposal_path": str(cpath.resolve()),
-            },
-        )
-        meta["execution_status"] = "pending"
-        meta["execution_job_id"] = request_obj.job_id
-
-        frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-        atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
-
-        try:
-            submit_job_request(request_obj)
-        except JobSubmissionError as error:
-            decision_path.unlink(missing_ok=True)
-            return render_proposal_detail(
-                request, g, team, slug,
-                selected_execution_agent=execution_agent,
-                submitted_answers=answers,
-                decision_note=decision_note,
-                decision_error=str(error),
-                status_code=400,
-            )
-    else:
-        meta["execution_status"] = "skipped"
-        meta["execution_summary"] = SKIP_EXECUTION_SUMMARY
-        frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-        atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n")
-
-    # Update proposal status to decided
-    update_frontmatter_field(cpath, "status", "decided")
-
-    return RedirectResponse(f"/{team}/decisions/{slug}", status_code=303)
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.get("/{team}/decisions", response_class=HTMLResponse)
@@ -2286,254 +2029,17 @@ async def decisions_list(request: Request, team: str):
 
 @app.get("/{team}/decisions/{slug}", response_class=HTMLResponse)
 async def decision_detail(request: Request, team: str, slug: str):
-    """View a single decision."""
-    g = get_team(team)
-    return render_decision_detail(request, g, team, slug)
-
-
-def render_decision_detail(request: Request, g: dict, team: str, slug: str,
-                            *, decision_error: str = "", status_code: int = 200):
-    """Build the decision_detail template response. Shared by the GET route and
-    the POST /retry route so validation/submission errors can re-render the
-    same page instead of returning a bare JSON error."""
-    path = Path(g["decisions"]) / f"{slug}.md"
-    if not path.exists():
-        raise HTTPException(404, "Decision not found")
-    raw = path.read_text()
-    meta, body = parse_frontmatter(raw)
-
-    # Resolve pipeline chain: observations → proposal → this decision
-    pipeline_observations = []
-    proposal_slug = (meta.get("proposal", "") or "").replace(".md", "")
-    pmeta = {}
-    if proposal_slug:
-        proposal_path = Path(g["proposals"]) / f"{proposal_slug}.md"
-        if proposal_path.exists():
-            pmeta, _ = parse_frontmatter(proposal_path.read_text())
-            for obs_file in pmeta.get("observations", []):
-                obs_slug = obs_file.replace(".md", "")
-                obs_path = Path(g["observations"]) / obs_file
-                if obs_path.exists():
-                    pipeline_observations.append({"slug": obs_slug, "filename": obs_file})
-
-    execution_status = meta.get("execution_status", "")
-    execution_summary = meta.get("execution_summary", "")
-    executed_by = meta.get("executed_by", "")
-    execution_log = meta.get("execution_log", "")
-    execution_job_id = meta.get("execution_job_id", "")
-    changed_files = meta.get("changed_files", []) or []
-    decision_note = meta.get("decision_note", "")
-    verification_status = meta.get("verification_status", "")
-    verified_by = meta.get("verified_by", "")
-    verified_at = meta.get("verified_at", "")
-    follow_up_observation = meta.get("follow_up_observation", "")
-
-    selected_execution_agent = (
-        meta.get("execution_agent")
-        or pmeta.get("execution_agent")
-        or ""
-    )
-
-    return templates.TemplateResponse(request, "decision_detail.html", {
-        "request": request,
-        **team_context(g),
-        "meta": meta,
-        "body_html": render_md(body),
-        "slug": slug,
-        "title": extract_display_title(body, slug),
-        "pipeline_observations": pipeline_observations,
-        "proposal_slug": proposal_slug,
-        "execution_status": execution_status,
-        "execution_summary": execution_summary,
-        "executed_by": executed_by,
-        "execution_log": execution_log,
-        "execution_job_id": execution_job_id,
-        "changed_files": changed_files,
-        "decision_note": decision_note,
-        "verification_status": verification_status,
-        "verified_by": verified_by,
-        "verified_at": verified_at,
-        "follow_up_observation": (follow_up_observation or "").replace(".md", ""),
-        "questions": pmeta.get("questions", []),
-        "answers": meta.get("answers", {}),
-        "execution_agents": execution_agent_options(g),
-        "selected_execution_agent": selected_execution_agent,
-        "decision_error": decision_error,
-    }, status_code=status_code)
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.post("/{team}/decisions/{slug}/retry", response_class=HTMLResponse)
 async def decision_retry(request: Request, team: str, slug: str):
-    """Retry execution of a failed decision by submitting a new durable job."""
-    g = get_team(team)
-    decision_path = Path(g["decisions"]) / f"{slug}.md"
-    if not decision_path.exists():
-        raise HTTPException(404, "Decision not found")
-
-    original_text = decision_path.read_text()
-    meta, body = parse_frontmatter(original_text)
-
-    # Only failed or cancelled decisions may be retried
-    current_status = meta.get("execution_status", "")
-    if current_status not in {"failed", "cancelled"}:
-        return render_decision_detail(
-            request, g, team, slug,
-            decision_error=f"Cannot retry a decision with status \u2018{current_status}\u2019. Only failed or cancelled decisions can be retried.",
-            status_code=400,
-        )
-
-    proposal_slug = (meta.get("proposal", "") or "").replace(".md", "")
-    proposal_path = Path(g["proposals"]) / f"{proposal_slug}.md"
-    if not proposal_slug or not proposal_path.exists():
-        raise HTTPException(400, "Decision has no linked proposal")
-    pmeta, proposal_body = parse_frontmatter(proposal_path.read_text())
-
-    default_agent = (
-        meta.get("execution_agent")
-        or pmeta.get("execution_agent", "")
-    )
-
-    form = await request.form()
-    execution_agent = form.get("execution_agent") or default_agent
-
-    if execution_agent not in execution_agent_options(g):
-        return render_decision_detail(
-            request, g, team, slug,
-            decision_error=f"Agent '{execution_agent}' does not support execution or is not writable.",
-            status_code=400,
-        )
-
-    request_obj = JobRequest(
-        config_path=CONFIG_PATH,
-        team_key=team,
-        agent_name=execution_agent,
-        trigger="decision_retry",
-        task_input=build_decision_prompt(proposal_body, meta.get("answers", {}), meta.get("decision_note", "")),
-        trigger_context={
-            "decision_path": str(decision_path.resolve()),
-            "proposal_path": str(proposal_path.resolve()),
-        },
-    )
-
-    previous_job_id = meta.get("execution_job_id") or ""
-    history = list(meta.get("execution_job_history") or [])
-    if previous_job_id:
-        history.append(previous_job_id)
-
-    updated_meta = dict(meta)
-    updated_meta.pop("execution_summary", None)
-    updated_meta.pop("changed_files", None)
-    updated_meta.update({
-        "execution_status": "pending",
-        "execution_agent": execution_agent,
-        "execution_job_id": request_obj.job_id,
-        "execution_job_history": history,
-    })
-
-    frontmatter = yaml.dump(updated_meta, default_flow_style=False, sort_keys=False).strip()
-    atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n\n{body}\n")
-
-    try:
-        submit_job_request(request_obj)
-    except JobSubmissionError as error:
-        atomic_write_text(decision_path, original_text)
-        return render_decision_detail(
-            request, g, team, slug,
-            decision_error=str(error),
-            status_code=400,
-        )
-
-    return RedirectResponse(f"/{team}/decisions/{slug}", status_code=303)
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.post("/{team}/decisions/{slug}/verify", response_class=HTMLResponse)
 async def decision_verify(request: Request, team: str, slug: str):
-    """Record whether an executed decision satisfied its originating proposal.
-
-    This is a thin, governance-only outcome state on the existing decision
-    record — Flowgency observes and governs the result, it does not execute. When
-    the outcome did not satisfy the intent, this opens a follow-up observation
-    (floated, linked back to the decision) so the loop stays connected.
-    """
-    g = get_team(team)
-    decision_path = Path(g["decisions"]) / f"{slug}.md"
-    if not decision_path.exists():
-        raise HTTPException(404, "Decision not found")
-
-    meta, body = parse_frontmatter(decision_path.read_text())
-
-    form = await request.form()
-    outcome = form.get("verification_status", "")
-    if outcome not in ("verified", "needs_follow_up"):
-        return render_decision_detail(
-            request, g, team, slug,
-            decision_error="Choose 'Verified' or 'Needs follow-up'.",
-            status_code=400,
-        )
-
-    flowgency_cfg = get_flowgency_config()
-    verifier = flowgency_cfg.get("decided_by", "admin")
-    now = clock_now().isoformat(timespec="seconds")
-
-    meta["verification_status"] = outcome
-    meta["verified_by"] = verifier
-    meta["verified_at"] = now
-
-    if outcome == "needs_follow_up":
-        follow_up_slug = _create_follow_up_observation(g, slug, meta, body)
-        meta["follow_up_observation"] = f"{follow_up_slug}.md"
-    else:
-        meta.pop("follow_up_observation", None)
-
-    frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-    atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n\n{body}\n")
-
-    if outcome == "needs_follow_up":
-        return RedirectResponse(
-            f"/{team}/observations/{meta['follow_up_observation'].replace('.md', '')}",
-            status_code=303,
-        )
-    return RedirectResponse(f"/{team}/decisions/{slug}", status_code=303)
-
-
-def _create_follow_up_observation(g: dict, decision_slug: str, meta: dict, body: str) -> str:
-    """Create a floated follow-up observation linked back to a decision whose
-    outcome did not satisfy its proposal. Returns the new observation slug."""
-    observations_dir = Path(g["observations"])
-    observations_dir.mkdir(parents=True, exist_ok=True)
-
-    stamp = clock_now().strftime("%Y%m%d-%H%M%S")
-    follow_up_slug = f"{decision_slug}-follow-up-{stamp}"
-
-    agent = (
-        meta.get("executed_by")
-        or meta.get("execution_agent")
-        or get_flowgency_config().get("decided_by", "admin")
-    )
-    proposal = meta.get("proposal", "")
-    obs_meta = {
-        "agent": agent,
-        "date": clock_now().isoformat(timespec="seconds"),
-        "category": "verification",
-        "status": "open",
-        "float": True,
-        "linked_observations": [],
-        "linked_proposal": proposal or None,
-        "follow_up_of_decision": f"{decision_slug}.md",
-    }
-    frontmatter = yaml.dump(obs_meta, default_flow_style=False, sort_keys=False).strip()
-    proposal_ref = f" (proposal `{proposal}`)" if proposal else ""
-    obs_body = (
-        f"# Follow-up needed: {decision_slug}\n\n"
-        f"The executed decision `{decision_slug}.md`{proposal_ref} did not satisfy "
-        "its originating proposal. Verification marked this outcome as needing "
-        "follow-up.\n\n"
-        "Describe what is still wrong or incomplete so it can be re-proposed and "
-        "re-dispatched.\n"
-    )
-    obs_path = observations_dir / f"{follow_up_slug}.md"
-    atomic_write_text(obs_path, f"---\n{frontmatter}\n---\n\n{obs_body}")
-    return follow_up_slug
+    raise HTTPException(status_code=410, detail="Retired pipeline routes are unavailable")
 
 
 @app.get("/{team}/logs", response_class=HTMLResponse)

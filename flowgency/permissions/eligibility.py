@@ -35,9 +35,14 @@ def grants_write_on(rules: Iterable[_Rule], workspace: Path | str) -> bool:
 
 def may_write_workspace(config, team_key: str, agent_name: str) -> bool:
     """Return True iff the agent's effective policy grants write on the team workspace root."""
-    from flowgency.configuration.effective import _merge_rules
+    from flowgency.configuration.effective import resolve_effective_policy
+    from flowgency.configuration.issues import ValidationFailed
 
     team = config.teams.get(team_key)
-    if team is None or agent_name not in team.agents:
+    if team is None:
         return False
-    return grants_write_on(_merge_rules(team, team.agents[agent_name]), team.workspace_path)
+    try:
+        policy = resolve_effective_policy(config, team_key, agent_name)
+    except (KeyError, ValidationFailed):
+        return False
+    return grants_write_on(policy.rules, team.workspace_path)

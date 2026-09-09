@@ -183,7 +183,7 @@ def validate_outbox(
 def writable_agent_names(config, team_key: str) -> frozenset[str]:
     """Configured instances in a team that may be trusted to execute."""
     from flowgency.integrations import get_integration
-    from flowgency.permissions.eligibility import may_execute_decisions
+    from flowgency.permissions.eligibility import may_write_workspace
 
     team = config.teams.get(team_key)
     if team is None:
@@ -191,7 +191,7 @@ def writable_agent_names(config, team_key: str) -> frozenset[str]:
 
     names: set[str] = set()
     for name, agent in team.agents.items():
-        if not may_execute_decisions(config, team_key, name):
+        if not may_write_workspace(config, team_key, name):
             continue
         try:
             integration = get_integration(agent.integration)
