@@ -147,6 +147,7 @@ test('save preserves the selected same-label new transition across reload', asyn
   await saveResponse;
 
   await expect(page).toHaveURL('/admin/workflow-library/blueprints/delivery');
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 
   const savedSelection = await page.evaluate(() => {
     const node = document.getElementById('workflow-editor-data');
@@ -283,6 +284,7 @@ test('state editing preserves order, color, initial selection, and recreated IDs
   await setColor(stateColors.nth(4), '#778899');
 
   await saveEditor(page);
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
   const secondSaved = await readEditorPayload(page);
   const recreatedBlocked = secondSaved.draft.states.find((row: { existing_state_id: string | null; name: string; color: string }) => row.name === 'Blocked');
 
