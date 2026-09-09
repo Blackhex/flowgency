@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
-import { assertNoConsoleErrors, installConsoleErrorGate } from './layout';
+import { assertFontFacesLoaded, assertNoConsoleErrors, installBasePageSetup } from './layout';
 
 const pages = [
   { name: 'Team Settings', path: '/admin/teams/newsletter/edit', identity: ['heading', 'Edit: Newsletter'] },
@@ -14,7 +14,7 @@ const pages = [
   { name: 'Agent Prompts', path: '/newsletter/agents/advisor/prompts', identity: ['tab', 'Prompts'] },
   { name: 'Agent Memory', path: '/newsletter/agents/advisor/memory', identity: ['tab', 'Memory'] },
   { name: 'Agent Activity', path: '/newsletter/agents/advisor/activity', identity: ['tab', 'Activity'] },
-  { name: 'Dashboard', path: '/newsletter/', identity: ['text', 'How the pipeline works'] },
+  { name: 'Dashboard', path: '/newsletter/', identity: ['text', 'Ticket workflows'] },
   { name: 'Agent Library', path: '/admin/agent-library', identity: ['heading', 'Agent Library'] },
   { name: 'Prompt Library', path: '/admin/agent-library/blueprints/advisor/prompts', identity: ['heading', 'Shared prompt source editor'] },
   { name: 'Workflow Library', path: '/admin/workflow-library', identity: ['heading', 'Workflow Library'] },
@@ -37,10 +37,7 @@ function identityLocator(page: Page, identity: (typeof pages)[number]['identity'
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
-  installConsoleErrorGate(page);
-  await page.addInitScript((theme) => {
-    if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
-  }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
+  await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
 });
 
 for (const { name, path, identity } of pages) {
@@ -52,6 +49,7 @@ for (const { name, path, identity } of pages) {
     if (identity[0] === 'tab') await expect(landmark).toHaveAttribute('aria-current', 'page');
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
     expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+    if (name === 'Dashboard') await assertFontFacesLoaded(page);
     await assertNoConsoleErrors(page);
   });
 }

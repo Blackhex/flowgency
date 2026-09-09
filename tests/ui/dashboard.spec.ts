@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
+import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
 
 // Absolute paths vary in length per checkout; pin them to one line so they cannot reflow the page.
 async function pinToSingleLine(locator: Locator) {
@@ -25,15 +25,12 @@ function dashboardScreenshotMasks(page: Page) {
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
-  installConsoleErrorGate(page);
-  await page.addInitScript((theme) => {
-    if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
-  }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
+  await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
 });
 
 test('dashboard reports selected group pipeline and durable job semantics', async ({ page }) => {
   await page.goto('/newsletter/');
-  await expect(page.getByText('2 agents')).toBeVisible();
+  await expect(page.getByText('4 agents')).toBeVisible();
   await expect(page.getByText('advisor', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('copilot')).toBeVisible();
   await expect(page.getByRole('link', { name: 'waiting for memory' })).toBeVisible();

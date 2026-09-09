@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { expect, type Page } from '@playwright/test';
 
 type LayoutIssue = {
@@ -7,27 +9,38 @@ type LayoutIssue = {
 };
 
 const pageErrors = new WeakMap<Page, string[]>();
+
+const FONT_DIR = resolve(__dirname, '../../node_modules');
+const FONT_BUFFERS: Record<string, Buffer> = {
+  '/test/dm-sans/normal.woff2': readFileSync(resolve(FONT_DIR, '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2')),
+  '/test/dm-sans/italic.woff2': readFileSync(resolve(FONT_DIR, '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-italic.woff2')),
+  '/test/jetbrains-mono/normal.woff2': readFileSync(resolve(FONT_DIR, '@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2')),
+};
+
 const deterministicFontStylesheet = `
 @font-face {
   font-family: 'DM Sans';
   font-style: normal;
-  font-weight: 300 700;
+  font-weight: 100 900;
   font-display: swap;
-  src: local('DM Sans');
+  src: url(https://fonts.gstatic.com/test/dm-sans/normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF;
 }
 @font-face {
   font-family: 'DM Sans';
   font-style: italic;
-  font-weight: 300 700;
+  font-weight: 100 900;
   font-display: swap;
-  src: local('DM Sans Italic'), local('DM Sans');
+  src: url(https://fonts.gstatic.com/test/dm-sans/italic.woff2) format('woff2');
+  unicode-range: U+0000-00FF;
 }
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
-  font-weight: 400 500;
+  font-weight: 100 800;
   font-display: swap;
-  src: local('JetBrains Mono');
+  src: url(https://fonts.gstatic.com/test/jetbrains-mono/normal.woff2) format('woff2');
+  unicode-range: U+0000-00FF;
 }
 `;
 
@@ -53,10 +66,13 @@ export async function installDeterministicFontResponses(page: Page): Promise<voi
     });
   });
   await page.route('https://fonts.gstatic.com/**', async (route) => {
-    await route.fulfill({
-      status: 204,
-      body: '',
-    });
+    const pathname = new URL(route.request().url()).pathname;
+    const buffer = FONT_BUFFERS[pathname];
+    if (buffer) {
+      await route.fulfill({ status: 200, contentType: 'font/woff2', body: buffer });
+    } else {
+      await route.fulfill({ status: 204, body: '' });
+    }
   });
 }
 
@@ -126,6 +142,21 @@ export async function assertNoLayoutIssues(page: Page): Promise<void> {
     return results;
   });
   expect(issues).toEqual([]);
+}
+
+export async function assertFontFacesLoaded(page: Page): Promise<void> {
+  const loaded = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const dmSans = await document.fonts.load('400 1em "DM Sans"');
+    const jbMono = await document.fonts.load('400 1em "JetBrains Mono"');
+    return [
+      { family: 'DM Sans', count: dmSans.length },
+      { family: 'JetBrains Mono', count: jbMono.length },
+    ];
+  });
+  for (const { family, count } of loaded) {
+    expect(count, `Expected loaded FontFace for "${family}"`).toBeGreaterThan(0);
+  }
 }
 
 export const expectLayoutIntegrity = assertNoLayoutIssues;

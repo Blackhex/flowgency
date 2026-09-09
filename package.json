@@ -7,6 +7,8 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@playwright/test": "^1.52.0",
     "lucide": "0.468.0"
   }
