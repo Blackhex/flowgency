@@ -1,0 +1,69 @@
+schema_version: 1
+id: research
+name: Research
+description: Structured research from open question to synthesized conclusion
+initial_state: open
+states:
+  - id: open
+    name: Open
+    color: '#a9b0bd'
+  - id: exploring
+    name: Exploring
+    color: '#7ab7d7'
+  - id: synthesizing
+    name: Synthesizing
+    color: '#ebc77c'
+  - id: closed
+    name: Closed
+    color: '#7ad7bf'
+fields:
+  - id: question
+    label: Research question
+    type: text
+  - id: findings
+    label: Findings
+    type: text
+  - id: conclusion
+    label: Conclusion
+    type: text
+transitions:
+  - id: start-exploration
+    name: Start exploration
+    from_state: open
+    to_state: exploring
+    inputs:
+      - field_id: question
+        required: true
+    outputs: []
+    preconditions: []
+    criteria: []
+  - id: begin-synthesis
+    name: Begin synthesis
+    from_state: exploring
+    to_state: synthesizing
+    inputs:
+      - field_id: findings
+        required: true
+    outputs: []
+    preconditions: []
+    criteria:
+      - id: sufficient-evidence
+        description: Enough evidence gathered to support synthesis
+  - id: close
+    name: Close
+    from_state: synthesizing
+    to_state: closed
+    inputs:
+      - field_id: conclusion
+        required: true
+    outputs: []
+    preconditions: []
+    criteria: []
+  - id: reopen
+    name: Reopen
+    from_state: synthesizing
+    to_state: exploring
+    inputs: []
+    outputs: []
+    preconditions: []
+    criteria: []

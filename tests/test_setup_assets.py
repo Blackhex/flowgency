@@ -59,3 +59,33 @@ def test_wheel_contains_every_canonical_setup_skill_file(tmp_path: Path):
         assert set(expected) <= names
         for name, content in expected.items():
             assert archive.read(name) == content
+
+
+def test_wheel_contains_shipped_workflow_examples(tmp_path: Path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--disable-pip-version-check",
+            "--no-deps",
+            "--wheel-dir",
+            str(tmp_path),
+            str(REPO_ROOT),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    wheels = list(tmp_path.glob("flowgency-*.whl"))
+    assert len(wheels) == 1
+
+    expected_paths = {
+        "flowgency/setup_assets/workflows/software-delivery/workflow.yaml",
+        "flowgency/setup_assets/workflows/research/workflow.yaml",
+    }
+    with ZipFile(wheels[0]) as archive:
+        names = set(archive.namelist())
+        assert expected_paths <= names

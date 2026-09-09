@@ -39,6 +39,7 @@ flowgency = ["templates/*.html", "static/*", "themes/*.yaml"]
 "flowgency.setup_assets" = [
     "copilot/.github/skills/flowgency-setup/*.md",
     "copilot/.github/skills/flowgency-setup/references/*.md",
+    "workflows/*/workflow.yaml",
 ]
 
 [tool.pytest.ini_options]

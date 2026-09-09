@@ -1,0 +1,74 @@
+schema_version: 1
+id: software-delivery
+name: Software delivery
+description: End-to-end delivery for verified software work
+initial_state: backlog
+states:
+  - id: backlog
+    name: Backlog
+    color: '#a9b0bd'
+  - id: in-progress
+    name: In progress
+    color: '#7ab7d7'
+  - id: review
+    name: Review
+    color: '#ebc77c'
+  - id: done
+    name: Done
+    color: '#7ad7bf'
+fields:
+  - id: notes
+    label: Notes
+    type: text
+  - id: review-notes
+    label: Review notes
+    type: text
+  - id: approved
+    label: Approved
+    type: boolean
+transitions:
+  - id: start
+    name: Start
+    from_state: backlog
+    to_state: in-progress
+    inputs: []
+    outputs: []
+    preconditions: []
+    criteria: []
+  - id: submit-review
+    name: Submit for review
+    from_state: in-progress
+    to_state: review
+    inputs:
+      - field_id: notes
+        required: false
+    outputs: []
+    preconditions: []
+    criteria:
+      - id: work-complete
+        description: Deliverable is complete and ready for review
+  - id: approve
+    name: Approve
+    from_state: review
+    to_state: done
+    inputs:
+      - field_id: approved
+        required: true
+      - field_id: review-notes
+        required: true
+    outputs: []
+    preconditions:
+      - field_id: approved
+        operator: equals
+        value: true
+    criteria: []
+  - id: return-to-progress
+    name: Return to in progress
+    from_state: review
+    to_state: in-progress
+    inputs:
+      - field_id: review-notes
+        required: true
+    outputs: []
+    preconditions: []
+    criteria: []
