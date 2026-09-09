@@ -2057,7 +2057,7 @@ def _run_reload_server(host: str, port: int) -> None:
         pass
 
 
-def run_server(host: str, port: int, reload: bool = False) -> None:
+def run_server(host: str, port: int, reload: bool = False, log_level: str | None = None) -> None:
     """Initialize Flowgency and run the web server."""
     if not CONFIG_PATH.exists():
         print(
@@ -2069,7 +2069,8 @@ def run_server(host: str, port: int, reload: bool = False) -> None:
         _run_reload_server(host, port)
         return
 
-    uvicorn.run(app, host=host, port=port)
+    kwargs = {} if log_level is None else {"log_level": log_level}
+    uvicorn.run(app, host=host, port=port, **kwargs)
 
 
 def main():

@@ -718,6 +718,8 @@ def main() -> int:
             "127.0.0.1",
             "--port",
             str(args.port),
+            "--log-level",
+            "warning",
         ]
         process = subprocess.Popen(command, cwd=ROOT, env=env)
         signal.signal(signal.SIGINT, stop)

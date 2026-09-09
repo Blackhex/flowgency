@@ -374,7 +374,7 @@ def cmd_validate(args: Namespace) -> int:
 
 def cmd_serve(args: Namespace) -> int:
     os.environ["FLOWGENCY_CONFIG"] = str(_config_path(args))
-    run_server(host=args.host, port=args.port, reload=args.reload)
+    run_server(host=args.host, port=args.port, reload=args.reload, log_level=args.log_level)
     return 0
 
 
@@ -837,6 +837,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8500)
     serve.add_argument("--host", default="0.0.0.0")
     serve.add_argument("--reload", action="store_true")
+    serve.add_argument("--log-level", default=None, dest="log_level",
+                       choices=["critical", "error", "warning", "info", "debug", "trace"])
     serve.set_defaults(handler=cmd_serve)
 
     status = subparsers.add_parser("status", help="Fleet overview across all teams")
