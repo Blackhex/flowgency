@@ -17,6 +17,7 @@
     is_present: 'Is present',
   };
   const uiStateKey = 'flowgency.workflow-editor.ui';
+  const pendingDraftKey = 'flowgency.workflow-editor.pending';
 
   let baseline = clone(initialState.baseline);
   let draft = clone(initialState.draft);
@@ -25,8 +26,8 @@
   let warning = typeof initialState.warning === 'string' ? initialState.warning : '';
   let activeTab = 'overview';
   let activeTransitionRef = null;
-  let pendingRequestId = 0;
-  let latestAppliedRequestId = 0;
+  let previewRequestId = 0;
+  let latestPreviewRequestId = 0;
   let previewTimer = 0;
   let menuState = null;
 
@@ -84,6 +85,10 @@
     return row.existing_transition_id || row.key;
   }
 
+  function criterionRef(row) {
+    return row.existing_criterion_id || row.key;
+  }
+
   function useRef(row) {
     return row.existing_field_id || row.draft_field_key;
   }
@@ -110,6 +115,33 @@
 
   function clearNode(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function readPendingDraft(pathname = window.location.pathname) {
+    try {
+      const raw = sessionStorage.getItem(pendingDraftKey);
+      if (!raw) return null;
+      const pending = JSON.parse(raw);
+      if (!pending || typeof pending !== 'object' || pending.path !== pathname || !pending.draft) return null;
+      sessionStorage.removeItem(pendingDraftKey);
+      return pending.draft;
+    } catch {
+      return null;
+    }
+  }
+
+  function persistPendingDraft(pathname, nextDraft) {
+    try {
+      sessionStorage.setItem(
+        pendingDraftKey,
+        JSON.stringify({
+          path: pathname,
+          draft: nextDraft,
+        }),
+      );
+    } catch {
+      // Ignore session storage failures.
+    }
   }
 
   function el(tag, attrs = {}, children = []) {
@@ -280,7 +312,6 @@
   }
 
   async function submit(url) {
-    const requestId = ++pendingRequestId;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -290,21 +321,110 @@
       body: new URLSearchParams({ payload: buildPayload() }),
       redirect: 'follow',
     });
-    if (response.redirected) {
-      if (requestId < latestAppliedRequestId) return { ignored: true, response, redirected: true };
-      latestAppliedRequestId = requestId;
-      return { ignored: false, response, redirected: true };
-    }
+    if (response.redirected) return { response, redirected: true };
     const data = await response.json();
-    if (requestId < latestAppliedRequestId) return { ignored: true, response, redirected: false, data };
-    latestAppliedRequestId = requestId;
-    return { ignored: false, response, redirected: false, data };
+    return { response, redirected: false, data };
+  }
+
+  async function readRedirectEditorState(response) {
+    try {
+      const html = await response.text();
+      if (!html) return null;
+      const documentNode = new DOMParser().parseFromString(html, 'text/html');
+      const payloadNode = documentNode.getElementById('workflow-editor-data');
+      if (!payloadNode || !payloadNode.textContent) return null;
+      return JSON.parse(payloadNode.textContent);
+    } catch {
+      return null;
+    }
+  }
+
+  function applyRedirectState(redirectedState, nextDraft = null) {
+    baseline = clone(redirectedState.baseline);
+    draft = clone(nextDraft || redirectedState.draft);
+    initialState.expected_revision = redirectedState.expected_revision;
+    initialState.expected_digest = redirectedState.expected_digest;
+    draftVersion = Number(redirectedState.draft_version || draftVersion);
+    if (typeof redirectedState.workflow_count === 'number') initialState.workflow_count = redirectedState.workflow_count;
+    initialNode.textContent = JSON.stringify({
+      ...redirectedState,
+      draft: clone(draft),
+    });
+  }
+
+  function rebaseSavedReferences(savedRows, redirectedRows, refForRow) {
+    const refs = new Map();
+    const limit = Math.min(savedRows.length, redirectedRows.length);
+    for (let index = 0; index < limit; index += 1) {
+      refs.set(refForRow(savedRows[index]), refForRow(redirectedRows[index]));
+    }
+    return refs;
+  }
+
+  function rebaseFieldUse(row, refs) {
+    const ref = useRef(row);
+    const nextRef = refs.get(ref);
+    if (!nextRef) return row;
+    return {
+      ...row,
+      existing_field_id: nextRef,
+      draft_field_key: null,
+    };
+  }
+
+  function rebaseTransitionDraft(savedDraft, currentDraft, redirectedDraft) {
+    const stateRefs = rebaseSavedReferences(savedDraft.states, redirectedDraft.states, stateRef);
+    const fieldRefs = rebaseSavedReferences(savedDraft.fields, redirectedDraft.fields, fieldRef);
+    const transitionRefs = rebaseSavedReferences(savedDraft.transitions, redirectedDraft.transitions, transitionRef);
+    const criterionRefs = new Map();
+    const transitionLimit = Math.min(savedDraft.transitions.length, redirectedDraft.transitions.length);
+    for (let index = 0; index < transitionLimit; index += 1) {
+      const savedTransition = savedDraft.transitions[index];
+      const redirectedTransition = redirectedDraft.transitions[index];
+      const limit = Math.min(savedTransition.criteria.length, redirectedTransition.criteria.length);
+      for (let criterionIndex = 0; criterionIndex < limit; criterionIndex += 1) {
+        criterionRefs.set(
+          criterionRef(savedTransition.criteria[criterionIndex]),
+          criterionRef(redirectedTransition.criteria[criterionIndex]),
+        );
+      }
+    }
+
+    return {
+      ...currentDraft,
+      states: currentDraft.states.map((row) => ({
+        ...row,
+        existing_state_id: stateRefs.get(stateRef(row)) || row.existing_state_id,
+      })),
+      fields: currentDraft.fields.map((row) => ({
+        ...row,
+        existing_field_id: fieldRefs.get(fieldRef(row)) || row.existing_field_id,
+      })),
+      transitions: currentDraft.transitions.map((row) => ({
+        ...row,
+        existing_transition_id: transitionRefs.get(transitionRef(row)) || row.existing_transition_id,
+        from_state_id: stateRefs.get(row.from_state_id) || row.from_state_id,
+        to_state_id: stateRefs.get(row.to_state_id) || row.to_state_id,
+        inputs: row.inputs.map((item) => rebaseFieldUse(item, fieldRefs)),
+        outputs: row.outputs.map((item) => rebaseFieldUse(item, fieldRefs)),
+        preconditions: row.preconditions.map((item) => rebaseFieldUse(item, fieldRefs)),
+        criteria: row.criteria.map((item) => ({
+          ...item,
+          existing_criterion_id: criterionRefs.get(criterionRef(item)) || item.existing_criterion_id,
+        })),
+      })),
+    };
   }
 
   async function runPreview() {
     if (!previewUrl) return;
+    const requestId = ++previewRequestId;
+    const draftSnapshot = clone(draft);
     const result = await submit(previewUrl);
-    if (result.ignored || result.redirected) return;
+    if (result.redirected) return;
+    if (requestId < latestPreviewRequestId) return;
+    if (!sameDraft(draft, draftSnapshot)) return;
+    latestPreviewRequestId = requestId;
     issues = Array.isArray(result.data.issues) ? result.data.issues : [];
     warning = result.response.ok ? '' : 'Correct the highlighted issues before saving.';
     if (typeof result.data.workflow_count === 'number') initialState.workflow_count = result.data.workflow_count;
@@ -317,11 +437,38 @@
     if (!saveUrl) return;
     clearTimeout(previewTimer);
     setStatus('Saving…', true);
+    const savedTransitionIndex = currentTransitionIndex();
+    const savedDraft = clone(draft);
     persistUiState();
     const result = await submit(saveUrl);
-    if (result.ignored) return;
     if (result.redirected) {
-      baseline = clone(draft);
+      const redirectedState = await readRedirectEditorState(result.response);
+      const redirectedTransitions = Array.isArray(redirectedState?.draft?.transitions)
+        ? redirectedState.draft.transitions
+        : [];
+      let nextDraft = null;
+      if (redirectedState && !sameDraft(draft, savedDraft)) {
+        nextDraft = rebaseTransitionDraft(savedDraft, draft, redirectedState.draft);
+      }
+      if (savedTransitionIndex >= 0 && redirectedTransitions[savedTransitionIndex]) {
+        activeTransitionRef = transitionRef(redirectedTransitions[savedTransitionIndex]);
+      } else if (!redirectedTransitions.length) {
+        activeTransitionRef = null;
+      }
+      const redirectUrl = new URL(result.response.url);
+      if (redirectedState && redirectUrl.pathname === window.location.pathname && redirectUrl.search === window.location.search) {
+        applyRedirectState(redirectedState, nextDraft);
+        issues = [];
+        warning = '';
+        showIssues(issues);
+        showWarning(warning);
+        setStatus(isDirty() ? 'Unsaved changes' : 'Saved', isDirty());
+        persistUiState();
+        render();
+        return;
+      }
+      if (nextDraft) persistPendingDraft(redirectUrl.pathname, nextDraft);
+      baseline = clone(nextDraft || draft);
       issues = [];
       warning = '';
       showIssues(issues);
@@ -917,6 +1064,8 @@
     }
   }
 
+  const pendingDraft = readPendingDraft();
+  if (pendingDraft) initialState.draft = pendingDraft;
   loadUiState();
   ensureActiveTransition();
   tabButtons.forEach((button) => {

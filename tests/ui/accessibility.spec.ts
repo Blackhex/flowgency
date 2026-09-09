@@ -55,3 +55,16 @@ for (const { name, path, identity } of pages) {
     await assertNoConsoleErrors(page);
   });
 }
+
+test('Workflow blueprint editor tabs have no WCAG A or AA violations', async ({ page }) => {
+  await page.goto('/admin/workflow-library/blueprints/delivery');
+  await expect(page.getByRole('heading', { name: 'Delivery', exact: true })).toBeVisible();
+
+  for (const name of ['Overview', 'States', 'Transitions']) {
+    await page.getByRole('tab', { name, exact: true }).click();
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+    expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+  }
+
+  await assertNoConsoleErrors(page);
+});

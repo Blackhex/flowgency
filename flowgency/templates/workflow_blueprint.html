@@ -1,58 +1,48 @@
 {% extends "base.html" %}
 {% block title %}Workflow blueprint editor — {{ flowgency_title }}{% endblock %}
-{% block content_container_class %}max-w-6xl 2xl:max-w-screen-xl 3xl:max-w-[1800px] mx-auto px-4 md:px-6 2xl:px-8 py-4 md:py-6{% endblock %}
+{% block content_container_class %}w-full max-w-none px-4 md:px-6 2xl:px-8 py-4 md:py-5{% endblock %}
 {% block content %}
 <style>@import url('/static/workflow-editor.css');</style>
-<div class="space-y-4">
-  <div class="flex items-start justify-between gap-4">
-    <div>
-      <p class="text-sm text-gray-500 dark:text-gray-400"><a href="/admin/workflow-library" class="text-indigo-600 hover:text-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200">Workflow Library</a></p>
-      <h1 class="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{{ editor.name }}</h1>
-      <p class="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">{% if create_mode %}Create a shared workflow blueprint with stable draft identities and structured transition rules.{% else %}Edit the shared workflow blueprint without exposing technical identifiers in the authoring surface.{% endif %}</p>
+<div data-workflow-editor-root>
+  <form class="workflow-editor-shell" data-editor-form data-preview-url="{% if create_mode %}/admin/workflow-library/blueprints/new/preview{% else %}/admin/workflow-library/blueprints/{{ editor.id }}/preview{% endif %}" data-save-url="{% if create_mode %}/admin/workflow-library/blueprints/new{% else %}/admin/workflow-library/blueprints/{{ editor.id }}{% endif %}">
+    <input type="hidden" name="payload" data-editor-payload>
+
+    <div class="wf-toolbar">
+      <div class="wf-toolbar-copy">
+        <p class="wf-toolbar-breadcrumb"><a href="/admin/workflow-library">Workflow Library</a></p>
+        <h1 class="wf-toolbar-title" data-editor-title>{{ editor.name }}</h1>
+      </div>
+      <div class="wf-toolbar-actions">
+        <span class="wf-status" data-editor-status aria-live="polite">Saved</span>
+        <button type="button" class="wf-btn" data-editor-revert disabled>
+          <i data-lucide="undo-2"></i>
+          <span>Revert</span>
+        </button>
+        <button type="button" class="wf-btn wf-btn-primary" data-editor-save disabled>
+          <i data-lucide="save"></i>
+          <span>Save</span>
+        </button>
+      </div>
     </div>
-  </div>
 
-  <div data-workflow-editor-root>
-    <form class="workflow-editor-shell" data-editor-form data-preview-url="{% if create_mode %}/admin/workflow-library/blueprints/new/preview{% else %}/admin/workflow-library/blueprints/{{ editor.id }}/preview{% endif %}" data-save-url="{% if create_mode %}/admin/workflow-library/blueprints/new{% else %}/admin/workflow-library/blueprints/{{ editor.id }}{% endif %}">
-      <input type="hidden" name="payload" data-editor-payload>
+    <nav class="wf-tabs" aria-label="Blueprint editor tabs" role="tablist">
+      <button type="button" class="workflow-editor-tab" role="tab" aria-selected="true" data-editor-tab="overview">Overview</button>
+      <button type="button" class="workflow-editor-tab" role="tab" aria-selected="false" data-editor-tab="states">States</button>
+      <button type="button" class="workflow-editor-tab" role="tab" aria-selected="false" data-editor-tab="transitions">Transitions</button>
+    </nav>
 
-      <div class="wf-toolbar">
-        <div class="wf-toolbar-copy">
-          <div class="wf-toolbar-title" data-editor-title>{{ editor.name }}</div>
-          <p class="wf-toolbar-subtitle">Exactly Overview, States, and Transitions. Technical identifiers stay in the payload, not the form.</p>
-        </div>
-        <div class="wf-toolbar-actions">
-          <span class="wf-status" data-editor-status aria-live="polite">Saved</span>
-          <button type="button" class="wf-btn" data-editor-revert disabled>
-            <i data-lucide="undo-2"></i>
-            <span>Revert</span>
-          </button>
-          <button type="button" class="wf-btn wf-btn-primary" data-editor-save disabled>
-            <i data-lucide="save"></i>
-            <span>Save</span>
-          </button>
-        </div>
+    <div class="wf-body">
+      <aside class="wf-transition-nav" data-editor-transition-nav hidden aria-label="Transitions"></aside>
+      <div class="wf-content">
+        <div class="workflow-editor-alert workflow-editor-warning" data-editor-warning {% if not warning %}hidden{% endif %}>{{ warning }}</div>
+        <div class="workflow-editor-alert" data-editor-issues {% if not issues %}hidden{% endif %}></div>
+        <div class="wf-mobile-transition" data-mobile-transition hidden></div>
+        <section class="wf-panel" data-editor-panel="overview"></section>
+        <section class="wf-panel" data-editor-panel="states" hidden></section>
+        <section class="wf-panel" data-editor-panel="transitions" hidden></section>
       </div>
-
-      <nav class="wf-tabs" aria-label="Blueprint editor tabs" role="tablist">
-        <button type="button" class="workflow-editor-tab" role="tab" aria-selected="true" data-editor-tab="overview">Overview</button>
-        <button type="button" class="workflow-editor-tab" role="tab" aria-selected="false" data-editor-tab="states">States</button>
-        <button type="button" class="workflow-editor-tab" role="tab" aria-selected="false" data-editor-tab="transitions">Transitions</button>
-      </nav>
-
-      <div class="wf-body">
-        <aside class="wf-transition-nav" data-editor-transition-nav hidden aria-label="Transitions"></aside>
-        <div class="wf-content">
-          <div class="workflow-editor-alert workflow-editor-warning" data-editor-warning {% if not warning %}hidden{% endif %}>{{ warning }}</div>
-          <div class="workflow-editor-alert" data-editor-issues {% if not issues %}hidden{% endif %}></div>
-          <div class="wf-mobile-transition" data-mobile-transition hidden></div>
-          <section class="wf-panel" data-editor-panel="overview"></section>
-          <section class="wf-panel" data-editor-panel="states" hidden></section>
-          <section class="wf-panel" data-editor-panel="transitions" hidden></section>
-        </div>
-      </div>
-    </form>
-  </div>
+    </div>
+  </form>
 </div>
 
 <script id="workflow-editor-data" type="application/json">{{ editor_state | tojson }}</script>
