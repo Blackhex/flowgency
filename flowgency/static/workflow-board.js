@@ -517,6 +517,12 @@
       if (expandLink && this.shouldInterceptLink(event, expandLink)) {
         event.preventDefault();
         await this.loadPage(expandLink.href, 'push', true);
+        return;
+      }
+      const closeLink = target.closest('.workflow-icon-link[aria-label="Close"]');
+      if (closeLink && this.shouldInterceptLink(event, closeLink)) {
+        event.preventDefault();
+        await this.closeTicket();
       }
     }
 

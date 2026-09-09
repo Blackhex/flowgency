@@ -50,6 +50,9 @@
       <a class="workflow-icon-link" aria-label="Expand" href="/{{ team }}/workflows/{{ active_workflow_id }}/tickets/{{ selected_ticket_id }}{% if board.query %}?query={{ board.query|urlencode }}{% if board.assignee %}&assignee={{ board.assignee|urlencode }}{% endif %}{% elif board.assignee %}?assignee={{ board.assignee|urlencode }}{% endif %}">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3H3v3M10 3h3v3M13 10v3h-3M6 13H3v-3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </a>
+      <a class="workflow-icon-link" aria-label="Close" href="/{{ team }}/workflows/{{ active_workflow_id }}{% if board.query %}?query={{ board.query|urlencode }}{% if board.assignee %}&assignee={{ board.assignee|urlencode }}{% endif %}{% elif board.assignee %}?assignee={{ board.assignee|urlencode }}{% endif %}">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5 11.5 11.5M11.5 4.5 4.5 11.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
       {% endif %}
     </div>
   </header>
@@ -82,7 +85,7 @@
     <div class="workflow-assignment-row">
       <select id="ticket-assignee" aria-label="Assigned agent" name="assignee" form="ticket-assignee-form">
         <option value="">Unassigned</option>
-        {% for agent in ["advisor", "builder", "researcher", "reviewer"] %}
+        {% for agent in team_agents %}
         <option value="{{ agent }}" {% if current_ticket.assignee == agent %}selected{% endif %}>{{ agent }}</option>
         {% endfor %}
       </select>

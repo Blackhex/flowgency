@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { assertNoLayoutIssues } from './layout';
+import { assertNoLayoutIssues, installBasePageSetup } from './layout';
 
 test('logs preserve readable output without active log markup', async ({ page }, testInfo) => {
+  await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
   const logs = path.resolve('tests/ui/.runtime/current/teams/newsletter/logs/2026-07-16');
   await mkdir(logs, { recursive: true });
   const unsafe = '<script>window.logExecuted=1</script><img src="/log-resource" onerror="window.logExecuted=1">';

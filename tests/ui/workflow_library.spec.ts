@@ -4,7 +4,7 @@ import path from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
-import { assertNoLayoutIssues, assertNoConsoleErrors, installConsoleErrorGate } from './layout';
+import { assertNoLayoutIssues, assertNoConsoleErrors, installBasePageSetup } from './layout';
 
 const runtimeRoot = path.resolve(__dirname, '.runtime', 'current');
 const configPath = path.join(runtimeRoot, 'config.yaml');
@@ -56,10 +56,7 @@ async function setColor(locator: Locator, value: string) {
 test.beforeEach(async ({ page, request }, testInfo) => {
   const reset = await request.post('/__ui/reset');
   expect(reset.status()).toBe(204);
-  installConsoleErrorGate(page);
-  await page.addInitScript((theme) => {
-    if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
-  }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
+  await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
 });
 
 test.afterEach(async ({ page, request }) => {

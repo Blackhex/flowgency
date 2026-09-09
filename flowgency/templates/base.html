@@ -356,39 +356,6 @@
 
         {% block sidebar_extra %}{% endblock %}
 
-        <!-- Pipeline: Observe > Propose > Decide -->
-        <div class="nav-section">Pipeline</div>
-
-        <a href="/{{ team }}/observations" class="nav-item {% if active == 'observations' %}active{% endif %}" title="Observations from your agents">
-          <span class="flex items-center gap-2">
-            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-            Observations
-          </span>
-          {% if nav_open_observations > 0 %}
-          <span class="nav-badge bg-amber-500/20 text-amber-300">{{ nav_open_observations }}</span>
-          {% endif %}
-        </a>
-
-        <a href="/{{ team }}/proposals" class="nav-item {% if active == 'proposals' %}active{% endif %}" title="Proposals waiting for your review">
-          <span class="flex items-center gap-2">
-            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-            Proposals
-          </span>
-          {% if nav_actionable_proposals > 0 %}
-          <span class="nav-badge bg-purple-500/20 text-purple-300">{{ nav_actionable_proposals }}</span>
-          {% endif %}
-        </a>
-
-        <a href="/{{ team }}/decisions" class="nav-item {% if active == 'decisions' %}active{% endif %}" title="Your approved, deferred, or rejected proposals">
-          <span class="flex items-center gap-2">
-            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            Decisions
-          </span>
-          {% if nav_running_decisions is defined and nav_running_decisions > 0 %}
-          <span class="nav-badge bg-blue-500/20 text-blue-400" title="{{ nav_running_decisions }} executing">{{ nav_running_decisions }}</span>
-          {% endif %}
-        </a>
-
         <!-- Workspace: Reference + config -->
         <div class="nav-section">Workspace</div>
 
@@ -403,6 +370,13 @@
           <span class="flex items-center gap-2">
             <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6m3 6V7m3 10v-4M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
             Jobs
+          </span>
+        </a>
+
+        <a href="/admin/workflow-library" class="nav-item">
+          <span class="flex items-center gap-2">
+            <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h10M7 12h4m-4 5h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm8 9 3-3m0 0-3-3m3 3H9"/></svg>
+            Workflow Library
           </span>
         </a>
 

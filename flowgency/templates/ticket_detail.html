@@ -28,8 +28,8 @@
       <label class="sr-only" for="workflow-assignee">All assignees</label>
       <select id="workflow-assignee" name="assignee" aria-label="All assignees">
         <option value="" {% if not board.assignee %}selected{% endif %}>All assignees</option>
-        <option value="unassigned">Unassigned</option>
-        {% for agent in ["advisor", "builder", "researcher", "reviewer"] %}
+        <option value="unassigned" {% if board.assignee == 'unassigned' %}selected{% endif %}>Unassigned</option>
+        {% for agent in team_agents %}
         <option value="{{ agent }}" {% if board.assignee == agent %}selected{% endif %}>{{ agent }}</option>
         {% endfor %}
       </select>

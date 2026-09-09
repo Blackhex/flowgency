@@ -1,7 +1,7 @@
 import { expect, test, type Locator } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
-import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
+import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
 
 // Absolute paths vary in length per checkout; pin them to one line so they cannot reflow the page.
 async function pinToSingleLine(locator: Locator) {
@@ -17,11 +17,8 @@ async function pinToSingleLine(locator: Locator) {
 const tabs = ['Profile', 'Blueprint', 'Runtime', 'Permissions', 'Routines', 'Prompts', 'Memory', 'Activity'];
 
 test.beforeEach(async ({ page }, testInfo) => {
-  installConsoleErrorGate(page);
   const dark = testInfo.project.name.endsWith('dark');
-  await page.addInitScript((theme) => {
-    if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
-  }, dark ? 'dark' : 'light');
+  await installBasePageSetup(page, dark ? 'dark' : 'light');
   await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; }' });
 });
 

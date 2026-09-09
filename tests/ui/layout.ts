@@ -7,6 +7,29 @@ type LayoutIssue = {
 };
 
 const pageErrors = new WeakMap<Page, string[]>();
+const deterministicFontStylesheet = `
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: local('DM Sans');
+}
+@font-face {
+  font-family: 'DM Sans';
+  font-style: italic;
+  font-weight: 300 700;
+  font-display: swap;
+  src: local('DM Sans Italic'), local('DM Sans');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: local('JetBrains Mono');
+}
+`;
 
 export function installConsoleErrorGate(page: Page): void {
   const errors: string[] = [];
@@ -26,7 +49,7 @@ export async function installDeterministicFontResponses(page: Page): Promise<voi
     await route.fulfill({
       status: 200,
       contentType: 'text/css; charset=utf-8',
-      body: '',
+      body: deterministicFontStylesheet,
     });
   });
   await page.route('https://fonts.gstatic.com/**', async (route) => {
@@ -35,6 +58,14 @@ export async function installDeterministicFontResponses(page: Page): Promise<voi
       body: '',
     });
   });
+}
+
+export async function installBasePageSetup(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  installConsoleErrorGate(page);
+  await installDeterministicFontResponses(page);
+  await page.addInitScript((initialTheme) => {
+    if (!localStorage.getItem('theme')) localStorage.setItem('theme', initialTheme);
+  }, theme);
 }
 
 export async function assertNoConsoleErrors(page: Page): Promise<void> {

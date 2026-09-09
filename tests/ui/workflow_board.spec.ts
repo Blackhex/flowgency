@@ -1,7 +1,9 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 import { expectBodyFocus, tabTo } from './keyboard';
-import { assertNoLayoutIssues, assertNoConsoleErrors, installConsoleErrorGate, installDeterministicFontResponses } from './layout';
+import { assertNoLayoutIssues, assertNoConsoleErrors, installBasePageSetup } from './layout';
 
 type DetailSnapshot = {
   ticket: {
@@ -11,6 +13,8 @@ type DetailSnapshot = {
   };
   fields: Array<{ id: string; value: unknown }>;
 };
+
+const runtimeConfigPath = path.join(__dirname, '.runtime', 'current', 'config.yaml');
 
 function operationId(label: string): string {
   return `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -27,17 +31,20 @@ async function detailSnapshot(request: APIRequestContext, ticketId = 'fixture-re
   return await response.json() as DetailSnapshot;
 }
 
+async function replaceRuntimeConfigAgent(fromName: string, toName: string): Promise<void> {
+  const config = await readFile(runtimeConfigPath, 'utf8');
+  const updated = config.replace(`- name: ${fromName}`, `- name: ${toName}`);
+  expect(updated).not.toBe(config);
+  await writeFile(runtimeConfigPath, updated, 'utf8');
+}
+
 async function waitForWorkflowController(page: Parameters<typeof test.beforeEach>[0]['page']): Promise<void> {
   await page.waitForFunction(() => Boolean((window as typeof window & { workflowBoardController?: unknown }).workflowBoardController));
 }
 
 test.beforeEach(async ({ page, request }, testInfo) => {
   await resetUiRuntime(request);
-  installConsoleErrorGate(page);
-  await installDeterministicFontResponses(page);
-  await page.addInitScript((theme) => {
-    if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
-  }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
+  await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
 });
 
 test.afterEach(async ({ page, request }) => {
@@ -60,6 +67,44 @@ test('board page exposes approved toolbar and inspector controls', async ({ page
   await expect(page.getByRole('button', { name: 'Assign', exact: true })).toHaveCount(0);
   await expect(page.locator('[draggable="true"]')).toHaveCount(0);
   await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+});
+
+test('team sidebar exposes workflow library and a live route', async ({ page }, testInfo) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  if (testInfo.project.name.startsWith('mobile')) {
+    await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
+  }
+
+  await expect(page.getByRole('link', { name: 'Workflow Library', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Observations', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Proposals', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Decisions', exact: true })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Workflow Library', exact: true }).click();
+  await expect(page).toHaveURL('/admin/workflow-library');
+  await expect(page.getByRole('heading', { name: 'Workflow Library' })).toBeVisible();
+  await assertNoConsoleErrors(page);
+});
+
+test('assignee controls use the configured team agent set in html and js', async ({ page }) => {
+  await replaceRuntimeConfigAgent('researcher', 'qa-lead');
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+
+  await expect(page.locator('#ticket-assignee option[value="qa-lead"]')).toHaveText('qa-lead');
+  await expect(page.locator('#ticket-assignee option[value="researcher"]')).toHaveCount(0);
+  await expect(page.locator('#workflow-assignee option[value="qa-lead"]')).toHaveText('qa-lead');
+  await expect(page.locator('#workflow-assignee option[value="researcher"]')).toHaveCount(0);
+
+  const saveResponse = page.waitForResponse((response) => response.url().includes('/tickets/fixture-review/assignee') && response.request().method() === 'POST');
+  await page.getByLabel('Assigned agent', { exact: true }).selectOption('qa-lead');
+  await saveResponse;
+
+  await expect(page.getByLabel('Assigned agent', { exact: true })).toHaveValue('qa-lead');
+  const saved = await detailSnapshot(page.request);
+  expect(saved.ticket.assignee).toBe('qa-lead');
   await assertNoConsoleErrors(page);
 });
 
@@ -386,6 +431,24 @@ test('board selection keeps ticket drafts across card navigation and browser his
 
   await expect(page).toHaveURL(/ticket=fixture-review/);
   await expect(page.locator('#field-acceptance-criteria')).toHaveValue('Unsaved local workflow note');
+});
+
+test('keyboard close clears the selection and reopening restores the ticket draft', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review&query=Validate&assignee=reviewer');
+
+  await page.getByLabel('Acceptance criteria', { exact: true }).fill('Unsaved close-and-reopen note');
+  const closeLink = await tabTo(page, { role: 'link', name: 'Close' });
+  await expect(closeLink).toBeFocused();
+  await closeLink.press('Enter');
+
+  await expect(page).toHaveURL(/\/newsletter\/workflows\/delivery\?query=Validate&assignee=reviewer$/);
+  await expect(page.getByLabel('Ticket details')).toHaveCount(0);
+
+  await page.getByRole('link', { name: /Validate stale transition handling/ }).click();
+
+  await expect(page).toHaveURL(/ticket=fixture-review/);
+  await expect(page.locator('#field-acceptance-criteria')).toHaveValue('Unsaved close-and-reopen note');
+  await assertNoConsoleErrors(page);
 });
 
 test('visible polling refresh updates server content without wiping a dirty draft', async ({ page, request }) => {

@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from '@
 import { rename } from 'node:fs/promises';
 import path from 'node:path';
 
-import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
+import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
 
 const pagePath = '/newsletter/agents/advisor/routines';
 const fixturePath = '/research/agents/permissions-editor/routines';
@@ -74,10 +74,7 @@ async function restoreRoutines(request: APIRequestContext, path: string, origina
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
-  installConsoleErrorGate(page);
-  await page.addInitScript((theme) => {
-    localStorage.setItem('theme', theme);
-  }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
+  await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
   await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; }' });
 });
 

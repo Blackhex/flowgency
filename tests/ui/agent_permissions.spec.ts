@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
-import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
+import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
 
 const advisorPath = '/newsletter/agents/advisor/permissions';
 const fixturePath = '/research/agents/permissions-editor/permissions';
@@ -102,10 +102,7 @@ async function restorePermissions(request: APIRequestContext, path: string, orig
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
-  installConsoleErrorGate(page);
-  await page.addInitScript((theme) => {
-    localStorage.setItem('theme', theme);
-  }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
+  await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
   await page.addStyleTag({ content: '* { animation: none !important; transition: none !important; caret-color: transparent !important; }' });
 });
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 import flowgency.jobs.submission as submission_module
 
@@ -15,6 +16,47 @@ def test_workflow_board_renders_html_page(workflow_web_env):
     assert "text/html" in response.headers["content-type"]
     assert "Search tickets" in response.text
     assert "New ticket" in response.text
+
+
+def test_workflow_board_sidebar_uses_workflow_library_links(workflow_web_env):
+    response = workflow_web_env.client.get(workflow_web_env.base_path)
+
+    assert response.status_code == 200
+    assert 'href="/admin/workflow-library"' in response.text
+    assert "Workflow Library" in response.text
+    assert "Pipeline" not in response.text
+    assert 'href="/newsletter/observations"' not in response.text
+    assert 'href="/newsletter/proposals"' not in response.text
+    assert 'href="/newsletter/decisions"' not in response.text
+
+
+def test_workflow_board_assignee_options_follow_configured_team_agents(workflow_web_env):
+    response = workflow_web_env.client.get(f"{workflow_web_env.base_path}?ticket=ticket-a")
+
+    assert response.status_code == 200
+    assert 'option value="builder"' in response.text
+    assert 'option value="advisor"' not in response.text
+    assert 'option value="reviewer"' not in response.text
+    assert 'option value="researcher"' not in response.text
+
+
+def test_workflow_board_close_link_returns_to_filtered_board(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="Close target")
+    env.service.assign(env.user, ticket.version, "builder", env.operation("assign-close"))
+
+    response = env.client.get(
+        f"{env.base_path}?ticket={ticket.ref.ticket_id}&query=Close&assignee=builder"
+    )
+
+    assert response.status_code == 200
+    match = re.search(r'aria-label="Close" href="([^"]+)"', response.text)
+    assert match is not None
+    href = match.group(1)
+    assert href.startswith(env.base_path)
+    assert "ticket=" not in href
+    assert "query=Close" in href
+    assert "assignee=builder" in href
 
 
 def test_board_snapshot_uses_definition_order_and_filtered_counts(workflow_web_env):

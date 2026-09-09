@@ -5,7 +5,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
-import { assertNoConsoleErrors, assertNoLayoutIssues, installConsoleErrorGate } from './layout';
+import { assertNoConsoleErrors, assertNoLayoutIssues, installBasePageSetup } from './layout';
 
 const runtimeRoot = path.resolve(__dirname, '.runtime', 'current');
 const configPath = path.join(runtimeRoot, 'config.yaml');
@@ -49,10 +49,7 @@ async function expectNoAxeViolations(page: Page): Promise<void> {
 
 test.beforeEach(async ({ page, request }, testInfo) => {
   await resetUiRuntime(request);
-  installConsoleErrorGate(page);
-  await page.addInitScript((theme) => {
-    if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
-  }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
+  await installBasePageSetup(page, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
 });
 
 test.afterEach(async ({ page, request }) => {
