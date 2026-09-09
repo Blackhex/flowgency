@@ -306,6 +306,13 @@ test('check storage distinguishes unavailable from empty and create follows sele
   await expect(page.getByRole('link', { name: 'Open blueprint', exact: true })).toHaveAttribute('href', '/admin/workflow-library/blueprints/research-workflow');
   await page.getByLabel('Name', { exact: true }).fill('Investigation');
   await fillStorageRoot(page, path.join(path.dirname(originalRoot), 'investigation-root'));
+  // Screenshot of the filled create form before submission
+  await assertNoLayoutIssues(page);
+  if (testInfo.project.name.startsWith('mobile')) {
+    await expect(page).toHaveScreenshot('workflow-create-mobile.png', { fullPage: true });
+  } else {
+    await expect(page).toHaveScreenshot('workflow-create.png', { fullPage: true });
+  }
 
   const saveCreated = page.waitForResponse((response) => response.url().includes('/newsletter/workflows/new') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Create workflow', exact: true }).click();
@@ -314,12 +321,6 @@ test('check storage distinguishes unavailable from empty and create follows sele
   await expect(page).toHaveURL(/\/newsletter\/workflows\/wf-[0-9a-f]{32}\/settings$/);
   await expect(page.getByRole('heading', { name: 'Investigation settings', exact: true })).toBeVisible();
   await expect(page.getByText('Investigation', { exact: true }).first()).toBeVisible();
-  await assertNoLayoutIssues(page);
-  if (testInfo.project.name.startsWith('mobile')) {
-    await expect(page).toHaveScreenshot('workflow-create-mobile.png', { fullPage: true });
-  } else {
-    await expect(page).toHaveScreenshot('workflow-create.png', { fullPage: true });
-  }
   await assertNoConsoleErrors(page);
 });
 
@@ -336,6 +337,11 @@ test('validation errors keep the submitted draft visible on desktop and mobile',
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
   await expect(page.getByLabel('Storage root', { exact: true })).toHaveValue('');
   await expect(page.locator('#workflow-storage-health')).toHaveText('Invalid settings');
+  // Heading uses canonical saved name, not blank submitted name
+  await expect(page.locator('h1')).toContainText('Delivery settings');
+  // Error message must not expose raw Pydantic model internals
+  await expect(page.getByRole('alert')).not.toContainText('input_value');
+  await expect(page.getByRole('alert')).not.toContainText('input_url');
   await assertNoLayoutIssues(page);
   if (testInfo.project.name.startsWith('mobile')) {
     await expect(page).toHaveScreenshot('workflow-storage-error-mobile.png', { fullPage: true });

@@ -210,3 +210,73 @@ def test_repeated_create_with_same_name_gets_distinct_server_ids(workflow_web_en
 
     assert created_ids[0] != created_ids[1]
     assert all(created_id.startswith("wf-") for created_id in created_ids)
+
+
+def test_blank_name_edit_error_is_concise_and_excludes_model_internals(workflow_web_env):
+    env = workflow_web_env
+    before = env.store.load().config.teams[env.team_id].workflows[env.workflow_id]
+
+    response = env.client.post(
+        f"/{env.team_id}/workflows/{env.workflow_id}/settings",
+        data={
+            "workflow_id": env.workflow_id,
+            "name": "",
+            "blueprint": before.blueprint,
+            "integration": before.integration,
+            "integration_config.root": str(env.root_a),
+            "expected_revision": env.store.load().revision,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert "Workflow name is required." in response.text
+    assert "input_value" not in response.text
+    assert "input_url" not in response.text
+    # workflow_id must not appear as exception text (it may appear in hidden fields)
+    assert response.text.count("input_value") == 0
+
+
+def test_blank_name_edit_error_preserves_canonical_heading(workflow_web_env):
+    env = workflow_web_env
+    before = env.store.load().config.teams[env.team_id].workflows[env.workflow_id]
+
+    response = env.client.post(
+        f"/{env.team_id}/workflows/{env.workflow_id}/settings",
+        data={
+            "workflow_id": env.workflow_id,
+            "name": "",
+            "blueprint": before.blueprint,
+            "integration": before.integration,
+            "integration_config.root": str(env.root_a),
+            "expected_revision": env.store.load().revision,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    # Title tag and h1 use the canonical saved name, not the blank submitted name
+    assert f"<title>{before.name} settings" in response.text
+    assert "<title> settings" not in response.text
+
+
+def test_check_storage_invalid_message_excludes_model_internals(workflow_web_env):
+    env = workflow_web_env
+
+    response = env.client.post(
+        f"/{env.team_id}/workflows/{env.workflow_id}/settings/check-storage",
+        data={
+            "name": "",
+            "blueprint": "",
+            "integration": "",
+            "integration_config.root": "",
+            "expected_revision": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["status"] == "invalid"
+    assert "input_value" not in body["detail"]
+    assert "input_url" not in body["detail"]

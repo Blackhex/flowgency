@@ -79,6 +79,21 @@ def _issue_dicts(exc: ValidationFailed) -> list[dict[str, str]]:
     ]
 
 
+def _form_error_message(exc: ValidationError | ValueError) -> str:
+    """Extract a concise user-facing message from a form parse exception."""
+    if isinstance(exc, ValidationError):
+        parts = []
+        for e in exc.errors(include_input=False, include_url=False):
+            msg = e.get("msg", "")
+            # Strip Pydantic's "Value error, " type prefix
+            if msg.startswith("Value error, "):
+                msg = msg[len("Value error, "):]
+            if msg:
+                parts.append(msg)
+        return " ".join(parts) if parts else "Invalid settings."
+    return str(exc)
+
+
 def _settings_form_payload(form: WorkflowSettingsForm) -> dict[str, str]:
     return {
         "name": form.name,
@@ -163,7 +178,7 @@ def _form_context(
             "workflow_settings_saved_form": saved_form or form,
             "workflow_settings_issues": issues or [],
             "workflow_settings_warning": warning,
-            "workflow_settings_title": "New workflow" if create_mode else f"{form.name} settings",
+            "workflow_settings_title": "New workflow" if create_mode else f"{(saved_form or form).name} settings",
             "workflow_settings_save_label": "Create workflow" if create_mode else "Save",
             "workflow_settings_save_action": f"/{team_id}/workflows/new" if create_mode else f"/{team_id}/workflows/{workflow_id}/settings",
             "workflow_settings_check_action": f"/{team_id}/workflows/{workflow_id}/settings/check-storage",
@@ -310,8 +325,8 @@ async def workflow_create_save(
                 expected_revision=snapshot.revision,
             ),
             create_mode=True,
-            warning=str(exc),
-            health=_invalid_health_payload(str(exc)),
+            warning=_form_error_message(exc),
+            health=_invalid_health_payload(_form_error_message(exc)),
             status_code=422,
         )
     configuration = _require_workflow_configuration(services)
@@ -417,8 +432,8 @@ async def workflow_settings_save(
             form=current,
             saved_form=_existing_form(snapshot, team, workflow),
             create_mode=False,
-            warning=str(exc),
-            health=_invalid_health_payload(str(exc)),
+            warning=_form_error_message(exc),
+            health=_invalid_health_payload(_form_error_message(exc)),
             status_code=422,
         )
     configuration = _require_workflow_configuration(services)
@@ -489,7 +504,7 @@ async def workflow_settings_check_storage(
             {
                 "status": "invalid",
                 "label": "Invalid settings",
-                "detail": str(exc),
+                "detail": _form_error_message(exc),
                 "ticket_count": 0,
                 "issues": [],
             },
