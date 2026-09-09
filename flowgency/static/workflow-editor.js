@@ -28,6 +28,7 @@
   let activeTransitionRef = null;
   let previewRequestId = 0;
   let latestPreviewRequestId = 0;
+  let previewCommitToken = 0;
   let previewTimer = 0;
   let menuState = null;
 
@@ -419,9 +420,11 @@
   async function runPreview() {
     if (!previewUrl) return;
     const requestId = ++previewRequestId;
+    const commitToken = previewCommitToken;
     const draftSnapshot = clone(draft);
     const result = await submit(previewUrl);
     if (result.redirected) return;
+    if (commitToken !== previewCommitToken) return;
     if (requestId < latestPreviewRequestId) return;
     if (!sameDraft(draft, draftSnapshot)) return;
     latestPreviewRequestId = requestId;
@@ -458,6 +461,7 @@
       const redirectUrl = new URL(result.response.url);
       if (redirectedState && redirectUrl.pathname === window.location.pathname && redirectUrl.search === window.location.search) {
         applyRedirectState(redirectedState, nextDraft);
+        previewCommitToken += 1;
         issues = [];
         warning = '';
         showIssues(issues);
@@ -468,6 +472,7 @@
         return;
       }
       if (nextDraft) persistPendingDraft(redirectUrl.pathname, nextDraft);
+      previewCommitToken += 1;
       baseline = clone(nextDraft || draft);
       issues = [];
       warning = '';
@@ -487,6 +492,7 @@
 
   function revertDraft() {
     draft = clone(baseline);
+    previewCommitToken += 1;
     issues = [];
     warning = '';
     menuState = null;
