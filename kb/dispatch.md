@@ -74,7 +74,9 @@ recovery does not push subsequent occurrences later.
 ## Job queue
 
 `flowgency.jobs.pool` caps the number of concurrently running workers across the
-whole installation. The default is 4; the minimum is 1.
+whole installation. The default is 4; the minimum is 1. Ticket runs submitted with
+`flowgency ticket run` are durable jobs too and drain through this same pool
+alongside routine jobs; taking another ticket during a run does not submit a new job.
 
 When a job is submitted and the pool has a free slot it launches immediately.
 When the pool is full the job waits in the `queued` status until a slot opens.

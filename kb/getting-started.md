@@ -33,11 +33,11 @@ A team owns a project workspace, runtime defaults, dispatch limits, workspaces, 
 
 ### Routines, jobs, and memory
 
-A routine selects one saved prompt, schedule, optional arguments, and optional semantic memory. Routine and decision submissions create durable jobs. The roster manual launcher can run saved prompts or one-off tasks. Memory uses selectors such as `scope: routine`, `scope: agent`, or `scope: channel`; Memory Channels define named cross-instance memory.
+A routine selects one saved prompt, schedule, optional arguments, and optional semantic memory. Routine submissions, ticket runs, and decision submissions create durable jobs. The roster manual launcher can run saved prompts or one-off tasks. Memory uses selectors such as `scope: routine`, `scope: agent`, or `scope: channel`; Memory Channels define named cross-instance memory.
 
-### Pipeline
+### Ticket workflows
 
-Flowgency links observations to proposals, human decisions, durable execution jobs, and verification. Proposal execution requires an explicit instance whose integration supports execution and whose runtime permissions grant write access.
+Work is tracked as tickets that move through a configurable workflow. A reusable blueprint in `flowgency.workflow_library` defines states, a field catalog, and transitions; each transition declares required inputs and optional agent criteria. A team attaches named workflow instances that bind a blueprint to a Local ticket storage root. Agents discover open tickets, claim one, and advance it by executing a transition through the live ticket tools, supplying required field values and a per-criterion assessment. Only agents move tickets between states; assignment is persistent ownership and sign-off is optional. Read-only agents can transition tickets without workspace write access. Inspect boards and tickets from the CLI with `flowgency workflows`, `flowgency tickets`, and `flowgency ticket show|create|assign|unassign|run`.
 
 ## Development reload
 
@@ -51,6 +51,7 @@ Reload watches application code, templates, static assets, themes, and control-p
 
 - Read [Configuration](configuration.md) for the current config schema.
 - Read [Directory Structure](directory-structure.md) before choosing global paths.
+- Read [Data Formats](data-formats.md) for the ticket workflow contract.
 - Use [Flowgency Setup Skill](setup-skill.md) to propose blueprints and explicit instances.
 - Use [Dispatch and Routines](dispatch.md) to install the singleton scheduler.
 

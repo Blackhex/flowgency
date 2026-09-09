@@ -1,167 +1,157 @@
 # Data Formats
 
-Flowgency is a read/write dashboard for managing AI agents. Agents write observations, proposals, decisions, and logs under the Flowgency-owned team root (`teams/<team-id>/`) as markdown files with YAML frontmatter. Flowgency reads those files and presents them in the UI. When decisions are made, Flowgency dispatches agents to act on the answers via their configured integration. `workspace_path` is the execution workspace and source repository; `path` is the Flowgency-owned team root. The team root is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`.
+Flowgency tracks work as tickets moving through configurable ticket workflows. A reusable blueprint defines the states, fields, and transitions; a team attaches named workflow instances that bind a blueprint to a Local ticket storage root. Agents advance tickets through the live ticket tools, not by writing Markdown records into a workspace. `workspace_path` is the execution workspace and source repository; `path` is the Flowgency-owned team root, which holds `locks/` and `logs/` and is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`. Ticket records live under the workflow instance's Local storage root, keyed by the workflow binding.
 
-## Observation Format
+## Workflow Blueprint Format
 
-```yaml
----
-agent: researcher
-date: 2025-01-15T10:30:00
-category: data-quality
-status: open
-float: false
-linked_observations: []
-linked_proposal: ~
-ttl_days: 14
----
-
-Found inconsistency in the source dataset — three entries have duplicate IDs
-but different content. This may affect downstream analysis.
-```
-
-### Observation Fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `agent` | yes | Source agent name |
-| `date` | yes | ISO 8601 datetime |
-| `category` | no | Domain category for filtering |
-| `status` | yes | `open`, `connected`, `dismissed`, `archived` |
-| `float` | no | `true` promotes to "Floated Signals" in the inbox |
-| `linked_observations` | no | List of related observation filenames |
-| `linked_proposal` | no | Filename of the proposal this observation led to |
-| `ttl_days` | no | Days before auto-archive (see TTL below) |
-
-## Proposal Format
+A blueprint is one validated `workflow.yaml` under `flowgency.workflow_library/<blueprint-id>/`. It deserializes into an immutable `WorkflowDefinition` — the states, a top-level `fields` catalog, and transitions that reference the catalog. The current source is validated on every read; there is no persisted last-good definition and no native-file conversion. One invalid blueprint never erases the rest of the listing, and an invalid definition blocks only the transitions it affects.
 
 ```yaml
----
-origin_agent: researcher
-date: 2025-01-15
-status: proposed
-observations: [duplicate-ids-found.md, data-drift-detected.md]
-feedback_requested: []
-feedback_received: []
-ttl_days: 30
-execution_agent: builder
-questions:
-  - id: approach
-    type: choice
-    prompt: "Which deduplication strategy?"
-    options:
-      - label: "Pre-processing pass"
-      - label: "Real-time dedup at ingest"
-    multi: false
-    required: true
-  - id: approve
+schema_version: 1
+id: software-delivery
+name: Software delivery
+description: End-to-end delivery for verified software work
+initial_state: backlog
+states:
+  - id: backlog
+    name: Backlog
+    color: '#a9b0bd'
+  - id: in-progress
+    name: In progress
+    color: '#7ab7d7'
+  - id: review
+    name: Review
+    color: '#ebc77c'
+  - id: done
+    name: Done
+    color: '#7ad7bf'
+fields:
+  - id: review-notes
+    label: Review notes
+    type: text
+  - id: approved
+    label: Approved
     type: boolean
-    prompt: "Proceed with implementing this?"
-    required: true
----
-
-Recommend implementing a deduplication pass before the analysis pipeline runs.
-Two related observations suggest this is a systemic issue, not a one-off.
+transitions:
+  - id: approve
+    name: Approve
+    from_state: review
+    to_state: done
+    inputs:
+      - field_id: approved
+        required: true
+      - field_id: review-notes
+        required: true
+    outputs: []
+    preconditions:
+      - field_id: approved
+        operator: equals
+        value: true
+    criteria:
+      - id: work-complete
+        description: Deliverable is complete and ready for review
 ```
 
-### Proposal Fields
+### Definition Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `origin_agent` | yes | Agent that proposed this |
-| `date` | yes | ISO 8601 date |
-| `status` | yes | `investigating`, `feedback`, `proposed`, `decided`, `archived` |
-| `observations` | no | List of source observation filenames |
-| `feedback_requested` | no | Agents asked for input |
-| `feedback_received` | no | Agents that responded |
-| `ttl_days` | no | Days before auto-archive |
-| `questions` | yes | List of typed questions (see below) |
-| `execution_agent` | yes | Agent that should implement decisions on this proposal. Must be an agent whose integration supports execution and whose runtime permissions grant write access. Omitting this field, or naming an agent that is unavailable, non-executable, or lacks write permission, blocks the decide form and POST until corrected. |
+| `schema_version` | yes | Must be `1` |
+| `id` | yes | Stable blueprint slug; must equal the directory name |
+| `name` | yes | Display label; label equality alone does not establish identity |
+| `description` | yes | Human-readable summary |
+| `initial_state` | yes | State id a new ticket starts in; must be a declared state |
+| `states` | yes | Declared states (see below) |
+| `fields` | yes | The field catalog owning all field ids, labels, and types |
+| `transitions` | yes | Declared transitions (see below) |
 
-### Question Types
+Identifiers (`id`) are stable technical keys; labels (`name`, `label`) are mutable display text. IDs are generated for user-created definitions rather than typed by hand; changing a label never changes identity. Shipped reusable blueprint IDs are stable and can be referenced by configured instances.
 
-Each question has an `id`, `type`, and `prompt`. The three types:
+### State Fields
 
-| Type | Extra Fields | Answer Format | Notes |
-|------|-------------|---------------|-------|
-| `boolean` | `required` (bool, default true) | `approved` or `declined` | `deferred` and `rejected` are not valid answer values |
-| `choice` | `options` (list of `{label}` or bare strings), `multi` (bool), `required` (bool, default true) | Selected label string, or list if multi | `options` is mandatory |
-| `free-response` or `text` | `required` (bool, default true) | Free text string | Both type names are accepted |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | Stable state id |
+| `name` | yes | Display name |
+| `color` | yes | `#rrggbb` hex colour |
 
-## Decision Format
+### Field Catalog
 
-Decisions are created when you answer a proposal's questions:
+Each entry declares an `id`, a `label`, and a `type`. The types are `text`, `number`, `boolean`, and `artifact`. Transitions reference catalog entries by id through a `FieldUse` (`field_id`, `required`) rather than duplicating field definitions, so a field's label or type is defined in exactly one place.
+
+### Transition Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | Stable transition id |
+| `name` | yes | Display name |
+| `from_state` | yes | Source state id |
+| `to_state` | yes | Destination state id |
+| `inputs` | yes | `FieldUse` list an agent may or must supply |
+| `outputs` | yes | `FieldUse` list the transition records |
+| `preconditions` | yes | Field checks that must hold before the transition |
+| `criteria` | yes | Agent criteria requiring a qualitative assessment |
+
+A `Precondition` names an input `field_id`, an `operator` (`equals`, `not_equals`, or `is_present`), and a comparison `value` for the equality operators. Its `field_id` must be declared as an input of the same transition. An `AgentCriterion` has an `id` and a `description`; there is no separate `evidence_required` flag. When a transition carries criteria, the agent must submit a `CriterionAssessment` (`criterion_id`, `satisfied`, non-blank `reasoning`, and `supporting_fields`) for each one. Required inputs and each criterion assessment are enforced; only an accepted transition changes ticket state.
+
+## Artifact References
+
+An `artifact` field holds an immutable `ArtifactRef`, either `{kind: id, value: ...}` (no path separators) or `{kind: url, value: https://...}` (HTTPS host, no embedded credentials). Recorded artifacts are immutable.
+
+
+## Ticket Records
+
+A `TicketRecord` is the operational record for one ticket. It carries no blueprint pin: its `state_id` and `field_values` are interpreted against the current board context, so an external edit to the blueprint is reflected the next time the ticket is read. A record also tracks its `title`, `assignee`, and monotonically increasing `revision`.
+
+There is one ownership concept: assignment. Assigning a ticket sets its `assignee` to an instance's stable `name`; assignment is persistent ownership, not an expiring lease, and there is no second per-ticket claim. Only agents move tickets between states. Sign-off is optional and is not a completion rule. One agent run may work several tickets, and taking another ticket does not create a new durable job.
+
+Every agent mutation carries a `TicketVersion` (`ref`, `revision`, `workflow_digest`, `context_digest`) so a stale write is rejected. A `TicketRef` (`binding_id`, `team_id`, `workflow_id`, `ticket_id`) locates a ticket within its binding. A `TicketOperation` carries a unique `operation_id` and a canonical request digest; a committed operation persists a receipt, so a replay returns the original `TicketMutationResult` (`replayed: true`) instead of applying twice. The ticket operation is atomic; the external project it describes is not.
+
+## Workflow Bindings and Storage
+
+A `WorkflowBinding` is the configured selection for one team workflow: `team_id`, `workflow_id`, `blueprint_id`, a `StorageBinding`, and a `context_digest` over the relevant configuration. Display-name edits are excluded from that digest. A `StorageBinding` names the storage `integration`, its canonical validated `config`, the `team_id`, the `workflow_id`, and a computed `binding_id`.
+
+Flowgency ships the Local storage provider only. A Local instance names a filesystem `root`:
 
 ```yaml
----
-proposal: deduplication-pass.md
-decided_by: admin
-date: 2025-01-16
-answers:
-  approach: "Pre-processing pass"
-  approve: approved
-execution_status: complete
-execution_summary: Added deduplication pass to the pre-processing pipeline. 3 duplicate entries resolved.
-execution_agent: builder
-decision_note: Prioritise the pre-processing approach for simplicity.
----
+workflows:
+  delivery:
+    name: Delivery
+    blueprint: software-delivery
+    integration: local
+    integration_config:
+      root: C:/Flowgency/tickets
 ```
 
-### Decision Fields
+An unavailable or unreadable storage root is not an empty ticket set — it is surfaced as an issue rather than silently showing zero tickets. Switching a workflow's storage does not transfer, rewrite, or delete existing tickets or history in either root, and the prior binding's data is cleaned up on its own terms; no existing ticket or history is transferred.
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `proposal` | yes | Linked proposal filename |
-| `decided_by` | yes | Who made the decision |
-| `date` | yes | ISO 8601 date |
-| `answers` | yes | Dict of question id → answer value |
-| `execution_status` | no | `pending`, `running`, `complete`, `failed`, `skipped` |
-| `execution_summary` | no | Agent's report of what it did |
-| `execution_agent` | no | Agent selected to implement this decision. Must have write permission via runtime permissions. Set when the decision is created or retried; no origin-agent fallback. |
-| `execution_job_id` | no | ID of the current (or most recent) durable job submitted for this decision |
-| `execution_job_history` | no | IDs of prior jobs superseded by retries, oldest first |
-| `decision_note` | no | Free-text context or guidance for the executing agent |
+## Durable Jobs
 
-### Execution Intent and `execution_status: skipped`
+`flowgency ticket run` submits a durable job for an assigned ticket. The job is the unit that runs an agent against the ticket; it drains through the shared job pool alongside routine jobs. Assignment and transitions are recorded on the ticket itself, not on the job.
 
-Flowgency validates the executor and evaluates execution intent before creating a decision:
+## Decision Execution
 
-| Condition | Result |
-|-----------|--------|
-| `execution_agent` is missing, invalid, non-executable, or non-writable | Decide form and POST are blocked until corrected — no decision is created |
-| Questionnaire has no `boolean` questions | `pending` (job submitted after validation) |
-| At least one `boolean` answer is `approved` | `pending` (job submitted) |
-| All `boolean` answers are `declined` AND no substantive non-boolean input (non-whitespace choice selection, open-ended answer, or decision note) | `skipped` (no job submitted) |
-| All `boolean` answers are `declined` AND at least one substantive non-boolean input is present | `pending` (job submitted) |
+The human decision-execution path remains alongside ticket workflows: a decision names an `execution_agent` that implements it. Flowgency validates the executor before a decision is created. A missing, invalid, non-executable, or non-writable `execution_agent` blocks the decide form and POST; the form stays blocked until corrected and no decision is created. It does not silently create a skipped decision. When the executor is valid, a durable job is submitted with an immutable snapshot of the request embedded in the prompt.
 
-`skipped` is a terminal status — no job is submitted and no retry is offered unless the
-decision is re-opened. The executor dropdown on the decide form lists only agents
-whose integration supports execution and whose runtime permissions grant write
-access; agents without these do not appear.
+Execution intent still decides whether a job runs. A questionnaire with no `boolean` questions executes after validation. When at least one `boolean` answer is `approved`, or when all `boolean` answers are `declined` but a substantive non-boolean input is present (a non-whitespace choice selection, an open-ended answer, or a decision note), the decision executes. Only when all `boolean` answers are `declined` with no substantive input is execution `skipped`.
 
-### Execution
+## CLI
 
-When you answer a proposal's questions, you select which agent implements the decision
-from the executor dropdown (only agents with write permission are listed).
-Flowgency validates the executor and evaluates execution intent before creating the
-decision — see the table above. When a decision executes, Flowgency submits a durable job
-for the executor with an immutable snapshot of the proposal body and your answers
-embedded in the prompt — the agent never needs to re-read the proposal or decision
-files. Failed executions can be retried from the decision detail page; retrying keeps
-the prior `execution_job_id` in `execution_job_history` and lets you change the
-executing agent.
+Inspect and mutate tickets from the CLI:
 
-## TTL Enforcement
+```text
+flowgency workflows --team <team>
+flowgency tickets --team <team> --workflow <workflow> [--state <id>] [--assignee <name>]
+flowgency ticket show <ticket-id> --workflow <workflow> --team <team>
+flowgency ticket create --workflow <workflow> --title <title> [--description <text>]
+flowgency ticket assign <ticket-id> --workflow <workflow> --agent <name>
+flowgency ticket unassign <ticket-id> --workflow <workflow>
+flowgency ticket run <ticket-id> --workflow <workflow>
+```
 
-Observations and proposals with a `ttl_days` field are automatically archived when `date + ttl_days` passes. Items already in terminal states (`archived`, `dismissed`, `decided`) are not affected. TTL is checked on each page load.
+`workflows` and `tickets` are read-only board views. `ticket run` queues a durable job for an assigned ticket. Read commands do not change config, cache, memory, or ticket storage.
 
-## Pipeline Relationships
+## Lifecycle
 
-Flowgency tracks the full chain across the pipeline:
+Flowgency records each ticket's path through its workflow: creation, assignment changes, and every accepted transition with the field inputs and criterion assessments supplied. Label equality alone does not establish identity — the stable `id` does. Because a `TicketRecord` holds no blueprint pin, the board renders each ticket against the current definition; a missing or invalid transition is surfaced as an issue on the board rather than silently dropped, and only the affected transitions are blocked.
 
-- An **observation** can link to a proposal via `linked_proposal`
-- A **proposal** links back to its source observations via `observations`
-- A **decision** links to its proposal via `proposal`
-- A missing, invalid, or non-writable `execution_agent` blocks the decide form and POST until corrected; execution is `skipped` only when all `boolean` answers are `declined` with no substantive non-boolean input (choice selection, open-ended answer, or decision note)
-
-The UI renders these as clickable pipeline banners on each detail page, showing the full path from observation to action to execution.

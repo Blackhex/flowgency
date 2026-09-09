@@ -25,6 +25,14 @@ The other integrations do not enforce path rules. They declare `unrestricted` on
 
 `flowgency/integrations/integrations.yaml` controls which Python plugins are loadable. It is plugin discovery metadata, not team, instance, routine, identity, or memory configuration.
 
+## Ticket tools
+
+Agents report work through live Flowgency ticket tools, not by writing Markdown records into the workspace. The tools let an agent list configured workflows, inspect a ticket's current state, required transition inputs, and agent criteria, claim an unassigned ticket, and execute a transition by supplying required field values and a per-criterion assessment. Only an accepted transition changes ticket state.
+
+Ticket transport is currently supplied by the `copilot` integration only. Other integrations fail closed for ticket operations: they cannot execute ticket tools, so a workflow bound to an unsupported integration produces no ticket transport for its agents. A team with no configured workflows still runs; memory-only routines succeed when no ticket reporting is required.
+
+The ticket tools are scoped and do not widen runtime authority. They grant no workspace write, no `gitAuth`, no `ghAuth`, and no `shell` access. A read-only agent can inspect and transition tickets through the tools while still being unable to write the workspace, because ticket state lives in Flowgency-owned storage reached over a loopback tool endpoint, not through the filesystem policy. Anything an agent may write to the filesystem is still limited to the generated launch-view outbox and memory zones described above.
+
 ## Superseded layouts
 
 Integration auto-detection, sidecar parsing, and directory-coupled runtime hints are not part of the current runtime. Native files under projected runtime layouts are generated output and never become control-plane authority.

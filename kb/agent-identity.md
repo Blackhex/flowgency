@@ -25,6 +25,8 @@ An instance belongs to exactly one team. Its config record owns stable `name`, `
 
 The Agents page lists team-owned instances. Agent Detail provides `Profile/Blueprint/Runtime/Routines/Memory/Activity`; Profile patches config identity with an expected revision and never edits blueprint source. Identity is display name, title, and emoji. Agent Library edits reusable source separately.
 
+Ticket assignment binds a ticket to an instance by its stable `name`, not its display identity. Assignment is persistent ownership: changing an instance's display name, title, or emoji leaves its ticket assignments untouched. Only agents move tickets between workflow states; sign-off is optional.
+
 ## Superseded layouts
 
 Native identity sidecars and adjacent metadata files are not read by runtime. Identity belongs in explicit instance records.
