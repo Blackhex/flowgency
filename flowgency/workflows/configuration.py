@@ -347,15 +347,30 @@ class WorkflowConfigurationService:
         or an existing ticket the candidate cannot interpret leaves config bytes,
         old tickets, and destination data untouched. A rebind is not a transfer –
         existing tickets under the previous storage are simply hidden by the new
-        selection. The candidate config is validated without committing, an
-        initial local root is prepared before its namespace is inspected, then a
-        single revision-checked config write publishes the change. An ordinary
-        rebind creates no destination directory.
+        selection. The candidate config is validated without committing. Local
+        storage roots are prepared only when a new binding selection is created or
+        chosen; a display-name-only save keeps the binding untouched and does not
+        depend on the current storage remaining readable.
         """
         lock_blueprints = self._locked_blueprints(team_id, workflow_id, patch, create)
         with workflow_operation(
             self.store, (team_id,), lock_blueprints, expected_revision=expected_revision
         ) as snapshot:
+            current_workflow = None
+            if not create:
+                current_workflow = snapshot.config.teams[team_id].workflows[workflow_id]
+            selection_changed = create or current_workflow is None or (
+                current_workflow.blueprint != patch.blueprint
+                or current_workflow.integration != patch.integration
+                or _normalized_provider_config(
+                    current_workflow.integration,
+                    current_workflow.integration_config,
+                )
+                != _normalized_provider_config(
+                    patch.integration,
+                    patch.integration_config,
+                )
+            )
             library = self.library_for(snapshot)
             source = library.inspect(patch.blueprint)
             candidate = WorkflowDefinition.model_validate(source.definition.model_dump())
@@ -370,15 +385,26 @@ class WorkflowConfigurationService:
             destination = resolve_workflow_binding(
                 candidate_snapshot, team_id, workflow_id
             ).storage
-            if create and destination.integration == "local":
-                prepare_writable_directory(
-                    Path(destination.config["root"]),
-                    label="workflow storage root",
-                )
-            require_compatible(candidate, self._destination_records(destination))
+            if selection_changed:
+                destination_root = Path(destination.config["root"])
+                if create and destination.integration == "local" and not destination_root.exists():
+                    destination_records: tuple[TicketRecord, ...] = ()
+                else:
+                    destination_records = self._destination_records(destination)
+                require_compatible(candidate, destination_records)
+            else:
+                try:
+                    require_compatible(candidate, self._destination_records(destination))
+                except ValidationFailed:
+                    pass
             if library.inspect(patch.blueprint).digest != source.digest:
                 raise ConfigConflictError(
                     "Blueprint source changed; reload before saving"
+                )
+            if selection_changed and destination.integration == "local":
+                prepare_writable_directory(
+                    Path(destination.config["root"]),
+                    label="workflow storage root",
                 )
             return patch_workflow_instance(
                 self.store,

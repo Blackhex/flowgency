@@ -527,6 +527,10 @@ def _safe_remove_runtime(runtime: Path) -> None:
 def _reset_runtime_state(runtime: Path) -> None:
     raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
     config = _replace_runtime(raw, runtime)
+    (runtime / "config.yaml").write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
 
     _clear_directory(runtime / "workflow-library")
     _clear_directory(runtime / "tickets")

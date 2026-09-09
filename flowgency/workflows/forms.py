@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, StrictStr
-
-from pathlib import Path
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, StrictStr, model_validator
 
 from flowgency.workflows.library import WorkflowSnapshot
 from flowgency.workflows.editing import new_definition
+from flowgency.workflows.configuration import WorkflowInstancePatch
 from flowgency.workflows.models import (
     AgentCriterion,
     FieldDefinition,
@@ -19,6 +20,7 @@ from flowgency.workflows.models import (
     TransitionDefinition,
     WorkflowDefinition,
 )
+from flowgency.tickets.storages.registry import validate_storage_config
 
 DraftScalar = StrictBool | StrictInt | StrictFloat | StrictStr | None
 
@@ -95,6 +97,60 @@ class WorkflowEditorDraft(BaseModel):
     states: tuple[DraftState, ...]
     fields: tuple[DraftField, ...]
     transitions: tuple[DraftTransition, ...]
+
+
+class WorkflowSettingsForm(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    workflow_id: StrictStr | None = None
+    name: StrictStr
+    blueprint: StrictStr
+    integration: StrictStr
+    integration_config: dict[str, object]
+    expected_revision: StrictStr
+
+    @classmethod
+    def from_form_data(cls, form: Mapping[str, object]) -> "WorkflowSettingsForm":
+        workflow_id = str(form.get("workflow_id", "")).strip() or None
+        return cls.model_validate(
+            {
+                "workflow_id": workflow_id,
+                "name": str(form.get("name", "")).strip(),
+                "blueprint": str(form.get("blueprint", "")).strip(),
+                "integration": str(form.get("integration", "")).strip(),
+                "integration_config": {
+                    "root": str(form.get("integration_config.root", "")).strip(),
+                },
+                "expected_revision": str(form.get("expected_revision", "")).strip(),
+            }
+        )
+
+    @property
+    def storage_root(self) -> str:
+        return str(self.integration_config.get("root", ""))
+
+    @model_validator(mode="after")
+    def _validate_values(self) -> "WorkflowSettingsForm":
+        if not self.name:
+            raise ValueError("Workflow name is required.")
+        if not self.blueprint:
+            raise ValueError("Blueprint is required.")
+        if not self.integration:
+            raise ValueError("Integration is required.")
+        if not self.expected_revision:
+            raise ValueError("Expected revision is required.")
+        errors = validate_storage_config(self.integration, self.integration_config)
+        if errors:
+            raise ValueError(errors[0])
+        return self
+
+    def to_patch(self) -> WorkflowInstancePatch:
+        return WorkflowInstancePatch(
+            name=self.name,
+            blueprint=self.blueprint,
+            integration=self.integration,
+            integration_config={"root": self.storage_root},
+        )
 
 
 def new_editor_snapshot(name: str = "New workflow") -> WorkflowSnapshot:

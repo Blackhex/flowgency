@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}{{ workflow_settings_title }} - {{ flowgency_title }}{% endblock %}
+{% block content_container_class %}px-0 py-0{% endblock %}
+{% block sidebar_extra %}
+{% if workflow_nav %}
+<div class="nav-section flex items-center justify-between gap-2">
+  <span>Workflows</span>
+  <a href="/{{ team }}/workflows/new" aria-label="New workflow" class="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-white/10 hover:text-white">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14M5 12h14"/></svg>
+  </a>
+</div>
+{% for workflow in workflow_nav %}
+<a href="/{{ team }}/workflows/{{ workflow.id }}" class="nav-item {% if workflow.id == active_workflow_id %}active{% endif %}">
+  <span class="flex items-center gap-2">
+    <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    {{ workflow.name }}
+  </span>
+  <span class="nav-badge bg-white/10 text-gray-400">{{ workflow.count }}</span>
+</a>
+{% endfor %}
+{% endif %}
+{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-4xl px-4 py-4 md:px-6 md:py-6" data-workflow-settings-root>
+  <div class="mb-4 flex items-center justify-between gap-3 border-b border-gray-200 pb-3 dark:border-gray-700">
+    <div class="flex items-center gap-3">
+      {% if workflow_settings_back_href %}
+      <a href="{{ workflow_settings_back_href }}" aria-label="Back to board" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      </a>
+      {% endif %}
+      <h1 class="text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ workflow_settings_title }}</h1>
+    </div>
+    <button type="submit" form="workflow-settings-form" class="inline-flex items-center gap-2 rounded-lg bg-flowgency-700 px-4 py-2 text-sm font-medium text-white hover:bg-flowgency-800">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      {{ workflow_settings_save_label }}
+    </button>
+  </div>
+
+  {% if workflow_settings_warning or workflow_settings_issues %}
+  <div class="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200" role="alert">
+    {% if workflow_settings_warning %}<p class="font-medium">{{ workflow_settings_warning }}</p>{% endif %}
+    {% if workflow_settings_issues %}
+    <ul class="mt-2 list-disc pl-5">
+      {% for issue in workflow_settings_issues %}
+      <li>{{ issue.message }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <form id="workflow-settings-form" method="post" action="{{ workflow_settings_save_action }}" class="space-y-8">
+    <input type="hidden" name="workflow_id" value="{{ workflow_settings_id }}">
+    <input type="hidden" name="expected_revision" value="{{ workflow_settings_form.expected_revision }}">
+
+    <section class="border-b border-gray-200 pb-6 dark:border-gray-700">
+      <h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Workflow</h2>
+      <div class="grid gap-4 md:grid-cols-2">
+        <label class="block" for="workflow-name">
+          <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Name</span>
+          <input id="workflow-name" name="name" type="text" value="{{ workflow_settings_form.name }}" maxlength="120" autocomplete="off" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-flowgency-600 focus:outline-none dark:border-gray-600 dark:bg-gray-900">
+        </label>
+        <div>
+          <label for="workflow-blueprint" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Blueprint</label>
+          <div class="flex items-center gap-2">
+            <select id="workflow-blueprint" name="blueprint" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-flowgency-600 focus:outline-none dark:border-gray-600 dark:bg-gray-900">
+              {% for blueprint in workflow_settings_blueprints %}
+              <option value="{{ blueprint.id }}" {% if blueprint.id == workflow_settings_form.blueprint %}selected{% endif %}>{{ blueprint.name }}</option>
+              {% endfor %}
+            </select>
+            <a id="workflow-blueprint-link" href="{{ workflow_settings_blueprint_href }}" aria-label="Open blueprint" class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 3h7v7m0-7L10 14m-4 0H3v7h7v-3"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Ticket storage</h2>
+      <div class="grid gap-4 md:grid-cols-2">
+        <label class="block" for="workflow-integration">
+          <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Integration</span>
+          <select id="workflow-integration" name="integration" aria-label="Integration" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-flowgency-600 focus:outline-none dark:border-gray-600 dark:bg-gray-900">
+            <option value="local" {% if workflow_settings_form.integration == 'local' %}selected{% endif %}>Local</option>
+          </select>
+        </label>
+      </div>
+      <label class="mt-4 block" for="workflow-storage-root">
+        <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Storage root</span>
+        <input id="workflow-storage-root" name="integration_config.root" type="text" value="{{ workflow_settings_form.storage_root }}" spellcheck="false" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-flowgency-600 focus:outline-none dark:border-gray-600 dark:bg-gray-900">
+      </label>
+      <div class="mt-4 flex items-center gap-3">
+        <div id="workflow-storage-health" aria-live="polite" class="text-sm text-gray-600 dark:text-gray-300">Not checked</div>
+        <button id="workflow-check-storage" type="button" class="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800">Check storage</button>
+      </div>
+    </section>
+  </form>
+</section>
+<script id="workflow-settings-initial" type="application/json">{{ {
+  "mode": settings_mode,
+  "checkUrl": workflow_settings_check_action,
+  "blueprintHrefBase": "/admin/workflow-library/blueprints/",
+} | tojson }}</script>
+{% endblock %}
+{% block page_scripts %}
+<script src="/static/workflow-settings.js"></script>
+{% endblock %}

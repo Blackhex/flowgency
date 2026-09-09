@@ -29,7 +29,6 @@ from .store import (
     latest_terminal_job,
 )
 from .submission import JobSubmissionError, submit_job_request
-from .tickets import CleanupResult, TicketJobCoordinator
 
 
 def reconcile_jobs(teams: dict, *, memory_store_root):
@@ -54,6 +53,17 @@ def queue_snapshot(config, *, memory_store):
     from .queue import queue_snapshot as _queue_snapshot
 
     return _queue_snapshot(config, memory_store=memory_store)
+
+
+def __getattr__(name):
+    if name in {"CleanupResult", "TicketJobCoordinator"}:
+        from .tickets import CleanupResult, TicketJobCoordinator
+
+        return {
+            "CleanupResult": CleanupResult,
+            "TicketJobCoordinator": TicketJobCoordinator,
+        }[name]
+    raise AttributeError(name)
 
 
 __all__ = [

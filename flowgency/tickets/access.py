@@ -6,6 +6,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -21,7 +22,9 @@ from flowgency.tickets.models import (
     TicketAccessGrant,
     TicketRef,
 )
-from flowgency.workflows.configuration import WorkflowBinding
+
+if TYPE_CHECKING:
+    from flowgency.workflows.configuration import WorkflowBinding
 
 
 def _token_hash(token: str) -> str:

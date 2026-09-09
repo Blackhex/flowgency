@@ -685,6 +685,69 @@ class WorkflowWebTestEnv(WorkflowTestEnv):
     client: TestClient | None = None
     base_path: str = "/newsletter/workflows/board-a"
 
+    def save_settings(
+        self,
+        *,
+        root: Path | None = None,
+        blueprint: str | None = None,
+        name: str | None = None,
+        expected_revision: str | None = None,
+    ):
+        snapshot = self.store.load()
+        workflow = snapshot.config.teams[self.team_id].workflows[self.workflow_id]
+        return self.client.post(
+            f"/{self.team_id}/workflows/{self.workflow_id}/settings",
+            data={
+                "name": name if name is not None else workflow.name,
+                "blueprint": blueprint if blueprint is not None else workflow.blueprint,
+                "integration": workflow.integration,
+                "integration_config.root": str(
+                    root if root is not None else workflow.integration_config["root"]
+                ),
+                "expected_revision": (
+                    expected_revision if expected_revision is not None else snapshot.revision
+                ),
+            },
+            follow_redirects=False,
+        )
+
+    def check_storage(
+        self,
+        *,
+        workflow_id: str | None = None,
+        root: Path | None = None,
+        blueprint: str | None = None,
+        name: str | None = None,
+    ):
+        snapshot = self.store.load()
+        current_id = workflow_id or self.workflow_id
+        workflow = snapshot.config.teams[self.team_id].workflows.get(current_id)
+        current_name = name
+        current_blueprint = blueprint
+        current_root = root
+        if workflow is not None:
+            current_name = current_name if current_name is not None else workflow.name
+            current_blueprint = (
+                current_blueprint if current_blueprint is not None else workflow.blueprint
+            )
+            current_root = (
+                current_root
+                if current_root is not None
+                else Path(str(workflow.integration_config["root"]))
+            )
+        return self.client.post(
+            f"/{self.team_id}/workflows/{current_id}/settings/check-storage",
+            data={
+                "workflow_id": current_id,
+                "name": current_name if current_name is not None else "Draft workflow",
+                "blueprint": current_blueprint if current_blueprint is not None else self.blueprint_id,
+                "integration": "local",
+                "integration_config.root": str(current_root) if current_root is not None else "",
+                "expected_revision": snapshot.revision,
+            },
+            follow_redirects=False,
+        )
+
 
 def make_ticket_job_environment(tmp_path: Path, raw_config: dict, monkeypatch) -> TicketJobTestEnv:
     env = make_workflow_environment(tmp_path, raw_config)
