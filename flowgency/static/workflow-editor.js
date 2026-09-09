@@ -110,6 +110,29 @@
     return draft.fields.map((row) => ({ value: fieldRef(row), label: row.label || 'Untitled field', type: row.type }));
   }
 
+  function inputFieldOptions(transition, currentRule = null) {
+    const seenRefs = new Set();
+    const options = [];
+    transition.inputs.forEach((row) => {
+      const ref = useRef(row);
+      if (!ref || seenRefs.has(ref)) return;
+      const field = fieldByRef(ref);
+      if (!field) return;
+      seenRefs.add(ref);
+      options.push({ value: ref, label: field.label || 'Untitled field', type: field.type });
+    });
+    const currentRef = currentRule ? useRef(currentRule) : null;
+    if (currentRef && !seenRefs.has(currentRef)) {
+      const field = fieldByRef(currentRef);
+      options.push({
+        value: currentRef,
+        label: `${field?.label || 'Unknown field'} (not an input)`,
+        type: field?.type || 'text',
+      });
+    }
+    return options;
+  }
+
   function stateOptions() {
     return draft.states.map((row) => ({ value: stateRef(row), label: row.name || 'Untitled state' }));
   }
@@ -592,14 +615,14 @@
   function addPrecondition() {
     const transition = currentTransition();
     if (!transition) return;
-    const firstField = draft.fields[0] || ensureField();
+    const firstField = inputFieldOptions(transition)[0] || null;
     const row = {
       existing_field_id: null,
       draft_field_key: null,
       operator: 'equals',
       value: '',
     };
-    setRuleField(row, fieldRef(firstField));
+    if (firstField) setRuleField(row, firstField.value);
     transition.preconditions.push(row);
     refreshAfterChange();
   }
@@ -984,7 +1007,7 @@
       const fieldLabelNode = el('label', { class: 'wf-field' });
       fieldLabelNode.append(el('span', { class: 'wf-label', text: 'Field' }));
       const fieldSelect = el('select', { class: 'wf-select', 'aria-label': `Precondition input ${position + 1}` });
-      appendOptions(fieldSelect, fieldOptions(), useRef(row));
+      appendOptions(fieldSelect, inputFieldOptions(transition, row), useRef(row));
       bindSelect(fieldSelect, () => useRef(row), (value) => {
         setRuleField(row, value);
       });

@@ -584,6 +584,32 @@ def test_save_route_preserves_submitted_draft_when_source_is_malformed(
     assert body["issues"][0]["code"] == "source-unavailable"
 
 
+def test_save_route_rejects_precondition_on_output_only_field(workflow_web_env):
+    env = workflow_web_env
+    source = env.library.inspect("delivery")
+    payload = {
+        "expected_revision": env.store.load().revision,
+        "expected_digest": source.digest,
+        "draft_version": 11,
+        "draft": editor_payload(source),
+    }
+    payload["draft"]["transitions"][0]["preconditions"][0]["existing_field_id"] = "summary"
+    payload["draft"]["transitions"][0]["preconditions"][0]["value"] = "approved"
+    before = source.source_path.read_text(encoding="utf-8")
+
+    response = env.client.post(
+        "/admin/workflow-library/blueprints/delivery",
+        data={"payload": json.dumps(payload)},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["draft_version"] == 11
+    assert body["draft"]["transitions"][0]["preconditions"][0]["existing_field_id"] == "summary"
+    assert source.source_path.read_text(encoding="utf-8") == before
+
+
 def test_save_route_uses_current_workflow_library_root(workflow_web_env, tmp_path):
     env = workflow_web_env
     from flowgency.configuration.patches import patch_flowgency_settings

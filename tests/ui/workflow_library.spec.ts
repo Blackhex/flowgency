@@ -635,6 +635,9 @@ test('reused fields stay linked across transitions and preconditions', async ({ 
   await page.getByLabel('New field type').selectOption('text');
   await page.getByRole('button', { name: 'Create and add', exact: true }).click();
 
+  await page.getByLabel('Add input').click();
+  await page.getByRole('button', { name: 'Shared note (Text)', exact: true }).click();
+
   await page.getByLabel('Add precondition').click();
   await page.getByLabel('Precondition input 1').selectOption({ label: 'Shared note' });
   await page.getByLabel('Precondition value 1').fill('ready');
@@ -671,10 +674,51 @@ test('reused fields stay linked across transitions and preconditions', async ({ 
   const sharedField = savedPayload.draft.fields.find((row: { label: string }) => row.label === 'Shared review note');
 
   expect(sharedField?.existing_field_id).toBeTruthy();
+  expect(completeReview?.inputs[1]?.existing_field_id).toBe(sharedField.existing_field_id);
   expect(completeReview?.outputs[2]?.existing_field_id).toBe(sharedField.existing_field_id);
   expect(completeReview?.preconditions[0]?.existing_field_id).toBe(sharedField.existing_field_id);
   expect(requestChanges?.inputs[0]?.existing_field_id).toBe(sharedField.existing_field_id);
   await assertNoConsoleErrors(page);
+});
+
+test('preconditions only offer declared inputs and preserve invalid refs for correction', async ({ page }) => {
+  await page.goto('/admin/workflow-library/blueprints/delivery');
+  await openTransitions(page);
+
+  await page.getByLabel('Add output').click();
+  await page.getByLabel('New field label').fill('Internal note');
+  await page.getByLabel('New field type').selectOption('text');
+  await page.getByRole('button', { name: 'Create and add', exact: true }).click();
+
+  await page.getByLabel('Add precondition').click();
+
+  await expect.poll(async () => page.getByLabel('Precondition input 1').locator('option').allTextContents()).toEqual([
+    'Acceptance criteria',
+  ]);
+
+  await page.getByLabel('Add input').click();
+  await page.getByRole('button', { name: 'Review verdict (Text)', exact: true }).click();
+
+  await expect
+    .poll(async () => page.getByLabel('Precondition input 1').locator('option').allTextContents())
+    .toEqual(['Acceptance criteria', 'Review verdict']);
+
+  await page.getByLabel('Precondition input 1').selectOption({ label: 'Review verdict' });
+  await page.getByLabel('Precondition value 1').fill('approved');
+  const selectedFieldId = await page.getByLabel('Precondition input 1').inputValue();
+
+  await page.getByLabel('Remove input field 2').click();
+
+  await expect(page.getByLabel('Precondition input 1')).toHaveValue(selectedFieldId);
+  await expect(page.getByLabel('Precondition input 1').locator('option:checked')).toContainText('Review verdict');
+
+  await saveEditor(page);
+
+  await expect(page.locator('[data-editor-issues]')).toContainText('Workflow draft has invalid structure or references.');
+  await expect(page.locator('[data-editor-warning]')).toHaveText('Correct the highlighted issues before saving.');
+  await expect(page.locator('[data-editor-status]')).toHaveText('Unsaved changes');
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+  await expect(page.getByLabel('Precondition input 1')).toHaveValue(selectedFieldId);
 });
 
 test('typed preconditions, required flags, and duplicate labels keep their real identities after save', async ({ page }) => {

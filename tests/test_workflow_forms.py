@@ -64,7 +64,10 @@ def test_parse_editor_draft_preserves_false_and_zero_values(workflow_env):
                     "name": "Finish",
                     "from_state": "todo",
                     "to_state": "done",
-                    "inputs": [{"field_id": "approved", "required": True}],
+                    "inputs": [
+                        {"field_id": "approved", "required": True},
+                        {"field_id": "score", "required": False},
+                    ],
                     "outputs": [{"field_id": "score", "required": False}],
                     "preconditions": [
                         {"field_id": "approved", "operator": "equals", "value": False},
@@ -96,6 +99,21 @@ def test_parse_editor_draft_rejects_removed_field_still_referenced(workflow_env)
         assert "Removed field" in str(error)
     else:
         raise AssertionError("expected parse_editor_draft() to reject a dangling field reference")
+
+
+def test_parse_editor_draft_rejects_precondition_on_output_only_field(workflow_env):
+    env = workflow_env
+    source = env.library.inspect("delivery")
+
+    draft = editor_payload(source)
+    draft["transitions"][0]["preconditions"][0]["existing_field_id"] = "summary"
+    draft["transitions"][0]["preconditions"][0]["value"] = "approved"
+
+    with pytest.raises(ValueError) as exc_info:
+        parse_editor_draft(source, draft)
+
+    assert "precondition" in str(exc_info.value).lower()
+    assert "input" in str(exc_info.value).lower()
 
 
 def test_parse_editor_draft_renaming_reused_field_updates_all_uses(workflow_env):

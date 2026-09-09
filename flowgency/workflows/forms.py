@@ -347,6 +347,13 @@ def parse_editor_draft(source: WorkflowSnapshot, payload: dict) -> WorkflowDefin
             )
             for item in row.preconditions
         )
+        input_field_ids = {item.field_id for item in inputs}
+        for item in preconditions:
+            if item.field_id not in input_field_ids:
+                raise ValueError(
+                    f"Transition {transition_id!r}: precondition field {item.field_id!r}"
+                    " must be declared as an input"
+                )
         transitions.append(
             TransitionDefinition(
                 id=transition_id,

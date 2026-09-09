@@ -136,6 +136,13 @@ class TransitionDefinition(BaseModel):
         output_ids = [u.field_id for u in self.outputs]
         if len(set(output_ids)) != len(output_ids):
             raise ValueError("Duplicate output field uses in transition")
+        input_id_set = set(input_ids)
+        for precondition in self.preconditions:
+            if precondition.field_id not in input_id_set:
+                raise ValueError(
+                    f"Transition {self.id!r}: precondition field {precondition.field_id!r}"
+                    " must be declared as an input"
+                )
         return self
 
 
