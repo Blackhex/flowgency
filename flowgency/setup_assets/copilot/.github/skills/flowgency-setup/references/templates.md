@@ -83,11 +83,10 @@ description: Use when {CONCRETE_TRIGGER_CONDITION}.
 
 1. Read the relevant project files and current semantic memory supplied by Flowgency.
 2. Perform {TASK} with project-appropriate commands.
-3. Record observations and proposals by writing Markdown files into
-   `.flowgency/outbox/observations/` and `.flowgency/outbox/proposals/`, relative to
-   the working directory. Flowgency validates and files them after the run, and
-   assigns the `agent`, `date`, and `status` fields and the file name itself.
-   Keep durable knowledge by editing the seeded files in `.flowgency/memory/`.
+3. Use the live ticket tools supplied by Flowgency to list tickets, inspect their
+   state and transition criteria, and execute transitions with required inputs.
+   A read-only agent may execute transitions without filesystem write access.
+   Keep durable knowledge in the semantic memory snapshot selected by the routine.
 4. Update memory only with durable facts.
 
 ## Boundaries
@@ -95,7 +94,7 @@ description: Use when {CONCRETE_TRIGGER_CONDITION}.
 - {TASK_SPECIFIC_BOUNDARY}
 ```
 
-Use standard `scripts/`, `references/`, and `assets/` subdirectories when needed. Routines select a scoped prompt rather than a skill.
+Use standard `scripts/`, `references/`, and `assets/` subdirectories when needed. For ticket-oriented skills, see `references/ticket-workflow-steps.md`. Routines select a scoped prompt rather than a skill.
 
 ## Standard Task Prompt
 

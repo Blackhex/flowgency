@@ -1,6 +1,6 @@
 # Content Team Template
 
-A 3-agent team for content-driven projects: blogs, newsletters, documentation sites, or any project where writing is a core output.
+A 3-agent team for content-driven projects: blogs, newsletters, documentation sites, or any project where writing is a core output. These agents discover and advance tickets through your configured workflow boards.
 
 ## Agents
 
@@ -17,21 +17,29 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
    cp -r examples/content-team /path/to/your/content-agents
    ```
 
-2. Add the team to your Flowgency `config.yaml`:
+2. Add the team to your Flowgency `config.yaml`. Each agent uses `read, search`
+   by default; ticket transitions do not require workspace write access:
    ```yaml
    schema_version: 1
    flowgency:
-     prompt_store: /path/to/flowgency/prompts
+     workflow_library: /path/to/flowgency/workflow-library
    teams:
      content:
        name: Content Team
        workspace_path: /path/to/your/project
        path: /path/to/flowgency/teams/content
-       default_integration: claude-code  # or whichever tool you use
+       default_integration: copilot
+       workflows:
+         content-research:
+           name: Research
+           blueprint: research
+           integration: local
+           integration_config:
+             root: /path/to/flowgency/tickets
        agents:
        - name: writer
          blueprint: writer
-         integration: claude-code
+         integration: copilot
          permissions:
            mode: restricted
            rules:
@@ -39,7 +47,7 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
                tools: [read, search]
        - name: editor
          blueprint: editor
-         integration: claude-code
+         integration: copilot
          permissions:
            mode: restricted
            rules:
@@ -47,7 +55,7 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
                tools: [read, search]
        - name: researcher
          blueprint: researcher
-         integration: claude-code
+         integration: copilot
          permissions:
            mode: restricted
            rules:

@@ -12,6 +12,7 @@ flowgency:
   compilation_cache: C:/Flowgency/compiled-agents
   memory_store: C:/Flowgency/memory
   prompt_store: C:/Flowgency/prompts
+  workflow_library: C:/Flowgency/workflow-library
 
 memory:
   channels:
@@ -33,6 +34,13 @@ teams:
       timeout: 1800
     dispatch:
       enabled: true
+    workflows:
+      project-delivery:
+        name: Delivery
+        blueprint: software-delivery
+        integration: local
+        integration_config:
+          root: C:/Flowgency/tickets
     agents:
       - name: builder
         blueprint: builder

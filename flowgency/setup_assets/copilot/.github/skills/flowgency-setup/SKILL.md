@@ -62,6 +62,7 @@ flowgency.agent_library = <root>/agent-library
 flowgency.compilation_cache = <root>/compiled-agents
 flowgency.memory_store = <root>/memory
 flowgency.prompt_store = <root>/prompts
+flowgency.workflow_library = <root>/workflow-library
 teams.<team-id>.path = <root>/teams/<team-id>
 teams.<team-id>.workspace_path = <project workspace>
 ```
@@ -279,8 +280,6 @@ disposable native layouts in `flowgency.compilation_cache`.
 
 Upsert one team whose `workspace_path` points to the project workspace and whose `path` points to the Flowgency-owned team-state root. `workspace_path` is the execution workspace and source repository; `path` is the Flowgency-owned team root. The team root is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`. Preserve existing team workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the team; instance roots are additive and an instance tool policy is a complete override.
 
-Use this canonical shape:
-
 ```yaml
 schema_version: 1
 flowgency:
@@ -293,6 +292,7 @@ flowgency:
   compilation_cache: C:/Flowgency/compiled-agents
   memory_store: C:/Flowgency/memory
   prompt_store: C:/Flowgency/prompts
+  workflow_library: C:/Flowgency/workflow-library
 memory:
   channels:
     project-strategy:
@@ -312,6 +312,13 @@ teams:
       timeout: 1800
     dispatch:
       enabled: true
+    workflows:
+      example-delivery:
+        name: Delivery
+        blueprint: software-delivery
+        integration: local
+        integration_config:
+          root: C:/Flowgency/tickets
     agents:
       - name: builder
         blueprint: builder
@@ -356,6 +363,32 @@ teams:
 ```
 
 Record each approved Phase 2 routine assignment under that instance's `routines`. A routine selects one scoped prompt, one schedule (`at`, `every`, or supported condition), optional arguments, and optional semantic memory. Keep optional cross-task Agent Skills separate from routine prompt selection. Never write prompt filenames or per-agent dispatch maps.
+
+### Workflow instances
+
+After the team is approved, ask the user whether to track work as tickets in a workflow. If declined, omit `workflows` from the team config and skip this section. Empty workflows configuration is valid.
+
+Propose named workflow instances that match the team's work streams. For each proposed workflow, name a reusable blueprint from the configured `flowgency.workflow_library` or a shipped example, the workflow instance ID, display name, and ticket storage location. Derive `flowgency.workflow_library` and the ticket storage root (`integration: local`, `root: <data_root>/tickets`) from the already-approved data root; do not introduce additional path questions. Require explicit approval of the proposed workflow names, blueprints, and storage location before writing any instance.
+
+Shipped reusable blueprints — including `software-delivery` and `research` from `references/ticket-workflow-steps.md` — have stable IDs that configured instances may reference. Do not generate IDs for the user to name; generate stable hidden IDs for configured workflow instances from approved display names.
+
+For each approved workflow instance, write it under `teams.<team-id>.workflows`:
+
+```yaml
+teams:
+  example:
+    workflows:
+      example-delivery:
+        name: Delivery
+        blueprint: software-delivery
+        integration: local
+        integration_config:
+          root: C:/Flowgency/tickets
+```
+
+Document these rules in the setup summary: workflow blueprint IDs differ from display name labels; an invalid definition blocks only affected transitions, not the whole board; switching the storage integration does not transfer existing tickets; assignment is ownership and sign-off remains optional; only agents may advance tickets through transitions, not users. Read-only agents may execute ticket transitions through live ticket tools without workspace write access. Ticket tools are only available when the Copilot integration supplies them; other integrations fail closed for ticket operations.
+
+Preserve the already-approved `flowgency.workflow_library` path in the complete config candidate. Do not prompt for individual workflow library sub-paths; the library root is the only path the user supplies.
 
 For every approved routine, create its selected scoped prompt document using
 the Standard Task Prompt contract. Preserve its approved owning instance, ID,

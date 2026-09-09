@@ -1,6 +1,6 @@
 # Code Review Team Template
 
-A 3-agent team for software projects: automated code review, security scanning, and documentation quality. These agents watch your codebase and surface issues through the observation pipeline.
+A 3-agent team for software projects: automated code review, security scanning, and documentation quality. These agents discover and advance tickets through your configured workflow boards.
 
 ## Agents
 
@@ -17,21 +17,29 @@ A 3-agent team for software projects: automated code review, security scanning, 
    cp -r examples/code-review-team /path/to/your/review-agents
    ```
 
-2. Add the team to your Flowgency `config.yaml`:
+2. Add the team to your Flowgency `config.yaml`. Each agent uses `read, search`
+   by default; ticket transitions do not require workspace write access:
    ```yaml
    schema_version: 1
    flowgency:
-     prompt_store: /path/to/flowgency/prompts
+     workflow_library: /path/to/flowgency/workflow-library
    teams:
      review:
        name: Code Review Team
        workspace_path: /path/to/your/project
        path: /path/to/flowgency/teams/review
-       default_integration: claude-code
+       default_integration: copilot
+       workflows:
+         code-review:
+           name: Code review
+           blueprint: software-delivery
+           integration: local
+           integration_config:
+             root: /path/to/flowgency/tickets
        agents:
        - name: reviewer
          blueprint: reviewer
-         integration: claude-code
+         integration: copilot
          permissions:
            mode: restricted
            rules:
@@ -39,7 +47,7 @@ A 3-agent team for software projects: automated code review, security scanning, 
                tools: [read, search]
        - name: security
          blueprint: security
-         integration: claude-code
+         integration: copilot
          permissions:
            mode: restricted
            rules:
@@ -47,7 +55,7 @@ A 3-agent team for software projects: automated code review, security scanning, 
                tools: [read, search]
        - name: docs
          blueprint: docs
-         integration: claude-code
+         integration: copilot
          permissions:
            mode: restricted
            rules:

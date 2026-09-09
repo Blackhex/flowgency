@@ -5,9 +5,11 @@ Flowgency uses one authoritative YAML document. The top-level `schema_version: 1
 ## Global paths
 
 `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and
-`flowgency.prompt_store` are required non-empty paths. Relative paths resolve against
-the directory containing the config. The library must exist and be readable; Flowgency
-may create cache, memory, and prompt-store roots when their nearest parent is writable.
+`flowgency.prompt_store` are required non-empty paths. `flowgency.workflow_library` is
+optional; when present it points to the directory containing reusable blueprint YAML files.
+Relative paths resolve against the directory containing the config. The library must exist
+and be readable; Flowgency may create cache, memory, and prompt-store roots when their
+nearest parent is writable.
 
 `flowgency.jobs.pool` caps the number of concurrently running workers across the whole
 installation. The default is 4; the minimum is 1. See [dispatch.md](dispatch.md)
@@ -21,7 +23,7 @@ Team runtime defaults now include timeout only. A permission is a **tool acting 
 
 `mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Relative rule paths resolve against the team workspace. Only the `copilot` integration currently supports `mode: restricted`, and it is the only one that enforces path rules; the others accept `unrestricted` and do not enforce the rules written under it. Writing a narrow rule for one of them expresses intent, not a boundary. What each integration did and did not enforce for a given run is recorded on that job.
 
-Flowgency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.flowgency/outbox` and `<launch>/.flowgency/memory` are `read` and `write`. An agent cannot rewrite the instructions it is executing under.
+Flowgency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.flowgency/memory` is `read` and `write`. An agent cannot rewrite the instructions it is executing under.
 
 Executor eligibility is derived, not stored: an agent may execute decisions when its effective permissions grant `write` on a rule whose `path` is the team's `workspace_path` itself — not a subdirectory.
 
@@ -46,6 +48,32 @@ The effective prompt catalog is the union of blueprint-shared prompts from `.age
 Memory selectors are semantic: `run`, `routine`, `agent`, `team`, or declared global `channel`. An instance default cannot use routine scope. Example selectors include `scope: routine` and `scope: channel` with a channel key.
 
 See [../config.yaml.example](../config.yaml.example) for a complete example.
+
+## Workflow instances
+
+A team may define named workflow instances under `teams.<team-id>.workflows`. Each instance
+pins a `blueprint` ID (from `flowgency.workflow_library` or a shipped example), an
+`integration` (currently `local`), and its `integration_config`. For the `local` integration
+a `root` path is required:
+
+```yaml
+teams:
+  example:
+    workflows:
+      example-delivery:
+        name: Delivery
+        blueprint: software-delivery
+        integration: local
+        integration_config:
+          root: C:/Flowgency/tickets
+```
+
+Label equality alone does not establish workflow identity; always reference blueprints by
+stable ID. An invalid definition blocks only the affected transitions, not the whole board.
+Switching the storage integration does not transfer existing tickets. Assignment is
+ownership; sign-off remains optional. Only agents may advance tickets through transitions;
+read-only agents may execute transitions through live ticket tools without filesystem
+write access. Ticket tools are only available when the Copilot integration supplies them.
 
 ## Superseded layouts
 

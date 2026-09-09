@@ -301,6 +301,12 @@ def test_invalid_config_json_shape_is_exact(tmp_path, cli_runner):
     }
 
 
+def test_validate_accepts_config_with_workflow_instance(cli_config, cli_runner):
+    result = cli_runner("validate", config=cli_config)
+    assert result.exit_code == 0
+    assert "No validation issues found." in result.stdout
+
+
 def test_agents_json_uses_friendly_stable_fields_and_policy_parity(cli_config, cli_runner):
     result = cli_runner("agents", "--team", "newsletter", "--json", config=cli_config)
     assert result.exit_code == 0

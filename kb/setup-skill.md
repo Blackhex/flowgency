@@ -66,6 +66,46 @@ new team and leaves dispatch disabled. Existing teams are not changed without
 explicit approval. Scheduler installation is offered only after activation
 approval and configuration verification, and requires installation consent.
 
+## Workflow Instances
+
+After team approval, setup asks whether to track work as tickets in a workflow.
+If declined, the `workflows` key is omitted and configuration proceeds without
+ticket tracking. Empty workflows configuration is always valid.
+
+When accepted, setup proposes named workflow instances matched to the team's
+work streams, using reusable blueprints from `flowgency.workflow_library` or
+shipped examples such as `software-delivery` and `research`. It derives
+`flowgency.workflow_library` and the ticket storage root from the already-approved
+data root without introducing additional path questions.
+
+Setup requires explicit approval of proposed workflow names, blueprints, and
+storage location before writing any instance. It generates stable hidden IDs for
+configured workflow instances from approved display names; no user-visible
+technical ID is required. The generated config shape is:
+
+```yaml
+flowgency:
+  workflow_library: C:/Flowgency/workflow-library
+teams:
+  example:
+    workflows:
+      example-delivery:
+        name: Delivery
+        blueprint: software-delivery
+        integration: local
+        integration_config:
+          root: C:/Flowgency/tickets
+```
+
+Setup documents these rules in its completion summary:
+- Workflow blueprint IDs differ from display name labels; label equality alone does not establish identity.
+- An invalid definition blocks only affected transitions, not the whole board.
+- Switching the storage integration does not transfer existing tickets.
+- Assignment is ownership; sign-off remains optional, not a completion rule.
+- Only agents may advance tickets through transitions; users view and triage but do not move tickets.
+- Read-only agents may execute ticket transitions through live ticket tools without filesystem write access.
+- Ticket tools are available only when the Copilot integration supplies them; other integrations fail closed.
+
 ## Install
 
 ### Claude Code on Linux
@@ -98,7 +138,7 @@ Invoke `flowgency-setup` after the first-run page launches it from the selected 
    approval of team coverage, permissions, memory, and assumptions.
 5. Derives `teams/<team-id>`, offers one optional grouped path override, and
    obtains the consolidated storage-path approval.
-6. Resolves exactly one canonical config with only the supported root sections (`flowgency`, `memory`, and `teams`) and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, and `flowgency.prompt_store`.
+6. Resolves exactly one canonical config with only the supported root sections (`flowgency`, `memory`, and `teams`) and requires `flowgency.agent_library`, `flowgency.compilation_cache`, `flowgency.memory_store`, `flowgency.prompt_store`, and optionally `flowgency.workflow_library`.
 7. Writes each approved blueprint with global `AGENTS.md` source. Blueprints may contain zero or more standard Agent Skills. For each approved routine capability, writes `.agents/skills/<skill>/SKILL.md`. Do not create a placeholder skill or an empty `.agents/skills` directory for a role without approved routine capabilities.
 8. Registers explicit team-owned instances and every approved team workspace. Every instance pins a blueprint and integration; routines select scoped saved prompts and semantic memory selectors, and approved private prompts are registered for the instance when needed.
 9. Validates team naming, storage paths, integrations, cross-references, and

@@ -9,10 +9,9 @@ transition inspectable from one local-first control plane.
 
 ## How tickets flow
 
-Agents surface observations as they work. Observations converge into proposals —
-questions waiting for human decisions. Approved decisions become durable execution
-jobs. The board shows each ticket's status as agents take and complete work. Every
-transition is recorded and revisitable from the dashboard.
+Agents discover open tickets, claim them, and advance them through workflow transitions using live ticket tools. Each transition records field inputs, optional agent assessments, and the criteria that were met. The board shows every ticket's current state as agents take and complete work; every transition is recorded and revisitable from the dashboard. Workflows are configurable: define states, fields, and transition criteria in a reusable blueprint, then attach named instances to teams with a Local ticket storage root.
+
+Read-only agents can execute ticket transitions without filesystem write access. Only agents may move tickets between states; users view and triage from the dashboard but do not advance the workflow directly.
 
 ## Supporting capabilities
 
@@ -64,6 +63,7 @@ flowgency:
   compilation_cache: C:/Flowgency/compiled-agents
   memory_store: C:/Flowgency/memory
   prompt_store: C:/Flowgency/prompts
+  workflow_library: C:/Flowgency/workflow-library
 teams:
   my-project:
     name: My Project

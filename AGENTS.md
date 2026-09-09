@@ -1,6 +1,6 @@
 # Flowgency Repository Guide
 
-Flowgency is a FastAPI and Jinja2 application with filesystem-backed canonical configuration, standards-based agent blueprints, immutable runtime projections, semantic Markdown memory, durable jobs, and observation/proposal/decision records.
+Flowgency is a FastAPI and Jinja2 application with filesystem-backed canonical configuration, standards-based agent blueprints, immutable runtime projections, semantic Markdown memory, durable jobs, and configurable ticket workflows.
 
 ## Authority boundaries
 
@@ -10,10 +10,10 @@ Flowgency is a FastAPI and Jinja2 application with filesystem-backed canonical c
 - `flowgency.memory_store` contains hash-addressed mutable Markdown selected by semantic scope.
 - `flowgency.prompt_store` contains canonical saved prompt files referenced by configured instances.
 - A team `workspace_path` is the execution workspace and source repository.
-- A team `path` is the Flowgency-owned team root for pipeline records, locks, and logs.
+- A team `path` is the Flowgency-owned team root for records, locks, and logs.
 - Every team agent entry is an explicit instance with `name`, `blueprint`, and `integration`.
 
-Reporting is unconditional. Every agent may record observations, create proposals, and update its own memory regardless of its permission policy.
+Ticket tools are available without workspace write access. Agents may discover and claim tickets, execute transitions, and update their own memory through the live ticket tools supplied by Flowgency, regardless of their filesystem permission policy. Ticket tools are only available when the Copilot integration supplies them; other integrations fail closed for ticket operations.
 
 Do not add runtime directory-shape loaders, native-file integration detection for configured instances, physical instance identity writers, prompt-file schedules, arbitrary-path memory editors, or startup conversion. Native integration files are generated runtime output only and never become authority.
 
@@ -87,7 +87,7 @@ teams:
               channel: brand-strategy
 ```
 
-Relative global and team paths resolve against the config directory. Relative rule paths resolve against the team workspace. A permission is a **tool acting on a path**; rules are a list, not YAML keys. The rule with the longest matching path governs; instance rules are additive to team rules and the same path in both unions its tools. `mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Flowgency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.flowgency/outbox` and `<launch>/.flowgency/memory` are `read` and `write`. Executor eligibility is derived: an agent may execute decisions when its effective permissions grant `write` on a rule whose `path` is the team's `workspace_path` itself — not a subdirectory. Only the `copilot` integration currently supports `mode: restricted`; the other integrations support `unrestricted` only. Compilation is a per-instance projection keyed on blueprint × integration × projector version × instance digest. Omitted runtime defaults are timeout 1800, unrestricted permissions, and dispatch disabled.
+Relative global and team paths resolve against the config directory. Relative rule paths resolve against the team workspace. A permission is a **tool acting on a path**; rules are a list, not YAML keys. The rule with the longest matching path governs; instance rules are additive to team rules and the same path in both unions its tools. `mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Flowgency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.flowgency/memory` is `read` and `write`. Executor eligibility is derived: an agent may execute decisions when its effective permissions grant `write` on a rule whose `path` is the team's `workspace_path` itself — not a subdirectory. Only the `copilot` integration currently supports `mode: restricted`; the other integrations support `unrestricted` only. Compilation is a per-instance projection keyed on blueprint × integration × projector version × instance digest. Omitted runtime defaults are timeout 1800, unrestricted permissions, and dispatch disabled.
 
 The team root is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`; operation locks live in `<team.path>/locks`.
 
@@ -101,7 +101,7 @@ Configured instance integration is authoritative. Job submission resolves the bl
 
 Decision execution requires an explicit configured `execution_agent` whose integration is executable and whose effective permissions grant `write` on the team's `workspace_path` itself. A missing, invalid, or ineligible executor blocks the decide form and POST until corrected. It does not silently skip execution.
 
-Preserve observation, proposal, decision, log, job, dashboard, and workspace behavior when changing configuration surfaces.
+Preserve ticket workflow, log, job, dashboard, and workspace behavior when changing configuration surfaces.
 
 ## Development
 

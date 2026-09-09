@@ -99,6 +99,16 @@ def test_guided_setup_asks_for_workspace_before_inspection_and_team_questions():
     assert "do not ask for the data root again" in normalized
 
 
+def test_setup_references_ticket_workflow_guidance():
+    skill = SKILL_PATH.read_text(encoding="utf-8")
+    assert "flowgency.workflow_library" in skill
+    assert "ticket-workflow-steps.md" in skill
+    assert "observation-system-steps.md" not in skill
+    assert "one authoritative canonical Flowgency config" in skill
+    assert "software-delivery" in skill
+    assert "integration: local" in skill
+
+
 def test_manual_setup_collects_root_then_workspace_without_hidden_mode_state():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
