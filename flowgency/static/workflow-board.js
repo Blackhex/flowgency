@@ -22,6 +22,7 @@
       this.requestCounters = { page: 0, refresh: 0, action: 0 };
       this.requestControllers = { page: null, refresh: null };
       this.pendingAction = null;
+      this.actionChain = Promise.resolve();
       this.cacheElements();
       this.bindEvents();
       this.inputDraft = this.restoreOrCreateDraft();
@@ -394,6 +395,7 @@
       if (document.hidden) {
         return;
       }
+      const pageSeqAtStart = this.requestCounters.page;
       const request = this.beginAbortableRequest('refresh');
       try {
         const headers = { Accept: 'application/json' };
@@ -406,6 +408,12 @@
           signal: request.controller.signal,
         });
         if (!this.isLatestRequest('refresh', request.seq)) {
+          return;
+        }
+        if (this.requestCounters.page !== pageSeqAtStart) {
+          // A newer user navigation started while this refresh was in flight. Its
+          // reload must not abort or override that newer selection with a stale URL.
+          this.scheduleRefresh();
           return;
         }
         if (response.status === 304) {
@@ -676,7 +684,20 @@
       return template.replace('__ticket__', ticketId);
     }
 
-    async saveAssignee(value) {
+    // Ticket mutations (assignee, inputs, run) run strictly one at a time. A later
+    // user action must never bump the shared action counter or read the ticket
+    // version until the pending mutation has finished rebasing on its server reply.
+    enqueueAction(run) {
+      const result = this.actionChain.then(run, run);
+      this.actionChain = result.then(() => undefined, () => undefined);
+      return result;
+    }
+
+    saveAssignee(value) {
+      return this.enqueueAction(() => this._saveAssignee(value));
+    }
+
+    async _saveAssignee(value) {
       const current = this.currentTicket();
       if (!current || !current.version || !this.assigneeSelect) {
         return;
@@ -746,6 +767,10 @@
     }
 
     async saveInputs() {
+      return this.enqueueAction(() => this._saveInputs());
+    }
+
+    async _saveInputs() {
       const current = this.currentTicket();
       if (!current || !this.saveInputsButton) {
         return;
@@ -800,6 +825,10 @@
     }
 
     async runAssignedAgent() {
+      return this.enqueueAction(() => this._runAssignedAgent());
+    }
+
+    async _runAssignedAgent() {
       const current = this.currentTicket();
       if (!current || !current.version || !this.runButton || !current.assignee || current.active_run_job_id || current.pending_run_job_id) {
         this.renderAssignment();
