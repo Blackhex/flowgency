@@ -2,7 +2,7 @@ import pytest
 
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.artifacts import JobArtifact, retain_failed_stage, retain_rejected_records
-from flowgency.records.validation import MAX_OUTBOX_ENTRIES_PER_KIND, MAX_RECORD_BYTES
+from flowgency.memory.limits import MAX_MEMORY_ENTRIES, MAX_MEMORY_FILE_BYTES
 
 
 def test_retain_rejected_records_labels_both_directories_without_collision(tmp_path):
@@ -114,7 +114,7 @@ def test_retain_rejected_records_skips_oversized_file(tmp_path):
     observations = tmp_path / "outbox" / "observations"
     observations.mkdir(parents=True)
     (observations / "small.md").write_bytes(b"x" * 100)
-    (observations / "big.md").write_bytes(b"y" * (MAX_RECORD_BYTES + 1))
+    (observations / "big.md").write_bytes(b"y" * (MAX_MEMORY_FILE_BYTES + 1))
 
     artifacts = retain_rejected_records(
         job_store=job_store,
@@ -130,7 +130,7 @@ def test_retain_rejected_records_caps_entry_count(tmp_path):
     job_store.mkdir(parents=True)
     observations = tmp_path / "outbox" / "observations"
     observations.mkdir(parents=True)
-    for i in range(MAX_OUTBOX_ENTRIES_PER_KIND + 5):
+    for i in range(MAX_MEMORY_ENTRIES + 5):
         (observations / f"rec-{i:03d}.md").write_bytes(b"content\n")
 
     artifacts = retain_rejected_records(
@@ -139,4 +139,4 @@ def test_retain_rejected_records_caps_entry_count(tmp_path):
         sources={"observations": observations},
     )
 
-    assert len(artifacts) <= MAX_OUTBOX_ENTRIES_PER_KIND
+    assert len(artifacts) <= MAX_MEMORY_ENTRIES

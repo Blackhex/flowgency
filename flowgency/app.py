@@ -429,19 +429,11 @@ def safe_redirect(url: str, fallback: str = "/") -> str:
     return fallback
 
 
-def team_context(g: dict, observations: list[dict] | None = None, proposals: list[dict] | None = None) -> dict:
+def team_context(g: dict) -> dict:
     """Return standard template context for a team."""
     snapshot = _load_snapshot()
     flowgency = flowgency_settings(snapshot)
     team_cfg = snapshot.config.teams[g["key"]]
-    observations = observations or []
-    proposals = proposals or []
-    open_observation_count = sum(1 for c in observations if c.get("status") == "open")
-    actionable_proposal_count = sum(1 for c in proposals if c.get("status") in ("proposed", "investigating"))
-    floated_observation_count = sum(1 for c in observations if c.get("float") and c.get("status") == "open")
-    needs_action_count = actionable_proposal_count + floated_observation_count
-    decisions: list[dict] = []
-    running_decisions = sum(1 for d in decisions if d.get("execution_status") == "running")
     return {
         "team": g["key"],
         "team_name": g["name"],
@@ -455,11 +447,11 @@ def team_context(g: dict, observations: list[dict] | None = None, proposals: lis
             for workspace in team_cfg.workspaces
         ],
         "workspaces_available": bool(team_cfg.workspaces),
-        "nav_open_observations": open_observation_count,
-        "nav_actionable": needs_action_count,
-        "nav_actionable_proposals": actionable_proposal_count,
+        "nav_open_observations": 0,
+        "nav_actionable": 0,
+        "nav_actionable_proposals": 0,
         "nav_agent_count": len(g["agents"]),
-        "nav_running_decisions": running_decisions,
+        "nav_running_decisions": 0,
         "show_tips": flowgency.get("show_tips", True),
         "tips_dismissed": flowgency.get("tips_dismissed", []),
         "theme_css": get_theme_css(),
@@ -517,179 +509,6 @@ def validate_file_access(fpath: Path, base_path: Path, allowed_roots: list[Path]
             except ValueError:
                 continue
     raise HTTPException(403, "Access denied")
-
-
-def update_frontmatter_field(filepath: Path, field: str, value: str) -> None:
-    """Update a single YAML frontmatter field in a markdown file."""
-    raw = filepath.read_text()
-    raw = re.sub(rf'^({field}:\s*).*$', f'\\1{value}', raw, count=1, flags=re.MULTILINE)
-    filepath.write_text(raw)
-
-
-def update_decision_execution(decision_path: Path, field: str, value) -> None:
-    """Update execution_status (or other top-level field) in a decision file."""
-    raw = decision_path.read_text()
-    meta, body = parse_frontmatter(raw)
-    meta[field] = value
-    frontmatter = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
-    atomic_write_text(decision_path, f"---\n{frontmatter}\n---\n\n{body}\n")
-
-
-def check_ttl_expired(meta: dict) -> bool:
-    """Check if an item has exceeded its TTL based on date + ttl_days."""
-    ttl = meta.get("ttl_days")
-    if not ttl:
-        return False
-    item_date = meta.get("date")
-    if not item_date:
-        return False
-    if isinstance(item_date, str):
-        try:
-            item_date = datetime.fromisoformat(item_date)
-        except (ValueError, TypeError):
-            return False
-    elif not isinstance(item_date, datetime):
-        try:
-            # Handle date objects (not datetime)
-            item_date = datetime.combine(item_date, datetime.min.time())
-        except (TypeError, AttributeError):
-            return False
-    try:
-        ttl = int(ttl)
-    except (ValueError, TypeError):
-        return False
-    return clock_now(tz=item_date.tzinfo) > item_date + timedelta(days=ttl)
-
-
-def enforce_ttl(filepath: Path, meta: dict) -> bool:
-    """Auto-archive an item if its TTL has expired. Returns True if archived."""
-    status = meta.get("status", "")
-    if status in ("archived", "dismissed", "decided"):
-        return False
-    if check_ttl_expired(meta):
-        update_frontmatter_field(filepath, "status", "archived")
-        meta["status"] = "archived"
-        return True
-    return False
-
-
-
-def list_markdown_items(item_dir: Path, apply_ttl: bool = False) -> list[dict]:
-    """List markdown files from an explicit team directory with parsed frontmatter."""
-    item_dir = Path(item_dir)
-    if not item_dir.exists():
-        return []
-    items = []
-    for f in sorted(item_dir.glob("*.md"), reverse=True):
-        raw = f.read_text()
-        meta, body = parse_frontmatter(raw)
-        meta.update({
-            "_filename": f.name,
-            "_body": body,
-            "_slug": f.stem,
-            "_title": extract_display_title(body, f.stem),
-        })
-        if apply_ttl:
-            enforce_ttl(f, meta)
-        items.append(meta)
-    return items
-
-
-def list_observations(g: dict) -> list[dict]:
-    return list_markdown_items(g["observations"], apply_ttl=True)
-
-
-def list_proposals(g: dict) -> list[dict]:
-    return list_markdown_items(g["proposals"], apply_ttl=True)
-
-
-def list_decisions(g: dict) -> list[dict]:
-    return list_markdown_items(g["decisions"])
-
-
-def build_pipeline_stats(observations: list[dict], proposals: list[dict],
-                         decisions: list[dict]) -> dict:
-    """Compute pipeline stage counts and 7-day sparkline data for dashboard."""
-    today = clock_today()
-
-    def sparkline_buckets(items: list[dict]) -> list[int]:
-        buckets = [0] * 7
-        for item in items:
-            date_val = item.get("date", "")
-            if isinstance(date_val, str):
-                try:
-                    date_val = datetime.fromisoformat(date_val).date()
-                except (ValueError, TypeError):
-                    continue
-            elif isinstance(date_val, datetime):
-                date_val = date_val.date()
-            elif hasattr(date_val, "year"):
-                pass
-            else:
-                continue
-            days_ago = (today - date_val).days
-            if 0 <= days_ago < 7:
-                buckets[6 - days_ago] += 1
-        return buckets
-
-    obs_total = len(observations)
-    prop_total = len(proposals)
-    dec_total = len(decisions)
-
-    if obs_total > 8 and prop_total <= 1:
-        flow = "bottleneck"
-    elif obs_total > 5 * max(prop_total, 1) and obs_total > 5:
-        flow = "bottleneck"
-    else:
-        flow = "healthy"
-
-    return {
-        "observations": {"total": obs_total, "sparkline": sparkline_buckets(observations)},
-        "proposals": {"total": prop_total, "sparkline": sparkline_buckets(proposals)},
-        "decisions": {"total": dec_total, "sparkline": sparkline_buckets(decisions)},
-        "flow_status": flow,
-    }
-
-
-def build_activity_feed(observations: list[dict], proposals: list[dict],
-                        limit: int = 15) -> list[dict]:
-    """Build a cross-agent chronological feed for the dashboard activity zone."""
-    events = []
-
-    def _parse_dt(date_val) -> datetime:
-        """Parse a date value into a naive datetime for safe comparison."""
-        if isinstance(date_val, str):
-            try:
-                dt = datetime.fromisoformat(date_val)
-            except (ValueError, TypeError):
-                return datetime.min
-        elif isinstance(date_val, datetime):
-            dt = date_val
-        else:
-            return datetime.min
-        # Strip tzinfo so naive and aware datetimes can be compared
-        return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
-
-    for o in observations:
-        events.append({
-            "type": "observation",
-            "slug": o.get("_slug", ""),
-            "agent": o.get("agent", ""),
-            "timestamp": _parse_dt(o.get("date", "")),
-            "status": o.get("status", ""),
-        })
-
-    for p in proposals:
-        events.append({
-            "type": "proposal",
-            "slug": p.get("_slug", ""),
-            "agent": p.get("origin_agent", ""),
-            "timestamp": _parse_dt(p.get("date", "")),
-            "status": p.get("status", ""),
-        })
-
-    events.sort(key=lambda e: e["timestamp"], reverse=True)
-    return events[:limit]
 
 
 def build_ticket_dashboard(services: FlowgencyServices, team_id: str) -> dict[str, Any]:

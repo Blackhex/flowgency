@@ -62,6 +62,61 @@ def test_home_reports_unavailable_workflow_storage(workflow_web_env):
     assert "How the pipeline works" not in response.text
 
 
+def _add_second_workflow(env, root, *, name="Board B", workflow_id="board-b"):
+    from flowgency.workflows.configuration import WorkflowInstancePatch
+
+    snapshot = env.store.load()
+    env.configuration_service.save_instance(
+        snapshot.revision,
+        env.team_id,
+        workflow_id,
+        WorkflowInstancePatch(
+            name=name,
+            blueprint=env.blueprint_id,
+            integration="local",
+            integration_config={"root": str(root)},
+        ),
+        create=True,
+    )
+
+
+def test_home_partial_workflow_availability_preserves_readable_board(workflow_web_env):
+    import shutil
+
+    env = workflow_web_env
+    env.create(title="Alpha review")
+    env.create(title="Beta review")
+    _add_second_workflow(env, env.root_b)
+    shutil.rmtree(env.root_b)  # board-b becomes unavailable after registration
+
+    response = env.client.get(f"/{env.team_id}/")
+
+    assert response.status_code == 200
+    body = response.text
+    # The readable board's tickets and counts survive the sibling's failure.
+    assert "Board A" in body
+    assert "2 tickets" in body
+    # The unavailable board is reported as an explicit error, not silently dropped.
+    assert "Board B" in body
+    assert "Ticket storage root does not exist" in body
+
+
+def test_home_empty_configured_workflow_reports_zero_not_unavailable(workflow_web_env):
+    env = workflow_web_env
+    env.create(title="Alpha review")
+    _add_second_workflow(env, env.root_b)  # readable, holds no tickets
+
+    response = env.client.get(f"/{env.team_id}/")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "Board B" in body
+    # An empty readable workflow is zero tickets, never an unavailability error.
+    assert "0 tickets" in body
+    assert "Ticket storage root does not exist" not in body
+    assert "unavailable" not in body.lower()
+
+
 def _write_yaml(path: Path, raw: dict) -> Path:
     path.write_text(
         yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
@@ -830,9 +885,9 @@ class TestWorkQueueStrip:
             path = authority.path("newsletter", job_id)
             write_job(path, JobRecord.from_spec(spec, due_at=due))
 
-    def test_the_strip_sits_between_pipeline_and_the_attention_queue(self, client, waiting_jobs):
+    def test_the_strip_sits_between_workflows_and_the_attention_queue(self, client, waiting_jobs):
         body = client.get("/newsletter/").text
-        assert body.index("Pipeline") < body.index("Work queue") < body.index("Attention Queue")
+        assert body.index("Ticket workflows") < body.index("Work queue") < body.index("Attention Queue")
 
     def test_the_strip_lists_waiting_jobs_in_due_order(self, client, waiting_jobs):
         body = client.get("/newsletter/").text

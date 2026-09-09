@@ -108,3 +108,88 @@ def test_home_with_no_workflows_does_not_create_retired_directories(monkeypatch,
     assert not (paths.state_root / "observations").exists()
     assert not (paths.state_root / "proposals").exists()
     assert not (paths.state_root / "decisions").exists()
+
+
+# Single-segment slugs that a restored loader could try to resolve into the
+# retired record roots. The path param never spans '/', so traversal is probed
+# through percent-encoding and dot segments alongside plain unknown/known ids.
+HOSTILE_SLUGS = (
+    "old",
+    "old.md",
+    "%2e%2e",
+    "%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+    "..%5c..%5cwindows",
+    "does-not-exist",
+    "a" * 512,
+    "%00",
+    "<script>alert(1)</script>",
+)
+
+
+def _seed_retired_roots(team_root):
+    sentinels = {}
+    for kind, front in (
+        ("observations", "status: open\ndate: 2000-01-01"),
+        ("proposals", "status: proposed\ndate: 2000-01-01\nquestions: []"),
+        ("decisions", "proposal: old.md\nexecution_status: failed\ndate: 2000-01-01"),
+    ):
+        path = team_root / kind / "old.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\n{front}\n---\nOld {kind} record\n", encoding="utf-8")
+        sentinels[path] = path.read_bytes()
+    return sentinels
+
+
+def _retired_requests(client, team, slug):
+    return (
+        client.get(f"/{team}/observations/{slug}"),
+        client.post(f"/{team}/observations/{slug}/status", data={"status": "dismissed"}),
+        client.get(f"/{team}/proposals/{slug}"),
+        client.post(
+            f"/{team}/proposals/{slug}/decide",
+            data={"execution_agent": "builder", "decision_note": slug},
+        ),
+        client.get(f"/{team}/decisions/{slug}"),
+        client.post(f"/{team}/decisions/{slug}/retry", data={"execution_agent": "builder"}),
+        client.post(f"/{team}/decisions/{slug}/verify", data={"verification_status": "verified"}),
+    )
+
+
+def test_retired_routes_reject_hostile_and_unknown_ids_without_touching_records(workflow_web_env):
+    env = workflow_web_env
+    sentinels = _seed_retired_roots(env.team_root)
+
+    for slug in HOSTILE_SLUGS:
+        for response in _retired_requests(env.client, env.team_id, slug):
+            assert response.status_code in (404, 405, 410)
+
+    # No hostile or unknown id created, deleted, or mutated a retired record, and
+    # each retired root still holds exactly the sentinel it started with.
+    for kind in ("observations", "proposals", "decisions"):
+        assert [p.name for p in (env.team_root / kind).iterdir()] == ["old.md"]
+    for path, payload in sentinels.items():
+        assert path.read_bytes() == payload
+
+
+def test_retired_routes_never_invoke_team_or_record_loaders(workflow_web_env, monkeypatch):
+    """The retired handlers must short-circuit before any team/record read."""
+    env = workflow_web_env
+    _seed_retired_roots(env.team_root)
+
+    loaded: list[str] = []
+    real_get_team = app_mod.get_team
+    monkeypatch.setattr(
+        app_mod, "get_team", lambda team: loaded.append(team) or real_get_team(team)
+    )
+
+    for slug in ("old", "does-not-exist", "%2e%2e"):
+        for response in _retired_requests(env.client, env.team_id, slug):
+            assert response.status_code in (404, 405, 410)
+    for response in (
+        env.client.get(f"/{env.team_id}/observations"),
+        env.client.get(f"/{env.team_id}/proposals"),
+        env.client.get(f"/{env.team_id}/decisions"),
+    ):
+        assert response.status_code in (404, 410)
+
+    assert loaded == []

@@ -12,13 +12,15 @@ import pytest
 from flowgency.integrations import RunResult
 from flowgency.integrations.models import EffectiveRuntimePolicy
 from flowgency.jobs.execution import execute_job
-from flowgency.records.outbox import (
+from flowgency.memory.launch import (
+    _is_plain_regular_file,
+    copy_launch_memory_to_stage as copy_outbox_memory_to_stage,
+    prepare_launch_memory as create_outbox,
+)
+from flowgency.memory.limits import (
     MAX_MEMORY_ENTRIES,
     MAX_MEMORY_FILE_BYTES,
     MAX_MEMORY_FILES,
-    _is_plain_regular_file,
-    copy_outbox_memory_to_stage,
-    create_outbox,
 )
 from test_job_execution import MemoryJobFixture
 

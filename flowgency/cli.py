@@ -175,34 +175,6 @@ def _team(args: Namespace):
     return snapshot, team_id, snapshot.config.teams[team_id]
 
 
-def _resolve_team(args: Namespace) -> dict[str, Any]:
-    snapshot, team_id, team = _team(args)
-    paths = resolve_team_paths(team)
-    from flowgency.permissions.eligibility import may_write_workspace
-    return {
-        "key": team_id,
-        "name": team.name,
-        "workspace_root": paths.workspace_root,
-        "team_root": paths.team_root,
-        "observations": paths.observations,
-        "proposals": paths.proposals,
-        "decisions": paths.decisions,
-        "logs": paths.logs,
-        "agents": list(team.agents),
-        "_agents_normalized": [
-            {
-                "name": instance.name,
-                "integration": instance.integration,
-                "integration_config": dict(instance.integration_config),
-                "capabilities": {"write": may_write_workspace(snapshot.config, team_id, instance.name)},
-            }
-            for instance in team.agents.values()
-        ],
-        "_snapshot": snapshot,
-        "_team_config": team,
-    }
-
-
 def _instance(snapshot, team_id: str, agent_id: str):
     try:
         return snapshot.config.teams[team_id].agents[agent_id]
@@ -247,27 +219,6 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return _parse_frontmatter(text)
-
-
-def _extract_title(body: str, fallback: str) -> str:
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            continue
-        parts = stripped.split("**")
-        if len(parts) >= 3 and parts[1].strip():
-            return parts[1].strip().rstrip(".,;:!?")
-    return fallback.replace("-", " ")
-
-
-def _markdown_items(directory: Path) -> list[dict[str, Any]]:
-    if not directory.is_dir():
-        return []
-    items = []
-    for path in sorted(directory.glob("*.md"), reverse=True):
-        metadata, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
-        items.append({**metadata, "_slug": path.stem, "_title": _extract_title(body, path.stem), "_path": path})
-    return items
 
 
 def _job_records(snapshot, team_id: str):

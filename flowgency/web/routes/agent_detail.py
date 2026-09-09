@@ -176,46 +176,6 @@ def _path_lines(paths: tuple[Path, ...]) -> list[str]:
     return [str(path.resolve(strict=False)).replace("\\", "/") for path in paths]
 
 
-def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    if text.startswith("---"):
-        parts = text.split("---", 2)
-        if len(parts) >= 3:
-            try:
-                return yaml.safe_load(parts[1]) or {}, parts[2].strip()
-            except yaml.YAMLError:
-                return {}, text
-    return {}, text
-
-
-def _extract_title(body: str, fallback: str) -> str:
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            continue
-        if "**" in stripped:
-            parts = stripped.split("**")
-            if len(parts) >= 3 and parts[1].strip():
-                return parts[1].strip().rstrip(".,;:!?")
-    return fallback.replace("-", " ")
-
-
-def _list_markdown_items(directory: Path) -> list[dict[str, Any]]:
-    if not directory.exists():
-        return []
-    items: list[dict[str, Any]] = []
-    for path in sorted(directory.glob("*.md"), reverse=True):
-        meta, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
-        items.append(
-            {
-                **meta,
-                "_slug": path.stem,
-                "_title": _extract_title(body, path.stem),
-                "_path": path,
-            }
-        )
-    return items
-
-
 def _recent_log_rows(
     team_id: str,
     paths: ResolvedTeamPaths,
