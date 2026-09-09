@@ -138,19 +138,22 @@ def _expected_bridge_launch() -> TicketToolLaunch:
     return build_ticket_tool_launch(_endpoint())
 
 
-def test_build_ticket_tool_launch_uses_shell_runnable_interpreter():
+def test_build_ticket_tool_launch_uses_bridge_contract():
     launch = build_ticket_tool_launch(_endpoint())
 
-    # The MCP host spawns `command` through a shell. `sys.executable` is the venv
-    # launcher a shell can run; a Microsoft Store Python's native image lives under
-    # `Program Files\WindowsApps`, which a shell refuses to execute, so it must not
-    # be used and no `__PYVENV_LAUNCHER__` bridge remains.
-    assert launch.command == sys.executable
-    assert "WindowsApps" not in launch.command
-    assert "__PYVENV_LAUNCHER__" not in launch.env
+    if sys.platform == "win32":
+        import win32api
+        import win32process
+
+        assert launch.command == win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0)
+        assert launch.env["__PYVENV_LAUNCHER__"] == sys.executable
+    else:
+        assert launch.command == sys.executable
+        assert "__PYVENV_LAUNCHER__" not in launch.env
     assert launch.args == ("-m", "flowgency.tickets.mcp_server")
     assert launch.server_name == "flowgency-tickets"
     assert launch.env == {
+        **({"__PYVENV_LAUNCHER__": sys.executable} if sys.platform == "win32" else {}),
         "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
         "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
     }

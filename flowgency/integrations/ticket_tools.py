@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -10,27 +11,25 @@ from flowgency.tickets.models import LiveTicketEndpoint
 
 
 def _ticket_tool_command() -> str:
-    """The interpreter that launches the ticket MCP server.
+    if os.name != "nt":
+        return sys.executable
+    import win32api
+    import win32process
 
-    An MCP host spawns this `command` through a shell (Copilot wraps it in a
-    PowerShell `& '...'` invocation). A Microsoft Store Python's native image
-    lives under `C:\\Program Files\\WindowsApps`, whose execution alias a shell
-    refuses to run ("Access is denied"), so the server never starts and no ticket
-    tools appear. `sys.executable` is the venv launcher a shell can run and that
-    still resolves this project's environment. Its stdio transport dies with the
-    host's pipe, so the server is still bounded by the supervised host.
-    """
-    return sys.executable
+    return win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0)
 
 
 def build_ticket_tool_launch(endpoint: LiveTicketEndpoint) -> TicketToolLaunch:
+    env = {
+        "FLOWGENCY_TICKET_ENDPOINT": endpoint.url,
+        "FLOWGENCY_TICKET_TOKEN": endpoint.grant.token,
+    }
+    if os.name == "nt":
+        env["__PYVENV_LAUNCHER__"] = sys.executable
     return TicketToolLaunch(
         command=_ticket_tool_command(),
         args=("-m", "flowgency.tickets.mcp_server"),
-        env={
-            "FLOWGENCY_TICKET_ENDPOINT": endpoint.url,
-            "FLOWGENCY_TICKET_TOKEN": endpoint.grant.token,
-        },
+        env=env,
     )
 
 
