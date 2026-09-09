@@ -678,6 +678,33 @@ test('reused fields stay linked across transitions and preconditions', async ({ 
   expect(completeReview?.outputs[2]?.existing_field_id).toBe(sharedField.existing_field_id);
   expect(completeReview?.preconditions[0]?.existing_field_id).toBe(sharedField.existing_field_id);
   expect(requestChanges?.inputs[0]?.existing_field_id).toBe(sharedField.existing_field_id);
+
+  // Reload: server must persist canonical field ID through all references
+  const sharedFieldId = sharedField.existing_field_id as string;
+  await page.reload();
+
+  const freshPayload = await readEditorPayload(page);
+  const freshCompleteReview = freshPayload.draft.transitions.find((row: { name: string }) => row.name === 'Complete review');
+  const freshRequestChanges = freshPayload.draft.transitions.find((row: { name: string }) => row.name === 'Request changes');
+  const freshSharedField = freshPayload.draft.fields.find((row: { existing_field_id: string }) => row.existing_field_id === sharedFieldId);
+
+  expect(freshSharedField?.existing_field_id).toBe(sharedFieldId);
+  expect(freshSharedField?.label).toBe('Shared review note');
+  expect(freshCompleteReview?.inputs[1]?.existing_field_id).toBe(sharedFieldId);
+  expect(freshCompleteReview?.outputs[2]?.existing_field_id).toBe(sharedFieldId);
+  expect(freshCompleteReview?.preconditions[0]?.existing_field_id).toBe(sharedFieldId);
+  expect(freshRequestChanges?.inputs[0]?.existing_field_id).toBe(sharedFieldId);
+
+  // Verify the renamed label renders in the UI after reload
+  await openTransitions(page);
+  if (testInfo.project.name.startsWith('mobile')) {
+    await page.getByLabel('Transition picker').selectOption({ label: 'Complete review' });
+  } else {
+    await page.getByRole('button', { name: 'Complete review Review Done' }).click();
+  }
+  await expect(page.getByLabel('Output label 3')).toHaveValue('Shared review note');
+  await expect(page.getByLabel('Input label 2')).toHaveValue('Shared review note');
+  await expect(page.getByLabel('Precondition input 1')).toHaveText(/Shared review note/);
   await assertNoConsoleErrors(page);
 });
 
