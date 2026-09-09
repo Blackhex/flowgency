@@ -27,6 +27,7 @@ from flowgency.memory import MemoryStore, resolve_memory_selector
 from flowgency.prompts import PromptStore
 from flowgency.tickets.models import ActiveTicketRun, StorageBinding, TicketEvent, TicketOperation, TicketRecord, TicketRef
 from flowgency.tickets.storages.local import LocalTicketStorage
+from flowgency.workflows.models import ArtifactRef
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -354,7 +355,7 @@ def _seed_ticket_workflows(runtime: Path, config: dict) -> None:
         _ticket_record(delivery_binding, ticket_id="fixture-backlog-1", number=101, title="Define reusable workflow blueprints", description="Represent states, transition contracts, and qualitative criteria in reusable workflow sources.", state_id="backlog"),
         _ticket_record(delivery_binding, ticket_id="fixture-backlog-2", number=102, title="Document ticket storage provider capabilities", description="Describe the persistence guarantees every ticket storage integration must provide.", state_id="backlog", assignee="researcher"),
         _ticket_record(delivery_binding, ticket_id="fixture-active-1", number=103, title="Implement atomic ticket assignment", description="Coordinate assignment and active work so two agents cannot both begin work on one ticket.", state_id="in-progress", assignee="builder", active_run=active_run),
-        _ticket_record(delivery_binding, ticket_id="fixture-review", number=104, title="Validate stale transition handling", description="Reject transitions when the ticket revision or workflow definition has changed. Return enough context for the agent to refresh and reevaluate.", state_id="review", assignee="reviewer", field_values={"acceptance-criteria": "A stale ticket revision or workflow digest cannot change state. Repeating an accepted operation returns its original result without a second transition.", "review-verdict": "Passed", "test-report": "artifacts/transition-tests.txt"}),
+        _ticket_record(delivery_binding, ticket_id="fixture-review", number=104, title="Validate stale transition handling", description="Reject transitions when the ticket revision or workflow definition has changed. Return enough context for the agent to refresh and reevaluate.", state_id="review", assignee="reviewer", field_values={"acceptance-criteria": "A stale ticket revision or workflow digest cannot change state. Repeating an accepted operation returns its original result without a second transition.", "review-verdict": "Passed", "test-report": ArtifactRef(kind="id", value="transition-tests")}),
         _ticket_record(delivery_binding, ticket_id="fixture-review-2", number=105, title="Review the local storage contract", description="Check atomicity, history preservation, and storage error handling against the provider contract.", state_id="review"),
         _ticket_record(delivery_binding, ticket_id="fixture-done-1", number=106, title="Preserve canonical configuration authority", description="Keep workflow instance registration and integration settings in canonical configuration.", state_id="done", assignee="builder"),
         _ticket_record(delivery_binding, ticket_id="fixture-done-2", number=107, title="Separate ticket state from job lifecycle", description="Job completion, failure, and cancellation must not silently move tickets between workflow states.", state_id="done", assignee="reviewer"),
