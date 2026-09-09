@@ -311,10 +311,10 @@ def test_team_roots_builds_team_root_mapping():
 
 
 def test_a_drain_does_not_reproject_terminal_records(queue_fixture, monkeypatch):
-    """Terminal projection is a startup sweep, not a per-drain cost."""
+    """The terminal sweep (pin release) is a startup cost, not a per-drain cost."""
     projected: list[str] = []
     monkeypatch.setattr(
-        "flowgency.jobs.reconciliation.project_decision",
+        "flowgency.jobs.reconciliation._release_job_pin",
         lambda record: projected.append(record.spec.job_id),
     )
     queue_fixture.enqueue("done", status="complete")

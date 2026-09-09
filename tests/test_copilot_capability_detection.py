@@ -127,7 +127,9 @@ def test_a_probe_that_raises_scopes_nothing(copilot, monkeypatch):
 def test_the_cache_key_is_the_detected_version(copilot, monkeypatch):
     stub_version(monkeypatch, copilot, MEASURED_VERSION)
 
-    assert copilot._capability_cache_key() == MEASURED_VERSION
+    key = copilot._capability_cache_key()
+    assert key is not None
+    assert key.split("|", 1)[0] == MEASURED_VERSION
 
 
 def test_an_absent_cli_yields_no_cache_key(copilot, monkeypatch):

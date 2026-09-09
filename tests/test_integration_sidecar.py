@@ -573,7 +573,7 @@ class TestCopilot:
 
         def fake_run(args, **kwargs):
             # The capability probe is not a launch; only record launches.
-            if "--version" not in args:
+            if "--version" not in args and "--help" not in args:
                 results.append((list(args), kwargs.get("cwd")))
             return FakeCompleted()
 

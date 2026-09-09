@@ -187,7 +187,7 @@ def test_initialization_creates_team_state_but_not_workspace_shared(
     team_root = tmp_path / "groups" / "newsletter"
     assert {
         child.name for child in team_root.iterdir() if child.is_dir()
-    } == {"observations", "proposals", "decisions", "locks", "logs"}
+    } == {"locks", "logs"}
     assert not (workspace / "shared").exists()
 
 

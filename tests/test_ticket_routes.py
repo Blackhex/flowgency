@@ -14,7 +14,7 @@ from flowgency.tickets.artifacts import RetainedArtifact
 from flowgency.tickets.models import TicketRef, TicketRecord
 from flowgency.tickets.storages.local import LocalTicketStorage
 from flowgency.integrations.models import RuntimeCapabilities
-from flowgency.workflows.models import Precondition
+from flowgency.workflows.models import FieldUse, Precondition
 from tests._ticket_helpers import SEED_TIME, TicketRuntimeIntegration, storage_binding, ticket_record
 
 
@@ -679,6 +679,8 @@ def test_detail_snapshot_exposes_current_preconditions_without_overwriting_histo
     transitions = tuple(
         transition.model_copy(
             update={
+                "inputs": transition.inputs
+                + (FieldUse(field_id="attempts", required=False),),
                 "preconditions": (
                     Precondition(
                         field_id="verdict",

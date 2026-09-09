@@ -200,7 +200,7 @@ def test_resolve_job_request_reads_each_private_prompt_once_for_snapshot(tmp_pat
             config_path=config,
             team_key="newsletter",
             agent_name="builder",
-            trigger="decision",
+            trigger="manual_prompt",
             task_input="Decide what changed.",
         ),
         config_store=ConfigStore(config),
@@ -295,7 +295,7 @@ def test_resolve_job_request_translates_missing_private_prompt_to_validation_err
                 config_path=config,
                 team_key="newsletter",
                 agent_name="builder",
-                trigger="decision",
+                trigger="manual_prompt",
                 task_input="Decide what changed.",
             ),
             config_store=config_store,
@@ -842,7 +842,7 @@ def test_resolve_job_request_snapshots_runtime_authority_at_submission(tmp_path)
         arguments=("--mode=review", "literal value"),
     )
     assert spec.task_input.startswith(expected_base)
-    assert "## Flowgency reporting protocol" in spec.task_input
+    assert "## Flowgency ticket reporting protocol" in spec.task_input
 
 
 def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
@@ -877,7 +877,7 @@ def test_submit_freezes_routine_arguments_despite_later_config_edit(tmp_path):
         arguments=("--mode=review", "literal value"),
     )
     assert record.spec.task_input.startswith(expected_base)
-    assert "## Flowgency reporting protocol" in record.spec.task_input
+    assert "## Flowgency ticket reporting protocol" in record.spec.task_input
 
 
 def test_decision_jobs_keep_empty_skill_arguments(tmp_path):
@@ -1191,36 +1191,20 @@ def _resolve(tmp_path, **request_kwargs):
     )
 
 
-def test_decision_task_input_carries_the_reporting_protocol(tmp_path):
-    spec = _resolve(tmp_path, trigger="decision", task_input="Decide what changed.")
-
-    assert spec.task_input.startswith("Decide what changed.")
-    assert "## Flowgency reporting protocol" in spec.task_input
-    assert ".flowgency/outbox/observations" in spec.task_input
-
-
 def test_ad_hoc_prompt_task_input_carries_the_reporting_protocol(tmp_path):
     spec = _resolve(tmp_path, trigger="manual_prompt", task_input="Run the suite.")
 
     assert spec.task_input.startswith("Run the suite.")
-    assert ".flowgency/outbox/proposals" in spec.task_input
-    assert ".flowgency/memory" in spec.task_input
+    assert "## Flowgency ticket reporting protocol" in spec.task_input
+    assert "Write memory only in the provided memory directory." in spec.task_input
 
 
 def test_reporting_protocol_reports_the_granted_tool_policy(tmp_path):
     """`_write_config` grants allowlist [read, search, write] via the pathless rule."""
-    spec = _resolve(tmp_path, trigger="decision", task_input="Decide.")
+    spec = _resolve(tmp_path, trigger="manual_prompt", task_input="Run.")
 
     assert spec.runtime_policy.mode == "restricted"
     assert "read, search, write" in spec.task_input
-
-
-def test_resolve_snapshots_the_writable_agent_set(tmp_path):
-    """The executors a proposal may name are pinned with the rest of the spec."""
-    spec = _resolve(tmp_path, trigger="decision", task_input="Decide.")
-
-    assert spec.writable_agents == ("builder",)
-    assert JobSpec.from_dict(spec.to_dict()).writable_agents == ("builder",)
 
 
 def test_tool_mode_derives_from_all_rules_not_just_pathless():

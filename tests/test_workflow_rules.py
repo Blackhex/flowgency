@@ -324,7 +324,7 @@ def test_missing_value_never_satisfies_not_equals():
         "fields": [{"id": "f1", "label": "F1", "type": "text"}],
         "transitions": [{
             "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
-            "inputs": [],
+            "inputs": [{"field_id": "f1", "required": False}],
             "outputs": [],
             "preconditions": [
                 {"field_id": "f1", "operator": "not_equals", "value": "blocked"}
@@ -411,7 +411,7 @@ def _bool_precondition_def():
         "fields": [{"id": "flag", "label": "Flag", "type": "boolean"}],
         "transitions": [{
             "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
-            "inputs": [],
+            "inputs": [{"field_id": "flag", "required": False}],
             "outputs": [],
             "preconditions": [{"field_id": "flag", "operator": "equals", "value": True}],
             "criteria": [],
@@ -444,7 +444,7 @@ def test_false_satisfies_not_equals_true():
         "fields": [{"id": "flag", "label": "Flag", "type": "boolean"}],
         "transitions": [{
             "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
-            "inputs": [],
+            "inputs": [{"field_id": "flag", "required": False}],
             "outputs": [],
             "preconditions": [{"field_id": "flag", "operator": "not_equals", "value": True}],
             "criteria": [],
@@ -467,7 +467,7 @@ def test_zero_does_not_satisfy_not_equals_false():
         "fields": [{"id": "flag", "label": "Flag", "type": "boolean"}],
         "transitions": [{
             "id": "t1", "name": "T1", "from_state": "s1", "to_state": "s2",
-            "inputs": [],
+            "inputs": [{"field_id": "flag", "required": False}],
             "outputs": [],
             "preconditions": [{"field_id": "flag", "operator": "not_equals", "value": False}],
             "criteria": [],

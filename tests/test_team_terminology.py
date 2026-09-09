@@ -102,7 +102,6 @@ def test_normal_test_fixtures_use_team_domain_terms():
         REPO_ROOT / "tests" / "test_permission_capabilities.py",
         REPO_ROOT / "tests" / "test_permission_resolution.py",
         REPO_ROOT / "tests" / "test_prompt_store.py",
-        REPO_ROOT / "tests" / "test_proposal_questions.py",
         REPO_ROOT / "tests" / "test_write_boundary_contract.py",
     )
     text = "\n".join(path.read_text(encoding="utf-8") for path in paths)

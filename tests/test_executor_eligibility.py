@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
 import yaml
 
 from flowgency.integrations import BaseIntegration, REGISTRY
@@ -41,8 +42,25 @@ class UnrestrictedOnlyIntegration(RestrictedCapableIntegration):
     )
 
 
-REGISTRY[RestrictedCapableIntegration.name] = RestrictedCapableIntegration()
-REGISTRY[UnrestrictedOnlyIntegration.name] = UnrestrictedOnlyIntegration()
+@pytest.fixture(autouse=True)
+def _register_test_integrations():
+    """Expose the test integrations only while this module's tests run.
+
+    Registering at import time leaks them into the shared REGISTRY and breaks
+    the integration-contract suite, so add and remove them per test instead.
+    """
+    added = {
+        RestrictedCapableIntegration.name: RestrictedCapableIntegration(),
+        UnrestrictedOnlyIntegration.name: UnrestrictedOnlyIntegration(),
+    }
+    REGISTRY.update(added)
+    try:
+        yield
+    finally:
+        for name in added:
+            REGISTRY.pop(name, None)
+
+
 
 
 def _config(tmp_path: Path, raw_config, rules, *, integration: str = "restricted-test"):
