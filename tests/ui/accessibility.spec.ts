@@ -17,6 +17,8 @@ const pages = [
   { name: 'Dashboard', path: '/newsletter/', identity: ['text', 'How the pipeline works'] },
   { name: 'Agent Library', path: '/admin/agent-library', identity: ['heading', 'Agent Library'] },
   { name: 'Prompt Library', path: '/admin/agent-library/blueprints/advisor/prompts', identity: ['heading', 'Shared prompt source editor'] },
+  { name: 'Workflow Library', path: '/admin/workflow-library', identity: ['heading', 'Workflow Library'] },
+  { name: 'Workflow blueprint editor', path: '/admin/workflow-library/blueprints/delivery', identity: ['heading', 'Delivery'] },
   { name: 'Memory Channels', path: '/admin/memory-channels', identity: ['heading', 'Memory Channels'] },
   { name: 'Memory Channel detail', path: '/admin/memory-channels/brand-strategy', identity: ['heading', 'Brand Strategy'] },
   { name: 'Jobs', path: '/newsletter/jobs', identity: ['heading', 'Jobs in Newsletter'] },
