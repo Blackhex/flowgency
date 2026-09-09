@@ -625,6 +625,26 @@ test('320px workflow editor uses the mobile transition picker without losing key
   await assertNoConsoleErrors(page);
 });
 
+test('320px workflow editor overview and states show full controls without clipping', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto('/admin/workflow-library/blueprints/delivery');
+
+  // Overview tab is active by default — name and description fields must fit at 320px
+  await expect(page.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('textbox', { name: 'Blueprint name' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Blueprint description' })).toBeVisible();
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+
+  // States tab — the multi-word label "In progress" must not overflow the compact state row
+  await page.getByRole('tab', { name: 'States', exact: true }).click();
+  await expect(page.locator('input[aria-label="State name 2"]')).toBeVisible();
+  await expect(page.locator('input[aria-label="State name 2"]')).toHaveValue('In progress');
+  await expect(page.locator('[aria-label="In progress color"]')).toBeVisible();
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+});
+
 test('reused fields stay linked across transitions and preconditions', async ({ page }, testInfo) => {
   await page.goto('/admin/workflow-library/blueprints/delivery');
   await page.getByRole('tab', { name: 'Transitions', exact: true }).click();

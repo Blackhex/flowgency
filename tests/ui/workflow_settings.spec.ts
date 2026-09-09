@@ -390,6 +390,34 @@ test('320px workflow settings keep toolbar controls and storage row usable', asy
   await assertNoConsoleErrors(page);
 });
 
+test('320px new workflow form and validation error remain visible without clipping', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto('/newsletter/workflows/new');
+
+  await expect(page.getByRole('heading', { name: 'New workflow', exact: true })).toBeVisible();
+  // All form fields must fit at 320px — "Storage root" is the longest label in the form
+  await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Storage root', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create workflow', exact: true })).toBeVisible();
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+
+  // Type a meaningful name so the form is dirty and the Create button enables
+  await page.getByLabel('Name', { exact: true }).fill('Long workflow name for layout validation');
+  // Submit with empty storage root -> server returns 422 with validation error
+  const failedSave = page.waitForResponse((response) =>
+    response.url().includes('/newsletter/workflows/new') &&
+    response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Create workflow', exact: true }).click();
+  await failedSave;
+
+  // Error alert is visible and name draft is retained at 320px
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Long workflow name for layout validation');
+  await assertNoLayoutIssues(page);
+});
+
 test('workflow settings views have no WCAG A or AA violations', async ({ page, request }, testInfo) => {
   await page.goto('/newsletter/workflows/delivery/settings');
   await expect(page.getByRole('heading', { name: 'Delivery settings', exact: true })).toBeVisible();
