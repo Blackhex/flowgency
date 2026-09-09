@@ -129,12 +129,6 @@ An unavailable or unreadable storage root is not an empty ticket set — it is s
 
 `flowgency ticket run` submits a durable job for an assigned ticket. The job is the unit that runs an agent against the ticket; it drains through the shared job pool alongside routine jobs. Assignment and transitions are recorded on the ticket itself, not on the job.
 
-## Decision Execution
-
-The human decision-execution path remains alongside ticket workflows: a decision names an `execution_agent` that implements it. Flowgency validates the executor before a decision is created. A missing, invalid, non-executable, or non-writable `execution_agent` blocks the decide form and POST; the form stays blocked until corrected and no decision is created. It does not silently create a skipped decision. When the executor is valid, a durable job is submitted with an immutable snapshot of the request embedded in the prompt.
-
-Execution intent still decides whether a job runs. A questionnaire with no `boolean` questions executes after validation. When at least one `boolean` answer is `approved`, or when all `boolean` answers are `declined` but a substantive non-boolean input is present (a non-whitespace choice selection, an open-ended answer, or a decision note), the decision executes. Only when all `boolean` answers are `declined` with no substantive input is execution `skipped`.
-
 ## CLI
 
 Inspect and mutate tickets from the CLI:

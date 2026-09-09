@@ -99,8 +99,6 @@ The Agents page lists team-owned instances. Agent Detail owns the `Profile/Bluep
 
 Configured instance integration is authoritative. Job submission resolves the blueprint digest, projector, effective runtime policy, selected prompt source, immutable task input, and semantic memory before launch. Manual launches may run a saved prompt from the effective catalog or a one-off task. The worker runs from a private launch view and publishes memory only after successful execution and validation.
 
-Decision execution requires an explicit configured `execution_agent` whose integration is executable and whose effective permissions grant `write` on the team's `workspace_path` itself. A missing, invalid, or ineligible executor blocks the decide form and POST until corrected. It does not silently skip execution.
-
 Preserve ticket workflow, log, job, dashboard, and workspace behavior when changing configuration surfaces.
 
 ## Development

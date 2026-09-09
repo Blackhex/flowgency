@@ -33,7 +33,7 @@ A team owns a project workspace, runtime defaults, dispatch limits, workspaces, 
 
 ### Routines, jobs, and memory
 
-A routine selects one saved prompt, schedule, optional arguments, and optional semantic memory. Routine submissions, ticket runs, and decision submissions create durable jobs. The roster manual launcher can run saved prompts or one-off tasks. Memory uses selectors such as `scope: routine`, `scope: agent`, or `scope: channel`; Memory Channels define named cross-instance memory.
+A routine selects one saved prompt, schedule, optional arguments, and optional semantic memory. Routine submissions and ticket runs create durable jobs. The roster manual launcher can run saved prompts or one-off tasks. Memory uses selectors such as `scope: routine`, `scope: agent`, or `scope: channel`; Memory Channels define named cross-instance memory.
 
 ### Ticket workflows
 

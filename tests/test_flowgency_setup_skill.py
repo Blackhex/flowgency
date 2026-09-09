@@ -634,35 +634,31 @@ def test_setup_maps_review_profiles_only_to_existing_authority_surfaces():
         assert phrase in normalized
 
 
-def test_docs_clarify_execution_agent_blocks_not_skips():
-    """kb/data-formats.md and AGENTS.md must state that a missing, invalid, non-executable,
-    or non-writable execution_agent blocks the decide form and POST until corrected — not
-    that it silently creates a skipped decision. The prohibited obsolete skip row must be
-    absent. The substantive-input and no-boolean-questions execution rules must be stated."""
+def test_docs_current_ticket_contract_no_live_decision_paths():
+    """Docs must reflect that ticket transitions are the current agent-only workflow.
+    Decision endpoints return 410; no live human decision-execution path remains.
+    Job submissions come from routine, manual, and ticket-run triggers only."""
     data_formats = (REPO_ROOT / "kb" / "data-formats.md").read_text(encoding="utf-8")
+    getting_started = (REPO_ROOT / "kb" / "getting-started.md").read_text(encoding="utf-8")
     agents_md = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
-    # Required: blocking language in kb/data-formats.md
-    assert "blocks the decide form" in data_formats, \
-        "data-formats.md must say missing/invalid execution_agent blocks the decide form"
-    assert "blocked until corrected" in data_formats, \
-        "data-formats.md must say the form is blocked until the executor is corrected"
+    # Current: only agents move tickets between workflow states
+    assert "Only agents move tickets between states" in data_formats, \
+        "data-formats.md must state that only agents move tickets"
 
-    # Required: substantive non-boolean input causes execution despite all booleans declined
-    assert "substantive" in data_formats, \
-        "data-formats.md must describe the substantive non-boolean input rule"
+    # Current: durable jobs come from routine/manual/ticket-run — decision triggers are retired
+    assert "decision submissions create durable jobs" not in getting_started, \
+        "getting-started.md must not claim decision submissions create durable jobs"
 
-    # Required: questionnaires with no boolean questions execute after validation
-    assert "no `boolean` questions" in data_formats, \
-        "data-formats.md must state that questionnaires with no boolean questions execute"
+    # Retired: the human decision-execution path did not remain; handlers return 410
+    assert "human decision-execution path remains alongside ticket workflows" not in data_formats, \
+        "data-formats.md must not falsely claim the human decision-execution path remains"
 
-    # Required: blocking language in AGENTS.md
-    assert "blocks the decide form" in agents_md, \
-        "AGENTS.md Pipeline Relationships must say missing/invalid execution_agent blocks the decide form"
-
-    # Prohibited: obsolete skip row implying missing executor creates a skipped decision
-    assert "No writable `execution_agent` is available | `skipped`" not in data_formats, \
-        "data-formats.md must not contain the inaccurate obsolete skip table row"
+    # AGENTS.md must not carry retired decide-form blocking assertions
+    assert "blocks the decide form" not in agents_md, \
+        "AGENTS.md must not contain retired decide-form blocking language"
+    assert "Decision execution requires an explicit configured `execution_agent`" not in agents_md, \
+        "AGENTS.md must not contain retired decision-execution executor requirements"
 
 
 def test_setup_proposes_routines_with_recommended_cadences():
