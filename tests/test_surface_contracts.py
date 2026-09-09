@@ -287,6 +287,10 @@ def test_setup_skill_yaml_is_parseable_and_structurally_current(tmp_path):
     config["flowgency"]["agent_library"] = str(library)
     config["flowgency"]["compilation_cache"] = str(tmp_path / "cache")
     config["flowgency"]["memory_store"] = str(tmp_path / "memory")
+    if "workflow_library" in config.get("flowgency", {}):
+        workflow_library = tmp_path / "workflow-library"
+        workflow_library.mkdir()
+        config["flowgency"]["workflow_library"] = str(workflow_library)
     config["teams"]["example"]["workspace_path"] = str(workspace)
     config["teams"]["example"]["path"] = str(team_state)
     config["teams"]["example"]["permissions"]["rules"] = [

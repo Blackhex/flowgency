@@ -280,6 +280,8 @@ disposable native layouts in `flowgency.compilation_cache`.
 
 Upsert one team whose `workspace_path` points to the project workspace and whose `path` points to the Flowgency-owned team-state root. `workspace_path` is the execution workspace and source repository; `path` is the Flowgency-owned team root. The team root is automatically available to restricted agents. Flowgency never loads or creates `<workspace_path>/shared`. Durable jobs live in `flowgency.memory_store/.jobs`, and operation locks live in `<team.path>/locks`. Preserve existing team workspaces and unrelated settings. Every instance explicitly pins a blueprint and integration. Runtime defaults belong to the team; instance roots are additive and an instance tool policy is a complete override.
 
+Use this canonical shape:
+
 ```yaml
 schema_version: 1
 flowgency:
