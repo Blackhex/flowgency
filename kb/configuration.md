@@ -23,7 +23,7 @@ Team runtime defaults now include timeout only. A permission is a **tool acting 
 
 `mode` decides what happens to a path no rule covers: `restricted` forbids it, `unrestricted` allows it. Relative rule paths resolve against the team workspace. Only the `copilot` integration currently supports `mode: restricted`, and it is the only one that enforces path rules; the others accept `unrestricted` and do not enforce the rules written under it. Writing a narrow rule for one of them expresses intent, not a boundary. What each integration did and did not enforce for a given run is recorded on that job.
 
-Flowgency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.flowgency/memory` is `read` and `write`. An agent cannot rewrite the instructions it is executing under.
+Flowgency contributes generated rules for the launch view that configuration cannot widen: `<launch>/instructions` is `read` only; `<launch>/.flowgency/outbox` and `<launch>/.flowgency/memory` are `read` and `write`. An agent cannot rewrite the instructions it is executing under.
 
 Executor eligibility is derived, not stored: an agent may execute decisions when its effective permissions grant `write` on a rule whose `path` is the team's `workspace_path` itself — not a subdirectory.
 

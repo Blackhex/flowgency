@@ -370,9 +370,9 @@ Record each approved Phase 2 routine assignment under that instance's `routines`
 
 After the team is approved, ask the user whether to track work as tickets in a workflow. If declined, omit `workflows` from the team config and skip this section. Empty workflows configuration is valid.
 
-Propose named workflow instances that match the team's work streams. For each proposed workflow, name a reusable blueprint from the configured `flowgency.workflow_library` or a shipped example, the workflow instance ID, display name, and ticket storage location. Derive `flowgency.workflow_library` and the ticket storage root (`integration: local`, `root: <data_root>/tickets`) from the already-approved data root; do not introduce additional path questions. Require explicit approval of the proposed workflow names, blueprints, and storage location before writing any instance.
+Propose named workflow instances that match the team's work streams. For each proposed workflow, name a reusable blueprint from the configured `flowgency.workflow_library` or a shipped example, the display name, and ticket storage location. Derive `flowgency.workflow_library` and the ticket storage root (`integration: local`, `root: <data_root>/tickets`) from the already-approved data root; do not introduce additional path questions. Require explicit approval of the proposed workflow names, blueprints, and storage location before writing any instance.
 
-Shipped reusable blueprints — including `software-delivery` and `research` from `references/ticket-workflow-steps.md` — have stable IDs that configured instances may reference. Do not generate IDs for the user to name; generate stable hidden IDs for configured workflow instances from approved display names.
+Shipped reusable blueprints — including `software-delivery` and `research` from `references/ticket-workflow-steps.md` — have stable IDs that configured instances may reference. Do not generate IDs for the user to name; generate stable hidden IDs for both custom user blueprint definitions and configured workflow instances from approved display names.
 
 For each approved workflow instance, write it under `teams.<team-id>.workflows`:
 

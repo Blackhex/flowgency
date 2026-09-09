@@ -163,3 +163,37 @@ def test_installed_distribution_validates_shipped_workflow_examples(tmp_path):
     )
     assert proof.returncode == 0, proof.stdout + proof.stderr
     assert proof.stdout.strip().endswith("OK")
+
+
+def test_kb_configuration_documents_generated_outbox_and_memory_zones():
+    """kb/configuration.md must list both generated write zones; omitting outbox
+    contradicts AGENTS.md, kb/integrations.md and the live zones.py/launch_view.py."""
+    text = (KB / "configuration.md").read_text(encoding="utf-8")
+    # Both generated zones must appear as read+write; instructions stay read-only.
+    assert "<launch>/.flowgency/outbox" in text, (
+        "kb/configuration.md is missing the generated <launch>/.flowgency/outbox zone"
+    )
+    assert "<launch>/.flowgency/memory" in text
+    assert "`<launch>/instructions` is `read` only" in text
+
+
+def test_skill_does_not_propose_workflow_instance_id_to_user():
+    """SKILL.md must not ask users to name or approve technical workflow instance IDs;
+    stable hidden IDs must be generated for both custom blueprint definitions and
+    configured instances from approved display names only."""
+    from flowgency.setup_assets import copilot_discovery_root
+
+    skill = (
+        copilot_discovery_root()
+        / ".github/skills/flowgency-setup/SKILL.md"
+    ).read_text(encoding="utf-8")
+    # The proposal list must not include the instance ID.
+    assert "the workflow instance ID" not in skill, (
+        "SKILL.md proposes 'the workflow instance ID' to the user; IDs must be hidden"
+    )
+    # The skill must state that hidden IDs cover both blueprint definitions and instances.
+    assert "blueprint" in skill.lower() and "instance" in skill.lower()
+    normalized = " ".join(skill.split()).lower()
+    assert "stable hidden" in normalized, (
+        "SKILL.md must state that stable hidden IDs are generated"
+    )
