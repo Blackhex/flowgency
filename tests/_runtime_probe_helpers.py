@@ -57,6 +57,33 @@ def installed_ai_cli_runtimes(registry=REGISTRY) -> tuple[InstalledRuntime, ...]
     return tuple(installed)
 
 
+def supported_ticket_adapters(registry=REGISTRY) -> frozenset[str]:
+    """Adapters that explicitly declare a live ticket transport.
+
+    This is a deterministic declaration Task 8 makes on the adapter class, not a
+    probe of the installed binary: an adapter that names a `live_ticket_transport`
+    in its declared capabilities is a candidate. A successful live run is what
+    turns a declared candidate into measured availability -- capability selection
+    never recursively depends on this suite passing, and no flag is overridden
+    to force support here.
+    """
+    return frozenset(
+        name
+        for name in AI_CLI_COMMANDS
+        if registry[name].declared_runtime_capabilities.live_ticket_transport is not None
+    )
+
+
+def ticket_capable_installed_runtimes(registry=REGISTRY) -> tuple[InstalledRuntime, ...]:
+    """Installed runtimes intersected with the explicitly supported adapters."""
+    supported = supported_ticket_adapters(registry)
+    return tuple(
+        runtime
+        for runtime in installed_ai_cli_runtimes(registry)
+        if runtime.name in supported
+    )
+
+
 def selected_skill_supported(integration) -> bool:
     capabilities = integration.projector.capabilities
     return capabilities.discovers_skills and capabilities.activates_selected_skill
