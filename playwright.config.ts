@@ -46,6 +46,10 @@ export default defineConfig({
     navigationTimeout: 15_000,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
+    // The app registers /sw.js; a live service worker fetches Google Fonts outside
+    // page.route scope, hitting the real network (ERR_FAILED). Block it so the
+    // deterministic font intercepts are the only font source.
+    serviceWorkers: 'block',
   },
   webServer: {
     command: `.venv\\Scripts\\python.exe tests\\ui\\server.py --port ${port}`,

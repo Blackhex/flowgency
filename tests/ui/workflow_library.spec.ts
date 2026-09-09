@@ -329,6 +329,7 @@ test('criterion edits keep saved IDs and recreated criteria get fresh IDs after 
 
   await page.locator('textarea[aria-label="Agent criterion 1"]').fill('Edited criterion text');
   await saveEditor(page);
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 
   const afterEdit = await readEditorPayload(page);
   expect(afterEdit.draft.transitions[0].criteria[0].existing_criterion_id).toBe(originalCriterionId);
@@ -338,6 +339,7 @@ test('criterion edits keep saved IDs and recreated criteria get fresh IDs after 
   await page.getByLabel('Add agent criterion').click();
   await page.locator('textarea[aria-label="Agent criterion 1"]').fill('Replacement criterion text');
   await saveEditor(page);
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
 
   const afterRecreate = await readEditorPayload(page);
   expect(afterRecreate.draft.transitions[0].criteria[0].existing_criterion_id).toBeTruthy();
