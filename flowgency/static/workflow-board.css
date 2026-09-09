@@ -12,6 +12,7 @@
   --workflow-accent: #3465d9;
   --workflow-accent-border: #557fd8;
   --workflow-accent-soft: #dbe7ff;
+  --workflow-link: #2f5fd0;
   --workflow-idle: #5d6f86;
   --workflow-working: #156c59;
   --workflow-queued: #cb9d3b;
@@ -33,6 +34,7 @@
   --workflow-accent: #21446f;
   --workflow-accent-border: #416d9e;
   --workflow-accent-soft: #263244;
+  --workflow-link: #7aa2e8;
   --workflow-idle: #bcc3ce;
   --workflow-working: #7ad7bf;
   --workflow-queued: #ebc77c;
@@ -92,6 +94,14 @@
   gap: 0.75rem;
   justify-content: flex-end;
   margin: 0;
+}
+
+.workflow-board-actions {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 0.5rem;
+  min-width: 0;
 }
 
 .workflow-board-filters input,
@@ -593,7 +603,7 @@
 }
 
 .workflow-value-link {
-  color: var(--workflow-accent-border);
+  color: var(--workflow-link);
   text-decoration: underline;
   text-underline-offset: 0.12rem;
 }
@@ -726,7 +736,7 @@
 
 @media (max-width: 720px) {
   .workflow-board-toolbar {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
     gap: 0.7rem 0.9rem;
   }
@@ -740,16 +750,24 @@
   }
 
   .workflow-board-filters {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    grid-column: 1;
+    grid-row: 3;
     grid-template-columns: minmax(0, 1fr) minmax(8.25rem, 9.5rem);
   }
 
+  .workflow-board-actions {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: stretch;
+  }
+
+  .workflow-board-actions .workflow-link-button {
+    flex: 0 0 auto;
+  }
+
   #workflow-new-ticket {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: end;
-    align-self: start;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .workflow-search-field,
@@ -783,6 +801,17 @@
   .workflow-field-list div {
     grid-template-columns: 1fr;
     gap: 0.2rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .workflow-board-actions {
+    flex-wrap: wrap;
+  }
+
+  .workflow-board-actions .workflow-link-button,
+  .workflow-board-actions #workflow-new-ticket {
+    flex: 1 1 100%;
   }
 }
 

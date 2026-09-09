@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-import hashlib
-import json
+import dataclasses
 import os
 from pathlib import Path
 import shutil
@@ -18,6 +17,8 @@ import yaml
 
 from flowgency.configuration.models import MemorySelector
 from flowgency.configuration.store import ConfigStore
+from flowgency.fs.atomic import atomic_write_bytes
+from flowgency.fs.locks import exclusive_lock
 from flowgency.integrations import REGISTRY
 from flowgency.jobs.models import JobHandle
 from flowgency.jobs.authority import JobStore
@@ -50,6 +51,44 @@ def _ui_sitecustomize(runtime: Path) -> Path:
     return support
 
 
+def _ui_memory_binding(
+    memory_root: Path, *, team_key: str, agent_name: str, job_id: str
+) -> MemoryBinding:
+    """Build an agent-scope memory binding the way a real job persists one.
+
+    ``selector`` stores only the ``MemorySelector`` dump (scope/channel); the
+    team/agent identity lives in the hash criteria, not the selector, so the
+    strict service schema accepts what the Jobs view later revalidates.
+    """
+    resolved = resolve_memory_selector(
+        MemorySelector(scope="agent"),
+        job_id=job_id,
+        team_key=team_key,
+        agent_name=agent_name,
+        routine_id=None,
+        channels={},
+        store_root=memory_root,
+    )
+    memory_path = memory_root / "ui-ticket-memory" / team_key / agent_name
+    memory_path.mkdir(parents=True, exist_ok=True)
+    return MemoryBinding(
+        selector=resolved.selector.model_dump(mode="python"),
+        canonical_json=resolved.canonical_json,
+        memory_hash=resolved.memory_hash,
+        path=str(memory_path.resolve()),
+    )
+
+
+def _write_runtime_config(config_path: Path, config: dict) -> None:
+    """Write the runtime config the way ``ConfigStore`` does: atomically and
+    under the shared config lock so a concurrent board/jobs request never reads
+    a truncated ``config.yaml`` mid-reset."""
+    payload = yaml.safe_dump(config, sort_keys=False).encode("utf-8")
+    lock_path = config_path.with_suffix(f"{config_path.suffix}.lock")
+    with exclusive_lock(lock_path, wait=True):
+        atomic_write_bytes(config_path, payload)
+
+
 def _ui_submit_job_request(request, launcher=None) -> JobHandle:
     del launcher
     config_store = ConfigStore(Path(request.config_path))
@@ -58,16 +97,12 @@ def _ui_submit_job_request(request, launcher=None) -> JobHandle:
     agent = team.agents[request.agent_name]
     memory_root = Path(snapshot.config.flowgency.memory_store)
     job_store = JobStore(memory_root)
-    memory_selector = {
-        "scope": "agent",
-        "team": request.team_key,
-        "agent": request.agent_name,
-        "version": 1,
-    }
-    canonical_json = json.dumps(memory_selector, sort_keys=True, separators=(",", ":"))
-    memory_hash = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
-    memory_path = memory_root / "ui-ticket-memory" / request.team_key / request.agent_name
-    memory_path.mkdir(parents=True, exist_ok=True)
+    memory_binding = _ui_memory_binding(
+        memory_root,
+        team_key=request.team_key,
+        agent_name=request.agent_name,
+        job_id=request.job_id,
+    )
     cache_path = Path(snapshot.config.flowgency.compilation_cache) / "ticket-test" / "ui" / request.agent_name
     cache_path.mkdir(parents=True, exist_ok=True)
     timeout = getattr(team.runtime, "timeout", 1800)
@@ -97,12 +132,7 @@ def _ui_submit_job_request(request, launcher=None) -> JobHandle:
         skill_arguments=(),
         task_input=request.task_input,
         runtime_policy=RuntimePolicySnapshot(timeout=timeout, mode=mode),
-        memory=MemoryBinding(
-            selector=memory_selector,
-            canonical_json=canonical_json,
-            memory_hash=memory_hash,
-            path=str(memory_path.resolve()),
-        ),
+        memory=memory_binding,
         trigger_context=request.trigger_context,
         prompt_source={
             "type": "ticket",
@@ -472,12 +502,14 @@ def _seed_jobs(runtime: Path, config_path: Path) -> None:
     write_job(failed_path, failed)
 
     active_path = authority.path("newsletter", "fixture-active-job")
-    active = JobRecord.from_spec(_job_spec(runtime, config_path, "fixture-active-job"))
-    active.trigger = "ticket"
-    active.integration_name = "ticket-test"
-    active.agent_name = "reviewer"
-    active.task_input = "Review the current workflow ticket state.\n"
-    active.runtime_policy = RuntimePolicySnapshot(timeout=2400, mode="restricted")
+    # The running job belongs to reviewer. Setting it on the record alone left
+    # spec.agent_name as advisor, so the dashboard fleet read it as advisor's
+    # newest active job and hid advisor's waiting-for-memory link.
+    active_spec = dataclasses.replace(
+        _job_spec(runtime, config_path, "fixture-active-job"),
+        agent_name="reviewer",
+    )
+    active = JobRecord.from_spec(active_spec)
     active.status = "running"
     active.worker_pid = 4242
     active.started_at = FIXED_NOW
@@ -527,18 +559,15 @@ def _safe_remove_runtime(runtime: Path) -> None:
 def _reset_runtime_state(runtime: Path) -> None:
     raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
     config = _replace_runtime(raw, runtime)
-    (runtime / "config.yaml").write_text(
-        yaml.safe_dump(config, sort_keys=False),
-        encoding="utf-8",
-    )
+    _write_runtime_config(runtime / "config.yaml", config)
 
     _clear_directory(runtime / "workflow-library")
     _clear_directory(runtime / "tickets")
 
     memory_root = runtime / "memory-store"
     _clear_directory(memory_root / "ui-ticket-memory")
-    _clear_directory(memory_root / ".jobs" / "teams" / "newsletter")
-    _clear_directory(memory_root / ".jobs" / "teams" / "research")
+    _clear_directory(memory_root / ".jobs" / "newsletter")
+    _clear_directory(memory_root / ".jobs" / "research")
 
     for path in (
         runtime / "teams" / "newsletter" / "logs" / "2026-07-16",
@@ -559,7 +588,7 @@ def _prepare_runtime() -> tuple[Path, Path]:
     raw = yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))
     config = _replace_runtime(raw, runtime)
     config_path = runtime / "config.yaml"
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    _write_runtime_config(config_path, config)
     team = runtime / "teams" / "newsletter"
     (runtime / "teams" / "newsletter" / "editorial").mkdir(parents=True, exist_ok=True)
     (runtime / "workspaces" / "newsletter").mkdir(parents=True, exist_ok=True)

@@ -21,6 +21,22 @@ export function installConsoleErrorGate(page: Page): void {
   });
 }
 
+export async function installDeterministicFontResponses(page: Page): Promise<void> {
+  await page.route('https://fonts.googleapis.com/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/css; charset=utf-8',
+      body: '',
+    });
+  });
+  await page.route('https://fonts.gstatic.com/**', async (route) => {
+    await route.fulfill({
+      status: 204,
+      body: '',
+    });
+  });
+}
+
 export async function assertNoConsoleErrors(page: Page): Promise<void> {
   expect(pageErrors.get(page) ?? []).toEqual([]);
 }

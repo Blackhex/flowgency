@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
-import { assertNoLayoutIssues, assertNoConsoleErrors, installConsoleErrorGate } from './layout';
+import { assertNoLayoutIssues, assertNoConsoleErrors, installConsoleErrorGate, installDeterministicFontResponses } from './layout';
 
 type DetailSnapshot = {
   ticket: {
@@ -34,6 +34,7 @@ async function waitForWorkflowController(page: Parameters<typeof test.beforeEach
 test.beforeEach(async ({ page, request }, testInfo) => {
   await resetUiRuntime(request);
   installConsoleErrorGate(page);
+  await installDeterministicFontResponses(page);
   await page.addInitScript((theme) => {
     if (!localStorage.getItem('theme')) localStorage.setItem('theme', theme);
   }, testInfo.project.name.endsWith('dark') ? 'dark' : 'light');
@@ -58,6 +59,34 @@ test('board page exposes approved toolbar and inspector controls', async ({ page
   await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Assign', exact: true })).toHaveCount(0);
   await expect(page.locator('[draggable="true"]')).toHaveCount(0);
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+});
+
+test('board, ticket detail, and settings avoid clipping at a 320px viewport', async ({ page }) => {
+  // The narrowest supported width with the longest fixture labels. The Kanban
+  // track may scroll (it is .overflow-x-auto), but no control, form, or heading
+  // may clip and the document must not overflow horizontally.
+  await page.setViewportSize({ width: 320, height: 900 });
+
+  await page.goto('/newsletter/workflows/delivery?ticket=fixture-review');
+  await expect(page.getByRole('heading', { name: 'Delivery' })).toBeVisible();
+  await expect(page.getByLabel('Search tickets', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByLabel('Ticket details')
+      .getByRole('heading', { name: 'Validate stale transition handling', exact: true }),
+  ).toBeVisible();
+  await assertNoLayoutIssues(page);
+
+  await page.goto('/newsletter/workflows/delivery/tickets/fixture-review');
+  await expect(page.getByRole('button', { name: 'Back to board', exact: true })).toBeVisible();
+  await assertNoLayoutIssues(page);
+
+  await page.goto('/newsletter/workflows/delivery/settings');
+  await expect(page.locator('h1')).toContainText('Delivery settings');
+  await expect(page.getByLabel('Storage root', { exact: true })).toBeVisible();
   await assertNoLayoutIssues(page);
   await assertNoConsoleErrors(page);
 });
@@ -229,9 +258,11 @@ test('new ticket dialog creates a backlog ticket from the live board', async ({ 
   await page.goto('/newsletter/workflows/delivery');
 
   await page.getByRole('button', { name: 'New ticket', exact: true }).click();
-  await page.getByLabel('Title', { exact: true }).fill('Capture typed workflow values');
-  await page.getByLabel('Description', { exact: true }).fill('Keep boolean false and numeric zero visible without coercion.');
-  await page.getByRole('button', { name: 'Create ticket', exact: true }).click();
+  const dialog = page.locator('#workflow-ticket-dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Title', { exact: true }).fill('Capture typed workflow values');
+  await dialog.getByLabel('Description', { exact: true }).fill('Keep boolean false and numeric zero visible without coercion.');
+  await dialog.getByRole('button', { name: 'Create ticket', exact: true }).click();
 
   await expect(page.getByRole('heading', { name: 'Capture typed workflow values', exact: true })).toBeVisible();
   await expect(page.getByLabel('Assigned agent', { exact: true })).toHaveValue('');
