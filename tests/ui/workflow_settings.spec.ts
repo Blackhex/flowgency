@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { expectBodyFocus, tabTo } from './keyboard';
@@ -30,6 +31,20 @@ async function readExpectedRevision(page: Page): Promise<string> {
 
 async function currentRoot(page: Page): Promise<string> {
   return await page.getByLabel('Storage root', { exact: true }).inputValue();
+}
+
+async function openNewWorkflow(page: Page, projectName: string): Promise<void> {
+  if (projectName.startsWith('mobile')) {
+    await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
+  }
+  await page.getByRole('link', { name: 'New workflow', exact: true }).click();
+}
+
+async function expectNoAxeViolations(page: Page): Promise<void> {
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
 
 test.beforeEach(async ({ page, request }, testInfo) => {
@@ -89,8 +104,100 @@ test('board toolbar exposes workflow settings navigation', async ({ page }) => {
   await assertNoConsoleErrors(page);
 });
 
+test('settings toolbar tracks dirty state and revert restores the saved draft', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery/settings');
+
+  const name = page.getByLabel('Name', { exact: true });
+  const root = page.getByLabel('Storage root', { exact: true });
+  const savedStatus = page.locator('[data-workflow-settings-status]');
+  const saveButton = page.getByRole('button', { name: 'Save', exact: true });
+  const revertButton = page.getByRole('button', { name: 'Revert', exact: true });
+  const originalName = await name.inputValue();
+  const originalRoot = await root.inputValue();
+
+  await expect(savedStatus).toHaveText('Saved');
+  await expect(saveButton).toBeDisabled();
+  await expect(revertButton).toBeDisabled();
+
+  await name.fill('Draft delivery');
+  await root.fill(path.join(path.dirname(originalRoot), 'draft-root'));
+
+  await expect(savedStatus).toHaveText('Unsaved changes');
+  await expect(saveButton).toBeEnabled();
+  await expect(revertButton).toBeEnabled();
+
+  await revertButton.click();
+
+  await expect(name).toHaveValue(originalName);
+  await expect(root).toHaveValue(originalRoot);
+  await expect(savedStatus).toHaveText('Saved');
+  await expect(saveButton).toBeDisabled();
+  await expect(revertButton).toBeDisabled();
+  await expect(page.locator('#workflow-storage-health')).toHaveText('Not checked');
+  await assertNoConsoleErrors(page);
+});
+
+test('changing the storage target clears stale health and older responses do not overwrite newer results', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery/settings');
+  await page.evaluate(() => {
+    const realFetch = window.fetch.bind(window);
+    let requestCount = 0;
+    let releaseFirstResponse: (() => void) | null = null;
+    Object.assign(window, {
+      __releaseWorkflowStorageCheck: () => releaseFirstResponse?.(),
+    });
+    window.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (!url.endsWith('/newsletter/workflows/delivery/settings/check-storage')) {
+        return realFetch(input, init);
+      }
+      requestCount += 1;
+      const body = init?.body;
+      const form = body instanceof FormData ? body : new FormData();
+      const root = String(form.get('integration_config.root') ?? '');
+      if (requestCount === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirstResponse = resolve;
+        });
+      }
+      const payload = root.endsWith('delivery-stale-next')
+        ? {
+            status: 'unavailable',
+            label: 'Storage unavailable',
+            detail: 'Newest result',
+            ticket_count: 0,
+            issues: [],
+          }
+        : {
+            status: 'ok',
+            label: 'Available',
+            detail: '',
+            ticket_count: 0,
+            issues: [],
+          };
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+  });
+
+  const root = page.getByLabel('Storage root', { exact: true });
+  const health = page.locator('#workflow-storage-health');
+  const originalRoot = await root.inputValue();
+  const nextRoot = path.join(path.dirname(originalRoot), 'delivery-stale-next');
+
+  await page.getByRole('button', { name: 'Check storage', exact: true }).click();
+  await root.fill(nextRoot);
+  await expect(health).toHaveText('Not checked');
+  await page.getByRole('button', { name: 'Check storage', exact: true }).click();
+  await expect(health).toHaveText('Storage unavailable');
+  await page.evaluate(() => (window as typeof window & { __releaseWorkflowStorageCheck: () => void }).__releaseWorkflowStorageCheck());
+  await expect(health).toHaveText('Storage unavailable');
+  await assertNoConsoleErrors(page);
+});
+
 test('storage root switch hides old namespace and switch-back restores it', async ({ page, request }, testInfo) => {
-  test.skip(testInfo.project.name.startsWith('mobile'), 'desktop-only switch flow');
   await page.goto('/newsletter/workflows/delivery/settings');
 
   const originalRoot = await currentRoot(page);
@@ -122,8 +229,61 @@ test('storage root switch hides old namespace and switch-back restores it', asyn
   await assertNoConsoleErrors(page);
 });
 
+test('check storage renders text-only issues and recovers after a network failure', async ({ page }) => {
+  await page.goto('/newsletter/workflows/delivery/settings');
+  await page.evaluate(() => {
+    const realFetch = window.fetch.bind(window);
+    let requestCount = 0;
+    Object.assign(window, { __workflowStorageAttack: 0 });
+    window.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (!url.endsWith('/newsletter/workflows/delivery/settings/check-storage')) {
+        return realFetch(input, init);
+      }
+      requestCount += 1;
+      if (requestCount === 1) {
+        throw new TypeError('network failed');
+      }
+      return new Response(JSON.stringify({
+        status: 'incompatible',
+        label: 'Incompatible',
+        detail: 'Compatibility mismatch <script>window.__workflowStorageAttack = 1</script>',
+        ticket_count: 2,
+        issues: [
+          {
+            code: 'incompatible-blueprint',
+            field: 'definition',
+            message: 'Unsafe <img src=x onerror="window.__workflowStorageAttack = 1"> issue',
+            hint: 'Repair <svg onload="window.__workflowStorageAttack = 1"></svg> text only.',
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+  });
+
+  const checkButton = page.getByRole('button', { name: 'Check storage', exact: true });
+  await checkButton.click();
+  await expect(page.locator('#workflow-storage-health')).toHaveText('Check failed');
+  await expect(checkButton).toBeEnabled();
+
+  await checkButton.click();
+  await expect(page.locator('#workflow-storage-health')).toHaveText('Incompatible');
+  await expect(page.locator('#workflow-storage-health-details')).toContainText('Compatibility mismatch <script>window.__workflowStorageAttack = 1</script>');
+  await expect(page.locator('#workflow-storage-health-details')).toContainText('Unsafe <img src=x onerror="window.__workflowStorageAttack = 1"> issue');
+  await expect(page.locator('#workflow-storage-health-details')).toContainText('Repair <svg onload="window.__workflowStorageAttack = 1"></svg> text only.');
+  await expect(page.locator('#workflow-storage-health-details img')).toHaveCount(0);
+  await expect(page.locator('#workflow-storage-health-details script')).toHaveCount(0);
+  await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();
+  await expect(page.getByLabel('Blueprint', { exact: true })).toBeEnabled();
+  await expect(page.getByLabel('Storage root', { exact: true })).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __workflowStorageAttack: number }).__workflowStorageAttack)).toBe(0);
+  await assertNoConsoleErrors(page);
+});
+
 test('check storage distinguishes unavailable from empty and create follows selected blueprint', async ({ page, request }, testInfo) => {
-  test.skip(testInfo.project.name.startsWith('mobile'), 'desktop-only create flow');
   await page.goto('/newsletter/workflows/delivery/settings');
 
   const originalRoot = await currentRoot(page);
@@ -141,7 +301,7 @@ test('check storage distinguishes unavailable from empty and create follows sele
   await page.getByRole('button', { name: 'Check storage', exact: true }).click();
   await expect(page.locator('#workflow-storage-health')).toHaveText('Available');
 
-  await page.getByRole('link', { name: 'New workflow', exact: true }).click();
+  await openNewWorkflow(page, testInfo.project.name);
   await expect(page).toHaveURL('/newsletter/workflows/new');
   await expect(page.getByRole('heading', { name: 'New workflow', exact: true })).toBeVisible();
   await expect(page.getByLabel(/identifier/i)).toHaveCount(0);
@@ -166,8 +326,28 @@ test('check storage distinguishes unavailable from empty and create follows sele
   await assertNoConsoleErrors(page);
 });
 
+test('validation errors keep the submitted draft visible on desktop and mobile', async ({ page }, testInfo) => {
+  await page.goto('/newsletter/workflows/delivery/settings');
+
+  await page.getByLabel('Name', { exact: true }).fill('');
+  await fillStorageRoot(page, '');
+  const failedSave = page.waitForResponse((response) => response.url().includes('/newsletter/workflows/delivery/settings') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await failedSave;
+
+  await expect(page.getByRole('alert')).toContainText('Workflow name is required.');
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('Storage root', { exact: true })).toHaveValue('');
+  await expect(page.locator('#workflow-storage-health')).toHaveText('Invalid settings');
+  await assertNoLayoutIssues(page);
+  if (testInfo.project.name.startsWith('mobile')) {
+    await expect(page).toHaveScreenshot('workflow-storage-error-mobile.png', { fullPage: true });
+  } else {
+    await expect(page).toHaveScreenshot('workflow-storage-error.png', { fullPage: true });
+  }
+});
+
 test('stale save preserves the submitted draft after an external settings change', async ({ page, request }, testInfo) => {
-  test.skip(testInfo.project.name.startsWith('mobile'), 'desktop-only conflict flow');
   await page.goto('/newsletter/workflows/delivery/settings');
 
   const originalRoot = await currentRoot(page);
@@ -199,4 +379,47 @@ test('stale save preserves the submitted draft after an external settings change
   await expect(page.locator('body')).toContainText('reload before saving');
   const config = await readFile(configPath, 'utf8');
   expect(config).toContain('delivery-external');
+});
+
+test('320px workflow settings keep toolbar controls and storage row usable', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto('/newsletter/workflows/delivery/settings');
+
+  await expect(page.getByRole('button', { name: 'Open navigation', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Revert', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check storage', exact: true })).toBeVisible();
+  await assertNoLayoutIssues(page);
+  await assertNoConsoleErrors(page);
+});
+
+test('workflow settings views have no WCAG A or AA violations', async ({ page, request }, testInfo) => {
+  await page.goto('/newsletter/workflows/delivery/settings');
+  await expect(page.getByRole('heading', { name: 'Delivery settings', exact: true })).toBeVisible();
+  await expectNoAxeViolations(page);
+
+  await openNewWorkflow(page, testInfo.project.name);
+  await expect(page.getByRole('heading', { name: 'New workflow', exact: true })).toBeVisible();
+  await expectNoAxeViolations(page);
+
+  const invalidSave = await request.post('/newsletter/workflows/delivery/settings', {
+    form: {
+      name: '',
+      blueprint: 'delivery',
+      integration: 'local',
+      'integration_config.root': '',
+      expected_revision: await readExpectedRevision(page),
+    },
+    headers: { Accept: 'text/html' },
+    maxRedirects: 0,
+  });
+  expect(invalidSave.status()).toBe(422);
+  await page.goto('/newsletter/workflows/delivery/settings');
+  await page.getByLabel('Name', { exact: true }).fill('');
+  await page.getByLabel('Storage root', { exact: true }).fill('');
+  const failedSave = page.waitForResponse((response) => response.url().includes('/newsletter/workflows/delivery/settings') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await failedSave;
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expectNoAxeViolations(page);
 });

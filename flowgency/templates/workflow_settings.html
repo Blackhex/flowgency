@@ -22,7 +22,7 @@
 {% endblock %}
 {% block content %}
 <section class="mx-auto max-w-4xl px-4 py-4 md:px-6 md:py-6" data-workflow-settings-root>
-  <div class="mb-4 flex items-center justify-between gap-3 border-b border-gray-200 pb-3 dark:border-gray-700">
+  <div class="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3 dark:border-gray-700">
     <div class="flex items-center gap-3">
       {% if workflow_settings_back_href %}
       <a href="{{ workflow_settings_back_href }}" aria-label="Back to board" class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100">
@@ -31,10 +31,17 @@
       {% endif %}
       <h1 class="text-2xl font-semibold text-gray-900 dark:text-gray-100">{{ workflow_settings_title }}</h1>
     </div>
-    <button type="submit" form="workflow-settings-form" class="inline-flex items-center gap-2 rounded-lg bg-flowgency-700 px-4 py-2 text-sm font-medium text-white hover:bg-flowgency-800">
-      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-      {{ workflow_settings_save_label }}
-    </button>
+    <div class="flex flex-wrap items-center justify-end gap-2">
+      <span class="text-sm text-gray-600 dark:text-gray-300" data-workflow-settings-status aria-live="polite">Saved</span>
+      <button type="button" class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800" data-workflow-settings-revert title="Revert to saved values" aria-label="Revert" disabled>
+        <i data-lucide="undo-2"></i>
+        <span>Revert</span>
+      </button>
+      <button type="submit" form="workflow-settings-form" class="inline-flex items-center gap-2 rounded-lg bg-flowgency-700 px-4 py-2 text-sm font-medium text-white hover:bg-flowgency-800 disabled:cursor-not-allowed disabled:opacity-60" data-workflow-settings-save disabled>
+        <i data-lucide="save"></i>
+        <span>{{ workflow_settings_save_label }}</span>
+      </button>
+    </div>
   </div>
 
   {% if workflow_settings_warning or workflow_settings_issues %}
@@ -51,7 +58,6 @@
   {% endif %}
 
   <form id="workflow-settings-form" method="post" action="{{ workflow_settings_save_action }}" class="space-y-8">
-    <input type="hidden" name="workflow_id" value="{{ workflow_settings_id }}">
     <input type="hidden" name="expected_revision" value="{{ workflow_settings_form.expected_revision }}">
 
     <section class="border-b border-gray-200 pb-6 dark:border-gray-700">
@@ -91,9 +97,16 @@
         <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Storage root</span>
         <input id="workflow-storage-root" name="integration_config.root" type="text" value="{{ workflow_settings_form.storage_root }}" spellcheck="false" class="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm focus:border-flowgency-600 focus:outline-none dark:border-gray-600 dark:bg-gray-900">
       </label>
-      <div class="mt-4 flex items-center gap-3">
+      <div class="mt-4 flex flex-wrap items-center gap-3">
         <div id="workflow-storage-health" aria-live="polite" class="text-sm text-gray-600 dark:text-gray-300">Not checked</div>
-        <button id="workflow-check-storage" type="button" class="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800">Check storage</button>
+        <button id="workflow-check-storage" type="button" class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:hover:bg-gray-800" title="Check storage">
+          <i data-lucide="shield-check"></i>
+          <span>Check storage</span>
+        </button>
+      </div>
+      <div id="workflow-storage-health-details" class="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300" hidden>
+        <p data-workflow-settings-health-detail hidden></p>
+        <ul data-workflow-settings-health-issues class="list-disc pl-5" hidden></ul>
       </div>
     </section>
   </form>
@@ -102,8 +115,17 @@
   "mode": settings_mode,
   "checkUrl": workflow_settings_check_action,
   "blueprintHrefBase": "/admin/workflow-library/blueprints/",
+  "savedForm": {
+    "name": workflow_settings_saved_form.name,
+    "blueprint": workflow_settings_saved_form.blueprint,
+    "integration": workflow_settings_saved_form.integration,
+    "storageRoot": workflow_settings_saved_form.storage_root,
+    "expectedRevision": workflow_settings_saved_form.expected_revision,
+  },
+  "health": workflow_settings_initial_health,
 } | tojson }}</script>
 {% endblock %}
 {% block page_scripts %}
+<script src="/static/lucide.min.js"></script>
 <script src="/static/workflow-settings.js"></script>
 {% endblock %}

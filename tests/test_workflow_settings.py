@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 
 def research_definition() -> dict:
     return {
@@ -115,3 +117,96 @@ def test_storage_root_overlap_is_rejected_without_changing_binding(workflow_web_
     assert str(overlap_root) in response.text
     after = env.store.load().config.teams[env.team_id].workflows[env.workflow_id]
     assert after.integration_config == before.integration_config
+
+
+def test_check_storage_does_not_create_missing_root_or_change_config(workflow_web_env):
+    env = workflow_web_env
+    missing_root = env.root_a.parent / "delivery-read-only-check"
+    config_bytes = env.store.path.read_bytes()
+
+    response = env.check_storage(root=missing_root)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "unavailable"
+    assert not missing_root.exists()
+    assert env.store.path.read_bytes() == config_bytes
+
+
+def test_invalid_edit_save_preserves_exact_submitted_draft_and_binding(workflow_web_env):
+    env = workflow_web_env
+    before = env.store.load().config.teams[env.team_id].workflows[env.workflow_id]
+
+    response = env.client.post(
+        f"/{env.team_id}/workflows/{env.workflow_id}/settings",
+        data={
+            "workflow_id": env.workflow_id,
+            "name": "",
+            "blueprint": before.blueprint,
+            "integration": before.integration,
+            "integration_config.root": str(env.root_b),
+            "expected_revision": env.store.load().revision,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert 'value=""' in response.text
+    assert f'value="{env.root_b}"' in response.text
+    after = env.store.load().config.teams[env.team_id].workflows[env.workflow_id]
+    assert after.name == before.name
+    assert after.integration_config == before.integration_config
+
+
+def test_create_ignores_forged_existing_workflow_id(workflow_web_env):
+    env = workflow_web_env
+    before = env.store.load().config.teams[env.team_id].workflows[env.workflow_id]
+
+    response = env.client.post(
+        f"/{env.team_id}/workflows/new",
+        data={
+            "workflow_id": env.workflow_id,
+            "name": "Investigation",
+            "blueprint": env.blueprint_id,
+            "integration": "local",
+            "integration_config.root": str(env.root_b),
+            "expected_revision": env.store.load().revision,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location != f"/{env.team_id}/workflows/{env.workflow_id}/settings"
+    created_id = urlparse(location).path.split("/")[-2]
+    assert created_id.startswith("wf-")
+    snapshot = env.store.load()
+    assert snapshot.config.teams[env.team_id].workflows[env.workflow_id] == before
+    created = snapshot.config.teams[env.team_id].workflows[created_id]
+    assert created.name == "Investigation"
+    assert created.blueprint == env.blueprint_id
+
+
+def test_repeated_create_with_same_name_gets_distinct_server_ids(workflow_web_env):
+    env = workflow_web_env
+    created_ids: list[str] = []
+
+    for forged_id, root in (("wf-fixed", env.root_b), (env.workflow_id, env.root_a.parent / "delivery-second")):
+        root.mkdir(parents=True, exist_ok=True)
+        response = env.client.post(
+            f"/{env.team_id}/workflows/new",
+            data={
+                "workflow_id": forged_id,
+                "name": "Repeated",
+                "blueprint": env.blueprint_id,
+                "integration": "local",
+                "integration_config.root": str(root),
+                "expected_revision": env.store.load().revision,
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        created_ids.append(urlparse(response.headers["location"]).path.split("/")[-2])
+
+    assert created_ids[0] != created_ids[1]
+    assert all(created_id.startswith("wf-") for created_id in created_ids)

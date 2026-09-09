@@ -45,6 +45,14 @@ def _generated_workflow_id() -> str:
     return f"wf-{uuid4().hex}"
 
 
+def _new_workflow_id(snapshot, team_id: str) -> str:
+    workflows = snapshot.config.teams[team_id].workflows
+    workflow_id = _generated_workflow_id()
+    while workflow_id in workflows:
+        workflow_id = _generated_workflow_id()
+    return workflow_id
+
+
 def _available_blueprints(configuration, snapshot) -> tuple[dict[str, str], ...]:
     rows: list[dict[str, str]] = []
     for inspection in configuration.library_for(snapshot).list():
@@ -71,6 +79,54 @@ def _issue_dicts(exc: ValidationFailed) -> list[dict[str, str]]:
     ]
 
 
+def _settings_form_payload(form: WorkflowSettingsForm) -> dict[str, str]:
+    return {
+        "name": form.name,
+        "blueprint": form.blueprint,
+        "integration": form.integration,
+        "storageRoot": form.storage_root,
+        "expectedRevision": form.expected_revision,
+    }
+
+
+def _idle_health_payload() -> dict[str, Any]:
+    return {
+        "status": "idle",
+        "label": "Not checked",
+        "detail": "",
+        "issues": [],
+    }
+
+
+def _invalid_health_payload(message: str) -> dict[str, Any]:
+    return {
+        "status": "invalid",
+        "label": "Invalid settings",
+        "detail": message,
+        "issues": [],
+    }
+
+
+def _issues_health_payload(issues: list[dict[str, str]], warning: str | None = None) -> dict[str, Any]:
+    lowered = " ".join(issue.get("message", "").lower() for issue in issues)
+    if "unavailable" in lowered:
+        status = "unavailable"
+        label = "Storage unavailable"
+    elif issues:
+        status = "incompatible"
+        label = "Incompatible"
+    else:
+        status = "invalid"
+        label = "Invalid settings"
+    detail = "" if warning == "Cannot save workflow." else (warning or "")
+    return {
+        "status": status,
+        "label": label,
+        "detail": detail,
+        "issues": issues,
+    }
+
+
 def _form_context(
     request: Request,
     services: FlowgencyServices,
@@ -79,9 +135,11 @@ def _form_context(
     team_id: str,
     workflow_id: str,
     form: WorkflowSettingsForm,
+    saved_form: WorkflowSettingsForm | None = None,
     create_mode: bool,
     issues: list[dict[str, str]] | None = None,
     warning: str | None = None,
+    health: dict[str, Any] | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
     ticket_service = services.tickets
@@ -102,6 +160,7 @@ def _form_context(
             "settings_mode": "create" if create_mode else "edit",
             "workflow_settings_id": workflow_id,
             "workflow_settings_form": form,
+            "workflow_settings_saved_form": saved_form or form,
             "workflow_settings_issues": issues or [],
             "workflow_settings_warning": warning,
             "workflow_settings_title": "New workflow" if create_mode else f"{form.name} settings",
@@ -113,6 +172,7 @@ def _form_context(
                 _require_workflow_configuration(services), snapshot
             ),
             "workflow_settings_blueprint_href": f"/admin/workflow-library/blueprints/{form.blueprint}",
+            "workflow_settings_initial_health": health or _idle_health_payload(),
         }
     )
     return _templates(request).TemplateResponse(
@@ -156,6 +216,22 @@ def _draft_form(
     )
 
 
+def _submitted_draft_form(
+    submitted: Any,
+    *,
+    workflow_id: str,
+    expected_revision: str,
+) -> WorkflowSettingsForm:
+    return _draft_form(
+        workflow_id=workflow_id,
+        expected_revision=expected_revision,
+        name=str(submitted.get("name", "")).strip(),
+        blueprint=str(submitted.get("blueprint", "delivery")).strip() or "delivery",
+        integration=str(submitted.get("integration", "local")).strip() or "local",
+        root=str(submitted.get("integration_config.root", "")).strip(),
+    )
+
+
 def _check_candidate(configuration, snapshot, team_id: str, workflow_id: str, form: WorkflowSettingsForm):
     library = configuration.library_for(snapshot)
     source = library.inspect(form.blueprint)
@@ -189,7 +265,7 @@ async def workflow_create_page(
     snapshot = services.config_store.load()
     _require_team(snapshot, team)
     form = _draft_form(
-        workflow_id=_generated_workflow_id(),
+        workflow_id=_new_workflow_id(snapshot, team),
         expected_revision=snapshot.revision,
     )
     return _form_context(
@@ -197,8 +273,9 @@ async def workflow_create_page(
         services,
         snapshot,
         team_id=team,
-        workflow_id=form.workflow_id or _generated_workflow_id(),
+        workflow_id=form.workflow_id or _new_workflow_id(snapshot, team),
         form=form,
+        saved_form=form,
         create_mode=True,
     )
 
@@ -211,30 +288,32 @@ async def workflow_create_save(
 ) -> Response:
     snapshot = services.config_store.load()
     _require_team(snapshot, team)
+    workflow_id = _new_workflow_id(snapshot, team)
+    submitted = await request.form()
     try:
-        form = WorkflowSettingsForm.from_form_data(await request.form())
+        form = WorkflowSettingsForm.from_form_data(submitted)
     except (ValidationError, ValueError) as exc:
-        submitted = await request.form()
-        fallback = _draft_form(
-            workflow_id=str(submitted.get("workflow_id", "")).strip() or _generated_workflow_id(),
+        fallback = _submitted_draft_form(
+            submitted,
+            workflow_id=workflow_id,
             expected_revision=snapshot.revision,
-            name=str(submitted.get("name", "")).strip(),
-            blueprint=str(submitted.get("blueprint", "delivery")).strip() or "delivery",
-            integration="local",
-            root=str(submitted.get("integration_config.root", "")).strip(),
         )
         return _form_context(
             request,
             services,
             snapshot,
             team_id=team,
-            workflow_id=fallback.workflow_id or _generated_workflow_id(),
+            workflow_id=workflow_id,
             form=fallback,
+            saved_form=_draft_form(
+                workflow_id=workflow_id,
+                expected_revision=snapshot.revision,
+            ),
             create_mode=True,
             warning=str(exc),
+            health=_invalid_health_payload(str(exc)),
             status_code=422,
         )
-    workflow_id = form.workflow_id or _generated_workflow_id()
     configuration = _require_workflow_configuration(services)
     try:
         await run_in_threadpool(
@@ -254,13 +333,22 @@ async def workflow_create_save(
             team_id=team,
             workflow_id=workflow_id,
             form=form,
+            saved_form=_draft_form(
+                workflow_id=workflow_id,
+                expected_revision=snapshot.revision,
+            ),
             create_mode=True,
             issues=_issue_dicts(exc),
             warning="Cannot save workflow.",
+            health=_issues_health_payload(_issue_dicts(exc), "Cannot save workflow."),
             status_code=422,
         )
     except ConfigConflictError as exc:
         snapshot = services.config_store.load()
+        saved_form = _draft_form(
+            workflow_id=workflow_id,
+            expected_revision=snapshot.revision,
+        )
         return _form_context(
             request,
             services,
@@ -268,6 +356,7 @@ async def workflow_create_save(
             team_id=team,
             workflow_id=workflow_id,
             form=form,
+            saved_form=saved_form,
             create_mode=True,
             warning=str(exc),
             status_code=409,
@@ -294,6 +383,7 @@ async def workflow_settings_page(
         team_id=team,
         workflow_id=workflow,
         form=_existing_form(snapshot, team, workflow),
+        saved_form=_existing_form(snapshot, team, workflow),
         create_mode=False,
     )
 
@@ -309,10 +399,15 @@ async def workflow_settings_save(
     _require_team(snapshot, team)
     if workflow not in snapshot.config.teams[team].workflows:
         raise HTTPException(status_code=404, detail="Unknown workflow")
+    submitted = await request.form()
     try:
-        form = WorkflowSettingsForm.from_form_data(await request.form())
+        form = WorkflowSettingsForm.from_form_data(submitted)
     except (ValidationError, ValueError) as exc:
-        current = _existing_form(snapshot, team, workflow)
+        current = _submitted_draft_form(
+            submitted,
+            workflow_id=workflow,
+            expected_revision=snapshot.revision,
+        )
         return _form_context(
             request,
             services,
@@ -320,8 +415,10 @@ async def workflow_settings_save(
             team_id=team,
             workflow_id=workflow,
             form=current,
+            saved_form=_existing_form(snapshot, team, workflow),
             create_mode=False,
             warning=str(exc),
+            health=_invalid_health_payload(str(exc)),
             status_code=422,
         )
     configuration = _require_workflow_configuration(services)
@@ -335,6 +432,7 @@ async def workflow_settings_save(
         )
     except ValidationFailed as exc:
         snapshot = services.config_store.load()
+        issues = _issue_dicts(exc)
         return _form_context(
             request,
             services,
@@ -342,20 +440,31 @@ async def workflow_settings_save(
             team_id=team,
             workflow_id=workflow,
             form=form,
+            saved_form=_existing_form(snapshot, team, workflow),
             create_mode=False,
-            issues=_issue_dicts(exc),
+            issues=issues,
             warning="Cannot save workflow.",
+            health=_issues_health_payload(issues, "Cannot save workflow."),
             status_code=422,
         )
     except ConfigConflictError as exc:
         snapshot = services.config_store.load()
+        conflict_form = _draft_form(
+            workflow_id=workflow,
+            expected_revision=snapshot.revision,
+            name=form.name,
+            blueprint=form.blueprint,
+            integration=form.integration,
+            root=form.storage_root,
+        )
         return _form_context(
             request,
             services,
             snapshot,
             team_id=team,
             workflow_id=workflow,
-            form=form,
+            form=conflict_form,
+            saved_form=_existing_form(snapshot, team, workflow),
             create_mode=False,
             warning=str(exc),
             status_code=409,
