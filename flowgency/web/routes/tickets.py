@@ -34,6 +34,7 @@ def _team_context(request: Request, snapshot, team_id: str) -> dict[str, Any]:
     return {
         "team": team_id,
         "team_name": team_cfg.name,
+        "team_agents": tuple(team_cfg.agents.keys()),
         "teams": {key: value.name for key, value in snapshot.config.teams.items()},
         "flowgency_title": snapshot.config.flowgency.title,
         "admin_active": False,

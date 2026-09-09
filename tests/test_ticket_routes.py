@@ -310,6 +310,18 @@ def test_ticket_detail_route_renders_html_page(workflow_web_env):
     assert "Overview" in response.text
 
 
+def test_ticket_detail_route_offers_configured_team_agents(workflow_web_env):
+    env = workflow_web_env
+    ticket = env.create(title="Detail agent options")
+
+    response = env.client.get(f"{env.base_path}/tickets/{ticket.ref.ticket_id}")
+
+    assert response.status_code == 200
+    assert 'option value="builder"' in response.text
+    assert 'option value="advisor"' not in response.text
+    assert 'option value="researcher"' not in response.text
+
+
 def test_ticket_detail_snapshot_uses_deterministic_etag(workflow_web_env):
     env = workflow_web_env
     ticket = env.create(title="ETag detail")
