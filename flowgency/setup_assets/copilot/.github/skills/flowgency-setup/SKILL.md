@@ -388,6 +388,21 @@ teams:
           root: C:/Flowgency/tickets
 ```
 
+      When the team uses the `copilot` integration in `restricted` mode and the user
+      approves ticket workflows, propose the per-agent
+      `integration_config.allow_local_network` permission explicitly before writing
+      `true`. Name the Runtime checkbox label exactly as `Allow local-network access`
+      and disclose `Allows connections to local services and LAN hosts, not only Flowgency.`
+      State plainly that setup must ask before writing true.
+      Explain that the field is a strict boolean, defaults to `false`, and is broader
+      than Flowgency alone. No automatic grant is allowed. If the user declines, do not automatically grant local-network access:
+      leave the field absent or `false` and report that
+      ticket-enabled restricted Copilot runs will fail preflight with
+      `ticket-local-network-required` unless the user later enables the checkbox or
+      chooses a non-ticket unrestricted run. Do not silently write `true`, do not
+      enable any broader outbound grant, and do not promise ticket workflows will run
+      without that consent.
+
 Document these rules in the setup summary: workflow blueprint IDs differ from display name labels; an invalid definition blocks only affected transitions, not the whole board; switching the storage integration does not transfer existing tickets; assignment is ownership and sign-off remains optional; only agents may advance tickets through transitions, not users. Read-only agents may execute ticket transitions through live ticket tools without workspace write access. Ticket tools are only available when the Copilot integration supplies them; other integrations fail closed for ticket operations.
 
 Preserve the already-approved `flowgency.workflow_library` path in the complete config candidate. Do not prompt for individual workflow library sub-paths; the library root is the only path the user supplies.

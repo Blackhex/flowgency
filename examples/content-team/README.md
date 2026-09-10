@@ -18,7 +18,11 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
    ```
 
 2. Add the team to your Flowgency `config.yaml`. Each agent uses `read, search`
-   by default; ticket transitions do not require workspace write access:
+  by default; ticket transitions do not require workspace write access. For
+  restricted Copilot ticket runs, keep `allow_local_network: false` until you
+  explicitly approve the Runtime checkbox `Allow local-network access`. If you
+  leave it absent or `false`, Flowgency rejects ticket-enabled restricted runs
+  with `ticket-local-network-required` instead of widening policy:
    ```yaml
    schema_version: 1
    flowgency:
@@ -40,6 +44,8 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
        - name: writer
          blueprint: writer
          integration: copilot
+         integration_config:
+           allow_local_network: false
          permissions:
            mode: restricted
            rules:
@@ -48,6 +54,8 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
        - name: editor
          blueprint: editor
          integration: copilot
+         integration_config:
+           allow_local_network: false
          permissions:
            mode: restricted
            rules:
@@ -56,6 +64,8 @@ A 3-agent team for content-driven projects: blogs, newsletters, documentation si
        - name: researcher
          blueprint: researcher
          integration: copilot
+         integration_config:
+           allow_local_network: false
          permissions:
            mode: restricted
            rules:

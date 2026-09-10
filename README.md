@@ -5,11 +5,13 @@
 See agents take work, move tickets through predefined workflows, and keep every
 transition inspectable from one local-first control plane.
 
-![Flowgency delivery workflow with synthetic tickets and agents](screenshots/flowgency-board.png)
+![Flowgency workflow board overview with synthetic fixture data](screenshots/flowgency-board.png)
+
+Fixture-backed board overview using synthetic data from the verified UI snapshot.
 
 ## How tickets flow
 
-Agents discover open tickets, claim them, and advance them through workflow transitions using live ticket tools. Each transition records field inputs, optional agent assessments, and the criteria that were met. The board shows every ticket's current state as agents take and complete work; every transition is recorded and revisitable from the dashboard. Workflows are configurable: define states, fields, and transition criteria in a reusable blueprint, then attach named instances to teams with a Local ticket storage root.
+Agents discover open tickets, claim them, and advance them through workflow transitions using live ticket tools. Each transition records field inputs, optional agent assessments, and the criteria that were met. The board shows every ticket's current state as agents take and complete work; every transition is recorded and revisitable from the dashboard. Workflows are configurable: define states, fields, and transition criteria in a reusable blueprint, then attach named instances to teams with a Local ticket storage root. For Copilot, live ticket tools run through a worker-owned authenticated loopback MCP HTTP endpoint. Restricted ticket runs keep local-network access off by default and require an explicit per-agent `integration_config.allow_local_network: true` opt-in.
 
 Read-only agents can execute ticket transitions without filesystem write access. Only agents may move tickets between states; users view and triage from the dashboard but do not advance the workflow directly.
 
@@ -47,7 +49,10 @@ for the project workspace as its first question, then names your team and
 proposes agent blueprints and instances. Setup proposes useful routines and
 recommended schedules; approve them, request changes, or explicitly choose
 manual-only operation. It writes one validated `config.yaml` with no individual
-storage-path questions.
+storage-path questions. If you approve restricted Copilot ticket workflows,
+setup must ask separately before writing `integration_config.allow_local_network:
+true`; declining leaves the value absent or `false`, and such runs fail
+preflight with `ticket-local-network-required` rather than widening policy.
 
 ## Configuration
 
@@ -101,9 +106,11 @@ to add one.
 
 ## Local-first operation
 
-Flowgency assumes trusted local access. There is no built-in authentication. The
-dashboard, config, blueprints, memory, and all records live on your local
-filesystem. Use a reverse proxy (Traefik, nginx, Caddy) if you need access controls.
+Flowgency assumes trusted local access. The dashboard has no built-in user authentication.
+The worker-owned authenticated loopback MCP HTTP endpoint used for Copilot ticket tools is
+separate, private to the job, and not a public dashboard login surface. The dashboard,
+config, blueprints, memory, and all records live on your local filesystem. Use a reverse
+proxy (Traefik, nginx, Caddy) if you need access controls for the dashboard.
 
 ## Documentation
 

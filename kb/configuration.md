@@ -75,6 +75,15 @@ ownership; sign-off remains optional. Only agents may advance tickets through tr
 read-only agents may execute transitions through live ticket tools without filesystem
 write access. Ticket tools are only available when the Copilot integration supplies them.
 
+When a team's agents use the `copilot` integration in `restricted` mode and will
+run ticket workflows, each participating agent must opt in separately through
+`integration_config.allow_local_network: true`. The field is a strict boolean,
+defaults to `false`, and corresponds to the Runtime checkbox label `Allow local-network access`
+with disclosure `Allows connections to local services and LAN hosts, not only Flowgency.`
+If the field is absent or `false`, ticket-enabled restricted Copilot runs fail
+preflight with `ticket-local-network-required` rather than widening network
+policy automatically.
+
 ## Superseded layouts
 
 The application does not auto-load directory-coupled agent state, sidecars, prompt schedules, or per-agent memory files. Native integration prompt files are generated from canonical prompt authority and are never edited as source. A `config.yaml` declaring an older `schema_version` is rejected; the `runtime.sandbox`, `runtime.tools`, and `capabilities` keys from version 4 are not accepted.

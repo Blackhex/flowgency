@@ -109,6 +109,28 @@ def test_setup_references_ticket_workflow_guidance():
     assert "integration: local" in skill
 
 
+def test_setup_documents_explicit_copilot_local_network_opt_in_for_tickets():
+    documents = {
+        "skill": SKILL_PATH.read_text(encoding="utf-8"),
+        "guide": SETUP_KB_PATH.read_text(encoding="utf-8"),
+        "templates": TEMPLATES_PATH.read_text(encoding="utf-8"),
+    }
+
+    for document_name, text in documents.items():
+        normalized = " ".join(text.split())
+        assert "allow_local_network" in text, document_name
+        assert "Allow local-network access" in text, document_name
+        assert "Allows connections to local services and LAN hosts, not only Flowgency." in text, document_name
+        assert "ticket-local-network-required" in text, document_name
+        assert "other integrations fail closed" in normalized, document_name
+        assert "no automatic" in normalized.lower(), document_name
+
+    skill_normalized = " ".join(documents["skill"].split())
+    assert "before writing true" in skill_normalized
+    assert "If the user declines" in documents["skill"]
+    assert "do not automatically grant local-network access" in documents["skill"]
+
+
 def test_manual_setup_collects_root_then_workspace_without_hidden_mode_state():
     skill = SKILL_PATH.read_text(encoding="utf-8")
     normalized = " ".join(skill.split())

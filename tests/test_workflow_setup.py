@@ -107,6 +107,33 @@ def test_documented_config_examples_declare_local_workflow_instances():
         assert instance["integration_config"]["root"]
 
 
+def test_config_example_documents_ticket_opt_in_without_silent_network_grant():
+    example = (REPO_ROOT / "config.yaml.example").read_text(encoding="utf-8")
+    normalized = " ".join(example.split())
+
+    assert "allow_local_network: false" in example
+    assert "ticket-local-network-required" in example
+    assert "Allow local-network access" in example
+    assert "Allows connections to local services and LAN hosts, not only Flowgency." in example
+    assert "true by default" not in normalized.lower()
+
+
+def test_example_team_guides_document_restricted_ticket_opt_in_for_copilot():
+    documents = {
+        "content": (REPO_ROOT / "examples" / "content-team" / "README.md").read_text(
+            encoding="utf-8"
+        ),
+        "code-review": (REPO_ROOT / "examples" / "code-review-team" / "README.md").read_text(
+            encoding="utf-8"
+        ),
+    }
+
+    for document_name, text in documents.items():
+        assert "allow_local_network: false" in text, document_name
+        assert "Allow local-network access" in text, document_name
+        assert "ticket-local-network-required" in text, document_name
+
+
 def test_installed_distribution_validates_shipped_workflow_examples(tmp_path):
     """Load and validate the examples from a built wheel, not the worktree tree."""
     result = subprocess.run(

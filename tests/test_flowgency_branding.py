@@ -183,7 +183,7 @@ def test_production_icon_512_matches_frozen_reference():
 def test_readme_board_screenshot_matches_approved_dimensions():
     assert _png_dimensions(REPO_ROOT / "screenshots" / "flowgency-board.png") == (
         1440,
-        850,
+        1000,
     )
 
 
@@ -202,6 +202,8 @@ def test_readme_presents_ticket_driven_flowgency():
     assert "flowgency serve" in readme
     assert "schema_version: 1" in readme
     assert "flowgency:" in readme
+    assert "dashboard has no built-in user authentication" in readme.lower()
+    assert "worker-owned authenticated loopback mcp http endpoint" in readme.lower()
 
 
 def test_current_operator_documents_use_flowgency_schema_one():

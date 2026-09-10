@@ -45,6 +45,12 @@ teams:
       - name: builder
         blueprint: builder
         integration: copilot
+        integration_config:
+          # Runtime label: Allow local-network access.
+          # Disclosure: Allows connections to local services and LAN hosts, not only Flowgency.
+          # Keep false by default. Restricted ticket runs require explicit opt-in;
+          # otherwise Flowgency fails preflight with ticket-local-network-required.
+          allow_local_network: false
         identity:
           display_name: Builder
           title: Implementation Lead
@@ -79,6 +85,8 @@ teams:
       - name: advisor
         blueprint: advisor
         integration: copilot
+        integration_config:
+          allow_local_network: false
     workspaces:
       - name: Main workspace
         type: ide

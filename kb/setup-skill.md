@@ -97,6 +97,18 @@ teams:
           root: C:/Flowgency/tickets
 ```
 
+When the team uses restricted Copilot agents and the user wants ticket
+workflows, setup must also propose the per-agent
+`integration_config.allow_local_network` opt-in before writing `true`. The
+Runtime checkbox label is `Allow local-network access` and its disclosure is
+`Allows connections to local services and LAN hosts, not only Flowgency.` Setup
+must explain that the field is a strict boolean, defaults to `false`, and is a
+broad consent for local services and LAN hosts rather than a Flowgency-only
+exception. No automatic grant is allowed. If the user declines, setup must not automatically grant the field;
+it leaves the value absent or `false` and reports that ticket-enabled
+restricted Copilot runs fail preflight with `ticket-local-network-required`
+until the user enables the checkbox or uses a non-ticket unrestricted run.
+
 Setup documents these rules in its completion summary:
 - Workflow blueprint IDs differ from display name labels; label equality alone does not establish identity.
 - An invalid definition blocks only affected transitions, not the whole board.

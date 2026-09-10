@@ -86,6 +86,13 @@ description: Use when {CONCRETE_TRIGGER_CONDITION}.
 3. Use the live ticket tools supplied by Flowgency to list tickets, inspect their
    state and transition criteria, and execute transitions with required inputs.
    A read-only agent may execute transitions without filesystem write access.
+  For restricted Copilot ticket runs, require explicit per-agent
+  `integration_config.allow_local_network: true` consent before relying on the
+  tools; the Runtime checkbox label is `Allow local-network access` and its
+  disclosure is `Allows connections to local services and LAN hosts, not only Flowgency.`
+  No automatic grant is allowed.
+  Without that opt-in, Flowgency fails the run preflight with
+  `ticket-local-network-required` instead of silently widening policy; other integrations fail closed for ticket operations.
    Keep durable knowledge in the semantic memory snapshot selected by the routine.
 4. Update memory only with durable facts.
 

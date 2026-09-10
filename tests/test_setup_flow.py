@@ -117,6 +117,22 @@ def test_build_setup_prompt_requires_semantic_profiles_and_themed_identities(
     assert "every display name and title" in prompt
 
 
+def test_build_setup_prompt_mentions_copilot_ticket_network_opt_in(tmp_path: Path):
+    prompt = build_setup_prompt(
+        tmp_path,
+        tmp_path / "config.yaml",
+        selected_integration="copilot",
+    )
+
+    for phrase in (
+        "allow_local_network",
+        "Allow local-network access",
+        "Allows connections to local services and LAN hosts, not only Flowgency.",
+        "ticket-local-network-required",
+    ):
+        assert phrase in prompt
+
+
 def test_build_setup_prompt_keeps_derived_path_approval(tmp_path: Path):
     data_root = tmp_path / "Flowgency"
     data_root.mkdir()
