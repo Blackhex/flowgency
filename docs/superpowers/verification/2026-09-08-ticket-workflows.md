@@ -2,9 +2,9 @@
 
 **Branch:** `feat/ticket-workflows`  
 **Worktree:** `C:/Projekty/Flowgency/.worktrees/ticket-workflows`  
-**HEAD:** `b889b7b`  
+**HEAD:** `6042b3a` (live test dirty, ignored driver outside Git)  
 **Recorded:** 2026-09-10  
-**Status:** `BLOCKED` — broker path diagnostic (HEAD `b889b7b`) confirmed TCP connect phase: child connects never complete (~5 s `TimeoutError` × 3, no `connect_end`); parent control reached server healthy (HTTP 200, ~45 ms). `sandbox.userPolicy.network.allowLocalNetwork` grant pending user approval.
+**Status:** `BLOCKED` — local-network one-job experiment (HEAD `6042b3a`) applied `sandbox.userPolicy.network.allowLocalNetwork: true` for one isolated job; live acceptance still red. Both `ticket_get` calls returned `Ticket broker is unavailable`; no mutation, artifact, or workspace write reached. TCP connect resolution not proven by this run.
 
 ## Scope
 
@@ -18,7 +18,8 @@ This note records Task 16 verification checkpoints and the bounded 2026-09-10 no
 - Test-only commit `a49ecd4` reinjects `__PYVENV_LAUNCHER__` into each generated native `Popen` in the live-process tests. That fixes CPython child portability in tests only. It does not change production launcher policy, sandbox policy, or native process containment.
 - The old Store-only symptom, where `flowgency-tickets` tools never appeared, is now historical for this experiment. In the restricted non-Store run the MCP server initialized, tools registered, and `ticket_get` executed.
 - Acceptance is still blocked because both live `ticket_get` calls returned `Ticket broker is unavailable`, the ticket stayed in `review`, and no artifact publication or workspace write was reached.
-- Broker path diagnostic (HEAD `b889b7b`): parent server-trace showed the control request arriving and completing (HTTP 200, ~45 ms, auth/binding/dispatch returned); no child `request_received` appeared at the server. Child-client-trace (job outbox) showed three `ticket_get` attempts each reaching `connect_start` on 127.0.0.1:53956 and timing out after ~5 s (`TimeoutError`, no WinError numeric, no `connect_end`). Failure phase: TCP connect, not server auth or storage lock. Instrumentation removed; post-cleanup broker-check: 1 pass, 25 deselected, 1 warning, no production diff. `copilot help sandbox` (read-only) documents `sandbox.userPolicy.network.allowLocalNetwork` as a BOOL for broad local-network access; the current job has no network section.
+- Broker path diagnostic (HEAD `b889b7b`): parent server-trace showed the control request arriving and completing (HTTP 200, ~45 ms, auth/binding/dispatch returned); no child `request_received` appeared at the server. Child-client-trace (job outbox) showed three `ticket_get` attempts each reaching `connect_start` on 127.0.0.1:53956 and timing out after ~5 s (`TimeoutError`, no `connect_end`). Failure phase confirmed as TCP connect, not server auth or storage lock.
+- Local-network one-job experiment (HEAD `6042b3a`, interpreter CPython 3.13.13, Copilot 1.0.84-3): a cheap wrapper proved an exact one-leaf delta — `sandbox.userPolicy.network.allowLocalNetwork: true` added; all other settings (sandbox.enabled true, allowBypass false, workspace read-only, gitAuth/ghAuth false, no allowOutbound) unchanged. Persisted settings for job `4ba622233cc34d0690080e5f71e35192` confirmed the grant on disk. Pytest selected 1 / failures 1 / errors 0 / skips 0 / time 44.059 s. Tool counts: `ticket_get` ×2, zero start/artifact/report/transition. Both `ticket_get` calls returned `Ticket broker is unavailable`; ticket stayed `review`; no workspace write, artifact, or protected-hash assertion was reached. `exit_code 0` means the CLI session ended cleanly, not acceptance success. No product source, global Copilot config, firewall, or loopback exemption was changed; this was one isolated job, not a permanent default.
 
 ## Checkpoints
 
@@ -33,6 +34,7 @@ This note records Task 16 verification checkpoints and the bounded 2026-09-10 no
 | Non-Store portability correction | `a49ecd4` | 27 passed, 2 skipped, 1 warning | `task-16-report.md` |
 | Required restricted live probe, non-Store `.superpowers/venv-cpython` | `a49ecd4` + uncommitted live test | 1 failed, 4 deselected, 1 warning, 59.80s first probe; 53.39s bounded retry | `task-16c-cpython-live.txt/xml`, `task-16c-cpython-diag-runtime.xml` |
 | Broker path diagnostic | `b889b7b` + instrumented live probe | Parent control HTTP 200 ~45 ms; child `TimeoutError` ~5 s × 3, no `connect_end`; TCP connect confirmed; post-cleanup: 1 pass, 25 deselected, 1 warning | `task-16c-broker-path-runtime/server-trace.jsonl`, job outbox `child-client-trace.jsonl` |
+| Local-network one-job experiment | `6042b3a` + ignored driver | 1 failed, 4 deselected, 1 warning, 44.07 s; `ticket_get` ×2, broker unavailable, no mutation/write/protected-hash reached | `task-16c-local-network.xml`, `task-16c-local-network-runtime/policy-summary.json`, job `4ba622233cc34d0690080e5f71e35192/.copilot/settings.json` |
 
 `89c0cb2` was the clean baseline rerun inside this feature worktree, not `master`.
 
@@ -104,15 +106,17 @@ Measured restricted-runtime facts:
 
 Server-trace (`task-16c-broker-path-runtime/server-trace.jsonl`): parent control `request_received` t=1789029277.817, response 200 at t=277.862 (~45 ms); auth, binding, and dispatch all returned. No child `request_received` in the server trace.
 
-Child-client-trace (job outbox `child-client-trace.jsonl`): three `ticket_get` real attempts; `connect_start` 127.0.0.1:53956 → `TimeoutError` at 5016 ms, 5010 ms, 5001 ms; no `connect_end` or response. No WinError numeric (exception class is `TimeoutError`, not `OSError`).
+Child-client-trace (job outbox `child-client-trace.jsonl`): three `ticket_get` real attempts; `connect_start` 127.0.0.1:53956 → `TimeoutError` at 5016 ms, 5010 ms, 5001 ms; no `connect_end` or response. No WinError numeric (`TimeoutError` is a subclass of `OSError`).
 
 Post-cleanup broker-check: 1 pass, 25 deselected, 1 warning. No production diff.
 
 ### Root-cause boundary
 
-The broker path diagnostic confirmed the failure is TCP connect. Child attempts to connect to 127.0.0.1 time out before completion; the parent control reached the server healthy. No WinError numeric is present; the exception class is `TimeoutError`. The blocker is not server auth or storage lock deadlock.
+The broker path diagnostic (without network grant, earlier instrumented baseline) confirmed the failure is at the TCP connect phase. Child attempts to connect to 127.0.0.1 timed out before completion; the parent control reached the server healthy. No WinError numeric is present; `TimeoutError` is a subclass of `OSError`. The blocker is not server auth or storage lock deadlock.
 
-Do not quote `10061` as the live cause here. That code was captured only from the deliberate shutdown unit control, not from the restricted live artifacts. A bounded temporary broker warning logged only safe exception metadata, did not surface in the live MCP stderr, and was removed immediately with no production diff. Do not claim default loopback denial is proven by `copilot help sandbox`, that Windows Firewall is the culprit, or that the child is not AppContainer based on parent manifest alone.
+Do not quote `10061` as the live cause here. That code was captured only from the deliberate shutdown unit control, not from the restricted live artifacts. A bounded temporary broker warning logged only safe exception metadata, did not surface in the live MCP stderr, and was removed immediately with no production diff. Do not claim default loopback denial is proven by `copilot help sandbox`, that Windows Firewall is the culprit, or that the child is not AppContainer based on parent manifest inspection alone.
+
+The local-network one-job experiment applied `allowLocalNetwork: true` and the job still observed broker unavailable. Whether TCP connect now completes under this setting is not yet instrumented — the earlier TCP-timeout evidence was captured in a baseline run without the network grant, and the latest run did not include child connect-phase tracing.
 
 Earlier unrestricted live passes from `dc4eb0d` remain superseded and are not accepted as evidence for the required restricted workflow gate.
 
@@ -134,4 +138,4 @@ UI counts `474 passed, 2 skipped` and deterministic `2574 passed` are historical
 
 ## Next Investigation Boundary
 
-TCP connect phase is confirmed. The next candidate is one isolated job with `sandbox.userPolicy.network.allowLocalNetwork: true`, which requires explicit user approval and has not been applied. `copilot help sandbox` documents the field as a BOOL for broad local-network access and does not specify a per-host/port allowlist; no firewall or admin change is required by the documented setting, but the actual fix is unverified. Do not claim default loopback denial is proven by the help text, that Windows Firewall is the culprit, or that the child is not AppContainer based on parent manifest inspection alone. No merge, push, or waiver is claimed.
+The local-network one-job experiment is done and failed. The next minimal candidate, if approved, is a single instrumented replay combining the `allowLocalNetwork: true` wrapper with the earlier child connect-phase trace, so the remaining boundary can be narrowed to `TCP connect still blocked under this setting` versus `later broker/source failure after connect`. Alternatively, inspect the actual CLI→MCP translation to determine why the flag may not be restoring broker connectivity. Do not claim the network grant alone is sufficient, that TCP connect is now resolved, or that any broader permission or firewall change is needed. No merge, push, or waiver is claimed.
