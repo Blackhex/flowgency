@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 import threading
@@ -428,6 +429,13 @@ class SandboxDenial:
     target: str
 
 
+@dataclass(frozen=True)
+class SuccessfulReadBeforePublish:
+    read_call_id: str
+    publish_call_id: str
+    target: str
+
+
 def _basename(path: str) -> str:
     return re.split(r"[\\/]", path.strip())[-1]
 
@@ -438,6 +446,10 @@ def _truthy_flag(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"true", "1", "yes"}
     return False
+
+
+def file_content_b64(path: Path) -> str:
+    return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
 def _apply_patch_paths(arguments: object) -> list[str]:
@@ -453,6 +465,36 @@ def _apply_patch_paths(arguments: object) -> list[str]:
                     paths.append(target)
                 break
     return paths
+
+
+def _tool_arguments(data: dict) -> dict | None:
+    arguments = data.get("arguments")
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except (ValueError, TypeError):
+            return None
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _event_timestamp(event: dict) -> str | None:
+    timestamp = event.get("timestamp")
+    return timestamp if isinstance(timestamp, str) and timestamp else None
+
+
+def _artifact_name_for_publish_start(data: dict) -> str | None:
+    tool_name = data.get("toolName")
+    if tool_name != "flowgency-tickets-ticket_artifact_publish":
+        return None
+    arguments = _tool_arguments(data)
+    if arguments is None:
+        return None
+    filename = arguments.get("filename")
+    return filename if isinstance(filename, str) and filename else None
 
 
 def _write_targets_for_start(data: dict) -> list[str]:
@@ -472,6 +514,16 @@ def _write_targets_for_start(data: dict) -> list[str]:
         return []
     path = obj.get("path")
     return [path] if isinstance(path, str) and path else []
+
+
+def _view_target_for_start(data: dict) -> str | None:
+    if data.get("toolName") != "view":
+        return None
+    arguments = _tool_arguments(data)
+    if arguments is None:
+        return None
+    path = arguments.get("path")
+    return path if isinstance(path, str) and path else None
 
 
 def _has_sandbox_denied(data: dict) -> bool:
@@ -595,3 +647,80 @@ def assert_sandbox_denied_write(events, *, target_name: str) -> SandboxDenial:
         f"a generic tool failure or a missing policy flag is not a denial proof"
     )
     return denials[0]
+
+
+def assert_successful_file_read_before_publish(
+    events,
+    *,
+    target_path: Path,
+    artifact_name: str,
+) -> SuccessfulReadBeforePublish:
+    """Prove a correlated successful ``view`` of ``target_path`` completed
+    before the artifact publish started.
+
+    This rejects missing or unrelated reads, failed completions, and reads that
+    only completed after ``ticket_artifact_publish`` began. Error messages keep
+    to scalar fields and never print the raw task-bearing event payload.
+    """
+    expected_target = str(target_path)
+    read_starts: dict[str, tuple[str, str | None]] = {}
+    read_completes: dict[str, tuple[object, str | None]] = {}
+    publish_starts: list[tuple[str, str | None]] = []
+    for event in events:
+        data = event.get("data")
+        if not isinstance(data, dict):
+            continue
+        call_id = data.get("toolCallId")
+        if not isinstance(call_id, str) or not call_id:
+            continue
+        event_type = event.get("type")
+        if event_type == "tool.execution_start":
+            view_target = _view_target_for_start(data)
+            if view_target:
+                read_starts[call_id] = (view_target, _event_timestamp(event))
+                continue
+            publish_name = _artifact_name_for_publish_start(data)
+            if publish_name == artifact_name:
+                publish_starts.append((call_id, _event_timestamp(event)))
+        elif event_type == "tool.execution_complete":
+            read_completes[call_id] = (data.get("success"), _event_timestamp(event))
+
+    assert publish_starts, f"no ticket_artifact_publish start for {artifact_name!r}"
+    publish_call_id, publish_timestamp = publish_starts[0]
+    successful_reads = []
+    diagnostics = []
+    for call_id, (target, start_timestamp) in read_starts.items():
+        complete = read_completes.get(call_id)
+        if complete is None:
+            diagnostics.append((call_id, target, "no-completion", start_timestamp, None))
+            continue
+        success, complete_timestamp = complete
+        diagnostics.append((call_id, target, success, start_timestamp, complete_timestamp))
+        if target != expected_target or success is not True or complete_timestamp is None:
+            continue
+        successful_reads.append((call_id, complete_timestamp))
+
+    assert successful_reads, (
+        f"no successful view completion for {expected_target!r}; "
+        f"correlated (call_id, target, success, start, complete): {diagnostics}"
+    )
+    assert publish_timestamp is not None, (
+        f"ticket_artifact_publish for {artifact_name!r} had no timestamp; "
+        f"publish_call_id={publish_call_id!r}"
+    )
+    prior_reads = [
+        (call_id, complete_timestamp)
+        for call_id, complete_timestamp in successful_reads
+        if complete_timestamp < publish_timestamp
+    ]
+    assert prior_reads, (
+        f"no successful view completion for {expected_target!r} finished before "
+        f"ticket_artifact_publish; publish_call_id={publish_call_id!r}; "
+        f"publish_timestamp={publish_timestamp!r}; successful_reads={successful_reads}"
+    )
+    read_call_id, _ = prior_reads[-1]
+    return SuccessfulReadBeforePublish(
+        read_call_id=read_call_id,
+        publish_call_id=publish_call_id,
+        target=target_path.name,
+    )

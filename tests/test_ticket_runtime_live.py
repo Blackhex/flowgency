@@ -42,7 +42,9 @@ from flowgency.integrations import REGISTRY
 from flowgency.workflows.models import ArtifactRef
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
+    assert_successful_file_read_before_publish,
     assert_sandbox_denied_write,
+    file_content_b64,
     load_job_session_events,
     supported_ticket_adapters,
     ticket_capable_installed_runtimes,
@@ -140,6 +142,46 @@ def _completion_event(call_id: str, *, success: bool, sandbox_denied: bool | Non
     }
 
 
+def _view_start_event(call_id: str, target: Path | str, *, timestamp: str) -> dict:
+    return {
+        "type": "tool.execution_start",
+        "data": {
+            "toolCallId": call_id,
+            "toolName": "view",
+            "arguments": {"path": str(target)},
+        },
+        "timestamp": timestamp,
+    }
+
+
+def _view_complete_event(call_id: str, *, success: bool, timestamp: str) -> dict:
+    return {
+        "type": "tool.execution_complete",
+        "data": {
+            "toolCallId": call_id,
+            "success": success,
+            "toolTelemetry": {"properties": {"command": "view"}},
+        },
+        "timestamp": timestamp,
+    }
+
+
+def _publish_start_event(call_id: str, target_name: str, *, timestamp: str) -> dict:
+    return {
+        "type": "tool.execution_start",
+        "data": {
+            "toolCallId": call_id,
+            "toolName": "flowgency-tickets-ticket_artifact_publish",
+            "arguments": {
+                "filename": target_name,
+                "media_type": "text/plain",
+                "content_b64": "ZXhhY3Q=",
+            },
+        },
+        "timestamp": timestamp,
+    }
+
+
 def test_assert_sandbox_denied_write_accepts_only_a_correlated_policy_denial():
     """Deterministic proof the denial parser distinguishes a real policy refusal
     from look-alikes, using real-shaped Copilot events and no CLI launch.
@@ -186,6 +228,80 @@ def test_assert_sandbox_denied_write_accepts_only_a_correlated_policy_denial():
     # A merely absent file (no write event at all) is not a denial proof.
     with pytest.raises(AssertionError, match="attempted to write"):
         assert_sandbox_denied_write([], target_name=target)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_b64"),
+    (
+        (b". [100%]\n1 passed in 0.02s\n", "LiBbMTAwJV0KMSBwYXNzZWQgaW4gMC4wMnMK"),
+        (b". [100%]\r\n1 passed in 0.02s\r\n", "LiBbMTAwJV0NCjEgcGFzc2VkIGluIDAuMDJzDQo="),
+        (b". [100%] 1 passed in 0.02s", "LiBbMTAwJV0gMSBwYXNzZWQgaW4gMC4wMnM="),
+    ),
+)
+def test_file_content_b64_preserves_exact_fixture_bytes(tmp_path, payload: bytes, expected_b64: str):
+    result_file = tmp_path / "result.txt"
+    result_file.write_bytes(payload)
+
+    assert file_content_b64(result_file) == expected_b64
+
+
+def test_assert_successful_file_read_before_publish_requires_correlated_successful_read_before_publish():
+    target = Path("C:/tmp/result.txt")
+
+    proof = assert_successful_file_read_before_publish(
+        [
+            _view_start_event("read-1", target, timestamp="2026-09-10T17:55:24.100Z"),
+            _view_complete_event("read-1", success=True, timestamp="2026-09-10T17:55:25.699Z"),
+            _publish_start_event("publish-1", target.name, timestamp="2026-09-10T17:55:45.454Z"),
+        ],
+        target_path=target,
+        artifact_name=target.name,
+    )
+    assert proof.read_call_id == "read-1"
+    assert proof.publish_call_id == "publish-1"
+
+    with pytest.raises(AssertionError, match="no successful view completion"):
+        assert_successful_file_read_before_publish(
+            [
+                _view_start_event("read-2", target, timestamp="2026-09-10T17:55:24.100Z"),
+                _view_complete_event("read-2", success=False, timestamp="2026-09-10T17:55:25.699Z"),
+                _publish_start_event("publish-2", target.name, timestamp="2026-09-10T17:55:45.454Z"),
+            ],
+            target_path=target,
+            artifact_name=target.name,
+        )
+
+    with pytest.raises(AssertionError, match="no successful view completion"):
+        assert_successful_file_read_before_publish(
+            [
+                _view_start_event("read-3", "C:/tmp/unrelated.txt", timestamp="2026-09-10T17:55:24.100Z"),
+                _view_complete_event("read-3", success=True, timestamp="2026-09-10T17:55:25.699Z"),
+                _publish_start_event("publish-3", target.name, timestamp="2026-09-10T17:55:45.454Z"),
+            ],
+            target_path=target,
+            artifact_name=target.name,
+        )
+
+    with pytest.raises(AssertionError, match="before ticket_artifact_publish"):
+        assert_successful_file_read_before_publish(
+            [
+                _publish_start_event("publish-4", target.name, timestamp="2026-09-10T17:55:45.454Z"),
+                _view_start_event("read-4", target, timestamp="2026-09-10T17:55:46.100Z"),
+                _view_complete_event("read-4", success=True, timestamp="2026-09-10T17:55:46.699Z"),
+            ],
+            target_path=target,
+            artifact_name=target.name,
+        )
+
+    with pytest.raises(AssertionError, match="no ticket_artifact_publish start"):
+        assert_successful_file_read_before_publish(
+            [
+                _view_start_event("read-5", target, timestamp="2026-09-10T17:55:24.100Z"),
+                _view_complete_event("read-5", success=True, timestamp="2026-09-10T17:55:25.699Z"),
+            ],
+            target_path=target,
+            artifact_name=target.name,
+        )
 
 
 def test_reclaim_gated_worker_releases_and_joins_even_when_body_raises():
@@ -282,23 +398,11 @@ def _run_tiny_project_check(workspace: Path) -> bytes:
         cwd=workspace,
         check=True,
         capture_output=True,
-        text=True,
     )
-    # These are genuine pytest report bytes, but two kinds of whitespace make
-    # them impossible for a model to base64-reproduce faithfully. First, pytest
-    # pads the progress line with a terminal-width-dependent run of spaces
-    # before ``[100%]``. Second, the report spans several lines, and a model
-    # round-tripping the file through the CLI's text view cannot tell which
-    # newline bytes are on disk (LF here, but re-encoded as CRLF on Windows).
-    # Collapsing every whitespace run -- horizontal padding and line breaks
-    # alike -- to a single space keeps the real tokens (the dots, ``[100%]``,
-    # and the ``N passed in Xs`` summary) on one unambiguous line whose exact
-    # bytes the agent can publish back and we can compare byte-for-byte.
-    normalized = re.sub(r"\s+", " ", completed.stdout).strip()
-    return normalized.encode("utf-8")
+    return completed.stdout
 
 
-def _agent_task(ref_json: str, project_result: Path) -> str:
+def _agent_task(ref_json: str, project_result: Path, artifact_b64: str) -> str:
     return (
         "Operate a single Flowgency workflow ticket using the live ticket tools "
         'exposed by the "flowgency-tickets" MCP server. Do every step, in order.\n\n'
@@ -308,6 +412,8 @@ def _agent_task(ref_json: str, project_result: Path) -> str:
         "delete, or recreate it or any other project file.\n\n"
         "Ticket reference (JSON):\n"
         f"{ref_json}\n\n"
+        "Artifact content_b64:\n"
+        f"{artifact_b64}\n\n"
         "Steps:\n"
         "1. Call the ticket_get tool with that exact ref to load the ticket and its "
         'current `version`. Confirm it is assigned to you ("builder") and note the '
@@ -315,10 +421,11 @@ def _agent_task(ref_json: str, project_result: Path) -> str:
         '(id "evidence-reviewed").\n'
         "2. Call ticket_get again to obtain the freshest `version`, then call "
         'ticket_start_work with that version and operation_id "start-1".\n'
-        "3. Read the result file bytes exactly as they are on disk, base64-encode "
-        "them, call ticket_get again to obtain the current `version`, then call "
+        "3. Read the result file first and verify the passing output it contains. Then call "
+        "ticket_get again to obtain the current `version`, then call "
         'ticket_artifact_publish with that version, filename "result.txt", '
-        'media_type "text/plain", and content_b64 set to the exact base64 payload. '
+        'media_type "text/plain", and content_b64 set to the exact payload shown above. '
+        "Do not re-encode, normalize, or reconstruct that payload; pass it through unchanged. "
         "Keep the returned artifact reference for the transition output.\n"
         "4. Call ticket_get again to obtain the current `version`, then call "
         'ticket_report with that version, operation_id "report-1", a message that '
@@ -356,7 +463,12 @@ def _read_only_agent_task(ref_json: str) -> str:
     )
 
 
-def _restricted_agent_task(ref_json: str, project_result: Path, blocked_note: Path) -> str:
+def _restricted_agent_task(
+    ref_json: str,
+    project_result: Path,
+    blocked_note: Path,
+    artifact_b64: str,
+) -> str:
     return (
         "Operate a single Flowgency workflow ticket using the live ticket tools "
         'exposed by the "flowgency-tickets" MCP server. Do every step, in order.\n\n'
@@ -366,13 +478,16 @@ def _restricted_agent_task(ref_json: str, project_result: Path, blocked_note: Pa
         "Do not try any other workspace write.\n\n"
         "Ticket reference (JSON):\n"
         f"{ref_json}\n\n"
+        "Artifact content_b64:\n"
+        f"{artifact_b64}\n\n"
         "Steps:\n"
         "1. Call ticket_get with that exact ref to load the ticket and its current `version`.\n"
         "2. Call ticket_get again, then call ticket_start_work with operation_id \"start-1\".\n"
-        "3. Read the result file bytes exactly as they are on disk, base64-encode them, call "
+        "3. Read the result file first and verify the passing output it contains. Then call "
         "ticket_get again, then call ticket_artifact_publish with filename \"result.txt\", "
-        "media_type \"text/plain\", and the exact content_b64 payload. Keep the returned "
-        "artifact reference.\n"
+        "media_type \"text/plain\", and the exact content_b64 payload shown above. Do not "
+        "re-encode, normalize, or reconstruct that payload; pass it through unchanged. Keep "
+        "the returned artifact reference.\n"
         f"4. Attempt exactly one workspace write by creating {blocked_note} with a short note. "
         "If the write is refused, continue normally and do not retry.\n"
         "5. Call ticket_get again, then call ticket_report with operation_id \"report-1\", a "
@@ -955,7 +1070,11 @@ else:
         }
         hashes_before = _hash_files(protected)
 
-        task = _agent_task(json.dumps(ref.model_dump(mode="json")), project_result)
+        task = _agent_task(
+            json.dumps(ref.model_dump(mode="json")),
+            project_result,
+            file_content_b64(project_result),
+        )
 
         spec = resolve_job_request(
             JobRequest(
@@ -999,6 +1118,12 @@ else:
         assert evidence == ArtifactRef(kind="id", value=evidence.value)
         retained = env.current_provider().read_artifact(ref, evidence.value)
         assert retained.content == project_before
+        read_proof = assert_successful_file_read_before_publish(
+            load_job_session_events(job),
+            target_path=project_result,
+            artifact_name="result.txt",
+        )
+        assert read_proof.target == project_result.name
 
         reported = [event for event in final.events if event.kind == "reported"]
         assert reported and reported[-1].summary.strip(), (
@@ -1065,6 +1190,7 @@ else:
             json.dumps(ref.model_dump(mode="json")),
             project_result,
             blocked_note,
+            file_content_b64(project_result),
         )
 
         spec = resolve_job_request(
@@ -1104,6 +1230,12 @@ else:
         assert evidence == ArtifactRef(kind="id", value=evidence.value)
         retained = env.current_provider().read_artifact(ref, evidence.value)
         assert retained.content == project_before
+        read_proof = assert_successful_file_read_before_publish(
+            load_job_session_events(job),
+            target_path=project_result,
+            artifact_name="result.txt",
+        )
+        assert read_proof.target == project_result.name
         assert read_job(authority.path).result_metadata["write_attempts"] == [blocked_note.name]
         assert not blocked_note.exists()
         # The stored write_attempts and the absent file only prove the agent
