@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 import yaml
 
 from flowgency.configuration.models import MemorySelector
+from flowgency.configuration.store import ConfigStore
 from flowgency.jobs.authority import JobStore
 from flowgency.jobs.store import active_jobs, read_job
 from tests.ui import server
@@ -71,8 +72,12 @@ def test_write_runtime_config_is_atomic_under_concurrent_reads(tmp_path):
 
     def reader() -> None:
         try:
+            store = ConfigStore(config_path)
             for _ in range(600):
-                data = config_path.read_bytes()
+                snapshot = store.inspect()
+                assert snapshot.exists is True
+                data = snapshot.payload
+                assert data is not None
                 if data not in (old_bytes, new_bytes):
                     failures.append(("reader", len(data)))
                     return

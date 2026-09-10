@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 from dataclasses import replace
@@ -195,12 +197,22 @@ def test_http_broker_rejects_wrong_host(workflow_env):
 def test_http_broker_rejects_oversized_body(workflow_env):
     env = workflow_env
     authority = env.running_job("builder", "run-a")
-    body = _initialize_body()
-    body["params"]["padding"] = "x" * (2 * 1024 * 1024)
     with _http_broker(env, authority) as broker:
-        status, _ = _raw_mcp_post(_mcp_url(broker), body, token=_bearer(broker))
+        parsed = urllib.parse.urlparse(_mcp_url(broker))
+        connection = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+        try:
+            connection.putrequest("POST", parsed.path or "/")
+            connection.putheader("Authorization", f"Bearer {_bearer(broker)}")
+            connection.putheader("Content-Type", "application/json")
+            connection.putheader("Accept", "application/json, text/event-stream")
+            connection.putheader("Content-Length", str(MAX_BROKER_BODY_BYTES + 1))
+            connection.endheaders()
+            status = connection.getresponse().status
+        finally:
+            connection.close()
     # Auth, host and origin are all valid here, so the size gate — not an
-    # authorization failure — must be what rejects the request.
+    # authorization failure — must be what rejects the request, and it must do
+    # so before reading an oversized body from the client.
     assert status == 413
 
 
