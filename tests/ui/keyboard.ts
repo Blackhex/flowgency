@@ -12,6 +12,16 @@ type FocusState = {
   href: string | null;
 };
 
+const FOCUSABLE_SELECTOR = [
+  'a[href]:not([tabindex="-1"])',
+  'button:not([disabled]):not([tabindex="-1"])',
+  'input:not([type="hidden"]):not([disabled]):not([tabindex="-1"])',
+  'select:not([disabled]):not([tabindex="-1"])',
+  'textarea:not([disabled]):not([tabindex="-1"])',
+  '[role="tab"]:not([aria-disabled="true"]):not([tabindex="-1"])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
 function matches(actual: string | null, expected?: string | RegExp): boolean {
   if (expected === undefined) return true;
   if (actual === null) return false;
@@ -19,7 +29,7 @@ function matches(actual: string | null, expected?: string | RegExp): boolean {
 }
 
 export async function expectBodyFocus(page: Page): Promise<void> {
-  await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.readyState !== 'loading' && document.activeElement === document.body)).toBe(true);
 }
 
 export async function tabTo(
@@ -27,6 +37,9 @@ export async function tabTo(
   target: FocusTarget,
   options: { backwards?: boolean; maxTabs?: number } = {},
 ): Promise<Locator> {
+  await expect.poll(
+    () => page.evaluate((selector) => document.readyState !== 'loading' && document.querySelector(selector) !== null, FOCUSABLE_SELECTOR),
+  ).toBe(true);
   const key = options.backwards ? 'Shift+Tab' : 'Tab';
   const visited: FocusState[] = [];
   for (let step = 0; step < (options.maxTabs ?? 80); step += 1) {
