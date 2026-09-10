@@ -374,7 +374,11 @@ def cmd_validate(args: Namespace) -> int:
 
 def cmd_serve(args: Namespace) -> int:
     os.environ["FLOWGENCY_CONFIG"] = str(_config_path(args))
-    run_server(host=args.host, port=args.port, reload=args.reload, log_level=args.log_level)
+    kwargs: dict[str, Any] = {"host": args.host, "port": args.port, "reload": args.reload}
+    log_level = getattr(args, "log_level", None)
+    if log_level is not None:
+        kwargs["log_level"] = log_level
+    run_server(**kwargs)
     return 0
 
 

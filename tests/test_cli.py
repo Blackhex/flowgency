@@ -184,6 +184,13 @@ def test_cmd_serve_forwards_arguments_without_mutating_sys_argv(monkeypatch):
     assert sys.argv == original_argv
 
 
+def test_cmd_serve_forwards_log_level_to_run_server(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "run_server", lambda **options: calls.append(options))
+    cli.cmd_serve(Namespace(host="127.0.0.1", port=8500, reload=False, config="config.yaml", log_level="debug"))
+    assert calls == [{"host": "127.0.0.1", "port": 8500, "reload": False, "log_level": "debug"}]
+
+
 @pytest.mark.parametrize("selection", ["explicit", "environment", "default"])
 def test_cmd_serve_config_precedence_is_visible_at_lazy_import(tmp_path, monkeypatch, selection):
     explicit_path = tmp_path / "explicit.yaml"
