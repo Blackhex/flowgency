@@ -32,12 +32,8 @@ def ticket_request(tmp_path: Path) -> IntegrationRunRequest:
             rules=(ResolvedPermissionRule(path=workspace, tools=("read", "search")),),
         ),
         ticket_tools=TicketToolLaunch(
-            command="python",
-            args=("-m", "flowgency.tickets.mcp_server"),
-            env={
-                "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-                "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-            },
+            url="http://127.0.0.1:9999/mcp",
+            headers={"Authorization": "Bearer fixture-only-token"},
         ),
     )
 
@@ -79,14 +75,14 @@ def test_copilot_rejects_ticket_tools_when_runtime_capability_is_absent(
 def test_copilot_reports_live_ticket_transport_only_when_probe_confirms_contract(monkeypatch):
     integration = get_integration("copilot")
     monkeypatch.setattr(type(integration), "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(type(integration), "_ticket_tool_contract", lambda self, version: "mcp-stdio")
+    monkeypatch.setattr(type(integration), "_ticket_tool_contract", lambda self, version: "mcp-http")
     integration.invalidate_capability_cache()
 
     try:
         assert integration.runtime_capabilities == RuntimeCapabilities(
             permission_modes=frozenset({"restricted", "unrestricted"}),
             path_scopable_tools=frozenset({"write"}),
-            live_ticket_transport="mcp-stdio",
+            live_ticket_transport="mcp-http",
         )
     finally:
         integration.invalidate_capability_cache()
@@ -95,7 +91,7 @@ def test_copilot_reports_live_ticket_transport_only_when_probe_confirms_contract
 def test_copilot_does_not_guess_live_ticket_transport_for_unknown_versions(monkeypatch):
     integration = get_integration("copilot")
     monkeypatch.setattr(type(integration), "_cli_version", lambda self: None)
-    monkeypatch.setattr(type(integration), "_ticket_tool_contract", lambda self, version: "mcp-stdio")
+    monkeypatch.setattr(type(integration), "_ticket_tool_contract", lambda self, version: "mcp-http")
     integration.invalidate_capability_cache()
 
     try:
@@ -109,13 +105,14 @@ def test_copilot_does_not_guess_live_ticket_transport_for_unknown_versions(monke
 def test_copilot_capability_cache_key_includes_ticket_probe_result(monkeypatch):
     integration = get_integration("copilot")
     monkeypatch.setattr(type(integration), "_cli_version", lambda self: "1.0.84-1")
-    monkeypatch.setattr(type(integration), "_ticket_tool_contract", lambda self, version: "mcp-stdio")
+    monkeypatch.setattr(type(integration), "_ticket_tool_contract", lambda self, version: "mcp-http")
 
-    assert integration._capability_cache_key() == "1.0.84-1|ticket:mcp-stdio"
+    assert integration._capability_cache_key() == "1.0.84-1|ticket:mcp-http"
 
 
 def test_ticket_tool_launch_repr_redacts_secret_values(ticket_request: IntegrationRunRequest):
     text = repr(ticket_request.ticket_tools)
 
     assert "fixture-only-token" not in text
-    assert "FLOWGENCY_TICKET_TOKEN" in text
+    assert "Authorization" in text
+    assert "***" in text

@@ -131,7 +131,7 @@ def test_registry_runtime_capabilities_surface_is_fail_closed():
         "copilot": RuntimeCapabilities(
             permission_modes=frozenset({"restricted", "unrestricted"}),
             path_scopable_tools=frozenset({"write"}),
-            live_ticket_transport="mcp-stdio",
+            live_ticket_transport="mcp-http",
         ),
         "script": RuntimeCapabilities(
             permission_modes=frozenset({"unrestricted"})
@@ -175,7 +175,7 @@ def test_widening_detector_is_capped_to_declared():
             return RuntimeCapabilities(
                 permission_modes=frozenset({"unrestricted", "restricted"}),
                 path_scopable_tools=frozenset({"write"}),
-                live_ticket_transport="mcp-stdio",
+                live_ticket_transport="mcp-http",
             )
 
         def _capability_cache_key(self):
@@ -215,13 +215,13 @@ def test_builtin_ai_cli_runtime_capabilities_are_truthful(monkeypatch):
     # Stubbed both ways so the claim is pinned regardless of what this machine
     # happens to have installed.
     monkeypatch.setattr(type(copilot), "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(type(copilot), "_ticket_tool_contract", lambda self, version: "mcp-stdio")
+    monkeypatch.setattr(type(copilot), "_ticket_tool_contract", lambda self, version: "mcp-http")
     copilot.invalidate_capability_cache()
     try:
         assert copilot.runtime_capabilities == RuntimeCapabilities(
             permission_modes=frozenset({"restricted", "unrestricted"}),
             path_scopable_tools=frozenset({"write"}),
-            live_ticket_transport="mcp-stdio",
+            live_ticket_transport="mcp-http",
         )
     finally:
         copilot.invalidate_capability_cache()

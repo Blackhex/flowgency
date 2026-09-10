@@ -76,8 +76,8 @@ def test_agent_job_verifies_presatisfied_project_without_rewriting_it(
         def run(self, request: IntegrationRunRequest):
             assert request.ticket_tools is not None
             client = TicketToolClient(
-                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
-                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+                request.ticket_tools.url.removesuffix("/mcp"),
+                request.ticket_tools.headers["Authorization"].removeprefix("Bearer "),
             )
 
             looked_up = client.call(

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from pathlib import Path
-import sys
+
+import httpx2
 
 from mcp.client.session import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 from flowgency.integrations.ticket_tools import build_ticket_tool_launch
 from flowgency.tickets.broker import TicketBroker
@@ -14,9 +14,8 @@ from flowgency.tickets.models import TicketRef
 from flowgency.workflows.models import ArtifactRef
 
 
-def test_mcp_stdio_lifecycle_persists_mid_run(workflow_env):
+def test_mcp_http_lifecycle_persists_mid_run(workflow_env):
     env = workflow_env
-    worktree = Path(__file__).resolve().parents[1]
     env.publish_artifact_field_workflow()
     env.publish_criteria_workflow()
 
@@ -24,14 +23,12 @@ def test_mcp_stdio_lifecycle_persists_mid_run(workflow_env):
         authority = env.running_job("builder", "run-a")
         with TicketBroker(env.service, env.access_registry, authority=authority) as broker:
             launch = build_ticket_tool_launch(broker.endpoint)
-            params = StdioServerParameters(
-                command=launch.command,
-                args=list(launch.args),
-                env=dict(launch.env),
-                cwd=str(worktree),
-            )
-            async with stdio_client(params) as streams:
-                async with ClientSession(*streams) as session:
+            client = httpx2.AsyncClient(headers=dict(launch.headers))
+            async with streamable_http_client(launch.url, http_client=client) as (
+                read_stream,
+                write_stream,
+            ):
+                async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
                     tools = await session.list_tools()
                     names = tuple(tool.name for tool in tools.tools)

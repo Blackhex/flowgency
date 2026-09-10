@@ -141,7 +141,7 @@ class CopilotIntegration(BaseIntegration):
     declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"restricted", "unrestricted"}),
         path_scopable_tools=frozenset({"write"}),
-        live_ticket_transport="mcp-stdio",
+        live_ticket_transport="mcp-http",
     )
     _WINDOWS_SHELL_HOSTS = ("powershell.exe", "pwsh.exe")
     _WINDOWS_SCRIPT_EXTENSIONS = (".ps1",)
@@ -312,7 +312,7 @@ class CopilotIntegration(BaseIntegration):
         has_mcp_config = re.search(r"^\s+--additional-mcp-config\b", help_text, re.MULTILINE)
         has_allow_tool = re.search(r"^\s+--allow-tool(?:\[=tools\.\.\.\])?\b", help_text, re.MULTILINE)
         if has_mcp_config and has_allow_tool:
-            return "mcp-stdio"
+            return "mcp-http"
         return None
 
     @classmethod

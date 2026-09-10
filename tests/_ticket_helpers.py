@@ -73,7 +73,7 @@ class TicketRuntimeIntegration(BaseIntegration):
     declared_runtime_capabilities = RuntimeCapabilities(
         permission_modes=frozenset({"restricted", "unrestricted"}),
         path_scopable_tools=frozenset({"read", "search", "write", "shell"}),
-        live_ticket_transport="mcp-stdio",
+        live_ticket_transport="mcp-http",
     )
 
     def identity_filename(self) -> str:

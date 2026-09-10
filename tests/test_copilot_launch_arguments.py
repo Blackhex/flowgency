@@ -291,7 +291,7 @@ def test_a_scoped_write_is_not_granted_without_a_sandbox(tmp_path, monkeypatch, 
 
 
 def test_ticket_server_grant_does_not_add_workspace_write(tmp_path, monkeypatch, repo):
-    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
+    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-http")
     prompt = tmp_path / "p.prompt"
     prompt.write_text("do the thing", encoding="utf-8")
     captured: dict[str, list[str]] = {}
@@ -333,12 +333,8 @@ def test_ticket_server_grant_does_not_add_workspace_write(tmp_path, monkeypatch,
                 rules=(ResolvedPermissionRule(path=repo, tools=("read", "search")),),
             ),
             ticket_tools=TicketToolLaunch(
-                command="python",
-                args=("-m", "flowgency.tickets.mcp_server"),
-                env={
-                    "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-                    "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-                },
+                url="http://127.0.0.1:9999/mcp",
+                headers={"Authorization": "Bearer fixture-only-token"},
                 lifecycle=RuntimeProcessLifecycle(job_id="job-1", generation="gen-1"),
             ),
         )

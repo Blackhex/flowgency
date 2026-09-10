@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
+from collections.abc import Callable
 
 from mcp.server import MCPServer
 from pydantic import BaseModel
 
-from flowgency.tickets.broker import TicketToolClient, validate_loopback_endpoint
 from flowgency.tickets.models import TicketRef, TicketToolResponse, TicketVersion
 from flowgency.tickets.protocol import (
     ListTicketsCommand,
@@ -21,9 +20,11 @@ from flowgency.tickets.protocol import (
 )
 from flowgency.workflows.models import CriterionAssessment, FieldValue
 
+TicketToolCaller = Callable[[str, dict], dict]
 
-def _call(client: TicketToolClient, operation: str, payload: dict) -> TicketToolResponse:
-    return TicketToolResponse.model_validate(client.call(operation, payload))
+
+def _call(caller: TicketToolCaller, operation: str, payload: dict) -> TicketToolResponse:
+    return TicketToolResponse.model_validate(caller(operation, payload))
 
 
 def _payload(command: BaseModel) -> dict[str, object]:
@@ -32,12 +33,12 @@ def _payload(command: BaseModel) -> dict[str, object]:
     return payload
 
 
-def build_mcp_server(client: TicketToolClient) -> MCPServer:
+def build_mcp_server(caller: TicketToolCaller) -> MCPServer:
     server = MCPServer("flowgency-tickets")
 
     @server.tool(structured_output=True)
     def workflows_list() -> TicketToolResponse:
-        return _call(client, "list_workflows", {})
+        return _call(caller, "list_workflows", {})
 
     @server.tool(structured_output=True)
     def tickets_list(
@@ -47,7 +48,7 @@ def build_mcp_server(client: TicketToolClient) -> MCPServer:
         state_id: str | None = None,
     ) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "list_tickets",
             _payload(
                 ListTicketsCommand(
@@ -61,7 +62,7 @@ def build_mcp_server(client: TicketToolClient) -> MCPServer:
 
     @server.tool(structured_output=True)
     def ticket_get(ref: TicketRef) -> TicketToolResponse:
-        return _call(client, "get_ticket", _payload(TicketGetCommand(ref=ref)))
+        return _call(caller, "get_ticket", _payload(TicketGetCommand(ref=ref)))
 
     @server.tool(structured_output=True)
     def ticket_create(
@@ -72,7 +73,7 @@ def build_mcp_server(client: TicketToolClient) -> MCPServer:
         field_values: dict[str, FieldValue] = {},
     ) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "create_ticket",
             _payload(
                 TicketCreateCommand(
@@ -88,16 +89,16 @@ def build_mcp_server(client: TicketToolClient) -> MCPServer:
     @server.tool(structured_output=True)
     def ticket_start_work(version: TicketVersion, operation_id: str) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "start_work",
             _payload(TicketStartWorkCommand(version=version, operation_id=operation_id)),
         )
 
-    register_remaining_ticket_tools(server, client)
+    register_remaining_ticket_tools(server, caller)
     return server
 
 
-def register_remaining_ticket_tools(server: MCPServer, client: TicketToolClient) -> None:
+def register_remaining_ticket_tools(server: MCPServer, caller: TicketToolCaller) -> None:
     @server.tool(structured_output=True)
     def ticket_update(
         version: TicketVersion,
@@ -107,7 +108,7 @@ def register_remaining_ticket_tools(server: MCPServer, client: TicketToolClient)
         field_values: dict[str, FieldValue] | None = None,
     ) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "update_ticket",
             _payload(
                 TicketUpdateCommand(
@@ -128,7 +129,7 @@ def register_remaining_ticket_tools(server: MCPServer, client: TicketToolClient)
         assessments: tuple[CriterionAssessment, ...] = (),
     ) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "report_ticket",
             _payload(
                 TicketReportCommand(
@@ -150,7 +151,7 @@ def register_remaining_ticket_tools(server: MCPServer, client: TicketToolClient)
         assessments: tuple[CriterionAssessment, ...] = (),
     ) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "transition_ticket",
             _payload(
                 TicketTransitionCommand(
@@ -167,7 +168,7 @@ def register_remaining_ticket_tools(server: MCPServer, client: TicketToolClient)
     @server.tool(structured_output=True)
     def ticket_end_work(version: TicketVersion, operation_id: str) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "end_work",
             _payload(TicketEndWorkCommand(version=version, operation_id=operation_id)),
         )
@@ -175,7 +176,7 @@ def register_remaining_ticket_tools(server: MCPServer, client: TicketToolClient)
     @server.tool(structured_output=True)
     def ticket_sign_off(version: TicketVersion, operation_id: str) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "sign_off",
             _payload(TicketSignOffCommand(version=version, operation_id=operation_id)),
         )
@@ -188,7 +189,7 @@ def register_remaining_ticket_tools(server: MCPServer, client: TicketToolClient)
         content_b64: str,
     ) -> TicketToolResponse:
         return _call(
-            client,
+            caller,
             "publish_artifact",
             _payload(
                 TicketArtifactPublishCommand(
@@ -199,13 +200,3 @@ def register_remaining_ticket_tools(server: MCPServer, client: TicketToolClient)
                 )
             ),
         )
-
-
-def main() -> None:
-    endpoint = validate_loopback_endpoint(os.environ["FLOWGENCY_TICKET_ENDPOINT"])
-    token = os.environ["FLOWGENCY_TICKET_TOKEN"]
-    build_mcp_server(TicketToolClient(endpoint, token)).run(transport="stdio")
-
-
-if __name__ == "__main__":
-    main()

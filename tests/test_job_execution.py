@@ -1101,8 +1101,8 @@ def test_execute_job_workflow_team_run_opens_live_ticket_broker_and_persists_cle
             assert request.ticket_tools.lifecycle is not None
             assert request.ticket_tools.lifecycle.job_id == record.spec.job_id
             client = TicketToolClient(
-                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
-                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+                request.ticket_tools.url.removesuffix("/mcp"),
+                request.ticket_tools.headers["Authorization"].removeprefix("Bearer "),
             )
             looked_up = client.call(
                 "get_ticket",
@@ -1309,8 +1309,8 @@ def test_execute_job_workflow_team_retains_active_on_unknown_evidence_and_closes
     class Integration(TicketRuntimeIntegration):
         def run(self, request: IntegrationRunRequest):
             client = TicketToolClient(
-                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
-                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+                request.ticket_tools.url.removesuffix("/mcp"),
+                request.ticket_tools.headers["Authorization"].removeprefix("Bearer "),
             )
             captured["client"] = client
             captured["ref"] = ticket.ref.model_dump(mode="json")
@@ -1355,8 +1355,8 @@ def test_execute_job_workflow_team_retains_active_on_later_generation(
     class Integration(TicketRuntimeIntegration):
         def run(self, request: IntegrationRunRequest):
             client = TicketToolClient(
-                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
-                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+                request.ticket_tools.url.removesuffix("/mcp"),
+                request.ticket_tools.headers["Authorization"].removeprefix("Bearer "),
             )
             started = client.call(
                 "start_work",
@@ -1409,8 +1409,8 @@ def test_execute_job_workflow_team_records_pending_cleanup_when_original_storage
     class Integration(TicketRuntimeIntegration):
         def run(self, request: IntegrationRunRequest):
             client = TicketToolClient(
-                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
-                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+                request.ticket_tools.url.removesuffix("/mcp"),
+                request.ticket_tools.headers["Authorization"].removeprefix("Bearer "),
             )
             started = client.call(
                 "start_work",
@@ -1465,8 +1465,8 @@ def test_execute_job_workflow_team_runtime_exception_keeps_pending_cleanup_visib
     class Integration(TicketRuntimeIntegration):
         def run(self, request: IntegrationRunRequest):
             client = TicketToolClient(
-                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
-                request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"],
+                request.ticket_tools.url.removesuffix("/mcp"),
+                request.ticket_tools.headers["Authorization"].removeprefix("Bearer "),
             )
             started = client.call(
                 "start_work",
@@ -1507,9 +1507,9 @@ def test_execute_job_workflow_team_cleanup_exception_persists_sanitized_cleanup_
 
     class Integration(TicketRuntimeIntegration):
         def run(self, request: IntegrationRunRequest):
-            captured["token"] = request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"]
+            captured["token"] = request.ticket_tools.headers["Authorization"].removeprefix("Bearer ")
             captured["client"] = TicketToolClient(
-                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                request.ticket_tools.url.removesuffix("/mcp"),
                 captured["token"],
             )
             started = captured["client"].call(
@@ -1574,9 +1574,9 @@ def test_execute_job_workflow_team_broker_close_exception_persists_cleanup_outco
 
     class Integration(TicketRuntimeIntegration):
         def run(self, request: IntegrationRunRequest):
-            captured["token"] = request.ticket_tools.env["FLOWGENCY_TICKET_TOKEN"]
+            captured["token"] = request.ticket_tools.headers["Authorization"].removeprefix("Bearer ")
             captured["client"] = TicketToolClient(
-                request.ticket_tools.env["FLOWGENCY_TICKET_ENDPOINT"],
+                request.ticket_tools.url.removesuffix("/mcp"),
                 captured["token"],
             )
             started = captured["client"].call(

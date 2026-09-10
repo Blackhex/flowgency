@@ -166,12 +166,8 @@ def _resolve_saved_prompt(
 
 def _validation_ticket_tools() -> TicketToolLaunch:
     return TicketToolLaunch(
-        command="python",
-        args=("-m", "flowgency.tickets.mcp_server"),
-        env={
-            "FLOWGENCY_TICKET_ENDPOINT": "validation-only",
-            "FLOWGENCY_TICKET_TOKEN": "validation-only",
-        },
+        url="http://127.0.0.1:0/mcp",
+        headers={"Authorization": "Bearer validation-only"},
     )
 
 

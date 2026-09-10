@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,6 +65,66 @@ def copilot_request(tmp_path: Path) -> IntegrationRunRequest:
     )
 
 
+def _patch_common(monkeypatch) -> None:
+    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
+    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
+    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-http")
+    monkeypatch.setattr(
+        CopilotIntegration,
+        "_prepare_copilot_home",
+        lambda self, request, settings: (None, "fixture-shared-home"),
+    )
+
+
+def _ok_completion() -> CompletedRuntimeProcess:
+    return CompletedRuntimeProcess(
+        exit_code=0,
+        stdout='{"type":"message","content":"ok"}\n',
+        stderr="",
+        duration_seconds=0.01,
+        process_stop_evidence=ProcessStopEvidence(
+            job_id="job-1",
+            generation="gen-1",
+            confirmed=True,
+            reason="exited",
+        ),
+    )
+
+
+def _capture_supervised(monkeypatch) -> dict:
+    """Fake ``run_supervised`` capturing argv/env/config for ticket launches."""
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    captured: dict[str, object] = {}
+
+    def fake_supervised(argv, *, cwd, env, timeout, lifecycle):
+        argv_list = list(argv)
+        captured["argv"] = argv_list
+        captured["cwd"] = cwd
+        captured["env"] = dict(env)
+        captured["timeout"] = timeout
+        captured["lifecycle"] = lifecycle
+        prompt_index = argv_list.index("-p") + 1
+        captured["prompt_text"] = argv_list[prompt_index]
+        if "--additional-mcp-config" in argv_list:
+            config_index = argv_list.index("--additional-mcp-config") + 1
+            config_path = Path(argv_list[config_index][1:])
+            captured["config_path"] = config_path
+            captured["config_payload"] = json.loads(config_path.read_text(encoding="utf-8"))
+        return _ok_completion()
+
+    monkeypatch.setattr(copilot_mod, "run_supervised", fake_supervised)
+    monkeypatch.setattr(
+        copilot_mod.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ticket launch with lifecycle must not use subprocess.run")
+        ),
+    )
+    _patch_common(monkeypatch)
+    return captured
+
+
 def capture_copilot_launch(monkeypatch) -> CapturedLaunch:
     import flowgency.integrations.flowgency.copilot as copilot_mod
 
@@ -86,10 +145,7 @@ def capture_copilot_launch(monkeypatch) -> CapturedLaunch:
         return _FakeCompleted()
 
     monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
-    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
-    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
-    monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "fixture-shared-home"))
+    _patch_common(monkeypatch)
 
     def finish() -> CapturedLaunch:
         argv = captured["argv"]
@@ -134,87 +190,60 @@ def _launch_with_lifecycle() -> TicketToolLaunch:
     )
 
 
-def _expected_bridge_launch() -> TicketToolLaunch:
+def _expected_http_launch() -> TicketToolLaunch:
     return build_ticket_tool_launch(_endpoint())
 
 
-def test_build_ticket_tool_launch_uses_bridge_contract():
+def test_build_ticket_tool_launch_uses_http_contract():
     launch = build_ticket_tool_launch(_endpoint())
 
-    if sys.platform == "win32":
-        import win32api
-        import win32process
-
-        assert launch.command == win32process.GetModuleFileNameEx(win32api.GetCurrentProcess(), 0)
-        assert launch.env["__PYVENV_LAUNCHER__"] == sys.executable
-    else:
-        assert launch.command == sys.executable
-        assert "__PYVENV_LAUNCHER__" not in launch.env
-    assert launch.args == ("-m", "flowgency.tickets.mcp_server")
+    assert launch.url == "http://127.0.0.1:9999/mcp"
+    assert launch.headers == {"Authorization": "Bearer fixture-only-token"}
     assert launch.server_name == "flowgency-tickets"
-    assert launch.env == {
-        **({"__PYVENV_LAUNCHER__": sys.executable} if sys.platform == "win32" else {}),
-        "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-        "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-    }
+    assert launch.lifecycle is None
 
 
 def test_write_copilot_ticket_config_writes_expected_json(tmp_path: Path):
     config_path = tmp_path / "ticket-tools.json"
-    launch = _expected_bridge_launch()
+    launch = _expected_http_launch()
     write_copilot_ticket_config(launch, config_path)
 
     assert json.loads(config_path.read_text(encoding="utf-8")) == {
         "mcpServers": {
             "flowgency-tickets": {
-                "command": launch.command,
-                "args": ["-m", "flowgency.tickets.mcp_server"],
-                "env": dict(launch.env),
+                "type": "http",
+                "url": launch.url,
+                "headers": dict(launch.headers),
                 "tools": ["*"],
             }
         }
     }
 
 
-def test_ticket_tools_do_not_grant_shell(copilot_request, monkeypatch, tmp_path):
+def test_copilot_ticket_tools_use_http_config(copilot_request, monkeypatch):
+    request = dataclasses.replace(copilot_request, ticket_tools=_launch_with_lifecycle())
+    captured = _capture_supervised(monkeypatch)
+
+    CopilotIntegration().run(request)
+
+    argv = captured["argv"]
+    assert "--additional-mcp-config" in argv
+    tool_grants = [argv[i + 1] for i, value in enumerate(argv) if value == "--allow-tool"]
+    assert "flowgency-tickets" in tool_grants
+    assert "fixture-only-token" not in " ".join(argv)
+    assert captured["config_payload"]["mcpServers"]["flowgency-tickets"]["type"] == "http"
+
+
+def test_ticket_tools_do_not_grant_shell(copilot_request, monkeypatch):
     request = dataclasses.replace(
         copilot_request,
         ticket_tools=TicketToolLaunch(
-            command=sys.executable,
-            args=("-m", "flowgency.tickets.mcp_server"),
-            env={
-                "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-                "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-            },
+            url="http://127.0.0.1:9999/mcp",
+            headers={"Authorization": "Bearer fixture-only-token"},
             lifecycle=RuntimeProcessLifecycle(job_id="job-1", generation="gen-1"),
         ),
     )
-    import flowgency.integrations.flowgency.copilot as copilot_mod
-
-    captured: dict[str, object] = {}
-
-    def fake_supervised(argv, *, cwd, env, timeout, lifecycle):
-        captured["argv"] = list(argv)
-        captured["env"] = dict(env)
-        return CompletedRuntimeProcess(
-            exit_code=0,
-            stdout='{"type":"message","content":"ok"}\n',
-            stderr="",
-            duration_seconds=0.01,
-            process_stop_evidence=ProcessStopEvidence(
-                job_id="job-1",
-                generation="gen-1",
-                confirmed=True,
-                reason="exited",
-            ),
-        )
-
-    monkeypatch.setattr(copilot_mod, "run_supervised", fake_supervised)
-    monkeypatch.setattr(copilot_mod.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket launch with lifecycle must not use subprocess.run")))
-    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
-    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
-    monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "fixture-shared-home"))
+    captured = _capture_supervised(monkeypatch)
 
     CopilotIntegration().run(request)
 
@@ -232,36 +261,7 @@ def test_ticket_tools_use_private_ephemeral_config_and_delete_it_on_success(
     monkeypatch,
 ):
     request = dataclasses.replace(copilot_request, ticket_tools=_launch_with_lifecycle())
-    import flowgency.integrations.flowgency.copilot as copilot_mod
-
-    captured: dict[str, object] = {}
-
-    def fake_supervised(argv, *, cwd, env, timeout, lifecycle):
-        argv_list = list(argv)
-        captured["argv"] = argv_list
-        config_index = argv_list.index("--additional-mcp-config") + 1
-        config_path = Path(argv_list[config_index][1:])
-        captured["config_path"] = config_path
-        captured["config_payload"] = json.loads(config_path.read_text(encoding="utf-8"))
-        return CompletedRuntimeProcess(
-            exit_code=0,
-            stdout='{"type":"message","content":"ok"}\n',
-            stderr="",
-            duration_seconds=0.01,
-            process_stop_evidence=ProcessStopEvidence(
-                job_id="job-1",
-                generation="gen-1",
-                confirmed=True,
-                reason="exited",
-            ),
-        )
-
-    monkeypatch.setattr(copilot_mod, "run_supervised", fake_supervised)
-    monkeypatch.setattr(copilot_mod.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket launch with lifecycle must not use subprocess.run")))
-    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
-    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
-    monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "fixture-shared-home"))
+    captured = _capture_supervised(monkeypatch)
 
     CopilotIntegration().run(request)
 
@@ -271,9 +271,9 @@ def test_ticket_tools_use_private_ephemeral_config_and_delete_it_on_success(
     assert captured["config_payload"] == {
         "mcpServers": {
             "flowgency-tickets": {
-                "command": request.ticket_tools.command,
-                "args": ["-m", "flowgency.tickets.mcp_server"],
-                "env": dict(request.ticket_tools.env),
+                "type": "http",
+                "url": request.ticket_tools.url,
+                "headers": dict(request.ticket_tools.headers),
                 "tools": ["*"],
             }
         }
@@ -283,34 +283,7 @@ def test_ticket_tools_use_private_ephemeral_config_and_delete_it_on_success(
 
 def test_ticket_tools_do_not_enter_prompt_or_copilot_environment(copilot_request, monkeypatch):
     request = dataclasses.replace(copilot_request, ticket_tools=_launch_with_lifecycle())
-    import flowgency.integrations.flowgency.copilot as copilot_mod
-
-    captured: dict[str, object] = {}
-
-    def fake_supervised(argv, *, cwd, env, timeout, lifecycle):
-        captured["argv"] = list(argv)
-        captured["env"] = dict(env)
-        prompt_index = list(argv).index("-p") + 1
-        captured["prompt_text"] = list(argv)[prompt_index]
-        return CompletedRuntimeProcess(
-            exit_code=0,
-            stdout='{"type":"message","content":"ok"}\n',
-            stderr="",
-            duration_seconds=0.01,
-            process_stop_evidence=ProcessStopEvidence(
-                job_id="job-1",
-                generation="gen-1",
-                confirmed=True,
-                reason="exited",
-            ),
-        )
-
-    monkeypatch.setattr(copilot_mod, "run_supervised", fake_supervised)
-    monkeypatch.setattr(copilot_mod.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket launch with lifecycle must not use subprocess.run")))
-    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
-    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
-    monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "fixture-shared-home"))
+    captured = _capture_supervised(monkeypatch)
 
     CopilotIntegration().run(request)
 
@@ -319,6 +292,7 @@ def test_ticket_tools_do_not_enter_prompt_or_copilot_environment(copilot_request
     assert isinstance(env, dict)
     assert "FLOWGENCY_TICKET_TOKEN" not in env
     assert "FLOWGENCY_TICKET_ENDPOINT" not in env
+    assert not any("fixture-only-token" in value for value in env.values())
 
 
 def test_ticket_tools_delete_private_config_on_timeout(copilot_request, monkeypatch):
@@ -346,11 +320,14 @@ def test_ticket_tools_delete_private_config_on_timeout(copilot_request, monkeypa
         )
 
     monkeypatch.setattr(copilot_mod, "run_supervised", fake_supervised)
-    monkeypatch.setattr(copilot_mod.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket launch with lifecycle must not use subprocess.run")))
-    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
-    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
-    monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "fixture-shared-home"))
+    monkeypatch.setattr(
+        copilot_mod.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ticket launch with lifecycle must not use subprocess.run")
+        ),
+    )
+    _patch_common(monkeypatch)
 
     result = CopilotIntegration().run(request)
 
@@ -362,44 +339,12 @@ def test_ticket_launch_uses_supervised_runtime_with_lifecycle(copilot_request, m
     request = dataclasses.replace(
         copilot_request,
         ticket_tools=TicketToolLaunch(
-            command=sys.executable,
-            args=("-m", "flowgency.tickets.mcp_server"),
-            env={
-                "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-                "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-            },
+            url="http://127.0.0.1:9999/mcp",
+            headers={"Authorization": "Bearer fixture-only-token"},
             lifecycle=RuntimeProcessLifecycle(job_id="job-1", generation="gen-1"),
         ),
     )
-    import flowgency.integrations.flowgency.copilot as copilot_mod
-
-    captured: dict[str, object] = {}
-
-    def fake_supervised(argv, *, cwd, env, timeout, lifecycle):
-        captured["argv"] = list(argv)
-        captured["cwd"] = cwd
-        captured["env"] = dict(env)
-        captured["timeout"] = timeout
-        captured["lifecycle"] = lifecycle
-        return CompletedRuntimeProcess(
-            exit_code=0,
-            stdout='{"type":"message","content":"ok"}\n',
-            stderr="",
-            duration_seconds=0.01,
-            process_stop_evidence=ProcessStopEvidence(
-                job_id="job-1",
-                generation="gen-1",
-                confirmed=True,
-                reason="exited",
-            ),
-        )
-
-    monkeypatch.setattr(copilot_mod, "run_supervised", fake_supervised)
-    monkeypatch.setattr(copilot_mod.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket launch must not use subprocess.run")))
-    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
-    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
-    monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "fixture-shared-home"))
+    captured = _capture_supervised(monkeypatch)
 
     result = CopilotIntegration().run(request)
 
@@ -422,12 +367,8 @@ def test_ticket_launch_without_lifecycle_rejects_before_config_or_runner(
     request = dataclasses.replace(
         copilot_request,
         ticket_tools=TicketToolLaunch(
-            command=sys.executable,
-            args=("-m", "flowgency.tickets.mcp_server"),
-            env={
-                "FLOWGENCY_TICKET_ENDPOINT": "http://127.0.0.1:9999",
-                "FLOWGENCY_TICKET_TOKEN": "fixture-only-token",
-            },
+            url="http://127.0.0.1:9999/mcp",
+            headers={"Authorization": "Bearer fixture-only-token"},
         ),
     )
     import flowgency.integrations.flowgency.copilot as copilot_mod
@@ -435,22 +376,25 @@ def test_ticket_launch_without_lifecycle_rejects_before_config_or_runner(
     monkeypatch.setattr(
         copilot_mod,
         "write_copilot_ticket_config",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket config must not be written without a lifecycle")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ticket config must not be written without a lifecycle")
+        ),
     )
     monkeypatch.setattr(
         copilot_mod,
         "run_supervised",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket launch without lifecycle must not start supervised runtime")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ticket launch without lifecycle must not start supervised runtime")
+        ),
     )
     monkeypatch.setattr(
         copilot_mod.subprocess,
         "run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ticket launch without lifecycle must not fall back to subprocess.run")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("ticket launch without lifecycle must not fall back to subprocess.run")
+        ),
     )
-    monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
-    monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
-    monkeypatch.setattr(CopilotIntegration, "_ticket_tool_contract", lambda self, version: "mcp-stdio")
-    monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "fixture-shared-home"))
+    _patch_common(monkeypatch)
 
     with pytest.raises(IntegrationError, match="trusted lifecycle"):
         CopilotIntegration().run(request)
@@ -460,9 +404,16 @@ def test_non_ticket_launch_keeps_plain_subprocess_path(copilot_request, monkeypa
     import flowgency.integrations.flowgency.copilot as copilot_mod
 
     finish = capture_copilot_launch(monkeypatch)
-    monkeypatch.setattr(copilot_mod, "run_supervised", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("non-ticket launch must not use supervision")))
+    monkeypatch.setattr(
+        copilot_mod,
+        "run_supervised",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("non-ticket launch must not use supervision")
+        ),
+    )
 
     CopilotIntegration().run(copilot_request)
 
     captured = finish()
     assert captured.argv[0] == "copilot"
+

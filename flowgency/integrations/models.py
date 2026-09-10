@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
     from flowgency.jobs.processes import RuntimeProcessLifecycle
 
 PermissionMode = Literal["restricted", "unrestricted"]
-LiveTicketTransport = Literal["mcp-stdio"]
+LiveTicketTransport = Literal["mcp-http"]
 
 ANY_TOOL = "*"
 """Stands in for a per-path difference that no tool name can express.
@@ -137,22 +138,20 @@ class RuntimeCapabilities:
 
 @dataclass(frozen=True)
 class TicketToolLaunch:
-    command: str
-    args: tuple[str, ...]
-    env: dict[str, str] = field(repr=False)
+    url: str
+    headers: Mapping[str, str] = field(repr=False)
     server_name: str = "flowgency-tickets"
     lifecycle: RuntimeProcessLifecycle | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "args", tuple(self.args))
-        object.__setattr__(self, "env", dict(self.env))
+        object.__setattr__(self, "headers", dict(self.headers))
 
     def __repr__(self) -> str:
-        redacted = {name: "***" for name in self.env}
+        redacted = {name: "***" for name in self.headers}
         return (
             "TicketToolLaunch("
-            f"command={self.command!r}, args={self.args!r}, "
-            f"env={redacted!r}, server_name={self.server_name!r}"
+            f"url={self.url!r}, headers={redacted!r}, "
+            f"server_name={self.server_name!r}"
             ")"
         )
 
