@@ -26,11 +26,13 @@ runs were unattainable; see the task report.
 """
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 import hashlib
 import json
 import re
+import threading
 from copy import deepcopy
 from pathlib import Path
 
@@ -40,6 +42,8 @@ from flowgency.integrations import REGISTRY
 from flowgency.workflows.models import ArtifactRef
 from tests._runtime_probe_helpers import (
     AI_CLI_COMMANDS,
+    assert_sandbox_denied_write,
+    load_job_session_events,
     supported_ticket_adapters,
     ticket_capable_installed_runtimes,
 )
@@ -102,6 +106,86 @@ def test_record_ticket_tool_calls_observes_live_dispatch(workflow_env):
     ticket_get_calls = [call for call in calls if call["tool"] == "ticket_get"]
     assert ticket_get_calls, calls
     assert all(call["ok"] for call in ticket_get_calls)
+
+
+def _denied_write_start_event(call_id: str, target: str) -> dict:
+    """A real-shaped ``apply_patch`` start whose patch body names ``target``."""
+    return {
+        "type": "tool.execution_start",
+        "data": {
+            "toolCallId": call_id,
+            "toolName": "apply_patch",
+            "arguments": (
+                "*** Begin Patch\n"
+                f"*** Add File: {target}\n"
+                "+blocked note\n"
+                "*** End Patch\n"
+            ),
+        },
+    }
+
+
+def _completion_event(call_id: str, *, success: bool, sandbox_denied: bool | None) -> dict:
+    properties = {"command": "apply_patch"}
+    if sandbox_denied is not None:
+        properties["sandbox_denied"] = "true" if sandbox_denied else "false"
+        properties["sandboxed"] = "true"
+    return {
+        "type": "tool.execution_complete",
+        "data": {
+            "toolCallId": call_id,
+            "success": success,
+            "toolTelemetry": {"properties": properties},
+        },
+    }
+
+
+def test_assert_sandbox_denied_write_accepts_only_a_correlated_policy_denial():
+    """Deterministic proof the denial parser distinguishes a real policy refusal
+    from look-alikes, using real-shaped Copilot events and no CLI launch.
+
+    The stored ``write_attempts`` list alone cannot tell these apart: each case
+    below emits the same canary ``tool.execution_start``, so only the correlated
+    completion's ``success``/``sandbox_denied`` fields separate a genuine sandbox
+    denial from a generic tool failure or an unrelated target.
+    """
+    target = "blocked-note.txt"
+
+    # Explicit, correlated policy denial: accepted.
+    denial = assert_sandbox_denied_write(
+        [
+            _denied_write_start_event("call-1", target),
+            _completion_event("call-1", success=False, sandbox_denied=True),
+        ],
+        target_name=target,
+    )
+    assert denial.call_id == "call-1"
+    assert denial.tool_name == "apply_patch"
+    assert denial.target == target
+
+    # A generic malformed-patch failure (no sandbox flag) is not a denial proof.
+    with pytest.raises(AssertionError, match="not refused by the sandbox policy"):
+        assert_sandbox_denied_write(
+            [
+                _denied_write_start_event("call-2", target),
+                _completion_event("call-2", success=False, sandbox_denied=None),
+            ],
+            target_name=target,
+        )
+
+    # A sandbox denial of some *other* path does not prove the canary was denied.
+    with pytest.raises(AssertionError, match="attempted to write"):
+        assert_sandbox_denied_write(
+            [
+                _denied_write_start_event("call-3", "unrelated.txt"),
+                _completion_event("call-3", success=False, sandbox_denied=True),
+            ],
+            target_name=target,
+        )
+
+    # A merely absent file (no write event at all) is not a denial proof.
+    with pytest.raises(AssertionError, match="attempted to write"):
+        assert_sandbox_denied_write([], target_name=target)
 
 
 # --------------------------------------------------------------------------- #
@@ -273,6 +357,45 @@ def _restricted_agent_task(ref_json: str, project_result: Path, blocked_note: Pa
     )
 
 
+def _stale_refresh_and_sign_off_task(ref_a_json: str, ref_b_json: str) -> str:
+    return (
+        "Operate two Flowgency workflow tickets using the live ticket tools exposed by "
+        'the "flowgency-tickets" MCP server. Do every step, in order. Do not create, '
+        "edit, or delete any file on disk at any point.\n\n"
+        "Ticket A must prove stale refresh during completion. Ticket B must prove sign-off.\n\n"
+        f"Ticket A reference (JSON):\n{ref_a_json}\n\n"
+        f"Ticket B reference (JSON):\n{ref_b_json}\n\n"
+        "Steps:\n"
+        "1. Call ticket_get on ticket A, then call ticket_start_work on A with the returned version and operation_id \"start-a-1\".\n"
+        "2. Call ticket_get on ticket A again and save that exact version object as STALE_VERSION. Then call ticket_transition on A with STALE_VERSION, operation_id \"complete-stale\", transition_id \"complete\", inputs {\"verdict\": true}, outputs {\"summary\": \"completed after refresh\"}, and exactly one assessment: {\"criterion_id\": \"evidence-reviewed\", \"satisfied\": true, \"reasoning\": \"Reviewed the current ticket state after refresh.\", \"supporting_fields\": [\"summary\"]}.\n"
+        "3. Inspect the tool result from step 2. If it returns ok false with error.code \"stale-ticket\", immediately call ticket_get on ticket A again, discard STALE_VERSION, copy the entire newly returned version object as FRESH_VERSION, and retry ticket_transition exactly once with operation_id \"complete-fresh\" using FRESH_VERSION and the same inputs, outputs, and assessment. Do not reuse any earlier version object. If step 2 unexpectedly succeeds, do not retry.\n"
+        "4. Call ticket_get on ticket B, then call ticket_start_work on B with the returned version and operation_id \"start-b-1\".\n"
+        "5. Call ticket_get on ticket B again, then call ticket_sign_off on B with the returned version and operation_id \"signoff-b-1\".\n"
+        "6. Reply with the single word DONE.\n\n"
+        "Always pass the exact version object returned by your most recent ticket_get for a ticket to the next mutating call on that same ticket. Never invent a revision number or a digest."
+    )
+
+
+def _transition_then_timeout_task(ref_json: str, artifact_b64: str) -> str:
+    return (
+        "Operate a single Flowgency workflow ticket using the live ticket tools exposed by "
+        'the "flowgency-tickets" MCP server. Do every step, in order. Do not create, '
+        "edit, or delete any file on disk at any point.\n\n"
+        "Use the exact retained artifact payload provided below; do not modify or re-encode it except to pass it through unchanged to ticket_artifact_publish.\n\n"
+        "Ticket reference (JSON):\n"
+        f"{ref_json}\n\n"
+        "Artifact content_b64:\n"
+        f"{artifact_b64}\n\n"
+        "Steps:\n"
+        "1. Call ticket_get with that exact ref, then call ticket_start_work with the returned version and operation_id \"start-timeout-1\".\n"
+        "2. Call ticket_get again, then call ticket_artifact_publish with that fresh version, filename \"result.txt\", media_type \"text/plain\", and the exact content_b64 payload shown above. Keep the returned artifact reference.\n"
+        "3. Call ticket_get again, then call ticket_transition with that fresh version, operation_id \"complete-timeout\", transition_id \"complete\", inputs {\"verdict\": true}, outputs {\"summary\": \"Committed before timeout\", \"evidence\": "
+        "<the retained artifact reference from ticket_artifact_publish>}, and exactly one satisfied assessment: {\"criterion_id\": \"evidence-reviewed\", \"satisfied\": true, \"reasoning\": \"The retained result proves the ticket is complete.\", \"supporting_fields\": [\"summary\", \"evidence\"]}.\n"
+        "4. After the transition response returns, stop and reply with the single word DONE.\n\n"
+        "Always pass the exact version object returned by your most recent ticket_get call to the next mutating call. Never invent a revision number or a digest."
+    )
+
+
 if not TICKET_CAPABLE_RUNTIMES:
 
     @pytest.mark.real_runtime
@@ -284,7 +407,6 @@ if not TICKET_CAPABLE_RUNTIMES:
 
 else:
 
-    @pytest.mark.real_runtime
     @pytest.mark.parametrize(
         "runtime",
         tuple(runtime for runtime in TICKET_CAPABLE_RUNTIMES if runtime.name == "copilot"),
@@ -461,6 +583,289 @@ else:
         assert final.active_run is None
         assert project_result.read_bytes() == project_before
         assert _hash_files(protected) == hashes_before
+
+    @pytest.mark.real_runtime
+    @pytest.mark.parametrize(
+        "runtime",
+        tuple(runtime for runtime in TICKET_CAPABLE_RUNTIMES if runtime.name == "copilot"),
+        ids=lambda item: item.name,
+    )
+    def test_restricted_agent_refreshes_stale_transition_and_signs_off_second_ticket(
+        runtime, tmp_path, raw_config, monkeypatch
+    ):
+        from flowgency.blueprints import CompilationCache
+        from flowgency.blueprints.library import BlueprintLibrary
+        from flowgency.jobs.execution import execute_job
+        from flowgency.jobs.models import JobRecord, JobRequest
+        from flowgency.jobs.resolution import resolve_job_request
+        from flowgency.jobs.store import read_job
+        from flowgency.prompts import PromptStore
+        from tests._runtime_probe_helpers import record_ticket_tool_calls
+
+        raw = _restricted_ticket_agent_config(raw_config, runtime.name)
+        env = make_workflow_environment(tmp_path, raw)
+        env.publish_criteria_workflow()
+
+        ticket_a = env.create(title="Stale refresh live", values={"summary": "initial"})
+        env.service.assign(
+            env.user,
+            ticket_a.version,
+            "builder",
+            env.operation("assign-a", actor_name="local-user"),
+        )
+        ref_a = env.read(ticket_a.ref).ref
+
+        ticket_b = env.create(title="Sign-off live", values={"summary": "follow-up"})
+        env.service.assign(
+            env.user,
+            ticket_b.version,
+            "builder",
+            env.operation("assign-b", actor_name="local-user"),
+        )
+        ref_b = env.read(ticket_b.ref).ref
+
+        snapshot = env.store.load()
+        task = _stale_refresh_and_sign_off_task(
+            json.dumps(ref_a.model_dump(mode="json")),
+            json.dumps(ref_b.model_dump(mode="json")),
+        )
+        injected = {"stale": False}
+
+        def before_dispatch(service, registry, token, operation, payload):
+            if (
+                operation == "transition_ticket"
+                and isinstance(payload, dict)
+                and payload.get("operation_id") == "complete-stale"
+                and not injected["stale"]
+            ):
+                injected["stale"] = True
+                current = env.read(ref_a)
+                env.service.update(
+                    env.user,
+                    current.version,
+                    current.patch(description="Concurrent user refresh bump."),
+                    env.operation("remote-bump", actor_name="local-user"),
+                )
+
+        spec = resolve_job_request(
+            JobRequest(
+                config_path=env.store.path,
+                team_key=env.team_id,
+                agent_name="builder",
+                trigger="manual_prompt",
+                routine_id=None,
+                task_input=task,
+                timeout_override=300,
+            ),
+            config_store=env.store,
+            library=BlueprintLibrary(snapshot.config.flowgency.agent_library),
+            cache=CompilationCache(
+                snapshot.config.flowgency.compilation_cache,
+                {runtime.name: REGISTRY[runtime.name].projector},
+            ),
+            prompt_store=PromptStore(snapshot.config.flowgency.prompt_store),
+            integrations={runtime.name: REGISTRY[runtime.name]},
+        )
+        authority = env.job_store.create(JobRecord.from_spec(spec))
+
+        with record_ticket_tool_calls(before_dispatch=before_dispatch) as calls:
+            record = execute_job(authority)
+        job = read_job(authority.path)
+        assert record.status == "complete", (
+            f"{runtime.name}: stale-refresh/sign-off run did not complete: "
+            f"status={record.status!r}; summary={job.execution_summary!r}; "
+            f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}"
+        )
+        assert injected["stale"], f"{runtime.name}: stale transition was never forced"
+
+        stale_calls = [
+            call
+            for call in calls
+            if call["tool"] == "ticket_transition"
+            and call.get("operation_id") == "complete-stale"
+        ]
+        assert stale_calls, f"{runtime.name}: no stale transition attempt was observed"
+        assert stale_calls[-1]["ok"] is False, stale_calls
+        assert stale_calls[-1]["error_code"] == "stale-ticket", stale_calls
+
+        fresh_calls = [
+            call
+            for call in calls
+            if call["tool"] == "ticket_transition"
+            and call.get("operation_id") == "complete-fresh"
+        ]
+        assert fresh_calls, f"{runtime.name}: no fresh transition retry was observed"
+        assert fresh_calls[-1]["ok"] is True, fresh_calls
+
+        signoff_calls = [
+            call
+            for call in calls
+            if call["tool"] == "ticket_sign_off"
+            and call.get("operation_id") == "signoff-b-1"
+        ]
+        assert signoff_calls, f"{runtime.name}: no ticket_sign_off call was observed"
+        assert signoff_calls[-1]["ok"] is True, signoff_calls
+
+        final_a = env.read(ref_a).record
+        assert final_a.state_id == "done"
+        assert final_a.assignee == "builder"
+        assert final_a.active_run is None
+
+        final_b = env.read(ref_b).record
+        assert final_b.assignee is None
+        assert final_b.active_run is None
+        assert any(event.kind == "signed-off" for event in final_b.events)
+
+    @pytest.mark.real_runtime
+    @pytest.mark.parametrize(
+        "runtime",
+        tuple(runtime for runtime in TICKET_CAPABLE_RUNTIMES if runtime.name == "copilot"),
+        ids=lambda item: item.name,
+    )
+    def test_restricted_agent_timeout_after_committed_transition_keeps_ticket_state(
+        runtime, tmp_path, raw_config, monkeypatch
+    ):
+        from flowgency.blueprints import CompilationCache
+        from flowgency.blueprints.library import BlueprintLibrary
+        from flowgency.integrations.flowgency import copilot as copilot_mod
+        from flowgency.jobs.execution import execute_job
+        from flowgency.jobs.models import JobRecord, JobRequest
+        from flowgency.jobs.resolution import resolve_job_request
+        from flowgency.jobs.store import read_job
+        from flowgency.prompts import PromptStore
+        from tests._runtime_probe_helpers import record_ticket_tool_calls
+
+        timeout_seconds = 120
+        raw = _restricted_ticket_agent_config(raw_config, runtime.name)
+        env = make_workflow_environment(tmp_path, raw)
+        env.publish_artifact_field_workflow()
+        env.publish_criteria_workflow()
+
+        workspace = Path(env.store.load().config.teams[env.team_id].workspace_path)
+        project_result = workspace / "result.txt"
+        project_result.write_bytes(_run_tiny_project_check(workspace))
+        project_before = project_result.read_bytes()
+
+        ticket = env.create(title="Commit before timeout", values={"summary": "initial", "evidence": None})
+        env.service.assign(
+            env.user,
+            ticket.version,
+            "builder",
+            env.operation("assign-timeout", actor_name="local-user"),
+        )
+        ref = env.read(ticket.ref).ref
+
+        snapshot = env.store.load()
+        task = _transition_then_timeout_task(
+            json.dumps(ref.model_dump(mode="json")),
+            base64.b64encode(project_before).decode("ascii"),
+        )
+
+        committed = threading.Event()
+        release_response = threading.Event()
+        timeout_observed = threading.Event()
+        outcome: dict[str, object] = {}
+
+        def after_dispatch(service, registry, token, operation, payload, result):
+            if (
+                operation == "transition_ticket"
+                and isinstance(payload, dict)
+                and payload.get("operation_id") == "complete-timeout"
+            ):
+                committed.set()
+                assert release_response.wait(timeout=timeout_seconds + 60), (
+                    "transition response gate was never released"
+                )
+
+        original_run_supervised = copilot_mod.run_supervised
+
+        def observing_run_supervised(*args, **kwargs):
+            completed = original_run_supervised(*args, **kwargs)
+            if completed.exit_code == 124:
+                timeout_observed.set()
+            return completed
+
+        monkeypatch.setattr(copilot_mod, "run_supervised", observing_run_supervised)
+
+        spec = resolve_job_request(
+            JobRequest(
+                config_path=env.store.path,
+                team_key=env.team_id,
+                agent_name="builder",
+                trigger="manual_prompt",
+                routine_id=None,
+                task_input=task,
+                timeout_override=timeout_seconds,
+            ),
+            config_store=env.store,
+            library=BlueprintLibrary(snapshot.config.flowgency.agent_library),
+            cache=CompilationCache(
+                snapshot.config.flowgency.compilation_cache,
+                {runtime.name: REGISTRY[runtime.name].projector},
+            ),
+            prompt_store=PromptStore(snapshot.config.flowgency.prompt_store),
+            integrations={runtime.name: REGISTRY[runtime.name]},
+        )
+        authority = env.job_store.create(JobRecord.from_spec(spec))
+
+        def run_job() -> None:
+            try:
+                with record_ticket_tool_calls(after_dispatch=after_dispatch) as calls:
+                    outcome["record"] = execute_job(authority)
+                    outcome["calls"] = list(calls)
+            except BaseException as error:
+                outcome["error"] = error
+
+        worker = threading.Thread(target=run_job, daemon=True)
+        worker.start()
+        try:
+            assert committed.wait(timeout=timeout_seconds), (
+                f"{runtime.name}: the committed transition was never observed"
+            )
+            assert timeout_observed.wait(timeout=timeout_seconds + 60), (
+                f"{runtime.name}: run_supervised never reported a real timeout"
+            )
+        finally:
+            release_response.set()
+
+        worker.join(timeout=30)
+        assert not worker.is_alive(), f"{runtime.name}: execute_job remained blocked after gate release"
+        if "error" in outcome:
+            raise outcome["error"]
+
+        record = outcome["record"]
+        calls = outcome["calls"]
+        job = read_job(authority.path)
+        assert record.status == "failed", (
+            f"{runtime.name}: timeout-after-commit run did not fail as expected: "
+            f"status={record.status!r}; summary={job.execution_summary!r}; "
+            f"stderr_path={job.stderr_path!r}; stdout_path={job.stdout_path!r}"
+        )
+        assert record.exit_code == 124
+        assert record.execution_summary == f"Agent timed out after {timeout_seconds} seconds."
+
+        transition_calls = [
+            call
+            for call in calls
+            if call["tool"] == "ticket_transition"
+            and call.get("operation_id") == "complete-timeout"
+        ]
+        assert transition_calls, f"{runtime.name}: committed transition call was not observed"
+        assert transition_calls[-1]["ok"] is True, transition_calls
+
+        final = env.read(ref).record
+        assert final.state_id == "done"
+        assert final.assignee == "builder"
+        assert final.active_run is None
+        assert final.field_values["summary"] == "Committed before timeout"
+        evidence = final.field_values["evidence"]
+        retained = env.current_provider().read_artifact(ref, evidence.value)
+        assert retained.content == project_before
+
+        cleanup = job.result_metadata["ticket_cleanup"]
+        assert cleanup["status"] == "cleared"
+        assert cleanup["confirmed"] is True
+        assert cleanup["cleared"] == [ref.model_dump(mode="json")]
 
     @pytest.mark.real_runtime
     @pytest.mark.parametrize(
@@ -659,6 +1064,15 @@ else:
         assert retained.content == project_before
         assert read_job(authority.path).result_metadata["write_attempts"] == [blocked_note.name]
         assert not blocked_note.exists()
+        # The stored write_attempts and the absent file only prove the agent
+        # *tried* to write; correlate the canary write's own session events to
+        # prove the sandbox *policy* refused it (success false + sandbox_denied),
+        # not a malformed patch or an unrelated call. This is cooperative
+        # in-process containment of a built-in edit, not an OS write guarantee.
+        denial = assert_sandbox_denied_write(
+            load_job_session_events(job), target_name=blocked_note.name
+        )
+        assert denial.target == blocked_note.name
         assert project_result.read_bytes() == project_before
         assert _hash_files(protected) == hashes_before
 

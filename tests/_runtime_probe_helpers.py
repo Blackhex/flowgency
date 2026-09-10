@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -281,8 +283,26 @@ TICKET_TOOL_FOR_OPERATION = {
 }
 
 
+def _observed_ticket_id(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    ref = payload.get("ref")
+    if isinstance(ref, dict):
+        ticket_id = ref.get("ticket_id")
+        if isinstance(ticket_id, str):
+            return ticket_id
+    version = payload.get("version")
+    if isinstance(version, dict):
+        ref = version.get("ref")
+        if isinstance(ref, dict):
+            ticket_id = ref.get("ticket_id")
+            if isinstance(ticket_id, str):
+                return ticket_id
+    return None
+
+
 @contextmanager
-def record_ticket_tool_calls():
+def record_ticket_tool_calls(*, before_dispatch=None, after_dispatch=None):
     """Observe every ticket tool the live run dispatches through the broker.
 
     The worker-owned broker runs in-process (only the assistant CLI is a child),
@@ -301,24 +321,52 @@ def record_ticket_tool_calls():
     original = broker_mod._dispatch_authenticated_request
 
     def recording(service, registry, token, operation, payload):
+        if before_dispatch is not None:
+            before_dispatch(service, registry, token, operation, payload)
         try:
             result = original(service, registry, token, operation, payload)
-        except Exception:
+        except Exception as error:
+            error_code = None
+            error_message = None
+            if hasattr(error, "as_dict"):
+                details = error.as_dict()
+                if isinstance(details, dict):
+                    code = details.get("code")
+                    if isinstance(code, str):
+                        error_code = code
+                    message = details.get("message")
+                    if isinstance(message, str):
+                        error_message = message
             with lock:
                 calls.append(
                     {
                         "operation": operation,
                         "tool": TICKET_TOOL_FOR_OPERATION.get(operation, operation),
                         "ok": False,
+                        "error_code": error_code,
+                        "error_message": error_message,
+                        "operation_id": payload.get("operation_id") if isinstance(payload, dict) else None,
+                        "ticket_id": _observed_ticket_id(payload),
                     }
                 )
             raise
+        if after_dispatch is not None:
+            after_dispatch(service, registry, token, operation, payload, result)
+        ok = True
+        error = None
+        if isinstance(result, dict) and "ok" in result:
+            ok = bool(result.get("ok"))
+            error = result.get("error")
         with lock:
             calls.append(
                 {
                     "operation": operation,
                     "tool": TICKET_TOOL_FOR_OPERATION.get(operation, operation),
-                    "ok": True,
+                    "ok": ok,
+                    "error_code": error.get("code") if isinstance(error, dict) else None,
+                    "error_message": error.get("message") if isinstance(error, dict) else None,
+                    "operation_id": payload.get("operation_id") if isinstance(payload, dict) else None,
+                    "ticket_id": _observed_ticket_id(payload),
                 }
             )
         return result
@@ -328,3 +376,204 @@ def record_ticket_tool_calls():
         yield calls
     finally:
         broker_mod._dispatch_authenticated_request = original
+
+
+# --------------------------------------------------------------------------- #
+# Sandbox write-denial proof from the job's own Copilot session events.
+# --------------------------------------------------------------------------- #
+#
+# The stored ``write_attempts`` list is captured at ``tool.execution_start`` and
+# so only proves the agent *tried* to write a path -- a malformed patch that the
+# tool itself rejects produces the same observable, and an absent output file is
+# equally consistent with a write that simply never ran. Proving the *sandbox
+# policy* refused the write needs the correlated completion of that same call:
+# ``success`` false together with an explicit ``sandbox_denied`` policy flag.
+#
+# This is cooperative, in-process containment of a built-in file edit, not an
+# operating-system file-write guarantee; the metadata proves the policy denied
+# the edit, not that the kernel would have.
+
+_SANDBOX_DENIED_KEYS = ("sandbox_denied", "sandboxDenied")
+
+_APPLY_PATCH_HEADERS = (
+    "*** Add File: ",
+    "*** Update File: ",
+    "*** Delete File: ",
+    "*** Move to: ",
+)
+
+
+@dataclass(frozen=True)
+class SandboxDenial:
+    call_id: str
+    tool_name: str
+    target: str
+
+
+def _basename(path: str) -> str:
+    return re.split(r"[\\/]", path.strip())[-1]
+
+
+def _truthy_flag(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return False
+
+
+def _apply_patch_paths(arguments: object) -> list[str]:
+    """Target paths named inside an ``apply_patch`` envelope string."""
+    if not isinstance(arguments, str):
+        return []
+    paths: list[str] = []
+    for line in arguments.splitlines():
+        for prefix in _APPLY_PATCH_HEADERS:
+            if line.startswith(prefix):
+                target = line[len(prefix):].strip()
+                if target:
+                    paths.append(target)
+                break
+    return paths
+
+
+def _write_targets_for_start(data: dict) -> list[str]:
+    """Paths a ``tool.execution_start`` event attempts to write, or ``[]``."""
+    tool_name = data.get("toolName")
+    arguments = data.get("arguments")
+    if tool_name == "apply_patch":
+        return _apply_patch_paths(arguments)
+    obj: dict | None = arguments if isinstance(arguments, dict) else None
+    if obj is None and isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except (ValueError, TypeError):
+            parsed = None
+        obj = parsed if isinstance(parsed, dict) else None
+    if obj is None:
+        return []
+    path = obj.get("path")
+    return [path] if isinstance(path, str) and path else []
+
+
+def _has_sandbox_denied(data: dict) -> bool:
+    telemetry = data.get("toolTelemetry")
+    if isinstance(telemetry, dict):
+        properties = telemetry.get("properties")
+        if isinstance(properties, dict):
+            for key in _SANDBOX_DENIED_KEYS:
+                if _truthy_flag(properties.get(key)):
+                    return True
+    for key in _SANDBOX_DENIED_KEYS:
+        if _truthy_flag(data.get(key)):
+            return True
+    return False
+
+
+def iter_jsonl_events(text: str):
+    """Yield structured event dicts from a Copilot JSONL stream.
+
+    Malformed or non-object lines are skipped rather than raising, so a partial
+    or truncated session log still yields every well-formed event.
+    """
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(event, dict) and isinstance(event.get("type"), str):
+            yield event
+
+
+def load_job_session_events(job) -> list[dict]:
+    """Structured Copilot session events the completed job persisted itself.
+
+    Reads the job-owned run stream (``stdout_path``) and, when present, the
+    per-job ``copilot_home`` session log. Both are structured JSONL owned by the
+    job. The raw events carry the task payload, so callers must correlate and
+    assert on scalar fields rather than print whole event objects.
+    """
+    texts: list[str] = []
+    stdout_path = getattr(job, "stdout_path", None)
+    if stdout_path:
+        path = Path(stdout_path)
+        if path.is_file():
+            texts.append(path.read_text(encoding="utf-8"))
+    home = getattr(job, "copilot_home", None)
+    session_id = getattr(job, "session_id", None)
+    if home and session_id:
+        events_path = Path(home) / "session-state" / str(session_id) / "events.jsonl"
+        if events_path.is_file():
+            texts.append(events_path.read_text(encoding="utf-8"))
+    events: list[dict] = []
+    for text in texts:
+        events.extend(iter_jsonl_events(text))
+    return events
+
+
+def assert_sandbox_denied_write(events, *, target_name: str) -> SandboxDenial:
+    """Prove the sandbox policy refused a write to ``target_name``.
+
+    Correlates the write's ``tool.execution_start`` (call id and named target)
+    with its ``tool.execution_complete`` and requires that completion to carry
+    ``success`` false *and* an explicit ``sandbox_denied`` policy flag on the
+    same call. A generic tool failure with no policy flag, a denial of some
+    other path, or a merely absent output file are each rejected -- none of them
+    proves the policy, rather than the tool or chance, blocked the write.
+
+    Error messages name only scalar fields (call id, tool name, target, the
+    success and denied flags); the raw arguments and full event objects, which
+    carry the task payload, are never printed.
+    """
+    starts: dict[str, tuple[object, list[str]]] = {}
+    completes: dict[str, dict] = {}
+    for event in events:
+        data = event.get("data")
+        if not isinstance(data, dict):
+            continue
+        call_id = data.get("toolCallId")
+        if not isinstance(call_id, str) or not call_id:
+            continue
+        event_type = event.get("type")
+        if event_type == "tool.execution_start":
+            targets = _write_targets_for_start(data)
+            if targets:
+                starts[call_id] = (data.get("toolName"), targets)
+        elif event_type == "tool.execution_complete":
+            completes[call_id] = data
+
+    matching = [
+        (call_id, tool_name)
+        for call_id, (tool_name, targets) in starts.items()
+        if any(_basename(target) == target_name for target in targets)
+    ]
+    observed_targets = sorted(
+        {_basename(target) for _, targets in starts.values() for target in targets}
+    )
+    assert matching, (
+        f"no tool.execution_start attempted to write {target_name!r}; "
+        f"observed write targets: {observed_targets}"
+    )
+
+    denials: list[SandboxDenial] = []
+    diagnostics: list[tuple[str, object, bool]] = []
+    for call_id, tool_name in matching:
+        complete = completes.get(call_id)
+        if complete is None:
+            diagnostics.append((call_id, "no-completion", False))
+            continue
+        success = complete.get("success")
+        denied = _has_sandbox_denied(complete)
+        diagnostics.append((call_id, success, denied))
+        if success is False and denied:
+            denials.append(SandboxDenial(call_id, str(tool_name), target_name))
+
+    assert denials, (
+        f"the write to {target_name!r} was not refused by the sandbox policy; "
+        f"correlated (call_id, success, sandbox_denied) completions: {diagnostics}; "
+        f"a generic tool failure or a missing policy flag is not a denial proof"
+    )
+    return denials[0]
