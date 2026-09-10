@@ -150,6 +150,14 @@ not a cage.
 
 ### Git and GitHub tokens follow executor eligibility
 
+> **Superseded implementation detail (2026-09-10):** the settings keys named
+> below were later measured to be ignored by the installed Copilot CLI
+> (`1.0.84-3`), which reads credential injection from `sandbox.auth.git` /
+> `sandbox.auth.gh` and injects tokens only while the sandbox is enabled. The
+> eligibility *decision* in this section is unchanged; only the emitted key
+> names and the "enabled by default" wording are updated in the current code
+> and `kb/integrations.md`.
+
 `gitAuth` and `ghAuth` default to true and inject credentials into sandboxed
 commands. A filesystem policy cannot stop a `git push`, because the write happens
 on the remote.

@@ -31,8 +31,21 @@ describe the current transport or the approved consented path.
   `68 passed`.
 
 Restricted live runs preserved the intended boundary: workspace read-only,
-`gitAuth=false`, `ghAuth=false`, no `allowOutbound`, no `sandboxMcpServers=false`,
-and only the explicit per-job local-network opt-in when approved.
+the nested `sandbox.auth.git=false` and `sandbox.auth.gh=false` credential
+denial, no `allowOutbound`, no `sandboxMcpServers=false`, and only the explicit
+per-job local-network opt-in when approved.
+
+Credential schema correction (measured on `1.0.84-3`): Flowgency now emits git/gh
+injection under the CLI's supported `sandbox.auth.git`/`sandbox.auth.gh` keys.
+The earlier top-level `gitAuth`/`ghAuth` keys were logged by this CLI as
+`Ignoring unknown top-level key(s) ... have no effect`, so the intended denial
+had not actually taken effect at that version. A restricted denied-write live
+run's job `settings.json` now carries the nested keys, and its process log shows
+no unknown-key warning and a real `[rust:sandbox_spawn]`, confirming acceptance.
+Because the CLI injects git/gh only while the sandbox is enabled, the denial is
+enforceable exactly for confined (restricted or authored-rule) policies — the
+read-only ticket-agent case — and cannot bind an unconfined run whose sandbox is
+off.
 
 Built-in file edits are cooperatively policed in-process. The live denial proof
 establishes policy refusal of the ticket canary write, not OS-enforced file-edit
