@@ -32,15 +32,19 @@ This plan supersedes only the transport-specific implementation details from Tas
 **Files:**
 - Modify: `flowgency/tickets/access.py`, `flowgency/tickets/broker.py`, `flowgency/tickets/protocol.py`, `flowgency/tickets/mcp_server.py`
 - Modify: `flowgency/integrations/models.py`, `flowgency/integrations/ticket_tools.py`, `flowgency/integrations/flowgency/copilot.py`
+- Modify if adapter request plumbing crosses its own hop: `flowgency/jobs/execution.py` (own hop only; do not broaden).
+- Modify: `tests/test_ticket_end_to_end.py` — adapts direct `TicketToolLaunch` constructor consumers (`ticket_tools.env[...]` accesses) to the new `url`/`headers` shape; must not be left broken for Task 2.
 - Test: `tests/test_ticket_access.py`, `tests/test_ticket_broker.py`, `tests/test_ticket_mcp.py`, `tests/test_ticket_runtime_capabilities.py`, `tests/test_copilot_ticket_tools.py`, `tests/test_copilot_launch_arguments.py`, `tests/test_copilot_credentials.py`
+
+`flowgency/tickets/models.py` and `flowgency/integrations/__init__.py` are not listed because `LiveTicketEndpoint` is preserved unchanged and the `TicketToolLaunch` export name stays the same; add them only if a strictly required new export surface appears.
 
 **Interfaces:**
 - Consumes: `TicketAccessRegistry.open(authority) -> TicketAccessGrant`, the existing typed ticket command parser/dispatcher, and current Copilot launch plumbing.
-- Produces: `LiveTicketEndpoint(url: str, headers: Mapping[str, str], server_name: str)` with worker-owned lifecycle.
+- Preserves: existing `LiveTicketEndpoint(url: str, grant: TicketAccessGrant)` unchanged — `url` is the bare loopback origin; this struct is used by `TicketBroker.close()` and worker job generation.
 - Produces: `TicketBroker.start() -> LiveTicketEndpoint` and `close()` that revoke access and join bounded server threads.
 - Produces: `RuntimeCapabilities.live_ticket_transport: Literal["mcp-http"] | None`.
-- Produces: `TicketToolLaunch(url: str, headers: Mapping[str, str], server_name: str = "flowgency-tickets")` with secret-redacted repr and no canonical serialization.
-- Produces: `build_ticket_tool_launch(endpoint) -> TicketToolLaunch` and a Copilot per-job MCP config writer that emits only the Flowgency HTTP server entry.
+- Produces: `TicketToolLaunch(url: str, headers: Mapping[str, str], server_name: str = "flowgency-tickets", lifecycle: RuntimeProcessLifecycle | None = None)` replacing the prior `command/args/env` shape; `headers` is repr-redacted; `lifecycle` remains required for Copilot process supervision even without a bridge child; no canonical serialization.
+- Produces: `build_ticket_tool_launch(endpoint: LiveTicketEndpoint) -> TicketToolLaunch` deriving the MCP URL as `endpoint.url + "/mcp"` and the bearer token from `endpoint.grant.token`, and a Copilot per-job MCP config writer that emits only the Flowgency HTTP server entry.
 
 - [ ] **Step 1: Write deterministic failing tests for the HTTP authority boundary and Copilot launch contract.**
 
@@ -79,15 +83,15 @@ app = server.streamable_http_app(
     streamable_http_path="/mcp",
     json_response=True,
     stateless_http=True,
-    max_request_body_size=4_194_304,
+    max_request_body_size=2_097_152,  # 2 MiB outer cap; streamed result cap stays 64 KiB
     host="127.0.0.1",
 )
 
 async def guard_request(request: Request) -> AgentTicketContext:
     verify_loopback_host(request)
     verify_origin(request)
-    require_bearer(request.headers["Authorization"])
-    return registry.authenticate(token)
+    token = read_bearer(request)  # defined in flowgency/tickets/broker.py
+    return await run_in_threadpool(registry.authenticate, token)  # starlette helper
 ```
 
 Reuse the existing typed parser/dispatcher for all MCP tool calls. Keep the outer 2 MiB request cap, revoke-on-close behavior, per-call authority validation, result-size limits, and current artifact/state semantics. Generate a per-job Copilot MCP config that points only to the authenticated Flowgency HTTP server, pass it with `--additional-mcp-config`, and keep the allowlist limited to the Flowgency server name.
@@ -103,7 +107,7 @@ Expected: pass, confirming no forbidden tracked terminology or boundary regressi
 - [ ] **Step 5: Review and commit the implementation slice.**
 
 ```bash
-git add flowgency/tickets/access.py flowgency/tickets/broker.py flowgency/tickets/protocol.py flowgency/tickets/mcp_server.py flowgency/integrations/models.py flowgency/integrations/ticket_tools.py flowgency/integrations/flowgency/copilot.py tests/test_ticket_access.py tests/test_ticket_broker.py tests/test_ticket_mcp.py tests/test_ticket_runtime_capabilities.py tests/test_copilot_ticket_tools.py tests/test_copilot_launch_arguments.py tests/test_copilot_credentials.py
+git add flowgency/tickets/access.py flowgency/tickets/broker.py flowgency/tickets/protocol.py flowgency/tickets/mcp_server.py flowgency/integrations/models.py flowgency/integrations/ticket_tools.py flowgency/integrations/flowgency/copilot.py tests/test_ticket_access.py tests/test_ticket_broker.py tests/test_ticket_mcp.py tests/test_ticket_runtime_capabilities.py tests/test_copilot_ticket_tools.py tests/test_copilot_launch_arguments.py tests/test_copilot_credentials.py tests/test_ticket_end_to_end.py
 git commit -m "feat(runtime): switch ticket tools to mcp http"
 ```
 
@@ -113,6 +117,7 @@ git commit -m "feat(runtime): switch ticket tools to mcp http"
 - Modify: `tests/test_ticket_runtime_live.py`, `tests/test_ticket_end_to_end.py`, `tests/_runtime_probe_helpers.py`
 - Modify: `tests/ui/accessibility.spec.ts`, `tests/ui/dashboard.spec.ts`, `tests/ui/fixtures/config.yaml`, `tests/ui/server.py`
 - Modify: `docs/superpowers/verification/2026-09-08-ticket-workflows.md`
+- Update any `README.md` or `kb/integrations.md` sections that describe the stdio MCP bridge as the live transport to reflect the HTTP endpoint contract.
 
 **Interfaces:**
 - Consumes: Task 1 `mcp-http` capability and worker-owned `LiveTicketEndpoint` launch path.
@@ -122,11 +127,29 @@ git commit -m "feat(runtime): switch ticket tools to mcp http"
 - [ ] **Step 1: Extend the failing live tests to match the approved HTTP acceptance sequence.**
 
 ```python
+# runtime_env fixture contract (own in tests/test_ticket_runtime_live.py or a shared fixture);
+# implementer must produce all helpers used below before submitting Task 2:
+#   submit_probe_job() -> handle       — read-only job whose prompt calls ticket_get
+#   submit_artifact_job(expect_write_denial) -> handle
+#   wait_for_terminal_job(handle) -> JobRecord
+#   observed_tool_calls(handle) -> list[dict]  # MCP state events or output scan for tool results
+#   project_hash_before / project_hash_after -> str
+#   artifact_bytes(handle) -> bytes | None
+#   denial_telemetry(handle) -> list[dict]
+#   ticket_done(handle) -> bool        — ticket state == done after run
+#   active_run_after(handle) -> str | None
+#   protected_hashes_match(handle) -> bool
+
 @pytest.mark.real_runtime
 def test_copilot_read_only_probe_can_list_ticket_without_editing(runtime_env):
     handle = runtime_env.submit_probe_job()
     record = runtime_env.wait_for_terminal_job(handle)
     assert record.status == "complete"
+    assert record.exit_code == 0
+    calls = runtime_env.observed_tool_calls(handle)
+    ticket_get_results = [c for c in calls if c.get("tool") == "ticket_get"]
+    assert ticket_get_results, "ticket_get must appear in observed MCP tool calls"
+    assert all(c.get("ok") for c in ticket_get_results), "ticket_get must succeed without errors"
     assert runtime_env.project_hash_before == runtime_env.project_hash_after
 
 
@@ -134,8 +157,12 @@ def test_copilot_read_only_probe_can_list_ticket_without_editing(runtime_env):
 def test_copilot_http_run_keeps_ticket_commit_when_write_is_denied(runtime_env):
     handle = runtime_env.submit_artifact_job(expect_write_denial=True)
     record = runtime_env.wait_for_terminal_job(handle)
-    assert runtime_env.ticket_transition_committed()
-    assert runtime_env.protected_files_unchanged()
+    assert record.exit_code == 0
+    assert runtime_env.artifact_bytes(handle) is not None, "artifact must be produced"
+    assert runtime_env.denial_telemetry(handle), "at least one write-denial event must be recorded"
+    assert runtime_env.ticket_done(handle), "ticket must reach done state"
+    assert runtime_env.active_run_after(handle) is None, "active_run must be cleared after completion"
+    assert runtime_env.protected_hashes_match(handle), "protected file hashes must be unchanged"
 ```
 
 Also add revoke, stale refresh, multi-ticket same run, optional sign-off, wrong-host, and failed-after-commit live assertions without loosening policy.
