@@ -28,7 +28,8 @@ This note records Task 16 verification checkpoints and the bounded 2026-09-10 no
 | Full UI matrix | `9ede8d3` | `npm run test:ui -- --reporter=dot` -> 474 passed, 2 skipped, exit 0 | `.superpowers/sdd/2026-09-08-ticket-workflows/task-16b-ui-final.txt` |
 | Native-launch containment repair slice | `374a356` | 62 passed, 2 skipped, 1 warning | superseding Task 16 report section |
 | Required restricted live probe, Store `.venv` | `374a356` + uncommitted live test | 1 failed, 4 deselected, 1 warning, 21.47s | superseding Task 16 report section |
-| Non-Store portability correction | `a49ecd4` | 27 passed, 2 skipped, 1 warning | `task-16-report.md`, `task-16c-cpython-launch.txt/xml` |
+| Non-Store portability — initial run | pre-`a49ecd4` | 26 passed, 1 failed, 2 skipped, 1 warning | `task-16c-cpython-launch.txt/xml` |
+| Non-Store portability correction | `a49ecd4` | 27 passed, 2 skipped, 1 warning | `task-16-report.md` |
 | Required restricted live probe, non-Store `.superpowers/venv-cpython` | `a49ecd4` + uncommitted live test | 1 failed, 4 deselected, 1 warning, 59.80s first probe; 53.39s bounded retry | `task-16c-cpython-live.txt/xml`, `task-16c-cpython-diag-runtime.xml` |
 
 `89c0cb2` was the clean baseline rerun inside this feature worktree, not `master`.
@@ -49,7 +50,7 @@ npm run test:ui -- --reporter=dot
 => 474 passed, 2 skipped, exit 0
 ```
 
-Snapshot order matters: `cca63d1` committed the 96-file snapshot baseline first, and `9ede8d3` later regenerated only the eight settings/create/error PNGs. No `--update-snapshots` was used in the normal UI green run.
+Commit `9ede8d3` records the eight settings/create/error PNGs; `cca63d1` records the remaining 96 reviewed PNGs. No `--update-snapshots` was used in the normal UI green run.
 
 ### Non-Store environment and focused validation
 
