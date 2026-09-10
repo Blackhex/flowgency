@@ -209,7 +209,9 @@ def test_run_supervised_timeout_kills_native_descendants_after_root_exit(tmp_pat
         "import sys\n"
         "python = sys.argv[1]\n"
         "argv = [python, sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]]\n"
-        "child = subprocess.Popen(argv, stdout=sys.stdout, stderr=sys.stderr, close_fds=False, env=os.environ.copy())\n"
+        "_env = os.environ.copy()\n"
+        "if sys.platform == 'win32': _env['__PYVENV_LAUNCHER__'] = sys.executable\n"
+        "child = subprocess.Popen(argv, stdout=sys.stdout, stderr=sys.stderr, close_fds=False, env=_env)\n"
         "child.wait()\n",
     )
     root_script = _write_script(
@@ -219,7 +221,9 @@ def test_run_supervised_timeout_kills_native_descendants_after_root_exit(tmp_pat
         "import subprocess\n"
         "import sys\n"
         "python = sys.argv[1]\n"
-        "child = subprocess.Popen([python, sys.argv[2], python, sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7]], stdout=sys.stdout, stderr=sys.stderr, close_fds=False, env=os.environ.copy())\n"
+        "_env = os.environ.copy()\n"
+        "if sys.platform == 'win32': _env['__PYVENV_LAUNCHER__'] = sys.executable\n"
+        "child = subprocess.Popen([python, sys.argv[2], python, sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7]], stdout=sys.stdout, stderr=sys.stderr, close_fds=False, env=_env)\n"
         "pathlib.Path(sys.argv[8]).write_text('root-exited', encoding='utf-8')\n",
     )
     pid_file = tmp_path / "grandchild.pid"
