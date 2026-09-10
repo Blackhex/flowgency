@@ -8,6 +8,9 @@ from typing import Any, Literal
 from .store import ConfigSnapshot, ConfigStore
 
 
+_UNSET = object()
+
+
 @dataclass(frozen=True)
 class FlowgencySettingsPatch:
     title: str
@@ -71,6 +74,7 @@ class AgentProfilePatch:
 @dataclass(frozen=True)
 class AgentRuntimePatch:
     timeout: int | None
+    integration_config: dict[str, Any] | object = _UNSET
 
 
 def _teams(raw: dict[str, Any]) -> dict[str, Any]:
@@ -352,6 +356,17 @@ def patch_agent_runtime(
             _clear_known_keys(runtime, ("timeout",))
         else:
             runtime["timeout"] = patch.timeout
+        if patch.integration_config is not _UNSET:
+            integration_config = agent.get("integration_config")
+            if integration_config is None:
+                integration_config = {}
+            if not isinstance(integration_config, dict):
+                raise TypeError(
+                    f"teams.{team_id}.agents.{agent_id}.integration_config must be a mapping"
+                )
+            merged = dict(integration_config)
+            merged.update(deepcopy(patch.integration_config))
+            agent["integration_config"] = merged
 
     return store.patch(expected_revision, apply)
 

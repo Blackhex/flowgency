@@ -372,6 +372,10 @@ def _collect_shape_issues(raw: dict[str, Any]) -> list[ValidationIssue]:
             if runtime is not None and runtime_map is None:
                 issues.append(_shape_issue(f"{agent_field}.runtime", "mapping"))
 
+            integration_config = agent_map.get("integration_config")
+            if integration_config is not None and not _is_mapping(integration_config):
+                issues.append(_shape_issue(f"{agent_field}.integration_config", "mapping"))
+
             default_memory = agent_map.get("default_memory")
             if default_memory is not None and not _is_mapping(default_memory):
                 issues.append(_shape_issue(f"{agent_field}.default_memory", "mapping"))
@@ -865,6 +869,25 @@ def _validate_raw_config(raw: dict[str, Any], config_path: Path) -> list[Validat
                         hint="Set integration on every agent instance.",
                     )
                 )
+            integration_config = agent.get("integration_config")
+            if agent.get("integration") == "copilot" and _is_mapping(integration_config):
+                allow_local_network = integration_config.get("allow_local_network")
+                if (
+                    allow_local_network is not None
+                    and not isinstance(allow_local_network, bool)
+                ):
+                    issues.append(
+                        _build_issue(
+                            code="invalid-config",
+                            scope=f"teams.{team_name}.agents.{name or '<unknown>'}.integration_config",
+                            field=(
+                                f"teams.{team_name}.agents.{name or '<unknown>'}."
+                                "integration_config.allow_local_network"
+                            ),
+                            message="Copilot integration_config.allow_local_network must be a boolean.",
+                            hint="Set integration_config.allow_local_network to true or false.",
+                        )
+                    )
             default_memory = agent.get("default_memory") or {}
             if default_memory:
                 issue = _validate_memory_selector(
@@ -1070,6 +1093,9 @@ def _prepare_for_model(raw: dict[str, Any], config_path: Path) -> dict[str, Any]
             if not isinstance(name, str) or not name.strip():
                 continue
             agent_entry = dict(agent)
+            config = agent_entry.get("integration_config")
+            if _is_mapping(config):
+                agent_entry["integration_config"] = dict(config)
             agent_entry["runtime"] = _prepare_runtime(
                 agent_entry.get("runtime") or {}, workspace_root
             )

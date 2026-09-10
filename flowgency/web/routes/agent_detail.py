@@ -24,6 +24,7 @@ from flowgency.configuration import (
     patch_agent_profile,
     resolve_team_paths,
 )
+from flowgency.configuration.patches import _UNSET
 from flowgency.configuration.models import MemorySelector
 from flowgency.permissions.eligibility import may_write_workspace
 from flowgency.fs import ResourceBusyError
@@ -434,13 +435,26 @@ def _resolve_integration(services: FlowgencyServices, name: str):
 def _runtime_context(services: FlowgencyServices, snapshot, team_id: str, agent_id: str) -> dict[str, Any]:
     team_cfg, instance = _get_snapshot_instance(snapshot, team_id, agent_id)
     integration = _resolve_integration(services, instance.integration)
+    allow_local_network = instance.integration_config.get("allow_local_network") is True
     return {
         "integration_name": instance.integration,
         "integration_display_name": integration.display_name,
         "team_timeout": team_cfg.runtime.timeout,
         "agent_timeout": instance.runtime.timeout if "timeout" in instance.runtime.model_fields_set else "",
+        "show_allow_local_network": instance.integration == "copilot",
+        "allow_local_network": allow_local_network,
         "capabilities": integration.runtime_capabilities,
         "projector_capabilities": getattr(integration.projector, "capabilities", None),
+    }
+
+
+def _runtime_form_integration_config(form, integration_name: str) -> dict[str, object] | object:
+    if integration_name != "copilot":
+        return _UNSET
+    if "integration_config.allow_local_network__present" not in form:
+        return _UNSET
+    return {
+        "allow_local_network": "integration_config.allow_local_network" in form,
     }
 
 
@@ -637,8 +651,21 @@ async def agent_detail_runtime(request: Request, team: str, agent: str, services
 @router.post("/{team}/agents/{agent}/runtime", response_class=HTMLResponse)
 async def agent_detail_runtime_save(request: Request, team: str, agent: str, services: FlowgencyServices = Depends(get_services)):
     form = await request.form()
+    snapshot = services.config_store.load()
+    _, instance = _get_snapshot_instance(snapshot, team, agent)
     revision = str(form.get("revision", "")).strip()
     timeout_text = str(form.get("timeout", "")).strip()
+    show_allow_local_network = instance.integration == "copilot"
+    allow_local_network = (
+        "integration_config.allow_local_network" in form
+        if show_allow_local_network and "integration_config.allow_local_network__present" in form
+        else instance.integration_config.get("allow_local_network") is True
+    )
+    runtime_overrides = {
+        "agent_timeout": timeout_text,
+        "show_allow_local_network": show_allow_local_network,
+        "allow_local_network": allow_local_network,
+    }
     if "permission_rules_yaml" in form:
         return _detail_context(
             request,
@@ -648,7 +675,7 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
             "runtime",
             status_code=409,
             overrides={
-                "agent_timeout": timeout_text,
+                **runtime_overrides,
                 "permission_editor_href": f"/{team}/agents/{agent}/permissions",
                 "permission_move_message": "Permission rules moved to the dedicated Permissions tab.",
             },
@@ -661,7 +688,10 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
             revision,
             team,
             agent,
-            AgentRuntimePatch(timeout=int(timeout_text) if timeout_text else None),
+            AgentRuntimePatch(
+                timeout=int(timeout_text) if timeout_text else None,
+                integration_config=_runtime_form_integration_config(form, instance.integration),
+            ),
         )
     except ValueError as exc:
         issues = (
@@ -689,7 +719,7 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
             "runtime",
             status_code=409,
             issues=issues,
-            overrides={"agent_timeout": timeout_text},
+            overrides=runtime_overrides,
         )
     except ValidationFailed as exc:
         return _detail_context(
@@ -700,7 +730,7 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
             "runtime",
             status_code=409,
             issues=_issue_dicts(exc),
-            overrides={"agent_timeout": timeout_text},
+            overrides=runtime_overrides,
         )
     except ConfigConflictError as exc:
         return _detail_context(
@@ -711,7 +741,7 @@ async def agent_detail_runtime_save(request: Request, team: str, agent: str, ser
             "runtime",
             status_code=409,
             banner=str(exc),
-            overrides={"agent_timeout": timeout_text},
+            overrides=runtime_overrides,
         )
     request.app.state.refresh_services()
     return RedirectResponse(f"/{team}/agents/{agent}/runtime", status_code=303)

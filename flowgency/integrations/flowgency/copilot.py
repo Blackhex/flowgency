@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from flowgency.blueprints.projectors import get_projector
+from flowgency.configuration.issues import ValidationIssue
 from flowgency.configuration import is_symlink_or_reparse
 from flowgency.fs.atomic import atomic_write_text
 from flowgency.setup_assets import copilot_discovery_root
@@ -210,6 +211,12 @@ class CopilotIntegration(BaseIntegration):
             "TERM",
         }
     )
+
+    def __init__(self, integration_config: dict[str, object] | None = None):
+        self._config = dict(integration_config or {})
+
+    def with_config(self, integration_config: dict[str, object]) -> "CopilotIntegration":
+        return CopilotIntegration(dict(integration_config))
 
     def permission_tool_catalog(self) -> ToolCatalog:
         return ToolCatalog(
@@ -804,6 +811,31 @@ class CopilotIntegration(BaseIntegration):
             parts.append(f"Skill arguments: {', '.join(skill_arguments)}")
         return "\n".join(parts) + "\n\n" + task_text
 
+    def validate_run(self, request: IntegrationRunRequest) -> tuple[ValidationIssue, ...]:
+        issues = list(super().validate_run(request))
+        if request.ticket_tools is not None:
+            settings, _ = build_sandbox_settings(request.runtime_policy)
+            if (
+                settings["sandbox"]["enabled"]
+                and self._config.get("allow_local_network") is not True
+            ):
+                issues.append(
+                    ValidationIssue(
+                        code="ticket-local-network-required",
+                        scope="integrations.copilot",
+                        field="integration_config.allow_local_network",
+                        message=(
+                            "Restricted Copilot ticket runs require explicit local-network consent "
+                            "for the per-job MCP HTTP endpoint."
+                        ),
+                        corrective_hint=(
+                            "Enable Allow local-network access for this agent, or run without "
+                            "ticket workflows in an unrestricted runtime."
+                        ),
+                    )
+                )
+        return tuple(issues)
+
     def run(self, request: IntegrationRunRequest) -> RunResult:
         self.require_valid_run(request)
         task_text = request.task_file.read_text()
@@ -828,6 +860,7 @@ class CopilotIntegration(BaseIntegration):
         settings, unenforceable = build_sandbox_settings(
             policy,
             workspace_root=request.workspace_root,
+            allow_local_network=self._config.get("allow_local_network") is True,
         )
         job_home, degraded = self._prepare_copilot_home(request, settings)
         sandbox_confines = job_home is not None and settings["sandbox"]["enabled"]

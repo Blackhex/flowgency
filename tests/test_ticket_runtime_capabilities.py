@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -70,6 +72,66 @@ def test_copilot_rejects_ticket_tools_when_runtime_capability_is_absent(
     issues = integration.validate_run(ticket_request)
 
     assert any(issue.code == "unsupported-ticket-channel" for issue in issues)
+
+
+def test_copilot_rejects_restricted_ticket_run_without_local_network_opt_in(
+    monkeypatch,
+    ticket_request: IntegrationRunRequest,
+):
+    integration = get_integration("copilot")
+    monkeypatch.setattr(
+        integration,
+        "detect_runtime_capabilities",
+        lambda: RuntimeCapabilities(
+            permission_modes=frozenset({"restricted", "unrestricted"}),
+            path_scopable_tools=frozenset({"write"}),
+            live_ticket_transport="mcp-http",
+        ),
+    )
+    monkeypatch.setattr(integration, "_capability_cache_key", lambda: "ticket-channel")
+    integration.invalidate_capability_cache()
+    request = replace(
+        ticket_request,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            mode="restricted",
+            rules=ticket_request.runtime_policy.rules,
+        ),
+    )
+
+    issues = integration.with_config({"allow_local_network": False}).validate_run(request)
+
+    assert any(issue.code == "ticket-local-network-required" for issue in issues)
+
+
+def test_copilot_allows_restricted_ticket_run_with_explicit_local_network_opt_in(
+    monkeypatch,
+    ticket_request: IntegrationRunRequest,
+):
+    integration = get_integration("copilot")
+    monkeypatch.setattr(
+        integration,
+        "detect_runtime_capabilities",
+        lambda: RuntimeCapabilities(
+            permission_modes=frozenset({"restricted", "unrestricted"}),
+            path_scopable_tools=frozenset({"write"}),
+            live_ticket_transport="mcp-http",
+        ),
+    )
+    monkeypatch.setattr(integration, "_capability_cache_key", lambda: "ticket-channel")
+    integration.invalidate_capability_cache()
+    request = replace(
+        ticket_request,
+        runtime_policy=EffectiveRuntimePolicy(
+            timeout=60,
+            mode="restricted",
+            rules=ticket_request.runtime_policy.rules,
+        ),
+    )
+
+    issues = integration.with_config({"allow_local_network": True}).validate_run(request)
+
+    assert not any(issue.code == "ticket-local-network-required" for issue in issues)
 
 
 def test_copilot_reports_live_ticket_transport_only_when_probe_confirms_contract(monkeypatch):

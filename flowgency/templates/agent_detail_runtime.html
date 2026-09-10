@@ -23,6 +23,16 @@
         <input type="text" name="timeout" value="{{ agent_timeout }}" placeholder="inherit" class="w-full rounded-lg border border-gray-300 px-3 py-2">
       </label>
     </div>
+    {% if show_allow_local_network %}
+    <input type="hidden" name="integration_config.allow_local_network__present" value="1">
+    <label class="flex items-start gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+      <input type="checkbox" name="integration_config.allow_local_network" value="1" class="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600" {% if allow_local_network %}checked{% endif %}>
+      <span>
+        <span class="block font-medium text-gray-900">Allow local-network access</span>
+        <span class="block text-gray-500">Allows connections to local services and LAN hosts, not only Flowgency.</span>
+      </span>
+    </label>
+    {% endif %}
     {% if permission_move_message %}
     <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
       {{ permission_move_message }}

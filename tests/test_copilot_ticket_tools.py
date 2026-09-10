@@ -125,6 +125,10 @@ def _capture_supervised(monkeypatch) -> dict:
     return captured
 
 
+def _ticket_integration() -> CopilotIntegration:
+    return CopilotIntegration({"allow_local_network": True})
+
+
 def capture_copilot_launch(monkeypatch) -> CapturedLaunch:
     import flowgency.integrations.flowgency.copilot as copilot_mod
 
@@ -224,7 +228,7 @@ def test_copilot_ticket_tools_use_http_config(copilot_request, monkeypatch):
     request = dataclasses.replace(copilot_request, ticket_tools=_launch_with_lifecycle())
     captured = _capture_supervised(monkeypatch)
 
-    CopilotIntegration().run(request)
+    _ticket_integration().run(request)
 
     argv = captured["argv"]
     assert "--additional-mcp-config" in argv
@@ -245,7 +249,7 @@ def test_ticket_tools_do_not_grant_shell(copilot_request, monkeypatch):
     )
     captured = _capture_supervised(monkeypatch)
 
-    CopilotIntegration().run(request)
+    _ticket_integration().run(request)
 
     args = captured["argv"]
     assert isinstance(args, list)
@@ -263,7 +267,7 @@ def test_ticket_tools_use_private_ephemeral_config_and_delete_it_on_success(
     request = dataclasses.replace(copilot_request, ticket_tools=_launch_with_lifecycle())
     captured = _capture_supervised(monkeypatch)
 
-    CopilotIntegration().run(request)
+    _ticket_integration().run(request)
 
     config_path = captured["config_path"]
     assert isinstance(config_path, Path)
@@ -285,7 +289,7 @@ def test_ticket_tools_do_not_enter_prompt_or_copilot_environment(copilot_request
     request = dataclasses.replace(copilot_request, ticket_tools=_launch_with_lifecycle())
     captured = _capture_supervised(monkeypatch)
 
-    CopilotIntegration().run(request)
+    _ticket_integration().run(request)
 
     assert "fixture-only-token" not in str(captured["prompt_text"])
     env = captured["env"]
@@ -293,6 +297,47 @@ def test_ticket_tools_do_not_enter_prompt_or_copilot_environment(copilot_request
     assert "FLOWGENCY_TICKET_TOKEN" not in env
     assert "FLOWGENCY_TICKET_ENDPOINT" not in env
     assert not any("fixture-only-token" in value for value in env.values())
+
+
+def test_ticket_tools_can_use_launch_instructions_config_without_other_launch_deltas(
+    copilot_request,
+    monkeypatch,
+):
+    request = dataclasses.replace(copilot_request, ticket_tools=_launch_with_lifecycle())
+
+    baseline = _capture_supervised(monkeypatch)
+    _ticket_integration().run(request)
+
+    baseline_path = baseline["config_path"]
+    assert isinstance(baseline_path, Path)
+    assert baseline_path == request.launch_dir / "ticket-tools.mcp.json"
+
+    import flowgency.integrations.flowgency.copilot as copilot_mod
+
+    def write_under_instructions(launch, path):
+        return write_copilot_ticket_config(
+            launch,
+            path.parent / "instructions" / path.name,
+        )
+
+    monkeypatch.setattr(copilot_mod, "write_copilot_ticket_config", write_under_instructions)
+    patched = _capture_supervised(monkeypatch)
+
+    _ticket_integration().run(request)
+
+    patched_path = patched["config_path"]
+    assert isinstance(patched_path, Path)
+    assert patched_path == request.launch_dir / "instructions" / "ticket-tools.mcp.json"
+
+    def normalized(argv):
+        items = list(argv)
+        items[items.index("-p") + 1] = "<prompt>"
+        items[items.index("--additional-mcp-config") + 1] = "@<config>"
+        return items
+
+    assert normalized(baseline["argv"]) == normalized(patched["argv"])
+    assert baseline["env"] == patched["env"]
+    assert baseline["config_payload"] == patched["config_payload"]
 
 
 def test_ticket_tools_delete_private_config_on_timeout(copilot_request, monkeypatch):
@@ -329,7 +374,7 @@ def test_ticket_tools_delete_private_config_on_timeout(copilot_request, monkeypa
     )
     _patch_common(monkeypatch)
 
-    result = CopilotIntegration().run(request)
+    result = _ticket_integration().run(request)
 
     assert result.exit_code == 124
     assert not captured["config_path"].exists()
@@ -346,7 +391,7 @@ def test_ticket_launch_uses_supervised_runtime_with_lifecycle(copilot_request, m
     )
     captured = _capture_supervised(monkeypatch)
 
-    result = CopilotIntegration().run(request)
+    result = _ticket_integration().run(request)
 
     assert result.exit_code == 0
     assert result.process_stop_evidence == ProcessStopEvidence(
@@ -397,7 +442,7 @@ def test_ticket_launch_without_lifecycle_rejects_before_config_or_runner(
     _patch_common(monkeypatch)
 
     with pytest.raises(IntegrationError, match="trusted lifecycle"):
-        CopilotIntegration().run(request)
+        _ticket_integration().run(request)
 
 
 def test_non_ticket_launch_keeps_plain_subprocess_path(copilot_request, monkeypatch):

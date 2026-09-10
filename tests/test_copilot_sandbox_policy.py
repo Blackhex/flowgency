@@ -85,6 +85,25 @@ def test_bypass_is_disabled_and_cwd_is_not_implicit(tmp_path):
     assert sandbox["addCurrentWorkingDirectory"] is False
 
 
+def test_build_sandbox_settings_sets_allow_local_network_only_when_opted_in(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(rule(tmp_path / "ws", ("read",))),
+        allow_local_network=True,
+    )
+
+    assert settings["sandbox"]["userPolicy"]["network"] == {
+        "allowLocalNetwork": True
+    }
+
+
+def test_build_sandbox_settings_omits_allow_local_network_when_not_opted_in(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(rule(tmp_path / "ws", ("read",))),
+    )
+
+    assert "network" not in settings["sandbox"]["userPolicy"]
+
+
 def test_overlapping_path_in_read_and_write_rules_appears_only_in_readwrite(tmp_path):
     p = str(tmp_path / "ws")
     settings, _ = build_sandbox_settings(

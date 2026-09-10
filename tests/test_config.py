@@ -143,6 +143,39 @@ def test_validate_config_reports_team_dispatch_agents_not_supported(raw_config, 
     )
 
 
+def test_validate_config_rejects_string_local_network_opt_in_for_copilot(raw_config, config_paths):
+    from flowgency.configuration.models import validate_config
+
+    raw_config["teams"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    raw_config["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "allow_local_network": "true"
+    }
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    assert any(
+        issue.field == "teams.newsletter.agents.builder.integration_config.allow_local_network"
+        and "boolean" in issue.message.lower()
+        for issue in issues
+    )
+
+
+def test_validate_config_allows_default_off_copilot_setting_when_omitted(raw_config, config_paths):
+    from flowgency.configuration.models import validate_config
+
+    raw_config["teams"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    raw_config["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "model": "gpt-5.4"
+    }
+
+    issues = validate_config(raw_config, config_paths["config_path"])
+
+    assert not any(
+        issue.field == "teams.newsletter.agents.builder.integration_config.allow_local_network"
+        for issue in issues
+    )
+
+
 def test_parse_config_rejects_team_dispatch_agents_not_supported(raw_config, config_paths):
     from flowgency.configuration.models import parse_config
 

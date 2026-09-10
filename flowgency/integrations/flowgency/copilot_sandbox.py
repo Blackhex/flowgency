@@ -6,10 +6,20 @@ from flowgency.integrations.models import EffectiveRuntimePolicy, ResolvedPermis
 from flowgency.permissions.eligibility import grants_write_on
 
 
+def sandbox_confines_policy(policy: EffectiveRuntimePolicy) -> bool:
+    """Return whether Copilot's filesystem sandbox can safely stay enabled."""
+
+    return any(
+        not r.generated and r.path is not None and (r.tools is None or r.tools)
+        for r in policy.rules
+    ) or policy.mode == "restricted"
+
+
 def build_sandbox_settings(
     policy: EffectiveRuntimePolicy,
     *,
     workspace_root: Path | None = None,
+    allow_local_network: bool = False,
 ) -> tuple[dict, tuple[ResolvedPermissionRule, ...]]:
     """Translate permission rules into a Copilot sandbox settings mapping.
 
@@ -50,10 +60,7 @@ def build_sandbox_settings(
     # the defect on the one path that matters: an unrestricted policy with no
     # authored rule would render an allowlist holding only the zones, denying
     # the agent its own workspace while the launch arguments say allow-all-paths.
-    confines = any(
-        not r.generated and r.path is not None and (r.tools is None or r.tools)
-        for r in policy.rules
-    ) or policy.mode == "restricted"
+    confines = sandbox_confines_policy(policy)
     if not confines:
         # Turning the sandbox off drops any denial the operator did author.
         unenforceable.extend(
@@ -67,6 +74,15 @@ def build_sandbox_settings(
         policy.rules, workspace_root
     )
 
+    user_policy: dict[str, object] = {
+        "filesystem": {
+            "readonlyPaths": readonly,
+            "readwritePaths": readwrite,
+        },
+    }
+    if allow_local_network:
+        user_policy["network"] = {"allowLocalNetwork": True}
+
     return {
         "gitAuth": credentialed,
         "ghAuth": credentialed,
@@ -74,11 +90,6 @@ def build_sandbox_settings(
             "enabled": confines,
             "allowBypass": False,
             "addCurrentWorkingDirectory": False,
-            "userPolicy": {
-                "filesystem": {
-                    "readonlyPaths": readonly,
-                    "readwritePaths": readwrite,
-                },
-            },
+            "userPolicy": user_policy,
         },
     }, tuple(unenforceable)

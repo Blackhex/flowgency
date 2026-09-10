@@ -175,6 +175,23 @@ def test_schema_five_payload_keeps_historic_digest_and_shape():
     assert spec.immutable_digest() == "f4fcd50b1d4f3a9b762afd9d099a9d7a24cf9eee4ecc5791719b318ed6b53649"
 
 
+def test_job_spec_round_trips_integration_config_with_local_network_opt_in(tmp_path):
+    spec = make_spec(tmp_path)
+    spec = dc_replace(
+        spec,
+        integration_config={"model": "gpt-5.4", "allow_local_network": True},
+    )
+
+    payload = spec.to_dict()
+    restored = JobSpec.from_dict(payload)
+
+    assert payload["integration_config"] == {
+        "model": "gpt-5.4",
+        "allow_local_network": True,
+    }
+    assert restored.integration_config == payload["integration_config"]
+
+
 def test_ticket_job_target_requires_canonical_binding_relation(tmp_path):
     spec = make_spec(tmp_path)
     binding = StorageBinding(

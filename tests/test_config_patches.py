@@ -261,6 +261,39 @@ def test_patch_team_settings_state_preserves_extension_keys(config_store):
     assert team["workspaces"][0]["workspace_extension"] == {"preserve": True}
 
 
+def test_patch_agent_runtime_merges_integration_config_without_dropping_existing_keys(config_store):
+    from flowgency.configuration.patches import AgentRuntimePatch, patch_agent_runtime
+
+    snapshot = config_store.load()
+    snapshot.raw["teams"]["newsletter"]["agents"][0]["integration"] = "copilot"
+    snapshot.raw["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "model": "gpt-5.4"
+    }
+    snapshot.path.write_text(
+        yaml.safe_dump(snapshot.raw, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    refreshed = config_store.load()
+    updated = patch_agent_runtime(
+        config_store,
+        refreshed.revision,
+        "newsletter",
+        "builder",
+        AgentRuntimePatch(
+            timeout=1801,
+            integration_config={"allow_local_network": False},
+        ),
+    )
+
+    agent = updated.raw["teams"]["newsletter"]["agents"][0]
+    assert agent["runtime"]["timeout"] == 1801
+    assert agent["integration_config"] == {
+        "model": "gpt-5.4",
+        "allow_local_network": False,
+    }
+
+
 def test_create_team_rejects_unknown_root_key_on_load(
     config_store,
 ):

@@ -43,7 +43,7 @@ def _launch(policy, tmp_path, monkeypatch, *, enforce_validation=True) -> list[s
     monkeypatch.setattr(copilot_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(CopilotIntegration, "resolve_executable", lambda self: "copilot")
 
-    CopilotIntegration().run(
+    CopilotIntegration({"allow_local_network": True}).run(
         IntegrationRunRequest(
             workspace_root=tmp_path,
             launch_dir=tmp_path / "runtime",
@@ -321,7 +321,7 @@ def test_ticket_server_grant_does_not_add_workspace_write(tmp_path, monkeypatch,
     monkeypatch.setattr(CopilotIntegration, "_cli_version", lambda self: "1.0.78-2")
     monkeypatch.setattr(CopilotIntegration, "_prepare_copilot_home", lambda self, request, settings: (None, "shared-home"))
 
-    CopilotIntegration().run(
+    CopilotIntegration({"allow_local_network": True}).run(
         IntegrationRunRequest(
             workspace_root=tmp_path,
             launch_dir=tmp_path / "runtime",

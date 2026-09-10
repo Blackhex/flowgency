@@ -49,6 +49,7 @@ def _local_triage_source(body: str = "Review local work.\n") -> str:
 
 def _seed_app(monkeypatch, tmp_path, raw_config):
     raw = deepcopy(raw_config)
+    source_agent = raw_config["teams"]["newsletter"].get("agents", [{}])[0]
     library_root = tmp_path / "agent-library"
     cache_root = tmp_path / "compiled-agents"
     memory_root = tmp_path / "memory-store"
@@ -88,6 +89,7 @@ def _seed_app(monkeypatch, tmp_path, raw_config):
             "name": "advisor",
             "blueprint": "advisor",
             "integration": "copilot",
+            "integration_config": deepcopy(source_agent.get("integration_config", {})),
             "identity": {
                 "display_name": "Advisor",
                 "title": "Blueprint Librarian",
@@ -225,6 +227,21 @@ def test_runtime_tab_keeps_timeout_editor_only(monkeypatch, tmp_path, raw_config
     assert 'name="timeout"' in response.text
     assert ">Mode<" not in response.text
     assert "permission_rules_yaml" not in response.text
+
+
+def test_runtime_tab_renders_copilot_local_network_consent(monkeypatch, tmp_path, raw_config):
+    raw_config["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "model": "gpt-5.4"
+    }
+    client, _ = _seed_app(monkeypatch, tmp_path, raw_config)
+
+    response = client.get("/newsletter/agents/advisor/runtime")
+
+    assert response.status_code == 200
+    assert 'name="integration_config.allow_local_network__present"' in response.text
+    assert 'name="integration_config.allow_local_network"' in response.text
+    assert "Allow local-network access" in response.text
+    assert "Allows connections to local services and LAN hosts, not only Flowgency." in response.text
 
 
 def test_blueprint_tab_is_read_only(monkeypatch, tmp_path, raw_config):
@@ -451,6 +468,88 @@ def test_runtime_post_updates_override_and_effective_preview(monkeypatch, tmp_pa
     saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     runtime = saved["teams"]["newsletter"]["agents"][0]["runtime"]
     assert runtime["timeout"] == 1801
+
+
+def test_runtime_post_unchecked_checkbox_persists_false_without_dropping_model_key(monkeypatch, tmp_path, raw_config):
+    raw_config["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "model": "gpt-5.4"
+    }
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    revision = _revision(config_path)
+
+    response = client.post(
+        "/newsletter/agents/advisor/runtime",
+        data={
+            "revision": revision,
+            "timeout": "1801",
+            "integration_config.allow_local_network__present": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    agent = saved["teams"]["newsletter"]["agents"][0]
+    assert agent["integration_config"] == {
+        "model": "gpt-5.4",
+        "allow_local_network": False,
+    }
+
+
+def test_runtime_post_stale_revision_preserves_timeout_and_checkbox_state(monkeypatch, tmp_path, raw_config):
+    raw_config["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "model": "gpt-5.4"
+    }
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    stale_revision = _revision(config_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["flowgency"]["title"] = "Changed elsewhere"
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+
+    response = client.post(
+        "/newsletter/agents/advisor/runtime",
+        data={
+            "revision": stale_revision,
+            "timeout": "1801",
+            "integration_config.allow_local_network__present": "1",
+            "integration_config.allow_local_network": "on",
+        },
+    )
+
+    assert response.status_code == 409
+    assert "config.yaml changed" in response.text
+    assert 'name="timeout" value="1801"' in response.text
+    assert 'name="integration_config.allow_local_network"' in response.text
+    assert 'checked' in response.text
+
+
+def test_runtime_post_ignores_forged_local_network_checkbox_for_non_copilot_agent(monkeypatch, tmp_path, raw_config):
+    client, config_path = _seed_app(monkeypatch, tmp_path, raw_config)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["teams"]["newsletter"]["agents"][0]["integration"] = "script"
+    raw["teams"]["newsletter"]["agents"][0]["integration_config"] = {
+        "command": "echo ok"
+    }
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    app_mod.refresh_services()
+    revision = _revision(config_path)
+
+    response = client.post(
+        "/newsletter/agents/advisor/runtime",
+        data={
+            "revision": revision,
+            "timeout": "1801",
+            "integration_config.allow_local_network__present": "1",
+            "integration_config.allow_local_network": "on",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    agent = saved["teams"]["newsletter"]["agents"][0]
+    assert agent["integration_config"] == {"command": "echo ok"}
 
 
 def test_runtime_post_rejects_previous_permission_rules_field(monkeypatch, tmp_path, raw_config):
