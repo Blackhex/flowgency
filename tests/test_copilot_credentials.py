@@ -88,8 +88,11 @@ def test_reader_gets_no_git_or_github_credentials(tmp_path, monkeypatch, workspa
     _captured, job_home = _launch(policy, workspace, tmp_path, monkeypatch)
 
     settings = _settings(job_home)
-    assert settings["gitAuth"] is False
-    assert settings["ghAuth"] is False
+    # The installed CLI reads git/gh injection from the nested ``sandbox.auth``
+    # keys; the top-level ``gitAuth``/``ghAuth`` keys it ignores must be absent.
+    assert settings["sandbox"]["auth"] == {"git": False, "gh": False}
+    assert "gitAuth" not in settings
+    assert "ghAuth" not in settings
 
 
 def test_workspace_writer_gets_git_and_github_credentials(
@@ -100,8 +103,9 @@ def test_workspace_writer_gets_git_and_github_credentials(
     _captured, job_home = _launch(policy, workspace, tmp_path, monkeypatch)
 
     settings = _settings(job_home)
-    assert settings["gitAuth"] is True
-    assert settings["ghAuth"] is True
+    assert settings["sandbox"]["auth"] == {"git": True, "gh": True}
+    assert "gitAuth" not in settings
+    assert "ghAuth" not in settings
 
 
 def test_write_on_a_subdirectory_is_not_enough(tmp_path, monkeypatch, workspace):
@@ -113,8 +117,9 @@ def test_write_on_a_subdirectory_is_not_enough(tmp_path, monkeypatch, workspace)
     _captured, job_home = _launch(policy, workspace, tmp_path, monkeypatch)
 
     settings = _settings(job_home)
-    assert settings["gitAuth"] is False
-    assert settings["ghAuth"] is False
+    assert settings["sandbox"]["auth"] == {"git": False, "gh": False}
+    assert "gitAuth" not in settings
+    assert "ghAuth" not in settings
 
 
 # ── launch environment ──────────────────────────────────────────────────────

@@ -175,6 +175,81 @@ def test_generated_zones_alone_do_not_confine_an_unrestricted_policy(tmp_path):
     assert settings["sandbox"]["enabled"] is False
 
 
+# ── git / gh credentials ─────────────────────────────────────────────────────
+#
+# The installed CLI (1.0.84-3) documents credential injection under
+# ``sandbox.auth.git`` / ``sandbox.auth.gh`` and ignores the older top-level
+# ``gitAuth`` / ``ghAuth`` keys entirely ("Ignoring unknown top-level key(s)
+# ... 'gitAuth', 'ghAuth'. They ... have no effect."). The settings must carry
+# the nested form so the intended grant or denial actually takes effect, and
+# tokens are only injected while the sandbox is enabled.
+
+
+def test_credentials_use_the_nested_sandbox_auth_schema(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(rule(tmp_path / "ws", ("read", "write"))),
+        workspace_root=tmp_path / "ws",
+    )
+
+    assert settings["sandbox"]["auth"] == {"git": True, "gh": True}
+    assert "gitAuth" not in settings
+    assert "ghAuth" not in settings
+
+
+def test_reader_is_denied_git_and_gh_under_the_nested_schema(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(rule(tmp_path / "ws", ("read",))),
+        workspace_root=tmp_path / "ws",
+    )
+
+    assert settings["sandbox"]["enabled"] is True
+    assert settings["sandbox"]["auth"] == {"git": False, "gh": False}
+
+
+def test_root_writer_is_granted_git_and_gh_under_the_nested_schema(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(rule(tmp_path / "ws", ("read", "write"))),
+        workspace_root=tmp_path / "ws",
+    )
+
+    assert settings["sandbox"]["auth"] == {"git": True, "gh": True}
+
+
+def test_subdirectory_write_does_not_earn_credentials_under_nested_schema(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(
+            rule(tmp_path / "ws", ("read",)),
+            rule(tmp_path / "ws" / "scratch", ("read", "write")),
+        ),
+        workspace_root=tmp_path / "ws",
+    )
+
+    assert settings["sandbox"]["auth"] == {"git": False, "gh": False}
+
+
+def test_unknown_workspace_root_earns_no_credentials(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(rule(tmp_path / "ws", ("read", "write"))),
+    )
+
+    assert settings["sandbox"]["auth"] == {"git": False, "gh": False}
+
+
+def test_unconfined_policy_still_names_the_credential_keys(tmp_path):
+    """With the sandbox disabled the CLI cannot enforce the denial, but the
+    emitted schema must still be the recognised nested one, never the ignored
+    top-level keys."""
+    settings, _ = build_sandbox_settings(
+        policy(mode="unrestricted"),
+        workspace_root=tmp_path / "ws",
+    )
+
+    assert settings["sandbox"]["enabled"] is False
+    assert "auth" in settings["sandbox"]
+    assert "gitAuth" not in settings
+    assert "ghAuth" not in settings
+
+
 def test_an_authored_rule_confines_even_alongside_generated_zones(tmp_path):
     launch = tmp_path / "launch"
     settings, _ = build_sandbox_settings(
