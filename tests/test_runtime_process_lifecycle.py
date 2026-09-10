@@ -825,4 +825,3 @@ def test_windows_owner_death_kills_job_tree(tmp_path: Path):
         if worker.poll() is None:
             worker.kill()
             worker.wait(timeout=10)
-

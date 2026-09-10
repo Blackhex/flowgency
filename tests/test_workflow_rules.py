@@ -630,4 +630,3 @@ def test_repeated_to_json_projections_are_independent():
     p2 = result.to_json()
     p1["transition_snapshot"]["field_defs"]["verdict"]["type"] = "mutated"
     assert p2["transition_snapshot"]["field_defs"]["verdict"]["type"] == "boolean"
-

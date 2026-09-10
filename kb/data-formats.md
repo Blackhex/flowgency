@@ -148,4 +148,3 @@ flowgency ticket run <ticket-id> --workflow <workflow>
 ## Lifecycle
 
 Flowgency records each ticket's path through its workflow: creation, assignment changes, and every accepted transition with the field inputs and criterion assessments supplied. Label equality alone does not establish identity — the stable `id` does. Because a `TicketRecord` holds no blueprint pin, the board renders each ticket against the current definition; a missing or invalid transition is surfaced as an issue on the board rather than silently dropped, and only the affected transitions are blocked.
-

@@ -563,6 +563,3 @@ def test_transition_rename_roundtrip_preserves_references(workflow_env):
     assert complete.preconditions[0].field_id == "verdict"
     assert published.digest != source.digest
     assert env.provider.read(ref) == original_ticket
-
-
-

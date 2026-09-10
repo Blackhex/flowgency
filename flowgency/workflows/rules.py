@@ -249,4 +249,3 @@ def evaluate_transition(
         assessments=tuple(assessments),
         transition_snapshot=_deep_freeze(snapshot),
     )
-

@@ -637,4 +637,3 @@ def test_committed_transition_survives_a_failed_run_after_it(tmp_path, raw_confi
     cleanup = read_job(authority.path).result_metadata["ticket_cleanup"]
     assert cleanup["status"] == "cleared"
     assert cleanup["cleared"] == [ticket.ref.model_dump(mode="json")]
-

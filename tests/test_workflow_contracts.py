@@ -413,4 +413,3 @@ def test_precondition_bool_value_rejected_for_number_field():
                 "criteria": [],
             }],
         })
-

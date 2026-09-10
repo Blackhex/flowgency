@@ -799,4 +799,3 @@ def make_workflow_web_environment(tmp_path: Path, raw_config: dict, monkeypatch)
         **env.__dict__,
         client=client,
     )
-

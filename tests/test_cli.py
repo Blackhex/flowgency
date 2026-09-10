@@ -486,5 +486,3 @@ def test_cmd_jobs_and_logs_ignore_forged_team_jobs_records(tmp_path, monkeypatch
     logs = capsys.readouterr().out
     assert "canonical-job" in logs
     assert "forged-job" not in logs
-
-

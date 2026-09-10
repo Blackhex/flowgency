@@ -499,4 +499,3 @@ def test_non_ticket_launch_keeps_plain_subprocess_path(copilot_request, monkeypa
 
     captured = finish()
     assert captured.argv[0] == "copilot"
-

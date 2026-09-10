@@ -254,4 +254,3 @@ def test_blueprint_lock_paths_rejects_reparse_lock_dir(library_root, tmp_path):
         pytest.skip("symlink creation is not permitted in this environment")
     with pytest.raises(ContractError):
         blueprint_lock_paths(library_root, ("delivery",))
-
