@@ -14,7 +14,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from flowgency.integrations.ticket_tools import build_ticket_tool_launch
-from flowgency.tickets.broker import TicketBroker
+from flowgency.tickets.broker import MAX_BROKER_BODY_BYTES, TicketBroker
 
 
 TICKET_TOOL_NAMES = (
@@ -199,7 +199,123 @@ def test_http_broker_rejects_oversized_body(workflow_env):
     body["params"]["padding"] = "x" * (2 * 1024 * 1024)
     with _http_broker(env, authority) as broker:
         status, _ = _raw_mcp_post(_mcp_url(broker), body, token=_bearer(broker))
-    assert status in {403, 413}
+    # Auth, host and origin are all valid here, so the size gate — not an
+    # authorization failure — must be what rejects the request.
+    assert status == 413
+
+
+def _oversized_stream_chunks():
+    chunk = b"x" * (256 * 1024)
+    sent = 0
+    limit = MAX_BROKER_BODY_BYTES + 256 * 1024
+    while sent <= limit:
+        yield chunk
+        sent += len(chunk)
+
+
+def test_http_broker_rejects_streamed_oversized_body(workflow_env):
+    # No Content-Length: the body streams in chunks and its declared length is
+    # absent, so the 2 MiB maximum must be enforced on the received bytes.
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+    with _http_broker(env, authority) as broker:
+        url = _mcp_url(broker)
+        token = _bearer(broker)
+        with httpx2.Client(timeout=10.0) as client:
+            response = client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+                content=_oversized_stream_chunks(),
+            )
+    assert response.status_code == 413
+
+
+def test_http_broker_sanitizes_malformed_tool_arguments(workflow_env):
+    # SDK Pydantic signature validation runs before our dispatch and, left
+    # unsanitized, echoes the raw rejected argument values (a path or token an
+    # agent slipped into a field) back through the tool error content.
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+    secret_marker = "SECRET-etc-shadow-plus-token-9f8a7b6c"
+
+    async def exercise():
+        with _http_broker(env, authority) as broker:
+            token = _bearer(broker)
+            client, transport = await _open_session(_mcp_url(broker), token)
+            try:
+                async with transport as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        result = await session.call_tool(
+                            "ticket_create",
+                            {
+                                "workflow_id": {"path": secret_marker},
+                                "title": "t",
+                                "description": "d",
+                                "operation_id": "op",
+                                "evil_extra": secret_marker,
+                            },
+                        )
+                        return result, token
+            finally:
+                await client.aclose()
+
+    result, token = asyncio.run(exercise())
+    assert result.is_error
+    text = " ".join(getattr(part, "text", "") or "" for part in result.content)
+    assert secret_marker not in text
+    assert token not in text
+    assert "input_value" not in text
+    assert "Traceback" not in text
+    assert "validation error" not in text.lower()
+
+
+def test_http_broker_bounds_oversized_tool_result(workflow_env):
+    # The 64 KiB result contract governs the domain payload, not the protocol
+    # envelope or the fixed catalog. An oversized result returns a bounded safe
+    # error carrying none of the oversized content, and the commit still stands.
+    env = workflow_env
+    authority = env.running_job("builder", "run-a")
+    marker = "A" * 100_000
+
+    async def exercise():
+        with _http_broker(env, authority) as broker:
+            client, transport = await _open_session(_mcp_url(broker), _bearer(broker))
+            try:
+                async with transport as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        tools = await session.list_tools()
+                        created = await session.call_tool(
+                            "ticket_create",
+                            {
+                                "workflow_id": "board-a",
+                                "title": "Oversized result ticket",
+                                "description": marker,
+                                "operation_id": "http-oversized",
+                                "field_values": {"summary": "hello", "verdict": True},
+                            },
+                        )
+                        return tuple(t.name for t in tools.tools), created
+            finally:
+                await client.aclose()
+
+    names, created = asyncio.run(exercise())
+    assert names == TICKET_TOOL_NAMES
+    payload = created.structured_content
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "result-too-large"
+    assert marker not in json.dumps(payload)
+    stored = [
+        view
+        for view in env.service.list_tickets(env.user, "board-a")
+        if view.record.description == marker
+    ]
+    assert len(stored) == 1
 
 
 def test_http_broker_rejects_after_job_ends(workflow_env):

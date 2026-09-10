@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from mcp.server import MCPServer
+from mcp.server.context import ServerRequestContext
 from pydantic import BaseModel
 
 from flowgency.tickets.models import TicketRef, TicketToolResponse, TicketVersion
@@ -22,6 +23,42 @@ from flowgency.workflows.models import CriterionAssessment, FieldValue
 
 TicketToolCaller = Callable[[str, dict], dict]
 
+# SDK signature validation runs before our dispatch, and on failure the SDK's
+# tool-error content echoes the raw rejected argument values (a path or token an
+# agent slipped into a typed field) and, for a crash, a stack trace. This fixed
+# message is actionable — it tells the caller its arguments did not fit the
+# typed schema — without leaking any of that. Domain errors never surface here:
+# they return a structured ``{ok:false,error}`` envelope with ``isError`` unset.
+_SAFE_TOOL_ERROR_TEXT = "Tool call failed: the arguments did not satisfy the tool's typed schema."
+
+
+async def _sanitize_tool_errors(
+    ctx: ServerRequestContext,
+    call_next: Callable[[ServerRequestContext], Awaitable[object]],
+) -> object:
+    """Scrub SDK-level ``tools/call`` error content before it leaves the server.
+
+    Runs as official ``MCPServer`` middleware, so the typed schemas and fixed
+    command set stay fully in force; only the outgoing error text is replaced.
+    """
+    result = await call_next(ctx)
+    if ctx.method != "tools/call":
+        return result
+    if isinstance(result, dict):
+        if not result.get("isError"):
+            return result
+        result["content"] = [{"type": "text", "text": _SAFE_TOOL_ERROR_TEXT}]
+        result.pop("structuredContent", None)
+        return result
+    if getattr(result, "is_error", False):
+        from mcp.types import CallToolResult, TextContent
+
+        return CallToolResult(
+            content=[TextContent(type="text", text=_SAFE_TOOL_ERROR_TEXT)],
+            is_error=True,
+        )
+    return result
+
 
 def _call(caller: TicketToolCaller, operation: str, payload: dict) -> TicketToolResponse:
     return TicketToolResponse.model_validate(caller(operation, payload))
@@ -34,7 +71,7 @@ def _payload(command: BaseModel) -> dict[str, object]:
 
 
 def build_mcp_server(caller: TicketToolCaller) -> MCPServer:
-    server = MCPServer("flowgency-tickets")
+    server = MCPServer("flowgency-tickets", middleware=[_sanitize_tool_errors])
 
     @server.tool(structured_output=True)
     def workflows_list() -> TicketToolResponse:

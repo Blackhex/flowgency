@@ -199,6 +199,35 @@ def _redacted_error_envelope() -> dict[str, Any]:
     }
 
 
+def _result_too_large_envelope() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": {
+            "code": "result-too-large",
+            "message": "Ticket result exceeds the maximum size",
+            "details": {},
+        },
+    }
+
+
+def _bounded_result_envelope(result: Any) -> dict[str, Any]:
+    """Wrap a committed domain result in the 64 KiB result contract.
+
+    The cap governs the serialized domain result, never the SDK protocol
+    envelope or the fixed ``tools/list`` catalog. An oversized or unserializable
+    result yields a bounded safe error that carries none of the oversized
+    content; the operation has already committed, so its idempotency receipt and
+    stored data stay intact — nothing is rolled back or pruned to fit transport.
+    """
+    try:
+        serialized = json.dumps(result, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return _redacted_error_envelope()
+    if len(serialized.encode("utf-8")) > MAX_BROKER_RESPONSE_BYTES:
+        return _result_too_large_envelope()
+    return {"ok": True, "result": result}
+
+
 async def _handle_operation_request(
     service: TicketService,
     registry: TicketAccessRegistry,
@@ -223,7 +252,10 @@ async def _handle_operation_request(
             operation,
             payload,
         )
-        return JSONResponse({"ok": True, "result": result})
+        envelope = _bounded_result_envelope(result)
+        if not envelope["ok"]:
+            return JSONResponse(envelope, status_code=413)
+        return JSONResponse(envelope)
     except TicketStorageError as error:
         if error.http_status == 500:
             return _redacted_error_response()
@@ -252,7 +284,7 @@ def dispatch_tool_envelope(
         return {"ok": False, "error": error.as_dict()}
     except Exception:
         return _redacted_error_envelope()
-    return {"ok": True, "result": result}
+    return _bounded_result_envelope(result)
 
 
 def _build_app(
