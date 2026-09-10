@@ -541,6 +541,48 @@ class CopilotIntegration(BaseIntegration):
     }
 
     @staticmethod
+    def _apply_patch_targets(arguments: object) -> "list[dict]":
+        """Recover the files an ``apply_patch`` call touches from its envelope.
+
+        The ``apply_patch`` tool (used by newer Copilot models) carries its
+        target paths inside the patch text (``*** Add File: <path>`` etc.), not
+        in an ``arguments.path`` field, so the generic object-path extraction
+        misses it. Each returned entry names a path, a status, and the added and
+        removed line counts read from the hunk body.
+        """
+        if not isinstance(arguments, str):
+            return []
+        targets: list[dict] = []
+        current: dict | None = None
+        headers = (
+            ("*** Add File: ", "added"),
+            ("*** Update File: ", "modified"),
+            ("*** Delete File: ", "deleted"),
+        )
+        for line in arguments.splitlines():
+            for prefix, status in headers:
+                if line.startswith(prefix):
+                    current = {
+                        "path": line[len(prefix):].strip(),
+                        "status": status,
+                        "added": 0,
+                        "removed": 0,
+                    }
+                    targets.append(current)
+                    break
+            else:
+                if line.startswith("*** Move to: ") and current is not None:
+                    current["path"] = line[len("*** Move to: "):].strip()
+                elif line.startswith("*** "):
+                    current = None
+                elif current is not None and current["status"] != "deleted":
+                    if line.startswith("+"):
+                        current["added"] += 1
+                    elif line.startswith("-"):
+                        current["removed"] += 1
+        return [target for target in targets if target["path"]]
+
+    @staticmethod
     def _parse_jsonl_output_details(
         raw: str,
         root: "Path | None",
@@ -548,6 +590,7 @@ class CopilotIntegration(BaseIntegration):
         """Recover messages and metadata without discarding valid earlier events."""
         tool_names: dict[str, str] = {}
         tool_paths: dict[str, str] = {}
+        patch_targets: dict[str, list[dict]] = {}
         files: dict[str, dict] = {}
         texts: list[str] = []
         write_attempts: list[str] = []
@@ -566,6 +609,23 @@ class CopilotIntegration(BaseIntegration):
                 if not call_id or not isinstance(tool_name, str):
                     continue
                 tool_names[call_id] = tool_name
+                if tool_name == "apply_patch":
+                    # apply_patch names its files in the patch body, and a
+                    # sandbox-denied attempt must still be recorded here, before
+                    # its (failed) completion, exactly as a named write tool is.
+                    targets = CopilotIntegration._apply_patch_targets(
+                        data.get("arguments")
+                    )
+                    if targets:
+                        patch_targets[call_id] = targets
+                        for target in targets:
+                            relative = CopilotIntegration._relativize(
+                                target["path"], root
+                            )
+                            if relative not in seen_attempts:
+                                seen_attempts.add(relative)
+                                write_attempts.append(relative)
+                    continue
                 path = argument_object(data.get("arguments")).get("path")
                 if not isinstance(path, str) or not path:
                     continue
@@ -582,6 +642,28 @@ class CopilotIntegration(BaseIntegration):
                 command = properties.get("command")
                 if not isinstance(command, str) or not command:
                     command = tool_names.get(call_id, "")
+                if command == "apply_patch":
+                    # A denied patch changes nothing on disk; only a successful
+                    # one contributes to the changed-file set.
+                    if data.get("success") is False:
+                        continue
+                    for target in patch_targets.get(call_id, ()):
+                        relative = CopilotIntegration._relativize(
+                            target["path"], root
+                        )
+                        entry = files.setdefault(
+                            relative, {"status": None, "added": 0, "removed": 0}
+                        )
+                        entry["added"] += target["added"]
+                        entry["removed"] += target["removed"]
+                        status = target["status"]
+                        if entry["status"] is None or (
+                            entry["status"] != "added" and status == "added"
+                        ):
+                            entry["status"] = status
+                        elif entry["status"] == "modified" and status == "deleted":
+                            entry["status"] = "deleted"
+                    continue
                 if command not in CopilotIntegration._WRITE_TOOLS or data.get("success") is False:
                     continue
                 path = tool_paths.get(call_id)
