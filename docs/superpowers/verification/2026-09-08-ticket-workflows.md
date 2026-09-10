@@ -1,98 +1,83 @@
-# Verification Record — Ticket Workflows
+# Verification Record — Ticket Workflows Exact Artifact Repair
 
-Branch: `feat/ticket-workflows`
-Worktree: `C:/Projekty/Flowgency/.worktrees/ticket-workflows`
+Branch: `fix/ticket-artifact-exact-bytes`
+Worktree: `C:/Projekty/Flowgency/.worktrees/ticket-artifact-exact-bytes`
+Base: `9bcd218`
 Recorded: 2026-09-10
-Status: `FEATURE VERIFIED / INTEGRATION PENDING`
+Status: `REPAIR WORKTREE VERIFIED / MAIN INTEGRATION REQUIRED`
 
-## Current transport status
+## Repair checkpoint scope
 
-Task 3's HTTP transport amendment is verified at the feature tip `7734fd8`.
-Copilot ticket tools use a worker-owned authenticated loopback MCP HTTP
-endpoint. Restricted Copilot ticket runs keep local-network access off by
-default and require explicit per-agent `integration_config.allow_local_network:
-true`; when the field is absent or `false`, Flowgency stops the run before
-launch with `ticket-local-network-required`.
+This record covers the user-authorized documentation checkpoint for the exact
+artifact repair in the dedicated worktree at `9bcd218`. It does not claim that
+`master` has been reverified, fast-forwarded, published, or cleaned up. Those
+integration actions remain separately required after this checkpoint.
 
-This status supersedes the earlier one-job experiments that reported `Ticket
-broker is unavailable`. Those failures remain historical checkpoints only; they
-do not describe the current transport or the approved consented path.
+The repair scope is limited to one behavior correction in the live ticket
+verification surface: artifact publication must carry the raw genuine pytest
+report bytes, with `content_b64` derived unchanged from the actual fixture file,
+and the job must successfully read the exact file before
+`ticket_artifact_publish`. Strict stored-byte equality, protected hashes, the
+actual transition flow, and the restricted-policy denied-write proof remain in
+force.
 
-## Verified evidence
+## Verified worktree evidence
 
-- Real Copilot CLI: `1.0.84-3` on Windows, authenticated.
-- Interpreter: CPython `3.13.13` in `./.superpowers/venv-cpython`.
-- Post-review full Python gate at `7734fd8`: `2647 passed, 20 skipped, 1 warning
-  in 1175.13s (19m35s)` via `.superpowers/venv-cpython/Scripts/python.exe -m
-  pytest tests/ -q --tb=short --junitxml=.superpowers/sdd/2026-09-10-ticket-http-transport/feature-post-review-full.xml`.
-- Current normal UI gate at `4e419f6`: `490 passed, 2 skipped` in 10.6 minutes
-  across four projects. No subsequent substantive UI changes landed; the only
-  later UI-file edit was a missing newline in a new keyboard test.
-- Real-runtime composition in the full Python gate: `11` included live runtime
-  cases, consisting of `6` actual Copilot ticket-workflow scenarios plus `5`
-  existing runtime/projector probes. No runtime deselection was used.
-- Current skipped-test accounting: `13` of the `20` skips come from the preserved
-  untracked retired worker test file; `7` are committed skip conditions that did
-  not change during this task. They are not new product skips.
-- Known warning: one existing Starlette/AnyIO `BlockingPortal` warning.
-- Focused live denied-write proof: `1 passed` for the restricted denied-write
-  ticket case, with correlated `callId`, target path, `success:false`, exact-byte
-  artifact retention, and `sandbox_denied` metadata.
-- Whole-branch review `b0f0d8e..c1d171b` identified F1/F2/F5 as the only
-  load-bearing findings. The single fix wave `c1d171b..7734fd8` addressed them,
-  and the scoped re-review accepted F1/F2/F5 with the F1 measurement caveat
-  retained as an evidence limit.
+- Complete repair-worktree Python suite at `9bcd218`: `2651 passed, 7 skipped,
+  1 warning` in `1097.51s` via `./.venv/Scripts/python.exe -m pytest tests/ -q
+  --tb=short --junitxml=C:/Projekty/Flowgency/.superpowers/ticket-workflows-integration/exact-artifact-full.xml`.
+- Full runtime composition in that suite remained intact: all `6` actual Copilot
+  ticket-workflow scenarios plus `5` existing runtime/projector probes were
+  included, with no marker deselection.
+- Skip accounting in this worktree is stable and committed: there is no unknown
+  retired test file here, and the `7` skips come from committed skip conditions.
+- Focused repair checks passed before the full suite: `4` deterministic cases and
+  `2` affected live cases passed for exact-byte `content_b64` handling and the
+  successful-read-before-publish proof.
+- Independent diff review over `ebc8c11..9bcd218` rated spec compliance `PASS`
+  and quality `PASS`; the only residual note is the low-risk fixed-width
+  timestamp-format assumption in the read-before-publish helper.
+- The earlier full UI gate remains applicable: `490 passed, 2 skipped` in `10.6`
+  minutes. This repair made no production or UI changes.
 
-Restricted live runs preserved the intended ticket boundary: workspace read-only,
-no `allowOutbound`, no `sandboxMcpServers=false`, and only the explicit per-job
-local-network opt-in when approved.
+Restricted live runs still preserve the intended ticket boundary: the repair did
+not change permissions, grants, sandbox policy, or the denied-write proof.
 
-Credential schema correction, measured on `1.0.84-3`: Flowgency now emits git/gh
-settings under the CLI-supported `sandbox.auth.git` and `sandbox.auth.gh` keys.
-The earlier top-level `gitAuth` and `ghAuth` keys were logged by this CLI as
-unknown and ignored, so they were not the controlling settings on this runtime.
-A restricted denied-write live run's job `settings.json` now carries the nested
-keys, and its process log shows no unknown-key warning plus a real
-`[rust:sandbox_spawn]`, confirming configuration acceptance. This final record
-distinguishes that measured acceptance from a separate direct git/gh denial probe:
-actual remote git/gh denial was not exercised independently. The accepted runtime
-semantics are that the CLI injects those credentials only while the sandbox is
-enabled, so confined policies are the only cases where Flowgency can request no
-git/gh token injection; an unconfined run leaves the sandbox off.
+## Credential and evidence limits retained honestly
 
-Built-in file edits are cooperatively policed in-process. The live denial proof
-establishes policy refusal of the ticket canary write, not OS-enforced built-in
-file-edit containment. Shell commands remain the only path covered by OS sandbox
-containment, and the shell backend is unavailable in this measured runtime.
+The existing credential-schema-versus-denial evidence limit remains unchanged.
+This record does not expand the earlier claim beyond what was directly measured:
+the nested `sandbox.auth.git` and `sandbox.auth.gh` settings were accepted by the
+measured Copilot CLI runtime, and the confined denied-write run demonstrated the
+expected ticket sandbox boundary. A separate direct remote git/gh denial probe was
+not re-run here, and this checkpoint does not claim one.
+
+Built-in file edits remain cooperatively policed in-process. The live denial proof
+continues to establish policy refusal of the ticket canary write, not a new or
+broader OS-enforced containment claim.
 
 ## Historical checkpoints kept for comparison
 
-- Clean worktree baseline: `2222 passed, 6 skipped, 1 warning`.
-- Earlier deterministic feature checkpoint: `2574 passed, 7 skipped, 5 deselected, 1 warning`.
-- Earlier full UI checkpoint: `474 passed, 2 skipped`.
-- Earlier non-consented loopback experiments that reported broker unavailability
-  are retained as timeline evidence only and are superseded by the current HTTP
-  transport plus explicit consent results above.
+- Pre-repair baseline on the fresh worktree failed only the retained artifact
+  trailing-newline assertion: `2646 passed, 7 skipped, 1 failed` in `1160.59s`.
+- The complete repair-worktree suite at `9bcd218` is the current scoped Python
+  checkpoint for this repair: `2651 passed, 7 skipped, 1 warning` in `1097.51s`.
+- The prior full UI checkpoint remains `490 passed, 2 skipped` in `10.6` minutes
+  and is still applicable because this repair did not touch production or UI
+  surfaces.
 
-## Representative assets and documents
+## Related records
 
-- Approved design assets:
-  `docs/superpowers/specs/assets/2026-09-07-ticket-workflows/workflow-overview-desktop.png`
-  and `docs/superpowers/specs/assets/2026-09-07-ticket-workflows/workflow-overview-mobile.png`
-- Current verified UI screenshots:
-  `tests/ui/workflow_board.spec.ts-snapshots/workflow-board-overview-desktop-light-win32.png`
-  and `tests/ui/workflow_board.spec.ts-snapshots/workflow-board-mobile-mobile-light-win32.png`
-- Live acceptance report:
-  `.superpowers/sdd/2026-09-10-ticket-http-transport/task-3-report.md`
+- Durable local execution timeline: `.superpowers/ticket-workflows-integration/report.md`
+- Repair implementation report: `.superpowers/ticket-workflows-integration/exact-artifact-report.md`
+- Independent review: `.superpowers/ticket-workflows-integration/exact-artifact-review.md`
 
-## Reviewed limitations and next gate
+## Next required gate
 
-- F3 remains accepted as a low-risk semantic limitation: typed `number`
-  preconditions compare `1` and `1.0` strictly rather than numerically.
-- F4 remains accepted as a low-risk runtime limitation: `TicketToolLaunch.headers`
-  stays mutable but is copied defensively by consumers and is not persisted.
-- Mandatory main verification is still pending: integration on `master`, the
-  post-fast-forward full-suite rerun, push, and worktree cleanup have not started.
+Main integration work remains required after this documentation checkpoint:
+fast-forward integration onto `master`, the post-integration full-suite rerun,
+publish steps, and worktree cleanup must be recorded separately when they occur.
 
-This record marks the feature as verified in the worktree and explicitly not yet
-integrated or published.
+This record marks the exact-artifact repair as verified in its dedicated worktree
+and preserves the distinction between scoped worktree evidence and later mainline
+integration evidence.
