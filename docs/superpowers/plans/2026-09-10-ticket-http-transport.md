@@ -18,7 +18,7 @@ This plan supersedes only the transport-specific implementation details from Tas
 - Shell access is not an assumed prerequisite.
 - A workspace-read-only agent can still create/report tickets and transition tickets it owns when rules pass.
 - No token prebinding bypass after revoke, refingerprint, or confirmed stop.
-- Keep `127.0.0.1` loopback only, with no `allowLocalNetwork`, broad outbound grant, or `sandboxMcpServers=false` escape hatch.
+- Keep `127.0.0.1` loopback only. The default remains no local-network access; the only exception is an explicit per-agent Copilot opt-in via `integration_config.allow_local_network: true`. Do not introduce `allowOutbound`, `sandboxMcpServers=false`, or any broader grant.
 - Preserve the fixed ticket tool catalog and existing request-digest, assignment, active-run, artifact, and error-envelope rules.
 - Do not persist bearer values in `JobSpec`, CLI args, task text, logs, repr output, or canonical records.
 - Unsupported runtimes remain `None`; do not guess support from native files or earlier probes.
@@ -111,86 +111,167 @@ git add flowgency/tickets/access.py flowgency/tickets/broker.py flowgency/ticket
 git commit -m "feat(runtime): switch ticket tools to mcp http"
 ```
 
-### Task 2: Re-run live runtime acceptance and full feature gates under HTTP transport
+### Task 2: Add the explicit Copilot local-network opt-in, runtime form wiring, and preflight gate
 
 **Files:**
-- Modify: `tests/test_ticket_runtime_live.py`, `tests/test_ticket_end_to_end.py`, `tests/_runtime_probe_helpers.py`
-- Modify: `tests/ui/accessibility.spec.ts`, `tests/ui/dashboard.spec.ts`, `tests/ui/fixtures/config.yaml`, `tests/ui/server.py`
-- Modify: `docs/superpowers/verification/2026-09-08-ticket-workflows.md`
-- Update any `README.md` or `kb/integrations.md` sections that describe the stdio MCP bridge as the live transport to reflect the HTTP endpoint contract.
+- Modify: `flowgency/configuration/patches.py`, `flowgency/configuration/models.py`, `flowgency/jobs/resolution.py`, `flowgency/jobs/models.py`
+- Modify: `flowgency/web/routes/agent_detail.py`, `flowgency/templates/agent_detail_runtime.html`
+- Modify: `flowgency/integrations/flowgency/copilot.py`, `flowgency/integrations/flowgency/copilot_sandbox.py`
+- Test: `tests/test_agent_detail.py`, `tests/test_config.py`, `tests/test_config_patches.py`, `tests/test_job_models.py`, `tests/test_ticket_runtime_capabilities.py`, `tests/test_copilot_sandbox_policy.py`, `tests/test_copilot_ticket_tools.py`, `tests/test_ticket_end_to_end.py`
 
 **Interfaces:**
-- Consumes: Task 1 `mcp-http` capability and worker-owned `LiveTicketEndpoint` launch path.
-- Produces: live proof that Copilot can initialize, list tools, read tickets in a restricted run, complete the verified artifact path, deny workspace writes under read-only policy, and preserve assignment/cleanup semantics.
-- Produces: full deterministic, UI, and branch-level verification evidence for the ticket-workflows feature.
+- Consumes: Task 1 `TicketToolLaunch(url, headers, server_name, lifecycle)` and existing `AgentRuntimePatch(timeout: int | None)` save flow.
+- Produces: `AgentRuntimePatch(timeout: int | None, integration_config: dict[str, object] | object = _UNSET)` so the runtime POST path can distinguish an older form that omitted the local-network field from a submitted unchecked checkbox that means `false`.
+- Produces: runtime form fields `revision`, `timeout`, hidden `integration_config.allow_local_network__present=1`, and checkbox `integration_config.allow_local_network` with label `Allow local-network access` and disclosure `Allows connections to local services and LAN hosts, not only Flowgency.`
+- Produces: Copilot-only validation issue `code="ticket-local-network-required"`, `field="integration_config.allow_local_network"`, covering both `validate_config(...)` and `CopilotIntegration.validate_run(...)` for ticket-enabled restricted runs when the value is absent or not exactly `True`.
+- Produces: per-job sandbox settings that keep the existing `confines` logic and add `sandbox.userPolicy.network.allowLocalNetwork = true` only when the resolved Copilot integration config explicitly opted in.
+- Produces: immutable job snapshots that preserve the resolved `spec.integration_config["allow_local_network"]` value used for launch, without rewriting user config and without dropping unrelated `integration_config` keys.
 
-- [ ] **Step 1: Extend the failing live tests to match the approved HTTP acceptance sequence.**
+- [ ] **Step 1: Write focused RED tests for config typing, runtime form preservation, run validation, and sandbox opt-in.**
 
 ```python
-# runtime_env fixture contract (own in tests/test_ticket_runtime_live.py or a shared fixture);
-# implementer must produce all helpers used below before submitting Task 2:
-#   submit_probe_job() -> handle       — read-only job whose prompt calls ticket_get
-#   submit_artifact_job(expect_write_denial) -> handle
-#   wait_for_terminal_job(handle) -> JobRecord
-#   observed_tool_calls(handle) -> list[dict]  # MCP state events or output scan for tool results
-#   project_hash_before / project_hash_after -> str
-#   artifact_bytes(handle) -> bytes | None
-#   denial_telemetry(handle) -> list[dict]
-#   ticket_done(handle) -> bool        — ticket state == done after run
-#   active_run_after(handle) -> str | None
-#   protected_hashes_match(handle) -> bool
+def test_runtime_post_unchecked_checkbox_persists_false_without_dropping_model_key(...):
+    response = client.post(
+        "/newsletter/agents/advisor/runtime",
+        data={
+            "revision": revision,
+            "timeout": "1801",
+            "integration_config.allow_local_network__present": "1",
+        },
+    )
+    assert response.status_code == 303
+    assert saved_agent["integration_config"] == {
+        "model": "gpt-5.4",
+        "allow_local_network": False,
+    }
 
+
+def test_copilot_validate_run_rejects_ticket_tools_without_local_network_opt_in(ticket_request):
+    integration = get_integration("copilot").with_config({"allow_local_network": False})
+    request = replace(
+        ticket_request,
+        runtime_policy=EffectiveRuntimePolicy(timeout=60, mode="restricted"),
+    )
+    issues = integration.validate_run(request)
+    assert any(issue.code == "ticket-local-network-required" for issue in issues)
+
+
+def test_build_sandbox_settings_sets_allow_local_network_only_when_opted_in(tmp_path):
+    settings, _ = build_sandbox_settings(
+        policy(rule(tmp_path / "ws", ("read",))),
+        allow_local_network=True,
+    )
+    assert settings["sandbox"]["userPolicy"]["network"] == {"allowLocalNetwork": True}
+```
+
+- Add one config validation test that rejects `integration_config.allow_local_network: "true"` for a Copilot agent as a type error rather than coercing it, one runtime-tab render test that shows the checkbox plus disclosure, one stale-revision runtime POST test that preserves the submitted timeout and checkbox state, and one job-model round-trip test that preserves `integration_config={"model": "gpt-5.4", "allow_local_network": True}` in the snapshot payload.
+
+- [ ] **Step 2: Run the focused RED checks before implementation.**
+
+Run `./.superpowers/venv-cpython/Scripts/python.exe -m pytest tests/test_agent_detail.py tests/test_config.py tests/test_config_patches.py tests/test_job_models.py tests/test_ticket_runtime_capabilities.py tests/test_copilot_sandbox_policy.py tests/test_copilot_ticket_tools.py tests/test_ticket_end_to_end.py -q`
+Expected: failures for the missing runtime checkbox, missing strict Copilot config validation, missing `ticket-local-network-required` preflight, and missing per-job `allowLocalNetwork` policy field.
+
+- [ ] **Step 3: Implement the per-instance opt-in without widening unrelated runtime behavior.**
+
+```python
+_UNSET = object()
+
+
+@dataclass(frozen=True)
+class AgentRuntimePatch:
+    timeout: int | None
+    integration_config: dict[str, object] | object = _UNSET
+
+
+def _runtime_form_integration_config(form) -> dict[str, object] | object:
+    if "integration_config.allow_local_network__present" not in form:
+        return _UNSET
+    return {
+        "allow_local_network": "integration_config.allow_local_network" in form,
+    }
+```
+
+Merge the runtime patch into the agent's top-level `integration_config` mapping instead of `runtime`, preserve unrelated keys such as `model`, preserve permissions and workspace rules by leaving those sections untouched, and refresh services only after a successful patch. In `CopilotIntegration`, implement `with_config()` so per-instance config binds without mutating the global registered integration; `validate_run()` must raise `ticket-local-network-required` before `run()` reaches `task_file.read_text()` or spawns the Copilot process. Extend `build_sandbox_settings(...)` with an explicit boolean input and only emit `sandbox.userPolicy.network.allowLocalNetwork = true` when that input is exactly true; omit the `network` key entirely for absent/false.
+
+- [ ] **Step 4: Run GREEN checks for the opt-in slice and confirm the preflight gate happens before launch.**
+
+Run `./.superpowers/venv-cpython/Scripts/python.exe -m pytest tests/test_agent_detail.py tests/test_config.py tests/test_config_patches.py tests/test_job_models.py tests/test_ticket_runtime_capabilities.py tests/test_copilot_sandbox_policy.py tests/test_copilot_ticket_tools.py tests/test_ticket_end_to_end.py -q`
+Expected: pass, with consented fake Copilot/ticket cases setting `integration_config.allow_local_network` only where ticket-enabled restricted runs are supposed to work.
+
+Run `./.superpowers/venv-cpython/Scripts/python.exe -m pytest tests/test_copilot_launch_arguments.py tests/test_copilot_credentials.py -q`
+Expected: pass, confirming the opt-in did not leak secrets or change the HTTP MCP launch contract.
+
+- [ ] **Step 5: Commit the config/runtime opt-in slice.**
+
+```bash
+git add flowgency/configuration/patches.py flowgency/configuration/models.py flowgency/jobs/resolution.py flowgency/jobs/models.py flowgency/web/routes/agent_detail.py flowgency/templates/agent_detail_runtime.html flowgency/integrations/flowgency/copilot.py flowgency/integrations/flowgency/copilot_sandbox.py tests/test_agent_detail.py tests/test_config.py tests/test_config_patches.py tests/test_job_models.py tests/test_ticket_runtime_capabilities.py tests/test_copilot_sandbox_policy.py tests/test_copilot_ticket_tools.py tests/test_ticket_end_to_end.py
+git commit -m "fix(runtime): require copilot local-network opt-in for tickets"
+```
+
+### Task 3: Re-run live runtime acceptance and full feature gates under HTTP transport
+
+**Files:**
+- Modify: `tests/test_ticket_runtime_live.py`, `tests/_runtime_probe_helpers.py`, `tests/test_ticket_end_to_end.py`
+- Modify: `tests/ui/accessibility.spec.ts`, `tests/ui/dashboard.spec.ts`, `tests/ui/fixtures/config.yaml`, `tests/ui/server.py`
+- Modify: `docs/superpowers/verification/2026-09-08-ticket-workflows.md`
+
+**Interfaces:**
+- Consumes: Task 1 `mcp-http` capability and Task 2's explicit `integration_config.allow_local_network` opt-in path.
+- Produces: live proof that default-missing/false restricted Copilot ticket runs fail with `ticket-local-network-required` before launch, while explicit opt-in unlocks the remaining approved restricted HTTP sequence without widening any other sandbox policy.
+- Produces: the original deterministic, UI, and branch-level verification evidence for the ticket-workflows feature.
+
+- [ ] **Step 1: Extend the live tests to cover both the new preflight denial and the approved consented sequence.**
+
+```python
 @pytest.mark.real_runtime
-def test_copilot_read_only_probe_can_list_ticket_without_editing(runtime_env):
-    handle = runtime_env.submit_probe_job()
+def test_copilot_restricted_ticket_run_requires_explicit_local_network_opt_in(runtime_env):
+    handle = runtime_env.submit_probe_job(allow_local_network=False)
     record = runtime_env.wait_for_terminal_job(handle)
-    assert record.status == "complete"
-    assert record.exit_code == 0
-    calls = runtime_env.observed_tool_calls(handle)
-    ticket_get_results = [c for c in calls if c.get("tool") == "ticket_get"]
-    assert ticket_get_results, "ticket_get must appear in observed MCP tool calls"
-    assert all(c.get("ok") for c in ticket_get_results), "ticket_get must succeed without errors"
-    assert runtime_env.project_hash_before == runtime_env.project_hash_after
+    assert record.status == "failed"
+    assert "ticket-local-network-required" in record.execution_summary
 
 
 @pytest.mark.real_runtime
 def test_copilot_http_run_keeps_ticket_commit_when_write_is_denied(runtime_env):
-    handle = runtime_env.submit_artifact_job(expect_write_denial=True)
+    handle = runtime_env.submit_artifact_job(
+        allow_local_network=True,
+        expect_write_denial=True,
+    )
     record = runtime_env.wait_for_terminal_job(handle)
     assert record.exit_code == 0
-    assert runtime_env.artifact_bytes(handle) is not None, "artifact must be produced"
-    assert runtime_env.denial_telemetry(handle), "at least one write-denial event must be recorded"
-    assert runtime_env.ticket_done(handle), "ticket must reach done state"
-    assert runtime_env.active_run_after(handle) is None, "active_run must be cleared after completion"
-    assert runtime_env.protected_hashes_match(handle), "protected file hashes must be unchanged"
+    assert runtime_env.artifact_bytes(handle) is not None
+    assert runtime_env.denial_telemetry(handle)
+    assert runtime_env.ticket_done(handle)
+    assert runtime_env.active_run_after(handle) is None
+    assert runtime_env.protected_hashes_match(handle)
 ```
 
-Also add revoke, stale refresh, multi-ticket same run, optional sign-off, wrong-host, and failed-after-commit live assertions without loosening policy.
+Keep the existing wrong-host, unauthorized token, revoke, stale refresh, multi-ticket same run, optional sign-off, unchanged-files, and failed-after-commit assertions intact; update only the setup so consented cases submit `integration_config={"allow_local_network": True}` and default-missing cases assert the new preflight failure instead of trying to reach the broker.
 
 - [ ] **Step 2: Run the required live gates in the approved order.**
 
 Run `./.superpowers/venv-cpython/Scripts/python.exe -m pytest tests/test_ticket_runtime_live.py -m real_runtime -v`
-Expected: first the restricted no-op read path, then the full artifact path, denied write evidence, unchanged protected files, assignment cleanup, revoke handling, and preserved committed transitions after later failure.
+Expected: first a failing restricted preflight when opt-in is absent/false, then the explicit-opt-in no-op read path, then the full artifact path, denied write evidence, unchanged protected files, assignment cleanup, revoke handling, and preserved committed transitions after later failure.
 
 - [ ] **Step 3: Run deterministic and UI acceptance after the live gate is green.**
 
 Run `./.superpowers/venv-cpython/Scripts/python.exe -m pytest tests/ -m 'not real_runtime' -q`
-Expected: pass with the transport change absorbed by deterministic suites.
+Expected: pass with the transport change and explicit opt-in absorbed by deterministic suites.
 
 Run `npm run test:ui`
-Expected: approved workflow surfaces remain accessible and visually stable across desktop-light, desktop-dark, mobile-light, and mobile-dark.
+Expected: the Runtime tab shows the checkbox/disclosure and the approved workflow surfaces remain accessible and visually stable.
 
 - [ ] **Step 4: Run the full suite and whole-branch review before integration.**
 
 Run `./.superpowers/venv-cpython/Scripts/python.exe -m pytest tests/ -q`
 Expected: full green suite including installed live probes.
 
-Review the branch for auth-context derivation, revoke semantics, cross-job isolation, bounded shutdown, denied-write behavior, original-target cleanup, and stale-transition handling. Repair any findings with regression coverage before the final verification rerun.
+Review the branch for auth-context derivation, revoke semantics, cross-job isolation, bounded shutdown, denied-write behavior, original-target cleanup, stale-transition handling, explicit-opt-in preservation in job snapshots, and absence of any auto rewrite to user config outside submitted runtime forms. Repair any findings with regression coverage before the final verification rerun.
 
 - [ ] **Step 5: Commit verified tests and verification evidence separately.**
 
 ```bash
-git add tests/test_ticket_runtime_live.py tests/test_ticket_end_to_end.py tests/_runtime_probe_helpers.py tests/ui/accessibility.spec.ts tests/ui/dashboard.spec.ts tests/ui/fixtures/config.yaml tests/ui/server.py
+git add tests/test_ticket_runtime_live.py tests/_runtime_probe_helpers.py tests/test_ticket_end_to_end.py tests/ui/accessibility.spec.ts tests/ui/dashboard.spec.ts tests/ui/fixtures/config.yaml tests/ui/server.py
 git commit -m "test(workflows): verify ticket orchestration"
 
 git add docs/superpowers/verification/2026-09-08-ticket-workflows.md
